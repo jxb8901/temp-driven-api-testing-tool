@@ -42,13 +42,65 @@ class FrameworkConfigLoaderTest {
     }
 
     @Test void treatsAnEnvironmentMapWithOnlyDisabledProfilesAsAbsent() throws Exception {
-        Path config = write("disabled-profiles-only.yaml", "schemaVersion: att-config/v2.10\\n"
-                + "environments: {x-disabled-profile: not-a-profile}\\n");
+        Path config = write("disabled-profiles-only.yaml", "schemaVersion: att-config/v2.10\n"
+                + "environments: {x-disabled-profile: not-a-profile}\n");
 
         FrameworkConfig loaded = new FrameworkConfigLoader().load(config, tempDir);
 
         assertEquals("SIT", loaded.environment());
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config, tempDir, "UAT"));
+    }
+
+    @Test void ignoresDisabledToolArgumentDeclarationsInGlobalAndGroupTools() throws Exception {
+        String activeArgument = "    arguments:\n"
+                + "      x-oldCustomerId: not-an-argument-descriptor\n"
+                + "      customerId: {name: Customer ID, description: Active input, required: true}\n";
+        Path globalConfig = write("root-tool-arguments.yaml", "schemaVersion: att-config/v2.10\n"
+                + "tools:\n  rootEcho:\n"
+                + "    name: Root echo\n    description: Root tool with one active argument\n"
+                + "    command: [echo, '${input.customerId}']\n"
+                + "    stdoutFormat: text\n"
+                + activeArgument);
+        FrameworkConfig global = new FrameworkConfigLoader().load(globalConfig, tempDir);
+        assertEquals(java.util.Collections.singleton("customerId"), global.tool("rootEcho").arguments().keySet());
+
+        Path group = tempDir.resolve("config/tools/argument-group.yaml");
+        Files.createDirectories(group.getParent());
+        Files.write(group, ("schemaVersion: att-tool-group/v2.9\nid: argumentGroup\n"
+                + "name: Argument group\ndescription: Group with disabled argument declaration\n"
+                + "tools:\n  groupedCall:\n"
+                + "    name: Grouped call\n    description: Group tool with one active argument\n"
+                + "    call: \"#{upper(${customerId})}\"\n"
+                + activeArgument)
+                .getBytes("UTF-8"));
+        Path groupConfig = write("group-tool-arguments.yaml",
+                "schemaVersion: att-config/v2.10\ntoolGroups: [config/tools/argument-group.yaml]\n");
+        FrameworkConfig grouped = new FrameworkConfigLoader().load(groupConfig, tempDir);
+        assertEquals(java.util.Collections.singleton("customerId"), grouped.tool("argumentGroup.groupedCall").arguments().keySet());
+
+        Path disabledCommandReference = write("disabled-command-argument-reference.yaml", "schemaVersion: att-config/v2.10\n"
+                + "tools:\n  invalid:\n"
+                + "    name: Invalid command\n    description: References a disabled argument\n"
+                + "    command: [echo, '${input.oldCustomerId}']\n"
+                + "    stdoutFormat: text\n"
+                + activeArgument);
+        IllegalArgumentException commandFailure = assertThrows(IllegalArgumentException.class,
+                () -> new FrameworkConfigLoader().load(disabledCommandReference, tempDir));
+        assertTrue(commandFailure.getMessage().contains("declared argument"), commandFailure.getMessage());
+
+        Path disabledCallReference = tempDir.resolve("config/tools/disabled-call-reference.yaml");
+        Files.write(disabledCallReference, ("schemaVersion: att-tool-group/v2.9\nid: invalidCallGroup\n"
+                + "name: Invalid call group\ndescription: Call references a disabled argument\n"
+                + "tools:\n  invalid:\n"
+                + "    name: Invalid call\n    description: References a disabled argument\n"
+                + "    call: \"#{upper(${oldCustomerId})}\"\n"
+                + activeArgument)
+                .getBytes("UTF-8"));
+        Path disabledCallConfig = write("disabled-call-argument-reference-config.yaml",
+                "schemaVersion: att-config/v2.10\ntoolGroups: [config/tools/disabled-call-reference.yaml]\n");
+        IllegalArgumentException callFailure = assertThrows(IllegalArgumentException.class,
+                () -> new FrameworkConfigLoader().load(disabledCallConfig, tempDir));
+        assertTrue(callFailure.getMessage().contains("declared argument"), callFailure.getMessage());
     }
 
     @Test void rejectsCaseInsensitiveDbHelperIdsAndInvalidTimeouts() throws Exception {

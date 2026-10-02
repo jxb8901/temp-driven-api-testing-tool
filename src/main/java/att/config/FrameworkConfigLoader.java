@@ -654,6 +654,7 @@ public final class FrameworkConfigLoader {
         if (value == null) return result;
         if (!(value instanceof Map)) throw new IllegalArgumentException("arguments must be a map for tool: " + toolKey);
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
             if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException("Tool argument keys must be strings: " + toolKey);
             String key = String.valueOf(entry.getKey());
             if (!key.matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Tool argument name must match [A-Za-z_][A-Za-z0-9_]*: " + toolKey + "." + key);

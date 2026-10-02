@@ -19,7 +19,7 @@ This chapter is the authoritative reading reference for author-authored configur
 
 ### Ignore or disable ATT-owned configuration with `x-`
 
-Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as `tools`, environment profiles, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key:
+Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as `tools`, environment profiles, Tool `arguments` declarations, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key. This does not disable or rename argument values supplied when invoking a Tool:
 
 ```yaml
 schemaVersion: att-config/v2.10
@@ -50,7 +50,7 @@ actions:
 
 Disabled entries do not supply required fields: `x-schemaVersion` cannot replace `schemaVersion`, and `x-type` cannot replace an Action's required `type`. An `X-` uppercase prefix is not special and is validated as an ordinary key. A live reference to a disabled Action is unresolved, because that Action is absent. `runWhen: "#{false}"` is different: it is a valid, present Action that evaluates to `false` and produces the normal `SKIPPED` result.
 
-Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXEC.INPUT`, `EXEC.VARS`, arbitrary maps, DB `params`/`parameters`, and Tool arguments remain data and retain their names. For example, `x-correlation-id` is still an HTTP header or input key unless it is itself the key of an ATT-owned configuration collection.
+Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXEC.INPUT`, `EXEC.VARS`, arbitrary maps, DB `params`/`parameters`, and Tool invocation argument values remain data and retain their names. For example, `x-correlation-id` is still an HTTP header or input key unless it is itself the key of an ATT-owned configuration collection.
 
 ### Multi-environment profiles in current ATT
 

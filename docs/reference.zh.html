@@ -3777,12 +3777,13 @@ ATT 配置項</h3>
 <p>在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection
 條目名稱前加上完全小寫的
 <code>x-</code>，該項便會視為不存在。適用於現行配置物件和 keyed
-collection，例如 <code>tools</code>、environment
-profiles、<code>actions</code>、Action <code>evidence</code>
-collectors、report columns 及 Debug Tool overrides。YAML
-本身仍須能解析；但 ATT
+collection，例如 <code>tools</code>、environment profiles、Tool
+<code>arguments</code> declarations、<code>actions</code>、Action
+<code>evidence</code> collectors、report columns 及 Debug Tool
+overrides。YAML 本身仍須能解析；但 ATT
 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對
-keyed collection，請加在 key 上：</p>
+keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的
+argument values：</p>
 <div class="sourceCode" id="cb65"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.10</span></span>
 <span id="cb65-2"><a href="#cb65-2" aria-hidden="true" tabindex="-1"></a><span class="fu">x-debug-note</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{missing.tool()}&quot;</span><span class="co">      # 忽略的配置字段</span></span>
@@ -3817,10 +3818,10 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb66-1"><a href=
 <code>SKIPPED</code> 結果。</p>
 <p>不要用此規則移除 user data 中的 key。HTTP
 headers、<code>EXEC.INPUT</code>、<code>EXEC.VARS</code>、任意 maps、DB
-<code>params</code>/<code>parameters</code> 和 Tool arguments 中的 key
-都是資料，名稱會原樣保留。例如，除非 <code>x-correlation-id</code>
-本身是 ATT 擁有的配置 collection key，否則它仍是一般 HTTP header 或
-input key。</p>
+<code>params</code>/<code>parameters</code> 和 Tool invocation argument
+values 中的 key 都是資料，名稱會原樣保留。例如，除非
+<code>x-correlation-id</code> 本身是 ATT 擁有的配置 collection
+key，否則它仍是一般 HTTP header 或 input key。</p>
 <h3 id="att-多環境-profile-選擇">ATT 多環境 Profile 選擇</h3>
 <p><code>att-config/v2.10</code> 是現行 profile 契約。Profile
 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper descriptor

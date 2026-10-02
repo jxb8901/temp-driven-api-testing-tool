@@ -4144,11 +4144,13 @@ disable ATT-owned configuration with <code>x-</code></h3>
 <p>Prefix an optional ATT-owned field or an entry in an ATT-owned keyed
 collection with the exact lowercase <code>x-</code> to make it behave as
 absent. This applies to current config objects and keyed collections
-such as <code>tools</code>, environment profiles, <code>actions</code>,
-Action <code>evidence</code> collectors, report columns, and Debug Tool
+such as <code>tools</code>, environment profiles, Tool
+<code>arguments</code> declarations, <code>actions</code>, Action
+<code>evidence</code> collectors, report columns, and Debug Tool
 overrides. The YAML must still parse, but ATT does not schema-check,
 resolve, discover, evaluate, instantiate, execute, or publish a disabled
-entry. For a keyed collection, use this on the key:</p>
+entry. For a keyed collection, use this on the key. This does not
+disable or rename argument values supplied when invoking a Tool:</p>
 <div class="sourceCode" id="cb68"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.10</span></span>
 <span id="cb68-2"><a href="#cb68-2" aria-hidden="true" tabindex="-1"></a><span class="fu">x-debug-note</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{missing.tool()}&quot;</span><span class="co">      # ignored config field</span></span>
@@ -4185,10 +4187,10 @@ Action that evaluates to <code>false</code> and produces the normal
 <code>SKIPPED</code> result.</p>
 <p>Do not use this prefix to remove keys from user data. Keys in HTTP
 headers, <code>EXEC.INPUT</code>, <code>EXEC.VARS</code>, arbitrary
-maps, DB <code>params</code>/<code>parameters</code>, and Tool arguments
-remain data and retain their names. For example,
-<code>x-correlation-id</code> is still an HTTP header or input key
-unless it is itself the key of an ATT-owned configuration
+maps, DB <code>params</code>/<code>parameters</code>, and Tool
+invocation argument values remain data and retain their names. For
+example, <code>x-correlation-id</code> is still an HTTP header or input
+key unless it is itself the key of an ATT-owned configuration
 collection.</p>
 <h3 id="multi-environment-profiles-in-current-att">Multi-environment
 profiles in current ATT</h3>

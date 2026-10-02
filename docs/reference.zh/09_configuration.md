@@ -20,7 +20,7 @@ Timeout/Retry precedence 與 eligibility 見 [Reliability](08_reliability_execut
 
 ### 使用 `x-` 忽略或停用 ATT 配置項
 
-在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 `tools`、environment profiles、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上：
+在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 `tools`、environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
 
 ```yaml
 schemaVersion: att-config/v2.10
@@ -51,7 +51,7 @@ actions:
 
 停用項不能代替必填字段：`x-schemaVersion` 不能代替 `schemaVersion`，`x-type` 不能代替 Action 必填的 `type`。大寫 `X-` 沒有特殊含義，會按一般 key 校驗。若仍有啟用中的引用指向已停用 Action，該引用會因 Action 不存在而無法解析。`runWhen: "#{false}"` 則不同：Action 仍然存在，條件求值為 `false` 後會產生一般的 `SKIPPED` 結果。
 
-不要用此規則移除 user data 中的 key。HTTP headers、`EXEC.INPUT`、`EXEC.VARS`、任意 maps、DB `params`/`parameters` 和 Tool arguments 中的 key 都是資料，名稱會原樣保留。例如，除非 `x-correlation-id` 本身是 ATT 擁有的配置 collection key，否則它仍是一般 HTTP header 或 input key。
+不要用此規則移除 user data 中的 key。HTTP headers、`EXEC.INPUT`、`EXEC.VARS`、任意 maps、DB `params`/`parameters` 和 Tool invocation argument values 中的 key 都是資料，名稱會原樣保留。例如，除非 `x-correlation-id` 本身是 ATT 擁有的配置 collection key，否則它仍是一般 HTTP header 或 input key。
 
 ### ATT 多環境 Profile 選擇
 
