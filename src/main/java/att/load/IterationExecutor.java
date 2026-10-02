@@ -89,7 +89,7 @@ public final class IterationExecutor implements LoadIterationRunner {
             try {
                 if (testdataResolver != null)
                     context.replaceInputValues(testdataResolver.resolve(request.inputs(), context,
-                            request.userId(), request.iterationId()));
+                            request.userId(), request.iterationId(), request.testdataWaitAllowed()));
                 executionId = target.execIdFormat().isEmpty()
                         ? resources.nextDefaultExecutionId(request.runId())
                         : LoadExecutionIdPattern.evaluate(target.execIdFormat(),
@@ -133,6 +133,13 @@ public final class IterationExecutor implements LoadIterationRunner {
             context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
             context.finishStage(status.name(), Duration.between(started, Instant.now()).toMillis());
             diagnostic = firstDiagnostic(results);
+        } catch (att.testdata.TestdataSelectionDeferredException deferred) {
+            status = ResultStatus.SKIPPED;
+            if (context != null) {
+                context.put("CASE.testdataSelectionDeferred", Boolean.TRUE);
+                context.put("CASE.status", status.name());
+            }
+            if (!finalized) resources.db().abortCase();
         } catch (att.testdata.TestdataStopException stop) {
             status = ResultStatus.SKIPPED;
             if (context != null) {

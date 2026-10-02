@@ -927,9 +927,31 @@ records；只在 Case、Stage、Debug <code>inputs</code> 或 Load workload
 record 的原生 map/list/scalar 型別；<code>@{id.path}</code>
 可讀取巢狀值，也支援數字 list index。內嵌參照（例如
 <code>"ORD-@{accounts.id}"</code>）會產生文字，因此所選 record
-的欄位必須是 scalar。Mapping 中的 <code>${...}</code> 讀取已初始化的
-bootstrap Context；建立 <code>EXEC.INPUT</code>
-時不能再讀取它本身。<code>#{...}</code>、<code>&amp;{...}</code> 和
+的欄位必須是 scalar。Mapping 中的 <code>${...}</code> 只能讀取該 mapping
+解析前已初始化的 Context root。允許的 root 依 mapping 階段而異，並會在
+execution 開始前驗證（Load 則在 scheduler 啟動前驗證）：</p>
+<ul>
+<li>Run Case/Stage mapping 可讀取
+<code>EXEC.ID</code>、<code>EXEC.RUN_ID</code>、<code>EXEC.STARTED_AT</code>、<code>EXEC.RUN_STARTED_AT</code>、<code>EXEC.OUTPUT_DIR</code>，以及
+<code>META.PROJECT</code>、<code>META.SOURCE</code> 或
+<code>META.TARGET</code>。</li>
+<li>Debug <code>inputs</code> 可讀取相同的 execution root 與
+metadata，另加 <code>META.TEMPLATE</code>。</li>
+<li>Load workload <code>inputs</code> 可讀取
+<code>EXEC.RUN_ID</code>、<code>EXEC.STARTED_AT</code>、<code>EXEC.RUN_STARTED_AT</code>、已初始化的
+<code>EXEC.LOAD</code> identity fields，以及
+<code>META.PROJECT</code>、<code>META.SOURCE</code>、<code>META.TARGET</code>
+或 <code>META.TEMPLATE</code>。<code>EXEC.ID</code> 與
+<code>EXEC.OUTPUT_DIR</code> 只會在 input 解析後初始化。Arrival-rate
+workload 不提供 <code>EXEC.LOAD.USER_ID</code>；若 mapping
+要同時支援兩種模型，請使用 optional path
+<code>${EXEC.LOAD.USER_ID?}</code>。</li>
+</ul>
+<p>所有 mode 都拒絕引用
+<code>EXEC.INPUT</code>（正在建立的值）、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>、Action
+<code>output</code> 及 invocation-scoped helper metadata。Mapping
+expression 只可呼叫 pure bootstrap-safe
+built-ins。<code>#{...}</code>、<code>&amp;{...}</code> 和
 <code>%{...}</code> 都不是 input-mapping expression。</p>
 <div class="sourceCode" id="cb8"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-testdata/v1.0</span></span>

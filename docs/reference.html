@@ -988,8 +988,32 @@ type; <code>@{id.path}</code> selects a nested value, including a
 numeric list index. Interpolated references such as
 <code>"ORD-@{accounts.id}"</code> produce text and therefore require a
 scalar value from the selected record. <code>${...}</code> in a mapping
-reads initialized bootstrap Context; a mapping cannot read from
-<code>EXEC.INPUT</code> while it is being constructed.
+reads Context roots initialized before that mapping is resolved. The
+allowed roots depend on the mapping phase, and validation checks them
+before execution starts (before the scheduler starts for Load):</p>
+<ul>
+<li>Run Case/Stage mappings may read <code>EXEC.ID</code>,
+<code>EXEC.RUN_ID</code>, <code>EXEC.STARTED_AT</code>,
+<code>EXEC.RUN_STARTED_AT</code>, <code>EXEC.OUTPUT_DIR</code>, and
+<code>META.PROJECT</code>, <code>META.SOURCE</code>, or
+<code>META.TARGET</code>.</li>
+<li>Debug <code>inputs</code> may read the same execution roots and
+metadata, plus <code>META.TEMPLATE</code>.</li>
+<li>Load workload <code>inputs</code> may read <code>EXEC.RUN_ID</code>,
+<code>EXEC.STARTED_AT</code>, <code>EXEC.RUN_STARTED_AT</code>,
+initialized <code>EXEC.LOAD</code> identity fields, and
+<code>META.PROJECT</code>, <code>META.SOURCE</code>,
+<code>META.TARGET</code>, or <code>META.TEMPLATE</code>.
+<code>EXEC.ID</code> and <code>EXEC.OUTPUT_DIR</code> are initialized
+only after input resolution. <code>EXEC.LOAD.USER_ID</code> is absent
+for arrival-rate workloads; use the optional path form
+<code>${EXEC.LOAD.USER_ID?}</code> when one mapping must support both
+models.</li>
+</ul>
+<p>Every mode rejects references to <code>EXEC.INPUT</code> (the value
+being built), <code>EXEC.VARS</code>, <code>EXEC.ACTIONS</code>, Action
+<code>output</code>, and invocation-scoped helper metadata. Mapping
+expressions may call only pure bootstrap-safe built-ins.
 <code>#{...}</code>, <code>&amp;{...}</code>, and <code>%{...}</code>
 are not input-mapping expressions.</p>
 <div class="sourceCode" id="cb8"><pre

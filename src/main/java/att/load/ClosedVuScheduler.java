@@ -98,6 +98,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 String iterationId = prefix + "-" + userId + "-" + iteration;
                 IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(startedAt), "closed", iterationId,
                         sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId, scenario.inputs(), null);
+                request = request.withTestdataWaitAllowed(() -> !cancelled.get()
+                        && remainingRunMillis(startedAt) > 0L);
                 if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
                 Path evidenceRoot = evidenceOutputRoot(iterationId);
                 if (evidenceRoot != null) {

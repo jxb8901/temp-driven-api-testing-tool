@@ -42,6 +42,11 @@ public final class LoadTargetValidator {
                     : "workloads[" + workload.sourceIndex() + "].vars";
             Set<String> availableLoadFields = att.core.CaseRuntimeContext.availableLoadContextFields(
                     scenario.model() == LoadScenario.Model.CLOSED, !scenario.legacyV10());
+            String inputsField = workload.sourceIndex() < 0 ? "inputs"
+                    : "workloads[" + workload.sourceIndex() + "].inputs";
+            att.core.ExecutionBootstrapVariables.validateInputMapping(workload.inputs(), bootstrapEngine,
+                    scenario.source(), inputsField, att.validation.DiagnosticCodes.LOAD_INVALID,
+                    att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD, availableLoadFields);
             try {
                 att.core.ExecutionBootstrapVariables.validate(scenario.vars(), bootstrapEngine, scenario.inputs(),
                         scenario.source(), varsField, att.validation.DiagnosticCodes.LOAD_INVALID,

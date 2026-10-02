@@ -47,6 +47,31 @@ class DocumentationContractsTest(unittest.TestCase):
                 self.assertNotIn("@{accounts[0].id}", text)
                 self.assertIn("@{accounts.id}", text)
 
+    def test_input_mapping_pre_input_context_contract_is_published(self):
+        root = Path(__file__).resolve().parents[1]
+        english = (
+            root / "docs/reference/02_test_authoring.md",
+            root / "docs/reference.md",
+        )
+        chinese = (
+            root / "docs/reference.zh/02_test_authoring.md",
+            root / "docs/reference.zh.md",
+        )
+        for path in english:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("before the scheduler starts for Load", text)
+                self.assertIn("Load workload `inputs`", text)
+                self.assertIn("`EXEC.ID` and `EXEC.OUTPUT_DIR` are initialized only after input resolution", text)
+                self.assertIn("`EXEC.VARS`, `EXEC.ACTIONS`", text)
+        for path in chinese:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("Load 則在 scheduler 啟動前驗證", text)
+                self.assertIn("Load workload `inputs`", text)
+                self.assertIn("`EXEC.ID` 與 `EXEC.OUTPUT_DIR` 只會在 input 解析後初始化", text)
+                self.assertIn("`EXEC.VARS`、`EXEC.ACTIONS`", text)
+
     def test_explicit_historical_block_is_scoped_and_balanced(self):
         text = ("<!-- att-docs:historical -->\natt-load/v1.2\n"
                 "<!-- /att-docs:historical -->\natt-load/v1.2")

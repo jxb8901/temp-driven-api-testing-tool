@@ -81,6 +81,36 @@ class ExecutionBootstrapVariablesTest {
         }
     }
 
+    @Test void inputMappingsUseOnlyContextRootsInitializedBeforeTheirExecutionPhase() {
+        Map<String, Object> validLoad = mapOf("runId", "${EXEC.RUN_ID}",
+                "userId", "${EXEC.LOAD.USER_ID}", "template", "${META.TEMPLATE.name}");
+        assertDoesNotThrow(() -> ExecutionBootstrapVariables.validateInputMapping(validLoad, engine(), null,
+                "inputs", att.validation.DiagnosticCodes.LOAD_INVALID,
+                ExecutionBootstrapVariables.InputMappingMode.LOAD,
+                CaseRuntimeContext.availableLoadContextFields(true, true)));
+
+        for (String reference : Arrays.asList("${EXEC.ID}", "${EXEC.OUTPUT_DIR}",
+                "${EXEC.ACTIONS.previous.output.result}", "${EXEC.VARS.customerId}")) {
+            att.validation.DiagnosticException invalid = assertThrows(att.validation.DiagnosticException.class,
+                    () -> ExecutionBootstrapVariables.validateInputMapping(mapOf("value", reference), engine(),
+                            null, "inputs", att.validation.DiagnosticCodes.LOAD_INVALID,
+                            ExecutionBootstrapVariables.InputMappingMode.LOAD,
+                            CaseRuntimeContext.availableLoadContextFields(true, true)), reference);
+            assertEquals("inputs.value", invalid.field());
+        }
+
+        assertDoesNotThrow(() -> ExecutionBootstrapVariables.validateInputMapping(
+                mapOf("value", "${EXEC.ID}"), engine(), null, "inputs",
+                att.validation.DiagnosticCodes.DEBUG_INVALID,
+                ExecutionBootstrapVariables.InputMappingMode.DEBUG, null));
+        att.validation.DiagnosticException unavailableTestcaseTemplate = assertThrows(
+                att.validation.DiagnosticException.class,
+                () -> ExecutionBootstrapVariables.validateInputMapping(mapOf("value", "${META.TEMPLATE.name}"),
+                        engine(), null, "inputs", att.validation.DiagnosticCodes.TESTCASE_INVALID,
+                        ExecutionBootstrapVariables.InputMappingMode.TESTCASE, null));
+        assertEquals("inputs.value", unavailableTestcaseTemplate.field());
+    }
+
     @Test void probesInputPathsAsFoundMissingNullIntermediateOrStructurallyInvalid() {
         Map<String, Object> input = mapOf("customer", "C001", "nullable", null,
                 "profile", mapOf("id", "C002"), "items", Arrays.asList("first"));

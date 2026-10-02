@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -30,10 +31,13 @@ public final class TestdataInputResolver {
     private final Long defaultSeed;
     private final Long fallbackRandomSeed;
     private final int stableUserCount;
+    private final boolean orderedLoadExhaustion;
     private final ConcurrentHashMap<String, Selection> selections;
     private final ConcurrentHashMap<String, AtomicLong> counters;
+    private final ConcurrentHashMap<String, SelectionOrder> selectionOrders;
     private final ThreadLocal<Map<String, Map<String, Object>>> currentEvidence = new ThreadLocal<Map<String, Map<String, Object>>>();
     private final ThreadLocal<String> currentEvidenceScope = new ThreadLocal<String>();
+    private final ThreadLocal<BooleanSupplier> currentSelectionWaitAllowed = new ThreadLocal<BooleanSupplier>();
 
     public TestdataInputResolver(TestdataRegistry registry) {
         this(registry, Collections.<String, Object>emptyMap(), false, "", "", "", null, 0);
@@ -46,7 +50,14 @@ public final class TestdataInputResolver {
 
     public TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
                                  String workloadId, String model, Long defaultSeed, int stableUserCount) {
-        this(registry, workloadPolicies, true, workloadId, "", model, defaultSeed, stableUserCount);
+        this(registry, workloadPolicies, workloadId, model, defaultSeed, stableUserCount, false);
+    }
+
+    public TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
+                                 String workloadId, String model, Long defaultSeed, int stableUserCount,
+                                 boolean orderedLoadExhaustion) {
+        this(registry, workloadPolicies, true, workloadId, "", model, defaultSeed, stableUserCount,
+                orderedLoadExhaustion);
     }
 
     public TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
@@ -58,15 +69,26 @@ public final class TestdataInputResolver {
                                   boolean load, String workloadId, String executionScope,
                                   String model, Long defaultSeed, int stableUserCount) {
         this(registry, workloadPolicies, load, workloadId, executionScope, model, defaultSeed,
+                stableUserCount, false);
+    }
+
+    private TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
+                                  boolean load, String workloadId, String executionScope,
+                                  String model, Long defaultSeed, int stableUserCount,
+                                  boolean orderedLoadExhaustion) {
+        this(registry, workloadPolicies, load, workloadId, executionScope, model, defaultSeed,
                 stableUserCount, new ConcurrentHashMap<String, Selection>(), new ConcurrentHashMap<String, AtomicLong>(),
-                defaultSeed == null ? Long.valueOf(System.nanoTime()) : defaultSeed);
+                new ConcurrentHashMap<String, SelectionOrder>(),
+                defaultSeed == null ? Long.valueOf(System.nanoTime()) : defaultSeed, orderedLoadExhaustion);
     }
 
     private TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
                                   boolean load, String workloadId, String executionScope,
                                   String model, Long defaultSeed, int stableUserCount,
                                   ConcurrentHashMap<String, Selection> selections,
-                                  ConcurrentHashMap<String, AtomicLong> counters, Long fallbackRandomSeed) {
+                                  ConcurrentHashMap<String, AtomicLong> counters,
+                                  ConcurrentHashMap<String, SelectionOrder> selectionOrders,
+                                  Long fallbackRandomSeed, boolean orderedLoadExhaustion) {
         this.registry = registry;
         this.workloadPolicies = workloadPolicies == null ? Collections.<String, Object>emptyMap() : workloadPolicies;
         this.load = load;
@@ -75,10 +97,12 @@ public final class TestdataInputResolver {
         this.model = model == null ? "" : model;
         this.defaultSeed = defaultSeed;
         this.fallbackRandomSeed = fallbackRandomSeed;
+        this.orderedLoadExhaustion = orderedLoadExhaustion;
         if (stableUserCount < 0) throw new IllegalArgumentException("Load testdata stable user count must not be negative");
         this.stableUserCount = stableUserCount;
         this.selections = selections;
         this.counters = counters;
+        this.selectionOrders = selectionOrders;
     }
 
     /** Creates a Testcase-local view that shares this Run's selection allocator. */
@@ -86,12 +110,27 @@ public final class TestdataInputResolver {
         if (load) throw new IllegalStateException("Execution scopes are only available for Run testdata selection");
         if (scope == null || scope.trim().isEmpty()) throw new IllegalArgumentException("Testdata execution scope must not be blank");
         return new TestdataInputResolver(registry, workloadPolicies, false, workloadId, scope, model, defaultSeed,
-                stableUserCount,
-                selections, counters, fallbackRandomSeed);
+                stableUserCount, selections, counters, selectionOrders, fallbackRandomSeed, false);
     }
 
     public Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
                                        String userId, String iterationId) throws Exception {
+        return resolve(mapping, context, userId, iterationId, () -> true);
+    }
+
+    public Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
+                                       String userId, String iterationId, BooleanSupplier selectionWaitAllowed)
+            throws Exception {
+        currentSelectionWaitAllowed.set(selectionWaitAllowed == null ? () -> true : selectionWaitAllowed);
+        try {
+            return resolveMapping(mapping, context, userId, iterationId);
+        } finally {
+            currentSelectionWaitAllowed.remove();
+        }
+    }
+
+    private Map<String, Object> resolveMapping(Map<String, Object> mapping, CaseRuntimeContext context,
+                                               String userId, String iterationId) throws Exception {
         TestdataSyntax.references(mapping);
         String evidenceScope = load ? workloadId + "|" + String.valueOf(iterationId) : executionScope;
         if (!evidenceScope.equals(currentEvidenceScope.get())) {
@@ -239,14 +278,26 @@ public final class TestdataInputResolver {
             if (iterationId == null || iterationId.trim().isEmpty()) throw new IllegalArgumentException("scope: iteration requires an iterationId");
             scopeKey = workloadId + "|" + id + "|iteration|" + iterationId;
         }
-        Selection selected = selections.computeIfAbsent(scopeKey,
-                key -> choose(descriptor, id, layer, scope, policy, key, userId, iterationId));
+        Selection selected;
+        if (orderedLoadExhaustion && "closed".equals(model)) {
+            selected = selections.get(scopeKey);
+            if (selected == null) {
+                Selection candidate = choose(descriptor, id, layer, scope, policy, scopeKey, userId,
+                        iterationId, currentSelectionWaitAllowed.get());
+                Selection previous = selections.putIfAbsent(scopeKey, candidate);
+                selected = previous == null ? candidate : previous;
+            }
+        } else {
+            selected = selections.computeIfAbsent(scopeKey,
+                    key -> choose(descriptor, id, layer, scope, policy, key, userId, iterationId,
+                            currentSelectionWaitAllowed.get()));
+        }
         return selected;
     }
 
     private Selection choose(TestdataDescriptor descriptor, String id, String layer, String scope,
                              TestdataSelectionPolicy policy, String scopeKey,
-                             String userId, String iterationId) {
+                             String userId, String iterationId, BooleanSupplier selectionWaitAllowed) {
         String strategy = policy == null ? "sequential" : policy.strategy();
         String exhaustion = policy == null ? "error" : policy.exhaustion();
         long ordinal;
@@ -258,6 +309,15 @@ public final class TestdataInputResolver {
             ordinal = counter.getAndIncrement();
         }
         long count = descriptor.count();
+        SelectionOrder selectionOrder = orderedLoadExhaustion && load && "closed".equals(model)
+                && !"workload".equals(scope)
+                ? selectionOrders.computeIfAbsent(workloadId + "|" + id + "|" + scope,
+                        key -> new SelectionOrder())
+                : null;
+        if (selectionOrder != null && ordinal >= count
+                && ("stop".equals(exhaustion) || "error".equals(exhaustion))
+                && !selectionOrder.awaitConsumed(count, selectionWaitAllowed))
+            throw new TestdataSelectionDeferredException();
         long index;
         Long effectiveSeed = policy == null ? defaultSeed : policy.seed() == null ? defaultSeed : policy.seed();
         if ("random".equals(strategy)) {
@@ -283,7 +343,9 @@ public final class TestdataInputResolver {
         } else {
             throw exhausted(id, count, exhaustion);
         }
-        return selection(descriptor, id, index, layer, scope, policy, effectiveSeed);
+        Selection selected = selection(descriptor, id, index, layer, scope, policy, effectiveSeed);
+        if (selectionOrder != null && ordinal < count) selectionOrder.markConsumed(ordinal);
+        return selected;
     }
 
     private long loadOrdinal(String scope, String userId, String iterationId) {
@@ -456,6 +518,32 @@ public final class TestdataInputResolver {
         private final String scope;
         private final TestdataSelectionPolicy selection;
         private WorkloadPolicy(String scope, TestdataSelectionPolicy selection) { this.scope = scope; this.selection = selection; }
+    }
+
+    /** Orders exhaustion decisions after every lower valid Load identity has selected its record. */
+    private static final class SelectionOrder {
+        private long nextUnconsumed;
+        private final java.util.SortedSet<Long> completed = new java.util.TreeSet<Long>();
+
+        private synchronized void markConsumed(long ordinal) {
+            if (ordinal < nextUnconsumed) return;
+            completed.add(Long.valueOf(ordinal));
+            while (completed.remove(Long.valueOf(nextUnconsumed))) nextUnconsumed++;
+            notifyAll();
+        }
+
+        private synchronized boolean awaitConsumed(long count, BooleanSupplier allowedToWait) {
+            while (nextUnconsumed < count) {
+                if (Thread.currentThread().isInterrupted()
+                        || (allowedToWait != null && !allowedToWait.getAsBoolean())) return false;
+                try { wait(25L); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            return true;
+        }
     }
 
     private static final class Selection {

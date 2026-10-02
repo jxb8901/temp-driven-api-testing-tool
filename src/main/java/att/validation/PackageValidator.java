@@ -83,8 +83,13 @@ public final class PackageValidator {
                                     String executionMode, Map<String, Object> legacyInputs,
                                     Map<String, Object> debugVariables,
                                     List<Path> loadTestdataDescriptors) throws Exception {
-        validateTestdataMapping(testCase.caseData(), global, loadTestdataDescriptors);
-        validateTestdataMapping(stage.values(), global, loadTestdataDescriptors);
+        att.core.ExecutionBootstrapVariables.InputMappingMode mappingMode = "load".equalsIgnoreCase(executionMode)
+                ? att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD
+                : att.core.ExecutionBootstrapVariables.InputMappingMode.DEBUG;
+        validateTestdataMapping(testCase.caseData(), global, loadTestdataDescriptors, debugInput,
+                "inputs", mappingMode, null);
+        validateTestdataMapping(stage.values(), global, loadTestdataDescriptors, debugInput,
+                "inputs.stage", mappingMode, null);
         this.flows = selectedFlows;
         validateTemplate(template, global);
         validateReferencedToolsClosure(template, global, new LinkedHashSet<String>());
@@ -174,11 +179,14 @@ public final class PackageValidator {
                             resolved.toString(), testCase.sheetName(), testCase.rowNumber(), null, null, null));
                     cases++;
                     Set<String> assignedCaseVariables = new LinkedHashSet<String>();
-                    try { validateTestdataMapping(testCase.caseData(), config); }
+                    try { validateTestdataMapping(testCase.caseData(), config, Collections.<Path>emptyList(),
+                            resolved, "inputs", att.core.ExecutionBootstrapVariables.InputMappingMode.TESTCASE, null); }
                     catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, e, resolved)); }
                     for (StageCaseData stage : testCase.stages().values()) {
                         try {
-                            validateTestdataMapping(stage.values(), config);
+                            validateTestdataMapping(stage.values(), config, Collections.<Path>emptyList(), resolved,
+                                    "inputs.stage." + stage.key(),
+                                    att.core.ExecutionBootstrapVariables.InputMappingMode.TESTCASE, null);
                             StageTemplate template = loader.load(stage.templateName());
                             addCaseContextMigrationWarnings(diagnostics, template, testCase, stage, config,
                                     resolved, assignedCaseVariables);
@@ -206,15 +214,19 @@ public final class PackageValidator {
         return new ValidationSummary(options.validationScope(), suites.size(), cases, templates.size(), global.tools().size(), diagnostics);
     }
 
-    private void validateTestdataMapping(Map<String, Object> mapping, FrameworkConfig config) throws Exception {
-        validateTestdataMapping(mapping, config, Collections.<Path>emptyList());
-    }
-
     private void validateTestdataMapping(Map<String, Object> mapping, FrameworkConfig config,
-                                         List<Path> loadTestdataDescriptors) throws Exception {
+                                         List<Path> loadTestdataDescriptors, Path source, String field,
+                                         att.core.ExecutionBootstrapVariables.InputMappingMode mode,
+                                         Set<String> availableLoadFields) throws Exception {
         att.testdata.TestdataRegistry registry = new att.testdata.TestdataRegistry(projectRoot,
                 config.testdataDescriptors(), loadTestdataDescriptors);
         att.testdata.TestdataMappingValidator.validate(mapping, registry);
+        String diagnosticCode = mode == att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD
+                ? DiagnosticCodes.LOAD_INVALID
+                : mode == att.core.ExecutionBootstrapVariables.InputMappingMode.DEBUG
+                    ? DiagnosticCodes.DEBUG_INVALID : DiagnosticCodes.TESTCASE_INVALID;
+        att.core.ExecutionBootstrapVariables.validateInputMapping(mapping, expressionEngine, source,
+                field, diagnosticCode, mode, availableLoadFields);
     }
 
     /** An old-schema advisory adds no value beside an error for that same descriptor. */

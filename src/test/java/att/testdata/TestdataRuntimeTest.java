@@ -139,6 +139,48 @@ class TestdataRuntimeTest {
         assertThrows(IllegalArgumentException.class, () -> arrivalRate.resolve(mapping, null, null, "a1"));
     }
 
+    @Test void closedLoadExhaustionWaitsForLowerValidIdentitiesBeforeStopOrError() throws Exception {
+        for (String exhaustion : Arrays.asList("stop", "error")) {
+            String id = "ordered" + exhaustion;
+            Path descriptor = write("data/" + id + ".yaml", "schemaVersion: att-testdata/v1.0\n"
+                    + "id: " + id + "\nrecords: [first, second, third]\n"
+                    + "selection: {strategy: sequential, exhaustion: " + exhaustion + "}\n");
+            TestdataRegistry registry = new TestdataRegistry(root, Collections.<Path>emptyList(),
+                    Arrays.asList(descriptor));
+            Map<String, Object> policy = Collections.<String, Object>singletonMap(id,
+                    Collections.<String, Object>singletonMap("scope", "iteration"));
+            TestdataInputResolver resolver = new TestdataInputResolver(registry, policy, "work", "closed",
+                    null, 2, true);
+            Map<String, Object> mapping = Collections.<String, Object>singletonMap("value", "@{" + id + "}");
+
+            assertEquals("first", resolver.resolve(mapping, null, "VU-1", "run-VU-1-1").get("value"));
+            assertEquals("second", resolver.resolve(mapping, null, "VU-2", "run-VU-2-1").get("value"));
+
+            CountDownLatch higherOrdinalStarted = new CountDownLatch(1);
+            ExecutorService worker = Executors.newSingleThreadExecutor();
+            try {
+                Future<String> higher = worker.submit(() -> {
+                    higherOrdinalStarted.countDown();
+                    try {
+                        return String.valueOf(resolver.resolve(mapping, null, "VU-2", "run-VU-2-2").get("value"));
+                    } catch (TestdataStopException stop) {
+                        return "stop";
+                    } catch (IllegalStateException exhausted) {
+                        return "error";
+                    }
+                });
+                assertTrue(higherOrdinalStarted.await(5L, TimeUnit.SECONDS));
+                assertThrows(java.util.concurrent.TimeoutException.class,
+                        () -> higher.get(50L, TimeUnit.MILLISECONDS), exhaustion);
+
+                assertEquals("third", resolver.resolve(mapping, null, "VU-1", "run-VU-1-2").get("value"));
+                assertEquals(exhaustion, higher.get(5L, TimeUnit.SECONDS));
+            } finally {
+                worker.shutdownNow();
+            }
+        }
+    }
+
     @Test void concurrentLoadIterationAssignmentsAreStableAcrossWorkerArrivalOrders() throws Exception {
         List<String[]> scopes = new ArrayList<String[]>();
         for (int user = 1; user <= 3; user++) {
