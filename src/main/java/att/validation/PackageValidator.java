@@ -73,6 +73,23 @@ public final class PackageValidator {
                                     att.flow.FlowRegistry selectedFlows, Path debugInput,
                                     String executionMode, Map<String, Object> legacyInputs,
                                     Map<String, Object> debugVariables) throws Exception {
+        validateDebugTarget(template, testCase, stage, selectedFlows, debugInput, executionMode,
+                legacyInputs, debugVariables, Collections.<Path>emptyList());
+    }
+
+    /** Validates a selected target with additional descriptor imports owned by its Load scenario. */
+    public void validateDebugTarget(StageTemplate template, TestCase testCase, StageCaseData stage,
+                                    att.flow.FlowRegistry selectedFlows, Path debugInput,
+                                    String executionMode, Map<String, Object> legacyInputs,
+                                    Map<String, Object> debugVariables,
+                                    List<Path> loadTestdataDescriptors) throws Exception {
+        att.core.ExecutionBootstrapVariables.InputMappingMode mappingMode = "load".equalsIgnoreCase(executionMode)
+                ? att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD
+                : att.core.ExecutionBootstrapVariables.InputMappingMode.DEBUG;
+        validateTestdataMapping(testCase.caseData(), global, loadTestdataDescriptors, debugInput,
+                "inputs", mappingMode, null);
+        validateTestdataMapping(stage.values(), global, loadTestdataDescriptors, debugInput,
+                "inputs.stage", mappingMode, null);
         this.flows = selectedFlows;
         validateTemplate(template, global);
         validateReferencedToolsClosure(template, global, new LinkedHashSet<String>());
@@ -104,6 +121,14 @@ public final class PackageValidator {
         int cases = 0;
         Set<String> templates = new LinkedHashSet<String>();
         List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
+        if ("package".equals(options.validationScope())) {
+            try {
+                new att.testdata.TestdataRegistry(projectRoot, global.testdataDescriptors(), Collections.<Path>emptyList()).validateAll();
+            } catch (Exception e) {
+                diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, e,
+                        global.testdataDescriptors().isEmpty() ? null : global.testdataDescriptors().get(0)));
+            }
+        }
         // Package validation owns the complete Tool catalog.  Selected
         // validation adds warnings only while walking its dependency closure.
         // This keeps an unrelated Tool from affecting a selected run.
@@ -154,8 +179,14 @@ public final class PackageValidator {
                             resolved.toString(), testCase.sheetName(), testCase.rowNumber(), null, null, null));
                     cases++;
                     Set<String> assignedCaseVariables = new LinkedHashSet<String>();
+                    try { validateTestdataMapping(testCase.caseData(), config, Collections.<Path>emptyList(),
+                            resolved, "inputs", att.core.ExecutionBootstrapVariables.InputMappingMode.TESTCASE, null); }
+                    catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, e, resolved)); }
                     for (StageCaseData stage : testCase.stages().values()) {
                         try {
+                            validateTestdataMapping(stage.values(), config, Collections.<Path>emptyList(), resolved,
+                                    "inputs.stage." + stage.key(),
+                                    att.core.ExecutionBootstrapVariables.InputMappingMode.TESTCASE, null);
                             StageTemplate template = loader.load(stage.templateName());
                             addCaseContextMigrationWarnings(diagnostics, template, testCase, stage, config,
                                     resolved, assignedCaseVariables);
@@ -181,6 +212,21 @@ public final class PackageValidator {
         if ("selected".equals(options.validationScope())) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTED_SCOPE, Diagnostic.Severity.INFO, "Only the selected dependency closure was validated; unselected package content was not validated", null, null, null, null, null, null));
         Collections.sort(diagnostics);
         return new ValidationSummary(options.validationScope(), suites.size(), cases, templates.size(), global.tools().size(), diagnostics);
+    }
+
+    private void validateTestdataMapping(Map<String, Object> mapping, FrameworkConfig config,
+                                         List<Path> loadTestdataDescriptors, Path source, String field,
+                                         att.core.ExecutionBootstrapVariables.InputMappingMode mode,
+                                         Set<String> availableLoadFields) throws Exception {
+        att.testdata.TestdataRegistry registry = new att.testdata.TestdataRegistry(projectRoot,
+                config.testdataDescriptors(), loadTestdataDescriptors);
+        att.testdata.TestdataMappingValidator.validate(mapping, registry);
+        String diagnosticCode = mode == att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD
+                ? DiagnosticCodes.LOAD_INVALID
+                : mode == att.core.ExecutionBootstrapVariables.InputMappingMode.DEBUG
+                    ? DiagnosticCodes.DEBUG_INVALID : DiagnosticCodes.TESTCASE_INVALID;
+        att.core.ExecutionBootstrapVariables.validateInputMapping(mapping, expressionEngine, source,
+                field, diagnosticCode, mode, availableLoadFields);
     }
 
     /** An old-schema advisory adds no value beside an error for that same descriptor. */
@@ -1652,6 +1698,11 @@ public final class PackageValidator {
                         "Use a stage key declared by this Case sidecar selector/data mapping.", null);
             }
             String root = firstPathSegment(referencePath);
+            if (att.core.ContextPathPolicy.isForbiddenTestdataPath(referencePath)) {
+                throw incompatibleContextPath(path, DiagnosticCodes.CONTEXT_INVALID,
+                        "Testdata is available only through input mappings and is not a reusable expression Context root.",
+                        "Resolve @{id} in Case/Stage, Debug, or Load input mapping, then consume the value through EXEC.INPUT.");
+            }
             if ("EXEC".equals(root)) {
                 validateCanonicalPath(path, referencePath);
                 String field = firstChildSegment(referencePath, "EXEC");

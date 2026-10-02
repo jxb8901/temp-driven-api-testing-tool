@@ -168,6 +168,8 @@ public final class DebugEngine {
             ResolvedTarget resolved = resolveTarget(targetType, targetId, input);
             StageCaseData stage = input.stage(resolved.template.name());
             TestCase testCase = syntheticCase(targetType, targetId, input, stage);
+            if ("tool".equals(targetType))
+                att.testdata.TestdataSyntax.rejectDirectReferences(input.arguments, "Debug Tool arguments");
             UnifiedTemplateEngine bootstrapEngine = new UnifiedTemplateEngine(null, null, null, null,
                     new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
             att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine, input.inputs, input.path,
@@ -177,18 +179,24 @@ public final class DebugEngine {
                         + " case=" + testCase.caseId() + " resolved=" + input.path);
 
             new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
-                    resolved.flows, input.path, "debug", input.inputs, input.vars);
+                    resolved.flows, input.path, "debug", testCase.caseData(), input.vars);
 
             context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug");
             context.setProject(projectRoot);
             context.setSourceMetadata("debug", input.path, testCase.caseId());
             context.setTargetMetadata(targetType, targetId);
             context.setTemplateMetadata(resolved.template.name(), resolved.template.directory());
-            context.setLegacyInputsView(input.inputs);
+            context.put("CASE.environment", config.environment());
+            att.testdata.TestdataInputResolver testdata = new att.testdata.TestdataInputResolver(
+                    new att.testdata.TestdataRegistry(projectRoot, config.testdataDescriptors(), Collections.<Path>emptyList()));
+            context.replaceInputValues(testdata.resolve(testCase.caseData(), context, null, null));
             if ("template".equals(targetType) || "flow".equals(targetType))
                 att.core.ExecutionBootstrapVariables.evaluate(input.vars, context, bootstrapEngine,
                         att.core.ExecutionBootstrapVariables.Scope.DEBUG);
-            context.put("CASE.environment", config.environment());
+            Map<String, Object> resolvedStageValues = testdata.resolve(stage.values(), context, null, null);
+            if (!testdata.selectionEvidence().isEmpty())
+                context.put("CASE.testdataSelections", testdata.selectionEvidence());
+            stage = new StageCaseData(stage.key(), stage.templateName(), resolvedStageValues);
             context.put("CASE.debugInput", input.path.toString());
             Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();
             debugHeader.put("target", target);
@@ -295,12 +303,22 @@ public final class DebugEngine {
     }
 
     private TestCase syntheticCase(String type, String id, DebugInput input, StageCaseData stage) {
-        Map<String, Object> caseData = new LinkedHashMap<String, Object>(input.caseValues);
+        Map<String, Object> caseData = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : input.caseValues.entrySet())
+            if (!isFrameworkCaseField(entry.getKey())) caseData.put(entry.getKey(), entry.getValue());
         for (Map.Entry<String, Object> entry : input.inputs.entrySet()) if (!caseData.containsKey(entry.getKey())) caseData.put(entry.getKey(), entry.getValue());
         if (!caseData.containsKey("caseName")) caseData.put("caseName", "DEBUG " + type + " " + id);
         Map<String, StageCaseData> stages = new LinkedHashMap<String, StageCaseData>();
         stages.put(stage.key(), stage);
         return new TestCase(1, "DEBUG", type, "debug", safeRowId(id), Collections.<String>emptyList(), caseData, stages, "");
+    }
+
+    private boolean isFrameworkCaseField(String name) {
+        if (name == null) return false;
+        String normalized = name.toUpperCase(java.util.Locale.ROOT);
+        return java.util.Arrays.asList("CASEID", "WORKBOOKID", "GROUPID", "ROWCASEID", "WORKBOOK",
+                "SHEET", "ROWNUMBER", "TAGS", "STATUS", "STARTEDAT", "OUTPUTDIRECTORY",
+                "DURATIONMS", "ENVIRONMENT", "DEBUGINPUT", "VARS", "DB", "STAGES").contains(normalized);
     }
 
     private DebugInput loadInput(ExecutionOptions options, String type, String id) throws Exception {

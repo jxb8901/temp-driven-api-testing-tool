@@ -880,6 +880,27 @@
           },
           "additionalProperties": false
         },
+        "testdata": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "scope": { "enum": ["workload", "user", "iteration"] },
+              "selection": {
+                "type": "object",
+                "required": ["strategy"],
+                "properties": {
+                  "strategy": { "enum": ["sequential", "roundRobin", "random"] },
+                  "exhaustion": { "enum": ["error", "recycle", "stop"] },
+                  "seed": { "type": "integer" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
         "thresholds": { "type": "object", "additionalProperties": true }
       },
       "additionalProperties": false
@@ -922,7 +943,7 @@
       "type": "object",
       "required": ["schemaVersion", "workloads"],
       "properties": {
-        "schemaVersion": { "const": "att-load/v1.4" },
+        "schemaVersion": { "const": "att-load/v1.5" },
         "seed": { "type": "integer" },
         "effectiveSeed": { "type": "integer" },
         "load": { "$ref": "#/$defs/currentLoadDefaults" },

@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 /** Scheduler-to-executor contract for one load iteration. */
 public final class IterationRequest {
@@ -13,6 +14,8 @@ public final class IterationRequest {
     private final Map<String, Object> inputs;
     private final Path outputDirectory;
     private final boolean retainSuccessEvidence, retainFailureEvidence;
+    private final BooleanSupplier testdataWaitAllowed;
+    private final Long testdataOrdinal;
 
     public IterationRequest(String model, String iterationId, long iteration, String phase,
                             Instant startedAt, String userId, Map<String, Object> inputs, Path outputDirectory) {
@@ -37,6 +40,14 @@ public final class IterationRequest {
                              String phase, Instant startedAt, String userId, Map<String, Object> inputs,
                              Path outputDirectory, boolean retainSuccessEvidence, boolean retainFailureEvidence,
                              String workloadId) {
+        this(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, () -> true, null);
+    }
+
+    private IterationRequest(String runId, Instant runStartedAt, String model, String iterationId, long iteration,
+                             String phase, Instant startedAt, String userId, Map<String, Object> inputs,
+                             Path outputDirectory, boolean retainSuccessEvidence, boolean retainFailureEvidence,
+                             String workloadId, BooleanSupplier testdataWaitAllowed, Long testdataOrdinal) {
         if (runId == null || runId.trim().isEmpty()) throw new IllegalArgumentException("Load runId must not be blank");
         if (!("closed".equals(model) || "arrivalRate".equals(model))) throw new IllegalArgumentException("LOAD.model must be closed or arrivalRate");
         if (iterationId == null || iterationId.trim().isEmpty()) throw new IllegalArgumentException("LOAD.iterationId must not be blank");
@@ -56,6 +67,10 @@ public final class IterationRequest {
         this.retainSuccessEvidence = retainSuccessEvidence;
         this.retainFailureEvidence = retainFailureEvidence;
         this.workloadId = workloadId;
+        this.testdataWaitAllowed = testdataWaitAllowed == null ? () -> true : testdataWaitAllowed;
+        if (testdataOrdinal != null && testdataOrdinal.longValue() < 0L)
+            throw new IllegalArgumentException("Testdata ordinal must be >= 0");
+        this.testdataOrdinal = testdataOrdinal;
     }
 
     public static IterationRequest closed(String iterationId, long iteration, String phase, Instant startedAt,
@@ -76,19 +91,28 @@ public final class IterationRequest {
     }
     public IterationRequest withOutputDirectory(Path directory) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, directory,
-                directory != null, retainFailureEvidence, workloadId);
+                directory != null, retainFailureEvidence, workloadId, testdataWaitAllowed, testdataOrdinal);
     }
     public IterationRequest withFailureEvidence(boolean enabled) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, retainSuccessEvidence, enabled, workloadId);
+                outputDirectory, retainSuccessEvidence, enabled, workloadId, testdataWaitAllowed, testdataOrdinal);
     }
     public IterationRequest withEvidenceRetention(boolean success, boolean failure) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, success, failure, workloadId);
+                outputDirectory, success, failure, workloadId, testdataWaitAllowed, testdataOrdinal);
     }
     public IterationRequest withWorkloadId(String value) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, retainSuccessEvidence, retainFailureEvidence, value);
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, value, testdataWaitAllowed, testdataOrdinal);
+    }
+    public IterationRequest withTestdataWaitAllowed(BooleanSupplier value) {
+        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, value, testdataOrdinal);
+    }
+    public IterationRequest withTestdataOrdinal(long value) {
+        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId,
+                testdataWaitAllowed, Long.valueOf(value));
     }
     public String runId() { return runId; }
     public String model() { return model; }
@@ -103,4 +127,6 @@ public final class IterationRequest {
     public Path outputDirectory() { return outputDirectory; }
     public boolean retainSuccessEvidence() { return retainSuccessEvidence; }
     public boolean retainFailureEvidence() { return retainFailureEvidence; }
+    public BooleanSupplier testdataWaitAllowed() { return testdataWaitAllowed; }
+    public Long testdataOrdinal() { return testdataOrdinal; }
 }

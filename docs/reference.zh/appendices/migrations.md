@@ -1,5 +1,11 @@
 ## Appendix C — Migration Notes
 
+### ATT 3.7.0 Testdata Migration
+
+將 global configuration 從 `att-config/v2.10` 升至 `att-config/v2.11`，並將 Load scenario 從 `att-load/v1.4` 升至 `att-load/v1.5`。舊 schema 仍登錄於 `schemas/history/`，供 migration diagnostics 使用。`att-testdata/v1.0` 是新增契約：在選定的 environment profile `testdata` list 加入 descriptor path，再於 Case/Stage、Debug 或 Load workload input map 使用 `@{id}`。Load scenario 可在頂層加入 package-relative `testdata` paths，形成僅適用於該次 Load 的 overlay。不同 layer 的同名 ID 會完整取代 descriptor；同一 layer 內的重複 ID 無效。多筆 records 的 descriptor 必須有明確 selection policy。沒有 testdata reference 的既有 package 不需要新增 descriptor。
+
+Load workload `testdata.<id>` 設定控制 `scope`，並可選擇整份覆蓋 descriptor 的 `selection` policy。Scope 預設為 `iteration`；`user` 只適用 closed-VU workload。請明確選擇 `error`、`recycle` 或 `stop` exhaustion。Selection metadata 會記錄，但不包含 record value。
+
 ATT 3.6.2 將型別化 operation result、外部 parsing、project-file String、outbound transport 和人類可讀 evidence 分開。
 
 | 舊欄位／模型 | 3.6.2 遷移方式 |
@@ -39,9 +45,9 @@ send:
   call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
 ~~~
 
-Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader 遷移，再把 schemaVersion 升至 att-load/v1.4。Root defaults 可供多個 workload 共用；每個 workload 的 `inputs`、`vars`、load policy 及 execution 設定會覆蓋相應 root 值。Top-level thresholds 只屬於 aggregate；workload thresholds 必須在各 workload 宣告，不會從 root 繼承。`inputs` 仍對應 EXEC.INPUT；`vars` 在每個 execution 的 EXEC.ID 與 EXEC.OUTPUT_DIR 初始化後、target 啟動前評估。完整 reference 保留 native type，dependency 不受宣告順序影響；循環及 external/stateful calls 會在執行前拒絕。頂層 execution.execIdFormat 仍在 initialization 使用一般 expression engine 求值一次；closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。
+Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader 遷移，再把 schemaVersion 升至 att-load/v1.5。Root defaults 可供多個 workload 共用；每個 workload 的 `inputs`、`vars`、load policy 及 execution 設定會覆蓋相應 root 值。Top-level thresholds 只屬於 aggregate；workload thresholds 必須在各 workload 宣告，不會從 root 繼承。`inputs` 仍對應 EXEC.INPUT；`vars` 在每個 execution 的 EXEC.ID 與 EXEC.OUTPUT_DIR 初始化後、target 啟動前評估。完整 reference 保留 native type，dependency 不受宣告順序影響；循環及 external/stateful calls 會在執行前拒絕。頂層 execution.execIdFormat 仍在 initialization 使用一般 expression engine 求值一次；closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。
 
-歷史的 `att-load-profile/v1.0` policy file 僅供 migration 使用：使用前請改寫為現行 policy-only `att-load/v1.4` descriptor；它不是現行 `load/load.yaml` 範例。
+歷史的 `att-load-profile/v1.0` policy file 僅供 migration 使用：使用前請改寫為現行 policy-only `att-load/v1.5` descriptor；它不是現行 `load/load.yaml` 範例。
 
 Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[Action 與型別化值](../14_actions.md)、[Runtime 與 Context 模型](../03_runtime_context.md)、[Load 模式](../04_execution_modes/load.md)與[Schema 矩陣](schema_matrix.md)。
 

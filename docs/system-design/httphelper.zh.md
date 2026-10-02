@@ -1,6 +1,6 @@
 # HTTPHelper 執行設計
 
-`att-config/v2.10` loader 在外部執行前解析所選 profile 的 `httphelpers` 清單，驗證每個 `att-httphelper/v1.1` descriptor，並建立不分大小寫的 logical registry。Profile 整組替換清單，不逐屬性合併。Helper 設定不可變；認證資料及 trust-store 密碼屬 transport state，不進入 expression Context。
+`att-config/v2.11` loader 在外部執行前解析所選 profile 的 `httphelpers` 清單，驗證每個 `att-httphelper/v1.1` descriptor，並建立不分大小寫的 logical registry。Profile 整組替換清單，不逐屬性合併。Helper 設定不可變；認證資料及 trust-store 密碼屬 transport state，不進入 expression Context。
 
 `UnifiedTemplateEngine` 將 primary `http.<id>.<operation>` 呼叫交給 run-owned `HttpHelperExecutor`。每個 logical helper 懶建立 thread-safe Apache HTTP client 與有界 pool。一般 run 每個 suite 擁有一個 executor；load iteration 經 `LoadRunResources` 共享；debug 每次呼叫自有一個。owner 在生命週期結束時關閉 executor。不會隱式保留 cookie 或自動重試 request。
 

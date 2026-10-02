@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.7.0 - 2026-10-02
+
+- Implement issue #63: add layered environment and Load-local testdata registries, literal and virtual sequence records, typed input mapping, deterministic per-scope selection, Load scope/exhaustion policies, bounded selection evidence, and package validation.
+- Add the `att-testdata/v1.0` descriptor contract, advance global configuration to `att-config/v2.11` and Load scenarios to `att-load/v1.5`, and preserve the previous config/Load schemas under `schemas/history/`.
+- Document testdata authoring, mapping, Load policies, and migration in English and Traditional Chinese.
+
 ## 3.6.2 - 2026-10-01
 
 - Remove presentation-only dbText/prettyPrint aliases and user-authored Log.level; migrate to typed Log value + format and plain Case-log entries (#109).

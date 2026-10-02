@@ -1,4 +1,4 @@
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -29,6 +29,8 @@ dbhelpers:
   - config/dbhelpers/sit/orders.yaml
 mqhelpers:
   - config/mqhelpers/sit/payment.yaml
+testdata:
+  - config/testdata/accounts.yaml
 
 report:
   mode: append-to-copy

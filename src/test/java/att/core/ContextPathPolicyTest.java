@@ -40,6 +40,10 @@ class ContextPathPolicyTest {
         assertTrue(ContextPathPolicy.isUnsupportedExecPath("TOOL.orders.find"));
         assertTrue(ContextPathPolicy.isUnsupportedExecPath("DB.orders.query"));
         assertTrue(ContextPathPolicy.isUnsupportedExecPath("MQ.orders.send"));
+        assertTrue(ContextPathPolicy.isUnsupportedExecPath("TESTDATA.records"));
+        assertTrue(ContextPathPolicy.isForbiddenTestdataPath("TESTDATA.records"));
+        assertTrue(ContextPathPolicy.isForbiddenTestdataPath("EXEC.DATA.records"));
+        assertTrue(ContextPathPolicy.isForbiddenTestdataPath("EXEC.FIXTURE.records"));
         assertTrue(ContextPathPolicy.isUnsupportedExecPath("STAGES.invoke"));
     }
 }

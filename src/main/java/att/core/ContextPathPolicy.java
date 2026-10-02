@@ -26,7 +26,16 @@ public final class ContextPathPolicy {
     public static boolean isUnsupportedExecPath(String path) {
         String field = firstSegment(path == null ? "" : path);
         return "TOOL".equals(field) || "DB".equals(field) || "MQ".equals(field) || "OUTPUT".equals(field)
-                || "CALL".equals(field) || "INVOCATION".equals(field) || isUnsupportedStagePath(path);
+                || "CALL".equals(field) || "INVOCATION".equals(field) || "TESTDATA".equals(field)
+                || "DATA".equals(field) || "FIXTURE".equals(field) || isUnsupportedStagePath(path);
+    }
+    public static boolean isForbiddenTestdataPath(String path) {
+        String root = firstSegment(path == null ? "" : path).toUpperCase(java.util.Locale.ROOT);
+        if ("TESTDATA".equals(root)) return true;
+        String normalized = path == null ? "" : path.toUpperCase(java.util.Locale.ROOT);
+        return normalized.startsWith("EXEC.TESTDATA.") || normalized.startsWith("EXEC.TESTDATA[")
+                || normalized.startsWith("EXEC.DATA.") || normalized.startsWith("EXEC.DATA[")
+                || normalized.startsWith("EXEC.FIXTURE.") || normalized.startsWith("EXEC.FIXTURE[");
     }
     public static boolean isFrameworkOwnedExecField(String field) {
         if (field == null) return false;

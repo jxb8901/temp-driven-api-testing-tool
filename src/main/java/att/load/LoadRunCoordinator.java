@@ -77,6 +77,8 @@ public final class LoadRunCoordinator implements AutoCloseable {
             }
         };
         final LoadSchedulerStartGate startGate = new LoadSchedulerStartGate(scenario.workloads().size());
+        final att.testdata.TestdataRegistry testdataRegistry = new att.testdata.TestdataRegistry(
+                projectRoot, config.testdataDescriptors(), scenario.testdataDescriptors());
         coordinatorWorkers = Executors.newFixedThreadPool(scenario.workloads().size(), new NamedFactory("att-load-workload"));
         Map<String, Future<LoadRunResult>> futures = new LinkedHashMap<String, Future<LoadRunResult>>();
         try {
@@ -84,7 +86,12 @@ public final class LoadRunCoordinator implements AutoCloseable {
                 LoadScenario child = scenario.forWorkload(workload);
                 LoadTarget target = targets.get(workload.id());
                 if (target == null) throw new IllegalArgumentException("Missing validated target for workload '" + workload.id() + "'");
-                IterationExecutor iterations = new IterationExecutor(projectRoot, config, target, resources, outputRoot);
+                att.testdata.TestdataInputResolver testdataResolver = new att.testdata.TestdataInputResolver(
+                        testdataRegistry, workload.testdata(), workload.id(), workload.model().wireName(),
+                        scenario.seed(), Math.max(1, workload.users()),
+                        true);
+                IterationExecutor iterations = new IterationExecutor(projectRoot, config, target, resources, outputRoot,
+                        testdataResolver);
                 LoadScheduler scheduler = child.model() == LoadScenario.Model.CLOSED
                         ? new ClosedVuScheduler(child, iterations, runId, aggregateListener, timing, evidenceStore, outputRoot, startGate)
                         : new FixedArrivalRateScheduler(child, iterations, runId, aggregateListener, timing, null,

@@ -84,7 +84,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.6.2",
+  "attVersion": "3.7.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

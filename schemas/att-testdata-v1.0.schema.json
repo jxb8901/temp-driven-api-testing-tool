@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:testdata:v1.0",
+  "title": "ATT inline literal or bounded generated testdata records",
+  "type": "object",
+  "required": ["schemaVersion", "id", "records"],
+  "properties": {
+    "schemaVersion": { "const": "att-testdata/v1.0" },
+    "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
+    "records": {
+      "oneOf": [
+        { "type": "array", "minItems": 1, "items": {} },
+        {
+          "type": "object",
+          "required": ["generate", "record"],
+          "properties": {
+            "generate": {
+              "type": "object",
+              "required": ["seq"],
+              "properties": {
+                "seq": {
+                  "type": "object",
+                  "required": ["from", "to"],
+                  "properties": {
+                    "from": { "type": "integer" },
+                    "to": { "type": "integer" },
+                    "format": { "type": "string", "pattern": "^%d$|^%0[1-9][0-9]?d$" }
+                  },
+                  "patternProperties": { "^x-": {} },
+                  "additionalProperties": false
+                }
+              },
+              "patternProperties": { "^x-": {} },
+              "additionalProperties": false
+            },
+            "record": {}
+          },
+          "patternProperties": { "^x-": {} },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "selection": {
+      "type": "object",
+      "required": ["strategy"],
+      "properties": {
+        "strategy": { "enum": ["sequential", "roundRobin", "random"] },
+        "exhaustion": { "enum": ["error", "recycle", "stop"] },
+        "seed": { "type": "integer" }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    }
+  },
+  "patternProperties": { "^x-": {} },
+  "additionalProperties": false
+}

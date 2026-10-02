@@ -24,6 +24,8 @@ The three input contracts are intentionally separate:
 
 A Flow that only consumes `EXEC.INPUT` needs no `vars`. A Flow that normally runs after a parent Flow publishes `EXEC.VARS.refNo` can be debugged directly with a scalar or typed structure:
 
+Debug `inputs` use the same Testdata mapping syntax as Run: select a configured environment with `--env`, then use exact `@{id}` / `@{id.path}` references or scalar interpolation. ATT resolves these before publishing `EXEC.INPUT`; direct Testdata markers remain invalid inside the reusable Template, Flow or Tool definition. See [Testdata Registry and Input Mapping](../02_test_authoring.md).
+
 ```yaml
 schemaVersion: att-debug/v1.1
 inputs:
@@ -171,4 +173,3 @@ output/debug/<debugId>/
 `result.yaml` contains the target, status, exit code, duration, input path, Case ID, action results, diagnostic (when present), and evidence locations. Synthetic framework-owned fields always win over same-named values in `case`; debug inputs cannot replace `CASE.caseId`, `CASE.workbookId`, `CASE.groupId`, `CASE.rowCaseId`, `CASE.outputDirectory`, the legacy `CASE.STAGES` evidence view, `CASE.DB`, `CASE.VARS`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, or `DB.*`. Debug output is independent of ordinary `output/latest-run.yaml` and report lifecycle.
 
 For `validate --format json`, stdout contains exactly one JSON document; progress and human diagnostics go to stderr.
-

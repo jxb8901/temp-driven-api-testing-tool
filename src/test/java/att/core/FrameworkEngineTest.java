@@ -92,6 +92,46 @@ class FrameworkEngineTest {
         assertTrue(new String(Files.readAllBytes(regenerated), "UTF-8").contains("common.inner.v1"));
     }
 
+    @Test void runTestdataSelectionAdvancesAcrossTestcasesAndIsStableWithinEachCase() throws Exception {
+        writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
+                "schemaVersion: att-template/v3.4\nname: PAYMENT_INVOKE\ndescription: testdata selection\nactions:\n"
+                        + "  check:\n    type: assert\n    assert: \"${EXEC.INPUT.accountId} == '${EXEC.INPUT.stageAccountId}'\"\n");
+        Path descriptor = projectRoot.resolve("config/testdata/accounts.yaml");
+        writeText(descriptor, testdataDescriptor("recycle"));
+        Path workbook = projectRoot.resolve("testcase/testdata.xlsx");
+        writeTestdataWorkbook(workbook);
+        writeText(projectRoot.resolve("testcase/testdata.yaml"),
+                "schemaVersion: att-sidecar/v2.1\nid: testdata\n"
+                        + "excel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\n"
+                        + "  dataColumns: accountId=帳戶\n"
+                        + "stages:\n  - key: invoke\n    template: 執行模板\n    required: true\n"
+                        + "    dataColumns: stageAccountId=階段帳戶\n");
+        FrameworkConfig config = withTestdata(descriptor);
+        writeSnapshot(workbook, config);
+        writeRuntimeSchemas();
+
+        RunSummary recycled = new FrameworkEngine(projectRoot, config).run(ExecutionOptions.parse(new String[]{
+                "run", "--suite", workbook.toString(), "--run-id", "TESTDATA-RECYCLE"}));
+        assertEquals(3, recycled.passed());
+        int[] expectedIndices = {0, 1, 0};
+        for (int index = 0; index < recycled.results().size(); index++) {
+            Map<?, ?> evidence = readCaseEvidence(recycled.results().get(index).caseLogPath().getParent().resolve("case.yaml"));
+            Map<?, ?> selection = (Map<?, ?>) ((Map<?, ?>) evidence.get("testdataSelections")).get("accounts");
+            assertEquals(expectedIndices[index], ((Number) selection.get("index")).intValue());
+            Map<?, ?> stage = (Map<?, ?>) ((Map<?, ?>) evidence.get("STAGES")).get("invoke");
+            assertEquals(evidence.get("accountId"), stage.get("stageAccountId"));
+        }
+
+        writeText(descriptor, testdataDescriptor("error"));
+        writeSnapshot(workbook, config);
+        RunSummary exhausted = new FrameworkEngine(projectRoot, config).run(ExecutionOptions.parse(new String[]{
+                "run", "--suite", workbook.toString(), "--run-id", "TESTDATA-EXHAUSTED"}));
+        assertEquals(2, exhausted.passed());
+        assertEquals(1, exhausted.error());
+        Map<?, ?> failedEvidence = readCaseEvidence(exhausted.results().get(2).caseLogPath().getParent().resolve("case.yaml"));
+        assertTrue(String.valueOf(failedEvidence.get("error")).contains("Testdata selection exhausted"));
+    }
+
     @Test
     void runsV2GroupedCaseThroughTemplateAndTool() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
@@ -315,6 +355,45 @@ class FrameworkEngineTest {
                 Paths.get("templates"), tools, new ReportConfig(reportMode, "${suiteName}.result.xlsx", report), new RunConfig("timestamp", "yyyyMMdd-HHmmss"));
     }
 
+    private FrameworkConfig withTestdata(Path descriptor) {
+        FrameworkConfig base = globalConfig();
+        return new FrameworkConfig(base.outputDirectory(), base.reportDirectory(), base.logDirectory(), base.environment(),
+                base.timeoutMs(), base.templatesRoot(), base.testcasesRoot(), base.tools(), base.dbHelpers(), base.mqHelpers(),
+                base.sshHelpers(), base.httpHelpers(), base.report(), base.run(), base.sheetGroups(), base.caseIdColumn(),
+                base.tagsColumn(), base.dataColumns(), base.stages(), base.headerRows(), base.xmlNamespaceMode(),
+                base.workbookId(), base.caseLogYamlAnchors(), base.processOutput(), Collections.singletonList(descriptor));
+    }
+
+    private String testdataDescriptor(String exhaustion) {
+        return "schemaVersion: att-testdata/v1.0\nid: accounts\nrecords:\n  - {id: A-100}\n  - {id: A-200}\n"
+                + "selection: {strategy: sequential, exhaustion: " + exhaustion + "}\n";
+    }
+
+    private void writeTestdataWorkbook(Path path) throws Exception {
+        Files.createDirectories(path.getParent());
+        try (Workbook workbook = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(path)) {
+            Sheet sheet = workbook.createSheet("支付測試案例集");
+            Row header = sheet.createRow(0);
+            String[] columns = {"案例編號", "標籤", "帳戶", "階段帳戶", "執行模板"};
+            for (int index = 0; index < columns.length; index++) header.createCell(index).setCellValue(columns[index]);
+            for (int index = 1; index <= 3; index++) {
+                Row row = sheet.createRow(index);
+                row.createCell(0).setCellValue("TC00" + index);
+                row.createCell(1).setCellValue("testdata");
+                row.createCell(2).setCellValue("@{accounts.id}");
+                row.createCell(3).setCellValue("@{accounts.id}");
+                row.createCell(4).setCellValue("name: PAYMENT_INVOKE");
+            }
+            workbook.write(output);
+        }
+    }
+
+    private Map<?, ?> readCaseEvidence(Path path) throws Exception {
+        try (java.io.InputStream input = Files.newInputStream(path)) {
+            return (Map<?, ?>) new org.yaml.snakeyaml.Yaml().load(input);
+        }
+    }
+
     private void writeWorkbook(Path path) throws Exception {
         Files.createDirectories(path.getParent());
         try (Workbook workbook = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(path)) {
@@ -337,6 +416,10 @@ class FrameworkEngineTest {
     }
     private void writeSnapshot(Path workbook) throws Exception {
         FrameworkConfig suite = new SuiteConfigResolver(projectRoot, globalConfig()).resolve(workbook);
+        new TestcaseSnapshotService().write(workbook, suite, new ExcelTestSuiteLoader(suite).load(workbook));
+    }
+    private void writeSnapshot(Path workbook, FrameworkConfig config) throws Exception {
+        FrameworkConfig suite = new SuiteConfigResolver(projectRoot, config).resolve(workbook);
         new TestcaseSnapshotService().write(workbook, suite, new ExcelTestSuiteLoader(suite).load(workbook));
     }
     private void writeRuntimeSchemas() throws Exception {

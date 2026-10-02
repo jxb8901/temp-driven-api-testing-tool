@@ -155,3 +155,36 @@ After changing a Workbook, generate its Snapshot, review and commit the diff. Af
 ### Test data ownership
 
 Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage business inputs enter `EXEC.INPUT`; [Context](03_runtime_context.md) defines their scope and lifetime. Environment selection belongs to [Configuration](09_configuration.md).
+
+### Testdata registry and input mapping
+
+Use `att-testdata/v1.0` descriptors for reusable records, then reference them only from a Case, Stage, Debug `inputs`, or Load workload `inputs` mapping. An exact `@{id}` reference keeps the record's native map/list/scalar type; `@{id.path}` selects a nested value, including a numeric list index. Interpolated references such as `"ORD-@{accounts.id}"` produce text and therefore require a scalar value from the selected record. `${...}` in a mapping reads Context roots initialized before that mapping is resolved. The allowed roots depend on the mapping phase, and validation checks them before execution starts (before the scheduler starts for Load):
+
+- Run Case/Stage mappings may read `EXEC.ID`, `EXEC.RUN_ID`, `EXEC.STARTED_AT`, `EXEC.RUN_STARTED_AT`, `EXEC.OUTPUT_DIR`, and `META.PROJECT`, `META.SOURCE`, or `META.TARGET`.
+- Debug `inputs` may read the same execution roots and metadata, plus `META.TEMPLATE`.
+- Load workload `inputs` may read `EXEC.RUN_ID`, `EXEC.STARTED_AT`, `EXEC.RUN_STARTED_AT`, initialized `EXEC.LOAD` identity fields, and `META.PROJECT`, `META.SOURCE`, `META.TARGET`, or `META.TEMPLATE`. `EXEC.ID` and `EXEC.OUTPUT_DIR` are initialized only after input resolution. `EXEC.LOAD.USER_ID` is absent for arrival-rate workloads; use the optional path form `${EXEC.LOAD.USER_ID?}` when one mapping must support both models.
+
+Every mode rejects references to `EXEC.INPUT` (the value being built), `EXEC.VARS`, `EXEC.ACTIONS`, Action `output`, and invocation-scoped helper metadata. The V1 mapping grammar evaluates literals, selected-record `@{...}` references, and `${...}` Context references; built-in calls are not evaluated. `#{...}`, `&{...}`, and `%{...}` are not input-mapping expressions.
+
+~~~yaml
+schemaVersion: att-testdata/v1.0
+id: accounts
+records:
+  - {id: "A-100", tier: gold}
+  - {id: "A-200", tier: silver}
+selection: {strategy: sequential, exhaustion: recycle}
+~~~
+
+Generated records are virtual and indexed; ATT materializes only the selected record. The inclusive integer range is capped at 1,000,000 records, and `%{seq}` is the only supported generated-record substitution:
+
+~~~yaml
+schemaVersion: att-testdata/v1.0
+id: generatedAccounts
+records:
+  generate:
+    seq: {from: 100, to: 999999, format: "%06d"}
+  record: {id: "A-%{seq}", amount: 42}
+selection: {strategy: roundRobin, exhaustion: stop}
+~~~
+
+An environment profile's `testdata` list declares the shared registry. A Load scenario may declare its own top-level `testdata` imports; matching IDs replace the whole environment descriptor for that Load only. Duplicate IDs within one layer fail. Ordinary Run/Debug activate referenced IDs lazily, while `validate --package` checks every configured descriptor. Templates, Flows, and Tool definitions receive resolved values through `EXEC.INPUT`; they cannot contain direct `@{...}` or `%{...}` references. See [Environment and Test Data](09_configuration.md), [Load](04_execution_modes/load.md), and the maintainer [testdata design](../system-design/testdata.md).

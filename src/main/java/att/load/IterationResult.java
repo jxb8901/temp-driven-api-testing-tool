@@ -75,6 +75,9 @@ public final class IterationResult {
     public ResultStatus status() { return status; }
     public Duration duration() { return duration; }
     public CaseRuntimeContext context() { return context; }
+    public boolean testdataStopRequested() {
+        return context != null && Boolean.TRUE.equals(context.resolve("CASE.testdataStop"));
+    }
     public List<ValidationResult> validations() { return validations; }
     public Path outputDirectory() { return outputDirectory; }
     public att.validation.Diagnostic diagnostic() { return diagnostic; }

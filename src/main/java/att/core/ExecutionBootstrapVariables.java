@@ -14,13 +14,55 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Resolves pure, typed EXEC.VARS definitions after execution identity is ready and before actions start. */
 public final class ExecutionBootstrapVariables {
     private ExecutionBootstrapVariables() { }
 
+    private static final Pattern INPUT_MAPPING_CONTEXT = Pattern.compile("\\$\\{([^{}]+)}");
+
     /** Execution mode controls which framework roots are initialized before bootstrap evaluation. */
     public enum Scope { DEBUG, LOAD }
+
+    /** Mode-specific Context roots that have been initialized before input mappings are resolved. */
+    public enum InputMappingMode { TESTCASE, DEBUG, LOAD }
+
+    /** Validates every Context reference in an input mapping against its pre-input execution phase. */
+    public static void validateInputMapping(Map<String, Object> mapping, UnifiedTemplateEngine engine,
+                                            Path source, String fieldPrefix, String diagnosticCode,
+                                            InputMappingMode mode, Set<String> availableLoadFields) {
+        if (mapping == null) return;
+        att.testdata.TestdataSyntax.references(mapping);
+        Scope scope = mode == InputMappingMode.LOAD ? Scope.LOAD : Scope.DEBUG;
+        Validation validation = new Validation(null, source, fieldPrefix, diagnosticCode,
+                false, scope, availableLoadFields, mode);
+        validateInputMappingTree(mapping, fieldPrefix == null ? "inputs" : fieldPrefix, engine, validation);
+    }
+
+    private static void validateInputMappingTree(Object value, String field, UnifiedTemplateEngine engine,
+                                                 Validation validation) {
+        if (value instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                if (!(entry.getKey() instanceof String))
+                    throw validation.invalid("Input mapping keys must be strings", field);
+                validateInputMappingTree(entry.getValue(), field + "." + entry.getKey(), engine, validation);
+            }
+        } else if (value instanceof Iterable) {
+            int index = 0;
+            for (Object child : (Iterable<?>) value)
+                validateInputMappingTree(child, field + "[" + index++ + "]", engine, validation);
+        } else if (value instanceof String) {
+            String text = (String) value;
+            Matcher matcher = INPUT_MAPPING_CONTEXT.matcher(text);
+            while (matcher.find()) {
+                String expression = "${" + matcher.group(1) + "}";
+                for (String path : parsePaths(engine, expression, field, validation))
+                    validatePath(path, field, validation, validation.inputMappingMode);
+            }
+        }
+    }
 
     public static Map<String, Object> validate(Map<String, Object> definitions, UnifiedTemplateEngine engine) {
         return validate(definitions, engine, null, null, "vars", DiagnosticCodes.DEBUG_INVALID, Scope.DEBUG);
@@ -173,11 +215,18 @@ public final class ExecutionBootstrapVariables {
                                            Validation validation) {
         try { return engine.parseContextPaths(text); }
         catch (RuntimeException error) {
-            throw validation.invalid("Invalid bootstrap expression: " + error.getMessage(), field);
+            throw validation.invalid((validation.inputMappingMode == null
+                    ? "Invalid bootstrap expression: " : "Invalid input mapping expression: ")
+                    + error.getMessage(), field);
         }
     }
 
     private static void validatePath(String path, String field, Validation validation) {
+        validatePath(path, field, validation, null);
+    }
+
+    private static void validatePath(String path, String field, Validation validation,
+                                     InputMappingMode inputMappingMode) {
         if (path == null || path.trim().isEmpty())
             throw validation.invalid("Bootstrap expression contains an empty Context path", field);
         String requiredPath;
@@ -199,7 +248,8 @@ public final class ExecutionBootstrapVariables {
                 || "ACTIONS".equals(root) || "output".equals(root)
                 || ("CASE".equals(root) && ("ACTIONS".equals(child) || "STAGES".equals(child)))
                 || ("META".equals(root) && isOneOf(child, "TOOL", "DBHELPER", "MQHELPER", "HTTPHELPER")))
-            throw validation.invalid("Context path '" + path + "' is unavailable during execution bootstrap", field);
+            throw validation.invalid("Context path '" + path + "' is unavailable during "
+                    + (inputMappingMode == null ? "execution bootstrap" : "input mapping"), field);
 
         boolean inputPath = false;
         boolean loadPath = false;
@@ -207,19 +257,24 @@ public final class ExecutionBootstrapVariables {
         if ("EXEC".equals(root) && child != null) {
             if ("INPUT".equals(child)) {
                 inputPath = true;
-                allowed = true;
+                allowed = inputMappingMode == null;
             } else if ("VARS".equals(child)) {
-                allowed = segments.size() >= 3 && keyAt(segments, 2) != null;
+                allowed = inputMappingMode == null && segments.size() >= 3 && keyAt(segments, 2) != null;
             } else if ("LOAD".equals(child)) {
-                allowed = validation.scope == Scope.LOAD;
+                allowed = validation.scope == Scope.LOAD
+                        && (inputMappingMode == null || inputMappingMode == InputMappingMode.LOAD);
                 loadPath = allowed;
             } else if (isOneOf(child, "ID", "RUN_ID", "OUTPUT_DIR", "STARTED_AT", "RUN_STARTED_AT")) {
                 allowed = segments.size() == 2;
+                if (inputMappingMode == InputMappingMode.LOAD
+                        && isOneOf(child, "ID", "OUTPUT_DIR")) allowed = false;
             }
         } else if ("META".equals(root) && isOneOf(child, "PROJECT", "SOURCE", "TARGET", "TEMPLATE")) {
-            allowed = true;
+            allowed = inputMappingMode != InputMappingMode.TESTCASE || !"TEMPLATE".equals(child);
         }
-        if (!allowed) throw validation.invalid("Context path '" + path + "' is not an initialized bootstrap root", field);
+        if (!allowed) throw validation.invalid(inputMappingMode == null
+                ? "Context path '" + path + "' is not an initialized bootstrap root"
+                : "Context path '" + path + "' is not initialized before input mapping", field);
         if (inputPath && validation.checkInputReferences) {
             CaseRuntimeContext.InputPathStatus status = CaseRuntimeContext.probeInputPath(validation.inputs, path);
             boolean optional = CaseRuntimeContext.isOptionalReference(path);
@@ -283,9 +338,17 @@ public final class ExecutionBootstrapVariables {
         private final boolean checkInputReferences;
         private final Scope scope;
         private final Set<String> availableLoadFields;
+        private final InputMappingMode inputMappingMode;
 
         private Validation(Map<String, Object> inputs, Path source, String fieldPrefix, String diagnosticCode,
                            boolean checkInputReferences, Scope scope, Set<String> availableLoadFields) {
+            this(inputs, source, fieldPrefix, diagnosticCode, checkInputReferences, scope,
+                    availableLoadFields, null);
+        }
+
+        private Validation(Map<String, Object> inputs, Path source, String fieldPrefix, String diagnosticCode,
+                           boolean checkInputReferences, Scope scope, Set<String> availableLoadFields,
+                           InputMappingMode inputMappingMode) {
             this.inputs = inputs;
             this.source = source;
             this.fieldPrefix = fieldPrefix == null || fieldPrefix.trim().isEmpty() ? "vars" : fieldPrefix;
@@ -293,15 +356,19 @@ public final class ExecutionBootstrapVariables {
             this.checkInputReferences = checkInputReferences;
             this.scope = scope == null ? Scope.DEBUG : scope;
             this.availableLoadFields = availableLoadFields;
+            this.inputMappingMode = inputMappingMode;
         }
 
         private String variableField(String name) { return fieldPrefix + "." + name; }
 
         private DiagnosticException invalid(String message, String field) {
-            DiagnosticException error = new DiagnosticException(diagnosticCode, "Invalid execution bootstrap variables",
+            DiagnosticException error = new DiagnosticException(diagnosticCode,
+                    inputMappingMode == null ? "Invalid execution bootstrap variables" : "Invalid testdata input mapping Context",
                     message + " (" + field + ")", source == null ? null : source.toString(), field,
                     null, null, null, null, null,
-                    "Correct the bootstrap value or reference at the reported field before starting execution.", null);
+                    inputMappingMode == null
+                            ? "Correct the bootstrap value or reference at the reported field before starting execution."
+                            : "Correct the Context reference at the reported input mapping field before starting execution.", null);
             return source == null ? error : YamlSupport.locate(error, source, field);
         }
     }

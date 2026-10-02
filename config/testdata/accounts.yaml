@@ -1,0 +1,12 @@
+schemaVersion: att-testdata/v1.0
+id: accounts
+records:
+  - id: A-100
+    tier: gold
+    balance: 120.50
+  - id: A-200
+    tier: silver
+    balance: 75.00
+selection:
+  strategy: sequential
+  exhaustion: recycle

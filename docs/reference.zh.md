@@ -1,7 +1,7 @@
-# ATT V3.6.2 使用手冊與參考
+# ATT V3.7.0 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 3.6.2
+Version: 3.7.0
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -22,6 +22,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [2.4 Flow](#24-flow)
   - [2.5 Authoring lifecycle](#25-authoring-lifecycle)
   - [Test data ownership](#test-data-ownership)
+  - [Testdata Registry 與 Input Mapping](#testdata-registry-與-input-mapping)
 - [03 Actions 與 Typed Values](#03-actions-與-typed-values)
   - [Action 類型](#action-類型)
   - [區分邏輯值與表示方式](#區分邏輯值與表示方式)
@@ -42,6 +43,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
 - [05 Expressions 與 Built-ins](#05-expressions-與-built-ins)
   - [統一 expression engine](#統一-expression-engine)
   - [Project-file String expression](#project-file-string-expression)
+  - [Testdata Input Mapping 語法](#testdata-input-mapping-語法)
   - [操作符](#操作符)
   - [內建函數](#內建函數)
   - [Expression scope 與錯誤](#expression-scope-與錯誤)
@@ -119,6 +121,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
 - [Appendix A — Schema 與 Version Matrix](#appendix-a-schema-與-version-matrix)
 - [Appendix B — Compatibility 與 Deprecated Aliases](#appendix-b-compatibility-與-deprecated-aliases)
 - [Appendix C — Migration Notes](#appendix-c-migration-notes)
+  - [ATT 3.7.0 Testdata Migration](#att-370-testdata-migration)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
   - [Environment profile migration](#environment-profile-migration)
@@ -153,7 +156,7 @@ Run、Debug、Load 把不同輸入適配到同一 execution-neutral Context 和�
 |---|---|---|
 | Run | workbook Testcase 與 Stage selector | Template、Flow、Tool、DB/MQ/HTTP/SSH |
 | Debug | `att-debug/v1.1` sidecar 或 `--input` | 單一 Template、Flow 或 Tool target |
-| Load | `att-load/v1.4` scenario | 重複執行一個或多個 Template、Flow 或 Tool workload |
+| Load | `att-load/v1.5` scenario | 重複執行一個或多個 Template、Flow 或 Tool workload |
 
 可重用 Template/Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
 
@@ -345,6 +348,39 @@ Flow 是可重用的 Template logic，使用 `att-flow/v3.6`，並由 `flow.yaml
 ### Test data ownership
 
 Workbook/Sidecar/Snapshot 定義 Testcase data；Case 與 Stage 的 business input 進入 `EXEC.INPUT`。[Context](reference.zh/03_runtime_context.md) 定義 scope 與 lifetime；environment selection 由 [Configuration](reference.zh/09_configuration.md) 定義。
+
+### Testdata Registry 與 Input Mapping
+
+可用 `att-testdata/v1.0` descriptor 儲存可重用 records；只在 Case、Stage、Debug `inputs` 或 Load workload `inputs` mapping 中引用。完整 `@{id}` 會保留 record 的原生 map/list/scalar 型別；`@{id.path}` 可讀取巢狀值，也支援數字 list index。內嵌參照（例如 `"ORD-@{accounts.id}"`）會產生文字，因此所選 record 的欄位必須是 scalar。Mapping 中的 `${...}` 只能讀取該 mapping 解析前已初始化的 Context root。允許的 root 依 mapping 階段而異，並會在 execution 開始前驗證（Load 則在 scheduler 啟動前驗證）：
+
+- Run Case/Stage mapping 可讀取 `EXEC.ID`、`EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、`EXEC.OUTPUT_DIR`，以及 `META.PROJECT`、`META.SOURCE` 或 `META.TARGET`。
+- Debug `inputs` 可讀取相同的 execution root 與 metadata，另加 `META.TEMPLATE`。
+- Load workload `inputs` 可讀取 `EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、已初始化的 `EXEC.LOAD` identity fields，以及 `META.PROJECT`、`META.SOURCE`、`META.TARGET` 或 `META.TEMPLATE`。`EXEC.ID` 與 `EXEC.OUTPUT_DIR` 只會在 input 解析後初始化。Arrival-rate workload 不提供 `EXEC.LOAD.USER_ID`；若 mapping 要同時支援兩種模型，請使用 optional path `${EXEC.LOAD.USER_ID?}`。
+
+所有 mode 都拒絕引用 `EXEC.INPUT`（正在建立的值）、`EXEC.VARS`、`EXEC.ACTIONS`、Action `output` 及 invocation-scoped helper metadata。V1 mapping grammar 會評估 literal、selected-record `@{...}` reference 及 `${...}` Context reference；不會評估 built-in call。`#{...}`、`&{...}` 和 `%{...}` 都不是 input-mapping expression。
+
+~~~yaml
+schemaVersion: att-testdata/v1.0
+id: accounts
+records:
+  - {id: "A-100", tier: gold}
+  - {id: "A-200", tier: silver}
+selection: {strategy: sequential, exhaustion: recycle}
+~~~
+
+Generated records 為 virtual 並可按 index 存取；ATT 只物化被選中的 record。Inclusive integer range 上限為 1,000,000 筆，且 `%{seq}` 是唯一支援的 generated-record substitution：
+
+~~~yaml
+schemaVersion: att-testdata/v1.0
+id: generatedAccounts
+records:
+  generate:
+    seq: {from: 100, to: 999999, format: "%06d"}
+  record: {id: "A-%{seq}", amount: 42}
+selection: {strategy: roundRobin, exhaustion: stop}
+~~~
+
+Environment profile 的 `testdata` list 宣告共享 registry。Load scenario 可在頂層宣告本地 `testdata` imports；同 ID 會在該次 Load 完整取代 environment descriptor。單一 layer 內的重複 ID 會報錯。一般 Run/Debug 只延遲啟用實際引用的 ID；`validate --package` 會檢查全部配置 descriptors。Template、Flow 與 Tool 定義只能透過 `EXEC.INPUT` 取得已解析資料，不可直接寫 `@{...}` 或 `%{...}`。詳見[Environment 與 Test Data](reference.zh/09_configuration.md)、[Load](reference.zh/04_execution_modes/load.md) 及維護者的 [testdata design](system-design/testdata.zh.md)。
 
 ## 03 Actions 與 Typed Values
 
@@ -692,6 +728,12 @@ send:
 
 檔案內的 `${...}` 與 `#{...}` 會在 file value 使用時編譯及求值。Run 與 Debug 會 cache compiled plan，並在 file fingerprint 改變時失效；Load 會為 scenario freeze 已驗證的 file identity、content 及 compiled plan。File output 不會再被當作新的 expression source 解析。
 
+### Testdata Input Mapping 語法
+
+Testdata reference 會在準備 Case/Stage、Debug 或 Load input map 時解析，不屬於一般 `${...}` / `#{...}` expression engine。使用 `@{id}` 保留所選 record 的原生型別；`@{id.object.path}` 或 `@{id.items[0]}` 可讀取巢狀值；scalar interpolation 可組合文字。同一 mapping/lifetime 中，一個 logical ID 只選一次，因此該 mapping 內對同 ID 的引用會得到同一筆 record。Interpolation 不接受 null、map 或 list。`${...}` 可讀取已初始化 Context，但不能讀取 `EXEC.INPUT`，因為 input 建構不能依賴自身。Reusable Template、Flow 和 Tool definition 不可直接包含 testdata marker；它們只會使用已解析的 `EXEC.INPUT` 值。
+
+Descriptor 和 generated record 語法見[Testdata Registry 與 Input Mapping](reference.zh/02_test_authoring.md)。
+
 ### 操作符
 
 支持的斷言操作符有：
@@ -842,6 +884,8 @@ Debug input 使用現行 `schemaVersion: att-debug/v1.1`。Top-level 支援 `cas
 | `arguments` / `tools.<localKey>.arguments` | Tool argument contract | standalone Tool Debug 的明確參數 |
 
 只消費 `EXEC.INPUT` 的 Flow 不需要 `vars`。若 Flow 正常由 parent Flow 先發布 `EXEC.VARS.refNo`，可用 scalar 或 typed structure 直接 debug：
+
+Debug `inputs` 與 Run 使用相同 Testdata mapping 語法：以 `--env` 選擇已配置的 environment，再使用完整 `@{id}`／`@{id.path}` reference 或 scalar interpolation。ATT 會先解析再發布到 `EXEC.INPUT`；Reusable Template、Flow 或 Tool definition 內仍不可直接使用 Testdata marker。詳見[Testdata Registry 與 Input Mapping](reference.zh/02_test_authoring.md)。
 
 ```yaml
 schemaVersion: att-debug/v1.1
@@ -1019,18 +1063,23 @@ case:
 
 ### 6.3 Load 模式
 
-ATT 接受 att-load/v1.4 scenario。Scenario 有一個或多個 workload；每個 workload 固定一個 Template、Flow 或 Tool target，並配置自己的 inputs、bootstrap vars 與 pacing。Root defaults 可供多個 workload 共用，workload-local 欄位會覆蓋它們。Scheduler 啟動前會驗證 scenario 與所有 target。
+ATT 接受 att-load/v1.5 scenario。Scenario 有一個或多個 workload；每個 workload 固定一個 Template、Flow 或 Tool target，並配置自己的 inputs、testdata policy、bootstrap vars 與 pacing。Root defaults 可供多個 workload 共用，workload-local 欄位會覆蓋它們。Scheduler 啟動前會驗證 scenario 與所有 target。
 
 不帶 scenario 執行 `./att.sh load`，會發現 `load/` 下有效的完整 Load descriptor。只考慮宣告 `schemaVersion: att-load/*` 的 YAML；其他 YAML 會忽略，無效的已宣告 descriptor 則附 diagnostic 顯示。Discovery 會 resolve 並驗證 target，但不啟動 scheduler 或呼叫 resource。
 
 #### Scenario 結構
 
 ~~~yaml
-schemaVersion: att-load/v1.4
+schemaVersion: att-load/v1.5
+testdata: [examples/testdata/generated-account.yaml]
 workloads:
   - id: payment
     target: {type: template, id: PAYMENT_INVOKE}
-    inputs: {region: HK, amount: 100}
+    inputs: {region: HK, account: "@{generatedAccounts}", accountId: "@{generatedAccounts.id}"}
+    testdata:
+      generatedAccounts:
+        scope: iteration
+        selection: {strategy: sequential, exhaustion: recycle}
     vars:
       baseAmount: "${EXEC.INPUT.amount}"
       total: "#{${EXEC.INPUT.amount} * 2}"
@@ -1063,6 +1112,14 @@ Target 支援 template、flow 或 tool；Tool target 可有 named arguments，�
 | `inputs` | `EXEC.INPUT` | Business input；不作為 bootstrap variables |
 | `vars` | initial `EXEC.VARS` | Template/Flow typed expression tree；每個 execution 獨立評估 |
 | `target.arguments` | Tool arguments | 僅供 Tool call；與 `EXEC.INPUT`、`EXEC.VARS` 分開 |
+
+#### Testdata Imports 與 Workload Scope
+
+Environment profile 提供共享的 `testdata` descriptor list。Scenario 可選擇在頂層宣告 package-relative YAML `testdata` imports，形成僅供該次 Load 使用的 overlay。同 ID 的 Load-local descriptor 會完整取代 environment descriptor，不會合併 records 或 selection 設定。任一 layer 內的重複 ID 都會使 validation 失敗。
+
+使用 `inputs` 將 `@{id}`、`@{id.path}` 或 scalar interpolation 映射到 `EXEC.INPUT`。同一 mapping 內每個 ID 只選一次 record；`scope` 決定何時重新選擇：`workload`、`user` 或 `iteration`。Load 預設為 `iteration`。`user` 只適用 closed-VU workload，在 `arrivalRate` 無效。Workload `testdata` map 只存 policy，不負責匯入 descriptor。其 `selection` 若有設定，會整份取代 descriptor selection policy。Policy 支援 `sequential`、`roundRobin`、有 seed 的 `random`，以及 exhaustion `error`（預設）、`recycle` 或 `stop`。耗盡後 `stop` 會平順停止該 workload。單筆 descriptor 不需要 selection policy。
+
+Selection evidence 只記錄 testdata ID、來源 layer、record index、適用時的 generated sequence、scope、strategy 與 random seed，不包含 record 內容。Run/Debug 只載入 mapping 有引用的 ID；Load 會在 scheduler 啟動前驗證被引用的 ID 及 workload policy。
 
 #### 每次執行的 bootstrap vars
 
@@ -1118,12 +1175,12 @@ Root thresholds 只套用於 aggregate run；workload thresholds 只套用於個
 
 重複的 `--set` 可用 `input.path=value`、僅限 Tool 的 `arg.name=value`，或僅限 Template/Flow 的 `vars.path=value`。值使用 safe YAML 解析並保留型別；實用時支援巢狀 map 與數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效；解析 override 時不會評估 ATT expression。多 workload scenario 會拒絕未限定的 override。
 
-可選的 `load/load.yaml` 使用現行 `att-load/v1.4` policy-only descriptor，不含 target、inputs 或 Tool arguments。它提供預設 `load` policy，並可選擇包含 `execution`、`thresholds`、`evidence` 和 `seed`。明確 CLI pacing 會覆蓋 policy。`load --debug template|flow|tool <id>` 會將 sidecar 的 `inputs`、`vars` 或 Tool `arguments` promotion 成暫時的單一 workload scenario，然後使用正常 Load validation、scheduler 和 evidence pipeline；不會先執行 Debug。沒有 policy 時，請在 CLI 提供完整 policy，例如 `--users 2 --duration 10s`（arrival-rate 還需要 `--max-concurrent` 和 `--overload-policy`）。
+可選的 `load/load.yaml` 使用現行 `att-load/v1.5` policy-only descriptor，不含 target、inputs 或 Tool arguments。它提供預設 `load` policy，並可選擇包含 `execution`、`thresholds`、`evidence`、`seed` 及 Load-local `testdata` imports。明確 CLI pacing 會覆蓋 policy。`load --debug template|flow|tool <id>` 會將 sidecar 的 `inputs`、`vars` 或 Tool `arguments` promotion 成暫時的單一 workload scenario，然後使用正常 Load validation、scheduler 和 evidence pipeline；不會先執行 Debug。沒有 policy 時，請在 CLI 提供完整 policy，例如 `--users 2 --duration 10s`（arrival-rate 還需要 `--max-concurrent` 和 `--overload-policy`）。
 
 Policy descriptor 範例（複製到 `load/load.yaml`）：
 
 ~~~yaml
-schemaVersion: att-load/v1.4
+schemaVersion: att-load/v1.5
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -1145,7 +1202,7 @@ evidence: {mode: failures}
 
 ### Load execution ID initialization
 
-Load 使用 att-load/v1.4。設定 execution.execIdFormat 時，ATT 在每個 iteration initialization 使用一般 ${...} / #{...} engine 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及 output path 發布後評估。
+Load 使用 att-load/v1.5。設定 execution.execIdFormat 時，ATT 在每個 iteration initialization 使用一般 ${...} / #{...} engine 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及 output path 發布後評估。
 
 可用值有 EXEC.RUN_ID、timestamps、EXEC.INPUT、EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE、closed-only EXEC.LOAD.USER_ID，以及已建立的 META.PROJECT/SOURCE/TARGET/TEMPLATE。EXEC.ID 和 EXEC.OUTPUT_DIR 尚未可用，因為生成的 ID 決定 workspace。還沒有 Action 執行，所以 EXEC.ACTIONS 與 Flow/Tool/helper invocation META 缺席。
 
@@ -1677,11 +1734,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-在 `att-config/v2.10` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.10 與 Tool Group v2.9。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
+在 `att-config/v2.11` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.11 與 Tool Group v2.9。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 environment: SIT
 toolGroups: [config/tools/application.yaml]
 environments:
@@ -1825,7 +1882,7 @@ Timeout/Retry precedence 與 eligibility 見 [Reliability](reference.zh/08_relia
 在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 `tools`、environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
 
 ```yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 x-debug-note: "#{missing.tool()}"      # 忽略的配置字段
 tools:
   x-temporary: not-a-tool               # 忽略的 Tool 條目
@@ -1857,9 +1914,9 @@ actions:
 
 ### ATT 多環境 Profile 選擇
 
-`att-config/v2.10` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper descriptor lists。各綁定方式見 resource chapters。
+`att-config/v2.11` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper 與 testdata descriptor lists。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/02_test_authoring.md) 見對應章節。
 
-ATT 使用一份 common `att-config/v2.10` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
+ATT 使用一份 common `att-config/v2.11` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -1878,7 +1935,7 @@ common config 保留現有 templates、testcase root、run/execution/report 設�
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 environment: SIT                 # default；--env 会覆盖
 templates: {root: templates}
 testcase: {root: testcase}
@@ -1890,9 +1947,11 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
+    testdata: [config/testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
+    testdata: [config/testdata/accounts.yaml]
 ```
 
 可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作為 common registry 的遷移來源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。實際 package 不要把共用 registry 縮減成 `tools: {}` 或 `toolGroups: []`。
@@ -1968,7 +2027,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 以下 configuration example 與 field table 和英文版共用相同 contract；欄位名與 literal values 保留英文。
 
 ```yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2000,7 +2059,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.10`; older configuration versions are not active contracts. The example uses the active schema. |
+| `schemaVersion` | required | 現行版本：`att-config/v2.11`；上一版 schema 仍受支援。本例採用現行 schema。 |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -2022,7 +2081,8 @@ environments:
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.2` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
-| `environments` | absent | Non-empty map of profile names; profiles may contain configured resource descriptor lists |
+| `environments` | absent | Non-empty map of profile names; profiles may contain configured resource and testdata descriptor lists |
+| `environments.<profile>.testdata` | `[]` | Unique package-relative YAML paths available to that selected environment |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -2031,6 +2091,7 @@ Allowed global object properties are:
 | Object | Allowed properties |
 |---|---|
 | root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `ssh`, `tools`, `environments`, `x-*` |
+| `environments.<profile>` | `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `testdata`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |
@@ -2195,7 +2256,7 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本章 option matrix�
 
 ### 完整 CLI option matrix
 
-`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.10` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
+`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.11` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
 
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 
@@ -2210,10 +2271,10 @@ Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應
 
 `--set` 可重複使用，namespace 只能是 `input`、`arg` 或 `vars`。值使用 safe YAML 解析並保留型別，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可用 map key 及數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效。解析時不會執行 ATT expression；shell 可能展開的值要加引號。`arg.*` 僅適用 Tool，`vars.*` 僅適用 Template/Flow。多 workload Load scenario 會拒絕未限定的 override。
 
-可選的 `load/load.yaml` 使用現行 policy-only `att-load/v1.4`，不能包含 target 或 business inputs。它可設定 `load`，以及可選的 `execution`、`thresholds`、`evidence` 和 `seed`。`load --debug` 會將 sidecar `inputs` promotion 到 `EXEC.INPUT`、Template/Flow `vars` promotion 到 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，之後使用正常 Load validator、scheduler 和 evidence pipeline；不會先執行 Debug。明確的 CLI pacing 會覆蓋 policy。沒有 policy 時，請在命令列提供完整 policy：
+可選的 `load/load.yaml` 使用現行 policy-only `att-load/v1.5`，不能包含 target 或 business inputs。它可設定 `load`，以及可選的 `execution`、`thresholds`、`evidence` 和 `seed`。`load --debug` 會將 sidecar `inputs` promotion 到 `EXEC.INPUT`、Template/Flow `vars` promotion 到 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，之後使用正常 Load validator、scheduler 和 evidence pipeline；不會先執行 Debug。明確的 CLI pacing 會覆蓋 policy。沒有 policy 時，請在命令列提供完整 policy：
 
 ```yaml
-schemaVersion: att-load/v1.4
+schemaVersion: att-load/v1.5
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -2426,7 +2487,7 @@ ATT 會把缺失路徑視作作者/運行時錯誤，而不是靜默渲染成空
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.6.2",
+  "attVersion": "3.7.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2489,7 +2550,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 
 | Artifact | 現行 schema |
 |---|---|
-| Global configuration | att-config/v2.10 |
+| Global configuration | att-config/v2.11 |
+| Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
 | MQHelper | att-mqhelper/v1.2 |
 | HTTPHelper | att-httphelper/v1.1 |
@@ -2500,7 +2562,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Template | att-template/v3.6 |
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.1 |
-| Load scenario | att-load/v1.4 |
+| Load scenario | att-load/v1.5 |
 | Load summary | att-load-summary/v1.0 |
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |
@@ -2516,6 +2578,12 @@ Compatibility 的目的，是讓既有 package 可讀，而不是維持第二套
 Deterministic legacy alias 在可一對一映射時可以保留並產生 migration warning；若舊語義與 scope isolation 或 common result/evidence contract 衝突，就不建立 alias。Deprecated CLI/authoring form 只有在使用者仍需要 migration path 時才保留在其 owner chapter 或 CHANGELOG。
 
 ## Appendix C — Migration Notes
+
+### ATT 3.7.0 Testdata Migration
+
+將 global configuration 從 `att-config/v2.10` 升至 `att-config/v2.11`，並將 Load scenario 從 `att-load/v1.4` 升至 `att-load/v1.5`。舊 schema 仍登錄於 `schemas/history/`，供 migration diagnostics 使用。`att-testdata/v1.0` 是新增契約：在選定的 environment profile `testdata` list 加入 descriptor path，再於 Case/Stage、Debug 或 Load workload input map 使用 `@{id}`。Load scenario 可在頂層加入 package-relative `testdata` paths，形成僅適用於該次 Load 的 overlay。不同 layer 的同名 ID 會完整取代 descriptor；同一 layer 內的重複 ID 無效。多筆 records 的 descriptor 必須有明確 selection policy。沒有 testdata reference 的既有 package 不需要新增 descriptor。
+
+Load workload `testdata.<id>` 設定控制 `scope`，並可選擇整份覆蓋 descriptor 的 `selection` policy。Scope 預設為 `iteration`；`user` 只適用 closed-VU workload。請明確選擇 `error`、`recycle` 或 `stop` exhaustion。Selection metadata 會記錄，但不包含 record value。
 
 ATT 3.6.2 將型別化 operation result、外部 parsing、project-file String、outbound transport 和人類可讀 evidence 分開。
 
@@ -2556,9 +2624,9 @@ send:
   call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
 ~~~
 
-Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader 遷移，再把 schemaVersion 升至 att-load/v1.4。Root defaults 可供多個 workload 共用；每個 workload 的 `inputs`、`vars`、load policy 及 execution 設定會覆蓋相應 root 值。Top-level thresholds 只屬於 aggregate；workload thresholds 必須在各 workload 宣告，不會從 root 繼承。`inputs` 仍對應 EXEC.INPUT；`vars` 在每個 execution 的 EXEC.ID 與 EXEC.OUTPUT_DIR 初始化後、target 啟動前評估。完整 reference 保留 native type，dependency 不受宣告順序影響；循環及 external/stateful calls 會在執行前拒絕。頂層 execution.execIdFormat 仍在 initialization 使用一般 expression engine 求值一次；closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。
+Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader 遷移，再把 schemaVersion 升至 att-load/v1.5。Root defaults 可供多個 workload 共用；每個 workload 的 `inputs`、`vars`、load policy 及 execution 設定會覆蓋相應 root 值。Top-level thresholds 只屬於 aggregate；workload thresholds 必須在各 workload 宣告，不會從 root 繼承。`inputs` 仍對應 EXEC.INPUT；`vars` 在每個 execution 的 EXEC.ID 與 EXEC.OUTPUT_DIR 初始化後、target 啟動前評估。完整 reference 保留 native type，dependency 不受宣告順序影響；循環及 external/stateful calls 會在執行前拒絕。頂層 execution.execIdFormat 仍在 initialization 使用一般 expression engine 求值一次；closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。
 
-歷史的 `att-load-profile/v1.0` policy file 僅供 migration 使用：使用前請改寫為現行 policy-only `att-load/v1.4` descriptor；它不是現行 `load/load.yaml` 範例。
+歷史的 `att-load-profile/v1.0` policy file 僅供 migration 使用：使用前請改寫為現行 policy-only `att-load/v1.5` descriptor；它不是現行 `load/load.yaml` 範例。
 
 Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[Action 與型別化值](reference.zh/14_actions.md)、[Runtime 與 Context 模型](reference.zh/03_runtime_context.md)、[Load 模式](reference.zh/04_execution_modes/load.md)與[Schema 矩陣](reference.zh/appendices/schema_matrix.md)。
 

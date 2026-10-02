@@ -1,15 +1,17 @@
 """Regression tests for the documentation gate, independent of checked-in text."""
 import unittest
+from pathlib import Path
 from documentation_contracts import (active_schemas, stale_claims, current_html,
                                      manifest_errors, structure_errors, overview_resource_errors,
                                      chapter_label_errors)
 
-VERSION = "3.6.1"
+VERSION = "3.7.0"
 CATALOG = """schemaVersion: att-schema-catalog/v3.0
 schemas:
-  att-load/v1.3: att-load-v1.3.schema.json
-  att-load/v1.2: history/att-load-v1.2.schema.json
-  globalConfig: att-config-v2.10.schema.json
+  att-load/v1.5: att-load-v1.5.schema.json
+  att-load/v1.4: history/att-load-v1.4.schema.json
+  globalConfig: att-config-v2.11.schema.json
+  att-testdata/v1.0: att-testdata-v1.0.schema.json
 """
 
 
@@ -18,17 +20,78 @@ class DocumentationContractsTest(unittest.TestCase):
         self.active = active_schemas(CATALOG)
 
     def test_catalog_history_does_not_override_active_version(self):
-        self.assertEqual({"att-load": "1.3", "att-config": "2.10"}, self.active)
+        self.assertEqual({"att-load": "1.5", "att-config": "2.11", "att-testdata": "1.0"}, self.active)
 
     def test_stale_schemas_in_normal_text_examples_and_filenames_fail(self):
         for text in ("schemaVersion: att-load/v1.2", "Load v1.2",
-                     "schemas/att-config-v2.9.schema.json", "ATT 3.6.0"):
+                     "schemas/att-config-v2.9.schema.json", "ATT 3.6.2"):
             with self.subTest(text=text):
                 self.assertTrue(stale_claims(text, self.active, VERSION))
 
     def test_current_schemas_pass(self):
-        self.assertEqual([], stale_claims("ATT 3.6.1; att-load/v1.3; config v2.10",
+        self.assertEqual([], stale_claims("ATT 3.7.0; att-load/v1.5; config v2.11; att-testdata/v1.0",
                                           self.active, VERSION))
+
+    def test_testdata_mapping_example_is_bootstrap_safe_and_uses_selected_record_paths(self):
+        root = Path(__file__).resolve().parents[1]
+        paths = (
+            root / "docs/reference/02_test_authoring.md",
+            root / "docs/reference.zh/02_test_authoring.md",
+            root / "docs/reference.html",
+            root / "docs/reference.zh.html",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("ORD-${EXEC.INPUT.region}", text)
+                self.assertNotIn("@{accounts[0].id}", text)
+                self.assertIn("@{accounts.id}", text)
+
+    def test_input_mapping_pre_input_context_contract_is_published(self):
+        root = Path(__file__).resolve().parents[1]
+        english = (
+            root / "docs/reference/02_test_authoring.md",
+            root / "docs/reference.md",
+        )
+        chinese = (
+            root / "docs/reference.zh/02_test_authoring.md",
+            root / "docs/reference.zh.md",
+        )
+        for path in english:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("before the scheduler starts for Load", text)
+                self.assertIn("Load workload `inputs`", text)
+                self.assertIn("`EXEC.ID` and `EXEC.OUTPUT_DIR` are initialized only after input resolution", text)
+                self.assertIn("`EXEC.VARS`, `EXEC.ACTIONS`", text)
+        for path in chinese:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("Load 則在 scheduler 啟動前驗證", text)
+                self.assertIn("Load workload `inputs`", text)
+                self.assertIn("`EXEC.ID` 與 `EXEC.OUTPUT_DIR` 只會在 input 解析後初始化", text)
+                self.assertIn("`EXEC.VARS`、`EXEC.ACTIONS`", text)
+
+    def test_input_mapping_contract_does_not_claim_builtin_calls(self):
+        root = Path(__file__).resolve().parents[1]
+        paths = (
+            root / "docs/reference/02_test_authoring.md",
+            root / "docs/reference.zh/02_test_authoring.md",
+            root / "docs/reference.md",
+            root / "docs/reference.zh.md",
+            root / "docs/reference.html",
+            root / "docs/reference.zh.html",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("bootstrap-safe built-ins", text)
+                self.assertNotIn("Calls are limited to pure bootstrap-safe", text)
+                self.assertNotIn("Calls 只允許 pure bootstrap-safe", text)
+        for path in (root / "docs/reference/02_test_authoring.md", root / "docs/reference.md"):
+            self.assertIn("built-in calls are not evaluated", path.read_text(encoding="utf-8"))
+        for path in (root / "docs/reference.zh/02_test_authoring.md", root / "docs/reference.zh.md"):
+            self.assertIn("不會評估 built-in call", path.read_text(encoding="utf-8"))
 
     def test_explicit_historical_block_is_scoped_and_balanced(self):
         text = ("<!-- att-docs:historical -->\natt-load/v1.2\n"
@@ -52,7 +115,7 @@ class DocumentationContractsTest(unittest.TestCase):
         # Compact HTML reproduces both stripping and boundary-loss failures.
         text = ("<h2>05 Expressions</h2>"
                 "<!-- att-docs:historical --><p>att-load/v1.2; ATT 3.6.0</p>"
-                "<!-- /att-docs:historical --><p>att-load/v1.3</p>")
+                "<!-- /att-docs:historical --><p>att-load/v1.5</p>")
         self.assertEqual([], stale_claims(current_html(text), self.active, VERSION))
         # Identical stale text following the closing marker remains an error.
         outside = text + "<p>att-load/v1.2</p>"

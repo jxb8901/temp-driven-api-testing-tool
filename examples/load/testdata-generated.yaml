@@ -1,0 +1,17 @@
+schemaVersion: att-load/v1.5
+testdata:
+  - examples/testdata/generated-account.yaml
+workloads:
+  - id: generatedQuickStart
+    target: {type: template, id: QUICK_START}
+    inputs:
+      accountId: "@{generatedAccounts.id}"
+      amount: "@{generatedAccounts.amount}"
+      expected: "@{generatedAccounts.amount}"
+      useTool: false
+    testdata:
+      generatedAccounts:
+        scope: iteration
+        selection: {strategy: sequential, exhaustion: stop}
+    load: {users: 1, duration: 10s}
+    execution: {thinkTime: 25ms}

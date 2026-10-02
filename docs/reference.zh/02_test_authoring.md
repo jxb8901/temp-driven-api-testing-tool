@@ -155,3 +155,36 @@ Flow 是可重用的 Template logic，使用 `att-flow/v3.6`，並由 `flow.yaml
 ### Test data ownership
 
 Workbook/Sidecar/Snapshot 定義 Testcase data；Case 與 Stage 的 business input 進入 `EXEC.INPUT`。[Context](03_runtime_context.md) 定義 scope 與 lifetime；environment selection 由 [Configuration](09_configuration.md) 定義。
+
+### Testdata Registry 與 Input Mapping
+
+可用 `att-testdata/v1.0` descriptor 儲存可重用 records；只在 Case、Stage、Debug `inputs` 或 Load workload `inputs` mapping 中引用。完整 `@{id}` 會保留 record 的原生 map/list/scalar 型別；`@{id.path}` 可讀取巢狀值，也支援數字 list index。內嵌參照（例如 `"ORD-@{accounts.id}"`）會產生文字，因此所選 record 的欄位必須是 scalar。Mapping 中的 `${...}` 只能讀取該 mapping 解析前已初始化的 Context root。允許的 root 依 mapping 階段而異，並會在 execution 開始前驗證（Load 則在 scheduler 啟動前驗證）：
+
+- Run Case/Stage mapping 可讀取 `EXEC.ID`、`EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、`EXEC.OUTPUT_DIR`，以及 `META.PROJECT`、`META.SOURCE` 或 `META.TARGET`。
+- Debug `inputs` 可讀取相同的 execution root 與 metadata，另加 `META.TEMPLATE`。
+- Load workload `inputs` 可讀取 `EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、已初始化的 `EXEC.LOAD` identity fields，以及 `META.PROJECT`、`META.SOURCE`、`META.TARGET` 或 `META.TEMPLATE`。`EXEC.ID` 與 `EXEC.OUTPUT_DIR` 只會在 input 解析後初始化。Arrival-rate workload 不提供 `EXEC.LOAD.USER_ID`；若 mapping 要同時支援兩種模型，請使用 optional path `${EXEC.LOAD.USER_ID?}`。
+
+所有 mode 都拒絕引用 `EXEC.INPUT`（正在建立的值）、`EXEC.VARS`、`EXEC.ACTIONS`、Action `output` 及 invocation-scoped helper metadata。V1 mapping grammar 會評估 literal、selected-record `@{...}` reference 及 `${...}` Context reference；不會評估 built-in call。`#{...}`、`&{...}` 和 `%{...}` 都不是 input-mapping expression。
+
+~~~yaml
+schemaVersion: att-testdata/v1.0
+id: accounts
+records:
+  - {id: "A-100", tier: gold}
+  - {id: "A-200", tier: silver}
+selection: {strategy: sequential, exhaustion: recycle}
+~~~
+
+Generated records 為 virtual 並可按 index 存取；ATT 只物化被選中的 record。Inclusive integer range 上限為 1,000,000 筆，且 `%{seq}` 是唯一支援的 generated-record substitution：
+
+~~~yaml
+schemaVersion: att-testdata/v1.0
+id: generatedAccounts
+records:
+  generate:
+    seq: {from: 100, to: 999999, format: "%06d"}
+  record: {id: "A-%{seq}", amount: 42}
+selection: {strategy: roundRobin, exhaustion: stop}
+~~~
+
+Environment profile 的 `testdata` list 宣告共享 registry。Load scenario 可在頂層宣告本地 `testdata` imports；同 ID 會在該次 Load 完整取代 environment descriptor。單一 layer 內的重複 ID 會報錯。一般 Run/Debug 只延遲啟用實際引用的 ID；`validate --package` 會檢查全部配置 descriptors。Template、Flow 與 Tool 定義只能透過 `EXEC.INPUT` 取得已解析資料，不可直接寫 `@{...}` 或 `%{...}`。詳見[Environment 與 Test Data](09_configuration.md)、[Load](04_execution_modes/load.md) 及維護者的 [testdata design](../system-design/testdata.zh.md)。

@@ -188,8 +188,8 @@ public final class FlowRegistry {
             att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                     flowVersion, Version.FLOW_SCHEMA);
             throw new IllegalArgumentException("Unsupported Flow schemaVersion '" + flowVersion
-                    + "'; ATT 3.6.2 supports only " + Version.FLOW_SCHEMA
-                    + ". Migrate nested Actions to the 3.6.2 typed-result contract and see docs/reference/appendices/migrations.md.");
+                    + "'; ATT 3.7.0 supports only " + Version.FLOW_SCHEMA
+                    + ". Migrate nested Actions to the current typed-result contract and see docs/reference/appendices/migrations.md.");
         }
         Path schema = att.validation.SchemaFiles.resolve(projectRoot,
                 current ? "att-flow-v3.6.schema.json" : historicalV35 ? "att-flow-v3.5.schema.json" : "att-flow-v3.4.schema.json");
@@ -271,6 +271,7 @@ public final class FlowRegistry {
             if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
             String key = String.valueOf(entry.getKey());
             if (key.trim().isEmpty() || key.contains(".") || !(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Invalid Flow action: " + id + "." + key);
+            att.testdata.TestdataSyntax.rejectDirectReferences(entry.getValue(), "Flow action " + id + "." + key);
             TemplateAction action = new TemplateAction(key, objectMap((Map<?, ?>) entry.getValue()), templateSchema);
             validateActionShape(action, id, historical);
             result.add(action);

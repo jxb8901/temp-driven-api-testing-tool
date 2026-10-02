@@ -23,7 +23,7 @@ Timeout/Retry precedence 與 eligibility 見 [Reliability](08_reliability_execut
 在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 `tools`、environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
 
 ```yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 x-debug-note: "#{missing.tool()}"      # 忽略的配置字段
 tools:
   x-temporary: not-a-tool               # 忽略的 Tool 條目
@@ -55,9 +55,9 @@ actions:
 
 ### ATT 多環境 Profile 選擇
 
-`att-config/v2.10` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper descriptor lists。各綁定方式見 resource chapters。
+`att-config/v2.11` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper 與 testdata descriptor lists。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](02_test_authoring.md) 見對應章節。
 
-ATT 使用一份 common `att-config/v2.10` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
+ATT 使用一份 common `att-config/v2.11` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -76,7 +76,7 @@ common config 保留現有 templates、testcase root、run/execution/report 設�
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 environment: SIT                 # default；--env 会覆盖
 templates: {root: templates}
 testcase: {root: testcase}
@@ -88,9 +88,11 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
+    testdata: [config/testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
+    testdata: [config/testdata/accounts.yaml]
 ```
 
 可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作為 common registry 的遷移來源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。實際 package 不要把共用 registry 縮減成 `tools: {}` 或 `toolGroups: []`。
@@ -166,7 +168,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 以下 configuration example 與 field table 和英文版共用相同 contract；欄位名與 literal values 保留英文。
 
 ```yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -198,7 +200,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.10`; older configuration versions are not active contracts. The example uses the active schema. |
+| `schemaVersion` | required | 現行版本：`att-config/v2.11`；上一版 schema 仍受支援。本例採用現行 schema。 |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -220,7 +222,8 @@ environments:
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.2` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
-| `environments` | absent | Non-empty map of profile names; profiles may contain configured resource descriptor lists |
+| `environments` | absent | Non-empty map of profile names; profiles may contain configured resource and testdata descriptor lists |
+| `environments.<profile>.testdata` | `[]` | Unique package-relative YAML paths available to that selected environment |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -229,6 +232,7 @@ Allowed global object properties are:
 | Object | Allowed properties |
 |---|---|
 | root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `ssh`, `tools`, `environments`, `x-*` |
+| `environments.<profile>` | `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `testdata`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |

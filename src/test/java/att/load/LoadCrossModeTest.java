@@ -24,6 +24,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -170,6 +171,84 @@ class LoadCrossModeTest {
         IterationResult load = new IterationExecutor(project, config, target).execute(
                 IterationRequest.closed("cross-mode", "cross-mode-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
         assertPortableResult(load.context(), load.validations());
+    }
+
+    @Test void testdataInputsFeedLoadBootstrapVarsAndExecutionIdFormat() throws Exception {
+        Path project = fixture();
+        write(project, "templates/BOOTSTRAP/template.yaml", "schemaVersion: att-template/v3.6\n"
+                + "name: BOOTSTRAP\ndescription: testdata bootstrap input\nactions:\n"
+                + "  show: {type: log, message: 'copied=${EXEC.VARS.copied}|input=${EXEC.INPUT.accountId}'}\n");
+        write(project, "data/accounts.yaml", "schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: 42}]\n");
+        Path source = write(project, "load/testdata-bootstrap.yaml", "schemaVersion: att-load/v1.5\n"
+                + "testdata: [data/accounts.yaml]\nworkloads:\n  - id: bootstrap\n"
+                + "    target: {type: template, id: BOOTSTRAP}\n"
+                + "    inputs: {accountId: '@{accounts.id}'}\n"
+                + "    vars: {copied: '${EXEC.INPUT.accountId}'}\n"
+                + "    load: {users: 1, duration: 1s}\n"
+                + "execution: {execIdFormat: '${EXEC.RUN_ID}-${EXEC.INPUT.accountId}'}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(source);
+        LoadTarget target = new LoadTargetResolver(project, config()).resolve(scenario);
+        new LoadTargetValidator(project, config()).validate(scenario, target);
+        LoadWorkload workload = scenario.workload();
+        att.testdata.TestdataInputResolver testdata = new att.testdata.TestdataInputResolver(
+                new att.testdata.TestdataRegistry(project, Collections.<Path>emptyList(), scenario.testdataDescriptors()),
+                workload.testdata(), workload.id(), workload.model().wireName(), scenario.seed(), workload.users());
+
+        try (LoadRunResources resources = new LoadRunResources(project, config())) {
+            IterationExecutor executor = new IterationExecutor(project, config(), target, resources,
+                    temp.resolve("testdata-bootstrap-load"), testdata);
+            IterationResult result = executor.execute(IterationRequest.closed("testdata-bootstrap", "testdata-bootstrap-1", 1,
+                    "STEADY", Instant.now(), "VU-1", scenario.inputs()).withWorkloadId(workload.id()));
+
+            assertEquals(ResultStatus.PASS, result.status());
+            assertEquals(42L, ((Number) result.context().require("EXEC.INPUT.accountId")).longValue());
+            assertEquals(42L, ((Number) result.context().require("EXEC.VARS.copied")).longValue());
+            assertEquals("testdata-bootstrap-42", result.context().require("EXEC.ID"));
+            assertTrue(String.valueOf(result.context().resolve("EXEC.ACTIONS.show.output.result"))
+                    .contains("copied=42|input=42"));
+        }
+    }
+
+    @Test void loadInputMappingRejectsUnavailablePreIdentityContextBeforeScheduling() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        for (String reference : Arrays.asList("${EXEC.ID}", "${EXEC.ACTIONS.previous.output.result}")) {
+            Path source = write(project, "load/input-mapping-phase-" + Math.abs(reference.hashCode()) + ".yaml",
+                    "schemaVersion: att-load/v1.5\nworkloads:\n  - id: phase\n"
+                            + "    target: {type: template, id: SHARED}\n"
+                            + "    inputs: {value: '" + reference + "'}\n"
+                            + "    load: {users: 1, duration: 1s}\n");
+            LoadScenario scenario = new LoadScenarioLoader(project).load(source);
+            LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+            att.validation.DiagnosticException invalid = assertThrows(att.validation.DiagnosticException.class,
+                    () -> new LoadTargetValidator(project, config).validate(scenario, target), reference);
+            assertEquals("workloads[0].inputs.value", invalid.field());
+            assertTrue(invalid.detail().contains("input mapping"), invalid.format());
+        }
+
+        Path validSource = write(project, "load/input-mapping-phase-valid.yaml",
+                "schemaVersion: att-load/v1.5\nworkloads:\n  - id: phase\n"
+                        + "    target: {type: template, id: SHARED}\n"
+                        + "    inputs: {value: ready, run: '${EXEC.RUN_ID}', user: '${EXEC.LOAD.USER_ID}'}\n"
+                        + "    load: {users: 1, duration: 1s}\n");
+        LoadScenario validScenario = new LoadScenarioLoader(project).load(validSource);
+        LoadTarget validTarget = new LoadTargetResolver(project, config).resolve(validScenario);
+        new LoadTargetValidator(project, config).validate(validScenario, validTarget);
+
+        LoadWorkload workload = validScenario.workload();
+        att.testdata.TestdataInputResolver testdata = new att.testdata.TestdataInputResolver(
+                new att.testdata.TestdataRegistry(project, config.testdataDescriptors(),
+                        validScenario.testdataDescriptors()), workload.testdata(), workload.id(),
+                workload.model().wireName(), validScenario.seed(), workload.users());
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationResult result = new IterationExecutor(project, config, validTarget, resources,
+                    temp.resolve("input-mapping-phase-load"), testdata).execute(
+                    IterationRequest.closed("phase-run", "phase-run-VU-1-1", 1, "STEADY",
+                            Instant.now(), "VU-1", validScenario.inputs()).withWorkloadId(workload.id()));
+            assertEquals(ResultStatus.PASS, result.status());
+            assertEquals("phase-run", result.context().resolve("EXEC.INPUT.run"));
+            assertEquals("VU-1", result.context().resolve("EXEC.INPUT.user"));
+        }
     }
 
     @Test void loadDebugPromotionEvaluatesOverridesPerExecutionWithoutSharingValues() throws Exception {

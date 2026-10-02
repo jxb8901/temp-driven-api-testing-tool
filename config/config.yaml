@@ -1,4 +1,4 @@
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -123,12 +123,14 @@ tools:
         description: Full V2 Case ID
         required: true
 
-# ATT 3.6.2 profile example. Common settings and logical helper IDs stay stable;
+# ATT 3.7.0 profile example. Common settings and logical helper IDs stay stable;
 # each profile replaces only the resource descriptor lists it declares.
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
+    testdata: [config/testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
+    testdata: [config/testdata/accounts.yaml]

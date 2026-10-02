@@ -1,7 +1,7 @@
-# ATT V3.6.2 Reference Manual
+# ATT V3.7.0 Reference Manual
 
 Author: Jeffrey + ChatGPT
-Version: 3.6.2
+Version: 3.7.0
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -22,6 +22,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [2.4 Flow](#24-flow)
   - [2.5 Authoring lifecycle](#25-authoring-lifecycle)
   - [Test data ownership](#test-data-ownership)
+  - [Testdata registry and input mapping](#testdata-registry-and-input-mapping)
 - [03 Actions and Typed Values](#03-actions-and-typed-values)
   - [Action types](#action-types)
   - [Separate logical values from representations](#separate-logical-values-from-representations)
@@ -42,6 +43,7 @@ Status: Normative end-user documentation; generated from modular sources
 - [05 Expressions and Built-ins](#05-expressions-and-built-ins)
   - [Unified expression engine](#unified-expression-engine)
   - [Project-file String expressions](#project-file-string-expressions)
+  - [Testdata input mapping syntax](#testdata-input-mapping-syntax)
   - [Operators](#operators)
   - [Built-in functions](#built-in-functions)
   - [Expression scope and errors](#expression-scope-and-errors)
@@ -119,6 +121,7 @@ Status: Normative end-user documentation; generated from modular sources
 - [Appendix A — Schema and Version Matrix](#appendix-a-schema-and-version-matrix)
 - [Appendix B — Compatibility and Deprecated Aliases](#appendix-b-compatibility-and-deprecated-aliases)
 - [Appendix C — Migration Notes](#appendix-c-migration-notes)
+  - [ATT 3.7.0 testdata migration](#att-370-testdata-migration)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
   - [Global configuration migration](#global-configuration-migration)
@@ -154,7 +157,7 @@ Run, Debug and Load adapt different inputs into the same execution-neutral Conte
 |---|---|---|
 | Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ/HTTP/SSH |
 | Debug | `att-debug/v1.1` sidecar or `--input` | one Template, Flow or Tool target |
-| Load | `att-load/v1.4` scenario | one or more Template, Flow or Tool workloads repeatedly |
+| Load | `att-load/v1.5` scenario | one or more Template, Flow or Tool workloads repeatedly |
 
 Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
 
@@ -346,6 +349,39 @@ After changing a Workbook, generate its Snapshot, review and commit the diff. Af
 ### Test data ownership
 
 Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage business inputs enter `EXEC.INPUT`; [Context](reference/03_runtime_context.md) defines their scope and lifetime. Environment selection belongs to [Configuration](reference/09_configuration.md).
+
+### Testdata registry and input mapping
+
+Use `att-testdata/v1.0` descriptors for reusable records, then reference them only from a Case, Stage, Debug `inputs`, or Load workload `inputs` mapping. An exact `@{id}` reference keeps the record's native map/list/scalar type; `@{id.path}` selects a nested value, including a numeric list index. Interpolated references such as `"ORD-@{accounts.id}"` produce text and therefore require a scalar value from the selected record. `${...}` in a mapping reads Context roots initialized before that mapping is resolved. The allowed roots depend on the mapping phase, and validation checks them before execution starts (before the scheduler starts for Load):
+
+- Run Case/Stage mappings may read `EXEC.ID`, `EXEC.RUN_ID`, `EXEC.STARTED_AT`, `EXEC.RUN_STARTED_AT`, `EXEC.OUTPUT_DIR`, and `META.PROJECT`, `META.SOURCE`, or `META.TARGET`.
+- Debug `inputs` may read the same execution roots and metadata, plus `META.TEMPLATE`.
+- Load workload `inputs` may read `EXEC.RUN_ID`, `EXEC.STARTED_AT`, `EXEC.RUN_STARTED_AT`, initialized `EXEC.LOAD` identity fields, and `META.PROJECT`, `META.SOURCE`, `META.TARGET`, or `META.TEMPLATE`. `EXEC.ID` and `EXEC.OUTPUT_DIR` are initialized only after input resolution. `EXEC.LOAD.USER_ID` is absent for arrival-rate workloads; use the optional path form `${EXEC.LOAD.USER_ID?}` when one mapping must support both models.
+
+Every mode rejects references to `EXEC.INPUT` (the value being built), `EXEC.VARS`, `EXEC.ACTIONS`, Action `output`, and invocation-scoped helper metadata. The V1 mapping grammar evaluates literals, selected-record `@{...}` references, and `${...}` Context references; built-in calls are not evaluated. `#{...}`, `&{...}`, and `%{...}` are not input-mapping expressions.
+
+~~~yaml
+schemaVersion: att-testdata/v1.0
+id: accounts
+records:
+  - {id: "A-100", tier: gold}
+  - {id: "A-200", tier: silver}
+selection: {strategy: sequential, exhaustion: recycle}
+~~~
+
+Generated records are virtual and indexed; ATT materializes only the selected record. The inclusive integer range is capped at 1,000,000 records, and `%{seq}` is the only supported generated-record substitution:
+
+~~~yaml
+schemaVersion: att-testdata/v1.0
+id: generatedAccounts
+records:
+  generate:
+    seq: {from: 100, to: 999999, format: "%06d"}
+  record: {id: "A-%{seq}", amount: 42}
+selection: {strategy: roundRobin, exhaustion: stop}
+~~~
+
+An environment profile's `testdata` list declares the shared registry. A Load scenario may declare its own top-level `testdata` imports; matching IDs replace the whole environment descriptor for that Load only. Duplicate IDs within one layer fail. Ordinary Run/Debug activate referenced IDs lazily, while `validate --package` checks every configured descriptor. Templates, Flows, and Tool definitions receive resolved values through `EXEC.INPUT`; they cannot contain direct `@{...}` or `%{...}` references. See [Environment and Test Data](reference/09_configuration.md), [Load](reference/04_execution_modes/load.md), and the maintainer [testdata design](system-design/testdata.md).
 
 ## 03 Actions and Typed Values
 
@@ -692,6 +728,12 @@ send:
 
 `${...}` and `#{...}` inside the file are compiled and evaluated when the file value is used. Run and Debug cache the compiled plan and invalidate it when the file fingerprint changes; Load freezes the validated file identity, content and compiled plan for the scenario. File output is not reparsed as a new expression source.
 
+### Testdata input mapping syntax
+
+Testdata references are resolved while Case/Stage, Debug, or Load input maps are prepared; they are not part of the general `${...}` / `#{...}` expression engine. Use `@{id}` to preserve a selected record's native type, `@{id.object.path}` or `@{id.items[0]}` to select a value, and scalar interpolation to compose text. One logical ID selects one record per mapping/lifetime, so every reference to that ID in the same mapping sees the same record. Mapping interpolation rejects nulls, maps and lists. `${...}` can read initialized Context values except `EXEC.INPUT`; input construction cannot depend on itself. Direct testdata markers are rejected in reusable Template, Flow, and Tool definitions so those components consume resolved `EXEC.INPUT` values only.
+
+See [Testdata Registry and Input Mapping](reference/02_test_authoring.md) for descriptor and generation syntax.
+
 ### Operators
 
 Supported assertion operators are `==`, `!=`, `>`, `>=`, `<`, `<=`, `like`, `is null`, `is not null`, `not`, `and`, and `or`. Use parentheses when mixing logical operators so intent is explicit.
@@ -862,6 +904,8 @@ The three input contracts are intentionally separate:
 
 A Flow that only consumes `EXEC.INPUT` needs no `vars`. A Flow that normally runs after a parent Flow publishes `EXEC.VARS.refNo` can be debugged directly with a scalar or typed structure:
 
+Debug `inputs` use the same Testdata mapping syntax as Run: select a configured environment with `--env`, then use exact `@{id}` / `@{id.path}` references or scalar interpolation. ATT resolves these before publishing `EXEC.INPUT`; direct Testdata markers remain invalid inside the reusable Template, Flow or Tool definition. See [Testdata Registry and Input Mapping](reference/02_test_authoring.md).
+
 ```yaml
 schemaVersion: att-debug/v1.1
 inputs:
@@ -1012,18 +1056,23 @@ For `validate --format json`, stdout contains exactly one JSON document; progres
 
 ### 6.3 Load Mode
 
-ATT accepts att-load/v1.4 scenarios. A scenario has one or more workloads; each workload owns a fixed Template, Flow or Tool target, its inputs, bootstrap vars and pacing policy. Root defaults may be shared by all workloads, while workload-local fields override them. ATT validates the scenario and all targets before a scheduler starts.
+ATT accepts att-load/v1.5 scenarios. A scenario has one or more workloads; each workload owns a fixed Template, Flow or Tool target, its inputs, testdata policy, bootstrap vars and pacing policy. Root defaults may be shared by all workloads, while workload-local fields override them. ATT validates the scenario and all targets before a scheduler starts.
 
 Run `./att.sh load` with no scenario to discover valid full Load descriptors under `load/`. Only YAML declaring `schemaVersion: att-load/*` is considered; unrelated YAML is ignored, while invalid declared descriptors are shown with their diagnostics. Discovery resolves and validates targets without starting a scheduler or making resource calls.
 
 #### Scenario shape
 
 ~~~yaml
-schemaVersion: att-load/v1.4
+schemaVersion: att-load/v1.5
+testdata: [examples/testdata/generated-account.yaml]
 workloads:
   - id: payment
     target: {type: template, id: PAYMENT_INVOKE}
-    inputs: {region: HK, amount: 100}
+    inputs: {region: HK, account: "@{generatedAccounts}", accountId: "@{generatedAccounts.id}"}
+    testdata:
+      generatedAccounts:
+        scope: iteration
+        selection: {strategy: sequential, exhaustion: recycle}
     vars:
       baseAmount: "${EXEC.INPUT.amount}"
       total: "#{${EXEC.INPUT.amount} * 2}"
@@ -1056,6 +1105,14 @@ A target accepts template, flow or tool; Tool targets may provide named argument
 | `inputs` | `EXEC.INPUT` | Business input values; not bootstrap variables |
 | `vars` | initial `EXEC.VARS` | Typed expression tree for Template/Flow; independently evaluated per execution |
 | `target.arguments` | Tool arguments | Tool-only call arguments; separate from `EXEC.INPUT` and `EXEC.VARS` |
+
+#### Testdata imports and workload scopes
+
+The environment profile contributes the shared `testdata` descriptor list. A scenario's optional top-level `testdata` list imports package-relative YAML files as a Load-only overlay. A matching local ID replaces the whole environment descriptor for that scenario; records and selection settings are not merged. Duplicate IDs within either layer fail validation.
+
+Use `inputs` to map `@{id}`, `@{id.path}`, or scalar interpolation into `EXEC.INPUT`. Each ID is selected once for a mapping, and the configured `scope` controls how long that choice is reused: `workload`, `user`, or `iteration`. If omitted, Load uses `iteration`. `user` requires a closed-VU workload and is invalid for `arrivalRate`. The workload `testdata` map is policy only; it does not import descriptors. Its optional `selection` object replaces the descriptor's entire selection policy. Policies support `sequential`, `roundRobin`, or seeded `random`, with exhaustion behavior `error` (default), `recycle`, or `stop`. `stop` ends that workload cleanly after its records are consumed. A one-record descriptor needs no selection policy.
+
+Selection evidence records only the testdata ID, source layer, record index, generated sequence where applicable, scope, strategy, and random seed. It never includes the record contents. Run and Debug load only IDs used in mappings; Load validates referenced IDs and explicit workload policies before starting the scheduler.
 
 #### Per-execution bootstrap vars
 
@@ -1111,12 +1168,12 @@ For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, 
 
 Repeatable `--set` accepts `input.path=value`, Tool-only `arg.name=value`, or Template/Flow-only `vars.path=value`. Values use safe YAML parsing and remain typed; nested maps and numeric list indexes are supported where practical, for example `input.customer.ids[0]=42`. Duplicate assignments apply in order (last wins). ATT expressions are not evaluated during option parsing. Unqualified overrides are rejected for multi-workload scenarios.
 
-`load/load.yaml` is an optional current `att-load/v1.4` policy-only descriptor with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence` and `seed`. Explicit CLI pacing values override the policy. `load --debug template|flow|tool <id>` promotes the selected sidecar's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no policy, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
+`load/load.yaml` is an optional current `att-load/v1.5` policy-only descriptor with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence`, `seed` and Load-local `testdata` imports. Explicit CLI pacing values override the policy. `load --debug template|flow|tool <id>` promotes the selected sidecar's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no policy, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
 
 Example policy descriptor (copy to `load/load.yaml`):
 
 ~~~yaml
-schemaVersion: att-load/v1.4
+schemaVersion: att-load/v1.5
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -1138,7 +1195,7 @@ Copyable examples and field descriptions are maintained in [examples/load/README
 
 ### Load execution ID initialization
 
-Load uses schema att-load/v1.4. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
+Load uses schema att-load/v1.5. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
 
 Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT, EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only EXEC.LOAD.USER_ID and the already curated META.PROJECT/SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID determines the workspace. No Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are absent.
 
@@ -1724,11 +1781,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.10`. Current packages use config v2.10 and Tool Group v2.9. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.11`. Current packages use config v2.11 and Tool Group v2.9. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 environment: SIT
 toolGroups: [config/tools/application.yaml]
 environments:
@@ -1872,7 +1929,7 @@ This chapter is the authoritative reading reference for author-authored configur
 Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as `tools`, environment profiles, Tool `arguments` declarations, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key. This does not disable or rename argument values supplied when invoking a Tool:
 
 ```yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 x-debug-note: "#{missing.tool()}"      # ignored config field
 tools:
   x-temporary: not-a-tool               # ignored Tool entry
@@ -1904,9 +1961,9 @@ Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXE
 
 ### Multi-environment profiles in current ATT
 
-`att-config/v2.10` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper descriptor lists as a whole. See the resource chapters for each binding.
+`att-config/v2.11` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper, HTTPHelper and testdata descriptor lists as a whole. See the resource chapters and [Testdata Registry and Input Mapping](reference/02_test_authoring.md) for each binding.
 
-ATT selects an environment through one common `att-config/v2.10` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT selects an environment through one common `att-config/v2.11` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -1925,7 +1982,7 @@ The common config keeps the existing templates, testcase roots, run/execution/re
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
@@ -1937,6 +1994,7 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
+    testdata: [config/testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
@@ -2013,7 +2071,7 @@ Use profiles when the same test package is promoted across environments and only
 ### Global configuration
 
 ```yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2038,14 +2096,16 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
+    testdata: [config/testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
+    testdata: [config/testdata/accounts.yaml]
 ```
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.10`; older configuration versions are not active contracts. The example uses the active schema. |
+| `schemaVersion` | required | Current: `att-config/v2.11`; the previous schema remains compatible. The example uses the active schema. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -2067,7 +2127,8 @@ environments:
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.2` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
-| `environments` | absent | Non-empty map of profile names; profiles may contain configured resource descriptor lists |
+| `environments` | absent | Non-empty map of profile names; profiles may contain configured resource and testdata descriptor lists |
+| `environments.<profile>.testdata` | `[]` | Unique package-relative YAML paths available to that selected environment |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -2076,6 +2137,7 @@ Allowed global object properties are:
 | Object | Allowed properties |
 |---|---|
 | root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `ssh`, `tools`, `environments`, `x-*` |
+| `environments.<profile>` | `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `testdata`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
 | `testcase` | `root`, `x-*` |
@@ -2260,10 +2322,10 @@ No-target `debug` and `load` are read-only discovery commands. Debug validates t
 
 `--set` is repeatable and accepts exactly one namespace: `input`, `arg`, or `vars`. Values use safe YAML parsing (for example `42`, `true`, `null`, `[a, b]`, or `{id: 7}`), and nested paths may use map keys and numeric list indexes such as `input.customer.ids[0]=42`. Duplicate assignments are applied in order, so the last value wins. ATT expressions are not evaluated while parsing an override; quote expression-looking values when a shell could expand them. `arg.*` is Tool-only; `vars.*` is Template/Flow-only. Unqualified overrides are rejected for multi-workload Load scenarios.
 
-`load/load.yaml` is an optional, policy-only `att-load/v1.4` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. Explicit CLI pacing fields override the policy. Without a policy, provide a complete policy on the command line; for example:
+`load/load.yaml` is an optional, policy-only `att-load/v1.5` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. Explicit CLI pacing fields override the policy. Without a policy, provide a complete policy on the command line; for example:
 
 ```yaml
-schemaVersion: att-load/v1.4
+schemaVersion: att-load/v1.5
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -2294,7 +2356,7 @@ This chapter defines target, `--input`, `--set` and `--env` syntax in the option
 
 ### Complete option matrix
 
-`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.10` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.11` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
 
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 
@@ -2514,7 +2576,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.6.2",
+  "attVersion": "3.7.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2577,7 +2639,8 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 
 | Artifact | Active schema |
 |---|---|
-| Global configuration | att-config/v2.10 |
+| Global configuration | att-config/v2.11 |
+| Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
 | MQHelper | att-mqhelper/v1.2 |
 | HTTPHelper | att-httphelper/v1.1 |
@@ -2588,7 +2651,7 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Template | att-template/v3.6 |
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.1 |
-| Load scenario | att-load/v1.4 |
+| Load scenario | att-load/v1.5 |
 | Load summary | att-load-summary/v1.0 |
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |
@@ -2604,6 +2667,12 @@ Compatibility exists to read established packages without creating a second curr
 Deterministic legacy aliases may remain readable with migration warnings. Aliases are not created where old semantics conflict with scope isolation or the common result/evidence contract. Deprecated CLI/authoring forms remain documented in their owning chapter or CHANGELOG only when users still need a migration path.
 
 ## Appendix C — Migration Notes
+
+### ATT 3.7.0 testdata migration
+
+Change global configuration from `att-config/v2.10` to `att-config/v2.11` and Load scenarios from `att-load/v1.4` to `att-load/v1.5`. The previous schemas remain catalogued under `schemas/history/` for migration diagnostics. `att-testdata/v1.0` is new: add descriptor paths to the selected environment profile's `testdata` list, then use `@{id}` references in Case/Stage, Debug, or Load workload input maps. Load scenarios can add package-relative top-level `testdata` paths as a Load-only overlay. Repeated logical IDs across layers mean a whole descriptor replacement; duplicate IDs inside one layer are invalid. Add an explicit selection policy for every descriptor containing multiple records. Existing packages without testdata references need no new descriptor files.
+
+Load workload `testdata.<id>` settings control `scope` and optionally replace the whole descriptor `selection` policy. Scope defaults to `iteration`; `user` is valid only for closed-VU workloads. Choose `error`, `recycle`, or `stop` exhaustion deliberately. Selection metadata is recorded without record values.
 
 ATT 3.6.2 separates typed operation results, external parsing, project-file Strings, outbound transport and human-readable evidence.
 
@@ -2644,9 +2713,9 @@ send:
   call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
 ~~~
 
-For Load, migrate old single-target or v1.1 scenarios through the historical v1.2/v1.3 loaders, then change the schemaVersion to att-load/v1.4. Root defaults may be shared by multiple workloads; each workload's `inputs`, `vars`, load policy and execution settings override the corresponding root values. Top-level thresholds remain aggregate-only; workload thresholds are declared per workload and are not inherited from the root. `inputs` remains EXEC.INPUT; `vars` is evaluated after each execution's EXEC.ID and EXEC.OUTPUT_DIR are initialized and before the target starts. Exact references preserve native values, dependencies are order-independent, and cycles or external/stateful calls fail validation. The optional top-level execution.execIdFormat still uses the ordinary expression engine once during initialization; closed workloads may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have it.
+For Load, migrate old single-target or v1.1 scenarios through the historical v1.2/v1.3 loaders, then change the schemaVersion to att-load/v1.5. Root defaults may be shared by multiple workloads; each workload's `inputs`, `vars`, load policy and execution settings override the corresponding root values. Top-level thresholds remain aggregate-only; workload thresholds are declared per workload and are not inherited from the root. `inputs` remains EXEC.INPUT; `vars` is evaluated after each execution's EXEC.ID and EXEC.OUTPUT_DIR are initialized and before the target starts. Exact references preserve native values, dependencies are order-independent, and cycles or external/stateful calls fail validation. The optional top-level execution.execIdFormat still uses the ordinary expression engine once during initialization; closed workloads may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have it.
 
-The historical `att-load-profile/v1.0` policy file is migration-only: rewrite it as the current policy-only `att-load/v1.4` descriptor before use. It is not a current `load/load.yaml` example.
+The historical `att-load-profile/v1.0` policy file is migration-only: rewrite it as the current policy-only `att-load/v1.5` descriptor before use. It is not a current `load/load.yaml` example.
 
 Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](reference/14_actions.md), [Runtime and Context Model](reference/03_runtime_context.md), [Load Mode](reference/04_execution_modes/load.md) and [Schema Matrix](reference/appendices/schema_matrix.md).
 

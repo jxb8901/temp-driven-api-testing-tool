@@ -88,7 +88,7 @@ class EnvironmentProfileTest {
 
     @Test
     void explicitSelectorOverridesDefaultAndReplacesOnlyTypedResourceLists() throws Exception {
-        Path config = write("config.yaml", "schemaVersion: att-config/v2.10\n"
+        Path config = write("config.yaml", "schemaVersion: att-config/v2.11\n"
                 + "environment: SIT\n"
                 + "templates: {root: templates}\n"
                 + "dbhelpers: [db/common.yaml]\n"
@@ -107,7 +107,7 @@ class EnvironmentProfileTest {
 
         FrameworkConfig defaultConfig = new FrameworkConfigLoader().load(config, temp);
         FrameworkConfig uat = new FrameworkConfigLoader().load(config, temp, "uat");
-        JsonSchemaVerifier.verify(Paths.get("schemas/att-config-v2.10.schema.json"), YamlSupport.load(config));
+        JsonSchemaVerifier.verify(Paths.get("schemas/att-config-v2.11.schema.json"), YamlSupport.load(config));
 
         assertEquals("SIT", defaultConfig.environment());
         assertEquals("jdbc:sit", defaultConfig.dbHelper("orders").url());
