@@ -9,16 +9,16 @@ actions:
 
   getSeq:
     type: tool
-    call: "#{getSeq(caseId=${CASE.caseId})}"
+    call: "#{getSeq(caseId=${META.SOURCE.caseId})}"
 
   genEndToEndId:
     type: tool
-    call: "#{genEndToEndId(caseId=${CASE.caseId})}"
+    call: "#{genEndToEndId(caseId=${META.SOURCE.caseId})}"
 
   logIds:
     type: log
-    message: "Prepared IDs for ${CASE.caseId}"
+    message: "Prepared IDs for ${META.SOURCE.caseId}"
     value:
-      acDate: "${ACTIONS.getAcDate.output.result}"
-      sequence: "${ACTIONS.getSeq.output.result}"
-      endToEndId: "${ACTIONS.genEndToEndId.output.result}"
+      acDate: "${EXEC.ACTIONS.getAcDate.output.result}"
+      sequence: "${EXEC.ACTIONS.getSeq.output.result}"
+      endToEndId: "${EXEC.ACTIONS.genEndToEndId.output.result}"

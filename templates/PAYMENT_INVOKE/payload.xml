@@ -1,8 +1,8 @@
 <PaymentTransferRequest>
-  <CaseId>${CASE.caseId}</CaseId>
-  <DebitAccount>${CASE.debitAccount}</DebitAccount>
-  <CreditAccount>${CASE.creditAccount}</CreditAccount>
-  <Amount>${CASE.amount}</Amount>
-  <Currency>${CASE.currency}</Currency>
+  <CaseId>${META.SOURCE.caseId}</CaseId>
+  <DebitAccount>${EXEC.INPUT.debitAccount}</DebitAccount>
+  <CreditAccount>${EXEC.INPUT.creditAccount}</CreditAccount>
+  <Amount>${EXEC.INPUT.amount}</Amount>
+  <Currency>${EXEC.INPUT.currency}</Currency>
   <Channel>${EXEC.INPUT.channel?}</Channel>
 </PaymentTransferRequest>

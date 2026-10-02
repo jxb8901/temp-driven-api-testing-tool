@@ -6,47 +6,47 @@ actions:
   checkAPIResult:
     type: assert
     description: API status matches the expected status
-    assert: "${EXEC.VARS.lastApiStatus?} == '${CASE.預期結果.status}'"
-    expected: "${CASE.預期結果.status}"
+    assert: "${EXEC.VARS.lastApiStatus?} == '${EXEC.INPUT.預期結果.status}'"
+    expected: "${EXEC.INPUT.預期結果.status}"
     actual: "${EXEC.VARS.lastApiStatus?}"
 
   checkRejectCode:
     type: assert
     description: API reject code matches the expected code
-    assert: "${EXEC.VARS.lastApiRejectCode?} == '${CASE.預期結果.rejectCode}'"
-    expected: "${CASE.預期結果.rejectCode}"
+    assert: "${EXEC.VARS.lastApiRejectCode?} == '${EXEC.INPUT.預期結果.rejectCode}'"
+    expected: "${EXEC.INPUT.預期結果.rejectCode}"
     actual: "${EXEC.VARS.lastApiRejectCode?}"
 
   selectTxn:
     type: tool
-    call: "#{selectCtxn(caseId=${CASE.caseId})}"
+    call: "#{selectCtxn(caseId=${META.SOURCE.caseId})}"
 
   checkCtxRecords:
     type: assert
     description: CT record count and status match the expectation
-    assert: "${ACTIONS.selectTxn.output.result.effectRows} >= '${CASE.預期結果.effectRows}' and ${ACTIONS.selectTxn.output.result.record.status} like '%${CASE.預期結果.txnStatus}%'"
-    expected: "effectRows>=${CASE.預期結果.effectRows}, status=${CASE.預期結果.txnStatus}"
-    actual: "effectRows=${ACTIONS.selectTxn.output.result.effectRows}, status=${ACTIONS.selectTxn.output.result.record.status}"
+    assert: "${EXEC.ACTIONS.selectTxn.output.result.effectRows} >= '${EXEC.INPUT.預期結果.effectRows}' and ${EXEC.ACTIONS.selectTxn.output.result.record.status} like '%${EXEC.INPUT.預期結果.txnStatus}%'"
+    expected: "effectRows>=${EXEC.INPUT.預期結果.effectRows}, status=${EXEC.INPUT.預期結果.txnStatus}"
+    actual: "effectRows=${EXEC.ACTIONS.selectTxn.output.result.effectRows}, status=${EXEC.ACTIONS.selectTxn.output.result.record.status}"
 
   getLogs:
     type: tool
-    call: "#{getAppLogs(caseId=${CASE.caseId})}"
+    call: "#{getAppLogs(caseId=${META.SOURCE.caseId})}"
 
   grepLogs:
     type: tool
-    call: "#{grepFromAppLogs(logText=${ACTIONS.getLogs.output.result}, keywords=['PAYMENT', ${CASE.預期結果.txnStatus}])}"
+    call: "#{grepFromAppLogs(logText=${EXEC.ACTIONS.getLogs.output.result}, keywords=['PAYMENT', ${EXEC.INPUT.預期結果.txnStatus}])}"
     onFailure: continue
 
   checkLogs:
     type: assert
     description: Application logs contain the expected payment marker
-    assert: "${ACTIONS.getLogs.output.result} like '%PAYMENT%POSTED%'"
+    assert: "${EXEC.ACTIONS.getLogs.output.result} like '%PAYMENT%POSTED%'"
     expected: PAYMENT...POSTED
-    actual: "${ACTIONS.getLogs.output.result}"
+    actual: "${EXEC.ACTIONS.getLogs.output.result}"
 
   logSummary:
     type: log
-    message: "Verified payment result for ${CASE.caseId}"
+    message: "Verified payment result for ${META.SOURCE.caseId}"
     value:
       apiStatus: "${EXEC.VARS.lastApiStatus?}"
-      txnStatus: "${ACTIONS.selectTxn.output.result.record.status}"
+      txnStatus: "${EXEC.ACTIONS.selectTxn.output.result.record.status}"

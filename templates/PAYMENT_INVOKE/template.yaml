@@ -10,7 +10,7 @@ actions:
 
   logRequest:
     type: log
-    message: "Project-file request for ${CASE.caseId}"
+    message: "Project-file request for ${META.SOURCE.caseId}"
     value: "${EXEC.VARS.requestText}"
 
   callApi:

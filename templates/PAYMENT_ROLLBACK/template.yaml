@@ -4,6 +4,6 @@ description: Failure-only compensation example used by cases that opt in to roll
 actions:
   rollbackSummary:
     type: log
-    message: "Rollback requested for ${CASE.caseId}"
+    message: "Rollback requested for ${META.SOURCE.caseId}"
     value:
       previousStatus: "${CASE.status}"

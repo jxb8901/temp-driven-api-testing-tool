@@ -49,7 +49,7 @@ class FppLandingTemplatesTest {
         assertNull(actions.get("searchPrecheckLog"), "top-level x-staged extension must not become an action");
         assertEquals("TxnSeq", actions.get("buildTxnSeq").name());
         assertEquals("precheckRequest", actions.get("preparePrecheckRequest").name());
-        assertTrue(actions.get("invokePrecheck").call().contains("${CASE.VARS.TxnSeq}"));
+        assertTrue(actions.get("invokePrecheck").call().contains("${EXEC.VARS.TxnSeq}"));
         assertTrue(actions.get("invokePrecheck").call().contains("${EXEC.VARS.precheckRequest}"));
     }
 

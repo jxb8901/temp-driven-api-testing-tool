@@ -8,10 +8,10 @@
         <TxType>Precheck</TxType>
         <TxData>
             <PrecheckReq>
-                <RequestId>${CASE.VARS.TxnSeq}</RequestId>
-                <CustomerId>${CASE.debitAccount}</CustomerId>
-                <ProductId>${CASE.creditAccount}</ProductId>
-                <OrderDetails>${CASE.amount}</OrderDetails>
+                <RequestId>${EXEC.VARS.TxnSeq}</RequestId>
+                <CustomerId>${EXEC.INPUT.debitAccount}</CustomerId>
+                <ProductId>${EXEC.INPUT.creditAccount}</ProductId>
+                <OrderDetails>${EXEC.INPUT.amount}</OrderDetails>
             </PrecheckReq>
         </TxData>
     </TxBody>

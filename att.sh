@@ -5,6 +5,17 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 cd "$ROOT_DIR"
 
+# Package validation checks configuration structure and templates without
+# opening database or MQ connections. Supply non-secret values only when the
+# sample package's optional resource credentials are otherwise unset.
+if [ "${1:-}" = "validate" ]; then
+  ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-validation-placeholder}"
+  ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-validation-placeholder}"
+  PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-validation-placeholder}"
+  PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-validation-placeholder}"
+  export ORDERS_DB_USERNAME ORDERS_DB_PASSWORD PAYMENT_MQ_USERNAME PAYMENT_MQ_PASSWORD
+fi
+
 APP_JAR=""
 for candidate in "$ROOT_DIR"/lib/att-*.jar; do
   if [ -f "$candidate" ]; then APP_JAR="$candidate"; break; fi
