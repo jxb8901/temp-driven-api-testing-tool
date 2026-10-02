@@ -2586,7 +2586,9 @@ success）會在記憶體保留經 redaction 的 rolling tail，最多 65,536
 已預留的 slot 可能令 scheduler 保守地略過其他 iteration 的
 capture。保留的 log 會在 truncation marker 後保留最新 action 與 runtime
 failure detail。已抽中的 success 與保留的 full-success evidence 使用完整
-deferred case log。例如 <code>mode: metrics, failure: full</code>
+deferred case log；若已預留 success slot 的 iteration
+最後失敗，系統仍會保留其完整 deferred log，並使用該 slot 保存 failure
+evidence。例如 <code>mode: metrics, failure: full</code>
 會在仍有容量時啟用 bounded failure
 capture；<code>mode: failures, failure: none</code> 則會略過 failure
 capture。</p>

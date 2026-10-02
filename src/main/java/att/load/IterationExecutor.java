@@ -218,7 +218,7 @@ public final class IterationExecutor implements LoadIterationRunner {
             deleteEmptyWorkspace(executionWorkspace);
         }
         CaseExecutionLog deferredFailureLog = !evidenceAvailable && status != ResultStatus.PASS
-                && request.captureFailureLog() ? log : null;
+                && (request.captureFailureLog() || request.retainSuccessEvidence()) ? log : null;
         return new IterationResult(request.iterationId(), executionId, status, duration, context, results,
                 executionWorkspace, evidenceDirectory, diagnostic, evidenceAvailable,
                 deferredFailureLog, transientWorkspace);

@@ -3,6 +3,7 @@
 ## 3.7.1 - 2026-10-02
 
 - Make Load failure-log capture stop when `maxSamples` is zero or retained/reserved evidence has exhausted capacity; cover zero and full capacity.
+- Preserve a full deferred log when a success-reserved sampled iteration fails and uses its reserved slot for failure evidence.
 - Describe Load case-log behavior using effective success/failure policies, including independent overrides.
 - Upgrade ATT product version to 3.7.1.
 

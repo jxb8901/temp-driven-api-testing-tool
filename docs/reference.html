@@ -2847,8 +2847,10 @@ iteration may conservatively make the scheduler skip capture for other
 iterations. The latest action and runtime failure details remain at the
 end of a retained log, after a truncation marker. Selected sampled
 successes and retained full-success evidence use full deferred case
-logs. For example, <code>mode: metrics, failure: full</code> enables
-bounded failure capture when capacity remains, while
+logs; if a success-reserved iteration fails, its full deferred log
+remains available for failure evidence using that same reserved slot.
+For example, <code>mode: metrics, failure: full</code> enables bounded
+failure capture when capacity remains, while
 <code>mode: failures, failure: none</code> skips failure capture.</p>
 <p>evidence.resources.output accepts inherit (default) or none. none
 disables optional human-readable resource-output formatting and
