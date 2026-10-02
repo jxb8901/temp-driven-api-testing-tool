@@ -36,7 +36,6 @@ public class TemplateAction {
     private final String expected;
     private final String actual;
     private final String onFailure;
-    private final String level;
     private final Map<String, Object> fields;
     private final Map<String, Object> raw;
     private final Map<String, Object> retry;
@@ -54,6 +53,8 @@ public class TemplateAction {
         Map<String, Object> data = values == null ? Collections.<String, Object>emptyMap() : new LinkedHashMap<String, Object>(values);
         this.id = text(data.get("id"), key);
         this.type = text(data.get("type"), "tool");
+        if (att.Version.TEMPLATE_SCHEMA.equals(schemaVersion) && "log".equals(this.type) && data.containsKey("level"))
+            throw new IllegalArgumentException("Log.level was removed; delete level and use message or value + format.");
         this.description = text(data.get("description"), "");
         this.payload = text(data.get("payload"), "");
         this.resultFormat = "";
@@ -73,7 +74,6 @@ public class TemplateAction {
         this.expected = text(data.get("expected"), "");
         this.actual = text(data.get("actual"), "");
         this.onFailure = failureMode(data.get("onFailure"));
-        this.level = text(data.get("level"), "INFO");
         this.fields = Collections.emptyMap();
         this.retry = map(data.get("retry"));
         this.evidence = collectors(data.get("evidence"));
@@ -118,7 +118,6 @@ public class TemplateAction {
     public String actual() { return actual; }
     public boolean overwrite() { return result.overwrite(); }
     public String onFailure() { return onFailure; }
-    public String level() { return level; }
     public Map<String, Object> fields() { return fields; }
     public Map<String, Object> raw() { return raw; }
     public Map<String, Object> retry() { return retry; }

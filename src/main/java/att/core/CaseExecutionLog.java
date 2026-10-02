@@ -285,10 +285,10 @@ public class CaseExecutionLog implements AutoCloseable {
             }
             copyIfPresent(output, compact, "winningAttempt", "assertion");
         } else if ("log".equalsIgnoreCase(String.valueOf(action.get("type")))) {
-            copyIfPresent(output, compact, "level", "sourceFile", "fields", "assertion");
+            copyIfPresent(output, compact, "sourceFile", "fields", "assertion");
         } else {
             copyResultUnlessTargetDuplicate(output, compact);
-            copyIfPresent(output, compact, "format", "sources", "level", "sourceFile", "fields", "name", "assertion", "expected", "actual");
+            copyIfPresent(output, compact, "format", "sources", "sourceFile", "fields", "name", "assertion", "expected", "actual");
         }
         Object exception = output.get("exception");
         if (exception instanceof Map) compact.put("exception", compactException((Map<String, Object>) exception));

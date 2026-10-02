@@ -2,6 +2,10 @@
 
 ## 3.6.2 - 2026-10-01
 
+- Remove presentation-only dbText/prettyPrint aliases and user-authored Log.level; migrate to typed Log value + format and plain Case-log entries (#109).
+- Remove local file built-ins/aliases and add typed SSHHelper SFTP stat, mkdirs, move and non-recursive delete using the existing selection, concurrency, timeout and identity handling (#110).
+- Document shared DB/MQ/HTTP evidence.output presentation, retain automatic Case-log visibility and deferred Load materialization, and redact credentials before formatting/truncation (#111).
+
 - Classify MQ request PUT followed by correlated reply MQRC 2033 as canonical TIMEOUT, preserve native completion/reason/wait metadata, and retain standalone receive polling semantics (issue #92).
 - Add common optional Boolean `retry.when` for Tool Actions, including DB queries, evaluated against current-attempt output only after retryOn matches; validate pure expressions, preserve suppressed TIMEOUT/FAIL outcomes, and record retry decisions. Document the MQ 2033 replay-suppression example and the duplicate-request risk of unconditional TIMEOUT retry (issue #92).
 - Correct typed expression source spans when retry conditions repeat literal values, preserving current-attempt DB timeout checks.

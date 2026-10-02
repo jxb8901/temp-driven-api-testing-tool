@@ -79,15 +79,10 @@ send:
 | `date.sysdate/systimestamp` | 返回系統日期／時間戳 | `#{date.sysdate('yyyyMMdd')}` |
 | `date.format` | 格式化 ISO 日期 | `#{date.format(${EXEC.INPUT.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
 | `date.add` | 日期增減 | `#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}` |
-| `file.exists/directoryExists` | 測試常規文件／目錄 | `#{file.exists(${EXEC.INPUT.requestText})}` |
-| `file.size/mkdirs` | 返回文件大小／創建目錄樹 | `#{file.size(${EXEC.INPUT.requestText})}` |
-| `file.copy/move/delete` | 復制、移動、刪除文件 | `#{file.move(${EXEC.INPUT.sourceFile}, ${EXEC.INPUT.targetFile})}` |
 | `misc.string/number/boolean` | 類型轉換與歸一化 | `#{misc.number(value='12.50')}` |
 | `misc.coalesce/nvl` | 返回非空值或默認值 | `#{misc.nvl(${EXEC.INPUT.optional}, 'N/A')}` |
 | `misc.iif` | 從布爾值選擇兩個值之一 | `#{misc.iif(${EXEC.INPUT.enabled}, 'Y', 'N')}` |
 | `misc.randomChoice` | 從輸入中隨機選擇 | `#{misc.randomChoice('A', 'B', 'C')}` |
-| `misc.dbText` | 將穩定 typed DB result 格式化為 SQL*Plus 風格文字 | `#{misc.dbText(${EXEC.ACTIONS.queryOrders.output.result})}` |
-| `misc.prettyPrint` | 將 Map/List/array/tree 確定性格式化為縮進文字 | `#{misc.prettyPrint(${EXEC.ACTIONS.queryOrders.output.result})}` |
 
 #### `seq.next` run-scoped 序列
 
@@ -110,13 +105,15 @@ send:
 
 `width` 必須是 1 至 1000 的整數。序列名稱必須是非空白文字；只有一個位置參數時，數字代表 `width`，字串代表序列名稱。超過兩個參數、混合具名與位置參數、無效參數型別、空白名稱、小數／零／負數／超出範圍的 width 都會報錯；diagnostic 會指出 `seq.next` 及錯誤的參數數量、型別或範圍。若補零後的數值位數超過 `width`，或底層 `Long` 計數器溢位，求值會明確失敗；ATT 不會截斷序列值，也不會默默超出指定寬度。
 
-`misc.dbText` 只接受一個位置參數或具名 `value`。參數必須是直接 DB Action、DB expression 或 DB-backed Tool 返回的穩定 query／update result。它與 DB `output.result` 的 text presentation 共用同一個確定性 formatter，並且沒有 JDBC、transaction、connection 或 cache side effect。
 
-`misc.prettyPrint`（alias：`prettyPrint`、`format.pretty`）接受一個位置參數或具名 `value`，遞歸格式化 Map、List、Iterable、array、scalar 與 null。Linked Map 保留插入順序，其他 Map 按 key 排序；輸出使用兩個空格縮進，並帶有循環和深度保護。它不會修改輸入值。
+
+
 
 ### Expression scope 與錯誤
 
 Expression language 由本章定義；可用 roots 與求值時機由欄位的 semantic owner 定義：[Tool command/call](05_resources/tools.md)、[Load execIdFormat 與 vars](04_execution_modes/load.md)、[Debug vars](04_execution_modes/debug.md)、[report filename](09_configuration.md)。`${path?}` 只允許缺少的 map/list path 回傳 null；語法錯誤與非法 scope 仍會失敗。Expression syntax 或缺少的必需 Context path 會提供結構化 diagnostic；見[Validation](12_validation_diagnostics.md)。
+
+已移除 presentation-only `dbText`／`misc.dbText`、`prettyPrint`／`misc.prettyPrint`／`format.pretty` 和所有 local `file.*`／legacy file alias。DB result 保持 typed；顯示時改用 Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` 加 `format: sqlplus`，Map/List 則使用 `format: json` 或 `yaml`。Project content 使用 `&{...}`；remote filesystem 使用 SSHHelper `stat`／`mkdirs`／`move`／`delete`，傳輸使用 `upload`／`download`。ATT local output 由 framework 管理。移除的 API 會提供 migration diagnostic。
 
 ### Retry condition 的生命週期
 

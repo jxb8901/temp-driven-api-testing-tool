@@ -288,6 +288,36 @@ class HttpHelperExecutorTest {
         }
     }
 
+    @Test void configuredHttpOutputFormatsTypedResponsesAndRedactsCredentialEchoes() throws Exception {
+        String origin = start(); configuration(origin, null);
+        Path descriptor = root.resolve("config/httphelpers/sit.yaml");
+        String original = new String(Files.readAllBytes(descriptor), StandardCharsets.UTF_8);
+        Files.write(descriptor, (original + "auth: {type: bearer, token: private-http-token}\n"
+                + "evidence: {output: {format: json, maxChars: 10000}}\n").getBytes(StandardCharsets.UTF_8));
+        FrameworkConfig configured = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root, "SIT");
+        Map<String, Object> value = args("count", 3, "credentialEcho", "private-http-token");
+        CaseRuntimeContext runtime = context();
+        runtime.beginStage(new StageCaseData("invoke", "T", args("body", value)), "T", root);
+        TemplateAction action = new TemplateAction("echo", args("type", "tool", "timeoutMs", 10000,
+                "call", "#{http.paymentApi.post(path='/echo', body=${EXEC.INPUT.body}, requestFormat='json', responseFormat='json', readTimeoutMs=10000)}"));
+        try (HttpHelperExecutor http = new HttpHelperExecutor(root, configured);
+             CaseExecutionLog log = new CaseExecutionLog(root.resolve("output.log"))) {
+            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(new ToolInvoker(root, configured),
+                    null, null, http, new att.template.DefaultBuiltInProvider());
+            ValidationResult result = new StageTemplateRunner(engine).execute("invoke",
+                    new StageTemplate("T", root, Collections.singletonList(action)), runtime, log).get(0);
+            assertEquals(ResultStatus.PASS, result.status(), result.message());
+            assertEquals(3, ((Number) runtime.resolve("ACTIONS.echo.output.result.count")).intValue());
+            assertEquals("private-http-token", runtime.resolve("ACTIONS.echo.output.result.credentialEcho"));
+            Map<?, ?> output = (Map<?, ?>) runtime.resolve("ACTIONS.echo.output.evidence.http.invocations[0].output");
+            assertEquals("json", output.get("format")); assertEquals(false, output.get("truncated"));
+            assertFalse(String.valueOf(output.get("text")).contains("private-http-token"));
+            assertTrue(String.valueOf(output.get("text")).contains("[REDACTED_SECRET]"));
+        }
+        String log = new String(Files.readAllBytes(root.resolve("output.log")), StandardCharsets.UTF_8);
+        assertTrue(log.contains("[REDACTED_SECRET]")); assertFalse(log.contains("private-http-token"));
+    }
+
     @Test void bearerAndBasicAuthenticationAreSentButNeverRecorded() throws Exception {
         String url = start();
         configuration(url, null);

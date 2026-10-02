@@ -42,6 +42,11 @@ import java.util.concurrent.TimeoutException;
 
 /** Executes the common SSH Resource Helper operations without changing Tool semantics. */
 public final class SshResourceExecutor {
+    /** TIMEOUT replay is allowed only for commands and idempotent filesystem operations. */
+    public static boolean supportsTimeoutRetry(String operation) {
+        return "execute".equals(operation) || "stat".equals(operation) || "mkdirs".equals(operation);
+    }
+
     private final Path projectRoot;
     private final FrameworkConfig config;
     private final SshCommandRunner commandRunner;
@@ -92,7 +97,9 @@ public final class SshResourceExecutor {
             if ("execute".equals(operation)) result = executeCommand(name, helper, target, supplied, timeoutMs, deadlineNanos, context, log);
             else if ("upload".equals(operation)) result = upload(name, helper, target, supplied, timeoutMs, deadlineNanos, context, lease);
             else if ("download".equals(operation)) result = download(name, helper, target, supplied, timeoutMs, deadlineNanos, context, lease);
-            else throw argument("Unknown SSH operation '" + operation + "'; use execute, upload, or download", "SSH_ARGUMENT");
+            else if (java.util.Arrays.asList("stat", "mkdirs", "move", "delete").contains(operation))
+                result = filesystem(helper, target, operation, supplied, timeoutMs, deadlineNanos, lease);
+            else throw argument("Unknown SSH operation '" + operation + "'; use execute, upload, download, stat, mkdirs, move, or delete", "SSH_ARGUMENT");
             return success(name, id, result.get("result"), result, safeInput, started);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -100,7 +107,9 @@ public final class SshResourceExecutor {
         } catch (Exception error) {
             String category = error instanceof SshOperationException ? ((SshOperationException) error).category
                     : ("upload".equals(operation) ? "SSH_UPLOAD_ERROR"
-                    : "download".equals(operation) ? "SSH_DOWNLOAD_ERROR" : "SSH_CONNECTION_ERROR");
+                    : "download".equals(operation) ? "SSH_DOWNLOAD_ERROR"
+                    : java.util.Arrays.asList("stat", "mkdirs", "move", "delete").contains(operation)
+                        ? "SSH_" + operation.toUpperCase(Locale.ROOT) + "_ERROR" : "SSH_CONNECTION_ERROR");
             String message = safeError(error, target);
             if (log != null && !(error instanceof SshOperationException && "SSH_ARGUMENT".equals(category)))
                 InternalExceptionLogger.logIfInternal(log, "ssh." + operation, error, identityRedactions(target));
@@ -195,12 +204,45 @@ public final class SshResourceExecutor {
             requiredRemotePath(input.get("remotePath"));
             requiredString(input.get("localPath"), "localPath");
             bool(input.get("overwrite"), false, "overwrite");
+        } else if ("move".equals(operation)) {
+            allowed.addAll(java.util.Arrays.asList("sourcePath", "targetPath", "overwrite", "timeoutMs"));
+            filesystemPath(input.get("sourcePath")); filesystemPath(input.get("targetPath"));
+            bool(input.get("overwrite"), false, "overwrite");
+        } else if (java.util.Arrays.asList("stat", "mkdirs", "delete").contains(operation)) {
+            allowed.add("remotePath"); allowed.add("timeoutMs");
+            filesystemPath(input.get("remotePath"));
+            if ("delete".equals(operation)) {
+                allowed.add("missingOk"); bool(input.get("missingOk"), false, "missingOk");
+            }
         } else {
-            throw argument("Unknown SSH operation '" + operation + "'; use execute, upload, or download", "SSH_ARGUMENT");
+            throw argument("Unknown SSH operation '" + operation + "'; use execute, upload, download, stat, mkdirs, move, or delete", "SSH_ARGUMENT");
         }
         if (input.containsKey("timeoutMs")) operationTimeout(input, null, 60000);
         for (String key : input.keySet()) if (!allowed.contains(key))
             throw argument("Unknown SSH " + operation + " argument '" + key + "'", "SSH_ARGUMENT");
+    }
+
+    private String filesystemPath(Object value) throws SshOperationException {
+        String path = requiredRemotePath(value);
+        if (path.indexOf('*') >= 0 || path.indexOf('?') >= 0 || path.indexOf('\\') >= 0)
+            throw argument("SSH filesystem paths must be literal paths without wildcards or backslashes", "SSH_ARGUMENT");
+        return path;
+    }
+
+    private Map<String, Object> filesystem(SshHelperConfig helper, SshConfig target, String operation,
+            Map<String, Object> input, long timeoutMs, long deadlineNanos, PermitLease lease) throws Exception {
+        Instant started = Instant.now();
+        Map<String, Object> summary = transferWithDeadline(cancellation -> transferClient.filesystem(target,
+                operation, input, connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos),
+                projectRoot, cancellation), deadlineNanos, lease);
+        Map<String, Object> evidence = commonEvidence(helper, target, operation, "sftp", started);
+        for (String key : java.util.Arrays.asList("remotePath", "sourcePath", "targetPath", "overwrite", "missingOk"))
+            if (input.containsKey(key)) evidence.put(key, redact(String.valueOf(input.get(key)), target));
+        evidence.put("timeoutMs", timeoutMs); evidence.put("connectTimeoutMs", helper.connectTimeoutMs());
+        evidence.put("durationMs", elapsed(started));
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("result", summary); result.put("evidence", evidence);
+        return result;
     }
 
     private Map<String, Object> upload(String name, SshHelperConfig helper, SshConfig target,
@@ -299,7 +341,7 @@ public final class SshResourceExecutor {
                                          SshHelperConfig helper, SshConfig target, String category, String message,
                                          CaseExecutionLog log, Throwable cause) {
         String operation = operationName(name);
-        String transport = ("upload".equals(operation) || "download".equals(operation))
+        String transport = !"execute".equals(operation)
                 ? "sftp" : (target == null ? "" : commandRunner.transportName());
         Map<String, Object> evidence = commonEvidence(helper, target, operation, transport, started);
         if (cause instanceof SshOperationException && ((SshOperationException) cause).evidence != null)
@@ -633,6 +675,11 @@ public final class SshResourceExecutor {
 }
 
 interface SshTransferClient {
+    default Map<String, Object> filesystem(SshConfig target, String operation, Map<String, Object> arguments,
+            Duration connectTimeout, Duration timeout, Path projectRoot, SshTransferCancellation cancellation) throws Exception {
+        throw new IOException("SFTP filesystem operations are unavailable in this transport");
+    }
+
     long upload(SshConfig target, Path source, byte[] payload, String remotePath, boolean overwrite,
                 Duration timeout, Path projectRoot) throws Exception;
     default long upload(SshConfig target, Path source, byte[] payload, String remotePath, boolean overwrite,
@@ -755,6 +802,20 @@ final class JschSshTransferClient implements SshTransferClient {
                 close(connection.channel, connection.session);
             }
             Files.deleteIfExists(temporary);
+        }
+    }
+
+    @Override public Map<String, Object> filesystem(SshConfig target, String operation, Map<String, Object> arguments,
+            Duration connectTimeout, Duration timeout, Path projectRoot, SshTransferCancellation cancellation) throws Exception {
+        Connection connection = null;
+        try {
+            connection = open(target, projectRoot, connectTimeout, timeout, cancellation);
+            return SftpFilesystemOperations.execute(connection.channel, operation, arguments);
+        } finally {
+            if (connection != null) {
+                cancellation.unregister(connection.closer);
+                close(connection.channel, connection.session);
+            }
         }
     }
 

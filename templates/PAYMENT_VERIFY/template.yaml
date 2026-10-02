@@ -46,7 +46,6 @@ actions:
 
   logSummary:
     type: log
-    level: INFO
     message: "Verified payment result for ${CASE.caseId}"
     value:
       apiStatus: "${EXEC.VARS.lastApiStatus?}"

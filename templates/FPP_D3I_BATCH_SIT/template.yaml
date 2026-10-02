@@ -463,7 +463,6 @@ actions:
 
   logD3iSummary:
     type: log
-    level: INFO
     message: "D3I batch end-to-end flow completed for ${CASE.caseId}"
     value:
       d3iFiles: "${ACTIONS.moveD3iFiles.output.result.count}"

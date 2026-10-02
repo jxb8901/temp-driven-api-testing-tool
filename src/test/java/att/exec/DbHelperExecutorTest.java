@@ -57,6 +57,37 @@ class DbHelperExecutorTest {
         DriverManager.deregisterDriver(driver);
     }
 
+    @Test void configuredDbPresentationIsAutomaticForActionsAndExpressionsAndKeepsRowsTyped() throws Exception {
+        att.TestSchemas.install(tempDir);
+        Files.write(tempDir.resolve("db.yaml"), ("schemaVersion: att-dbhelper/v2.6\n"
+                + "id: orders\nname: Orders\ndescription: Test orders\nconnection:\n  url: jdbc:att-test:output\n  password: A100\n"
+                + "evidence:\n  sql: full\n  parameters: masked\n  output: {format: sqlplus, maxChars: 10000}\n").getBytes("UTF-8"));
+        Map<String, DbHelperConfig> helpers = new att.config.DbHelperConfigLoader()
+                .load(Collections.singletonList("db.yaml"), tempDir);
+        assertEquals("sqlplus", helpers.get("orders").evidenceOutput().format());
+        assertEquals(10000, helpers.get("orders").evidenceOutput().maxChars());
+        DbHelperExecutor executor = executor(helpers);
+        CaseRuntimeContext context = context();
+        context.beginStage(new StageCaseData("invoke", "T", Collections.emptyMap()), "T", tempDir);
+        List<TemplateAction> actions = Arrays.asList(
+                new TemplateAction("query", map("type", "tool", "call", "#{db.orders.query(sql='select ONE')}")),
+                new TemplateAction("scalar", map("type", "assign", "name", "id", "expression", "#{db.orders.scalar(sql='select SCALAR')}")));
+        executor.beginCase();
+        try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("output.log"))) {
+            List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null, executor))
+                    .execute("invoke", new StageTemplate("T", tempDir, actions), context, log);
+            for (ValidationResult result : results) assertEquals(ResultStatus.PASS, result.status(), result.message());
+        } finally { executor.close(); }
+        assertTrue(context.resolve("ACTIONS.query.output.result.rows") instanceof List);
+        assertEquals("A100", context.resolve("ACTIONS.query.output.result.rows[0].ID"));
+        assertEquals("A100", context.resolve("EXEC.VARS.id"));
+        String snapshot = String.valueOf(context.resolve("ACTIONS.query.output.evidence.db.invocations[0].output.text"));
+        assertTrue(snapshot.contains("ID")); assertTrue(snapshot.contains("[REDACTED_SECRET]")); assertFalse(snapshot.contains("A100"));
+        String log = new String(Files.readAllBytes(tempDir.resolve("output.log")), "UTF-8");
+        assertTrue(log.contains("sqlplus")); assertTrue(log.contains("1 row selected."));
+        assertFalse(log.contains("A100")); assertFalse(log.contains("LOG "));
+    }
+
     @Test void executesTypedQueryAndUpdateWithInstanceTimeout() throws Exception {
         Map<String, DbHelperConfig> helpers = new LinkedHashMap<String, DbHelperConfig>();
         helpers.put("orders", db("orders", "jdbc:att-test:orders", "case", "rollback", 7, 10));

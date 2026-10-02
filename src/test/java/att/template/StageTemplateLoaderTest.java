@@ -167,4 +167,36 @@ class StageTemplateLoaderTest {
         assertEquals("db", loader.load("historical-v35").actions().get(0).type());
         assertEquals("render", loader.load("historical-v34").actions().get(0).type());
     }
+
+    @Test void historicalTemplateAndFlowLogLevelsRemainLoadableButCurrentLevelsReject() throws Exception {
+        for (String version : new String[]{"3.4", "3.5"}) {
+            String directory = "legacy-" + version;
+            Path template = tempDir.resolve("templates/" + directory);
+            Path flow = tempDir.resolve("templates/flows/" + directory);
+            Files.createDirectories(template); Files.createDirectories(flow);
+            Files.write(template.resolve("template.yaml"), ("schemaVersion: att-template/v" + version
+                    + "\nname: Legacy-" + version + "\ndescription: Legacy Log\nactions:\n"
+                    + "  note: {type: log, level: WARN, message: historical}\n").getBytes("UTF-8"));
+            Files.write(flow.resolve("flow.yaml"), ("schemaVersion: att-flow/v" + version
+                    + "\nid: common.legacy" + version.replace(".", "") + ".v1\nname: Legacy\ndescription: Legacy Log\nactions:\n"
+                    + "  note: {type: log, level: DEBUG, message: historical}\n").getBytes("UTF-8"));
+            TemplateAction action = new StageTemplateLoader(tempDir, Paths.get("templates")).load(directory).actions().get(0);
+            assertEquals("WARN", action.raw().get("level")); assertEquals("historical", action.message());
+        }
+        att.flow.FlowRegistry registry = new att.flow.FlowRegistry(tempDir, tempDir.resolve("templates"));
+        for (String version : new String[]{"34", "35"})
+            assertEquals("DEBUG", registry.get("common.legacy" + version + ".v1").actions().get(0).raw().get("level"));
+        Path current = tempDir.resolve("templates/current-level");
+        Files.createDirectories(current);
+        Files.write(current.resolve("template.yaml"), ("schemaVersion: att-template/v3.6\nname: Current\ndescription: Current Log\nactions:\n"
+                + "  note: {type: log, level: WARN, message: current}\n").getBytes("UTF-8"));
+        assertTrue(assertThrows(att.validation.DiagnosticException.class,
+                () -> new StageTemplateLoader(tempDir, Paths.get("templates")).load("current-level"))
+                .detail().contains("Log.level was removed"));
+        Path currentFlow = tempDir.resolve("templates/flows/current-level");
+        Files.createDirectories(currentFlow);
+        Files.write(currentFlow.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.6\nid: common.current.v1\nname: Current\ndescription: Current Log\nactions:\n"
+                + "  note: {type: log, level: WARN, message: current}\n").getBytes("UTF-8"));
+        assertThrows(Exception.class, () -> new att.flow.FlowRegistry(tempDir, tempDir.resolve("templates")));
+    }
 }

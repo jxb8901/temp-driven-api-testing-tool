@@ -35,7 +35,9 @@ public final class JsonSchemaVerifier {
                 Matcher unknownProperty = UNKNOWN_PROPERTY.matcher(error.getMessage());
                 if (unknownProperty.find()) field += "." + unknownProperty.group(1);
                 if (firstField == null || field.compareTo(firstField) < 0) firstField = field;
-                messages.add(field + ": " + error.getMessage() + " (keyword=" + error.getCode() + ")");
+                String migration = field.endsWith(".level") && field.contains("actions")
+                        ? " Log.level was removed; delete level and use a plain Log message or value + format. Severity does not affect Action status." : "";
+                messages.add(field + ": " + error.getMessage() + migration + " (keyword=" + error.getCode() + ")");
                 details.add(new SchemaViolation(field, error.getMessage(), error.getCode()));
             }
             java.util.Collections.sort(messages);

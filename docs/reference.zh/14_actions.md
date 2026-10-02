@@ -8,7 +8,7 @@
 |---|---|---|
 | tool | call | 呼叫已配置 Tool、built-in 或 helper，保留原生型別化結果；DB query/scalar/update 也是普通 Tool call。 |
 | assert | assert | 評估布林條件並記錄 PASS 或 FAIL。expected、actual 是可選診斷值。 |
-| log | message 或 value | 將型別化值格式化後寫入 Case 日誌。欄位為 level、message、value、format。 |
+| log | message 或 value | 將型別化值格式化後寫入 Case 日誌。欄位為 message、value、format。 |
 | assign | name、expression | 將 expression 的型別化結果發布至 EXEC.VARS。 |
 | flow | use | 在巢狀 Action scope 執行已註冊 Flow，返回時還原 caller scope。 |
 
@@ -160,13 +160,12 @@ Log 是 presentation Action，因此有自己的 format 欄位：
 ~~~yaml
 logOrder:
   type: log
-  level: INFO
   message: "Order response"
   value: "${EXEC.ACTIONS.callOrder.output.result}"
   format: yaml
 ~~~
 
-level 預設 INFO，可設 TRACE、DEBUG、INFO、WARN、ERROR。message 或 value 至少要有一項。message 以文字求值。value 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...} expression 保留原始型別；map/list 子節點會遞迴求值，不會將數字、布林、null 或巢狀值轉成字串。format 支援 text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format 時必須提供 value。
+Log 是一般 Case-log entry，沒有 user-authored severity；現行 v3.6 契約移除 `level`，migration 時請刪除該欄位。歷史 v3.4/v3.5 Template／Flow descriptor 為 compatibility 仍接受其 schema 定義的 Log level。Internal diagnostic severity 維持獨立。message 或 value 至少要有一項。message 以文字求值。value 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...} expression 保留原始型別；map/list 子節點會遞迴求值，不會將數字、布林、null 或巢狀值轉成字串。format 支援 text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format 時必須提供 value。
 
 同時提供 message 和 value 時，Log 輸出 message、換行，再輸出格式化 value。output.result 是最終字串。Project-file String 會原樣輸出；Log 不會推斷或附加 document format，也不會讀取檔案或使用 fields map。需要結構化日誌時，將 typed map/list 放到 value。
 

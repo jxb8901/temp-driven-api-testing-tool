@@ -50,7 +50,19 @@ import java.util.concurrent.ConcurrentMap;
 /** First-class V2.5 JDBC executor with one connection per dbhelper instance and execution thread. */
 public final class DbHelperExecutor implements AutoCloseable {
     public void recordResourceOutput(String helperId, DbInvocationResult result, att.core.CaseRuntimeContext context) {
-        if (context != null) context.recordResourceOutput(helper(helperId).evidenceOutput(), result.result(), result.evidence());
+        recordResourceOutput(helperId, result, context, null);
+    }
+    public void recordResourceOutput(String helperId, DbInvocationResult result, att.core.CaseRuntimeContext context,
+            CaseExecutionLog log) {
+        if (context == null) return;
+        DbHelperConfig configured = helper(helperId);
+        List<String> secrets = new ArrayList<String>();
+        if (!configured.password().isEmpty()) secrets.add(configured.password());
+        for (Map.Entry<String, String> entry : configured.properties().entrySet())
+            if (entry.getKey().matches("(?i).*password|.*secret|.*token|.*api[-_]?key.*")
+                    && entry.getValue() != null && !entry.getValue().isEmpty()) secrets.add(entry.getValue());
+        if (log != null) log.registerSecretRedactions(secrets);
+        context.recordResourceOutput(configured.evidenceOutput(), result.result(), result.evidence(), secrets);
     }
 
     private static final ScheduledExecutorService TIMEOUTS = Executors.newSingleThreadScheduledExecutor(

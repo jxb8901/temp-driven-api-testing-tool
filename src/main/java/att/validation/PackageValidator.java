@@ -902,7 +902,6 @@ public final class PackageValidator {
             if ("log".equals(type)) {
                 if (action.message().trim().isEmpty() && !action.valuePresent()) throw new IllegalArgumentException("message or value is required for log action " + action.id());
                 if (!action.valuePresent() && !action.format().trim().isEmpty()) throw new IllegalArgumentException("format requires value on Log action " + action.id());
-                if (!("TRACE".equals(action.level()) || "DEBUG".equals(action.level()) || "INFO".equals(action.level()) || "WARN".equals(action.level()) || "ERROR".equals(action.level()))) throw new IllegalArgumentException("Invalid log level: " + action.level());
                 forbid(action, "name", "payload", "result", "render", "call", "db", "query", "update", "expression", "expected", "actual", "retry", "timeoutMs", "file", "fields", "templateFormat", "assert");
                 validateInlineExpressions(action.message(), syntaxEngine, config);
                 validateInlineExpressions(String.valueOf(action.value() == null ? "" : action.value()), syntaxEngine, config);
@@ -1774,9 +1773,9 @@ public final class PackageValidator {
         }
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length == 3 && "ssh".equals(parts[0])
-                && ("upload".equals(parts[2]) || "download".equals(parts[2]))) {
+                && !att.exec.SshResourceExecutor.supportsTimeoutRetry(parts[2])) {
             throw new IllegalArgumentException("retryOn TIMEOUT is not supported for native SSH " + parts[2]
-                    + " actions because replaying a transfer may duplicate a side effect; retry execute or handle the transfer explicitly: " + action.id());
+                    + " actions because replaying a timed-out mutation may duplicate a side effect; retry execute/stat/mkdirs or handle recovery explicitly: " + action.id());
         }
     }
 
@@ -1855,6 +1854,7 @@ public final class PackageValidator {
             rejectBareCallReference(argument.expression(), expressionEngine);
         }
         String toolName = parsed.name();
+        att.template.DefaultBuiltInProvider.rejectRemoved(toolName);
         if (toolName.startsWith("db.")) {
             if (allowWriteFacade) validateDbToolCall(parsed, config);
             else validateDbExpressionCall(parsed, config);
@@ -1905,6 +1905,7 @@ public final class PackageValidator {
         }
         if (tool.callBacked() && isWriteFacade(tool) && !allowWriteFacade) {
             String target = callParser.parse(tool.call()).name();
+        att.template.DefaultBuiltInProvider.rejectRemoved(target);
             throw new IllegalArgumentException((target.startsWith("db.") ? "DB update" : "MQ/HTTP/SSH resource")
                     + " call-backed Tool may only be the primary call of a type: tool Action: " + tool.key());
         }
@@ -2063,7 +2064,7 @@ public final class PackageValidator {
     private void validateSshCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || !"ssh".equals(parts[0]) || parts[1].isEmpty())
-            throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|download: " + parsed.name());
+            throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|download|stat|mkdirs|move|delete: " + parsed.name());
         att.config.SshHelperConfig helper = config.sshHelper(parts[1]);
         if (helper == null) throw new IllegalArgumentException("Unknown sshhelper instance '" + parts[1] + "'");
         if ("all".equals(helper.strategy()))
@@ -2079,8 +2080,14 @@ public final class PackageValidator {
         } else if ("download".equals(operation)) {
             allowed.add("remotePath"); allowed.add("localPath"); allowed.add("overwrite");
             allowed.add("timeoutMs"); required.add("remotePath"); required.add("localPath");
+        } else if ("move".equals(operation)) {
+            allowed.addAll(java.util.Arrays.asList("sourcePath", "targetPath", "overwrite", "timeoutMs"));
+            required.add("sourcePath"); required.add("targetPath");
+        } else if (java.util.Arrays.asList("stat", "mkdirs", "delete").contains(operation)) {
+            allowed.add("remotePath"); allowed.add("timeoutMs"); required.add("remotePath");
+            if ("delete".equals(operation)) allowed.add("missingOk");
         } else {
-            throw new IllegalArgumentException("Unknown SSH operation '" + operation + "'; use execute, upload, or download");
+            throw new IllegalArgumentException("Unknown SSH operation '" + operation + "'; use execute, upload, download, stat, mkdirs, move, or delete");
         }
         Set<String> supplied = new LinkedHashSet<String>();
         for (ToolCallParser.Argument argument : parsed.arguments()) {
@@ -2097,17 +2104,20 @@ public final class PackageValidator {
                 if (!(literal instanceof Number) || ((Number) literal).doubleValue() != ((Number) literal).longValue()
                         || ((Number) literal).longValue() < 1L || ((Number) literal).longValue() > 3600000L)
                     throw new IllegalArgumentException("SSH timeoutMs must be an integer from 1 to 3600000");
-            } else if ("overwrite".equals(key)) {
-                if (!(literal instanceof Boolean)) throw new IllegalArgumentException("SSH overwrite must be boolean");
+            } else if ("overwrite".equals(key) || "missingOk".equals(key)) {
+                if (!(literal instanceof Boolean)) throw new IllegalArgumentException("SSH " + key + " must be boolean");
             } else if ("stdoutFormat".equals(key)) {
                 if (!(literal instanceof String) || !String.valueOf(literal).toLowerCase(java.util.Locale.ROOT)
                         .matches("text|json|yaml|xml"))
                     throw new IllegalArgumentException("SSH stdoutFormat must be text, json, yaml, or xml");
-            } else if ("command".equals(key) || "localPath".equals(key) || "remotePath".equals(key)) {
+            } else if ("command".equals(key) || "localPath".equals(key) || "remotePath".equals(key) || "sourcePath".equals(key) || "targetPath".equals(key)) {
                 if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty())
                     throw new IllegalArgumentException("SSH " + key + " must be a non-blank string");
-                if ("remotePath".equals(key)) {
+                if ("remotePath".equals(key) || "sourcePath".equals(key) || "targetPath".equals(key)) {
                     String value = String.valueOf(literal);
+                    if (java.util.Arrays.asList("stat", "mkdirs", "move", "delete").contains(operation)
+                            && (value.indexOf('*') >= 0 || value.indexOf('?') >= 0 || value.indexOf('\\') >= 0))
+                        throw new IllegalArgumentException("SSH filesystem paths must be literal paths without wildcards or backslashes");
                     for (int index = 0; index < value.length(); index++)
                         if (Character.isISOControl(value.charAt(index))) throw new IllegalArgumentException("SSH remotePath must not contain control characters");
                 }

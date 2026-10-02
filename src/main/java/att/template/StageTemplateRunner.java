@@ -288,8 +288,7 @@ public class StageTemplateRunner {
         Object value = action.valuePresent() ? templateEngine.evaluateTypedTree(action.value(), context, log) : null;
         String formatted = action.valuePresent() ? new TypedValueFormatter().format(value, action.format()) : "";
         output.put("result", message.isEmpty() ? formatted : formatted.isEmpty() ? message : message + "\n" + formatted);
-        output.put("level", action.level());
-        try { log.appendRaw("LOG " + action.id() + " " + action.level(), String.valueOf(output.get("result"))); }
+        try { log.appendRaw("LOG " + action.id(), String.valueOf(output.get("result"))); }
         catch (Exception error) { recordEvidenceError(output, error); }
     }
 
@@ -418,7 +417,7 @@ public class StageTemplateRunner {
                         elapsedMillis(operationStarted), error.getClass().getSimpleName());
                 throw error;
             }
-            executor.recordResourceOutput(action.db(), result, context);
+            executor.recordResourceOutput(action.db(), result, context, log);
         try { log.append("DB " + action.db() + " " + invocationId, result.evidence()); }
             catch (Exception error) { recordEvidenceError(output, error); result.evidence().put("evidenceError", safeMessage(error)); }
 
@@ -646,8 +645,8 @@ public class StageTemplateRunner {
     private boolean sshTimeout(Map<String, Object> invocation) {
         Object ssh = invocation == null ? null : invocation.get("SSH");
         if (!(ssh instanceof Map)) return false;
-        // Transfers must never be replayed automatically, including through call-backed Tools.
-        if (!"execute".equals(((Map<String, Object>) ssh).get("operation"))) return false;
+        // Apply the same replay policy as validation, including through call-backed Tools.
+        if (!att.exec.SshResourceExecutor.supportsTimeoutRetry(String.valueOf(((Map<String, Object>) ssh).get("operation")))) return false;
         Object error = ((Map<String, Object>) ssh).get("error");
         if (!(error instanceof Map)) return false;
         Object category = ((Map<String, Object>) error).get("category");

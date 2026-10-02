@@ -163,7 +163,7 @@ class PackageValidatorTest {
                 "assert","#{db.orders.scalar(sql='select count(*) from orders where id = ?', params=[${CASE.id}, 'OPEN'])} >= 0"),
                 "att-template/v3.4");
         TemplateAction print = new TemplateAction("print", map("type", "log",
-                "message", "#{dbText(${ACTIONS.query.output.result})}"), "att-template/v3.4");
+                "value", "${ACTIONS.query.output.result}", "format", "sqlplus"), "att-template/v3.4");
         assertDoesNotThrow(() -> { try { contract.invoke(validator,
                 new StageTemplate("DB",tempDir,Arrays.asList(query, print, expression),"att-template/v3.4"),config); }
             catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }

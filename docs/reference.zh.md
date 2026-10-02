@@ -235,7 +235,7 @@ Workbook/Sidecar/Snapshot 定義 Testcase data；Case 與 Stage 的 business inp
 |---|---|---|
 | tool | call | 呼叫已配置 Tool、built-in 或 helper，保留原生型別化結果；DB query/scalar/update 也是普通 Tool call。 |
 | assert | assert | 評估布林條件並記錄 PASS 或 FAIL。expected、actual 是可選診斷值。 |
-| log | message 或 value | 將型別化值格式化後寫入 Case 日誌。欄位為 level、message、value、format。 |
+| log | message 或 value | 將型別化值格式化後寫入 Case 日誌。欄位為 message、value、format。 |
 | assign | name、expression | 將 expression 的型別化結果發布至 EXEC.VARS。 |
 | flow | use | 在巢狀 Action scope 執行已註冊 Flow，返回時還原 caller scope。 |
 
@@ -387,13 +387,12 @@ Log 是 presentation Action，因此有自己的 format 欄位：
 ~~~yaml
 logOrder:
   type: log
-  level: INFO
   message: "Order response"
   value: "${EXEC.ACTIONS.callOrder.output.result}"
   format: yaml
 ~~~
 
-level 預設 INFO，可設 TRACE、DEBUG、INFO、WARN、ERROR。message 或 value 至少要有一項。message 以文字求值。value 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...} expression 保留原始型別；map/list 子節點會遞迴求值，不會將數字、布林、null 或巢狀值轉成字串。format 支援 text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format 時必須提供 value。
+Log 是一般 Case-log entry，沒有 user-authored severity；現行 v3.6 契約移除 `level`，migration 時請刪除該欄位。歷史 v3.4/v3.5 Template／Flow descriptor 為 compatibility 仍接受其 schema 定義的 Log level。Internal diagnostic severity 維持獨立。message 或 value 至少要有一項。message 以文字求值。value 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...} expression 保留原始型別；map/list 子節點會遞迴求值，不會將數字、布林、null 或巢狀值轉成字串。format 支援 text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format 時必須提供 value。
 
 同時提供 message 和 value 時，Log 輸出 message、換行，再輸出格式化 value。output.result 是最終字串。Project-file String 會原樣輸出；Log 不會推斷或附加 document format，也不會讀取檔案或使用 fields map。需要結構化日誌時，將 typed map/list 放到 value。
 
@@ -615,15 +614,10 @@ send:
 | `date.sysdate/systimestamp` | 返回系統日期／時間戳 | `#{date.sysdate('yyyyMMdd')}` |
 | `date.format` | 格式化 ISO 日期 | `#{date.format(${EXEC.INPUT.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
 | `date.add` | 日期增減 | `#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}` |
-| `file.exists/directoryExists` | 測試常規文件／目錄 | `#{file.exists(${EXEC.INPUT.requestText})}` |
-| `file.size/mkdirs` | 返回文件大小／創建目錄樹 | `#{file.size(${EXEC.INPUT.requestText})}` |
-| `file.copy/move/delete` | 復制、移動、刪除文件 | `#{file.move(${EXEC.INPUT.sourceFile}, ${EXEC.INPUT.targetFile})}` |
 | `misc.string/number/boolean` | 類型轉換與歸一化 | `#{misc.number(value='12.50')}` |
 | `misc.coalesce/nvl` | 返回非空值或默認值 | `#{misc.nvl(${EXEC.INPUT.optional}, 'N/A')}` |
 | `misc.iif` | 從布爾值選擇兩個值之一 | `#{misc.iif(${EXEC.INPUT.enabled}, 'Y', 'N')}` |
 | `misc.randomChoice` | 從輸入中隨機選擇 | `#{misc.randomChoice('A', 'B', 'C')}` |
-| `misc.dbText` | 將穩定 typed DB result 格式化為 SQL*Plus 風格文字 | `#{misc.dbText(${EXEC.ACTIONS.queryOrders.output.result})}` |
-| `misc.prettyPrint` | 將 Map/List/array/tree 確定性格式化為縮進文字 | `#{misc.prettyPrint(${EXEC.ACTIONS.queryOrders.output.result})}` |
 
 #### `seq.next` run-scoped 序列
 
@@ -646,13 +640,15 @@ send:
 
 `width` 必須是 1 至 1000 的整數。序列名稱必須是非空白文字；只有一個位置參數時，數字代表 `width`，字串代表序列名稱。超過兩個參數、混合具名與位置參數、無效參數型別、空白名稱、小數／零／負數／超出範圍的 width 都會報錯；diagnostic 會指出 `seq.next` 及錯誤的參數數量、型別或範圍。若補零後的數值位數超過 `width`，或底層 `Long` 計數器溢位，求值會明確失敗；ATT 不會截斷序列值，也不會默默超出指定寬度。
 
-`misc.dbText` 只接受一個位置參數或具名 `value`。參數必須是直接 DB Action、DB expression 或 DB-backed Tool 返回的穩定 query／update result。它與 DB `output.result` 的 text presentation 共用同一個確定性 formatter，並且沒有 JDBC、transaction、connection 或 cache side effect。
 
-`misc.prettyPrint`（alias：`prettyPrint`、`format.pretty`）接受一個位置參數或具名 `value`，遞歸格式化 Map、List、Iterable、array、scalar 與 null。Linked Map 保留插入順序，其他 Map 按 key 排序；輸出使用兩個空格縮進，並帶有循環和深度保護。它不會修改輸入值。
+
+
 
 ### Expression scope 與錯誤
 
 Expression language 由本章定義；可用 roots 與求值時機由欄位的 semantic owner 定義：[Tool command/call](reference.zh/05_resources/tools.md)、[Load execIdFormat 與 vars](reference.zh/04_execution_modes/load.md)、[Debug vars](reference.zh/04_execution_modes/debug.md)、[report filename](reference.zh/09_configuration.md)。`${path?}` 只允許缺少的 map/list path 回傳 null；語法錯誤與非法 scope 仍會失敗。Expression syntax 或缺少的必需 Context path 會提供結構化 diagnostic；見[Validation](reference.zh/12_validation_diagnostics.md)。
+
+已移除 presentation-only `dbText`／`misc.dbText`、`prettyPrint`／`misc.prettyPrint`／`format.pretty` 和所有 local `file.*`／legacy file alias。DB result 保持 typed；顯示時改用 Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` 加 `format: sqlplus`，Map/List 則使用 `format: json` 或 `yaml`。Project content 使用 `&{...}`；remote filesystem 使用 SSHHelper `stat`／`mkdirs`／`move`／`delete`，傳輸使用 `upload`／`download`。ATT local output 由 framework 管理。移除的 API 會提供 migration diagnostic。
 
 ### Retry condition 的生命週期
 
@@ -1316,9 +1312,14 @@ DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout�
 | `result.maxBytes` | `10485760` | 整數 1–1073741824，且不小於 maxCellBytes |
 | `evidence.sql` | `full` | `full` 或 `hash` |
 | `evidence.parameters` | `values` | `masked`、`types` 或 `values`；使用 values 可能暴露敏感業務數據 |
+| `evidence.output` | 不啟用 | `format: json\|yaml\|xml\|text\|sqlplus`；`maxChars` 預設 10000（1–1000000） |
 | `pool` | 默認值 | `maxSize` 默認 20、`minIdle` 默認 0、`connectionTimeout` 默認 2s；`maxSize` 為 1–10000，`minIdle` 不可大於 `maxSize`，timeout 至少 250ms |
 
 validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 template call 會在執行前校驗。
+
+DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
+
+以上 `waitForOrder` query 無需後續 Log Action。DBHelper 設定 `evidence: {sql: full, parameters: masked, output: {format: sqlplus, maxChars: 10000}}` 即會自動保留 SQL*Plus-style row snapshot；`sql` 決定 SQL evidence，`parameters` 決定 parameter representation，`output` 只控制人類可讀顯示。Assertion 和後續 Action 仍直接讀取 typed rows；`db.<id>.query`／`scalar` 亦遵循相同 policy。
 
 ### 7.4 MQHelper
 
@@ -1397,6 +1398,8 @@ Connection credentials may be complete `${ENV:NAME}` references. Resolved secret
 
 The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.2.schema.json).
 
+DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
+
 #### Request/reply timeout 與重播策略
 
 `mq.<id>.request(...)` 收到 correlated reply 時為 PASS。PUT 成功後，correlated GET 回傳 MQRC 2033（`MQRC_NO_MSG_AVAILABLE`）時，使用標準 TIMEOUT 與 `MQ_TIMEOUT` diagnostic，即使 outer Action deadline 尚未到期。原生 evidence 保留 `sent: true`、`replyReceived: false`、`completionCode: 2`、`reasonCode: 2033`、reason 名稱及有效 `waitMs`。其他 transport failure 維持既有 MQ ERROR 分類；outer deadline 與 pool borrow timeout 也走標準 TIMEOUT 路徑。
@@ -1470,11 +1473,13 @@ Transport/protocol、response-parse failures 屬 operational error。已收到�
 
 共用 typed-result 契約見[Action 與型別化值](reference.zh/14_actions.md)。
 
+DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
+
 ### 7.6 SSHHelper：邏輯 SSH 目標
 
 #### SSH Resource Helper operation
 
-SSHHelper 也支援在一般 `type: tool` Action 中使用共用 Resource Helper 形式：`ssh.<helperId>.execute`、`ssh.<helperId>.upload` 及 `ssh.<helperId>.download`。Helper ID 是邏輯 ID；native Resource Helper call 使用 `single`、`random` 或 `roundRobin` 選取一個實體 instance。Native Resource Helper call 不支援 `selection.strategy: all`，會在 validation 時拒絕；`all` 只供 command-backed Tool fan-out 使用。這些呼叫會在未建立 SSH connection 前完成驗證，並共用 helper 的並發上限及 identity 遮蔽規則。
+SSHHelper 也支援在一般 `type: tool` Action 中使用共用 Resource Helper 形式：`ssh.<helperId>.execute`、`ssh.<helperId>.upload` `ssh.<helperId>.download`、`ssh.<helperId>.stat`、`ssh.<helperId>.mkdirs`、`ssh.<helperId>.move` 及 `ssh.<helperId>.delete`。Helper ID 是邏輯 ID；native Resource Helper call 使用 `single`、`random` 或 `roundRobin` 選取一個實體 instance。Native Resource Helper call 不支援 `selection.strategy: all`，會在 validation 時拒絕；`all` 只供 command-backed Tool fan-out 使用。這些呼叫會在未建立 SSH connection 前完成驗證，並共用 helper 的並發上限及 identity 遮蔽規則。
 
 ```yaml
 actions:
@@ -1510,7 +1515,7 @@ actions:
 
 `download` 需要 `remotePath` 及 Case-output-relative 的 `localPath`。ATT 先寫入 temporary file，再移入受控 Case output directory；不會解析下載 bytes。Download 的 `overwrite` 預設為 `false`，已有檔案必須明確使用 `overwrite: true`。Typed result 是包含 remote path、保留後 local path 及 byte count 的 transfer summary。
 
-三種 operation 只接受 named arguments。Unknown operation/helper/argument、重複 argument、錯誤 format／timeout、缺少 required field、upload source 衝突及不安全 local path 都會在外部執行前驗證失敗。Runtime evidence 包含 logical helper、選定 instance、host/port、operation、transport、時間及 transfer/command 詳情；command input 和 represented payload 不會複製到 evidence。由 environment 提供的 identity path 仍會遮蔽。
+所有 operation 只接受 named arguments。Unknown operation/helper/argument、重複 argument、錯誤 format／timeout、缺少 required field、upload source 衝突及不安全 local path 都會在外部執行前驗證失敗。Runtime evidence 包含 logical helper、選定 instance、host/port、operation、transport、時間及 transfer/command 詳情；command input 和 represented payload 不會複製到 evidence。由 environment 提供的 identity path 仍會遮蔽。
 
 Native SSH failure 在 invocation `error.category` 和 `SSH.error.category` 發布穩定分類：
 
@@ -1528,7 +1533,7 @@ Native SSH failure 在 invocation `error.category` 和 `SSH.error.category` 發�
 
 Transfer connection/channel failure 保留 `phase: connect|channel`；timeout evidence 亦保留相應 timeout budget。所有 failure 都保留選定 operation 與實際 transport。Transfer error 仍不可自動 timeout replay。
 
-Native Resource Helper call 使用一個 absolute Action deadline，涵蓋 concurrency pool wait、connection 與 channel setup，以及 command 或 SFTP transfer。Per-call `timeoutMs` 或 helper `timeouts.commandTimeoutMs` 只設定 operation limit，不能延長 enclosing Action deadline。`timeouts.connectTimeoutMs` 只在剩餘 deadline 內限制 connection establishment，不會額外增加 operation 時間。`execute`、`upload`、`download` 都遵守此契約。Native `execute` 的 `SSH_TIMEOUT` 與 `SSH_POOL_TIMEOUT` 可使用 Action `retryOn: [TIMEOUT]`；native `upload` 與 `download` 會拒絕 timeout retry，因為重播 transfer 可能重複副作用。SFTP Action 會在 deadline 到達時返回，但 concurrency lease 會由 cleanup worker 持有，直到 transfer worker 與 transport 終止。
+Native Resource Helper call 使用一個 absolute Action deadline，涵蓋 concurrency pool wait、connection 與 channel setup，以及 command 或 SFTP operation。Per-call `timeoutMs` 或 helper `timeouts.commandTimeoutMs` 只設定 operation limit，不能延長 enclosing Action deadline。`timeouts.connectTimeoutMs` 只在剩餘 deadline 內限制 connection establishment，不會額外增加 operation 時間。execute/upload/download/stat/mkdirs/move/delete 均遵守此契約。Native `execute`、read-only `stat` 與 idempotent `mkdirs` 的 `SSH_TIMEOUT`／`SSH_POOL_TIMEOUT` 可使用 Action `retryOn: [TIMEOUT]`，call-backed Tool 亦相同，並沿用共用 `retry.when` 控制重播。Native `upload`、`download`、`move`、`delete` 拒絕 timeout retry，因為 timeout 後的 mutation outcome 可能不確定。Validation 與 runtime 共用同一 operation policy。SFTP Action 會在 deadline 到達時返回，但 concurrency lease 會由 cleanup worker 持有，直到 transfer worker 與 transport 終止。
 
 SSHHelper 讓 command-backed Tool 使用穩定的邏輯應用伺服器 ID，而非在 Tool group 中寫入實體主機。`att-sshhelper/v1.0` YAML descriptor 含 `id`、可選 `name`／`description`、可選 `defaults`（`user`、`port`、`identityFile`）、非空有序 `instances`、可選 `selection.strategy` 和 `fanout.maxConcurrency`（預設 4、範圍 1–256）。每個 instance 需有 `id`／`host`，`user` 必須由 instance 或 defaults 提供。Instance 欄位覆蓋 defaults；port 預設 22，必須在 1–65535。Helper 和 instance ID 符合 `[A-Za-z_][A-Za-z0-9_-]*`，忽略大小寫後不可重複。無效 host/user、未知欄位、重複 ID、缺少 user、不安全路徑和無效 strategy 都會在 SSH 執行前失敗。
 
@@ -1599,6 +1604,8 @@ Strategy 優先序：group override，再到 helper 預設。Native Resource Hel
 單主機及 `all` 執行都會在 argv、transport stderr（包括串流寫入的 Case log 診斷）及 exception evidence 遮蔽環境提供的私鑰路徑。上述不記錄保證適用於 ATT metadata 和 transport 診斷；解析後的業務 stdout 不變，因此命令不可輸出私鑰路徑。
 
 遷移：若一個實體目標已足夠，直接 SSH 可維持原狀。否則把 host/user/port/key 搬到 helper descriptor，在每個環境綁定，將 group 升到 v2.9，以 `ssh: {helper: application}` 取代實體 `ssh`，逐一驗證環境。Action 不需重寫。Inventory discovery、Action 層指定主機、分散式交易、跨主機 failover 與 orchestration 均不在此 schema 範圍。
+
+`stat(remotePath='/srv/app/result.xml')` 透過 SFTP lstat 回傳 typed `{path, exists}`，存在時包含 `type: file|directory|other`、file `size` 與可用的 ISO `modifiedAt`；missing path 是正常 `exists: false`，permission/auth/transport error 仍失敗。`mkdirs(remotePath='/srv/app/archive')` 建立 parents，已有 directory 時冪等，遇到 non-directory 時失敗。`move(sourcePath='/srv/app/out.xml', targetPath='/srv/app/archive/out.xml', overwrite=false)` 在同一選定 host 上 rename，source 必須存在，已有 target 需明確允許 overwrite；不下載／上傳。明確 overwrite 會先移除已有且型別相同的 regular file 或 empty directory，再執行 SFTP rename，因此不依賴 server 的 rename-overwrite extension。Non-empty directory、special file 或型別不符會拒絕。Replacement 不是 atomic：移除失敗時保留兩個 path；之後 rename 失敗則 source 仍在，target 可能不存在。`delete(remotePath='/srv/app/tmp.xml', missingOk=false)` 支援 regular file 和 empty directory，missingOk 必須明確開啟；non-empty directory、recursive 參數、wildcard／backslash path 都拒絕。所有 operation 只接受具名參數及可選 `timeoutMs`，沿用 selection／concurrency／deadline／host verification／redacted identity／Run-Debug-Load execution。Filesystem operation error 使用 `SSH_STAT_ERROR`／`SSH_MKDIRS_ERROR`／`SSH_MOVE_ERROR`／`SSH_DELETE_ERROR`。沒有 remote copy API；需要 copy 時明確使用 `execute(command='cp /srv/app/a /srv/app/b')`。Project file 使用 `&{...}`，local output 由 ATT 管理。
 
 ## 08 可靠性與執行控制
 

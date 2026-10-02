@@ -34,11 +34,51 @@ class ResourceOutputRetentionTest {
         assertTrue(evidence.contains("metadata:")); assertTrue(evidence.contains("truncated: true"));
         assertEquals("1234567890", value.get("paymentId"));
     }
+    @Test void credentialsAreRedactedBeforeTruncationInRetainedLoadEvidence() throws Exception {
+        CaseRuntimeContext context = context();
+        Map<String, Object> value = new LinkedHashMap<String, Object>(); value.put("token", "secret-value");
+        context.recordResourceOutput(policy(), value, new LinkedHashMap<String, Object>(), Collections.singletonList("secret-value"));
+        assertEquals("secret-value", value.get("token"));
+        context.materializeResourceOutputs(root);
+        String output = new String(Files.readAllBytes(root.resolve("resource-output.yaml")), "UTF-8");
+        assertFalse(output.contains("secret-value")); assertFalse(output.contains("secret-"));
+    }
+
+    @Test void presentationFailureDoesNotAlterTypedResultOrFailRetention() throws Exception {
+        CaseRuntimeContext context = context();
+        Object value = new Object() { @Override public String toString() { throw new IllegalStateException("private failure"); } };
+        ResourceOutputConfig invalid = ResourceOutputConfig.from(Collections.singletonMap("output",
+                Collections.singletonMap("format", "sqlplus")));
+        context.recordResourceOutput(invalid, value, new LinkedHashMap<String, Object>());
+        context.materializeResourceOutputs(root);
+        String output = new String(Files.readAllBytes(root.resolve("resource-output.yaml")), "UTF-8");
+        assertTrue(output.contains("outputError: Resource output formatting failed")); assertFalse(output.contains("private failure"));
+    }
+
     @Test void explicitNoneSuppressesFormattingEvenWhenEvidenceIsRetained() throws Exception {
         CountingMap value = new CountingMap(); value.put("payment", 1);
         CaseRuntimeContext context = context(); context.setResourceOutputEnabled(false);
         context.recordResourceOutput(policy(), value, new LinkedHashMap<String, Object>());
         context.materializeResourceOutputs(root);
         assertEquals(0, value.visits); assertFalse(Files.exists(root.resolve("resource-output.yaml")));
+    }
+
+    @Test void retainedMetadataRedactsNestedDbResultsWithoutTouchingCanonicalValues() throws Exception {
+        CaseRuntimeContext context = context();
+        CountingMap value = new CountingMap();
+        value.put("rows", Collections.singletonList(Collections.singletonMap("PASSWORD", "secret-value")));
+        Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+        metadata.put("result", value);
+        metadata.put("secret-value", Collections.singletonMap("diagnostic", "prefix secret-value suffix"));
+        metadata.put("numericCredential", 12345);
+        context.recordResourceOutput(policy(), value, metadata, Arrays.asList("secret-value", "12345"));
+        assertEquals(0, value.visits, "Metadata redaction must also wait for retention");
+        context.materializeResourceOutputs(root);
+        String output = new String(Files.readAllBytes(root.resolve("resource-output.yaml")), "UTF-8");
+        assertFalse(output.contains("secret-value")); assertFalse(output.contains("12345"));
+        assertTrue(output.contains("[REDACTED_SECRET]"));
+        assertSame(value, metadata.get("result"));
+        assertEquals("secret-value", ((Map<?, ?>) ((List<?>) value.get("rows")).get(0)).get("PASSWORD"));
+        assertEquals("prefix secret-value suffix", ((Map<?, ?>) metadata.get("secret-value")).get("diagnostic"));
     }
 }

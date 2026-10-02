@@ -10,7 +10,6 @@ actions:
 
   logRequest:
     type: log
-    level: INFO
     message: "Project-file request for ${CASE.caseId}"
     value: "${EXEC.VARS.requestText}"
 

@@ -123,15 +123,6 @@
           "type": "string",
           "minLength": 1
         },
-        "level": {
-          "enum": [
-            "TRACE",
-            "DEBUG",
-            "INFO",
-            "WARN",
-            "ERROR"
-          ]
-        },
         "timeoutMs": {
           "type": "integer",
           "minimum": 1,

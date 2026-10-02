@@ -751,7 +751,7 @@ class StageTemplateRunnerTest {
 
         assertEquals(ResultStatus.PASS, results.get(0).status());
         String text = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
-        assertTrue(text.contains("[LOG note INFO]\nfirst\nsecond\nthird\n\n"));
+        assertTrue(text.contains("[LOG note]\nfirst\nsecond\nthird\n\n"));
         assertFalse(text.contains("first\\nsecond"));
     }
 

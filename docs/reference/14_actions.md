@@ -8,7 +8,7 @@ This chapter defines the active ATT action contract. Templates use att-template/
 |---|---|---|
 | tool | call | Invokes a configured Tool, built-in or helper call and preserves the native typed result. DB query/scalar/update calls are ordinary Tool calls. |
 | assert | assert | Evaluates a boolean condition and records PASS or FAIL. expected and actual are optional diagnostic values. |
-| log | message or value | Formats a typed value for the Case log. Its fields are level, message, value and format. |
+| log | message or value | Formats a typed value for the Case log. Its fields are message, value and format. |
 | assign | name and expression | Publishes the expression's typed result below EXEC.VARS. |
 | flow | use | Runs a registered Flow in a nested Action scope and restores the caller's scope on return. |
 
@@ -159,13 +159,12 @@ Log is a presentation action and therefore has its own format field:
 ~~~yaml
 logOrder:
   type: log
-  level: INFO
   message: "Order response"
   value: "${EXEC.ACTIONS.callOrder.output.result}"
   format: yaml
 ~~~
 
-level defaults to INFO and accepts TRACE, DEBUG, INFO, WARN or ERROR. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
+Log is a plain Case-log entry. The current v3.6 contract removes `level`; delete it when migrating. Historical v3.4/v3.5 Template and Flow descriptors still accept their schema-defined Log level for compatibility. Internal diagnostic severity remains separate. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
 
 When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A project-file String is emitted as-is when used as a value; Log does not infer or attach a document format. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
 

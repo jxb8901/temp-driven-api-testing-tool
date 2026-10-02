@@ -490,7 +490,7 @@ class LoadScenarioTest {
         Files.createDirectories(project.resolve("templates/METRICS_PROBE_TEMPLATE"));
         write(project, "templates/METRICS_PROBE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
                 + "name: METRICS_PROBE_TEMPLATE\ndescription: metrics-only workspace probe\nactions:\n"
-                + "  probe: {type: tool, call: \"#{directoryExists(path=${EXEC.OUTPUT_DIR})}\", assert: \"${output.result} == 'false'\"}\n");
+                + "  probe: {type: tool, call: \"#{str.lower('FALSE')}\", assert: \"${output.result} == 'false'\"}\n");
         Path scenarioFile = write(project, "metrics-probe.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: METRICS_PROBE_TEMPLATE}\n"
                 + "load: {users: 1, duration: 1s}\nevidence: {mode: metrics}\n");
