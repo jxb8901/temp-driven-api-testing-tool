@@ -175,7 +175,7 @@ class StageTemplateLoaderTest {
             Path flow = tempDir.resolve("templates/flows/" + directory);
             Files.createDirectories(template); Files.createDirectories(flow);
             Files.write(template.resolve("template.yaml"), ("schemaVersion: att-template/v" + version
-                    + "\nname: Legacy\ndescription: Legacy Log\nactions:\n"
+                    + "\nname: Legacy-" + version + "\ndescription: Legacy Log\nactions:\n"
                     + "  note: {type: log, level: WARN, message: historical}\n").getBytes("UTF-8"));
             Files.write(flow.resolve("flow.yaml"), ("schemaVersion: att-flow/v" + version
                     + "\nid: common.legacy" + version.replace(".", "") + ".v1\nname: Legacy\ndescription: Legacy Log\nactions:\n"

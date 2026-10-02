@@ -1221,14 +1221,16 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb16-1"><a href=
 <span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">message</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Order response&quot;</span></span>
 <span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">value</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callOrder.output.result}&quot;</span></span>
 <span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">format</span><span class="kw">:</span><span class="at"> yaml</span></span></code></pre></div>
-<p>Log is a plain Case-log entry. The <code>level</code> field was
-removed; delete it. Internal diagnostic severity remains separate. At
-least one of message or value is required. message is rendered as text.
-value accepts any typed value, including nested maps/lists. Exact ${...}
-and #{...} expressions preserve their native types; map/list children
-are evaluated recursively without converting numbers, booleans, nulls or
-nested values to strings. format accepts text, json, yaml, xml or
-sqlplus and controls only the emitted Case-log string. When format is
+<p>Log is a plain Case-log entry. The current v3.6 contract removes
+<code>level</code>; delete it when migrating. Historical v3.4/v3.5
+Template and Flow descriptors still accept their schema-defined Log
+level for compatibility. Internal diagnostic severity remains separate.
+At least one of message or value is required. message is rendered as
+text. value accepts any typed value, including nested maps/lists. Exact
+${...} and #{...} expressions preserve their native types; map/list
+children are evaluated recursively without converting numbers, booleans,
+nulls or nested values to strings. format accepts text, json, yaml, xml
+or sqlplus and controls only the emitted Case-log string. When format is
 present, value is required.</p>
 <p>When both message and value are supplied, Log emits the message, a
 newline, then the formatted value. output.result is that emitted string.
@@ -3769,8 +3771,13 @@ available ISO <code>modifiedAt</code>. A missing path is normal
 succeeds for an existing directory, and rejects a non-directory.
 <code>move(sourcePath='/srv/app/out.xml', targetPath='/srv/app/archive/out.xml', overwrite=false)</code>
 renames on the same selected host; source must exist and replacing a
-target requires explicit overwrite. It neither stages bytes locally nor
-pre-deletes the target; servers unable to overwrite fail explicitly.
+target requires explicit overwrite. It does not stage bytes locally.
+Explicit overwrite removes an existing matching regular file or empty
+directory before SFTP rename, so it also works on servers without
+rename-overwrite support. Non-empty directories, special files, and
+mismatched types are rejected. Replacement is not atomic: a removal
+failure preserves both paths; a later rename failure leaves the source
+in place and may leave the target absent.
 <code>delete(remotePath='/srv/app/tmp.xml', missingOk=false)</code>
 supports regular files and empty directories; missingOk is explicit, and
 non-empty directories, recursive arguments, and wildcard/backslash paths
