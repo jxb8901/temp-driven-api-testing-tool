@@ -29,6 +29,7 @@ public final class LoadScenario {
     private final Map<String, Object> loadDefaults;
     private final Map<String, Object> executionDefaults;
     private final boolean policyOnly;
+    private final List<Path> testdataDescriptors;
     private String execIdFormat = "";
     public String execIdFormat() { return execIdFormat; }
     LoadScenario withExecIdFormat(String value) { execIdFormat = value == null ? "" : value; return this; }
@@ -64,25 +65,36 @@ public final class LoadScenario {
     LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
                  Map<String, Object> thresholds, Map<String, Object> evidence) {
         this(source, schemaVersion, workloads, seed, thresholds, evidence, false,
-                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), false);
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), false,
+                Collections.<Path>emptyList());
+    }
+
+    LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
+                 Map<String, Object> thresholds, Map<String, Object> evidence,
+                 Map<String, Object> loadDefaults, Map<String, Object> executionDefaults, boolean policyOnly,
+                 List<Path> testdataDescriptors) {
+        this(source, schemaVersion, workloads, seed, thresholds, evidence, false,
+                loadDefaults, executionDefaults, policyOnly, testdataDescriptors);
     }
 
     LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
                  Map<String, Object> thresholds, Map<String, Object> evidence,
                  Map<String, Object> loadDefaults, Map<String, Object> executionDefaults, boolean policyOnly) {
         this(source, schemaVersion, workloads, seed, thresholds, evidence, false,
-                loadDefaults, executionDefaults, policyOnly);
+                loadDefaults, executionDefaults, policyOnly, Collections.<Path>emptyList());
     }
 
     private LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
                          Map<String, Object> thresholds, Map<String, Object> evidence, boolean workloadView) {
         this(source, schemaVersion, workloads, seed, thresholds, evidence, workloadView,
-                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), false);
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), false,
+                Collections.<Path>emptyList());
     }
 
     private LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
                          Map<String, Object> thresholds, Map<String, Object> evidence, boolean workloadView,
-                         Map<String, Object> loadDefaults, Map<String, Object> executionDefaults, boolean policyOnly) {
+                         Map<String, Object> loadDefaults, Map<String, Object> executionDefaults, boolean policyOnly,
+                         List<Path> testdataDescriptors) {
         if (workloads == null || (workloads.isEmpty() && !policyOnly)) throw new IllegalArgumentException("Load scenario requires at least one workload unless it is policy-only");
         this.source = source;
         this.schemaVersion = schemaVersion == null ? Version.LOAD_SCHEMA : schemaVersion;
@@ -94,6 +106,8 @@ public final class LoadScenario {
         this.loadDefaults = immutable(loadDefaults);
         this.executionDefaults = immutable(executionDefaults);
         this.policyOnly = policyOnly;
+        this.testdataDescriptors = testdataDescriptors == null ? Collections.<Path>emptyList()
+                : Collections.unmodifiableList(new ArrayList<Path>(testdataDescriptors));
     }
 
     public Path source() { return source; }
@@ -138,6 +152,7 @@ public final class LoadScenario {
     public Map<String, Object> evidence() { return evidence; }
     public Map<String, Object> loadDefaults() { return loadDefaults; }
     public Map<String, Object> executionDefaults() { return executionDefaults; }
+    public List<Path> testdataDescriptors() { return testdataDescriptors; }
 
     public int configuredUsers() {
         int result = 0;
@@ -163,7 +178,8 @@ public final class LoadScenario {
     public LoadScenario forWorkload(LoadWorkload workload) {
         if (workload == null) throw new IllegalArgumentException("Load workload is required");
         return new LoadScenario(source, schemaVersion, Collections.singletonList(workload), seed,
-                workload.thresholds(), evidence, true).withExecIdFormat(execIdFormat);
+                workload.thresholds(), evidence, true, loadDefaults, executionDefaults, false,
+                testdataDescriptors).withExecIdFormat(execIdFormat);
     }
 
     public Map<String, Object> toMap() { return toMap(true, false); }

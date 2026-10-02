@@ -901,6 +901,14 @@ public final class CaseRuntimeContext {
                 : Collections.unmodifiableMap(new LinkedHashMap<String, Object>(inputs));
     }
 
+    /** Replaces the case-level input mapping before a Stage overlays its values. */
+    public void replaceInputValues(Map<String, Object> inputs) {
+        if (!activeStageInputKeys.isEmpty()) throw new IllegalStateException("Cannot replace EXEC.INPUT while a Stage is active");
+        inputNode.clear();
+        if (inputs != null) inputNode.putAll(debugCopyMap(inputs));
+        setLegacyInputsView(inputs);
+    }
+
     /** Stores an immutable definition snapshot to be evaluated per execution after ID publication. */
     public void setBootstrapVariables(Map<String, Object> variables) {
         bootstrapVariableDefinitions = variables == null || variables.isEmpty()

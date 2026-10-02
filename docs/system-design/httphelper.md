@@ -1,6 +1,6 @@
 # HTTPHelper runtime design
 
-The `att-config/v2.10` loader resolves the selected profile's `httphelpers` list before external execution, validates each `att-httphelper/v1.1` descriptor and builds a case-insensitive logical registry. Profiles replace whole lists, not individual properties. The configured helper is immutable; authentication values and trust-store passwords are transport state, not expression Context.
+The `att-config/v2.11` loader resolves the selected profile's `httphelpers` list before external execution, validates each `att-httphelper/v1.1` descriptor and builds a case-insensitive logical registry. Profiles replace whole lists, not individual properties. The configured helper is immutable; authentication values and trust-store passwords are transport state, not expression Context.
 
 `UnifiedTemplateEngine` routes primary `http.<id>.<operation>` calls to one run-owned `HttpHelperExecutor`. Each logical helper owns a lazily created, thread-safe Apache HTTP client and a bounded pooling connection manager. Normal runs own one executor per suite; load iterations share one executor through `LoadRunResources`; debug owns one per invocation. Each owner closes its executor at lifecycle end. There is no implicit cookie store or automatic request retry.
 

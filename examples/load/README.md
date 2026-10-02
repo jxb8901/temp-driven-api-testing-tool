@@ -1,6 +1,6 @@
 # ATT Load Scenario Examples
 
-本目錄的範例均使用 ATT 現行 schema att-load/v1.4。每個 scenario 以 workloads 清單配置 target。Schema、語義、所有 target 與依賴會在 scheduler 啟動前驗證。
+本目錄的範例均使用 ATT 現行 schema att-load/v1.5。每個 scenario 以 workloads 清單配置 target。Schema、語義、所有 target 與依賴會在 scheduler 啟動前驗證。
 
 ## 範例索引
 
@@ -15,12 +15,13 @@
 | multi-closed.yaml | 多個獨立 closed VU workload。 |
 | multi-arrival.yaml | 多個獨立 arrival-rate workload。 |
 | tool.yaml | 呼叫包內 deterministic Tool 的短範例。 |
+| testdata-generated.yaml | 從 Load-local generated testdata 依 iteration 順序載入 QUICK_START Template；records 用盡時停止 workload。 |
 | quick-profile.yaml | 僅含 Load policy 的 Quick Load profile；複製到 `load/load.yaml` 後使用。 |
 
 ## 最小 closed workload
 
 ~~~yaml
-schemaVersion: att-load/v1.4
+schemaVersion: att-load/v1.5
 workloads:
   - id: default
     target: {type: template, id: V3_FLOW_EXAMPLE}
@@ -31,12 +32,20 @@ workloads:
 
 每個 Virtual User 重複執行固定 target。Think time 可設一個 duration，也可設定 min/max range。
 
+## Generated Testdata
+
+`testdata-generated.yaml` imports a four-record virtual sequence from `examples/testdata/generated-account.yaml`, maps the typed `amount` value into the offline `QUICK_START` Template, and uses `scope: iteration`. Its `exhaustion: stop` policy ends that workload cleanly after the records are consumed:
+
+~~~sh
+./att.sh load examples/load/testdata-generated.yaml
+~~~
+
 ## Quick Load policy profile
 
-`quick-profile.yaml` 使用現行 `att-load/v1.4` policy-only descriptor，不包含 target 或 business data。複製到專案的 `load/load.yaml` 後，執行 `./att.sh load --debug template <id>`、`flow <id>` 或 `tool <id>`，即可將 sidecar inputs/vars/arguments 與此 policy 合併，再進入正常 Load runtime。CLI intensity options 會覆蓋 policy；若沒有 policy，命令列需提供完整 pacing policy。
+`quick-profile.yaml` 使用現行 `att-load/v1.5` policy-only descriptor，不包含 target 或 business data。複製到專案的 `load/load.yaml` 後，執行 `./att.sh load --debug template <id>`、`flow <id>` 或 `tool <id>`，即可將 sidecar inputs/vars/arguments 與此 policy 合併，再進入正常 Load runtime。CLI intensity options 會覆蓋 policy；若沒有 policy，命令列需提供完整 pacing policy。
 
 ~~~yaml
-schemaVersion: att-load/v1.4
+schemaVersion: att-load/v1.5
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -47,7 +56,7 @@ evidence: {mode: failures}
 Template/Flow workload 可設定 bootstrap `vars`。完整 reference 保留原生型別；expression 在每次 Load execution 的 EXEC.ID/EXEC.OUTPUT_DIR 初始化後評估：
 
 ~~~yaml
-schemaVersion: att-load/v1.4
+schemaVersion: att-load/v1.5
 workloads:
   - id: payments
     target: {type: template, id: PAYMENT_INVOKE}

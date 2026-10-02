@@ -25,6 +25,7 @@ public final class LoadWorkload {
     private final int maxConcurrent;
     private final String overloadPolicy;
     private final Map<String, Object> thresholds;
+    private final Map<String, Object> testdata;
     private final int sourceIndex;
 
     public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
@@ -52,6 +53,17 @@ public final class LoadWorkload {
                         double arrivalRatePerSecond, String arrivalRate, Duration warmup, Duration rampUp,
                         Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
                         int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds, int sourceIndex) {
+        this(id, targetType, targetId, targetArguments, inputs, vars, model, users, arrivalRatePerSecond,
+                arrivalRate, warmup, rampUp, duration, rampDown, thinkTimePolicy, maxConcurrent, overloadPolicy,
+                thresholds, Collections.<String, Object>emptyMap(), sourceIndex);
+    }
+
+    public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
+                        Map<String, Object> inputs, Map<String, Object> vars, LoadScenario.Model model, int users,
+                        double arrivalRatePerSecond, String arrivalRate, Duration warmup, Duration rampUp,
+                        Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
+                        int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds,
+                        Map<String, Object> testdata, int sourceIndex) {
         this.id = id;
         this.targetType = targetType;
         this.targetId = targetId;
@@ -70,6 +82,7 @@ public final class LoadWorkload {
         this.maxConcurrent = maxConcurrent;
         this.overloadPolicy = overloadPolicy;
         this.thresholds = immutable(thresholds);
+        this.testdata = immutable(testdata);
         this.sourceIndex = sourceIndex;
     }
 
@@ -91,6 +104,7 @@ public final class LoadWorkload {
     public int maxConcurrent() { return maxConcurrent; }
     public String overloadPolicy() { return overloadPolicy; }
     public Map<String, Object> thresholds() { return thresholds; }
+    public Map<String, Object> testdata() { return testdata; }
     /** Zero-based index in the source scenario, or -1 for in-memory promoted workloads. */
     public int sourceIndex() { return sourceIndex; }
 
@@ -104,6 +118,7 @@ public final class LoadWorkload {
         result.put("target", target);
         if (includeExecutionData && !inputs.isEmpty()) result.put("inputs", inputs);
         if (includeExecutionData && !vars.isEmpty()) result.put("vars", vars);
+        if (!testdata.isEmpty()) result.put("testdata", testdata);
         Map<String, Object> load = new LinkedHashMap<String, Object>();
         if (model == LoadScenario.Model.CLOSED) load.put("users", users);
         else load.put("arrivalRate", arrivalRate);

@@ -1,14 +1,14 @@
 # ATT environment profile examples
 
-ATT uses `att-config/v2.10` profiles to select resource descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. The active DBHelper, MQHelper, HTTPHelper, SSHHelper and Tool Group schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema_matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
+ATT uses `att-config/v2.11` profiles to select resource and testdata descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. The active DBHelper, MQHelper, HTTPHelper, SSHHelper, Tool Group and Testdata schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema_matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
 
 ## Shared configuration and profile bindings
 
-The package keeps common behavior in one `config/config.yaml`. Each profile may replace configured resource lists (`dbhelpers`, `mqhelpers`, `httphelpers`, `sshhelpers`) as a whole; omitted lists inherit the common list.
+The package keeps common behavior in one `config/config.yaml`. Each profile may replace configured resource lists (`dbhelpers`, `mqhelpers`, `httphelpers`, `sshhelpers`) as a whole; omitted lists inherit the common list. A profile's `testdata` list selects the reusable records available in that environment.
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 environment: SIT
 templates: {root: templates}
 testcase: {root: testcase}
@@ -18,12 +18,13 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
+    testdata: [config/testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-Keep the package's normal `report`, `run`, `execution`, global `tools` and `toolGroups` entries in the common config. Only move environment-specific resource descriptor paths into profiles. HTTP and SSH bindings use the same `httphelpers` and `sshhelpers` list pattern.
+Keep the package's normal `report`, `run`, `execution`, global `tools` and `toolGroups` entries in the common config. Only move environment-specific resource and testdata descriptor paths into profiles. HTTP and SSH bindings use the same `httphelpers` and `sshhelpers` list pattern. Testdata descriptors contain package-local records, not environment secrets.
 
 ## Stable logical helper IDs
 

@@ -208,6 +208,12 @@ public class FrameworkEngine {
         dbHelperExecutor.beginCase();
         try {
             if (!options.dryRun()) {
+                att.testdata.TestdataInputResolver testdata = new att.testdata.TestdataInputResolver(
+                        new att.testdata.TestdataRegistry(projectRoot, suiteConfig.testdataDescriptors(), Collections.<Path>emptyList()));
+                Map<String, Object> resolvedCaseInput = testdata.resolve(testCase.caseData(), context, null, null);
+                context.replaceInputValues(resolvedCaseInput);
+                if (!testdata.selectionEvidence().isEmpty())
+                    context.put("CASE.testdataSelections", testdata.selectionEvidence());
                 boolean hasPriorFailure = false;
                 boolean stoppedByFailure = false;
                 for (StageConfig stage : suiteConfig.stages()) {
@@ -222,7 +228,11 @@ public class FrameworkEngine {
                     StageTemplate template = suitePlan.template(stageData.templateName());
                     if (template == null) throw new IllegalArgumentException("Template was not resolved in execution plan: " + stageData.templateName());
                     verbose(options, "[STAGE] case=" + testCase.caseId() + " stage=" + stage.key() + " template=" + template.name() + " status=START");
-                    context.beginStage(stageData, template.name(), template.directory());
+                    Map<String, Object> resolvedStageInput = testdata.resolve(stageData.values(), context, null, null);
+                    if (!testdata.selectionEvidence().isEmpty())
+                        context.put("CASE.testdataSelections", testdata.selectionEvidence());
+                    StageCaseData executionStage = new StageCaseData(stageData.key(), stageData.templateName(), resolvedStageInput);
+                    context.beginStage(executionStage, template.name(), template.directory());
                     caseLog.append("STAGE " + stage.key(), "template: " + stageData.templateName());
                     Instant stageStarted = Instant.now();
                     List<ValidationResult> stageResults = templateRunner.execute(stage.key(), template, context, caseLog);

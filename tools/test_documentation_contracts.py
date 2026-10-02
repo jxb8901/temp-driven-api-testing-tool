@@ -4,12 +4,13 @@ from documentation_contracts import (active_schemas, stale_claims, current_html,
                                      manifest_errors, structure_errors, overview_resource_errors,
                                      chapter_label_errors)
 
-VERSION = "3.6.1"
+VERSION = "3.7.0"
 CATALOG = """schemaVersion: att-schema-catalog/v3.0
 schemas:
-  att-load/v1.3: att-load-v1.3.schema.json
-  att-load/v1.2: history/att-load-v1.2.schema.json
-  globalConfig: att-config-v2.10.schema.json
+  att-load/v1.5: att-load-v1.5.schema.json
+  att-load/v1.4: history/att-load-v1.4.schema.json
+  globalConfig: att-config-v2.11.schema.json
+  att-testdata/v1.0: att-testdata-v1.0.schema.json
 """
 
 
@@ -18,16 +19,16 @@ class DocumentationContractsTest(unittest.TestCase):
         self.active = active_schemas(CATALOG)
 
     def test_catalog_history_does_not_override_active_version(self):
-        self.assertEqual({"att-load": "1.3", "att-config": "2.10"}, self.active)
+        self.assertEqual({"att-load": "1.5", "att-config": "2.11", "att-testdata": "1.0"}, self.active)
 
     def test_stale_schemas_in_normal_text_examples_and_filenames_fail(self):
         for text in ("schemaVersion: att-load/v1.2", "Load v1.2",
-                     "schemas/att-config-v2.9.schema.json", "ATT 3.6.0"):
+                     "schemas/att-config-v2.9.schema.json", "ATT 3.6.2"):
             with self.subTest(text=text):
                 self.assertTrue(stale_claims(text, self.active, VERSION))
 
     def test_current_schemas_pass(self):
-        self.assertEqual([], stale_claims("ATT 3.6.1; att-load/v1.3; config v2.10",
+        self.assertEqual([], stale_claims("ATT 3.7.0; att-load/v1.5; config v2.11; att-testdata/v1.0",
                                           self.active, VERSION))
 
     def test_explicit_historical_block_is_scoped_and_balanced(self):
@@ -52,7 +53,7 @@ class DocumentationContractsTest(unittest.TestCase):
         # Compact HTML reproduces both stripping and boundary-loss failures.
         text = ("<h2>05 Expressions</h2>"
                 "<!-- att-docs:historical --><p>att-load/v1.2; ATT 3.6.0</p>"
-                "<!-- /att-docs:historical --><p>att-load/v1.3</p>")
+                "<!-- /att-docs:historical --><p>att-load/v1.5</p>")
         self.assertEqual([], stale_claims(current_html(text), self.active, VERSION))
         # Identical stale text following the closing marker remains an error.
         outside = text + "<p>att-load/v1.2</p>"

@@ -173,7 +173,7 @@ public final class StageTemplateLoader {
             att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                     schemaVersion, Version.TEMPLATE_SCHEMA);
             throw new IllegalArgumentException("Unsupported template schemaVersion '" + schemaVersion
-                    + "'; ATT 3.6.2 supports only " + Version.TEMPLATE_SCHEMA
+                    + "'; ATT 3.7.0 supports only " + Version.TEMPLATE_SCHEMA
                     + ". Render now returns String, command Tool parsing uses stdoutFormat, and Log file/fields migrate to value. See docs/reference/appendices/migrations.md.");
         }
         Path schema = att.validation.SchemaFiles.resolve(projectRoot,
@@ -192,6 +192,7 @@ public final class StageTemplateLoader {
             String actionKey = String.valueOf(entry.getKey());
             if (actionKey.trim().isEmpty() || actionKey.contains(".")) throw new IllegalArgumentException("Action key must be non-blank and dot-free: " + actionKey);
             Map<?, ?> actionMap = (Map<?, ?>) entry.getValue();
+            att.testdata.TestdataSyntax.rejectDirectReferences(actionMap, "Template action " + actionKey);
             if (current) rejectRemovedActionContract(actionMap, actionKey, descriptor);
             SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey,
                     current || historical

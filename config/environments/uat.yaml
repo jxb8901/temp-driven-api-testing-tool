@@ -1,4 +1,4 @@
-schemaVersion: att-config/v2.10
+schemaVersion: att-config/v2.11
 outputDirectory: output
 environment: UAT
 timeoutMs: 10000
@@ -29,6 +29,8 @@ dbhelpers:
   - config/dbhelpers/uat/orders.yaml
 mqhelpers:
   - config/mqhelpers/uat/payment.yaml
+testdata:
+  - config/testdata/accounts.yaml
 
 report:
   mode: append-to-copy

@@ -2,13 +2,15 @@ schemaVersion: att-schema-catalog/v3.0
 schemas:
   att-debug/v1.1: att-debug-v1.1.schema.json
   historicalDebugV10: history/att-debug-v1.0.schema.json
-  att-load/v1.4: att-load-v1.4.schema.json
+  att-load/v1.5: att-load-v1.5.schema.json
+  att-load/v1.4: history/att-load-v1.4.schema.json
   att-load/v1.3: history/att-load-v1.3.schema.json
   att-load-profile/v1.0: history/att-load-profile-v1.0.schema.json
   att-load/v1.2: history/att-load-v1.2.schema.json
   att-load/v1.0: history/att-load-v1.0.schema.json
   att-load-summary/v1.0: att-load-summary-v1.0.schema.json
-  globalConfig: att-config-v2.10.schema.json
+  att-config/v2.10: history/att-config-v2.10.schema.json
+  globalConfig: att-config-v2.11.schema.json
   previousGlobalConfig: history/att-config-v2.8.schema.json
   previousGlobalConfigV27: history/att-config-v2.7.schema.json
   legacyGlobalConfigV26: history/att-config-v2.6.schema.json
@@ -48,6 +50,7 @@ schemas:
   ciSummary: att-ci-summary-v2.1.schema.json
   junit: att-junit-v2.1.xsd
   historical-config-2.9: history/att-config-v2.9.schema.json
+  att-testdata/v1.0: att-testdata-v1.0.schema.json
   historical-tool-group-2.8: history/att-tool-group-v2.8.schema.json
   historical-template-3.2: history/att-template-v3.2.schema.json
   historical-flow-3.2: history/att-flow-v3.2.schema.json

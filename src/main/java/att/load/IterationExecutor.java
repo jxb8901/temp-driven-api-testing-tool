@@ -32,26 +32,34 @@ public final class IterationExecutor implements LoadIterationRunner {
     private final Path outputRoot;
     private final FlowRegistry flows;
     private final boolean ownsResources;
+    private final att.testdata.TestdataInputResolver testdataResolver;
 
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target) {
         this(projectRoot, config, target, new LoadRunResources(projectRoot, config), true,
-                projectRoot.resolve(config.outputDirectory()));
+                projectRoot.resolve(config.outputDirectory()), null);
     }
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target, LoadRunResources resources) {
-        this(projectRoot, config, target, resources, false, projectRoot.resolve(config.outputDirectory()));
+        this(projectRoot, config, target, resources, false, projectRoot.resolve(config.outputDirectory()), null);
     }
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
                              LoadRunResources resources, Path outputRoot) {
-        this(projectRoot, config, target, resources, false, outputRoot);
+        this(projectRoot, config, target, resources, false, outputRoot, null);
+    }
+    public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
+                             LoadRunResources resources, Path outputRoot,
+                             att.testdata.TestdataInputResolver testdataResolver) {
+        this(projectRoot, config, target, resources, false, outputRoot, testdataResolver);
     }
     private IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
-                              LoadRunResources resources, boolean ownsResources, Path outputRoot) {
+                              LoadRunResources resources, boolean ownsResources, Path outputRoot,
+                              att.testdata.TestdataInputResolver testdataResolver) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize(); this.config = config; this.target = target;
         this.resources = resources == null ? new LoadRunResources(projectRoot, config) : resources;
         this.outputRoot = (outputRoot == null ? this.projectRoot.resolve(config.outputDirectory()) : outputRoot)
                 .toAbsolutePath().normalize();
         this.flows = target.flows().freezeFor(target.template());
         this.ownsResources = resources == null || ownsResources;
+        this.testdataResolver = testdataResolver;
     }
 
     @Override public IterationResult execute(IterationRequest request) {
@@ -104,6 +112,12 @@ public final class IterationExecutor implements LoadIterationRunner {
             log = CaseExecutionLog.lightweight(executionWorkspace.resolve("case.log"), config.caseLogYamlAnchors());
             att.core.ExecutionBootstrapVariables.evaluate(context.bootstrapVariables(), context, identityEngine,
                     att.core.ExecutionBootstrapVariables.Scope.LOAD);
+            if (testdataResolver != null) {
+                context.replaceInputValues(testdataResolver.resolve(request.inputs(), context,
+                        request.userId(), request.iterationId()));
+                if (!testdataResolver.selectionEvidence().isEmpty())
+                    context.put("CASE.testdataSelections", testdataResolver.selectionEvidence());
+            }
             context.beginStage(prepared.stage(), target.template().name(), target.template().directory());
             DbHelperExecutor db = resources.db();
             db.beginCase();
@@ -120,6 +134,14 @@ public final class IterationExecutor implements LoadIterationRunner {
             context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
             context.finishStage(status.name(), Duration.between(started, Instant.now()).toMillis());
             diagnostic = firstDiagnostic(results);
+        } catch (att.testdata.TestdataStopException stop) {
+            status = ResultStatus.SKIPPED;
+            if (context != null) {
+                context.put("CASE.testdataStop", Boolean.TRUE);
+                context.put("CASE.testdataStopReason", message(stop));
+                context.put("CASE.status", status.name());
+            }
+            if (!finalized) resources.db().abortCase();
         } catch (Exception error) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(error);
             diagnostic = typed == null ? null : typed.toDiagnostic();

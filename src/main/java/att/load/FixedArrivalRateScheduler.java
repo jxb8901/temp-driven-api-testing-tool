@@ -127,6 +127,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                         evidenceStore.releaseEvidence(id);
                     }
                     if (result.evidenceRef() == null) result.discardTransientWorkspace();
+                    if (result.testdataStopRequested()) cancelled.set(true);
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                 } catch (RuntimeException error) {
                     if (evidenceStore != null && !evidenceStore.claimFailureEvidence(id)) evidenceStore.releaseEvidence(id);

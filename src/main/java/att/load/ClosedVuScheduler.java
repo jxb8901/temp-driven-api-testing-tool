@@ -120,6 +120,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
                         evidenceStore.releaseEvidence(iterationId);
                     }
                     if (result.evidenceRef() == null) result.discardTransientWorkspace();
+                    if (result.testdataStopRequested()) cancelled.set(true);
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                 }
                 catch (RuntimeException failure) {

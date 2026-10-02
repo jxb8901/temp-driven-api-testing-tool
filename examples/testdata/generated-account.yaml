@@ -1,0 +1,15 @@
+schemaVersion: att-testdata/v1.0
+id: generatedAccounts
+records:
+  generate:
+    seq:
+      from: 1000
+      to: 1003
+      format: "%06d"
+  record:
+    id: "A-%{seq}"
+    status: ACTIVE
+    amount: 42
+selection:
+  strategy: roundRobin
+  exhaustion: stop

@@ -12,7 +12,7 @@ actions:
   showInput:
     type: log
     description: Write a human-readable line to the Case log.
-    message: "Quick Start case ${META.SOURCE.caseId}: amount=${EXEC.VARS.quickStartAmount}"
+    message: "Quick Start case ${META.SOURCE.caseId?}: amount=${EXEC.VARS.quickStartAmount}"
 
   readDate:
     type: tool

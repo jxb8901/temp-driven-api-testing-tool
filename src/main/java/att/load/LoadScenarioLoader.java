@@ -21,7 +21,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Loads and semantically validates current att-load/v1.4 descriptors and historical v1.3 scenarios. */
+/** Loads and semantically validates current att-load/v1.5 descriptors and compatible historical scenarios. */
 public final class LoadScenarioLoader {
     private static final Pattern DURATION = Pattern.compile("^([0-9]+)(ms|s|m|h)$");
     private static final Pattern RATE = Pattern.compile("^([1-9][0-9]*(?:\\.[0-9]+)?)/(s|m)$");
@@ -43,9 +43,14 @@ public final class LoadScenarioLoader {
             LoadOverrides effectiveOverrides = overrides == null ? LoadOverrides.none() : overrides;
             Path schema;
             boolean normalizeHistoricalV13 = false;
+            boolean normalizePreviousV14 = false;
             if (Version.LOAD_SCHEMA_CURRENT.equals(version)) {
                 applyCurrentOverrides(map, effectiveOverrides);
-                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.4.schema.json");
+                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json");
+            } else if (Version.LOAD_SCHEMA_V1_4.equals(version)) {
+                applyCurrentOverrides(map, effectiveOverrides);
+                schema = att.validation.SchemaFiles.resolveVersion(projectRoot, Version.LOAD_SCHEMA_V1_4);
+                normalizePreviousV14 = true;
             } else if (Version.LOAD_SCHEMA_V1_3.equals(version)) {
                 applyCurrentOverrides(map, effectiveOverrides);
                 schema = att.validation.SchemaFiles.resolveVersion(projectRoot, Version.LOAD_SCHEMA_V1_3);
@@ -56,9 +61,9 @@ public final class LoadScenarioLoader {
                 throw failure("schemaVersion", "Unsupported load scenario schemaVersion '" + version + "'; current schema is "
                         + Version.LOAD_SCHEMA_CURRENT + " (historical workloads schema " + Version.LOAD_SCHEMA_V1_3 + "). Update to workloads-based syntax and use execution.execIdFormat; see docs/reference/appendices/migrations.md.");
             }
-            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.4.schema.json");
-            if (normalizeHistoricalV13) {
-                SchemaSupport.requireVersion(map, Version.LOAD_SCHEMA_V1_3, "historical load scenario");
+            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json");
+            if (normalizeHistoricalV13 || normalizePreviousV14) {
+                SchemaSupport.requireVersion(map, version, "historical load scenario");
                 JsonSchemaVerifier.verify(schema, map);
                 map.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
                 JsonSchemaVerifier.verify(currentSchema, map);
@@ -101,13 +106,22 @@ public final class LoadScenarioLoader {
         Path source = projectRoot.resolve("load/load.yaml").normalize();
         if (!Files.exists(source)) return null;
         if (!Files.isRegularFile(source) || Files.isSymbolicLink(source))
-            throw invalid(source, "Load policy must be a regular non-symlink file", "policy", "Create a regular att-load/v1.4 YAML policy descriptor.", null);
+            throw invalid(source, "Load policy must be a regular non-symlink file", "policy", "Create a regular att-load/v1.5 YAML policy descriptor.", null);
         Object loaded = YamlSupport.load(source);
-        if (!(loaded instanceof Map)) throw invalid(source, "Load policy must be a YAML map", "policy", "Create a valid att-load/v1.4 YAML policy descriptor.", null);
+        if (!(loaded instanceof Map)) throw invalid(source, "Load policy must be a YAML map", "policy", "Create a valid att-load/v1.5 YAML policy descriptor.", null);
         Map<String, Object> map = objectMap((Map<?, ?>) loaded);
         String version = string(map.get("schemaVersion"), "schemaVersion");
         if (Version.LOAD_SCHEMA_CURRENT.equals(version)) {
-            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.4.schema.json"), map);
+            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json"), map);
+            LoadScenario scenario = semanticCurrent(source, map, false);
+            if (!scenario.policyOnly()) throw quickLoadFailure(source, "workloads", "load/load.yaml is a policy-only descriptor and must not declare workloads");
+            return map;
+        }
+        if (Version.LOAD_SCHEMA_V1_4.equals(version)) {
+            Path previous = att.validation.SchemaFiles.resolveVersion(projectRoot, Version.LOAD_SCHEMA_V1_4);
+            JsonSchemaVerifier.verify(previous, map);
+            map.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
+            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json"), map);
             LoadScenario scenario = semanticCurrent(source, map, false);
             if (!scenario.policyOnly()) throw quickLoadFailure(source, "workloads", "load/load.yaml is a policy-only descriptor and must not declare workloads");
             return map;
@@ -120,7 +134,7 @@ public final class LoadScenarioLoader {
         migrated.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
         for (String field : new String[]{"load", "execution", "thresholds", "evidence", "seed"})
             if (map.containsKey(field)) migrated.put(field, map.get(field));
-        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.4.schema.json"), migrated);
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json"), migrated);
         semanticCurrent(source, migrated, false);
         return migrated;
     }
@@ -141,7 +155,7 @@ public final class LoadScenarioLoader {
         Map<String, Object> root = new LinkedHashMap<String, Object>();
         root.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
         if (profile != null) {
-            for (String field : new String[]{"seed", "thresholds", "evidence"}) if (profile.containsKey(field)) root.put(field, profile.get(field));
+            for (String field : new String[]{"seed", "thresholds", "evidence", "testdata"}) if (profile.containsKey(field)) root.put(field, profile.get(field));
         }
         Map<String, Object> workload = new LinkedHashMap<String, Object>();
         workload.put("id", "debug-" + targetId.replaceAll("[^A-Za-z0-9._-]", "-"));
@@ -163,7 +177,7 @@ public final class LoadScenarioLoader {
         if (!load.isEmpty()) root.put("load", load);
         if (!execution.isEmpty()) root.put("execution", execution);
         root.put("workloads", java.util.Collections.<Object>singletonList(workload));
-        try { JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.4.schema.json"), root); }
+        try { JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json"), root); }
         catch (Exception error) { throw quickLoadFailure(source, "load", "Invalid composed Quick Load policy: " + error.getMessage()); }
         return semanticCurrent(source, root, false);
     }
@@ -181,8 +195,29 @@ public final class LoadScenarioLoader {
         Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put(key, value); return result;
     }
 
+    private List<Path> descriptorPaths(Object value, String field) {
+        if (value == null) return Collections.emptyList();
+        List<Object> raw = list(value, field);
+        List<Path> result = new ArrayList<Path>();
+        Set<Path> unique = new HashSet<Path>();
+        for (int i = 0; i < raw.size(); i++) {
+            String owner = field + "[" + i + "]";
+            String name = string(raw.get(i), owner);
+            Path relative = java.nio.file.Paths.get(name);
+            if (relative.isAbsolute() || name.indexOf('\\') >= 0
+                    || !(name.endsWith(".yaml") || name.endsWith(".yml")))
+                throw failure(owner, "testdata imports must be package-relative YAML paths");
+            Path resolved = projectRoot.resolve(relative).normalize();
+            if (!resolved.startsWith(projectRoot) || !unique.add(resolved))
+                throw failure(owner, "testdata import paths must remain inside the package and be unique");
+            result.add(resolved);
+        }
+        return Collections.unmodifiableList(result);
+    }
+
     private LoadScenario semanticCurrent(Path source, Map<String, Object> root, boolean sourceIsScenario) {
         removeDisabledKeys(root);
+        List<Path> testdataDescriptors = descriptorPaths(root.get("testdata"), "testdata");
         List<Object> raw = root.containsKey("workloads") ? list(root.get("workloads"), "workloads") : Collections.<Object>emptyList();
         Map<String, Object> rootLoad = configMapOptional(root.get("load"), "load");
         Map<String, Object> rootExecution = configMapOptional(root.get("execution"), "execution");
@@ -198,7 +233,7 @@ public final class LoadScenarioLoader {
             try { LoadExecutionIdPattern.validate(policyFormat, parsePolicy("policy", rootLoad, workloadExecutionDefaults, rootThresholds).model()); }
             catch (IllegalArgumentException error) { throw failure("execution.execIdFormat", error.getMessage()); }
             return new LoadScenario(source, String.valueOf(root.get("schemaVersion")), Collections.<LoadWorkload>emptyList(),
-                    policySeed, rootThresholds, policyEvidence, rootLoad, rootExecution, true).withExecIdFormat(policyFormat);
+                    policySeed, rootThresholds, policyEvidence, rootLoad, rootExecution, true, testdataDescriptors).withExecIdFormat(policyFormat);
         }
         List<LoadWorkload> workloads = new ArrayList<LoadWorkload>();
         Set<String> ids = new HashSet<String>();
@@ -240,7 +275,7 @@ public final class LoadScenarioLoader {
         try { LoadExecutionIdPattern.validate(format, model); }
         catch (IllegalArgumentException error) { throw failure("execution.execIdFormat", error.getMessage()); }
         return new LoadScenario(source, String.valueOf(root.get("schemaVersion")), workloads, seed, thresholds, evidence,
-                rootLoad, rootExecution, false)
+                rootLoad, rootExecution, false, testdataDescriptors)
                 .withExecIdFormat(format);
     }
 
@@ -275,10 +310,29 @@ public final class LoadScenarioLoader {
         Map<String, Object> arguments = mapOptional(target.get("arguments"), prefix + "target.arguments");
         Map<String, Object> inputs = mapOptional(root.get("inputs"), prefix + "inputs");
         Map<String, Object> vars = mapOptional(root.get("vars"), prefix + "vars");
+        Map<String, Object> testdata = configMapOptional(root.get("testdata"), prefix + "testdata");
         Map<String, Object> load = configMap(root.get("load"), prefix + "load");
         Map<String, Object> execution = configMapOptional(root.get("execution"), prefix + "execution");
+        for (Map.Entry<String, Object> entry : testdata.entrySet()) {
+            String owner = prefix + "testdata." + entry.getKey();
+            if (!entry.getKey().matches("[A-Za-z][A-Za-z0-9_-]*"))
+                throw failure(owner, "workload testdata key must be a logical testdata id");
+            Map<String, Object> policy = configMap(entry.getValue(), owner);
+            for (String key : policy.keySet()) if (!"scope".equals(key) && !"selection".equals(key))
+                throw failure(owner + "." + key, "workload testdata policy supports only scope and selection");
+            Object scope = policy.get("scope");
+            if (scope != null && !("workload".equals(scope) || "user".equals(scope) || "iteration".equals(scope)))
+                throw failure(owner + ".scope", "scope must be workload, user, or iteration");
+            if (policy.get("selection") != null) {
+                Map<String, Object> selection = configMap(policy.get("selection"), owner + ".selection");
+                try { att.testdata.TestdataSelectionPolicy.parse(selection, owner + ".selection"); }
+                catch (IllegalArgumentException error) { throw failure(owner + ".selection", error.getMessage()); }
+            }
+        }
         if (("template".equals(type) || "flow".equals(type)) && !arguments.isEmpty())
             throw failure(prefix + "target.arguments", "target.arguments is supported only for Tool targets");
+        if ("tool".equals(type))
+            att.testdata.TestdataSyntax.rejectDirectReferences(arguments, prefix + "target.arguments");
         if ("tool".equals(type) && !vars.isEmpty())
             throw failure(prefix + "vars", "workload.vars is supported only for Template and Flow targets; Tool arguments remain a separate contract");
 
@@ -300,6 +354,13 @@ public final class LoadScenarioLoader {
             if (!"drop".equals(overload)) throw failure(prefix + "load.overloadPolicy", "load.overloadPolicy supports only drop");
             if (execution.get("thinkTime") != null) throw failure(prefix + "execution.thinkTime", "execution.thinkTime is valid only for closed users workloads");
         }
+        if (model == LoadScenario.Model.ARRIVAL_RATE) {
+            for (Map.Entry<String, Object> entry : testdata.entrySet()) {
+                Object scope = ((Map<?, ?>) entry.getValue()).get("scope");
+                if ("user".equals(scope)) throw failure(prefix + "testdata." + entry.getKey() + ".scope",
+                        "scope: user is supported only for closed workloads");
+            }
+        }
         Duration warmup = duration(load.get("warmup"), prefix + "load.warmup", false);
         Duration rampUp = duration(load.get("rampUp"), prefix + "load.rampUp", false);
         Duration duration = duration(load.get("duration"), prefix + "load.duration", true);
@@ -307,7 +368,7 @@ public final class LoadScenarioLoader {
         ThinkTimePolicy thinkTime = thinkTime(execution.get("thinkTime"), prefix + "execution.thinkTime");
         if (validateThresholds) validateThresholds(model, thresholds, prefix + "thresholds");
         return new LoadWorkload(id, type, targetId, arguments, inputs, vars, model, users, rate, rateText,
-                warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds, sourceIndex);
+                warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds, testdata, sourceIndex);
     }
 
     private ThinkTimePolicy thinkTime(Object value, String field) {

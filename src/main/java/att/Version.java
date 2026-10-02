@@ -9,8 +9,8 @@ public final class Version {
     public static final String DISPLAY = "ATT V" + PRODUCT;
     public static final String BUILD_TIME = property("att.buildTime", "unknown");
     public static final String GIT_COMMIT = property("att.gitCommit", "unknown");
-    public static final String CONFIG_SCHEMA = "att-config/v2.10";
-    public static final String PREVIOUS_CONFIG_SCHEMA = "att-config/v2.8";
+    public static final String CONFIG_SCHEMA = "att-config/v2.11";
+    public static final String PREVIOUS_CONFIG_SCHEMA = "att-config/v2.10";
     public static final String OLDER_CONFIG_SCHEMA = "att-config/v2.7";
     public static final String LEGACY_CONFIG_SCHEMA = "att-config/v2.5";
     public static final String DBHELPER_SCHEMA = "att-dbhelper/v2.6";
@@ -23,6 +23,7 @@ public final class Version {
     public static final String SIDECAR_SCHEMA = "att-sidecar/v2.2";
     public static final String LEGACY_SIDECAR_SCHEMA = "att-sidecar/v2.1";
     public static final String TESTCASE_SNAPSHOT_SCHEMA = "att-testcases/v2.4";
+    public static final String TESTDATA_SCHEMA = "att-testdata/v1.0";
     public static final String TEMPLATE_SCHEMA = "att-template/v3.6";
     public static final String HISTORICAL_TEMPLATE_SCHEMA_V3_5 = "att-template/v3.5";
     public static final String HISTORICAL_TEMPLATE_SCHEMA_V3_4 = "att-template/v3.4";
@@ -51,8 +52,9 @@ public final class Version {
     public static final String LOAD_SCHEMA_V1_1 = "att-load/v1.1";
     public static final String LOAD_SCHEMA_V1_2 = "att-load/v1.2";
     public static final String LOAD_SCHEMA_V1_3 = "att-load/v1.3";
-    public static final String PREVIOUS_LOAD_SCHEMA = LOAD_SCHEMA_V1_3;
-    public static final String LOAD_SCHEMA = "att-load/v1.4";
+    public static final String LOAD_SCHEMA_V1_4 = "att-load/v1.4";
+    public static final String PREVIOUS_LOAD_SCHEMA = LOAD_SCHEMA_V1_4;
+    public static final String LOAD_SCHEMA = "att-load/v1.5";
     public static final String LOAD_SCHEMA_CURRENT = LOAD_SCHEMA;
     public static final String LOAD_SUMMARY_SCHEMA = "att-load-summary/v1.0";
 

@@ -79,7 +79,7 @@ class LoadScenarioTest {
         Path prior = write(project, "prior-v12.yaml", "schemaVersion: att-load/v1.2\nworkloads:\n"
                 + "  - id: default\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 1, duration: 1s}\n");
         DiagnosticException oldCurrent = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(prior));
-        assertTrue(oldCurrent.getMessage().contains("att-load/v1.4"), oldCurrent.getMessage());
+        assertTrue(oldCurrent.getMessage().contains("att-load/v1.5"), oldCurrent.getMessage());
     }
 
     @Test void currentWorkloadVarsRemainDefinitionsAndCliOverridesAreAppliedBeforeEvaluation() throws Exception {
@@ -174,7 +174,7 @@ class LoadScenarioTest {
         assertTrue(missingPolicy.getMessage().contains("Quick Load needs a policy"), missingPolicy.getMessage());
     }
 
-    @Test void currentV14QuickLoadPolicyIsAcceptedWithoutWorkloads() throws Exception {
+    @Test void previousV14QuickLoadPolicyIsAcceptedWithoutWorkloads() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("load"));
         write(project, "load/load.yaml", "schemaVersion: att-load/v1.4\n"
@@ -184,7 +184,7 @@ class LoadScenarioTest {
 
         Map<String, Object> policy = new LoadScenarioLoader(project).loadDefaultPolicy();
 
-        assertEquals("att-load/v1.4", policy.get("schemaVersion"));
+        assertEquals("att-load/v1.5", policy.get("schemaVersion"));
         assertFalse(policy.containsKey("workloads"));
         assertEquals(2, ((Number) ((Map<?, ?>) policy.get("load")).get("users")).intValue());
     }
