@@ -71,12 +71,12 @@ actions:
     expression: "&{templates/payment/request.json}"
 
   queryOrder:
-    type: db
-    db: orders
-    query:
-      sql: "select * from orders where order_id = ?"
-      params:
-        - "${EXEC.INPUT.orderId}"
+    type: tool
+    call: >-
+      #{db.orders.query(
+        sql='select * from orders where order_id = ?',
+        params=[${EXEC.INPUT.orderId}]
+      )}
 
   paymentRequest:
     type: tool

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:att:schema:flow:v3.5",
+  "$id": "urn:att:schema:flow:v3.6",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -11,7 +11,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": "att-flow/v3.5"
+      "const": "att-flow/v3.6"
     },
     "id": {
       "type": "string",
@@ -47,7 +47,6 @@
         "type": {
           "enum": [
             "tool",
-            "db",
             "assert",
             "log",
             "assign",
@@ -75,15 +74,6 @@
         },
         "call": {
           "type": "string"
-        },
-        "db": {
-          "type": "string"
-        },
-        "query": {
-          "type": "object"
-        },
-        "update": {
-          "type": "object"
         },
         "assert": {
           "type": "string"
@@ -235,20 +225,6 @@
           "then": {
             "required": [
               "call"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "db"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "db"
             ]
           }
         },

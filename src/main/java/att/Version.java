@@ -23,7 +23,8 @@ public final class Version {
     public static final String SIDECAR_SCHEMA = "att-sidecar/v2.2";
     public static final String LEGACY_SIDECAR_SCHEMA = "att-sidecar/v2.1";
     public static final String TESTCASE_SNAPSHOT_SCHEMA = "att-testcases/v2.4";
-    public static final String TEMPLATE_SCHEMA = "att-template/v3.5";
+    public static final String TEMPLATE_SCHEMA = "att-template/v3.6";
+    public static final String HISTORICAL_TEMPLATE_SCHEMA_V3_5 = "att-template/v3.5";
     public static final String HISTORICAL_TEMPLATE_SCHEMA_V3_4 = "att-template/v3.4";
     public static final String HISTORICAL_TEMPLATE_SCHEMA_V3_3 = "att-template/v3.3";
     public static final String PREVIOUS_TEMPLATE_SCHEMA = "att-template/v3.1";
@@ -31,7 +32,8 @@ public final class Version {
     public static final String LEGACY_TEMPLATE_SCHEMA = "att-template/v2.6";
     public static final String OLDER_TEMPLATE_SCHEMA = "att-template/v2.5";
     public static final String OLDEST_TEMPLATE_SCHEMA = "att-template/v2.3";
-    public static final String FLOW_SCHEMA = "att-flow/v3.5";
+    public static final String FLOW_SCHEMA = "att-flow/v3.6";
+    public static final String HISTORICAL_FLOW_SCHEMA_V3_5 = "att-flow/v3.5";
     public static final String HISTORICAL_FLOW_SCHEMA_V3_4 = "att-flow/v3.4";
     public static final String HISTORICAL_FLOW_SCHEMA_V3_3 = "att-flow/v3.3";
     public static final String PREVIOUS_FLOW_SCHEMA = "att-flow/v3.1";

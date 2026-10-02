@@ -403,8 +403,11 @@ public class StageTemplateRunner {
                 if (action.timeoutMs() != null) {
                     // Explicit Action timeout overrides the helper's statement timeout.
                     // Positional execution is also valid for SQL normalized from named parameters.
-                    result = executor.execute(action.db(), query ? "query" : "update", sql, source,
-                            params, invocationId, action.timeoutMs());
+                    result = parameterNames.isEmpty()
+                            ? executor.execute(action.db(), query ? "query" : "update", sql, source,
+                            params, invocationId, action.timeoutMs())
+                            : executor.execute(action.db(), query ? "query" : "update", sql, source,
+                            params, parameterNames, invocationId, action.timeoutMs(), log);
                 } else {
                     result = parameterNames.isEmpty()
                             ? executor.execute(action.db(), query ? "query" : "update", sql, source, params, invocationId)

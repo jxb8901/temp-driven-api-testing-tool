@@ -42,7 +42,7 @@ class LoadCrossModeTest {
 
     @Test void mqReplyTimeoutAndReplayGateRemainConsistentInRunDebugAndLoad() throws Exception {
         Path project = fixture();
-        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.5\n"
+        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.6\n"
                 + "name: SHARED\ndescription: MQ timeout parity\nactions:\n"
                 + "  payment:\n    type: tool\n"
                 + "    call: \"#{mq.broker.request(requestQueue='REQUEST.Q', replyQueue='REPLY.Q', payload='request', waitMs=321)}\"\n"

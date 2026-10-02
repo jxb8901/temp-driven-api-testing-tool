@@ -371,14 +371,23 @@ class SshResourceHelperTest {
     @Test void nonTimeoutSftpConnectionFailureHasConnectionCategoryForBothOperations() throws Exception {
         Path knownHosts = root.resolve("refused_known_hosts");
         Files.write(knownHosts, new byte[0]);
-        // A bound socket that is not listening deterministically refuses local connections.
-        try (java.net.Socket reserved = new java.net.Socket()) {
-            reserved.bind(new java.net.InetSocketAddress("127.0.0.1", 0));
-            SshResourceExecutor executor = executor(new CommandResult(0, "unused", "", false),
-                    new JschSshTransferClient(knownHosts), "single",
-                    Collections.singletonMap("one", new SshConfig("127.0.0.1", "deploy", reserved.getLocalPort(), "")),
-                    1, 1000, null);
-            for (String operation : new String[]{"upload", "download"}) {
+        // Accept the TCP connection and close it before the SSH handshake so the failure
+        // is a deterministic connection error rather than a platform-dependent refusal timeout.
+        for (String operation : new String[]{"upload", "download"}) {
+            try (java.net.ServerSocket server = new java.net.ServerSocket(0, 1,
+                    java.net.InetAddress.getByName("127.0.0.1"))) {
+                FutureTask<Void> peer = new FutureTask<Void>(() -> {
+                    try (java.net.Socket accepted = server.accept()) {
+                        return null;
+                    }
+                });
+                Thread peerThread = new Thread(peer, "ssh-closing-peer");
+                peerThread.setDaemon(true);
+                peerThread.start();
+                SshResourceExecutor executor = executor(new CommandResult(0, "unused", "", false),
+                        new JschSshTransferClient(knownHosts), "single",
+                        Collections.singletonMap("one", new SshConfig("127.0.0.1", "deploy", server.getLocalPort(), "")),
+                        1, 1000, null);
                 Map<String, Object> input = "upload".equals(operation)
                         ? map("remotePath", "/srv/value", "payload", "value")
                         : map("remotePath", "/srv/value", "localPath", "refused.txt");
@@ -392,6 +401,7 @@ class SshResourceHelperTest {
                 assertEquals("connect", evidence.get("phase"));
                 assertEquals(operation, evidence.get("operation"));
                 assertEquals("sftp", evidence.get("transport"));
+                assertNull(peer.get(1, TimeUnit.SECONDS));
             }
         }
     }

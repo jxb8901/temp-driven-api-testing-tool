@@ -24,7 +24,7 @@ class SchemaMigrationGuidanceTest {
                 SchemaFiles.resolve(packageRoot, "att-flow-v3.1.schema.json"));
         assertEquals(packageRoot.resolve("schemas/history/att-flow-v3.0.schema.json"),
                 SchemaFiles.resolve(packageRoot, "att-flow-v3.0.schema.json"));
-        assertEquals(packageRoot.resolve("schemas/att-flow-v3.5.schema.json"),
+        assertEquals(packageRoot.resolve("schemas/history/att-flow-v3.5.schema.json"),
                 SchemaFiles.resolve(packageRoot, "att-flow-v3.5.schema.json"));
         assertEquals(packageRoot.resolve("schemas/history/att-flow-v3.4.schema.json"),
                 SchemaFiles.resolve(packageRoot, "att-flow-v3.4.schema.json"));
@@ -82,7 +82,7 @@ class SchemaMigrationGuidanceTest {
         DiagnosticException error = assertThrows(DiagnosticException.class,
                 () -> new FlowRegistry(root, root.resolve("templates")));
         assertTrue(error.detail().contains("att-flow/v3.0"));
-        assertTrue(error.detail().contains("att-flow/v3.5"));
+        assertTrue(error.detail().contains("att-flow/v3.6"));
         assertFalse(error.detail().contains("Upgrade schemaVersion"));
         assertTrue(error.detail().contains("version change alone is not sufficient"));
         assertTrue(error.detail().contains("result"));
@@ -101,7 +101,7 @@ class SchemaMigrationGuidanceTest {
         DiagnosticException error = assertThrows(DiagnosticException.class,
                 () -> new StageTemplateLoader(root, Paths.get("templates")).load("sample"));
         assertTrue(error.detail().contains("att-template/v3.0"));
-        assertTrue(error.detail().contains("att-template/v3.5"));
+        assertTrue(error.detail().contains("att-template/v3.6"));
         assertFalse(error.detail().contains("Upgrade schemaVersion"));
         assertTrue(error.detail().contains("version change alone is not sufficient"));
         assertTrue(error.field().contains("result"), error.detail());
