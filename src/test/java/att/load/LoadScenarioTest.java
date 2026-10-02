@@ -506,6 +506,35 @@ class LoadScenarioTest {
         } finally { resources.close(); }
     }
 
+    @Test void zeroFailureCapacitySkipsFailureLogCaptureBeforeExecution() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/ZERO_CAP_FAIL_TEMPLATE"));
+        write(project, "templates/ZERO_CAP_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: ZERO_CAP_FAIL_TEMPLATE\ndescription: zero-capacity failure\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "zero-cap-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: ZERO_CAP_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\nevidence: {mode: failures, maxSamples: 0}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("zero-cap-failure-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("zero-cap-run", "zero-cap-failure-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withEvidenceRetention(false, false)
+                            .withFailureLogCapture(evidence.retainsFailureEvidence()));
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertFalse(evidence.retainsFailureEvidence());
+            assertNull(result.evidenceRef());
+            assertTrue(Files.notExists(result.outputDirectory()));
+            assertFalse(Files.exists(result.outputDirectory().resolve("case.log")));
+        } finally { resources.close(); }
+    }
+
     @Test void metricsOnlyNonFileIterationDoesNotCreateExecutionWorkspace() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/METRICS_PROBE_TEMPLATE"));

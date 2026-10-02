@@ -114,6 +114,20 @@ class LoadEvidencePolicyTest {
         assertEquals("failure-1", sampled.events().get(0).iterationId());
     }
 
+    @Test void failureLogCaptureStopsAtZeroAndExhaustedEvidenceCapacity() throws Exception {
+        LoadEvidenceStore zeroCapacity = new LoadEvidenceStore(new LoadEvidencePolicy(
+                LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 0));
+        assertFalse(zeroCapacity.retainsFailureEvidence(), "zero capacity cannot retain a failure");
+
+        LoadEvidenceStore capped = new LoadEvidenceStore(new LoadEvidencePolicy(
+                LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 1));
+        assertTrue(capped.retainsFailureEvidence());
+        assertTrue(capped.claimFailureEvidence("failure-1"));
+        assertFalse(capped.retainsFailureEvidence(), "an in-flight reservation consumes available capacity");
+        capped.onEvent(event("failure-1", ResultStatus.FAIL));
+        assertFalse(capped.retainsFailureEvidence(), "retained evidence at the cap cannot be extended");
+    }
+
     private static LoadEvidencePolicy policyStore(Object... values) {
         return LoadEvidencePolicy.from(scenario(values));
     }
