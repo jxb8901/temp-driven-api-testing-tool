@@ -3482,9 +3482,8 @@ polling contract: MQRC 2033 returns PASS with
 <code>received: false</code> when the outer deadline has not expired,
 including a bounded wait that finds no message. An expired outer
 deadline is TIMEOUT. This operation-aware contract supersedes the
-earlier issue #13 guidance that avoided request/2033 TIMEOUT to prevent
-replay. See <a href="reference/14_actions.md">common retry
-semantics</a>.</p>
+earlier guidance that avoided request/2033 TIMEOUT to prevent replay.
+See <a href="reference/14_actions.md">common retry semantics</a>.</p>
 <h3 id="75-httphelper">7.5 HTTPHelper</h3>
 <p>HTTPHelper is an environment-bound HTTP resource. The selected config
 profile binds a stable logical helper ID to its base URL. Descriptors

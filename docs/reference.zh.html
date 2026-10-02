@@ -3126,8 +3126,8 @@ correlated <code>receive</code>。</p>
 <p>獨立 <code>receive</code> 明確保留非錯誤的 polling 契約：outer
 deadline 未到期時，即使 bounded wait 找不到訊息，2033 仍回傳 PASS 與
 <code>received: false</code>；outer deadline 到期則為
-TIMEOUT。此契約取代 issue #13 為避免重播而不將 request/2033 分類為
-TIMEOUT 的舊指引。請參閱<a href="reference.zh/14_actions.md">共用 retry
+TIMEOUT。此契約取代 先前為避免重播而不將 request/2033 分類為 TIMEOUT
+的舊指引。請參閱<a href="reference.zh/14_actions.md">共用 retry
 語義</a>。</p>
 <h3 id="75-httphelper">7.5 HTTPHelper</h3>
 <p>HTTPHelper 是依環境綁定的 HTTP resource。選定的 config profile 將穩定
