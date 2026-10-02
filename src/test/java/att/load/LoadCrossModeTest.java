@@ -40,6 +40,107 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LoadCrossModeTest {
     @TempDir Path temp;
 
+    @Test void mqReplyTimeoutAndReplayGateRemainConsistentInRunDebugAndLoad() throws Exception {
+        Path project = fixture();
+        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.6\n"
+                + "name: SHARED\ndescription: MQ timeout parity\nactions:\n"
+                + "  payment:\n    type: tool\n"
+                + "    call: \"#{mq.broker.request(requestQueue='REQUEST.Q', replyQueue='REPLY.Q', payload='request', waitMs=321)}\"\n"
+                + "    retry:\n      maxAttempts: 3\n      intervalMs: 0\n      retryOn: [TIMEOUT]\n"
+                + "      when: \"#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}\"\n");
+        att.config.MqHelperConfig mq = new att.config.MqHelperConfig("broker", "Broker", "Parity MQ",
+                "QM1", "localhost", 1414, "APP.CHANNEL", "", "", 1208, "MQSTR", "asQueue", 1000,
+                "metadata", project.resolve("mq.yaml"));
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"),
+                "SIT", 10000, Paths.get("templates"), project, Collections.emptyMap(), Collections.emptyMap(),
+                Collections.singletonMap("broker", mq), null, null, null, "", "", null, null, 1, "ignore", "", false,
+                att.config.ProcessOutputConfig.defaults());
+        StageTemplate template = new StageTemplateLoader(project, config.templatesRoot(), false).loadSelected("SHARED");
+        FlowRegistry flows = new FlowRegistry(project, config.templatesRoot(), false);
+        NoReplyFactory runFactory = new NoReplyFactory();
+        CaseRuntimeContext testcase = testcaseContext(project, template, Collections.<String,Object>emptyMap());
+        Files.createDirectories(testcase.caseOutputDirectory());
+        List<att.core.ValidationResult> run;
+        try (CaseExecutionLog log = new CaseExecutionLog(testcase.caseOutputDirectory().resolve("case.log"))) {
+            run = new StageTemplateRunner(new UnifiedTemplateEngine(null, null,
+                    new att.exec.MqHelperExecutor(project, config, runFactory)), flows).execute("testcase", template, testcase, log);
+        }
+        assertMqTimeout(testcase, run);
+        assertEquals(1, runFactory.puts.get());
+
+        NoReplyFactory debugFactory = new NoReplyFactory();
+        DebugEngine.Result debug = new DebugEngine(project, config, debugFactory).run(ExecutionOptions.parse(new String[]{
+                "debug", "template", "SHARED", "--output-dir", temp.resolve("mq-debug-output").toString(), "--format", "json"}));
+        assertEquals(ResultStatus.ERROR, debug.status());
+        assertEquals(1, debugFactory.puts.get());
+        String debugLog = new String(Files.readAllBytes(debug.logPath()), StandardCharsets.UTF_8);
+        for (String value : new String[]{"TIMEOUT", "2033", "MQRC_NO_MSG_AVAILABLE", "WHEN_FALSE"})
+            assertTrue(debugLog.contains(value), value + "\n" + debugLog);
+
+        Path scenarioFile = write(project, "mq-load.yaml", "schemaVersion: att-load/v1.4\n"
+                + "workloads:\n  - id: payment\n    target: {type: template, id: SHARED}\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        NoReplyFactory loadFactory = new NoReplyFactory();
+        try (LoadRunResources resources = new LoadRunResources(project, config, loadFactory)) {
+            IterationResult load = new IterationExecutor(project, config, target, resources).execute(
+                    IterationRequest.closed("mq-parity", "mq-parity-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+            assertMqTimeout(load.context(), load.validations());
+            assertEquals(1, loadFactory.puts.get());
+            assertEquals(0, resources.mqPool("broker").active());
+            assertEquals(0, resources.mqPool("broker").discarded());
+        }
+
+        att.core.TestResult reportCase = new att.core.TestResult("MQ-parity", "MQ reply wait", ResultStatus.ERROR,
+                java.time.Duration.ZERO, "", "", testcase.caseOutputDirectory().resolve("case.log"), run, "mq", "request",
+                Collections.<String>emptyList());
+        Path report = new att.report.HtmlReportGenerator().generate(temp.resolve("mq-report"), "mq-parity",
+                new att.core.RunSummary(Collections.singletonList(reportCase), temp.resolve("mq-report")), Instant.now(), Instant.now());
+        String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+        assertTrue(html.contains("TIMEOUT"), html);
+        assertTrue(html.contains("2033"), html);
+        assertTrue(html.contains("MQRC_NO_MSG_AVAILABLE"), html);
+    }
+
+    private void assertMqTimeout(CaseRuntimeContext context, List<att.core.ValidationResult> results) {
+        assertNotNull(context);
+        assertEquals(1, results.size());
+        assertEquals(ResultStatus.ERROR, results.get(0).status(), results.get(0).message());
+        String action = "EXEC.ACTIONS.payment.output.";
+        assertEquals("TIMEOUT", context.resolve(action + "status"));
+        assertEquals(1, ((List<?>) context.resolve(action + "attempts")).size());
+        assertEquals("WHEN_FALSE", context.resolve(action + "attempts[0].retryDecision.reason"));
+        assertEquals(Boolean.TRUE, context.resolve(action + "evidence.mq.invocations[0].sent"));
+        assertEquals(Boolean.FALSE, context.resolve(action + "evidence.mq.invocations[0].replyReceived"));
+        assertEquals(2033, context.resolve(action + "evidence.mq.invocations[0].reasonCode"));
+        assertEquals(2, context.resolve(action + "evidence.mq.invocations[0].completionCode"));
+        assertEquals(321, context.resolve(action + "evidence.mq.invocations[0].waitMs"));
+    }
+
+    private static final class NoReplyFactory implements att.exec.MqTransport.Factory {
+        final java.util.concurrent.atomic.AtomicInteger puts = new java.util.concurrent.atomic.AtomicInteger();
+        @Override public att.exec.MqTransport.Connection connect(att.config.MqHelperConfig config) {
+            return new att.exec.MqTransport.Connection() {
+                @Override public att.exec.MqTransport.Queue open(String queue, boolean input, boolean output) {
+                    return new att.exec.MqTransport.Queue() {
+                        @Override public att.exec.MqTransport.Message put(byte[] payload, att.exec.MqTransport.PutRequest request) {
+                            puts.incrementAndGet();
+                            return new att.exec.MqTransport.Message(new byte[]{1}, null, payload);
+                        }
+                        @Override public att.exec.MqTransport.Message get(att.exec.MqTransport.GetRequest request) throws Exception {
+                            throw new att.exec.MqTransport.Exception("No reply", 2, 2033, "MQRC_NO_MSG_AVAILABLE", null);
+                        }
+                        @Override public void close() { }
+                    };
+                }
+                @Override public void disconnect() { }
+                @Override public void close() { }
+            };
+        }
+    }
+
     @Test void sameTemplateFlowAndToolRunWithCanonicalInputInTestcaseDebugAndLoad() throws Exception {
         Path project = fixture();
         FrameworkConfig config = config();

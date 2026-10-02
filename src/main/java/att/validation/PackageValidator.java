@@ -942,6 +942,11 @@ public final class PackageValidator {
             boolean expectedOutputAvailable = "tool".equals(type);
             validateStaticContextStructure(action.expected(), syntaxEngine, expectedActions, expectedOutputAvailable, action.id());
             validateStaticContextStructure(action.runWhen(), syntaxEngine, completedActions, false, action.id());
+            if (!action.retry().isEmpty()) {
+                validateRetry(action);
+                if (action.retry().containsKey("when"))
+                    validateStaticContextStructure(String.valueOf(action.retry().get("when")), syntaxEngine, completedActions, true, action.id());
+            }
             if ("tool".equals(type)) {
                 validateStaticContextStructure(action.call(), syntaxEngine, completedActions, false, action.id());
                 validateStaticContextStructure(action.resultConfig().path(), syntaxEngine, completedActions, false, action.id());
@@ -981,7 +986,8 @@ public final class PackageValidator {
                 validateTemplateActions(body, config, new LinkedHashSet<String>(),
                         new LinkedHashSet<String>(), assignmentNames);
             }
-          } catch (DiagnosticException e) { throw att.config.YamlSupport.locate(e, template.sourceFile(), "actions." + action.id())
+          } catch (DiagnosticException e) { throw att.config.YamlSupport.locate(e, template.sourceFile(),
+                  "actions." + action.id() + ("retry.when".equals(e.field()) ? ".retry.when" : ""))
                   .withLocation(null, null, null, null, null, template.name(), action.id()); }
           catch (LocatedValidationException e) { throw e; }
           catch (Exception e) { throw att.config.YamlSupport.locate(DiagnosticException.wrap(
@@ -1427,6 +1433,13 @@ public final class PackageValidator {
                 engine.renderValidationValues(action.runWhen(), context);
                 validateCallArgumentsIn(action.runWhen(), context, engine);
 
+                if (action.retry().containsKey("when")) {
+                    sourceField = "actions." + action.id() + ".retry.when";
+                    att.template.RetryCondition.validate(action.retry().get("when"));
+                    validateContextStructure(String.valueOf(action.retry().get("when")),
+                            engine, context, testCase, completedActions, action.id());
+                }
+
                 if ("assign".equalsIgnoreCase(action.type())) {
                     sourceField = "actions." + action.id() + ".name";
                     context.requireCaseVariableAvailable(action.name());
@@ -1724,7 +1737,8 @@ public final class PackageValidator {
     }
     private static void validateRetry(TemplateAction action) {
         Map<String, Object> retry = action.retry(); if (retry.isEmpty()) return;
-        att.config.SchemaSupport.rejectUnknown(retry, "actions." + action.id() + ".retry", "maxAttempts", "intervalMs", "retryOn");
+        if (retry.containsKey("when")) att.template.RetryCondition.validate(retry.get("when"));
+        att.config.SchemaSupport.rejectUnknown(retry, "actions." + action.id() + ".retry", "maxAttempts", "intervalMs", "retryOn", "when");
         if (!retry.containsKey("maxAttempts") || !retry.containsKey("intervalMs") || !retry.containsKey("retryOn")) throw new IllegalArgumentException("retry requires maxAttempts, intervalMs, and retryOn: " + action.id());
         int attempts = integer(retry.get("maxAttempts"), 0); if (attempts < 2 || attempts > 10) throw new IllegalArgumentException("retry.maxAttempts must be 2..10: " + action.id());
         int interval = integer(retry.get("intervalMs"), -1); if (interval < 0 || interval > 3600000) throw new IllegalArgumentException("retry.intervalMs must be 0..3600000: " + action.id());
@@ -1975,12 +1989,12 @@ public final class PackageValidator {
         Set<String> allowed = new LinkedHashSet<String>();
         Set<String> required = new LinkedHashSet<String>();
         if ("send".equals(operation)) {
-            allowed.add("queue"); allowed.add("file"); allowed.add("instance"); required.add("file");
+            allowed.add("queue"); allowed.add("file"); allowed.add("payload"); allowed.add("requestFormat"); allowed.add("instance");
         } else if ("receive".equals(operation)) {
-            allowed.add("queue"); allowed.add("waitMs"); allowed.add("correlationId"); allowed.add("instance");
+            allowed.add("queue"); allowed.add("waitMs"); allowed.add("correlationId"); allowed.add("instance"); allowed.add("responseFormat");
         } else if ("request".equals(operation)) {
-            allowed.add("requestQueue"); allowed.add("replyQueue"); allowed.add("file"); allowed.add("waitMs"); allowed.add("instance");
-            required.add("file");
+            allowed.add("requestQueue"); allowed.add("replyQueue"); allowed.add("file"); allowed.add("payload");
+            allowed.add("requestFormat"); allowed.add("responseFormat"); allowed.add("waitMs"); allowed.add("instance");
         } else {
             throw new IllegalArgumentException("Unknown MQ operation '" + operation + "'; use send, receive, or request");
         }
@@ -1991,7 +2005,7 @@ public final class PackageValidator {
             if (!allowed.contains(argument.key())) throw new IllegalArgumentException("Unknown MQ argument '" + argument.key() + "' for " + parsed.name());
             if (!supplied.add(argument.key())) throw new IllegalArgumentException("Duplicate MQ argument '" + argument.key() + "'");
             String value = argument.expression().trim();
-            boolean dynamic = value.contains("${") || value.contains("#{");
+            boolean dynamic = value.contains("${") || value.contains("#{") || value.contains("&{");
             if (dynamic) continue;
             Object literal = callParser.literal(value);
             if ("waitMs".equals(argument.key())) {
@@ -2000,6 +2014,12 @@ public final class PackageValidator {
                 if (number.doubleValue() != number.longValue() || number.longValue() < 0 || number.longValue() > 3600000) {
                     throw new IllegalArgumentException(parsed.name() + ".waitMs must be an integer from 0 to 3600000");
                 }
+            } else if ("payload".equals(argument.key())) {
+                if (!(literal instanceof String || literal instanceof Map || literal instanceof List))
+                    throw new IllegalArgumentException("MQ payload must be a String, Map, or List");
+            } else if ("requestFormat".equals(argument.key()) || "responseFormat".equals(argument.key())) {
+                if (!(literal instanceof String) || !java.util.Arrays.asList("text", "json", "yaml", "xml").contains(literal))
+                    throw new IllegalArgumentException("MQ " + argument.key() + " must be text, json, yaml, or xml");
             } else {
                 if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty()) {
                     throw new IllegalArgumentException(parsed.name() + "." + argument.key() + " must be a non-blank string");
@@ -2014,6 +2034,11 @@ public final class PackageValidator {
                 }
             }
         }
+        if (("send".equals(operation) || "request".equals(operation))
+                && supplied.contains("file") == supplied.contains("payload"))
+            throw new IllegalArgumentException("MQ send/request requires exactly one file or payload");
+        if (supplied.contains("file") && supplied.contains("requestFormat"))
+            throw new IllegalArgumentException("MQ requestFormat is only valid with a structured payload");
         if ("send".equals(operation) && !supplied.contains("queue")) {
             boolean hasDefault = selected != null ? !selected.requestQueue().isEmpty() : allInstancesHaveRequestQueue(helper, true);
             if (!hasDefault) throw new IllegalArgumentException("Missing effective send queue: provide queue or configure message.requestQueue on every selectable instance");

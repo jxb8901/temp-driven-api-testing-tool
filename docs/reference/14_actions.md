@@ -205,3 +205,23 @@ This adds a bounded human-readable snapshot beside operation metadata; it does n
 | `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.error/evidence` | Failure summary and underlying evidence for that specific collector attempt. |
 
 Strings, numbers, booleans, null, maps and lists remain typed across Action/Template/Flow boundaries.
+
+### Common retry and Boolean conditions
+
+Tool Actions, including retry-capable DB query/scalar calls, share the `retry` contract. `maxAttempts` (2–10), `intervalMs` (0–3600000) and a non-empty `retryOn` list (ASSERTION/TIMEOUT) remain required. `when` is an optional non-empty Boolean expression String. Existing restrictions on mutating DB updates and SSH transfers still apply.
+
+~~~yaml
+retry:
+  maxAttempts: 3
+  intervalMs: 1000
+  retryOn: [TIMEOUT]
+  when: "#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}"
+~~~
+
+Each attempt executes its operation, publishes current result/evidence/diagnostic, evaluates its assertion where applicable, and selects a retry category. Only after `retryOn` matches, and while attempts remain, does ATT evaluate `when`. Omitting it preserves ordinary retry behavior. True permits the interval wait and another attempt; false preserves the current TIMEOUT/FAIL and stops. Successful attempts, category mismatches and exhausted attempts do not evaluate the gate.
+
+The condition can inspect `output.status`, `output.result`, `output.evidence`, `output.diagnostic`, the one-based `output.attempt`, and EXEC/META paths valid in the current scope. Top-level output is cleared at the start of each attempt so it cannot expose stale result/evidence. History remains in `output.attempts[n]`. Each `retryDecision` records category, candidate, whenEvaluated, whenResult (if evaluated), allowed and a reason such as WHEN_FALSE or MAX_ATTEMPTS.
+
+Conditions use normal `${...}`/`#{...}` typing and must return Boolean; numbers and strings such as 'false' are not coerced. Use `when: "#{false}"` to stop retry. Strict missing paths and expression failures produce normal diagnostics at retry.when and terminate retry. Pure deterministic built-ins are allowed; Tool/DB/MQ/HTTP/SSH calls, file/project-file operations, sequences, randomness and current-time operations are forbidden. Deterministic syntax/type errors fail validation; runtime result types and unavailable paths are checked when the gate runs.
+
+TIMEOUT is the canonical Action outcome; suite/report aggregate operational failure remains ERROR. Authors must decide whether side-effecting operations such as MQ request or HTTP POST are safe to replay. Unconditional TIMEOUT retry can duplicate a business transaction; ATT does not silently suppress MQ retry. See the [MQHelper example](05_resources/mqhelper.md).

@@ -434,6 +434,26 @@ evidence:
 
 String、Number、Boolean、null、Map、List 等值跨越 Action/Template/Flow boundary 時都保留原型別。
 
+### 共用 retry 與 Boolean condition
+
+Tool Action（包括可重試的 DB query/scalar call）共用 `retry` 契約。`maxAttempts`（2–10）、`intervalMs`（0–3600000）及非空 `retryOn`（ASSERTION/TIMEOUT）仍為必填；`when` 是可選的非空 Boolean expression String。Mutating DB update 及 SSH transfer 的既有 retry 限制維持不變。
+
+~~~yaml
+retry:
+  maxAttempts: 3
+  intervalMs: 1000
+  retryOn: [TIMEOUT]
+  when: "#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}"
+~~~
+
+每個 attempt 先執行 operation、發布當前 result/evidence/diagnostic、評估可用 assertion，然後分類 retry category。只有 `retryOn` 符合且尚有 attempt 可執行時，才評估 `when`。未配置時維持一般 retry 行為；true 才等待 interval 並重試，false 保留當前 TIMEOUT/FAIL 且不重試。沒有符合 category、成功或達到 maxAttempts 時均不評估 gate。
+
+`when` 可讀取 `output.status`、`output.result`、`output.evidence`、`output.diagnostic`、從 1 開始的 `output.attempt`，以及當前 scope 允許的 EXEC/META path。Top-level output 在每次 attempt 開始時清除，不會讀到前次的 result/evidence。歷史紀錄保留於 `output.attempts[n]`；`retryDecision` 記錄 category、candidate、whenEvaluated、whenResult（有評估時）、allowed 與 reason（例如 WHEN_FALSE、MAX_ATTEMPTS）。
+
+Condition 使用正常 `${...}`/`#{...}` 型別規則，必須回傳 Boolean；字串 'false' 或數字不會轉成 Boolean。`when: "#{false}"` 可停止 retry。Strict missing path 與 expression error 使用一般 diagnostic，定位至 retry.when 並停止重試。Pure deterministic built-in 可使用；Tool/DB/MQ/HTTP/SSH、file/project-file、sequence、random 與 current-time operation 均禁止。可確定的 syntax/type error 在 validation 時拒絕；runtime result 的型別與 missing path 在 gate 評估時檢查。
+
+TIMEOUT 是 canonical Action outcome；suite/report aggregate 的 operation failure 仍為 ERROR。對 MQ request、HTTP POST 等非冪等操作，作者必須決定是否可重播。未加 when 的 TIMEOUT retry 可能重複 business transaction；ATT 不會默默抑制 MQ retry。請參閱 [MQHelper 範例](reference.zh/05_resources/mqhelper.md)。
+
 ## 04 Runtime 與 Context Model
 
 Run、Debug、Load 共用 canonical EXEC/META expression model。EXEC 透過 framework lifecycle 和明確的 input/variable/action publication 更新。META 是 curated、immutable、secret-safe 的描述資訊。
@@ -633,6 +653,10 @@ send:
 ### Expression scope 與錯誤
 
 Expression language 由本章定義；可用 roots 與求值時機由欄位的 semantic owner 定義：[Tool command/call](reference.zh/05_resources/tools.md)、[Load execIdFormat 與 vars](reference.zh/04_execution_modes/load.md)、[Debug vars](reference.zh/04_execution_modes/debug.md)、[report filename](reference.zh/09_configuration.md)。`${path?}` 只允許缺少的 map/list path 回傳 null；語法錯誤與非法 scope 仍會失敗。Expression syntax 或缺少的必需 Context path 會提供結構化 diagnostic；見[Validation](reference.zh/12_validation_diagnostics.md)。
+
+### Retry condition 的生命週期
+
+`retry.when` 在當前 attempt 完成後、retryOn 符合且尚有 attempt 時才評估。`output.*` 綁定當前 result/evidence/diagnostic 及 `output.attempt`。Normal Boolean typing、strict/optional Context path 契約均適用。僅允許 deterministic pure built-in；external、file、sequence、random 及 current-time operation 禁止。詳見 [Actions retry](reference.zh/14_actions.md)。
 
 ## 06 Execution Modes
 
@@ -1372,6 +1396,30 @@ Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFor
 Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
 
 The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.2.schema.json).
+
+#### Request/reply timeout 與重播策略
+
+`mq.<id>.request(...)` 收到 correlated reply 時為 PASS。PUT 成功後，correlated GET 回傳 MQRC 2033（`MQRC_NO_MSG_AVAILABLE`）時，使用標準 TIMEOUT 與 `MQ_TIMEOUT` diagnostic，即使 outer Action deadline 尚未到期。原生 evidence 保留 `sent: true`、`replyReceived: false`、`completionCode: 2`、`reasonCode: 2033`、reason 名稱及有效 `waitMs`。其他 transport failure 維持既有 MQ ERROR 分類；outer deadline 與 pool borrow timeout 也走標準 TIMEOUT 路徑。
+
+Canonical Action outcome 為 `output.status: TIMEOUT`；suite/report 的 operation failure aggregate 仍為 ERROR，report message 與 Case log 顯示 TIMEOUT 及 MQRC 2033。當前 attempt 的原生 metadata 位於 `output.evidence.mq.invocations[0]`；完成後位於 `EXEC.ACTIONS.<actionId>.output.evidence.mq.invocations[0]`。
+
+未配置 `retry.when` 時，`retryOn: [TIMEOUT]` 可重新 PUT 整個 request。對有副作用的 request，使用 Boolean gate 排除已送出但無 reply 的情況：
+
+~~~yaml
+invokePayment:
+  type: tool
+  call: "#{mq.payment.request(payload=${EXEC.INPUT.requestText})}"
+  timeoutMs: 30000
+  retry:
+    maxAttempts: 3
+    intervalMs: 1000
+    retryOn: [TIMEOUT]
+    when: "#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}"
+~~~
+
+Optional `?` path 在其他 timeout 沒有 MQ reason code 時回傳 null，因此允許一般 timeout retry；reasonCode 為 2033 時阻止第二次 PUT，最終 Action 仍是 TIMEOUT。ATT 不會推斷 idempotency 或去除重複訊息。需要反覆輪詢 reply 時，可使用 `send` 後執行 correlated `receive`。
+
+獨立 `receive` 明確保留非錯誤的 polling 契約：outer deadline 未到期時，即使 bounded wait 找不到訊息，2033 仍回傳 PASS 與 `received: false`；outer deadline 到期則為 TIMEOUT。此契約取代 先前為避免重播而不將 request/2033 分類為 TIMEOUT 的舊指引。請參閱[共用 retry 語義](reference.zh/14_actions.md)。
 
 ### 7.5 HTTPHelper
 

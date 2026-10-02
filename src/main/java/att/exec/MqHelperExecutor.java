@@ -170,8 +170,8 @@ public final class MqHelperExecutor {
                         if (!isNoMessage(noReply)) throw noReply;
                         result.put("replyReceived", false); evidence.put("replyReceived", false);
                         addReason(result, evidence, noReply);
-                        success = !deadlineExceeded(deadlineNanos);
-                        if (!success) addDeadlineError(result, evidence);
+                        success = false;
+                        addDeadlineError(result, evidence, "MQ request reply wait expired (MQRC 2033: MQRC_NO_MSG_AVAILABLE)");
                         received = null;
                     }
                     if (received != null) {
@@ -264,7 +264,10 @@ public final class MqHelperExecutor {
         if (result.get("outputFile") != null) evidence.put("outputFile", portable(Paths.get(String.valueOf(result.get("outputFile")))));
         if (savePath != null && !savePath.trim().isEmpty()) evidence.put("resultPath", savePath);
         evidence.put("resultFormat", representation);
-        evidence.put("status", success ? "PASS" : "ERROR");
+        @SuppressWarnings("unchecked") Map<String, Object> error = (Map<String, Object>) result.get("error");
+        String status = success ? "PASS" : error != null && ("MQ_TIMEOUT".equals(error.get("type"))
+                || "MQ_POOL_TIMEOUT".equals(error.get("type"))) ? "TIMEOUT" : "ERROR";
+        result.put("status", status); evidence.put("status", status);
         if (context != null) context.recordResourceOutput(logical.evidenceOutput(), result.get("result"), evidence);
         return new MqInvocationResult(result, evidence, success);
     }

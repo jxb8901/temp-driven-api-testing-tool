@@ -110,6 +110,67 @@ class DirectDbActionRetryRuntimeTest {
         assertEquals(1, run.context.resolve("EXEC.ACTIONS.write.output.result.affectedRows"));
     }
 
+    @Test
+    void falseConditionPreservesTimeoutAndAssertionFailureWithoutAnotherQuery() throws Exception {
+        for (String category : new String[]{"TIMEOUT", "ASSERTION"}) {
+            ScriptedProvider provider = new ScriptedProvider("TIMEOUT".equals(category) ? Behavior.TIMEOUT_THEN_ROW : Behavior.ALWAYS_EMPTY);
+            TemplateAction action = dbToolQueryAction("poll", 3, 0, category, null);
+            action.retry().put("when", "#{false}");
+            RunResult run = run(provider, action);
+            assertEquals(1, provider.executions);
+            assertEquals("TIMEOUT".equals(category) ? "TIMEOUT" : "FAIL", run.context.resolve("EXEC.ACTIONS.poll.output.status"));
+            assertEquals("WHEN_FALSE", run.context.resolve("EXEC.ACTIONS.poll.output.attempts[0].retryDecision.reason"));
+        }
+    }
+
+    @Test
+    void dbConditionReadsTheCurrentAttemptResultAndEvidence() throws Exception {
+        ScriptedProvider provider = new ScriptedProvider(Behavior.EMPTY_THEN_ROW);
+        TemplateAction action = dbToolQueryAction("poll", 3, 0, "ASSERTION", null);
+        action.retry().put("when", "#{${output.status} == 'FAIL' AND ${output.attempt} == 1 AND ${output.result.rowCount} == 0}");
+        RunResult run = run(provider, action);
+        assertEquals(ResultStatus.PASS, run.result.status(), run.result.message());
+        assertEquals(2, provider.executions);
+        assertEquals(Boolean.TRUE, run.context.resolve("EXEC.ACTIONS.poll.output.attempts[0].retryDecision.whenResult"));
+        assertEquals(1, run.context.resolve("EXEC.ACTIONS.poll.output.result.rowCount"));
+    }
+
+    @Test
+    void dbRetryExpressionFailureIsTerminalWithNormalDiagnostic() throws Exception {
+        ScriptedProvider provider = new ScriptedProvider(Behavior.ALWAYS_EMPTY);
+        TemplateAction action = dbToolQueryAction("poll", 3, 0, "ASSERTION", null);
+        action.retry().put("when", "#{${output.result.missing} == 1}");
+        RunResult run = run(provider, action);
+        assertEquals(ResultStatus.ERROR, run.result.status());
+        assertEquals(1, provider.executions);
+        assertEquals("actions.poll.retry.when", run.result.diagnostic().field());
+        assertEquals("EXPRESSION_ERROR", run.context.resolve("EXEC.ACTIONS.poll.output.attempts[0].retryDecision.reason"));
+    }
+
+    @Test
+    void nativeDbToolTimeoutUsesConditionAndPublishesWinningAttempt() throws Exception {
+        ScriptedProvider provider = new ScriptedProvider(Behavior.TIMEOUT_THEN_ROW);
+        TemplateAction action = dbToolQueryAction("poll", 2, 0, "TIMEOUT", 1500L);
+        action.retry().put("when", "#{${output.status} == 'TIMEOUT' AND ${output.result.error.type} == 'TIMEOUT'}");
+        RunResult run = run(provider, action);
+        assertEquals(ResultStatus.PASS, run.result.status(), run.result.message());
+        assertEquals(2, provider.executions);
+        assertEquals("TIMEOUT", run.context.resolve("EXEC.ACTIONS.poll.output.attempts[0].status"));
+        assertEquals(Boolean.TRUE, run.context.resolve("EXEC.ACTIONS.poll.output.attempts[0].retryDecision.whenResult"));
+        assertEquals("PASS", run.context.resolve("EXEC.ACTIONS.poll.output.status"));
+        assertEquals(2, run.context.resolve("EXEC.ACTIONS.poll.output.winningAttempt"));
+    }
+
+    private TemplateAction dbToolQueryAction(String id, int maxAttempts, int intervalMs, String retryOn, Long timeoutMs) {
+        Map<String,Object> values = map("type", "tool",
+                "call", "#{db.orders.query(sql='select status from orders')}",
+                "assert", "#{${output.result.rowCount} == 1}",
+                "retry", map("maxAttempts", maxAttempts, "intervalMs", intervalMs,
+                        "retryOn", Collections.singletonList(retryOn)));
+        if (timeoutMs != null) values.put("timeoutMs", timeoutMs);
+        return new TemplateAction(id, values, att.Version.TEMPLATE_SCHEMA);
+    }
+
     private TemplateAction queryAction(String id, int maxAttempts, int intervalMs, String retryOn, Long timeoutMs) {
         Map<String, Object> values = map(
                 "type", "db", "db", "orders",
@@ -135,7 +196,8 @@ class DirectDbActionRetryRuntimeTest {
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, tempDir, "run-1", tempDir, tempDir.resolve("case.log"));
         context.beginStage(new StageCaseData("main", "DB_RETRY", Collections.<String, Object>emptyMap()),
                 "DB_RETRY", tempDir);
-        StageTemplate template = new StageTemplate("DB_RETRY", tempDir, Collections.singletonList(action), "att-template/v3.0");
+        StageTemplate template = new StageTemplate("DB_RETRY", tempDir, Collections.singletonList(action),
+                "tool".equals(action.type()) ? att.Version.TEMPLATE_SCHEMA : "att-template/v3.0");
         executor.beginCase();
         try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
             long started = System.nanoTime();

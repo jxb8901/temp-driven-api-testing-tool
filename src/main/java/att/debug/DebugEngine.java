@@ -45,10 +45,18 @@ import java.util.Map;
 public final class DebugEngine {
     private final Path projectRoot;
     private final FrameworkConfig config;
+    private final att.exec.MqTransport.Factory mqTransportFactory;
 
     public DebugEngine(Path projectRoot, FrameworkConfig config) {
+        this(projectRoot, config, new att.exec.IbmMqClientFactory());
+    }
+
+    /** Injectable transport boundary for repeatable Debug integration tests. */
+    public DebugEngine(Path projectRoot, FrameworkConfig config, att.exec.MqTransport.Factory mqTransportFactory) {
+        if (mqTransportFactory == null) throw new IllegalArgumentException("MQ transport factory is required");
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
         this.config = config;
+        this.mqTransportFactory = mqTransportFactory;
     }
 
     /** Reads and validates a Debug sidecar for in-memory Load promotion without executing the target. */
@@ -194,7 +202,7 @@ public final class DebugEngine {
             db.beginCase();
             caseStarted = true;
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, config);
-            MqHelperExecutor mq = new MqHelperExecutor(projectRoot, config);
+            MqHelperExecutor mq = new MqHelperExecutor(projectRoot, config, mqTransportFactory);
             http = new att.exec.HttpHelperExecutor(projectRoot, config);
             UnifiedTemplateEngine engine = new UnifiedTemplateEngine(toolInvoker, db, mq, http,
                     new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));

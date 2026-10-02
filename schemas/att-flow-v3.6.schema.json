@@ -100,7 +100,7 @@
           "type": "integer"
         },
         "retry": {
-          "type": "object"
+          "$ref": "#/$defs/retry"
         },
         "evidence": {
           "type": "object",
@@ -279,6 +279,43 @@
             "stop",
             "continue"
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "retry": {
+      "type": "object",
+      "required": [
+        "maxAttempts",
+        "intervalMs",
+        "retryOn"
+      ],
+      "properties": {
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 10
+        },
+        "intervalMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "retryOn": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "ASSERTION",
+              "TIMEOUT"
+            ]
+          }
+        },
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Pure Boolean expression evaluated against the completed attempt only after retryOn matches."
         }
       },
       "additionalProperties": false

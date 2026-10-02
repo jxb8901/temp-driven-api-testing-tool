@@ -117,3 +117,7 @@ send:
 ### Expression scope 與錯誤
 
 Expression language 由本章定義；可用 roots 與求值時機由欄位的 semantic owner 定義：[Tool command/call](05_resources/tools.md)、[Load execIdFormat 與 vars](04_execution_modes/load.md)、[Debug vars](04_execution_modes/debug.md)、[report filename](09_configuration.md)。`${path?}` 只允許缺少的 map/list path 回傳 null；語法錯誤與非法 scope 仍會失敗。Expression syntax 或缺少的必需 Context path 會提供結構化 diagnostic；見[Validation](12_validation_diagnostics.md)。
+
+### Retry condition 的生命週期
+
+`retry.when` 在當前 attempt 完成後、retryOn 符合且尚有 attempt 時才評估。`output.*` 綁定當前 result/evidence/diagnostic 及 `output.attempt`。Normal Boolean typing、strict/optional Context path 契約均適用。僅允許 deterministic pure built-in；external、file、sequence、random 及 current-time operation 禁止。詳見 [Actions retry](14_actions.md)。

@@ -292,6 +292,8 @@ public class CaseExecutionLog implements AutoCloseable {
         }
         Object exception = output.get("exception");
         if (exception instanceof Map) compact.put("exception", compactException((Map<String, Object>) exception));
+        else if (output.get("diagnostic") instanceof Map)
+            compact.put("diagnostic", compactException((Map<String, Object>) output.get("diagnostic")));
         result.put("output", compact);
         return result;
     }
@@ -305,7 +307,7 @@ public class CaseExecutionLog implements AutoCloseable {
         if (!(parsed instanceof String) || stdout == null || !String.valueOf(parsed).equals(String.valueOf(stdout).trim())) {
             if (attempt.containsKey("output")) result.put("output", parsed);
         }
-        copyIfPresent(attempt, result, "exitCode", "timeoutMs", "outputFile", "stdoutBytes", "stderrBytes", "stdoutTruncated", "stderrTruncated", "stdoutArtifactTruncated", "stderrArtifactTruncated", "stdoutArtifact", "stderrArtifact", "stdoutCaptureError", "stderrCaptureError", "category", "parserDiagnostic", "sshDestination", "sshPort", "sshTransport", "cleanupWarning", "evidenceError", "evidence", "MQ");
+        copyIfPresent(attempt, result, "exitCode", "timeoutMs", "outputFile", "stdoutBytes", "stderrBytes", "stdoutTruncated", "stderrTruncated", "stdoutArtifactTruncated", "stderrArtifactTruncated", "stdoutArtifact", "stderrArtifact", "stdoutCaptureError", "stderrCaptureError", "category", "retryDecision", "parserDiagnostic", "sshDestination", "sshPort", "sshTransport", "cleanupWarning", "evidenceError", "evidence", "MQ");
         return result;
     }
 

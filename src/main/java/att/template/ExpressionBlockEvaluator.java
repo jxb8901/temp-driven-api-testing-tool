@@ -432,13 +432,14 @@ public final class ExpressionBlockEvaluator {
 
     private static final class Parser {
         private final String source; private final List<Token> tokens; private int position;
+        private final Map<Node, int[]> spans = new java.util.IdentityHashMap<Node, int[]>();
         Parser(String source) { this.source = source; this.tokens = new Lexer(source).tokens(); }
         Node parseExpression() { if (peek().type == TokenType.END) throw new IllegalArgumentException("Expression block must not be blank"); return parseOr(); }
         private Node parseOr() { Node value = parseAnd(); while (keyword("or")) value = binary("or", value, parseAnd()); return value; }
         private Node parseAnd() { Node value = parseComparison(); while (keyword("and")) value = binary("and", value, parseComparison()); return value; }
         private Node parseComparison() {
             Node value = parseAdditive();
-            if (keyword("is")) { boolean negate = keyword("not"); requireKeyword("null"); return new IsNullNode(slice(value, previous()), value, negate); }
+            if (keyword("is")) { boolean negate = keyword("not"); requireKeyword("null"); return located(new IsNullNode(slice(value, previous()), value, negate), start(value), previous().end); }
             if (keyword("in")) return binary("in", value, parseAdditive());
             if (keyword("like")) return binary("like", value, parseAdditive());
             if (peek().type == TokenType.OPERATOR && ("==".equals(peek().text) || "!=".equals(peek().text) || ">".equals(peek().text) || ">=".equals(peek().text) || "<".equals(peek().text) || "<=".equals(peek().text))) {
@@ -449,11 +450,16 @@ public final class ExpressionBlockEvaluator {
         private Node parseAdditive() { Node value = parseMultiplicative(); while (operator("+") || operator("-")) { String op = previous().text; value = binary(op, value, parseMultiplicative()); } return value; }
         private Node parseMultiplicative() { Node value = parseUnary(); while (operator("*") || operator("/")) { String op = previous().text; value = binary(op, value, parseUnary()); } return value; }
         private Node parseUnary() {
-            if (keyword("not")) { Token start = previous(); Node value = parseUnary(); return new UnaryNode(source.substring(start.start, end(value)), "not", value); }
-            if (operator("+") || operator("-")) { Token start = previous(); Node value = parseUnary(); return new UnaryNode(source.substring(start.start, end(value)), start.text, value); }
+            if (keyword("not")) { Token start = previous(); Node value = parseUnary(); return located(new UnaryNode(source.substring(start.start, end(value)), "not", value), start.start, end(value)); }
+            if (operator("+") || operator("-")) { Token start = previous(); Node value = parseUnary(); return located(new UnaryNode(source.substring(start.start, end(value)), start.text, value), start.start, end(value)); }
             return parsePrimary();
         }
         private Node parsePrimary() {
+            int start = peek().start;
+            Node value = parsePrimaryValue();
+            return located(value, start, previous().end);
+        }
+        private Node parsePrimaryValue() {
             Token token = consume();
             if (token.type == TokenType.NUMBER) {
                 try { return new LiteralNode(raw(token), new BigDecimal(token.text), false); }
@@ -525,7 +531,7 @@ public final class ExpressionBlockEvaluator {
             Token close = expect(TokenType.RPAREN);
             return new CallNode(source.substring(name.start, close.end), name.text, arguments);
         }
-        private Node binary(String operator, Node left, Node right) { return new BinaryNode(source.substring(start(left), end(right)), operator, left, right); }
+        private Node binary(String operator, Node left, Node right) { return located(new BinaryNode(source.substring(start(left), end(right)), operator, left, right), start(left), end(right)); }
         private boolean keyword(String value) { if (peek().type == TokenType.IDENTIFIER && value.equalsIgnoreCase(peek().text)) { position++; return true; } return false; }
         private void requireKeyword(String value) { if (!keyword(value)) throw new ExpressionSyntaxException(peek().start, peek().end, "'" + value + "'", peek().type.name().toLowerCase(java.util.Locale.ROOT)); }
         private boolean operator(String value) { if (peek().type == TokenType.OPERATOR && value.equals(peek().text)) { position++; return true; } return false; }
@@ -537,9 +543,10 @@ public final class ExpressionBlockEvaluator {
         private Token previous() { return tokens.get(position - 1); }
         private Token expect(TokenType type) { if (!check(type)) throw new ExpressionSyntaxException(peek().start, peek().end, type.name().toLowerCase(java.util.Locale.ROOT), peek().type.name().toLowerCase(java.util.Locale.ROOT)); return consume(); }
         private String raw(Token token) { return source.substring(token.start, token.end); }
-        private int start(Node node) { return source.indexOf(node.source()); }
-        private int end(Node node) { int start = source.indexOf(node.source()); return start < 0 ? source.length() : start + node.source().length(); }
-        private String slice(Node left, Token end) { int start = source.indexOf(left.source()); return source.substring(Math.max(0, start), end.end); }
+        private Node located(Node node, int start, int end) { spans.put(node, new int[]{start, end}); return node; }
+        private int start(Node node) { return spans.get(node)[0]; }
+        private int end(Node node) { return spans.get(node)[1]; }
+        private String slice(Node left, Token end) { return source.substring(start(left), end.end); }
     }
 
     private static boolean explicitContextRoot(String value) {
