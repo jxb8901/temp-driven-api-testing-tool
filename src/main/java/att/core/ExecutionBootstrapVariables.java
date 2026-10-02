@@ -60,17 +60,6 @@ public final class ExecutionBootstrapVariables {
                 String expression = "${" + matcher.group(1) + "}";
                 for (String path : parsePaths(engine, expression, field, validation))
                     validatePath(path, field, validation, validation.inputMappingMode);
-                try {
-                    for (ToolCallParser.ParsedCall call : engine.parseCalls(expression)) {
-                        DefaultBuiltInProvider.rejectRemoved(call.name());
-                        if (!DefaultBuiltInProvider.isSafeForBootstrap(call.name()))
-                            throw validation.invalid("Input mappings may call only bootstrap-safe built-ins; rejected call '"
-                                    + call.name() + "'", field);
-                    }
-                } catch (DiagnosticException error) { throw error; }
-                catch (RuntimeException error) {
-                    throw validation.invalid("Invalid input mapping expression: " + error.getMessage(), field);
-                }
             }
         }
     }

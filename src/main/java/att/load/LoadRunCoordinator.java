@@ -89,7 +89,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
                 att.testdata.TestdataInputResolver testdataResolver = new att.testdata.TestdataInputResolver(
                         testdataRegistry, workload.testdata(), workload.id(), workload.model().wireName(),
                         scenario.seed(), Math.max(1, workload.users()),
-                        workload.model() == LoadScenario.Model.CLOSED);
+                        true);
                 IterationExecutor iterations = new IterationExecutor(projectRoot, config, target, resources, outputRoot,
                         testdataResolver);
                 LoadScheduler scheduler = child.model() == LoadScenario.Model.CLOSED

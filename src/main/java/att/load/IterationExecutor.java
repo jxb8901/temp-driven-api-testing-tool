@@ -89,7 +89,8 @@ public final class IterationExecutor implements LoadIterationRunner {
             try {
                 if (testdataResolver != null)
                     context.replaceInputValues(testdataResolver.resolve(request.inputs(), context,
-                            request.userId(), request.iterationId(), request.testdataWaitAllowed()));
+                            request.userId(), request.iterationId(), request.testdataOrdinal(),
+                            request.testdataWaitAllowed()));
                 executionId = target.execIdFormat().isEmpty()
                         ? resources.nextDefaultExecutionId(request.runId())
                         : LoadExecutionIdPattern.evaluate(target.execIdFormat(),

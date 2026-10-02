@@ -72,6 +72,27 @@ class DocumentationContractsTest(unittest.TestCase):
                 self.assertIn("`EXEC.ID` 與 `EXEC.OUTPUT_DIR` 只會在 input 解析後初始化", text)
                 self.assertIn("`EXEC.VARS`、`EXEC.ACTIONS`", text)
 
+    def test_input_mapping_contract_does_not_claim_builtin_calls(self):
+        root = Path(__file__).resolve().parents[1]
+        paths = (
+            root / "docs/reference/02_test_authoring.md",
+            root / "docs/reference.zh/02_test_authoring.md",
+            root / "docs/reference.md",
+            root / "docs/reference.zh.md",
+            root / "docs/reference.html",
+            root / "docs/reference.zh.html",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("bootstrap-safe built-ins", text)
+                self.assertNotIn("Calls are limited to pure bootstrap-safe", text)
+                self.assertNotIn("Calls 只允許 pure bootstrap-safe", text)
+        for path in (root / "docs/reference/02_test_authoring.md", root / "docs/reference.md"):
+            self.assertIn("built-in calls are not evaluated", path.read_text(encoding="utf-8"))
+        for path in (root / "docs/reference.zh/02_test_authoring.md", root / "docs/reference.zh.md"):
+            self.assertIn("不會評估 built-in call", path.read_text(encoding="utf-8"))
+
     def test_explicit_historical_block_is_scoped_and_balanced(self):
         text = ("<!-- att-docs:historical -->\natt-load/v1.2\n"
                 "<!-- /att-docs:historical -->\natt-load/v1.2")

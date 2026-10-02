@@ -22,7 +22,7 @@ Input mapping 會在解析值發布至 `EXEC.INPUT` 前執行：
 - `@{id.path}` 及數字 list index 可存取巢狀值。
 - `@{id}` 可內嵌於文字，但所選值必須是非 null scalar；結果為字串。
 - `${...}` 只可讀取該 mapping 階段開始前已初始化的 Context。Run Case/Stage mapping 可使用 `EXEC.ID`、`EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、`EXEC.OUTPUT_DIR` 及 `META.PROJECT/SOURCE/TARGET`。Debug `inputs` 另可使用 `META.TEMPLATE`。Load workload `inputs` 可使用 `EXEC.RUN_ID`、兩個 timestamp、當前可用的 `EXEC.LOAD` identity fields 及 `META.PROJECT/SOURCE/TARGET/TEMPLATE`；`EXEC.ID` 與 `EXEC.OUTPUT_DIR` 只會在 input 解析後初始化。`EXEC.LOAD.USER_ID` 只在 closed workload 提供；若要支援 arrival-rate，可用 optional path `${EXEC.LOAD.USER_ID?}`。
-- 所有 mode 都拒絕在建立時引用 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、Action `output` 及 invocation-scoped helper metadata。Mapping 會在 execution 前驗證；Load 會在 scheduler 啟動前驗證。Calls 只允許 pure bootstrap-safe built-ins。
+- 所有 mode 都拒絕在建立時引用 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、Action `output` 及 invocation-scoped helper metadata。Mapping 會在 execution 前驗證；Load 會在 scheduler 啟動前驗證。V1 mapping grammar 會評估 literal、selected-record `@{...}` reference 及 `${...}` Context reference；不會評估 built-in call。
 - Mapping 不會評估 `#{...}`、`&{...}` 或 `%{...}`。
 
 同一 mapping 對同一 ID 的所有引用共用同一筆 record。Run/Debug 跨 Case 與 Stage mapping 也會保留該 execution 的 ID choice。多筆 records 的 descriptor 必須宣告 `selection.strategy`：`sequential`、`roundRobin` 或 `random`。`exhaustion` 預設為 `error`；`recycle` 會由開頭重新選取，`stop` 會向 scheduler 發出停止目前 Load workload 的訊號。設定 `seed` 可讓 random selection 重複。

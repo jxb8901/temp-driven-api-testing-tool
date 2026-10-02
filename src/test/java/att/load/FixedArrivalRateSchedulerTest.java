@@ -1,15 +1,24 @@
 package att.load;
 
+import att.TestSchemas;
 import att.core.ResultStatus;
+import att.testdata.TestdataInputResolver;
+import att.testdata.TestdataRegistry;
+import att.testdata.TestdataStopException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -18,12 +27,16 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FixedArrivalRateSchedulerTest {
+    @TempDir Path testdataRoot;
+
     @Test
     void absoluteArrivalPlanUsesDeterministicPhaseAreas() {
         LoadScenario scenario = scenario(100.0, 0L, 1000L, 1000L, 1000L, 4);
@@ -74,6 +87,81 @@ class FixedArrivalRateSchedulerTest {
         }
         assertTrue(events.stream().anyMatch(LoadEvent::dropped));
         assertFalse(events.stream().anyMatch(event -> event.dropped() && event.started()));
+    }
+
+    @Test
+    void droppedArrivalsDoNotConsumeIterationScopedTestdataOrdinals() throws Exception {
+        TestSchemas.install(testdataRoot);
+        Path descriptor = testdataRoot.resolve("data/arrival.yaml");
+        Files.createDirectories(descriptor.getParent());
+        Files.write(descriptor, ("schemaVersion: att-testdata/v1.0\n"
+                + "id: arrival\n"
+                + "records: [A, B]\n"
+                + "selection: {strategy: sequential, exhaustion: stop}\n")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        TestdataRegistry registry = new TestdataRegistry(testdataRoot, Collections.<Path>emptyList(),
+                Collections.singletonList(descriptor));
+        Map<String, Object> policy = Collections.<String, Object>singletonMap("arrival",
+                Collections.<String, Object>singletonMap("scope", "iteration"));
+        TestdataInputResolver resolver = new TestdataInputResolver(registry, policy, "work", "arrivalRate",
+                null, 1, true);
+        Map<String, Object> mapping = Collections.<String, Object>singletonMap("value", "@{arrival}");
+
+        LoadScenario scenario = scenario(1000.0, 0L, 0L, 20L, 0L, 1);
+        FakeTiming fake = new FakeTiming();
+        List<IterationRequest> requests = Collections.synchronizedList(new ArrayList<IterationRequest>());
+        List<String> selected = Collections.synchronizedList(new ArrayList<String>());
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch firstCompleted = new CountDownLatch(1);
+        AtomicBoolean first = new AtomicBoolean(true);
+        AtomicInteger exhausted = new AtomicInteger();
+        AtomicReference<FixedArrivalRateScheduler> schedulerRef = new AtomicReference<FixedArrivalRateScheduler>();
+        LoadIterationRunner runner = request -> {
+            requests.add(request);
+            try {
+                Object value = resolver.resolve(mapping, null, null, request.iterationId(),
+                        request.testdataOrdinal(), () -> true).get("value");
+                selected.add(String.valueOf(value));
+                if (first.getAndSet(false)) {
+                    try { releaseFirst.await(); }
+                    finally { firstCompleted.countDown(); }
+                }
+                return result(request.iterationId());
+            } catch (TestdataStopException stop) {
+                exhausted.incrementAndGet();
+                FixedArrivalRateScheduler scheduler = schedulerRef.get();
+                if (scheduler != null) scheduler.cancel();
+                return result(request.iterationId());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            } catch (Exception error) {
+                throw new IllegalStateException(error);
+            }
+        };
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        FixedArrivalRateScheduler scheduler = new FixedArrivalRateScheduler(scenario, runner, "arrival-dense",
+                event -> {
+                    events.add(event);
+                    if (event.dropped()) {
+                        releaseFirst.countDown();
+                        try { firstCompleted.await(2L, TimeUnit.SECONDS); }
+                        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                    }
+                }, fake.cooperativeTiming());
+        schedulerRef.set(scheduler);
+
+        scheduler.run();
+
+        assertTrue(events.stream().anyMatch(LoadEvent::dropped));
+        assertEquals(Arrays.asList("A", "B"), selected);
+        assertEquals(1, exhausted.get());
+        assertTrue(requests.size() >= 3);
+        assertEquals(Long.valueOf(0L), requests.get(0).testdataOrdinal());
+        assertEquals(Long.valueOf(1L), requests.get(1).testdataOrdinal());
+        assertTrue(requests.stream().anyMatch(request -> Long.valueOf(2L).equals(request.testdataOrdinal())));
+        assertTrue(requests.get(1).iteration() > requests.get(0).iteration(),
+                "admitted testdata ordinal must be independent of planned arrival sequence");
     }
 
     @Test
@@ -220,6 +308,13 @@ class FixedArrivalRateSchedulerTest {
             return new LoadSchedulerTiming(now::get, millis -> {
                 if (advance && millis > 0L) now.addAndGet(millis);
                 Thread.yield();
+            });
+        }
+
+        LoadSchedulerTiming cooperativeTiming() {
+            return new LoadSchedulerTiming(now::get, millis -> {
+                if (millis > 0L) now.addAndGet(millis);
+                Thread.sleep(1L);
             });
         }
 

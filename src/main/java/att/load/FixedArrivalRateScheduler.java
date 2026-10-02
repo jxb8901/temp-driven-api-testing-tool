@@ -75,6 +75,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, LoadPhase.totalMs(scenario));
         workers = Executors.newFixedThreadPool(scenario.maxConcurrent(), new NamedFactory("att-load-arrival-" + safe(scenario.workloadId())));
         long scheduledCount = 0L;
+        long admittedTestdataOrdinal = 0L;
         try {
             while (!cancelled.get()) {
                 long elapsed = timing.now() - startedAt;
@@ -88,7 +89,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                     if (inFlight.get() >= scenario.maxConcurrent()) {
                         LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.dropped(runId, "arrivalRate", phase, iterationId,
                                 plannedSequence, dueAt, timing.now())));
-                    } else submit(metrics, phase, iterationId, plannedSequence, dueAt, startedAt);
+                    } else submit(metrics, phase, iterationId, plannedSequence, admittedTestdataOrdinal++, dueAt, startedAt);
                 }
                 if (elapsed >= total) break;
                 timing.sleep(1L);
@@ -98,7 +99,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         return new LoadRunResult(runId, scenario, start, LoadSchedulerSupport.instant(endedAt), metrics.snapshot());
     }
 
-    private void submit(LoadMetrics metrics, String phase, String id, long sequenceValue, long dueAt, long runStartedAt) {
+    private void submit(LoadMetrics metrics, String phase, String id, long sequenceValue,
+                        long testdataOrdinal, long dueAt, long runStartedAt) {
         inFlight.incrementAndGet();
         try {
             if (beforeSubmitHook != null) beforeSubmitHook.run();
@@ -112,6 +114,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                             sequenceValue, dueAt, iterationStarted)));
                     IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(runStartedAt), "arrivalRate", id,
                             sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
+                    request = request.withTestdataOrdinal(testdataOrdinal)
+                            .withTestdataWaitAllowed(() -> !cancelled.get() && remainingRunMillis(runStartedAt) > 0L);
                     if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
                     Path evidenceRoot = evidenceOutputRoot(id);
                     if (evidenceRoot != null) {
@@ -150,6 +154,9 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId)) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
         return scenario.legacyV10() ? root : root.resolve(safe(scenario.workloadId()));
+    }
+    private long remainingRunMillis(long startedAt) {
+        return LoadPhase.totalMs(scenario) - (timing.now() - startedAt);
     }
     static long arrivalsDueAt(LoadScenario scenario, long elapsedMs) {
         if (elapsedMs < 0L) return 0L;

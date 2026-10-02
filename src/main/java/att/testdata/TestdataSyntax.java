@@ -144,7 +144,7 @@ public final class TestdataSyntax {
 
     private static void rejectUnsupportedMappingMarkers(String text) {
         if (text.contains("%{") || text.contains("#{") || text.contains("&{"))
-            throw new IllegalArgumentException("Input mapping supports only literals, @{...}, and bootstrap-safe ${...} references");
+            throw new IllegalArgumentException("Input mapping supports only literals, @{...}, and ${Context} references");
         validateMarkerPairs(text, "@{", REFERENCE);
         validateMarkerPairs(text, "${", Pattern.compile("\\$\\{([^{}]+)}"));
         Matcher context = Pattern.compile("\\$\\{([^{}]+)}").matcher(text);

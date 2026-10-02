@@ -949,9 +949,10 @@ workload 不提供 <code>EXEC.LOAD.USER_ID</code>；若 mapping
 </ul>
 <p>所有 mode 都拒絕引用
 <code>EXEC.INPUT</code>（正在建立的值）、<code>EXEC.VARS</code>、<code>EXEC.ACTIONS</code>、Action
-<code>output</code> 及 invocation-scoped helper metadata。Mapping
-expression 只可呼叫 pure bootstrap-safe
-built-ins。<code>#{...}</code>、<code>&amp;{...}</code> 和
+<code>output</code> 及 invocation-scoped helper metadata。V1 mapping
+grammar 會評估 literal、selected-record <code>@{...}</code> reference 及
+<code>${...}</code> Context reference；不會評估 built-in
+call。<code>#{...}</code>、<code>&amp;{...}</code> 和
 <code>%{...}</code> 都不是 input-mapping expression。</p>
 <div class="sourceCode" id="cb8"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-testdata/v1.0</span></span>

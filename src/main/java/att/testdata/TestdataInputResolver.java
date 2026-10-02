@@ -115,22 +115,31 @@ public final class TestdataInputResolver {
 
     public Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
                                        String userId, String iterationId) throws Exception {
-        return resolve(mapping, context, userId, iterationId, () -> true);
+        return resolve(mapping, context, userId, iterationId, null, () -> true);
     }
 
     public Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
                                        String userId, String iterationId, BooleanSupplier selectionWaitAllowed)
             throws Exception {
+        return resolve(mapping, context, userId, iterationId, null, selectionWaitAllowed);
+    }
+
+    /** Resolves one mapping with a scheduler-assigned dense ordinal when available. */
+    public Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
+                                       String userId, String iterationId, Long testdataOrdinal,
+                                       BooleanSupplier selectionWaitAllowed) throws Exception {
+        if (testdataOrdinal != null && testdataOrdinal.longValue() < 0L)
+            throw new IllegalArgumentException("Testdata ordinal must be >= 0");
         currentSelectionWaitAllowed.set(selectionWaitAllowed == null ? () -> true : selectionWaitAllowed);
         try {
-            return resolveMapping(mapping, context, userId, iterationId);
+            return resolveMapping(mapping, context, userId, iterationId, testdataOrdinal);
         } finally {
             currentSelectionWaitAllowed.remove();
         }
     }
 
     private Map<String, Object> resolveMapping(Map<String, Object> mapping, CaseRuntimeContext context,
-                                               String userId, String iterationId) throws Exception {
+                                               String userId, String iterationId, Long testdataOrdinal) throws Exception {
         TestdataSyntax.references(mapping);
         String evidenceScope = load ? workloadId + "|" + String.valueOf(iterationId) : executionScope;
         if (!evidenceScope.equals(currentEvidenceScope.get())) {
@@ -144,7 +153,7 @@ public final class TestdataInputResolver {
             return immutableMap((Map<?, ?>) deepCopy(mapping));
         }
         Map<String, Selection> selected = new LinkedHashMap<String, Selection>();
-        Object resolved = mapValue(mapping, context, userId, iterationId, selected);
+        Object resolved = mapValue(mapping, context, userId, iterationId, testdataOrdinal, selected);
         if (!(resolved instanceof Map)) throw new IllegalArgumentException("Input mapping must be an object");
         Map<String, Map<String, Object>> metadata = new LinkedHashMap<String, Map<String, Object>>();
         Map<String, Map<String, Object>> previous = currentEvidence.get();
@@ -165,32 +174,36 @@ public final class TestdataInputResolver {
     }
 
     private Object mapValue(Object value, CaseRuntimeContext context, String userId, String iterationId,
+                            Long testdataOrdinal,
                             Map<String, Selection> perMapping) throws Exception {
-        if (value instanceof String) return mapString((String) value, context, userId, iterationId, perMapping);
+        if (value instanceof String) return mapString((String) value, context, userId, iterationId,
+                testdataOrdinal, perMapping);
         if (value instanceof Map) {
             Map<Object, Object> result = new LinkedHashMap<Object, Object>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet())
-                result.put(entry.getKey(), mapValue(entry.getValue(), context, userId, iterationId, perMapping));
+                result.put(entry.getKey(), mapValue(entry.getValue(), context, userId, iterationId,
+                        testdataOrdinal, perMapping));
             return result;
         }
         if (value instanceof Iterable) {
             List<Object> result = new ArrayList<Object>();
-            for (Object item : (Iterable<?>) value) result.add(mapValue(item, context, userId, iterationId, perMapping));
+            for (Object item : (Iterable<?>) value)
+                result.add(mapValue(item, context, userId, iterationId, testdataOrdinal, perMapping));
             return result;
         }
         return value;
     }
 
     private Object mapString(String value, CaseRuntimeContext context, String userId, String iterationId,
-                             Map<String, Selection> perMapping) throws Exception {
+                             Long testdataOrdinal, Map<String, Selection> perMapping) throws Exception {
         String text = value.trim();
         Matcher exactData = REFERENCE.matcher(value);
-        if (exactData.matches()) return valueAt(exactData.group(1), userId, iterationId, perMapping);
+        if (exactData.matches()) return valueAt(exactData.group(1), userId, iterationId, testdataOrdinal, perMapping);
         if (text.startsWith("@{") && text.endsWith("}") && !text.equals(value))
             throw new IllegalArgumentException("Exact testdata references must not have surrounding whitespace");
         if (text.contains("%{")) throw new IllegalArgumentException("%{...} is reserved for generated testdata record templates");
         if (text.contains("#{") || text.contains("&{"))
-            throw new IllegalArgumentException("Input mapping supports only literals, @{...}, and bootstrap-safe ${...} references");
+            throw new IllegalArgumentException("Input mapping supports only literals, @{...}, and ${Context} references");
         if (text.contains("@{") && !REFERENCE.matcher(text).find()) throw new IllegalArgumentException("Malformed @{testdata} reference in input mapping");
         if (text.contains("${") && !CONTEXT.matcher(text).find()) throw new IllegalArgumentException("Malformed ${...} reference in input mapping");
 
@@ -213,7 +226,7 @@ public final class TestdataInputResolver {
             matcher.region(start, value.length());
             if (!matcher.lookingAt()) throw new IllegalArgumentException("Malformed input mapping reference");
             Object resolved;
-            if (data) resolved = valueAt(matcher.group(1), userId, iterationId, perMapping);
+            if (data) resolved = valueAt(matcher.group(1), userId, iterationId, testdataOrdinal, perMapping);
             else {
                 String path = contextPath(matcher.group(1));
                 resolved = new UnifiedTemplateEngine(null).evaluate("${" + path + "}", context, null);
@@ -236,7 +249,7 @@ public final class TestdataInputResolver {
         return path;
     }
 
-    private Object valueAt(String reference, String userId, String iterationId,
+    private Object valueAt(String reference, String userId, String iterationId, Long testdataOrdinal,
                            Map<String, Selection> perMapping) throws Exception {
         String value = reference.trim();
         if (!value.equals(reference)) throw new IllegalArgumentException("Testdata reference must not contain surrounding whitespace");
@@ -246,13 +259,13 @@ public final class TestdataInputResolver {
         if (!id.matches("[A-Za-z][A-Za-z0-9_-]*")) throw new IllegalArgumentException("Invalid logical testdata id in @{...}: " + id);
         Selection selection = perMapping.get(id);
         if (selection == null) {
-            selection = select(id, userId, iterationId);
+            selection = select(id, userId, iterationId, testdataOrdinal);
             perMapping.put(id, selection);
         }
         return path.isEmpty() ? selection.record : traverse(selection.record, path.charAt(0) == '.' ? path.substring(1) : path);
     }
 
-    private Selection select(String id, String userId, String iterationId) throws Exception {
+    private Selection select(String id, String userId, String iterationId, Long testdataOrdinal) throws Exception {
         if (registry == null) throw new IllegalArgumentException("No testdata registry is configured for reference: " + id);
         final TestdataDescriptor descriptor = registry.resolve(id);
         final String layer = registry.layer(id);
@@ -279,37 +292,38 @@ public final class TestdataInputResolver {
             scopeKey = workloadId + "|" + id + "|iteration|" + iterationId;
         }
         Selection selected;
-        if (orderedLoadExhaustion && "closed".equals(model)) {
+        if (orderedLoadExhaustion) {
             selected = selections.get(scopeKey);
             if (selected == null) {
                 Selection candidate = choose(descriptor, id, layer, scope, policy, scopeKey, userId,
-                        iterationId, currentSelectionWaitAllowed.get());
+                        iterationId, testdataOrdinal, currentSelectionWaitAllowed.get());
                 Selection previous = selections.putIfAbsent(scopeKey, candidate);
                 selected = previous == null ? candidate : previous;
             }
         } else {
             selected = selections.computeIfAbsent(scopeKey,
                     key -> choose(descriptor, id, layer, scope, policy, key, userId, iterationId,
-                            currentSelectionWaitAllowed.get()));
+                            testdataOrdinal, currentSelectionWaitAllowed.get()));
         }
         return selected;
     }
 
     private Selection choose(TestdataDescriptor descriptor, String id, String layer, String scope,
                              TestdataSelectionPolicy policy, String scopeKey,
-                             String userId, String iterationId, BooleanSupplier selectionWaitAllowed) {
+                             String userId, String iterationId, Long testdataOrdinal,
+                             BooleanSupplier selectionWaitAllowed) {
         String strategy = policy == null ? "sequential" : policy.strategy();
         String exhaustion = policy == null ? "error" : policy.exhaustion();
         long ordinal;
         if (load) {
-            ordinal = loadOrdinal(scope, userId, iterationId);
+            ordinal = loadOrdinal(scope, userId, iterationId, testdataOrdinal);
         } else {
             String counterKey = workloadId + "|" + id + "|" + strategy + "|" + exhaustion;
             AtomicLong counter = counters.computeIfAbsent(counterKey, key -> new AtomicLong());
             ordinal = counter.getAndIncrement();
         }
         long count = descriptor.count();
-        SelectionOrder selectionOrder = orderedLoadExhaustion && load && "closed".equals(model)
+        SelectionOrder selectionOrder = orderedLoadExhaustion && load
                 && !"workload".equals(scope)
                 ? selectionOrders.computeIfAbsent(workloadId + "|" + id + "|" + scope,
                         key -> new SelectionOrder())
@@ -348,10 +362,11 @@ public final class TestdataInputResolver {
         return selected;
     }
 
-    private long loadOrdinal(String scope, String userId, String iterationId) {
+    private long loadOrdinal(String scope, String userId, String iterationId, Long testdataOrdinal) {
         if ("workload".equals(scope)) return 0L;
         if ("user".equals(scope)) return stableUserOrdinal(userId);
         if ("arrivalRate".equals(model)) {
+            if (testdataOrdinal != null) return testdataOrdinal.longValue();
             java.util.regex.Matcher planned = ARRIVAL_ITERATION_ID.matcher(iterationId);
             if (!planned.find()) throw new IllegalArgumentException("Arrival-rate iterationId must end with -arrival-<sequence>");
             return positiveOrdinal(planned.group(1), "arrival-rate iteration sequence");
