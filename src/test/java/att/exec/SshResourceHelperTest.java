@@ -575,6 +575,78 @@ class SshResourceHelperTest {
         assertTrue(new String(Files.readAllBytes(root.resolve("stat.log")), "UTF-8").contains("sftp"));
     }
 
+    @Test void filesystemTimeoutRetryValidationMatchesNativeAndCallBackedOperationPolicy() throws Exception {
+        SshResourceExecutor executor = executor(new CommandResult(0, "", "", false), null);
+        java.lang.reflect.Field configured = SshResourceExecutor.class.getDeclaredField("config"); configured.setAccessible(true);
+        FrameworkConfig config = (FrameworkConfig) configured.get(executor);
+        java.lang.reflect.Method contract = att.validation.PackageValidator.class.getDeclaredMethod("validateSshRetryContract",
+                TemplateAction.class, FrameworkConfig.class); contract.setAccessible(true);
+        for (String operation : new String[]{"execute", "stat", "mkdirs", "move", "delete", "upload", "download"}) {
+            String call = "#{ssh.application." + operation + "()}";
+            att.config.ToolConfig wrapper = new att.config.ToolConfig("wrapped", "wrapped", "", "Wrapper", "",
+                    Collections.<String>emptyList(), call, Collections.<String>emptyList(), "",
+                    Collections.emptyMap(), null, null);
+            FrameworkConfig facadeConfig = new FrameworkConfig(root, root, root, "SIT", 5000, root,
+                    Collections.singletonMap("wrapped", wrapper), null, null);
+            for (boolean facade : new boolean[]{false, true}) {
+                FrameworkConfig selected = facade ? facadeConfig : config;
+                att.validation.PackageValidator validator = new att.validation.PackageValidator(root, selected);
+                TemplateAction action = new TemplateAction("retry", map("type", "tool",
+                        "call", facade ? "#{wrapped()}" : call,
+                        "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"))));
+                if (java.util.Arrays.asList("execute", "stat", "mkdirs").contains(operation))
+                    assertDoesNotThrow(() -> contract.invoke(validator, action, selected), operation);
+                else {
+                    java.lang.reflect.InvocationTargetException rejected = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                            () -> contract.invoke(validator, action, selected), operation);
+                    assertTrue(rejected.getCause().getMessage().contains("retryOn TIMEOUT is not supported"), operation);
+                }
+            }
+        }
+    }
+
+    @Test void idempotentFilesystemTimeoutsActuallyRetryAndRespectTheBooleanGate() throws Exception {
+        for (String operation : new String[]{"stat", "mkdirs"}) for (String category : new String[]{"SSH_TIMEOUT", "SSH_POOL_TIMEOUT"}) for (boolean facade : new boolean[]{false, true})
+            for (boolean allow : new boolean[]{false, true}) {
+                AtomicInteger calls = new AtomicInteger();
+                FakeTransfer transfer = new FakeTransfer() {
+                    @Override public Map<String, Object> filesystem(SshConfig target, String requested, Map<String, Object> arguments,
+                            Duration connectTimeout, Duration timeout, Path project, SshTransferCancellation cancellation) throws Exception {
+                        assertEquals(operation, requested);
+                        if (calls.incrementAndGet() == 1)
+                            throw new SshResourceExecutor.SshOperationException(category, "Filesystem deadline expired", null);
+                        return "stat".equals(requested) ? map("path", "/x", "exists", false) : map("path", "/x", "created", false);
+                    }
+                };
+                SshResourceExecutor executor = executor(new CommandResult(0, "", "", false), transfer);
+                String call = "#{ssh.application." + operation + "(remotePath='/x')}";
+                att.config.ToolConfig wrapper = new att.config.ToolConfig("wrapped", "wrapped", "", "Wrapper", "",
+                        Collections.<String>emptyList(), call, Collections.<String>emptyList(), "",
+                        Collections.emptyMap(), null, null);
+                FrameworkConfig config = new FrameworkConfig(root, root, root, "SIT", 5000, root,
+                        Collections.singletonMap("wrapped", wrapper), null, null);
+                CaseRuntimeContext runtime = context();
+                runtime.beginStage(new StageCaseData("invoke", "T", Collections.emptyMap()), "T", root);
+                TemplateAction action = new TemplateAction("filesystem", map("type", "tool",
+                        "call", facade ? "#{wrapped()}" : call,
+                        "retry", map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"),
+                                "when", allow ? "#{true}" : "#{false}")));
+                try (CaseExecutionLog log = new CaseExecutionLog(root.resolve(operation + "-" + category + "-" + facade + "-" + allow + ".log"))) {
+                    List<att.core.ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(
+                            facade ? new ToolInvoker(root, config) : null, null, null, null, executor, new DefaultBuiltInProvider()))
+                            .execute("invoke", new StageTemplate("T", root, Collections.singletonList(action)), runtime, log);
+                    assertEquals(allow ? ResultStatus.PASS : ResultStatus.ERROR, results.get(0).status(), results.get(0).message());
+                }
+                assertEquals(allow ? 2 : 1, calls.get());
+                assertEquals("TIMEOUT", runtime.resolve("ACTIONS.filesystem.output.attempts[0].status"));
+                assertEquals(category, runtime.resolve("ACTIONS.filesystem.output.attempts[0].SSH.error.category"));
+                assertEquals(allow ? "RETRY" : "WHEN_FALSE",
+                        runtime.resolve("ACTIONS.filesystem.output.attempts[0].retryDecision.reason"));
+                if (allow) assertEquals(false, runtime.resolve("ACTIONS.filesystem.output.result." + ("stat".equals(operation) ? "exists" : "created")));
+                else assertEquals("TIMEOUT", runtime.resolve("ACTIONS.filesystem.output.status"));
+            }
+    }
+
     private SshResourceExecutor executor(final CommandResult commandResult, SshTransferClient transfer) {
         return executor(commandResult, transfer, "single",
                 Collections.singletonMap("one", new SshConfig("example.test", "deploy", 22, "")));

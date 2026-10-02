@@ -645,8 +645,8 @@ public class StageTemplateRunner {
     private boolean sshTimeout(Map<String, Object> invocation) {
         Object ssh = invocation == null ? null : invocation.get("SSH");
         if (!(ssh instanceof Map)) return false;
-        // Transfers must never be replayed automatically, including through call-backed Tools.
-        if (!"execute".equals(((Map<String, Object>) ssh).get("operation"))) return false;
+        // Apply the same replay policy as validation, including through call-backed Tools.
+        if (!att.exec.SshResourceExecutor.supportsTimeoutRetry(String.valueOf(((Map<String, Object>) ssh).get("operation")))) return false;
         Object error = ((Map<String, Object>) ssh).get("error");
         if (!(error instanceof Map)) return false;
         Object category = ((Map<String, Object>) error).get("category");

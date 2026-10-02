@@ -1773,9 +1773,9 @@ public final class PackageValidator {
         }
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length == 3 && "ssh".equals(parts[0])
-                && ("upload".equals(parts[2]) || "download".equals(parts[2]))) {
+                && !att.exec.SshResourceExecutor.supportsTimeoutRetry(parts[2])) {
             throw new IllegalArgumentException("retryOn TIMEOUT is not supported for native SSH " + parts[2]
-                    + " actions because replaying a transfer may duplicate a side effect; retry execute or handle the transfer explicitly: " + action.id());
+                    + " actions because replaying a timed-out mutation may duplicate a side effect; retry execute/stat/mkdirs or handle recovery explicitly: " + action.id());
         }
     }
 

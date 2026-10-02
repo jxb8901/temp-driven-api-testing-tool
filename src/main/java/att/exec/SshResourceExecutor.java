@@ -42,6 +42,11 @@ import java.util.concurrent.TimeoutException;
 
 /** Executes the common SSH Resource Helper operations without changing Tool semantics. */
 public final class SshResourceExecutor {
+    /** TIMEOUT replay is allowed only for commands and idempotent filesystem operations. */
+    public static boolean supportsTimeoutRetry(String operation) {
+        return "execute".equals(operation) || "stat".equals(operation) || "mkdirs".equals(operation);
+    }
+
     private final Path projectRoot;
     private final FrameworkConfig config;
     private final SshCommandRunner commandRunner;
