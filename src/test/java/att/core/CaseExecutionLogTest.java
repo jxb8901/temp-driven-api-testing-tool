@@ -6,8 +6,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.file.*;
+import java.util.AbstractMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CaseExecutionLogTest {
@@ -94,6 +96,41 @@ class CaseExecutionLogTest {
         assertTrue(text.contains("stderrCaptureError"));
         assertTrue(text.contains("cleanupWarning"));
         assertTrue(text.contains("evidenceError"));
+    }
+
+    @Test void discardingLogSkipsValueTraversalAndDoesNotMaterializeAFile() throws Exception {
+        Map<String, Object> expensive = new AbstractMap<String, Object>() {
+            @Override public Set<Entry<String, Object>> entrySet() {
+                throw new AssertionError("discarding logs must not traverse or serialize values");
+            }
+        };
+        Path file = tempDir.resolve("discarded.log");
+        CaseExecutionLog log = CaseExecutionLog.discarding(file);
+        log.registerSecretRedactions(java.util.Collections.singletonList("secret-value"));
+        assertFalse(log.appendInternalErrorOnce(new RuntimeException("ignored"), "ignored"));
+        log.append("ACTION", expensive);
+        log.appendAction("ACTION", expensive);
+        log.appendToolInvocation("ACTION", expensive);
+        log.appendRaw("ACTION", "ignored");
+        log.materialize(file);
+        assertFalse(Files.exists(file));
+    }
+
+    @Test void boundedDeferredLogRetainsRecentFailureDetailsAndRedactsSecrets() throws Exception {
+        Path file = tempDir.resolve("bounded.log");
+        CaseExecutionLog log = CaseExecutionLog.bounded(file, false, 160);
+        log.registerSecretRedactions(java.util.Collections.singletonList("secret-token"));
+        StringBuilder oldEvents = new StringBuilder();
+        for (int index = 0; index < 100; index++) oldEvents.append("old-event-").append(index).append(' ');
+        log.appendRaw("ACTION prior", oldEvents.toString());
+        log.appendRaw("LOAD ERROR", "failure detail token=secret-token");
+        log.materialize(file);
+
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.length() <= 160, "deferred failure log must stay within its character bound");
+        assertTrue(text.startsWith("... earlier case log events omitted ..."));
+        assertTrue(text.contains("failure detail token=[REDACTED_SECRET]"));
+        assertFalse(text.contains("secret-token"));
     }
 
     @Test void consoleMirrorFlushesEachAlreadyRedactedAppendWithCaseIdentity() throws Exception {

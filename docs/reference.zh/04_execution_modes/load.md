@@ -96,7 +96,9 @@ Metrics-only iteration 雖有 EXEC.ID，但除非 operation 寫入 artifact 或 
 
 #### Evidence 與 resource output
 
-evidence.mode 支援 metrics、failures、samples、all；預設 failures。sampleRate 與 maxSamples 限制保留 evidence。Dropped arrival 不建立 iteration evidence。
+`evidence.mode` 支援 `metrics`、`failures`、`samples`、`all`；預設為 `failures`。這些 mode 分別將 effective success/failure policy 預設為 `none/none`、`none/full`、`sample/full`、`full/full`。`evidence.success` 與 `evidence.failure` 可各自覆寫預設。`sampleRate` 與 `maxSamples` 限制保留 evidence。Dropped arrival 不建立 iteration evidence。
+
+Case log capture 會在每個 iteration 開始前依 effective success/failure policy 及剩餘 retention capacity 決定。Effective failure policy 為 `full` 且仍有可用的 `maxSamples` slot 時，failure（包括 `samples` 中未抽中的 success）會在記憶體保留經 redaction 的 rolling tail，最多 65,536 字元；只有 failure claim 到 retention slot 後才會物化。`maxSamples` 為零或已用盡、因此不能再保留 failure 時，會略過 per-action serialization 與 buffering。In-flight iteration 已預留的 slot 可能令 scheduler 保守地略過其他 iteration 的 capture。保留的 log 會在 truncation marker 後保留最新 action 與 runtime failure detail。已抽中的 success 與保留的 full-success evidence 使用完整 deferred case log；若已預留 success slot 的 iteration 最後失敗，系統仍會保留其完整 deferred log，並使用該 slot 保存 failure evidence。例如 `mode: metrics, failure: full` 會在仍有容量時啟用 bounded failure capture；`mode: failures, failure: none` 則會略過 failure capture。
 
 evidence.resources.output 支援 inherit（預設）或 none。none 停用可選的人類可讀 resource-output 格式化與物化，但保留 typed result、stdoutFormat/responseFormat parsing、exact project-file String 與 requestFormat 行為。Load 將 resource output 延至 iteration 被保留後才處理；metrics-only iteration 不做 business-output formatting 或 evidence file I/O。
 

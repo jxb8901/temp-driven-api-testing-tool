@@ -1,7 +1,7 @@
-# ATT V3.7.0 使用手冊與參考
+# ATT V3.7.1 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 3.7.0
+Version: 3.7.1
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -121,7 +121,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
 - [Appendix A — Schema 與 Version Matrix](#appendix-a-schema-與-version-matrix)
 - [Appendix B — Compatibility 與 Deprecated Aliases](#appendix-b-compatibility-與-deprecated-aliases)
 - [Appendix C — Migration Notes](#appendix-c-migration-notes)
-  - [ATT 3.7.0 Testdata Migration](#att-370-testdata-migration)
+  - [ATT 3.7.1 Testdata Migration](#att-371-testdata-migration)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
   - [Environment profile migration](#environment-profile-migration)
@@ -1159,7 +1159,9 @@ Metrics-only iteration 雖有 EXEC.ID，但除非 operation 寫入 artifact 或 
 
 #### Evidence 與 resource output
 
-evidence.mode 支援 metrics、failures、samples、all；預設 failures。sampleRate 與 maxSamples 限制保留 evidence。Dropped arrival 不建立 iteration evidence。
+`evidence.mode` 支援 `metrics`、`failures`、`samples`、`all`；預設為 `failures`。這些 mode 分別將 effective success/failure policy 預設為 `none/none`、`none/full`、`sample/full`、`full/full`。`evidence.success` 與 `evidence.failure` 可各自覆寫預設。`sampleRate` 與 `maxSamples` 限制保留 evidence。Dropped arrival 不建立 iteration evidence。
+
+Case log capture 會在每個 iteration 開始前依 effective success/failure policy 及剩餘 retention capacity 決定。Effective failure policy 為 `full` 且仍有可用的 `maxSamples` slot 時，failure（包括 `samples` 中未抽中的 success）會在記憶體保留經 redaction 的 rolling tail，最多 65,536 字元；只有 failure claim 到 retention slot 後才會物化。`maxSamples` 為零或已用盡、因此不能再保留 failure 時，會略過 per-action serialization 與 buffering。In-flight iteration 已預留的 slot 可能令 scheduler 保守地略過其他 iteration 的 capture。保留的 log 會在 truncation marker 後保留最新 action 與 runtime failure detail。已抽中的 success 與保留的 full-success evidence 使用完整 deferred case log；若已預留 success slot 的 iteration 最後失敗，系統仍會保留其完整 deferred log，並使用該 slot 保存 failure evidence。例如 `mode: metrics, failure: full` 會在仍有容量時啟用 bounded failure capture；`mode: failures, failure: none` 則會略過 failure capture。
 
 evidence.resources.output 支援 inherit（預設）或 none。none 停用可選的人類可讀 resource-output 格式化與物化，但保留 typed result、stdoutFormat/responseFormat parsing、exact project-file String 與 requestFormat 行為。Load 將 resource output 延至 iteration 被保留後才處理；metrics-only iteration 不做 business-output formatting 或 evidence file I/O。
 
@@ -2487,7 +2489,7 @@ ATT 會把缺失路徑視作作者/運行時錯誤，而不是靜默渲染成空
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.7.0",
+  "attVersion": "3.7.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2579,7 +2581,7 @@ Deterministic legacy alias 在可一對一映射時可以保留並產生 migrati
 
 ## Appendix C — Migration Notes
 
-### ATT 3.7.0 Testdata Migration
+### ATT 3.7.1 Testdata Migration
 
 將 global configuration 從 `att-config/v2.10` 升至 `att-config/v2.11`，並將 Load scenario 從 `att-load/v1.4` 升至 `att-load/v1.5`。舊 schema 仍登錄於 `schemas/history/`，供 migration diagnostics 使用。`att-testdata/v1.0` 是新增契約：在選定的 environment profile `testdata` list 加入 descriptor path，再於 Case/Stage、Debug 或 Load workload input map 使用 `@{id}`。Load scenario 可在頂層加入 package-relative `testdata` paths，形成僅適用於該次 Load 的 overlay。不同 layer 的同名 ID 會完整取代 descriptor；同一 layer 內的重複 ID 無效。多筆 records 的 descriptor 必須有明確 selection policy。沒有 testdata reference 的既有 package 不需要新增 descriptor。
 

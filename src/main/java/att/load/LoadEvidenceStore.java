@@ -25,7 +25,11 @@ public final class LoadEvidenceStore implements LoadEventListener {
         this.policy = policy;
         this.observer = observer;
     }
-    public boolean retainsFailureEvidence() { return policy.failure() == LoadEvidencePolicy.Failure.FULL; }
+    /** Returns whether an unreserved slot remains for a failure, so the scheduler can avoid needless log capture. */
+    public synchronized boolean retainsFailureEvidence() {
+        return policy.retainFailure()
+                && (long) retained.size() + reservedEvidence.size() < policy.maxSamples();
+    }
     public boolean retainsSuccessEvidence(String iterationId) { return policy.retainSuccess(iterationId); }
 
     /** Reserves a slot only when this iteration is known to be success-eligible. */

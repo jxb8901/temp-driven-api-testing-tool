@@ -506,6 +506,35 @@ class LoadScenarioTest {
         } finally { resources.close(); }
     }
 
+    @Test void zeroFailureCapacitySkipsFailureLogCaptureBeforeExecution() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/ZERO_CAP_FAIL_TEMPLATE"));
+        write(project, "templates/ZERO_CAP_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: ZERO_CAP_FAIL_TEMPLATE\ndescription: zero-capacity failure\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "zero-cap-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: ZERO_CAP_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\nevidence: {mode: failures, maxSamples: 0}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("zero-cap-failure-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("zero-cap-run", "zero-cap-failure-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withEvidenceRetention(false, false)
+                            .withFailureLogCapture(evidence.retainsFailureEvidence()));
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertFalse(evidence.retainsFailureEvidence());
+            assertNull(result.evidenceRef());
+            assertTrue(Files.notExists(result.outputDirectory()));
+            assertFalse(Files.exists(result.outputDirectory().resolve("case.log")));
+        } finally { resources.close(); }
+    }
+
     @Test void metricsOnlyNonFileIterationDoesNotCreateExecutionWorkspace() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/METRICS_PROBE_TEMPLATE"));
@@ -528,6 +557,38 @@ class LoadScenarioTest {
             assertEquals("false", result.context().resolve("ACTIONS.probe.output.result"));
             assertFalse(Files.exists(result.outputDirectory()), "metrics-only non-file iterations must keep EXEC.OUTPUT_DIR logical");
             assertFalse(Files.exists(outputRoot.resolve("load/metrics-probe-run")));
+        } finally { resources.close(); }
+    }
+
+    @Test void deferredFailureEvidenceMaterializesTheBoundedLogAfterRetentionClaim() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/DEFERRED_FAIL_TEMPLATE"));
+        write(project, "templates/DEFERRED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: DEFERRED_FAIL_TEMPLATE\ndescription: deferred failure evidence\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "deferred-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: DEFERRED_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\nevidence: {mode: failures}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("deferred-failure-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("deferred-run", "deferred-failure-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withEvidenceRetention(false, false).withFailureLogCapture(true));
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertNull(result.evidenceRef(), "the executor must leave the retention decision to the scheduler");
+            assertTrue(Files.notExists(result.outputDirectory()));
+
+            IterationResult retained = result.materializeEvidence();
+            assertNotNull(retained.evidenceRef());
+            String caseLog = new String(Files.readAllBytes(retained.evidenceRef().caseLog()), "UTF-8");
+            assertTrue(caseLog.contains("ACTION verify"));
+            assertTrue(caseLog.contains("LOAD OUTCOME"));
+            assertTrue(caseLog.contains("FAIL"));
         } finally { resources.close(); }
     }
 
@@ -643,6 +704,52 @@ class LoadScenarioTest {
             @SuppressWarnings("unchecked") Map<String, Object> reference = (Map<String, Object>) event.get("evidence");
             assertTrue(String.valueOf(reference.get("workspace")).startsWith("samples/"));
             assertTrue(Files.isRegularFile(outputRoot.resolve("load/sample-run").resolve(String.valueOf(reference.get("caseLog")))));
+        } finally { resources.close(); }
+    }
+
+    @Test void successReservedSampleFailureRetainsItsFullDeferredLogAtCapacity() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/SAMPLED_FAIL_TEMPLATE"));
+        write(project, "templates/SAMPLED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: SAMPLED_FAIL_TEMPLATE\ndescription: pre-reserved sample failure\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "sampled-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: SAMPLED_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "evidence: {mode: samples, sampleRate: 1.0, maxSamples: 1}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("sampled-failure-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            String iterationId = "sampled-failure-1";
+            assertTrue(evidence.reserveSuccessEvidence(iterationId));
+            IterationRequest request = IterationRequest.closed("sampled-failure-run", iterationId, 1, "STEADY",
+                            Instant.now(), "VU-1", scenario.inputs())
+                    .withOutputDirectory(outputRoot.resolve("load/sampled-failure-run/iterations"))
+                    .withEvidenceRetention(true, false)
+                    .withFailureLogCapture(evidence.retainsFailureEvidence());
+            assertFalse(request.captureFailureLog(), "the reservation fills the only slot, so the shared capacity check is conservative");
+
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(request);
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertTrue(evidence.claimFailureEvidence(iterationId), "the failing iteration may use its own success reservation");
+
+            IterationResult retained = result.materializeEvidence();
+            assertNotNull(retained.evidenceRef(), "the reserved full log must remain available for failure materialization");
+            String caseLog = new String(Files.readAllBytes(retained.evidenceRef().caseLog()), "UTF-8");
+            assertTrue(caseLog.contains("ACTION verify"));
+            assertTrue(caseLog.contains("LOAD OUTCOME"));
+            assertTrue(caseLog.contains("FAIL"));
+
+            long now = System.currentTimeMillis();
+            evidence.onEvent(LoadEvent.completed("sampled-failure-run", "closed", "STEADY", iterationId, "VU-1", 1,
+                    now, now, now + 1, retained.status(), retained.evidenceRef()));
+            assertEquals(1, evidence.events().size());
+            assertEquals(iterationId, evidence.events().get(0).iterationId());
         } finally { resources.close(); }
     }
 
@@ -771,6 +878,8 @@ class LoadScenarioTest {
         CountDownLatch releaseFirst = new CountDownLatch(1);
         AtomicInteger calls = new AtomicInteger();
         LoadIterationRunner runner = request -> {
+            assertTrue(request.captureFailureLog(), "failure policy must keep a bounded log until the outcome is known");
+            assertFalse(request.retainSuccessEvidence(), "failures mode must not capture full logs for successful iterations");
             int call = calls.incrementAndGet();
             try {
                 if (call == 1) {

@@ -21,10 +21,13 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Workload-agnostic execution layer; one instance binds one fixed target and shared run resources. */
 public final class IterationExecutor implements LoadIterationRunner {
+    private static final int FAILURE_LOG_BUFFER_CHARACTERS = 64 * 1024;
     private final Path projectRoot;
     private final FrameworkConfig config;
     private final LoadTarget target;
@@ -103,7 +106,7 @@ public final class IterationExecutor implements LoadIterationRunner {
                 resources.reserveExecutionId(executionId, request);
                 executionWorkspace = executionWorkspace(request, executionId);
                 context.finishExecutionIdInitialization(executionId, executionWorkspace, executionWorkspace.resolve("case.log"));
-                log = CaseExecutionLog.lightweight(executionWorkspace.resolve("case.log"), config.caseLogYamlAnchors());
+                log = executionLog(executionWorkspace.resolve("case.log"), request);
                 throw invalidId;
             }
             executionWorkspace = executionWorkspace(request, executionId);
@@ -113,7 +116,7 @@ public final class IterationExecutor implements LoadIterationRunner {
             // metrics-only/helper iterations therefore do not pay per-iteration
             // mkdir and temporary-workspace cleanup I/O.
             context.setCommandWorkingDirectory(executionWorkspace);
-            log = CaseExecutionLog.lightweight(executionWorkspace.resolve("case.log"), config.caseLogYamlAnchors());
+            log = executionLog(executionWorkspace.resolve("case.log"), request);
             att.core.ExecutionBootstrapVariables.evaluate(context.bootstrapVariables(), context, identityEngine,
                     att.core.ExecutionBootstrapVariables.Scope.LOAD);
             if (testdataResolver != null && !testdataResolver.selectionEvidence().isEmpty())
@@ -163,6 +166,15 @@ public final class IterationExecutor implements LoadIterationRunner {
             if (error instanceof InterruptedException) Thread.currentThread().interrupt();
         } finally {
             if (context != null) context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
+            if (log != null && status != ResultStatus.PASS) {
+                Map<String, Object> outcome = new LinkedHashMap<String, Object>();
+                outcome.put("status", status.name());
+                if (diagnostic != null) {
+                    if (diagnostic.code() != null) outcome.put("code", diagnostic.code());
+                    if (diagnostic.summary() != null) outcome.put("summary", diagnostic.summary());
+                }
+                try { log.append("LOAD OUTCOME", outcome); } catch (Exception ignored) { }
+            }
             if (log != null) try { log.close(); } catch (Exception ignored) { }
         }
         Duration duration = Duration.between(started, Instant.now());
@@ -205,9 +217,19 @@ public final class IterationExecutor implements LoadIterationRunner {
         } else {
             deleteEmptyWorkspace(executionWorkspace);
         }
+        CaseExecutionLog deferredFailureLog = !evidenceAvailable && status != ResultStatus.PASS
+                && (request.captureFailureLog() || request.retainSuccessEvidence()) ? log : null;
         return new IterationResult(request.iterationId(), executionId, status, duration, context, results,
                 executionWorkspace, evidenceDirectory, diagnostic, evidenceAvailable,
-                evidenceAvailable ? null : log, transientWorkspace);
+                deferredFailureLog, transientWorkspace);
+    }
+
+    private CaseExecutionLog executionLog(Path logicalPath, IterationRequest request) throws IOException {
+        if (request.retainSuccessEvidence())
+            return CaseExecutionLog.lightweight(logicalPath, config.caseLogYamlAnchors());
+        if (request.captureFailureLog())
+            return CaseExecutionLog.bounded(logicalPath, config.caseLogYamlAnchors(), FAILURE_LOG_BUFFER_CHARACTERS);
+        return CaseExecutionLog.discarding(logicalPath);
     }
 
     private void deleteEmptyWorkspace(Path directory) {
