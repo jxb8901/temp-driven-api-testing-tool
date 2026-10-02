@@ -3706,19 +3706,23 @@ and actual transport. Transfer errors remain ineligible for automatic
 timeout replay.</p>
 <p>Native Resource Helper calls use one absolute Action deadline
 covering concurrency-pool wait, connection and channel setup, and
-command or SFTP transfer. A per-call <code>timeoutMs</code> or helper
+command or SFTP operation. A per-call <code>timeoutMs</code> or helper
 <code>timeouts.commandTimeoutMs</code> sets the operation limit but
 cannot extend the enclosing Action deadline.
 <code>timeouts.connectTimeoutMs</code> caps connection establishment
 within the remaining deadline; it does not add time to the operation.
-The timeout applies to <code>execute</code>, <code>upload</code>, and
-<code>download</code>. Native <code>execute</code>
-<code>SSH_TIMEOUT</code> and <code>SSH_POOL_TIMEOUT</code> failures may
-use Action <code>retryOn: [TIMEOUT]</code>; native <code>upload</code>
-and <code>download</code> reject timeout retry because replaying a
-transfer can duplicate a side effect. A timed-out SFTP Action returns at
-its deadline while its concurrency lease remains held by the cleanup
-worker until the transfer worker and transport terminate.</p>
+The timeout applies to execute/upload/download/stat/mkdirs/move/delete.
+Native <code>execute</code>, read-only <code>stat</code>, and idempotent
+<code>mkdirs</code> <code>SSH_TIMEOUT</code> and
+<code>SSH_POOL_TIMEOUT</code> failures may use Action
+<code>retryOn: [TIMEOUT]</code>, including through call-backed Tools;
+common <code>retry.when</code> controls replay. Native
+<code>upload</code>, <code>download</code>, <code>move</code>, and
+<code>delete</code> reject timeout retry because their mutation outcome
+may be uncertain after timeout. Validation and runtime use the same
+operation policy. A timed-out SFTP Action returns at its deadline while
+its concurrency lease remains held by the cleanup worker until the
+transfer worker and transport terminate.</p>
 <p>SSHHelper routes a command-backed Tool to a stable logical
 application-server ID instead of embedding a physical host in the Tool
 group. The <code>att-sshhelper/v1.0</code> YAML descriptor contains

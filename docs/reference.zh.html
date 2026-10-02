@@ -3370,19 +3370,21 @@ budget。所有 failure 都保留選定 operation 與實際 transport。Transfer
 error 仍不可自動 timeout replay。</p>
 <p>Native Resource Helper call 使用一個 absolute Action deadline，涵蓋
 concurrency pool wait、connection 與 channel setup，以及 command 或 SFTP
-transfer。Per-call <code>timeoutMs</code> 或 helper
+operation。Per-call <code>timeoutMs</code> 或 helper
 <code>timeouts.commandTimeoutMs</code> 只設定 operation limit，不能延長
 enclosing Action deadline。<code>timeouts.connectTimeoutMs</code>
 只在剩餘 deadline 內限制 connection establishment，不會額外增加
-operation
-時間。<code>execute</code>、<code>upload</code>、<code>download</code>
-都遵守此契約。Native <code>execute</code> 的 <code>SSH_TIMEOUT</code> 與
-<code>SSH_POOL_TIMEOUT</code> 可使用 Action
-<code>retryOn: [TIMEOUT]</code>；native <code>upload</code> 與
-<code>download</code> 會拒絕 timeout retry，因為重播 transfer
-可能重複副作用。SFTP Action 會在 deadline 到達時返回，但 concurrency
-lease 會由 cleanup worker 持有，直到 transfer worker 與 transport
-終止。</p>
+operation 時間。execute/upload/download/stat/mkdirs/move/delete
+均遵守此契約。Native <code>execute</code>、read-only <code>stat</code>
+與 idempotent <code>mkdirs</code> 的
+<code>SSH_TIMEOUT</code>／<code>SSH_POOL_TIMEOUT</code> 可使用 Action
+<code>retryOn: [TIMEOUT]</code>，call-backed Tool 亦相同，並沿用共用
+<code>retry.when</code> 控制重播。Native
+<code>upload</code>、<code>download</code>、<code>move</code>、<code>delete</code>
+拒絕 timeout retry，因為 timeout 後的 mutation outcome
+可能不確定。Validation 與 runtime 共用同一 operation policy。SFTP Action
+會在 deadline 到達時返回，但 concurrency lease 會由 cleanup worker
+持有，直到 transfer worker 與 transport 終止。</p>
 <p>SSHHelper 讓 command-backed Tool 使用穩定的邏輯應用伺服器 ID，而非在
 Tool group 中寫入實體主機。<code>att-sshhelper/v1.0</code> YAML
 descriptor 含 <code>id</code>、可選
