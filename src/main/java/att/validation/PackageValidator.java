@@ -969,7 +969,8 @@ public final class PackageValidator {
                 validateTemplateActions(body, config, new LinkedHashSet<String>(),
                         new LinkedHashSet<String>(), assignmentNames);
             }
-          } catch (DiagnosticException e) { throw att.config.YamlSupport.locate(e, template.sourceFile(), "actions." + action.id())
+          } catch (DiagnosticException e) { throw att.config.YamlSupport.locate(e, template.sourceFile(),
+                  "actions." + action.id() + ("retry.when".equals(e.field()) ? ".retry.when" : ""))
                   .withLocation(null, null, null, null, null, template.name(), action.id()); }
           catch (LocatedValidationException e) { throw e; }
           catch (Exception e) { throw att.config.YamlSupport.locate(DiagnosticException.wrap(
