@@ -40,9 +40,12 @@ class RetryConditionTest {
         CaseRuntimeContext context = new CaseRuntimeContext(test, tempDir, "r", tempDir, tempDir.resolve("case.log"));
         Map<String,Object> output = new LinkedHashMap<String,Object>();
         output.put("status", "TIMEOUT"); output.put("attempt", 1);
+        output.put("result", Collections.singletonMap("error", Collections.singletonMap("type", "TIMEOUT")));
         context.beginAction(output);
         context.setActionOutput(output);
         assertTrue(RetryCondition.evaluate("#{${output.status} == 'TIMEOUT' AND ${output.attempt} == 1}", context));
+        assertTrue(RetryCondition.evaluate("#{${output.status} == 'TIMEOUT' AND ${output.result.error.type} == 'TIMEOUT'}", context));
+        assertTrue(RetryCondition.evaluate("#{'TIMEOUT' == 'TIMEOUT' AND 'TIMEOUT' is not null}", context));
         output.put("attempt", 2);
         assertFalse(RetryCondition.evaluate("#{${output.attempt} == 1}", context));
         assertTrue(RetryCondition.evaluate("#{${output.missing?} != 2033}", context));
