@@ -492,15 +492,13 @@ public class FrameworkEngine {
         if (Files.isDirectory(templates)) try (java.util.stream.Stream<Path> files = Files.walk(templates)) { java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path)).filter(path -> !path.getFileName().toString().startsWith(".")).sorted().iterator(); while (iterator.hasNext()) addInput(inputs, "template-input", iterator.next()); }
         java.util.Set<Path> toolGroupFiles = new java.util.LinkedHashSet<Path>();
         java.util.Set<Path> toolSqlFiles = new java.util.LinkedHashSet<Path>();
+        att.template.FileExpressionResolver toolFileExpressions = new att.template.FileExpressionResolver(projectRoot);
         for (att.config.ToolConfig tool : config.tools().values()) {
             if (tool.sourceFile() != null && toolGroupFiles.add(tool.sourceFile())) addInput(inputs, "tool-group", tool.sourceFile());
             if (tool.callBacked()) {
                 att.template.ToolCallParser.ParsedCall call = new att.template.ToolCallParser().parse(tool.call());
                 for (att.template.ToolCallParser.Argument argument : call.arguments()) {
-                    if (!"sqlFile".equals(argument.key())) continue;
-                    String configured = String.valueOf(new att.template.ToolCallParser().literal(argument.expression()));
-                    Path sqlFile = new att.exec.DbHelperExecutor(projectRoot, config).resolveSqlFile(configured);
-                    if (toolSqlFiles.add(sqlFile)) addInput(inputs, "tool-sql", sqlFile);
+                    addToolFileExpressionInputs(inputs, toolFileExpressions, argument.expression(), projectRoot, toolSqlFiles);
                 }
             }
             java.util.List<String> command = tool.groupScriptArgv().isEmpty() ? tool.commandArgv() : tool.groupScriptArgv();
@@ -522,6 +520,25 @@ public class FrameworkEngine {
         Path schemas = projectRoot.resolve("schemas");
         if (Files.isDirectory(schemas)) try (java.util.stream.Stream<Path> files = Files.walk(schemas)) { java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).sorted().iterator(); while (iterator.hasNext()) addInput(inputs, "schema", iterator.next()); }
         return inputs;
+    }
+    private void addToolFileExpressionInputs(List<Map<String, Object>> inputs,
+                                              att.template.FileExpressionResolver resolver,
+                                              String expression, Path sourceDirectory,
+                                              Set<Path> captured) throws Exception {
+        java.util.ArrayDeque<java.util.Map.Entry<String, Path>> pending = new java.util.ArrayDeque<java.util.Map.Entry<String, Path>>();
+        for (String path : resolver.extractReferences(expression)) {
+            pending.addLast(new java.util.AbstractMap.SimpleImmutableEntry<String, Path>(path, sourceDirectory));
+        }
+        while (!pending.isEmpty()) {
+            java.util.Map.Entry<String, Path> reference = pending.removeFirst();
+            Path file = resolver.resolve(reference.getKey(), reference.getValue());
+            if (!captured.add(file)) continue;
+            addInput(inputs, "tool-sql", file);
+            att.template.FileExpressionResolver.CompiledFilePlan plan = resolver.compile(reference.getKey(), reference.getValue());
+            for (String nested : plan.filePaths()) {
+                pending.addLast(new java.util.AbstractMap.SimpleImmutableEntry<String, Path>(nested, plan.file().getParent()));
+            }
+        }
     }
     private void addInput(List<Map<String, Object>> inputs, String kind, Path file) throws Exception { if (!Files.isRegularFile(file)) return; Path canonicalRoot = projectRoot.toRealPath(); Path canonicalFile = file.toRealPath(); if (!canonicalFile.startsWith(canonicalRoot)) throw new IllegalArgumentException("Run input escapes package root: " + file); Map<String, Object> item = new LinkedHashMap<String, Object>(); item.put("kind", kind); item.put("path", canonicalRoot.relativize(canonicalFile).toString().replace('\\', '/')); item.put("sha256", sha256(canonicalFile)); inputs.add(item); }
     private String sha256(Path file) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); try (java.io.InputStream input = Files.newInputStream(file)) { byte[] buffer = new byte[65536]; int count; while ((count = input.read(buffer)) >= 0) digest.update(buffer, 0, count); } byte[] hash = digest.digest(); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }

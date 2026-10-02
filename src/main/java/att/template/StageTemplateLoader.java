@@ -162,20 +162,20 @@ public final class StageTemplateLoader {
         rejectLegacyResultFields(map, descriptor);
         String schemaVersion = String.valueOf(map.get("schemaVersion"));
         boolean current = Version.TEMPLATE_SCHEMA.equals(schemaVersion);
-        boolean historical = Version.HISTORICAL_TEMPLATE_SCHEMA_V3_4.equals(schemaVersion);
+        boolean historicalV35 = Version.HISTORICAL_TEMPLATE_SCHEMA_V3_5.equals(schemaVersion);
+        boolean historicalV34 = Version.HISTORICAL_TEMPLATE_SCHEMA_V3_4.equals(schemaVersion);
+        boolean historical = historicalV35 || historicalV34;
         if (!current && !historical) {
             Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion);
-            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.5.schema.json");
+            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-template-v3.6.schema.json");
             att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                     schemaVersion, Version.TEMPLATE_SCHEMA);
             throw new IllegalArgumentException("Unsupported template schemaVersion '" + schemaVersion
                     + "'; ATT 3.6.2 supports only " + Version.TEMPLATE_SCHEMA
                     + ". Render now returns String, command Tool parsing uses stdoutFormat, and Log file/fields migrate to value. See docs/reference/appendices/migrations.md.");
         }
-        boolean previousVersion = historical;
-        boolean modern = historical;
         Path schema = att.validation.SchemaFiles.resolve(projectRoot,
-                current ? "att-template-v3.5.schema.json" : "att-template-v3.4.schema.json");
+                current ? "att-template-v3.6.schema.json" : historicalV35 ? "att-template-v3.5.schema.json" : "att-template-v3.4.schema.json");
         if (current) att.validation.SchemaMigrationGuidance.verify(schema, schema, map, schemaVersion, Version.TEMPLATE_SCHEMA);
         else att.validation.JsonSchemaVerifier.verify(schema, map);
         SchemaSupport.requireVersion(map, schemaVersion, "template");
@@ -191,20 +191,18 @@ public final class StageTemplateLoader {
             Map<?, ?> actionMap = (Map<?, ?>) entry.getValue();
             if (current) rejectRemovedActionContract(actionMap, actionKey, descriptor);
             SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey,
-                    current || previousVersion
+                    current || historical
                             ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "value", "format", "call", "assert", "expected", "actual", "message", "timeoutMs", "db", "query", "update", "use", "runWhen"}
-                            : modern
-                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "renderAs", "saveAs", "call", "assert", "expected", "actual", "message", "file", "fields", "timeoutMs", "db", "query", "update", "use", "runWhen"}
+
                             : new String[]{"type", "onFailure", "retry", "description", "name", "expression", "payload", "renderAs", "saveAs", "overwrite", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs"});
             SchemaSupport.string(actionMap.get("type"), "actions." + actionKey + ".type", true);
             if (actionMap.get("description") != null) SchemaSupport.string(actionMap.get("description"), "actions." + actionKey + ".description", true);
-            if (!modern && actionMap.get("overwrite") != null && !(actionMap.get("overwrite") instanceof Boolean)) throw new IllegalArgumentException("actions." + actionKey + ".overwrite must be a boolean");
-            for (String mapping : current ? new String[]{"retry", "evidence", "query", "update"}
-                    : previousVersion ? new String[]{"retry", "evidence", "query", "update"}
-                    : modern ? new String[]{"retry", "evidence", "fields", "saveAs", "query", "update"} : new String[]{"retry", "fields"}) {
+            if (!(current || historical) && actionMap.get("overwrite") != null && !(actionMap.get("overwrite") instanceof Boolean)) throw new IllegalArgumentException("actions." + actionKey + ".overwrite must be a boolean");
+            for (String mapping : current || historical ? new String[]{"retry", "evidence", "query", "update"}
+                    : new String[]{"retry", "fields"}) {
                 if (actionMap.get(mapping) != null && !(actionMap.get(mapping) instanceof Map)) throw new IllegalArgumentException("actions." + actionKey + "." + mapping + " must be a map");
             }
-            if ((current || previousVersion) && "flow".equals(String.valueOf(actionMap.get("type")))
+            if ((current || historical) && "flow".equals(String.valueOf(actionMap.get("type")))
                     && !att.flow.FlowRegistry.isCanonicalId(String.valueOf(actionMap.get("use")))) {
                 throw new IllegalArgumentException("actions." + actionKey + ".use must be one static canonical Flow ID ending in .vN");
             }

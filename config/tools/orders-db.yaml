@@ -35,7 +35,7 @@ tools:
   findByDate:
     name: Find orders by date
     description: Query through a package-contained rendered SQL file
-    call: "#{db.orders.query(sqlFile='sql/orders-by-date.sql', params=[${input.customerId}, ${input.fromDate}])}"
+    call: "#{db.orders.query(sql=&{sql/orders-by-date.sql}, params=[${input.customerId}, ${input.fromDate}])}"
     arguments:
       customerId:
         name: Customer ID

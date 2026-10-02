@@ -1,4 +1,4 @@
-schemaVersion: att-template/v3.5
+schemaVersion: att-template/v3.6
 name: CTO/RTI流程模板
 description: USMF CTO success plus RTI success transaction flow with API, log, and database verification.
 

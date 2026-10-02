@@ -166,7 +166,7 @@ public final class DbHelperExecutor implements AutoCloseable {
         return execute(instance, operation, sql, source, params, parameterNames, invocationId, null, null);
     }
 
-    private DbInvocationResult execute(String instance, String operation, String sql, String source,
+    public DbInvocationResult execute(String instance, String operation, String sql, String source,
                                       List<?> params, List<String> parameterNames, String invocationId, Long timeoutMs,
                                       CaseExecutionLog log) {
         DbHelperConfig config = helper(instance);

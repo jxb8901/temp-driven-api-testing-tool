@@ -147,19 +147,24 @@ class StageTemplateLoaderTest {
         assertTrue(invalidWith.getMessage().contains("Unknown field") || invalidWith.getMessage().contains("with"), invalidWith.getMessage());
     }
 
-    @Test void currentV35RetiresRenderWhileHistoricalV34RemainsLoadable() throws Exception {
-        Path current = tempDir.resolve("templates/current-v35");
+    @Test void currentV36RetiresRenderWhileHistoricalV35AndV34RemainLoadable() throws Exception {
+        Path current = tempDir.resolve("templates/current-v36");
+        Path historicalV35 = tempDir.resolve("templates/historical-v35");
         Path historical = tempDir.resolve("templates/historical-v34");
         Files.createDirectories(current);
+        Files.createDirectories(historicalV35);
         Files.createDirectories(historical);
-        Files.write(current.resolve("template.yaml"), ("schemaVersion: att-template/v3.5\nname: current\ndescription: current\nactions:\n"
+        Files.write(current.resolve("template.yaml"), ("schemaVersion: att-template/v3.6\nname: current\ndescription: current\nactions:\n"
                 + "  request: {type: render, payload: request.txt}\n").getBytes("UTF-8"));
-        Files.write(historical.resolve("template.yaml"), ("schemaVersion: att-template/v3.4\nname: historical\ndescription: historical\nactions:\n"
+        Files.write(historicalV35.resolve("template.yaml"), ("schemaVersion: att-template/v3.5\nname: historical-v35\ndescription: historical\nactions:\n"
+                + "  request: {type: db, db: orders, query: {sql: 'select 1'}}\n").getBytes("UTF-8"));
+        Files.write(historical.resolve("template.yaml"), ("schemaVersion: att-template/v3.4\nname: historical-v34\ndescription: historical\nactions:\n"
                 + "  request: {type: render, payload: request.txt}\n").getBytes("UTF-8"));
         Files.write(historical.resolve("request.txt"), "historical".getBytes("UTF-8"));
 
         StageTemplateLoader loader = new StageTemplateLoader(tempDir, Paths.get("templates"));
-        assertThrows(Exception.class, () -> loader.load("current-v35"));
+        assertThrows(Exception.class, () -> loader.load("current-v36"));
+        assertEquals("db", loader.load("historical-v35").actions().get(0).type());
         assertEquals("render", loader.load("historical-v34").actions().get(0).type());
     }
 }

@@ -155,6 +155,66 @@ class PackageValidatorTest {
 
     }
 
+    @Test void currentDbExpressionsRequireFileMigrationAndValidateNamedBindings() throws Exception {
+        Files.createDirectories(tempDir.resolve("sql"));
+        Files.write(tempDir.resolve("sql/find.sql"), "select 1".getBytes("UTF-8"));
+        Files.write(tempDir.resolve("sql/named.sql"), "select * from t where id=:id".getBytes("UTF-8"));
+        DbHelperConfig helper = new DbHelperConfig("orders", "Orders", "Orders DB", "jdbc:never-connect",
+                "", "", "", Collections.<String,String>emptyMap(), false, "driverDefault", 7,
+                "case", "rollback", 10, 1024, 4096, "full", "masked", null);
+        FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,tempDir,
+                Collections.<String,ToolConfig>emptyMap(), Collections.singletonMap("orders", helper), null, null,
+                null,"","",null,null,1,"ignore","",false,ProcessOutputConfig.defaults());
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod("validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+
+        TemplateAction fileSql = new TemplateAction("file", map("type", "assign", "name", "value",
+                "expression", "#{db.orders.scalar(sql=&{sql/find.sql}, params=[])}"), "att-template/v3.6");
+        assertDoesNotThrow(() -> contract.invoke(validator,
+                new StageTemplate("Current", tempDir, Collections.singletonList(fileSql), "att-template/v3.6"), config));
+
+        TemplateAction historicalSqlFile = new TemplateAction("historical", map("type", "assign", "name", "value",
+                "expression", "#{db.orders.scalar(sqlFile='sql/find.sql', params=[])}"), "att-template/v3.4");
+        assertDoesNotThrow(() -> contract.invoke(validator,
+                new StageTemplate("Historical", tempDir, Collections.singletonList(historicalSqlFile), "att-template/v3.4"), config));
+
+        TemplateAction currentSqlFile = new TemplateAction("migrate", map("type", "assign", "name", "value",
+                "expression", "#{db.orders.scalar(sqlFile='sql/find.sql', params=[])}"), "att-template/v3.6");
+        java.lang.reflect.InvocationTargetException migration = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> contract.invoke(validator,
+                        new StageTemplate("Current", tempDir, Collections.singletonList(currentSqlFile), "att-template/v3.6"), config));
+        assertTrue(String.valueOf(migration.getCause().getMessage()).contains("historical-only"));
+
+        TemplateAction validRepeated = new TemplateAction("valid", map("type", "tool",
+                "call", "#{db.orders.query(sql='select * from t where left_id=:id or right_id=:id', parameters={id: 'A'})}"), "att-template/v3.6");
+        assertDoesNotThrow(() -> contract.invoke(validator,
+                new StageTemplate("Named", tempDir, Collections.singletonList(validRepeated), "att-template/v3.6"), config));
+
+        TemplateAction validFileNamed = new TemplateAction("validFile", map("type", "tool",
+                "call", "#{db.orders.query(sql=&{sql/named.sql}, parameters={id: 'A'})}"), "att-template/v3.6");
+        assertDoesNotThrow(() -> contract.invoke(validator,
+                new StageTemplate("NamedFile", tempDir, Collections.singletonList(validFileNamed), "att-template/v3.6"), config));
+
+        TemplateAction invalidFileNamed = new TemplateAction("invalidFile", map("type", "tool",
+                "call", "#{db.orders.query(sql=&{sql/named.sql}, parameters={other: 'A'})}"), "att-template/v3.6");
+        java.lang.reflect.InvocationTargetException fileError = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> contract.invoke(validator,
+                        new StageTemplate("NamedFile", tempDir, Collections.singletonList(invalidFileNamed), "att-template/v3.6"), config));
+        String fileMessage = String.valueOf(fileError.getCause().getMessage());
+        assertTrue(fileMessage.contains("named SQL parameter") || fileMessage.contains("Unused named SQL parameters"), fileMessage);
+
+        for (String parameters : Arrays.asList("{other: 'A'}", "{id: 'A', other: 'B'}")) {
+            TemplateAction invalid = new TemplateAction("invalid", map("type", "tool",
+                    "call", "#{db.orders.query(sql='select * from t where id=:id', parameters=" + parameters + ")}"), "att-template/v3.6");
+            java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> contract.invoke(validator,
+                            new StageTemplate("Named", tempDir, Collections.singletonList(invalid), "att-template/v3.6"), config));
+            String message = String.valueOf(error.getCause().getMessage());
+            assertTrue(message.contains("named SQL parameter") || message.contains("Unused named SQL parameters"), message);
+        }
+    }
+
     @Test void validatesCallBackedReadAndWriteToolBoundaries() throws Exception {
         DbHelperConfig helper = new DbHelperConfig("orders", "Orders", "Orders DB", "jdbc:never-connect",
                 "", "", "", Collections.<String,String>emptyMap(), false, "driverDefault", 7,

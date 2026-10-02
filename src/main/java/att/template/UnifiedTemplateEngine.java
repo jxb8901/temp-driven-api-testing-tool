@@ -440,9 +440,9 @@ public class UnifiedTemplateEngine {
     private Object executeResolvedCallScoped(String name, Map<String, Object> input, CaseRuntimeContext context,
                                        CaseExecutionLog log, String invocationId, boolean attempt, String actionId,
                                        Long timeoutMs, String saveAs, String saveFormat,
-                                       boolean overwrite, boolean bypassCache) throws Exception {
+        boolean overwrite, boolean bypassCache) throws Exception {
         if (name.startsWith("db.")) {
-            if (attempt) throw new IllegalArgumentException("A DB query cannot be the primary call of type: tool; use type: db or an ordinary expression");
+            if (attempt) return executeDbToolCall(name, input, context, log, invocationId, timeoutMs);
             return executeDbResolvedCall(name, input, context, log, invocationId);
         }
         if (name.startsWith("mq.")) {
@@ -484,6 +484,105 @@ public class UnifiedTemplateEngine {
                 ? toolInvoker.invokeAttempt(invocationId, name, input, context, log, timeoutMs, saveAs, overwrite)
                 : toolInvoker.invokeAttempt(invocationId, name, input, context, log, null, "", false);
         return attempt ? result : result.output();
+    }
+
+    private att.exec.ToolInvocationResult executeDbToolCall(String name, Map<String, Object> input,
+                                                            CaseRuntimeContext context, CaseExecutionLog log,
+                                                            String requestedId, Long timeoutMs) throws Exception {
+        DbOperationResult operation = executeDbOperation(name, input, context, log, requestedId, timeoutMs, false);
+        Map<String, Object> invocation = new LinkedHashMap<String, Object>();
+        invocation.put("id", operation.invocationId);
+        invocation.put("type", "tool");
+        invocation.put("name", name);
+        invocation.put("operation", operation.operation);
+        invocation.put("status", operation.success ? "PASS" : "ERROR");
+        invocation.put("durationMs", operation.evidence.get("durationMs"));
+        invocation.put("timeoutMs", timeoutMs);
+        invocation.put("input", input);
+        invocation.put("output", operation.output);
+        invocation.put("DB", operation.evidence);
+        return new att.exec.ToolInvocationResult(name, operation.invocationId, operation.output,
+                invocation, operation.success, operation.operationResult);
+    }
+
+    /** Shared current-contract DB executor for native and call-backed Tool actions. */
+    private DbOperationResult executeDbOperation(String callName, Map<String, Object> input,
+                                                 CaseRuntimeContext context, CaseExecutionLog log,
+                                                 String requestedId, Long timeoutMs,
+                                                 boolean allowLegacySqlFile) throws Exception {
+        if (dbHelperExecutor == null) throw new IllegalStateException("DB invocation is unavailable: " + callName);
+        String[] parts = callName.split("\\.", -1);
+        if (parts.length != 3 || !"db".equals(parts[0]) || parts[1].isEmpty()
+                || !("query".equals(parts[2]) || "scalar".equals(parts[2]) || "update".equals(parts[2]))) {
+            throw new IllegalArgumentException("DB Tool call must be db.<instance>.query|scalar|update: " + callName);
+        }
+        for (String key : input.keySet()) {
+            if (!("sql".equals(key) || "sqlFile".equals(key) || "params".equals(key) || "parameters".equals(key))) {
+                throw new IllegalArgumentException("Unknown DB call argument: " + key);
+            }
+        }
+        boolean hasSql = input.containsKey("sql");
+        boolean hasFile = input.containsKey("sqlFile");
+        if (hasSql == hasFile) throw new IllegalArgumentException(callName + " requires exactly one of sql or sqlFile");
+        if (hasFile && !allowLegacySqlFile) {
+            throw new IllegalArgumentException(callName + " no longer accepts sqlFile; use sql=&{project/path.sql}");
+        }
+        String source = "inline";
+        String sql;
+        if (hasFile) {
+            Object configuredValue = input.get("sqlFile");
+            if (!(configuredValue instanceof String)) throw new IllegalArgumentException(callName + ".sqlFile must be a String");
+            String configured = (String) configuredValue;
+            java.nio.file.Path file = dbHelperExecutor.resolveSqlFile(configured);
+            sql = new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
+            source = configured;
+            sql = renderScoped(sql, definitionScope(input));
+        } else {
+            Object sqlValue = input.get("sql");
+            if (!(sqlValue instanceof String)) throw new IllegalArgumentException(callName + ".sql must be a String");
+            // resolveArguments/resolveDefinitionDbArguments already evaluated
+            // Context, file, and authored interpolation nodes exactly once.
+            // Do not interpret the resulting SQL text as template source again.
+            sql = (String) sqlValue;
+        }
+        if (input.containsKey("params") && input.containsKey("parameters")) {
+            throw new IllegalArgumentException(callName + " cannot use both params and parameters");
+        }
+        List<Object> params = new ArrayList<Object>();
+        List<String> parameterNames = new ArrayList<String>();
+        Object positional = input.get("params");
+        if (input.containsKey("params")) {
+            if (!(positional instanceof List)) throw new IllegalArgumentException(callName + ".params must resolve to a List");
+            params.addAll((List<?>) positional);
+        } else if (input.containsKey("parameters")) {
+            Object named = input.get("parameters");
+            if (!(named instanceof Map)) throw new IllegalArgumentException(callName + ".parameters must resolve to a map");
+            Map<String, Object> resolved = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) named).entrySet()) {
+                if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException(callName + ".parameters keys must be Strings");
+                resolved.put((String) entry.getKey(), entry.getValue());
+            }
+            NamedSqlParameters.Binding binding = NamedSqlParameters.bind(sql, resolved);
+            sql = binding.sql();
+            params.addAll(binding.values());
+            parameterNames.addAll(binding.names());
+        }
+        String invocationId = requestedId == null || requestedId.trim().isEmpty()
+                ? context.nextDbInvocationId(parts[1]) : requestedId;
+        String operation = "update".equals(parts[2]) ? "update" : "query";
+        DbInvocationResult result = parameterNames.isEmpty()
+                ? dbHelperExecutor.execute(parts[1], operation, sql, source, params, invocationId, timeoutMs, log)
+                : dbHelperExecutor.execute(parts[1], operation, sql, source, params, parameterNames, invocationId, timeoutMs, log);
+        dbHelperExecutor.recordResourceOutput(parts[1], result, context, log);
+        if (log != null) try { log.append("DB " + parts[1] + " " + invocationId, result.evidence()); }
+        catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
+        Object output = result.result();
+        if (result.success() && "scalar".equals(parts[2])) output = scalar(parts[1], result.result());
+        ActionExecutionResult operationResult = new ActionExecutionResult(output,
+                ActionExecutionResult.evidence("db", result.evidence()), result.success());
+        context.recordActionEvidence(operationResult.evidence());
+        return new DbOperationResult(parts[1], invocationId, operation, output, result.evidence(),
+                result.success(), operationResult);
     }
 
 
@@ -710,40 +809,15 @@ public class UnifiedTemplateEngine {
 
     private CallBackedDbResult executeCallBackedDbScoped(ToolCallParser.ParsedCall call, Map<String, Object> input,
                                                    CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs) throws Exception {
-        if (dbHelperExecutor == null) throw new IllegalStateException("DB invocation is unavailable: " + call.name());
         String[] parts = call.name().split("\\.", -1);
         if (parts.length != 3 || !"db".equals(parts[0]) || parts[1].isEmpty()
                 || !("query".equals(parts[2]) || "scalar".equals(parts[2]) || "update".equals(parts[2]))) {
             throw new IllegalArgumentException("call-backed Tool DB target must be db.<instance>.query|scalar|update: " + call.name());
         }
         Map<String, Object> arguments = resolveDefinitionDbArguments(call, input);
-        boolean hasSql = arguments.containsKey("sql");
-        boolean hasFile = arguments.containsKey("sqlFile");
-        if (hasSql == hasFile) throw new IllegalArgumentException(call.name() + " requires exactly one of sql or sqlFile");
-        String source = "inline";
-        String sql;
-        if (hasFile) {
-            String configured = String.valueOf(arguments.get("sqlFile"));
-            java.nio.file.Path file = dbHelperExecutor.resolveSqlFile(configured);
-            sql = new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
-            source = configured;
-            sql = renderScoped(sql, definitionScope(input));
-        } else sql = String.valueOf(arguments.get("sql"));
-        Object paramsValue = arguments.get("params");
-        if (paramsValue != null && !(paramsValue instanceof java.util.List)) {
-            throw new IllegalArgumentException(call.name() + ".params must resolve to a List");
-        }
-        java.util.List<?> params = paramsValue == null ? java.util.Collections.emptyList() : (java.util.List<?>) paramsValue;
-        String invocationId = context.nextDbInvocationId(parts[1]);
-        String operation = "update".equals(parts[2]) ? "update" : "query";
-        DbInvocationResult result = dbHelperExecutor.execute(parts[1], operation, sql, source, params, invocationId, timeoutMs, log);
-        dbHelperExecutor.recordResourceOutput(parts[1], result, context, log);
-        if (log != null) try { log.append("DB " + parts[1] + " " + invocationId, result.evidence()); }
-        catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
-        context.recordActionEvidence(result.operationResult().evidence());
-        Object output = result.result();
-        if (result.success() && "scalar".equals(parts[2])) output = scalar(parts[1], result.result());
-        return new CallBackedDbResult(parts[1], invocationId, output, result.evidence(), result.success());
+        DbOperationResult result = executeDbOperation(call.name(), arguments, context, log, null, timeoutMs, true);
+        return new CallBackedDbResult(result.instance, result.invocationId, result.output,
+                result.evidence, result.success);
     }
 
     private Object scalar(String instance, Object result) {
@@ -766,7 +840,8 @@ public class UnifiedTemplateEngine {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         for (ToolCallParser.Argument argument : call.arguments()) {
             if (argument.positional()) throw new IllegalArgumentException(call.name() + " requires named arguments");
-            if (!("sql".equals(argument.key()) || "sqlFile".equals(argument.key()) || "params".equals(argument.key()))) {
+            if (!("sql".equals(argument.key()) || "sqlFile".equals(argument.key())
+                    || "params".equals(argument.key()) || "parameters".equals(argument.key()))) {
                 throw new IllegalArgumentException("Unknown DB call argument: " + argument.key());
             }
             if (result.containsKey(argument.key())) throw new IllegalArgumentException("Duplicate DB call argument: " + argument.key());
@@ -807,6 +882,26 @@ public class UnifiedTemplateEngine {
         tool.put("input", new LinkedHashMap<String, Object>(input));
         scope.put("TOOL", tool);
         return scope;
+    }
+
+    private static final class DbOperationResult {
+        private final String instance, invocationId, operation;
+        private final Object output;
+        private final Map<String, Object> evidence;
+        private final boolean success;
+        private final ActionExecutionResult operationResult;
+
+        private DbOperationResult(String instance, String invocationId, String operation, Object output,
+                                   Map<String, Object> evidence, boolean success,
+                                   ActionExecutionResult operationResult) {
+            this.instance = instance;
+            this.invocationId = invocationId;
+            this.operation = operation;
+            this.output = output;
+            this.evidence = evidence;
+            this.success = success;
+            this.operationResult = operationResult;
+        }
     }
 
     private static final class CallBackedDbResult {
@@ -851,17 +946,39 @@ public class UnifiedTemplateEngine {
             java.nio.file.Path file = dbHelperExecutor.resolveSqlFile(configured);
             sql = new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
             source = configured;
-        } else sql = String.valueOf(input.get("sql"));
-        sql = renderDbSql(sql, context);
+        } else {
+            Object sqlValue = input.get("sql");
+            if (!(sqlValue instanceof String)) throw new IllegalArgumentException(callName + ".sql must be a String");
+            sql = (String) sqlValue;
+        }
+        if (hasFile) sql = renderDbSql(sql, context);
+        if (input.containsKey("params") && input.containsKey("parameters")) {
+            throw new IllegalArgumentException(callName + " cannot use both params and parameters");
+        }
         Object paramsValue = input.get("params");
-        if (paramsValue != null && !(paramsValue instanceof java.util.List)) {
+        if (input.containsKey("params") && paramsValue != null && !(paramsValue instanceof java.util.List)) {
             throw new IllegalArgumentException(callName + ".params must resolve to a List");
         }
-        java.util.List<?> params = paramsValue == null ? java.util.Collections.emptyList() : (java.util.List<?>) paramsValue;
+        java.util.List<Object> params = new java.util.ArrayList<Object>();
+        java.util.List<String> parameterNames = new java.util.ArrayList<String>();
+        if (input.containsKey("params") && paramsValue != null) params.addAll((java.util.List<?>) paramsValue);
+        if (input.containsKey("parameters")) {
+            Object named = input.get("parameters");
+            if (!(named instanceof Map)) throw new IllegalArgumentException(callName + ".parameters must resolve to a map");
+            Map<String, Object> resolved = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) named).entrySet()) {
+                if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException(callName + ".parameters keys must be Strings");
+                resolved.put((String) entry.getKey(), entry.getValue());
+            }
+            NamedSqlParameters.Binding binding = NamedSqlParameters.bind(sql, resolved);
+            sql = binding.sql(); params.addAll(binding.values()); parameterNames.addAll(binding.names());
+        }
         String id = requestedId == null || requestedId.trim().isEmpty()
                 ? context.nextDbInvocationId(parts[1]) : requestedId;
-        DbInvocationResult result = dbHelperExecutor.execute(parts[1], "query", sql, source, params, id, null, log);
-        dbHelperExecutor.recordResourceOutput(parts[1], result, context);
+        DbInvocationResult result = parameterNames.isEmpty()
+                ? dbHelperExecutor.execute(parts[1], "query", sql, source, params, id, null, log)
+                : dbHelperExecutor.execute(parts[1], "query", sql, source, params, parameterNames, id, null, log);
+        dbHelperExecutor.recordResourceOutput(parts[1], result, context, log);
         if (log != null) try { log.append("DB " + parts[1] + " " + id, result.evidence()); }
         catch (Exception error) { result.evidence().put("evidenceError", "DB invocation log append failed: " + safeMessage(error)); }
         context.recordActionEvidence(result.operationResult().evidence());
@@ -879,7 +996,7 @@ public class UnifiedTemplateEngine {
         for (ToolCallParser.Argument argument : call.arguments()) {
             if (argument.positional()) throw new IllegalArgumentException(call.name() + " requires named arguments");
             String key = argument.key();
-            if (!("sql".equals(key) || "sqlFile".equals(key) || "params".equals(key))) {
+            if (!("sql".equals(key) || "sqlFile".equals(key) || "params".equals(key) || "parameters".equals(key))) {
                 throw new IllegalArgumentException("Unknown DB expression argument: " + key);
             }
             if (input.containsKey(key)) throw new IllegalArgumentException("Duplicate DB expression argument: " + key);
@@ -896,13 +1013,9 @@ public class UnifiedTemplateEngine {
     }
 
     private Object resolveDbValue(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
-        Matcher exact = VALUE.matcher(expression);
-        if (exact.matches()) return context.require(exact.group(1));
-        if (isExplicitContextPath(expression)) throw bareContextReference(expression);
-        if (expression.startsWith("#{") && findToolEnd(expression, 2) == expression.length() - 1) {
-            return executeCall(expression, context, log, null);
-        }
-        return callParser.literal(expression);
+        // Use the normal typed expression resolver so quoted SQL, Context
+        // values, and project-file values are each evaluated once.
+        return resolveArgumentValue(expression, context, log);
     }
 
     private att.exec.ToolInvocationResult builtInAttempt(String name, String invocationId, Map<String, Object> input,
