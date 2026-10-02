@@ -2270,7 +2270,7 @@ public final class PackageValidator {
         }
         String value = expression.trim();
         if (value.contains("&{")) {
-            validateFileExpressions(value, validationSourceDirectories.get());
+            validateFileExpressions(value, validationSourceDirectories.get(), config);
             if (value.startsWith("&{") && value.endsWith("}") && value.indexOf('&', 2) < 0
                     && value.indexOf("${") < 0 && value.indexOf("#{") < 0) {
                 String authoredPath = value.substring(2, value.length() - 1);
