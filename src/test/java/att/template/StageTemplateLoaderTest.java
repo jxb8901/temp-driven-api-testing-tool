@@ -190,9 +190,9 @@ class StageTemplateLoaderTest {
         Files.createDirectories(current);
         Files.write(current.resolve("template.yaml"), ("schemaVersion: att-template/v3.6\nname: Current\ndescription: Current Log\nactions:\n"
                 + "  note: {type: log, level: WARN, message: current}\n").getBytes("UTF-8"));
-        assertTrue(assertThrows(Exception.class,
+        assertTrue(assertThrows(att.validation.DiagnosticException.class,
                 () -> new StageTemplateLoader(tempDir, Paths.get("templates")).load("current-level"))
-                .getMessage().contains("Log.level was removed"));
+                .detail().contains("Log.level was removed"));
         Path currentFlow = tempDir.resolve("templates/flows/current-level");
         Files.createDirectories(currentFlow);
         Files.write(currentFlow.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.6\nid: common.current.v1\nname: Current\ndescription: Current Log\nactions:\n"
