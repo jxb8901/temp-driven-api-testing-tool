@@ -12,8 +12,8 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Tool group | att-tool-group/v2.9 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
-| Template | att-template/v3.5 |
-| Flow | att-flow/v3.5 |
+| Template | att-template/v3.6 |
+| Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.1 |
 | Load scenario | att-load/v1.4 |
 | Load summary | att-load-summary/v1.0 |

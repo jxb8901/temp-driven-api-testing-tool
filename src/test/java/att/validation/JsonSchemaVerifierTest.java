@@ -33,19 +33,31 @@ class JsonSchemaVerifierTest {
                 valid.replace("\"format\":\"text\",", "\"format\":\"file\",")));
     }
 
-    @Test void activeTemplateAndFlowLogsAcceptSqlplusAndRequireValueWithFormat() throws Exception {
+    @Test void currentTemplateAndFlowLogsAcceptSqlplusAndRequireValueWithFormat() throws Exception {
         Path root = Paths.get("").toAbsolutePath();
-        Path templateSchema = root.resolve("schemas/att-template-v3.5.schema.json");
-        String template = "{\"schemaVersion\":\"att-template/v3.5\",\"name\":\"T\",\"description\":\"x\",\"actions\":{\"log\":{\"type\":\"log\",\"value\":\"${EXEC.INPUT.result}\",\"format\":\"sqlplus\"}}}";
+        Path templateSchema = root.resolve("schemas/att-template-v3.6.schema.json");
+        String template = "{\"schemaVersion\":\"att-template/v3.6\",\"name\":\"T\",\"description\":\"x\",\"actions\":{\"log\":{\"type\":\"log\",\"value\":\"${EXEC.INPUT.result}\",\"format\":\"sqlplus\"}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(templateSchema, template));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(templateSchema,
                 template.replace("\"value\":\"${EXEC.INPUT.result}\",", "\"message\":\"summary\",")));
 
-        Path flowSchema = root.resolve("schemas/att-flow-v3.5.schema.json");
-        String flow = "{\"schemaVersion\":\"att-flow/v3.5\",\"id\":\"common.log.v1\",\"name\":\"Log\",\"description\":\"x\",\"actions\":{\"log\":{\"type\":\"log\",\"value\":\"${EXEC.INPUT.result}\",\"format\":\"sqlplus\"}}}";
+        Path flowSchema = root.resolve("schemas/att-flow-v3.6.schema.json");
+        String flow = "{\"schemaVersion\":\"att-flow/v3.6\",\"id\":\"common.log.v1\",\"name\":\"Log\",\"description\":\"x\",\"actions\":{\"log\":{\"type\":\"log\",\"value\":\"${EXEC.INPUT.result}\",\"format\":\"sqlplus\"}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(flowSchema, flow));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(flowSchema,
                 flow.replace("\"value\":\"${EXEC.INPUT.result}\",", "\"message\":\"summary\",")));
+    }
+
+    @Test void currentTemplateRemovesDirectDbActionContractButHistoryRetainsIt() throws Exception {
+        Path root = Paths.get("").toAbsolutePath();
+        Path current = root.resolve("schemas/att-template-v3.6.schema.json");
+        Path historical = root.resolve("schemas/history/att-template-v3.5.schema.json");
+        String directDb = "{\"schemaVersion\":\"att-template/v3.5\",\"description\":\"x\",\"actions\":{\"query\":{\"type\":\"db\",\"db\":\"orders\",\"query\":{\"sqlFile\":\"sql/orders.sql\"}}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(historical, directDb));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(current,
+                directDb.replace("att-template/v3.5", "att-template/v3.6")));
+        String currentTool = "{\"schemaVersion\":\"att-template/v3.6\",\"description\":\"x\",\"actions\":{\"query\":{\"type\":\"tool\",\"call\":\"#{db.orders.query(sql='select 1')}\"}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(current, currentTool));
     }
     @TempDir Path tempDir;
     @Test void enforcesDraft202012CompositionAndConstraints() throws Exception {

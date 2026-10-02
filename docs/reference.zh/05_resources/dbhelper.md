@@ -16,7 +16,7 @@ connection:
 
 Credential 可從 environment variable 解析，但不能發布到 `META`、report 或 diagnostic。JDBC driver jar 由使用者放入 `lib/`；ATT 不內置 database driver。
 
-`type: db` Action 選擇一個 helper ID，並且只能有一個 `query` 或 `update` block。Read operation 亦可透過支援的 `#{db.<id>.query(...)}` / `scalar(...)` expression call 使用。文件契約支援 positional JDBC `?` binding，以及 direct Action 的 named `:name` parameter。
+在現行 `att-template/v3.6` 契約中，DB operation 在普通 `type: tool` Action 內使用 `#{db.<id>.query(...)}`、`scalar(...)` 或 `update(...)` call。Call 必須有一個 String `sql` argument。SQL 若存放於 package，可使用 `sql=&{sql/find-order.sql}`；`sqlFile` 只供 historical compatibility。Positional `params` 與 named `parameters` 互斥，並使用相同 JDBC binding 規則。
 
 Query 返回 typed row/scalar；update 返回規範的 update result。Operation、SQL/parameter evidence 進入 common Action envelope；secret credential 永遠不是 evidence。Parameter evidence 按 descriptor/Action 的 masking/type policy 處理。
 
@@ -25,19 +25,30 @@ Query 返回 typed row/scalar；update 返回規範的 update result。Operation
 ```yaml
 actions:
   waitForOrder:
-    type: db
-    db: orders
     timeoutMs: 1500
-    query:
-      sql: select status from orders where id = :id
-      parameters:
-        id: "${EXEC.INPUT.orderId}"
+    type: tool
+    call: >-
+      #{db.orders.query(
+        sql='select status from orders where id = :id',
+        parameters={id: ${EXEC.INPUT.orderId}}
+      )}
     assert: "#{${output.result.rowCount} == 1 and ${output.result.rows[0].STATUS} == 'DONE'}"
     retry:
       maxAttempts: 5
       intervalMs: 500
       retryOn: [ASSERTION, TIMEOUT]
 ```
+
+明確的 update 亦使用 Tool Action，而且不可使用 automatic retry：
+
+```yaml
+actions:
+  markOrder:
+    type: tool
+    call: "#{db.orders.update(sql='update orders set status = ? where id = ?', params=['DONE', ${EXEC.INPUT.orderId}])}"
+```
+
+歷史 v3.5/v3.4 的 `type: db` Action 及其 `query`/`update` block 只會由 archived schema 與 compatibility loader 支援。
 
 DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout、transaction behavior。Transaction finalization 綁定 Case/iteration lifecycle；commit/rollback/reconnect 是 resource operation，不是 public Context root。Action-level timeout/retry 只擴展共同 Action lifecycle，不改變 DBHelper identity 或 Context model。
 
@@ -65,4 +76,3 @@ DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout�
 | `pool` | 默認值 | `maxSize` 默認 20、`minIdle` 默認 0、`connectionTimeout` 默認 2s；`maxSize` 為 1–10000，`minIdle` 不可大於 `maxSize`，timeout 至少 250ms |
 
 validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 template call 會在執行前校驗。
-

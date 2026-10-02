@@ -413,7 +413,7 @@ public final class FrameworkConfigLoader {
         java.util.Set<String> supplied = new java.util.LinkedHashSet<String>();
         for (att.template.ToolCallParser.Argument argument : call.arguments()) {
             if (argument.positional()) throw new IllegalArgumentException(call.name() + " requires named arguments: " + tool);
-            if (!("sql".equals(argument.key()) || "sqlFile".equals(argument.key()) || "params".equals(argument.key()))) {
+            if (!("sql".equals(argument.key()) || "params".equals(argument.key()) || "parameters".equals(argument.key()))) {
                 throw new IllegalArgumentException("Unknown DB call argument in Tool " + tool + ": " + argument.key());
             }
             if (!supplied.add(argument.key())) throw new IllegalArgumentException("Duplicate DB call argument in Tool " + tool + ": " + argument.key());
@@ -423,16 +423,18 @@ public final class FrameworkConfigLoader {
                 boolean input = value.startsWith("${input.") || value.startsWith("${TOOL.input.");
                 if (!(list || input)) throw new IllegalArgumentException(call.name() + ".params must be an inline list or typed input List: " + tool);
             }
-        }
-        if (supplied.contains("sql") == supplied.contains("sqlFile")) {
-            throw new IllegalArgumentException(call.name() + " requires exactly one of sql or sqlFile: " + tool);
-        }
-        for (att.template.ToolCallParser.Argument argument : call.arguments()) {
-            if (!"sqlFile".equals(argument.key())) continue;
-            String expression = argument.expression().trim();
-            if (expression.contains("${") || expression.contains("#{")) {
-                throw new IllegalArgumentException(call.name() + ".sqlFile must be a static package-relative path: " + tool);
+            if ("parameters".equals(argument.key())) {
+                String value = argument.expression().trim();
+                boolean map = value.startsWith("{") && value.endsWith("}");
+                boolean input = value.startsWith("${input.") || value.startsWith("${TOOL.input.");
+                if (!(map || input)) throw new IllegalArgumentException(call.name() + ".parameters must be an inline map or typed input Map: " + tool);
             }
+        }
+        if (!supplied.contains("sql")) {
+            throw new IllegalArgumentException(call.name() + " requires sql: " + tool);
+        }
+        if (supplied.contains("params") && supplied.contains("parameters")) {
+            throw new IllegalArgumentException(call.name() + " accepts either params or parameters, not both: " + tool);
         }
     }
 

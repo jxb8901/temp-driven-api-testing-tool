@@ -207,7 +207,7 @@ Stage 的 `required`、`runWhen` 與 `onFailure` 規則見 [Reliability](referen
 
 ### 2.3 Template
 
-只有直接包含 template.yaml 的目錄纔是可呼叫 Template。ATT 使用 att-template/v3.5。每個 Template 都需要非空且有序的 actions map，以及 description。
+只有直接包含 template.yaml 的目錄纔是可呼叫 Template。ATT 使用 att-template/v3.6。每個 Template 都需要非空且有序的 actions map，以及 description。
 
 每個 Action 依類型使用不同契約。`&{templates/payment/request.xml}` 這類 project-file expression 會將 exact UTF-8 檔案內容作為 String 回傳，不會建立檔案。Tool/DB/HTTP/MQ/SSH action 發布原生型別化 operation result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至 EXEC.VARS；Flow 在巢狀 Action scope 執行。
 
@@ -215,7 +215,7 @@ Stage 的 `required`、`runWhen` 與 `onFailure` 規則見 [Reliability](referen
 
 ### 2.4 Flow
 
-Flow 是可重用的 Template logic，使用 `att-flow/v3.5`，並由 `flow.yaml` 定義。必填欄位為 `schemaVersion`、versioned canonical `id`（例如 `common.payment.v1`）、`name`、`description` 及非空有序 `actions` map。Template 的 Flow Action 以 `use: common.payment.v1` 呼叫它。每次 invocation 建立新的 `EXEC.ACTIONS` scope；回傳後恢復 caller scope。`META.FLOW` 只在 invocation 期間存在。[Actions](reference.zh/14_actions.md) 定義 Flow result 與 Assign behavior；[Context](reference.zh/03_runtime_context.md) 定義 lifetime。
+Flow 是可重用的 Template logic，使用 `att-flow/v3.6`，並由 `flow.yaml` 定義。必填欄位為 `schemaVersion`、versioned canonical `id`（例如 `common.payment.v1`）、`name`、`description` 及非空有序 `actions` map。Template 的 Flow Action 以 `use: common.payment.v1` 呼叫它。每次 invocation 建立新的 `EXEC.ACTIONS` scope；回傳後恢復 caller scope。`META.FLOW` 只在 invocation 期間存在。[Actions](reference.zh/14_actions.md) 定義 Flow result 與 Assign behavior；[Context](reference.zh/03_runtime_context.md) 定義 lifetime。
 
 ### 2.5 Authoring lifecycle
 
@@ -227,14 +227,13 @@ Workbook/Sidecar/Snapshot 定義 Testcase data；Case 與 Stage 的 business inp
 
 ## 03 Actions 與 Typed Values
 
-本章定義 ATT 現行 Action 契約。Template 使用 att-template/v3.5。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請參閱 Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 章節。
+本章定義 ATT 現行 Action 契約。Template 使用 att-template/v3.6。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請參閱 Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 章節。
 
 ### Action 類型
 
 | 類型 | 必填欄位 | 結果與行為 |
 |---|---|---|
-| tool | call | 呼叫已配置 Tool、built-in 或 helper，保留原生型別化結果。 |
-| db | db 與 query/update 其中一個區塊 | 回傳 DB operation 的型別化值與 evidence。 |
+| tool | call | 呼叫已配置 Tool、built-in 或 helper，保留原生型別化結果；DB query/scalar/update 也是普通 Tool call。 |
 | assert | assert | 評估布林條件並記錄 PASS 或 FAIL。expected、actual 是可選診斷值。 |
 | log | message 或 value | 將型別化值格式化後寫入 Case 日誌。欄位為 level、message、value、format。 |
 | assign | name、expression | 將 expression 的型別化結果發布至 EXEC.VARS。 |
@@ -255,6 +254,8 @@ ATT 將 operation 的邏輯結果與人類可讀或 wire representation 分開�
 | Log 或 resource evidence | format / evidence.output.format | 產生人類可讀表示。 |
 
 DB result 本身已是型別化值。Tool、Action、Template、Flow 和 expression results 在 ATT 中傳遞時均保留型別。
+
+DB query、scalar、update operation 在普通 `type: tool` Action 內使用 `db.<helper>.query(...)`、`db.<helper>.scalar(...)`、`db.<helper>.update(...)`。DB call 接受一個 String `sql`，以及 `params` 或 `parameters` 其中一種；`sql=&{project-relative-file.sql}` 可提供 package SQL 內容。歷史 `type: db` Action 只由 archived schema 保留。
 
 ### Project-file expression 回傳 String
 
@@ -1234,7 +1235,7 @@ connection:
 
 Credential 可從 environment variable 解析，但不能發布到 `META`、report 或 diagnostic。JDBC driver jar 由使用者放入 `lib/`；ATT 不內置 database driver。
 
-`type: db` Action 選擇一個 helper ID，並且只能有一個 `query` 或 `update` block。Read operation 亦可透過支援的 `#{db.<id>.query(...)}` / `scalar(...)` expression call 使用。文件契約支援 positional JDBC `?` binding，以及 direct Action 的 named `:name` parameter。
+在現行 `att-template/v3.6` 契約中，DB operation 在普通 `type: tool` Action 內使用 `#{db.<id>.query(...)}`、`scalar(...)` 或 `update(...)` call。Call 必須有一個 String `sql` argument。SQL 若存放於 package，可使用 `sql=&{sql/find-order.sql}`；`sqlFile` 只供 historical compatibility。Positional `params` 與 named `parameters` 互斥，並使用相同 JDBC binding 規則。
 
 Query 返回 typed row/scalar；update 返回規範的 update result。Operation、SQL/parameter evidence 進入 common Action envelope；secret credential 永遠不是 evidence。Parameter evidence 按 descriptor/Action 的 masking/type policy 處理。
 
@@ -1243,19 +1244,30 @@ Query 返回 typed row/scalar；update 返回規範的 update result。Operation
 ```yaml
 actions:
   waitForOrder:
-    type: db
-    db: orders
     timeoutMs: 1500
-    query:
-      sql: select status from orders where id = :id
-      parameters:
-        id: "${EXEC.INPUT.orderId}"
+    type: tool
+    call: >-
+      #{db.orders.query(
+        sql='select status from orders where id = :id',
+        parameters={id: ${EXEC.INPUT.orderId}}
+      )}
     assert: "#{${output.result.rowCount} == 1 and ${output.result.rows[0].STATUS} == 'DONE'}"
     retry:
       maxAttempts: 5
       intervalMs: 500
       retryOn: [ASSERTION, TIMEOUT]
 ```
+
+明確的 update 亦使用 Tool Action，而且不可使用 automatic retry：
+
+```yaml
+actions:
+  markOrder:
+    type: tool
+    call: "#{db.orders.update(sql='update orders set status = ? where id = ?', params=['DONE', ${EXEC.INPUT.orderId}])}"
+```
+
+歷史 v3.5/v3.4 的 `type: db` Action 及其 `query`/`update` block 只會由 archived schema 與 compatibility loader 支援。
 
 DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout、transaction behavior。Transaction finalization 綁定 Case/iteration lifecycle；commit/rollback/reconnect 是 resource operation，不是 public Context root。Action-level timeout/retry 只擴展共同 Action lifecycle，不改變 DBHelper identity 或 Context model。
 
@@ -1682,12 +1694,12 @@ actions:
     expression: "&{templates/payment/request.json}"
 
   queryOrder:
-    type: db
-    db: orders
-    query:
-      sql: "select * from orders where order_id = ?"
-      params:
-        - "${EXEC.INPUT.orderId}"
+    type: tool
+    call: >-
+      #{db.orders.query(
+        sql='select * from orders where order_id = ?',
+        params=[${EXEC.INPUT.orderId}]
+      )}
 
   paymentRequest:
     type: tool
@@ -2270,8 +2282,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Tool group | att-tool-group/v2.9 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
-| Template | att-template/v3.5 |
-| Flow | att-flow/v3.5 |
+| Template | att-template/v3.6 |
+| Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.1 |
 | Load scenario | att-load/v1.4 |
 | Load summary | att-load-summary/v1.0 |
@@ -2337,11 +2349,13 @@ Unsupported schema version 會在 execution 前失敗並提供 migration guidanc
 
 ### Historical schema migration
 
-ATT 3.6.2 使用 `att-template/v3.5` 與 `att-flow/v3.5` 作為 active schemas。已發布的 `att-template/v3.4` 與 `att-flow/v3.4` 定義保留於 `schemas/history/`；其中 historical Render Action 只供 compatibility 使用，不是 active contract。遷移這些 descriptor 時，先將 schema version 改為 v3.5，再套用以下欄位變更。
+ATT 3.6.2 使用 `att-template/v3.6` 與 `att-flow/v3.6` 作為 active schemas。已發布的 `att-template/v3.5`、`att-flow/v3.5` 及更舊定義保留於 `schemas/history/`；其中 historical DB 與 Render Action 只供 compatibility 使用，不是 active contract。遷移這些 descriptor 時，先將 schema version 改為 v3.6，再套用以下欄位變更。
 
 | Historical configuration | 3.6.2 形式 |
 |---|---|
-| `att-template/v3.3` 或 `att-flow/v3.3` | 先按 historical release migration 遷移至 v3.4，再改為 v3.5 並遷移 Render Action。 |
+| `att-template/v3.3` 或 `att-flow/v3.3` | 先按 historical release migration 遷移至 v3.4，再改為 v3.6 並遷移 Render/DB Action。 |
+| Historical `type: db` 及 `query`/`update` | 改為普通 `type: tool` Action，使用 `#{db.<id>.query(...)}`、`scalar(...)` 或 `update(...)`；query/scalar 可 retry，update 不可 automatic retry。 |
+| Historical `sqlFile` | 改用單一 String argument `sql=&{project-relative-sql-file}`；`params` 與 `parameters` 互斥。 |
 | Historical `type: render` | 改為使用 `"&{project-relative-file}"` expression 的 Assign；後續 Action 使用 `${EXEC.VARS.<name>}`。 |
 | Command Tool result.format | Tool descriptor stdoutFormat |
 | Render result.format/path/overwrite 或 renderAs/saveAs | 移除舊 persistence 欄位。Project-file expression 回傳 exact UTF-8 String，不會隱式建立結果檔。 |

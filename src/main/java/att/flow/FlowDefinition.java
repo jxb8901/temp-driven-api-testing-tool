@@ -27,6 +27,7 @@ public final class FlowDefinition {
     public String description() { return description; }
     public String schemaVersion() { return schemaVersion; }
     public String templateSchemaVersion() {
+        if (Version.HISTORICAL_FLOW_SCHEMA_V3_5.equals(schemaVersion)) return Version.HISTORICAL_TEMPLATE_SCHEMA_V3_5;
         return Version.HISTORICAL_FLOW_SCHEMA_V3_4.equals(schemaVersion)
                 ? Version.HISTORICAL_TEMPLATE_SCHEMA_V3_4 : Version.TEMPLATE_SCHEMA;
     }

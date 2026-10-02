@@ -1,4 +1,4 @@
-schemaVersion: att-template/v3.5
+schemaVersion: att-template/v3.6
 name: V3_FLOW_EXAMPLE
 description: V3.4.2 Template composing isolated Flow Action scopes.
 actions:
