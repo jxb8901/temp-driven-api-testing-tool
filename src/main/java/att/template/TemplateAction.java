@@ -53,7 +53,7 @@ public class TemplateAction {
         Map<String, Object> data = values == null ? Collections.<String, Object>emptyMap() : new LinkedHashMap<String, Object>(values);
         this.id = text(data.get("id"), key);
         this.type = text(data.get("type"), "tool");
-        if ("log".equals(this.type) && data.containsKey("level"))
+        if (att.Version.TEMPLATE_SCHEMA.equals(schemaVersion) && "log".equals(this.type) && data.containsKey("level"))
             throw new IllegalArgumentException("Log.level was removed; delete level and use message or value + format.");
         this.description = text(data.get("description"), "");
         this.payload = text(data.get("payload"), "");

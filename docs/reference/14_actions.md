@@ -164,7 +164,7 @@ logOrder:
   format: yaml
 ~~~
 
-Log is a plain Case-log entry. The `level` field was removed; delete it. Internal diagnostic severity remains separate. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
+Log is a plain Case-log entry. The current v3.6 contract removes `level`; delete it when migrating. Historical v3.4/v3.5 Template and Flow descriptors still accept their schema-defined Log level for compatibility. Internal diagnostic severity remains separate. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
 
 When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A project-file String is emitted as-is when used as a value; Log does not infer or attach a document format. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
 

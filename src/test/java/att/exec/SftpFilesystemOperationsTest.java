@@ -12,6 +12,7 @@ class SftpFilesystemOperationsTest {
     static final class MemorySftp extends ChannelSftp {
         final Map<String, SftpATTRS> nodes = new LinkedHashMap<String, SftpATTRS>();
         int calls;
+        boolean refuseRemoval, refuseRename;
         MemorySftp() throws Exception { nodes.put("/", attr(true, 0)); }
         @Override public SftpATTRS lstat(String path) throws SftpException {
             calls++;
@@ -20,12 +21,19 @@ class SftpFilesystemOperationsTest {
             if (value == null) throw new SftpException(SSH_FX_NO_SUCH_FILE, "missing");
             return value;
         }
+        @Override public String realpath(String path) { return "/alias".equals(path) ? "/from" : path; }
         @Override public void mkdir(String path) throws SftpException {
             if (nodes.containsKey(path)) throw new SftpException(SSH_FX_FAILURE, "exists");
             try { nodes.put(path, attr(true, 0)); } catch (Exception error) { throw new AssertionError(error); }
         }
-        @Override public void rename(String source, String target) { nodes.put(target, nodes.remove(source)); }
-        @Override public void rm(String path) { nodes.remove(path); }
+        @Override public void rename(String source, String target) throws SftpException {
+            if (refuseRename || nodes.containsKey(target)) throw new SftpException(SSH_FX_FAILURE, "target exists or rename denied");
+            nodes.put(target, nodes.remove(source));
+        }
+        @Override public void rm(String path) throws SftpException {
+            if (refuseRemoval) throw new SftpException(SSH_FX_PERMISSION_DENIED, "removal denied");
+            nodes.remove(path);
+        }
         @Override public void rmdir(String path) throws SftpException {
             for (String child : nodes.keySet()) if (child.startsWith(path + "/"))
                 throw new SftpException(SSH_FX_FAILURE, "not empty");
@@ -67,10 +75,38 @@ class SftpFilesystemOperationsTest {
         MemorySftp remote = new MemorySftp(); remote.nodes.put("/from", attr(false, 7)); remote.nodes.put("/to", attr(false, 2));
         assertThrows(java.io.IOException.class, () -> SftpFilesystemOperations.execute(remote, "move", args("sourcePath", "/from", "targetPath", "/to")));
         assertEquals(2, remote.nodes.get("/to").getSize());
+        assertThrows(SftpException.class, () -> remote.rename("/from", "/to"), "Simulate SFTP v3 without rename-overwrite");
         assertEquals(true, SftpFilesystemOperations.execute(remote, "move", args("sourcePath", "/from", "targetPath", "/to", "overwrite", true)).get("moved"));
         assertFalse(remote.nodes.containsKey("/from")); assertEquals(7, remote.nodes.get("/to").getSize());
         assertThrows(java.io.IOException.class, () -> SftpFilesystemOperations.execute(remote, "move", args("sourcePath", "/absent", "targetPath", "/new")));
     }
+    @Test void overwriteFailureAndDirectoryReplacementAreExplicitAndNonRecursive() throws Exception {
+        MemorySftp remote = new MemorySftp();
+        remote.nodes.put("/from", attr(false, 7)); remote.nodes.put("/to", attr(false, 2));
+        remote.nodes.put("/alias", remote.nodes.get("/from"));
+        assertThrows(java.io.IOException.class, () -> SftpFilesystemOperations.execute(remote, "move",
+                args("sourcePath", "/from", "targetPath", "/alias", "overwrite", true)));
+        assertTrue(remote.nodes.containsKey("/from")); remote.nodes.remove("/alias");
+        remote.refuseRemoval = true;
+        assertThrows(SftpException.class, () -> SftpFilesystemOperations.execute(remote, "move",
+                args("sourcePath", "/from", "targetPath", "/to", "overwrite", true)));
+        assertEquals(7, remote.nodes.get("/from").getSize()); assertEquals(2, remote.nodes.get("/to").getSize());
+        remote.refuseRemoval = false; remote.refuseRename = true;
+        assertThrows(SftpException.class, () -> SftpFilesystemOperations.execute(remote, "move",
+                args("sourcePath", "/from", "targetPath", "/to", "overwrite", true)));
+        assertTrue(remote.nodes.containsKey("/from")); assertFalse(remote.nodes.containsKey("/to"));
+        remote.refuseRename = false;
+        remote.nodes.put("/sourceDir", attr(true, 0)); remote.nodes.put("/targetDir", attr(true, 0));
+        remote.nodes.put("/targetDir/child", attr(false, 1));
+        assertThrows(SftpException.class, () -> SftpFilesystemOperations.execute(remote, "move",
+                args("sourcePath", "/sourceDir", "targetPath", "/targetDir", "overwrite", true)));
+        assertTrue(remote.nodes.containsKey("/targetDir/child")); assertTrue(remote.nodes.containsKey("/sourceDir"));
+        remote.nodes.remove("/targetDir/child");
+        assertEquals(true, SftpFilesystemOperations.execute(remote, "move",
+                args("sourcePath", "/sourceDir", "targetPath", "/targetDir", "overwrite", true)).get("moved"));
+        assertFalse(remote.nodes.containsKey("/sourceDir")); assertTrue(remote.nodes.get("/targetDir").isDir());
+    }
+
     @Test void deleteIsNonRecursiveAndMissingOkIsExplicit() throws Exception {
         MemorySftp remote = new MemorySftp(); remote.nodes.put("/a", attr(true, 0)); remote.nodes.put("/a/file", attr(false, 7));
         assertThrows(SftpException.class, () -> SftpFilesystemOperations.execute(remote, "delete", args("remotePath", "/a")));

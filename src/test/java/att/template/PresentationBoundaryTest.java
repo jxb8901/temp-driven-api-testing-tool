@@ -47,6 +47,6 @@ class PresentationBoundaryTest {
                 () -> JsonSchemaVerifier.verify(root.resolve("schemas/att-template-v3.6.schema.json"),
                         map("schemaVersion", "att-template/v3.6", "name", "T", "description", "test", "actions", map("note", action))));
         assertTrue(invalid.getMessage().contains("Log.level was removed"), invalid.getMessage());
-        assertTrue(assertThrows(IllegalArgumentException.class, () -> new TemplateAction("note", action)).getMessage().contains("delete level"));
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> new TemplateAction("note", action, att.Version.TEMPLATE_SCHEMA)).getMessage().contains("delete level"));
     }
 }

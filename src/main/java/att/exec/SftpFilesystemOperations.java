@@ -19,9 +19,19 @@ final class SftpFilesystemOperations {
             String target = String.valueOf(input.get("targetPath"));
             boolean overwrite = Boolean.TRUE.equals(input.get("overwrite"));
             if (source.equals(target)) throw new IOException("SSH move requires different sourcePath and targetPath");
-            if (attributes(channel, source) == null) throw new IOException("SSH move source does not exist");
-            if (!overwrite && attributes(channel, target) != null) throw new IOException("SSH move target exists; set overwrite=true");
-            // SFTP rename stays on the selected host. Servers that cannot overwrite fail without pre-deleting the target.
+            SftpATTRS sourceAttributes = attributes(channel, source);
+            if (sourceAttributes == null) throw new IOException("SSH move source does not exist");
+            SftpATTRS targetAttributes = attributes(channel, target);
+            if (targetAttributes != null) {
+                if (!overwrite) throw new IOException("SSH move target exists; set overwrite=true");
+                if (channel.realpath(source).equals(channel.realpath(target)))
+                    throw new IOException("SSH move source and target resolve to the same path");
+                if (sourceAttributes.isReg() && targetAttributes.isReg()) channel.rm(target);
+                else if (sourceAttributes.isDir() && targetAttributes.isDir()) channel.rmdir(target);
+                else throw new IOException("SSH move overwrite requires matching regular files or directories");
+            }
+            // Explicit replacement works with SFTP v3 servers that refuse rename onto an existing path.
+            // Removal + rename is not atomic: if rename fails, source remains and target may be absent.
             channel.rename(source, target);
             result.put("sourcePath", source); result.put("targetPath", target); result.put("moved", true);
             return result;

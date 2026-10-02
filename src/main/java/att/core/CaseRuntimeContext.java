@@ -43,7 +43,8 @@ public final class CaseRuntimeContext {
         final Map<String, Object> metadata = new LinkedHashMap<String, Object>(evidence);
         deferredResourceOutputs.add(() -> {
             Map<String, Object> record = new LinkedHashMap<String, Object>();
-            record.put("metadata", metadata);
+            try { record.put("metadata", new att.template.TypedValueFormatter().presentationCopy(metadata, redactions)); }
+            catch (RuntimeException error) { record.put("metadataError", "Resource metadata formatting failed"); }
             try { record.put("output", policy.render(value, redactions)); }
             catch (RuntimeException error) { record.put("outputError", "Resource output formatting failed"); }
             return record;

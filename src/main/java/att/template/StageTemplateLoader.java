@@ -158,10 +158,10 @@ public final class StageTemplateLoader {
             if (cached != null) { HITS.incrementAndGet(); return cached; }
         }
         Map<String, Object> map = yaml(descriptor);
-        rejectLogLevel(map);
         rejectLegacyResultFields(map, descriptor);
         String schemaVersion = String.valueOf(map.get("schemaVersion"));
         boolean current = Version.TEMPLATE_SCHEMA.equals(schemaVersion);
+        if (current) rejectLogLevel(map);
         boolean historicalV35 = Version.HISTORICAL_TEMPLATE_SCHEMA_V3_5.equals(schemaVersion);
         boolean historicalV34 = Version.HISTORICAL_TEMPLATE_SCHEMA_V3_4.equals(schemaVersion);
         boolean historical = historicalV35 || historicalV34;
@@ -192,7 +192,7 @@ public final class StageTemplateLoader {
             if (current) rejectRemovedActionContract(actionMap, actionKey, descriptor);
             SchemaSupport.rejectUnknown(actionMap, "actions." + actionKey,
                     current || historical
-                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "value", "format", "call", "assert", "expected", "actual", "message", "timeoutMs", "db", "query", "update", "use", "runWhen"}
+                            ? new String[]{"type", "onFailure", "retry", "evidence", "description", "name", "expression", "payload", "value", "format", "call", "assert", "expected", "actual", "message", "level", "timeoutMs", "db", "query", "update", "use", "runWhen"}
 
                             : new String[]{"type", "onFailure", "retry", "description", "name", "expression", "payload", "renderAs", "saveAs", "overwrite", "call", "assert", "expected", "actual", "message", "file", "level", "fields", "timeoutMs"});
             SchemaSupport.string(actionMap.get("type"), "actions." + actionKey + ".type", true);

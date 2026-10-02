@@ -62,4 +62,23 @@ class ResourceOutputRetentionTest {
         context.materializeResourceOutputs(root);
         assertEquals(0, value.visits); assertFalse(Files.exists(root.resolve("resource-output.yaml")));
     }
+
+    @Test void retainedMetadataRedactsNestedDbResultsWithoutTouchingCanonicalValues() throws Exception {
+        CaseRuntimeContext context = context();
+        CountingMap value = new CountingMap();
+        value.put("rows", Collections.singletonList(Collections.singletonMap("PASSWORD", "secret-value")));
+        Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+        metadata.put("result", value);
+        metadata.put("secret-value", Collections.singletonMap("diagnostic", "prefix secret-value suffix"));
+        metadata.put("numericCredential", 12345);
+        context.recordResourceOutput(policy(), value, metadata, Arrays.asList("secret-value", "12345"));
+        assertEquals(0, value.visits, "Metadata redaction must also wait for retention");
+        context.materializeResourceOutputs(root);
+        String output = new String(Files.readAllBytes(root.resolve("resource-output.yaml")), "UTF-8");
+        assertFalse(output.contains("secret-value")); assertFalse(output.contains("12345"));
+        assertTrue(output.contains("[REDACTED_SECRET]"));
+        assertSame(value, metadata.get("result"));
+        assertEquals("secret-value", ((Map<?, ?>) ((List<?>) value.get("rows")).get(0)).get("PASSWORD"));
+        assertEquals("prefix secret-value suffix", ((Map<?, ?>) metadata.get("secret-value")).get("diagnostic"));
+    }
 }
