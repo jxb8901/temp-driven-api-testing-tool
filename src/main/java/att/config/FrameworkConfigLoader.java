@@ -137,6 +137,7 @@ public final class FrameworkConfigLoader {
         Map<?, ?> profiles = (Map<?, ?>) configured;
         Map<String, String> names = new LinkedHashMap<String, String>();
         for (Map.Entry<?, ?> entry : profiles.entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
             if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException("config.environments keys must be strings");
             String name = ((String) entry.getKey()).trim();
             if (!name.matches("[A-Za-z][A-Za-z0-9_-]*")) throw new IllegalArgumentException("Environment name must match [A-Za-z][A-Za-z0-9_-]*: " + name);
@@ -152,6 +153,13 @@ public final class FrameworkConfigLoader {
             if (profile.containsKey("mqhelpers")) validateProfileList(profile.get("mqhelpers"), "config.environments." + name + ".mqhelpers");
             if (profile.containsKey("sshhelpers")) validateProfileList(profile.get("sshhelpers"), "config.environments." + name + ".sshhelpers");
             if (profile.containsKey("httphelpers")) validateProfileList(profile.get("httphelpers"), "config.environments." + name + ".httphelpers");
+        }
+
+        if (names.isEmpty()) {
+            if (requested != null) throw new IllegalArgumentException("--env requires a profile config with an active environments map");
+            Map<String, Object> copy = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : raw.entrySet()) copy.put(String.valueOf(entry.getKey()), entry.getValue());
+            return copy;
         }
 
         String requestedName = requested;
@@ -248,6 +256,7 @@ public final class FrameworkConfigLoader {
                                  boolean allowCall, boolean allowLegacyDelimit, boolean currentResultContract, boolean typedResultContract) {
         if (!(configured instanceof Map)) return;
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
             String localKey = String.valueOf(entry.getKey());
             String sourceField = "tools." + localKey;
             try {
@@ -577,8 +586,10 @@ public final class FrameworkConfigLoader {
                 if (!found) throw new IllegalArgumentException("Unknown SSH helper '" + sshHelper + "' in tool group " + id);
             } else ssh = ssh(group.get("ssh"), "tool group " + id + ".ssh");
             if (!(group.get("tools") instanceof Map) || ((Map<?, ?>) group.get("tools")).isEmpty()) throw new IllegalArgumentException("Tool group tools must be a non-empty map: " + id);
+            int toolCountBefore = tools.size();
             addTools(group.get("tools"), tools, id, script, ssh, sshHelper, sshStrategy,
                     "tool group " + id + ".tools", file, v28 || v27 || v26, !(v28 || v27 || v26), v28, v29);
+            if (tools.size() == toolCountBefore) throw new IllegalArgumentException("Tool group must contain at least one active Tool: " + id);
         } catch (att.validation.DiagnosticException e) {
             throw YamlSupport.locate(e, file, e.field());
         } catch (Exception e) {
@@ -713,19 +724,15 @@ public final class FrameworkConfigLoader {
         return new RunConfig("timestamp", "yyyyMMdd-HHmmss");
     }
 
-    private static Map<String, String> stringMap(Object value) {
-        Map<String, String> result = new LinkedHashMap<String, String>();
-        if (value == null) return result;
-        if (!(value instanceof Map)) throw new IllegalArgumentException("Expected a string mapping");
-        for (Map.Entry<?, ?> e : ((Map<?, ?>) value).entrySet()) {
-            if (!(e.getKey() instanceof String)) throw new IllegalArgumentException("Mapping key must be a string: " + e.getKey());
-            if (!(e.getValue() instanceof String)) throw new IllegalArgumentException("Mapping value must be a string: " + e.getKey());
-            result.put(String.valueOf(e.getKey()), (String) e.getValue());
-        }
-        return result;
-    }
     private static Map<String, String> reportColumns(Object value) {
-        Map<String, String> result = stringMap(value);
+        Map<String, String> result = new LinkedHashMap<String, String>();
+        if (value != null && !(value instanceof Map)) throw new IllegalArgumentException("Expected a string mapping");
+        if (value instanceof Map) for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
+            if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException("Mapping key must be a string: " + entry.getKey());
+            if (!(entry.getValue() instanceof String)) throw new IllegalArgumentException("Mapping value must be a string: " + entry.getKey());
+            result.put((String) entry.getKey(), (String) entry.getValue());
+        }
         java.util.Set<String> allowed = new java.util.LinkedHashSet<String>(java.util.Arrays.asList("result", "durationMs", "expectedResult", "actualResult", "caseLog", "reportLink", "runTime", "execId"));
         for (Map.Entry<String, String> entry : result.entrySet()) {
             if (!allowed.contains(entry.getKey())) throw new IllegalArgumentException("Unknown report column key: " + entry.getKey());

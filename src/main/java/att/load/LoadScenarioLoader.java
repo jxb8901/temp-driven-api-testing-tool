@@ -182,17 +182,18 @@ public final class LoadScenarioLoader {
     }
 
     private LoadScenario semanticCurrent(Path source, Map<String, Object> root, boolean sourceIsScenario) {
+        removeDisabledKeys(root);
         List<Object> raw = root.containsKey("workloads") ? list(root.get("workloads"), "workloads") : Collections.<Object>emptyList();
-        Map<String, Object> rootLoad = mapOptional(root.get("load"), "load");
-        Map<String, Object> rootExecution = mapOptional(root.get("execution"), "execution");
+        Map<String, Object> rootLoad = configMapOptional(root.get("load"), "load");
+        Map<String, Object> rootExecution = configMapOptional(root.get("execution"), "execution");
         Map<String, Object> workloadExecutionDefaults = new LinkedHashMap<String, Object>(rootExecution);
         workloadExecutionDefaults.remove("execIdFormat");
-        Map<String, Object> rootThresholds = mapOptional(root.get("thresholds"), "thresholds");
+        Map<String, Object> rootThresholds = configMapOptional(root.get("thresholds"), "thresholds");
         if (raw.isEmpty()) {
             if (rootLoad.isEmpty()) throw failure("load", "policy-only load descriptor requires a root load policy");
             parsePolicy("policy", rootLoad, workloadExecutionDefaults, rootThresholds);
             Long policySeed = longInteger(root.get("seed"), "seed");
-            Map<String, Object> policyEvidence = mapOptional(root.get("evidence"), "evidence");
+            Map<String, Object> policyEvidence = evidenceMap(root.get("evidence"), "evidence");
             String policyFormat = rootExecution.containsKey("execIdFormat") ? string(rootExecution.get("execIdFormat"), "execution.execIdFormat") : "";
             try { LoadExecutionIdPattern.validate(policyFormat, parsePolicy("policy", rootLoad, workloadExecutionDefaults, rootThresholds).model()); }
             catch (IllegalArgumentException error) { throw failure("execution.execIdFormat", error.getMessage()); }
@@ -206,14 +207,15 @@ public final class LoadScenarioLoader {
         for (int i = 0; i < raw.size(); i++) {
             String prefix = "workloads[" + i + "]";
             Map<String, Object> map = map(raw.get(i), prefix);
+            removeDisabledKeys(map);
             String id = string(map.get("id"), prefix + ".id");
             if (!WORKLOAD_ID.matcher(id).matches()) throw failure(prefix + ".id", "workload id must match [A-Za-z0-9][A-Za-z0-9._-]*");
             if (!ids.add(id)) throw failure(prefix + ".id", "duplicate workload id '" + id + "'");
-            Map<String, Object> localThresholds = mapOptional(map.get("thresholds"), prefix + ".thresholds");
+            Map<String, Object> localThresholds = configMapOptional(map.get("thresholds"), prefix + ".thresholds");
             Map<String, Object> thresholds = localThresholds;
             Map<String, Object> effective = new LinkedHashMap<String, Object>(map);
-            effective.put("load", mergeMaps(rootLoad, mapOptional(map.get("load"), prefix + ".load")));
-            effective.put("execution", mergeMaps(workloadExecutionDefaults, mapOptional(map.get("execution"), prefix + ".execution")));
+            effective.put("load", mergeMaps(rootLoad, configMapOptional(map.get("load"), prefix + ".load")));
+            effective.put("execution", mergeMaps(workloadExecutionDefaults, configMapOptional(map.get("execution"), prefix + ".execution")));
             LoadWorkload workload = parseWorkload(id, effective, prefix + ".", thresholds, sourceIsScenario ? i : -1, false);
             if (model == null) {
                 model = workload.model();
@@ -231,7 +233,7 @@ public final class LoadScenarioLoader {
         }
         Map<String, Object> thresholds = rootThresholds;
         validateThresholds(model, thresholds, "thresholds");
-        Map<String, Object> evidence = mapOptional(root.get("evidence"), "evidence");
+        Map<String, Object> evidence = evidenceMap(root.get("evidence"), "evidence");
         Long seed = longInteger(root.get("seed"), "seed");
         Map<String, Object> execution = rootExecution;
         String format = execution.containsKey("execIdFormat") ? string(execution.get("execIdFormat"), "execution.execIdFormat") : "";
@@ -267,14 +269,14 @@ public final class LoadScenarioLoader {
 
     private LoadWorkload parseWorkload(String id, Map<String, Object> root, String prefix,
                                        Map<String, Object> thresholds, int sourceIndex, boolean validateThresholds) {
-        Map<String, Object> target = map(root.get("target"), prefix + "target");
+        Map<String, Object> target = configMap(root.get("target"), prefix + "target");
         String type = string(target.get("type"), prefix + "target.type");
         String targetId = string(target.get("id"), prefix + "target.id");
         Map<String, Object> arguments = mapOptional(target.get("arguments"), prefix + "target.arguments");
         Map<String, Object> inputs = mapOptional(root.get("inputs"), prefix + "inputs");
         Map<String, Object> vars = mapOptional(root.get("vars"), prefix + "vars");
-        Map<String, Object> load = map(root.get("load"), prefix + "load");
-        Map<String, Object> execution = mapOptional(root.get("execution"), prefix + "execution");
+        Map<String, Object> load = configMap(root.get("load"), prefix + "load");
+        Map<String, Object> execution = configMapOptional(root.get("execution"), prefix + "execution");
         if (("template".equals(type) || "flow".equals(type)) && !arguments.isEmpty())
             throw failure(prefix + "target.arguments", "target.arguments is supported only for Tool targets");
         if ("tool".equals(type) && !vars.isEmpty())
@@ -312,7 +314,7 @@ public final class LoadScenarioLoader {
         if (value == null) return ThinkTimePolicy.fixed(Duration.ZERO);
         if (value instanceof String) return ThinkTimePolicy.fixed(duration(value, field, false));
         if (!(value instanceof Map)) throw failure(field, field + " must be a duration or a {min, max} map");
-        Map<String, Object> range = map(value, field);
+        Map<String, Object> range = configMap(value, field);
         for (String key : range.keySet()) {
             if (!"min".equals(key) && !"max".equals(key)) throw failure(field + "." + key, field + " supports only min and max");
         }
@@ -403,6 +405,7 @@ public final class LoadScenarioLoader {
 
     private void validateThresholds(LoadScenario.Model model, Map<String, Object> thresholds, String fieldPrefix) {
         for (Map.Entry<String, Object> entry : thresholds.entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
             String field = fieldPrefix + "." + entry.getKey();
             if (!LoadThresholdEvaluator.isSupportedName(entry.getKey()))
                 throw failure(field, field + " is not a supported threshold");
@@ -448,6 +451,25 @@ public final class LoadScenarioLoader {
         return objectMap((Map<?, ?>) value);
     }
     private static Map<String, Object> mapOptional(Object value, String field) { return value == null ? new LinkedHashMap<String, Object>() : map(value, field); }
+    private static Map<String, Object> configMapOptional(Object value, String field) {
+        Map<String, Object> result = mapOptional(value, field);
+        removeDisabledKeys(result);
+        return result;
+    }
+    private static Map<String, Object> configMap(Object value, String field) {
+        Map<String, Object> result = map(value, field);
+        removeDisabledKeys(result);
+        return result;
+    }
+    private static Map<String, Object> evidenceMap(Object value, String field) {
+        Map<String, Object> result = configMapOptional(value, field);
+        if (result.get("resources") instanceof Map) result.put("resources", configMap(result.get("resources"), field + ".resources"));
+        return result;
+    }
+    private static void removeDisabledKeys(Map<?, ?> value) {
+        java.util.Iterator<?> keys = value.keySet().iterator();
+        while (keys.hasNext()) if (SchemaSupport.isDisabledKey(keys.next())) keys.remove();
+    }
     private static Map<String, Object> copyMap(Object value) { return value instanceof Map ? objectMap((Map<?, ?>) value) : new LinkedHashMap<String, Object>(); }
     private static Map<String, Object> objectMap(Map<?, ?> value) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();

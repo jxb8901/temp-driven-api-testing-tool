@@ -104,6 +104,7 @@ public final class SuiteConfigResolver {
         Object configured = map.get("columns");
         if (configured != null && !(configured instanceof Map)) throw new IllegalArgumentException("sidecar.report.columns must be a map");
         if (configured instanceof Map) for (Map.Entry<?, ?> e : ((Map<?, ?>) configured).entrySet()) {
+            if (SchemaSupport.isDisabledKey(e.getKey())) continue;
             String key = String.valueOf(e.getKey());
             if (!java.util.Arrays.asList("result", "durationMs", "expectedResult", "actualResult", "caseLog", "reportLink", "runTime", "execId").contains(key)) throw new IllegalArgumentException("Unknown report column key: " + key);
             if (!(e.getValue() instanceof String) || String.valueOf(e.getValue()).trim().isEmpty()) throw new IllegalArgumentException("Report column header must be a non-blank string: " + key);

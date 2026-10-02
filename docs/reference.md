@@ -76,6 +76,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Direct DB timeout and retry eligibility](#direct-db-timeout-and-retry-eligibility)
 - [09 Configuration and Environments](#09-configuration-and-environments)
   - [Configuration layers and precedence](#configuration-layers-and-precedence)
+  - [Ignore or disable ATT-owned configuration with `x-`](#ignore-or-disable-att-owned-configuration-with-x)
   - [Multi-environment profiles in current ATT](#multi-environment-profiles-in-current-att)
   - [Schema catalog](#schema-catalog)
   - [Global configuration](#global-configuration)
@@ -361,6 +362,8 @@ This chapter defines the active ATT action contract. Templates use att-template/
 | flow | use | Runs a registered Flow in a nested Action scope and restores the caller's scope on return. |
 
 Actions run in YAML order. Where supported, an action may also define id, description, onFailure and runWhen. Action IDs are unique within their scope. Type-specific invalid fields fail validation. Action result, Log file and Log fields are not part of the current action contract.
+
+For the lowercase `x-` convention that disables ATT-owned Action fields and keyed entries before validation or execution—and how it differs from `runWhen: false`—see [Configuration](reference/09_configuration.md#ignore-or-disable-att-owned-configuration-with-x).
 
 ### Separate logical values from representations
 
@@ -1172,6 +1175,8 @@ SSHHelper -> SSH routing or Resource Helper /
 
 Resource IDs are logical contracts referenced by Templates/expressions or Tool groups. Environment profiles may bind the same DB/MQ/HTTP/SSH logical ID to different descriptors without changing Action YAML.
 
+The lowercase `x-` prefix can disable fields and keyed entries in ATT-owned resource configuration. It does not strip user data such as HTTP header names or DB parameters; see [Configuration](reference/09_configuration.md#ignore-or-disable-att-owned-configuration-with-x).
+
 ### 7.1 Operation Result and Evidence
 
 ATT keeps an operation's logical result separate from execution evidence:
@@ -1861,6 +1866,41 @@ This chapter is the authoritative reading reference for author-authored configur
 | CLI | command options | selection, Run ID, output override, presentation, CI formats |
 
 [Reliability](reference/08_reliability_execution_control.md) defines timeout/retry precedence and eligibility. CLI `--output-dir` and `--run-id` override their applicable defaults for one command. A field valid in one layer is still rejected if placed in another layer.
+
+### Ignore or disable ATT-owned configuration with `x-`
+
+Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as `tools`, environment profiles, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key:
+
+```yaml
+schemaVersion: att-config/v2.10
+x-debug-note: "#{missing.tool()}"      # ignored config field
+tools:
+  x-temporary: not-a-tool               # ignored Tool entry
+  smoke:
+    name: Smoke check
+    description: Check the local setup
+    call: "#{upper('ok')}"
+    x-retry: 0                           # ignored optional Tool field
+```
+
+The same rule applies to Actions and evidence collectors. A disabled Action is absent from validation and runtime; a disabled collector is not called or included in evidence. Nested `x-` fields in ATT-owned blocks are also ignored:
+
+```yaml
+actions:
+  x-preview:
+    type: tool
+    call: "#{missing.tool()}"
+  verify:
+    type: tool
+    call: "#{upper('ok')}"
+    retry: {maxAttempts: 2, intervalMs: 0, retryOn: [TIMEOUT], x-note: ignored}
+    evidence:
+      x-snapshot: not-a-collector
+```
+
+Disabled entries do not supply required fields: `x-schemaVersion` cannot replace `schemaVersion`, and `x-type` cannot replace an Action's required `type`. An `X-` uppercase prefix is not special and is validated as an ordinary key. A live reference to a disabled Action is unresolved, because that Action is absent. `runWhen: "#{false}"` is different: it is a valid, present Action that evaluates to `false` and produces the normal `SKIPPED` result.
+
+Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXEC.INPUT`, `EXEC.VARS`, arbitrary maps, DB `params`/`parameters`, and Tool arguments remain data and retain their names. For example, `x-correlation-id` is still an HTTP header or input key unless it is itself the key of an ATT-owned configuration collection.
 
 ### Multi-environment profiles in current ATT
 

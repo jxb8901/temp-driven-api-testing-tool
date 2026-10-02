@@ -36,6 +36,27 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadScenarioTest {
     @TempDir Path temp;
 
+    @Test void xPrefixDisablesLoadConfigurationFieldsButPreservesUserMaps() throws Exception {
+        Path project = project();
+        Path file = write(project, "x-prefix.yaml", "schemaVersion: att-load/v1.4\n"
+                + "thresholds: {p95: '< 20ms', x-disabled: [not, a, threshold]}\n"
+                + "evidence: {mode: metrics, x-disabled: invalid, resources: {output: none, x-retired: invalid}}\n"
+                + "workloads:\n  - id: normal\n"
+                + "    target: {type: tool, id: sample.echo, x-disabled: invalid, arguments: {x-correlation-id: retained}}\n"
+                + "    inputs: {x-correlation-id: retained}\n"
+                + "    load: {users: 1, duration: 1s, x-disabled: [ignored]}\n"
+                + "    execution:\n      thinkTime: {min: 1ms, max: 2ms, x-disabled: invalid}\n");
+
+        LoadScenario scenario = new LoadScenarioLoader(project).load(file);
+        assertFalse(scenario.thresholds().containsKey("x-disabled"));
+        assertFalse(scenario.evidence().containsKey("x-disabled"));
+        assertFalse(((Map<?, ?>) scenario.evidence().get("resources")).containsKey("x-retired"));
+        assertEquals("retained", scenario.inputs().get("x-correlation-id"));
+        assertEquals("retained", scenario.targetArguments().get("x-correlation-id"));
+        assertEquals(1L, scenario.thinkTimePolicy().min().toMillis());
+        assertEquals(2L, scenario.thinkTimePolicy().max().toMillis());
+    }
+
     @Test void rejectsHistoricalLoadSchemaAndAcceptsCurrentEvidencePolicy() throws Exception {
         Path project = project();
         Path legacy = project.resolve("legacy-v10.yaml");

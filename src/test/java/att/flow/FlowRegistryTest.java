@@ -74,6 +74,20 @@ class FlowRegistryTest {
                 () -> new FlowRegistry(root, root.resolve("templates"))).getMessage().contains("Duplicate"));
     }
 
+    @Test void lowercaseXActionsAreSkippedBeforeFlowValidationAndEmptyActiveSetStillFails() throws Exception {
+        flow("with-disabled", "schemaVersion: att-flow/v3.6\nid: common.with-disabled.v1\nname: Flow\ndescription: Flow\nactions:\n"
+                + "  x-disabled.with.dot: {type: unsupported, use: missing.flow.v1}\n"
+                + "  active: {type: log, message: active}\n");
+        FlowDefinition loaded = new FlowRegistry(root, root.resolve("templates")).get("common.with-disabled.v1");
+        assertEquals(1, loaded.actions().size());
+        assertEquals("active", loaded.actions().get(0).id());
+
+        deleteFlows();
+        flow("only-disabled", "schemaVersion: att-flow/v3.6\nid: common.only-disabled.v1\nname: Flow\ndescription: Flow\nactions:\n"
+                + "  x-disabled: {type: unsupported}\n");
+        assertThrows(IllegalArgumentException.class, () -> new FlowRegistry(root, root.resolve("templates")));
+    }
+
     @Test void compilesTwoHundredFlowsAndTwoThousandReferencesOnceWithinTarget() throws Exception {
         for (int index = 0; index < 180; index++) {
             flow("leaf-" + index, valid("perf.leaf" + index + ".v1", "note" + index, "${CASE.caseId}"));

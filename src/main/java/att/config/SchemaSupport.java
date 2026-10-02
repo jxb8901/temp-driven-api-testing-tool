@@ -24,6 +24,11 @@ public final class SchemaSupport {
         }
     }
 
+    /** True only for the exact lowercase ATT extension/disable prefix. */
+    public static boolean isDisabledKey(Object key) {
+        return key instanceof String && ((String) key).startsWith("x-");
+    }
+
     public static Map<?, ?> map(Object value, String owner) {
         if (!(value instanceof Map)) throw new IllegalArgumentException(owner + " must be a map");
         return (Map<?, ?>) value;

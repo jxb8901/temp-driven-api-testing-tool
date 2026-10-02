@@ -11,6 +11,46 @@ class FrameworkConfigLoaderTest {
 
     @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
 
+    @Test void ignoresLowercaseXProfilesAndToolsButKeepsTheirCanonicalRequirements() throws Exception {
+        Path config = tempDir.resolve("x-config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.10\nenvironment: SIT\n"
+                + "x-note: [ignored, without, interpretation]\n"
+                + "report: {columns: {x-disabled-column: [not, a, label], result: Status}}\n"
+                + "environments:\n  x-disabled-profile: not-a-profile\n  SIT: {x-disabled-resource-list: [not, paths]}\n"
+                + "tools:\n  x-disabled-tool: [not, a, tool]\n  active:\n"
+                + "    name: Active\n    description: Active Tool\n    call: \"#{upper('ok')}\"\n"
+                + "    x-invalid-field: {anything: goes}\n").getBytes("UTF-8"));
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config, tempDir);
+        assertNotNull(loaded.tool("active"));
+        assertNull(loaded.tool("x-disabled-tool"));
+        assertEquals("Status", loaded.report().columns().get("result"));
+        assertFalse(loaded.report().columns().containsKey("x-disabled-column"));
+
+        Path group = tempDir.resolve("config/x-group.yaml");
+        Files.createDirectories(group.getParent());
+        Files.write(group, ("schemaVersion: att-tool-group/v2.9\nid: sample\nname: Sample\ndescription: Sample tools\n"
+                + "tools:\n  x-disabled-tool: not-a-tool\n  active:\n"
+                + "    name: Group Tool\n    description: Active Group Tool\n    call: \"#{upper('ok')}\"\n").getBytes("UTF-8"));
+        Path groupConfig = tempDir.resolve("group-config.yaml");
+        Files.write(groupConfig, "schemaVersion: att-config/v2.10\ntoolGroups: [config/x-group.yaml]\n".getBytes("UTF-8"));
+        assertNotNull(new FrameworkConfigLoader().load(groupConfig, tempDir).tool("sample.active"));
+
+        Path missingVersion = write("x-schema-version.yaml", "x-schemaVersion: att-config/v2.10\n");
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missingVersion, tempDir));
+        Path uppercase = write("uppercase-prefix.yaml", "schemaVersion: att-config/v2.10\ntools: {X-disabled-tool: not-a-tool}\n");
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(uppercase, tempDir));
+    }
+
+    @Test void treatsAnEnvironmentMapWithOnlyDisabledProfilesAsAbsent() throws Exception {
+        Path config = write("disabled-profiles-only.yaml", "schemaVersion: att-config/v2.10\\n"
+                + "environments: {x-disabled-profile: not-a-profile}\\n");
+
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config, tempDir);
+
+        assertEquals("SIT", loaded.environment());
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config, tempDir, "UAT"));
+    }
+
     @Test void rejectsCaseInsensitiveDbHelperIdsAndInvalidTimeouts() throws Exception {
         Path helpers = tempDir.resolve("config/dbhelpers");
         Files.createDirectories(helpers);
@@ -26,6 +66,25 @@ class FrameworkConfigLoaderTest {
         Path invalidTimeout = tempDir.resolve("config/invalid-timeout.yaml");
         Files.write(invalidTimeout, ("schemaVersion: att-config/v2.10\ndbhelpers: [config/dbhelpers/two.yaml]\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidTimeout, tempDir));
+    }
+
+    @Test void helperExtensionsAreIgnoredButDatabasePropertiesRemainData() throws Exception {
+        Path helper = tempDir.resolve("config/dbhelpers/extensions.yaml");
+        Files.createDirectories(helper.getParent());
+        Files.write(helper, ("schemaVersion: att-dbhelper/v2.6\nid: extensions\nname: Extensions\ndescription: Extensions\n"
+                + "connection:\n  url: jdbc:test\n  x-disabled: [not, a, connection field]\n  properties: {x-correlation-id: retained}\n"
+                + "statement: {timeoutSeconds: 10, x-disabled: invalid}\n"
+                + "transaction: {scope: case, x-disabled: invalid}\n"
+                + "result: {maxRows: 20, x-disabled: invalid}\n"
+                + "evidence: {sql: hash, x-disabled: invalid, output: {format: json, x-disabled: invalid}}\n"
+                + "pool: {maxSize: 2, x-disabled: invalid}\n").getBytes("UTF-8"));
+        Path config = tempDir.resolve("db-extension-config.yaml");
+        Files.write(config, "schemaVersion: att-config/v2.10\ndbhelpers: [config/dbhelpers/extensions.yaml]\n".getBytes("UTF-8"));
+
+        DbHelperConfig loaded = new FrameworkConfigLoader().load(config, tempDir).dbHelper("extensions");
+        assertEquals("retained", loaded.properties().get("x-correlation-id"));
+        assertEquals("hash", loaded.evidenceSql());
+        assertNotNull(loaded.evidenceOutput());
     }
 
     @Test void loadsV26CallBackedToolsAndKeepsV25CommandOnly() throws Exception {

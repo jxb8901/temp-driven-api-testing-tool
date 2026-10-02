@@ -14,6 +14,26 @@ class MqHelperConfigLoaderTest {
 
     @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
 
+    @Test void ignoresExtensionFieldsAcrossMqDescriptorObjects() throws Exception {
+        Path helper = tempDir.resolve("config/mqhelpers/extensions.yaml");
+        Files.createDirectories(helper.getParent());
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.2\nid: extensions\nname: Extensions\ndescription: Extensions\n"
+                + "defaults:\n"
+                + "  connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.CH, x-disabled: invalid}\n"
+                + "  message: {format: MQSTR, x-disabled: invalid}\n"
+                + "  requestReply: {waitMs: 2500, x-disabled: invalid}\n"
+                + "  pool: {maxSize: 3, x-disabled: invalid}\n"
+                + "instances: [{id: primary, x-disabled: [not, instance fields]}]\n"
+                + "selection: {strategy: roundRobin, x-disabled: invalid}\n"
+                + "evidence: {payload: none, x-disabled: invalid}\n").getBytes("UTF-8"));
+        Path config = tempDir.resolve("config/mq-extension-config.yaml");
+        Files.write(config, "schemaVersion: att-config/v2.10\nmqhelpers: [config/mqhelpers/extensions.yaml]\n".getBytes("UTF-8"));
+
+        MqHelperConfig loaded = new FrameworkConfigLoader().load(config, tempDir).mqHelper("extensions");
+        assertEquals(2500, loaded.requestReplyWaitMs());
+        assertEquals("MQSTR", loaded.format());
+    }
+
     @Test void loadsV12MqHelperWithoutExposingPasswordInMetadata() throws Exception {
         Path directory = tempDir.resolve("config/mqhelpers"); Files.createDirectories(directory);
         Path helper = directory.resolve("broker.yaml");

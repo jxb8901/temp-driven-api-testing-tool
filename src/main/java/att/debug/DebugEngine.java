@@ -547,7 +547,7 @@ public final class DebugEngine {
             Map<String, Object> rootArguments = map(root.get("arguments"));
             Map<String, Object> selectedArguments = effectiveToolArguments == null ? rootArguments : effectiveToolArguments;
             if ("tool".equals(type) && effectiveToolArguments == null) {
-                Map<String, Object> tools = map(root.get("tools"));
+                Map<String, Object> tools = configMap(root.get("tools"));
                 ToolConfig tool = findTool(config, id);
                 String local = tool == null ? id : tool.localKey();
                 Map<String, Object> selected = map(tools.get(local));
@@ -571,6 +571,12 @@ public final class DebugEngine {
         }
         @SuppressWarnings("unchecked") private static Map<String, Object> map(Object value) {
             return value instanceof Map ? objectMap((Map<?, ?>) value) : new LinkedHashMap<String, Object>();
+        }
+        private static Map<String, Object> configMap(Object value) {
+            Map<String, Object> result = map(value);
+            java.util.Iterator<String> keys = result.keySet().iterator();
+            while (keys.hasNext()) if (SchemaSupport.isDisabledKey(keys.next())) keys.remove();
+            return result;
         }
     }
 }

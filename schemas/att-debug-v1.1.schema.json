@@ -13,6 +13,7 @@
         "key": { "type": "string", "minLength": 1 },
         "values": { "type": "object", "additionalProperties": true }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "inputs": { "type": "object", "additionalProperties": true },
@@ -20,6 +21,7 @@
     "arguments": { "type": "object", "additionalProperties": true },
     "tools": {
       "type": "object",
+      "patternProperties": { "^x-": {} },
       "additionalProperties": {
         "type": "object",
         "properties": {
@@ -29,5 +31,6 @@
       }
     }
   },
+  "patternProperties": { "^x-": {} },
   "additionalProperties": false
 }

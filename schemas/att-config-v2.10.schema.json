@@ -115,6 +115,9 @@
         },
         "columns": {
           "type": "object",
+          "patternProperties": {
+            "^x-": {}
+          },
           "additionalProperties": {
             "type": "string"
           }
@@ -228,12 +231,13 @@
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
-        "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+        "pattern": "^(?:x-.*|[A-Za-z][A-Za-z0-9_-]*)$"
       },
       "patternProperties": {
-        "^[A-Za-z][A-Za-z0-9_-]*$": {
+        "^(?!x-)[A-Za-z][A-Za-z0-9_-]*$": {
           "$ref": "#/$defs/environmentProfile"
-        }
+        },
+        "^x-": {}
       },
       "additionalProperties": false
     },
@@ -243,7 +247,10 @@
     "tools": {
       "type": "object",
       "propertyNames": {
-        "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+        "pattern": "^(?:x-.*|[A-Za-z_][A-Za-z0-9_-]*)$"
+      },
+      "patternProperties": {
+        "^x-": {}
       },
       "additionalProperties": {
         "$ref": "#/$defs/tool"
@@ -294,6 +301,9 @@
           "type": "string",
           "minLength": 1
         }
+      },
+      "patternProperties": {
+        "^x-": {}
       },
       "additionalProperties": false
     },
@@ -416,6 +426,9 @@
                 "db"
               ]
             }
+          },
+          "patternProperties": {
+            "^x-": {}
           },
           "additionalProperties": false
         },

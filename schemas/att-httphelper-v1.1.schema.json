@@ -52,6 +52,9 @@
           "type": "boolean"
         }
       },
+      "patternProperties": {
+        "^x-": {}
+      },
       "additionalProperties": false
     },
     "pool": {
@@ -77,6 +80,9 @@
           "$ref": "#/$defs/timeout"
         }
       },
+      "patternProperties": {
+        "^x-": {}
+      },
       "additionalProperties": false
     },
     "auth": {
@@ -99,6 +105,9 @@
           "type": "string"
         }
       },
+      "patternProperties": {
+        "^x-": {}
+      },
       "additionalProperties": false
     },
     "tls": {
@@ -114,6 +123,9 @@
         "trustStorePassword": {
           "type": "string"
         }
+      },
+      "patternProperties": {
+        "^x-": {}
       },
       "additionalProperties": false
     },
@@ -142,8 +154,14 @@
               "default": 10000
             }
           },
+          "patternProperties": {
+            "^x-": {}
+          },
           "additionalProperties": false
         }
+      },
+      "patternProperties": {
+        "^x-": {}
       },
       "additionalProperties": false
     }
@@ -163,6 +181,9 @@
         "type": "string"
       }
     }
+  },
+  "patternProperties": {
+    "^x-": {}
   },
   "additionalProperties": false
 }

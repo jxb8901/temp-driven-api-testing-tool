@@ -14,6 +14,8 @@
 
 Actions 按 YAML 順序執行。依類型允許時，也可定義 id、description、onFailure、runWhen。Action ID 在 scope 內必須唯一。類型不支援的欄位會在 validation 失敗。共用 Action result、Log file 與 Log fields 不屬於現行契約。
 
+關於以小寫 `x-` 在 validation 或 execution 前停用 ATT 擁有的 Action 字段/keyed entries，以及它與 `runWhen: false` 的差別，請見[配置章節](09_configuration.md#使用-x-忽略或停用-att-配置項)。
+
 ### 區分邏輯值與表示方式
 
 ATT 將 operation 的邏輯結果與人類可讀或 wire representation 分開：

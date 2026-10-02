@@ -57,8 +57,14 @@
                   ]
                 }
               },
+              "patternProperties": {
+                "^x-": {}
+              },
               "additionalProperties": false
             }
+          },
+          "patternProperties": {
+            "^x-": {}
           },
           "additionalProperties": false
         }
@@ -68,7 +74,10 @@
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
-        "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+        "pattern": "^(?:x-.*|[A-Za-z_][A-Za-z0-9_-]*)$"
+      },
+      "patternProperties": {
+        "^x-": {}
       },
       "additionalProperties": {
         "$ref": "#/$defs/tool"
@@ -120,6 +129,9 @@
           "type": "string",
           "minLength": 1
         }
+      },
+      "patternProperties": {
+        "^x-": {}
       },
       "additionalProperties": false
     },
@@ -198,6 +210,9 @@
                 "db"
               ]
             }
+          },
+          "patternProperties": {
+            "^x-": {}
           },
           "additionalProperties": false
         },

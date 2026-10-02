@@ -43,6 +43,7 @@
         "execution": { "$ref": "#/$defs/workloadExecution" },
         "thresholds": { "$ref": "#/$defs/thresholds" }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "target": {
@@ -53,6 +54,7 @@
         "id": { "type": "string", "minLength": 1 },
         "arguments": { "type": "object", "additionalProperties": true }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "load": {
@@ -72,6 +74,7 @@
         { "required": ["users"], "not": { "anyOf": [{ "required": ["arrivalRate"] }, { "required": ["maxConcurrent"] }, { "required": ["overloadPolicy"] }] } },
         { "required": ["arrivalRate", "maxConcurrent", "overloadPolicy"], "not": { "required": ["users"] } }
       ],
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "loadOverride": {
@@ -86,6 +89,7 @@
         "maxConcurrent": { "type": "integer", "minimum": 1 },
         "overloadPolicy": { "const": "drop" }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "workloadExecution": {
@@ -97,10 +101,11 @@
             { "type": "object", "required": ["min", "max"], "properties": {
               "min": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
               "max": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" }
-            }, "additionalProperties": false }
+            }, "patternProperties": { "^x-": {} }, "additionalProperties": false }
           ]
         }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "rootExecution": {
@@ -113,10 +118,11 @@
             { "type": "object", "required": ["min", "max"], "properties": {
               "min": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
               "max": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" }
-            }, "additionalProperties": false }
+            }, "patternProperties": { "^x-": {} }, "additionalProperties": false }
           ]
         }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "thresholds": {
@@ -129,6 +135,7 @@
         "droppedRate": { "type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?%$" },
         "achievedArrivalRate": { "type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?(%|/(s|m))$" }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "evidence": {
@@ -139,8 +146,9 @@
         "mode": { "enum": ["metrics", "failures", "samples", "all"] },
         "sampleRate": { "type": "number", "minimum": 0, "maximum": 1 },
         "maxSamples": { "type": "integer", "minimum": 0 },
-        "resources": { "type": "object", "properties": { "output": { "enum": ["inherit", "none"], "default": "inherit" } }, "additionalProperties": false }
+        "resources": { "type": "object", "properties": { "output": { "enum": ["inherit", "none"], "default": "inherit" } }, "patternProperties": { "^x-": {} }, "additionalProperties": false }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     }
   },

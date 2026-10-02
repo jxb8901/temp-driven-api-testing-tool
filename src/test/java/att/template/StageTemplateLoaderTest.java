@@ -4,6 +4,8 @@ package att.template;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.*;
+import java.util.Arrays;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class StageTemplateLoaderTest {
@@ -104,6 +106,47 @@ class StageTemplateLoaderTest {
 
     @Test void actionFailureDefaultsToStop() {
         assertEquals("stop", new TemplateAction("note", java.util.Collections.<String, Object>singletonMap("type", "log")).onFailure());
+    }
+
+    @Test void lowercaseXEntriesAreAbsentBeforeActionAndCollectorValidationOrDiscovery() throws Exception {
+        Path directory = tempDir.resolve("templates/x-prefix");
+        Files.createDirectories(directory);
+        Files.write(directory.resolve("template.yaml"), ("schemaVersion: att-template/v3.6\nname: x-prefix\ndescription: extensions\n"
+                + "actions:\n"
+                + "  x-disabled.with.dot: {type: log, level: INVALID, expression: '&{missing.txt}'}\n"
+                + "  call:\n    type: tool\n    call: \"#{upper('ok')}\"\n"
+                + "    retry: {maxAttempts: 2, intervalMs: 0, retryOn: [TIMEOUT], x-disabled: invalid}\n"
+                + "    evidence: {x-collector.with.dot: not-a-collector}\n"
+                + "    x-retry: {notes: [temporarily, disabled]}\n"
+                + "    x-evidence: [incomplete, disabled, block]\n"
+                + "    x-expression: '&{also-missing.txt}'\n"
+                + "  data: {type: log, value: {x-correlation-id: preserved}, format: json, runWhen: '#{false}'}\n")
+                .getBytes("UTF-8"));
+
+        StageTemplate template = new StageTemplateLoader(tempDir, Paths.get("templates")).load("x-prefix");
+        assertEquals(Arrays.asList("call", "data"), Arrays.asList(template.actions().get(0).id(), template.actions().get(1).id()));
+        assertTrue(template.actions().get(0).evidence().isEmpty());
+        assertFalse(template.actions().get(0).retry().containsKey("x-disabled"));
+        assertFalse(template.actions().get(0).raw().containsKey("x-retry"));
+        assertFalse(template.actions().get(0).raw().containsKey("x-evidence"));
+        assertFalse(template.actions().get(0).raw().containsKey("x-expression"));
+        assertEquals("#{false}", template.actions().get(1).runWhen());
+        assertEquals("preserved", ((Map<?, ?>) template.actions().get(1).value()).get("x-correlation-id"));
+        assertEquals(0, new FileExpressionResolver(tempDir).snapshotFor(template, null).size());
+    }
+
+    @Test void disabledKeysDoNotReplaceRequiredFieldsAndPrefixIsCaseSensitive() throws Exception {
+        Path missing = tempDir.resolve("templates/x-required");
+        Path uppercase = tempDir.resolve("templates/uppercase-key");
+        Files.createDirectories(missing);
+        Files.createDirectories(uppercase);
+        Files.write(missing.resolve("template.yaml"), ("schemaVersion: att-template/v3.6\nname: missing\ndescription: missing required action type\n"
+                + "actions: {call: {x-type: log, x-message: hidden}}\n").getBytes("UTF-8"));
+        Files.write(uppercase.resolve("template.yaml"), ("schemaVersion: att-template/v3.6\nname: uppercase\ndescription: active uppercase key\n"
+                + "actions: {X-disabled: {}}\n").getBytes("UTF-8"));
+        StageTemplateLoader loader = new StageTemplateLoader(tempDir, Paths.get("templates"));
+        assertThrows(Exception.class, () -> loader.load("x-required"));
+        assertThrows(Exception.class, () -> loader.load("uppercase-key"));
     }
 
     @Test void acceptsTimeoutOnlyForToolActionAtLoadBoundary() throws Exception {
