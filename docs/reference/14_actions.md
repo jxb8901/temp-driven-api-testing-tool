@@ -14,6 +14,8 @@ This chapter defines the active ATT action contract. Templates use att-template/
 
 Actions run in YAML order. Where supported, an action may also define id, description, onFailure and runWhen. Action IDs are unique within their scope. Type-specific invalid fields fail validation. Action result, Log file and Log fields are not part of the current action contract.
 
+For the lowercase `x-` convention that disables ATT-owned Action fields and keyed entries before validation or execution—and how it differs from `runWhen: false`—see [Configuration](09_configuration.md#ignore-or-disable-att-owned-configuration-with-x).
+
 ### Separate logical values from representations
 
 ATT keeps the logical operation result separate from human or wire representations:

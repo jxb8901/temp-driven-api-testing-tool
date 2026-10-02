@@ -22,7 +22,9 @@ public final class StageTemplateLoader {
     private static void rejectLogLevel(Map<String, Object> document) {
         Object configured = document.get("actions");
         if (!(configured instanceof Map)) return;
-        for (Object action : ((Map<?, ?>) configured).values()) {
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
+            Object action = entry.getValue();
             if (action instanceof Map && "log".equals(((Map<?, ?>) action).get("type"))
                     && ((Map<?, ?>) action).containsKey("level"))
                 throw new IllegalArgumentException("Log.level was removed; delete level and use message or value + format. Log entries have no severity semantics.");
@@ -185,6 +187,7 @@ public final class StageTemplateLoader {
         Object configured = map.get("actions");
         if (!(configured instanceof Map)) throw new IllegalArgumentException("Template actions must be an ordered map: " + directory);
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
             if (!(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Action must be a map: " + entry.getKey());
             String actionKey = String.valueOf(entry.getKey());
             if (actionKey.trim().isEmpty() || actionKey.contains(".")) throw new IllegalArgumentException("Action key must be non-blank and dot-free: " + actionKey);
@@ -276,6 +279,7 @@ public final class StageTemplateLoader {
         Object configured = template.get("actions");
         if (!(configured instanceof Map)) return;
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
             if (!(entry.getValue() instanceof Map)) continue;
             Map<?, ?> action = (Map<?, ?>) entry.getValue();
             String actionId = String.valueOf(entry.getKey());

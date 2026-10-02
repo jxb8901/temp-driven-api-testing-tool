@@ -18,6 +18,41 @@
 
 Timeout/Retry precedence 與 eligibility 見 [Reliability](08_reliability_execution_control.md)。CLI 的 `--output-dir` 和 `--run-id` 會在一次命令中覆蓋相應默認值。一個層級中合法的字段，若放在別的層級中也會被拒絕。
 
+### 使用 `x-` 忽略或停用 ATT 配置項
+
+在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 `tools`、environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
+
+```yaml
+schemaVersion: att-config/v2.10
+x-debug-note: "#{missing.tool()}"      # 忽略的配置字段
+tools:
+  x-temporary: not-a-tool               # 忽略的 Tool 條目
+  smoke:
+    name: Smoke check
+    description: Check the local setup
+    call: "#{upper('ok')}"
+    x-retry: 0                           # 忽略的可選 Tool 字段
+```
+
+Action 和 evidence collector 也使用相同規則。停用的 Action 不會進入校驗或 runtime；停用的 collector 不會被呼叫，也不會加入 evidence。ATT 擁有的巢狀配置區塊中的 `x-` 字段同樣會被忽略：
+
+```yaml
+actions:
+  x-preview:
+    type: tool
+    call: "#{missing.tool()}"
+  verify:
+    type: tool
+    call: "#{upper('ok')}"
+    retry: {maxAttempts: 2, intervalMs: 0, retryOn: [TIMEOUT], x-note: ignored}
+    evidence:
+      x-snapshot: not-a-collector
+```
+
+停用項不能代替必填字段：`x-schemaVersion` 不能代替 `schemaVersion`，`x-type` 不能代替 Action 必填的 `type`。大寫 `X-` 沒有特殊含義，會按一般 key 校驗。若仍有啟用中的引用指向已停用 Action，該引用會因 Action 不存在而無法解析。`runWhen: "#{false}"` 則不同：Action 仍然存在，條件求值為 `false` 後會產生一般的 `SKIPPED` 結果。
+
+不要用此規則移除 user data 中的 key。HTTP headers、`EXEC.INPUT`、`EXEC.VARS`、任意 maps、DB `params`/`parameters` 和 Tool invocation argument values 中的 key 都是資料，名稱會原樣保留。例如，除非 `x-correlation-id` 本身是 ATT 擁有的配置 collection key，否則它仍是一般 HTTP header 或 input key。
+
 ### ATT 多環境 Profile 選擇
 
 `att-config/v2.10` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper descriptor lists。各綁定方式見 resource chapters。

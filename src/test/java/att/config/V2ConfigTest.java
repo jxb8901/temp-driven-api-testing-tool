@@ -10,6 +10,7 @@ import java.nio.file.Paths;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class V2ConfigTest {
@@ -55,6 +56,20 @@ class V2ConfigTest {
         assertThrows(IllegalArgumentException.class, () -> new SuiteConfigResolver(tempDir, global).resolve(tempDir.resolve("reserved-vars.xlsx")));
         Files.write(tempDir.resolve("missing-id.yaml"), ("schemaVersion: att-sidecar/v2.1\nexcel:\n  sheet: cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: invoke\n    template: Template\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new SuiteConfigResolver(tempDir, global).resolve(tempDir.resolve("missing-id.xlsx")));
+    }
+
+    @Test
+    void ignoresDisabledSidecarReportColumnsBeforeValidation() throws Exception {
+        Path workbook = tempDir.resolve("report-columns.xlsx");
+        Files.write(tempDir.resolve("report-columns.yaml"), ("schemaVersion: att-sidecar/v2.2\nid: report-columns\n"
+                + "excel: {sheet: cases, caseId: ID, tags: Tags}\nstages: [{key: invoke, template: Template}]\n"
+                + "report:\n  columns:\n    x-disabled-column: [not, a, label]\n    result: Outcome\n").getBytes("UTF-8"));
+        FrameworkConfig global = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30,
+                Paths.get("templates"), null, null, null);
+
+        ReportConfig report = new SuiteConfigResolver(tempDir, global).resolve(workbook).report();
+        assertEquals("Outcome", report.columns().get("result"));
+        assertFalse(report.columns().containsKey("x-disabled-column"));
     }
 
     @Test

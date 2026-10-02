@@ -190,6 +190,9 @@
               "default": 10000
             }
           },
+          "patternProperties": {
+            "^x-": {}
+          },
           "additionalProperties": false
         }
       },
@@ -223,6 +226,9 @@
             }
           ]
         }
+      },
+      "patternProperties": {
+        "^x-": {}
       },
       "additionalProperties": false
     }

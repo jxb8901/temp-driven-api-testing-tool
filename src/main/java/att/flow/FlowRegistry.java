@@ -219,6 +219,7 @@ public final class FlowRegistry {
         Object configured = flow.get("actions");
         if (!(configured instanceof Map)) return;
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
             if (!(entry.getValue() instanceof Map)) continue;
             Map<?, ?> action = (Map<?, ?>) entry.getValue();
             String id = String.valueOf(entry.getKey());
@@ -233,6 +234,7 @@ public final class FlowRegistry {
         Object configured = flow.get("actions");
         if (!(configured instanceof Map)) return;
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
             if (!(entry.getValue() instanceof Map)) continue;
             Map<?, ?> action = (Map<?, ?>) entry.getValue();
             String id = String.valueOf(entry.getKey());
@@ -266,12 +268,14 @@ public final class FlowRegistry {
         if (!(configured instanceof Map) || ((Map<?, ?>) configured).isEmpty()) throw new IllegalArgumentException("Flow actions must be a non-empty ordered map: " + id);
         List<TemplateAction> result = new ArrayList<TemplateAction>();
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) configured).entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
             String key = String.valueOf(entry.getKey());
             if (key.trim().isEmpty() || key.contains(".") || !(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Invalid Flow action: " + id + "." + key);
             TemplateAction action = new TemplateAction(key, objectMap((Map<?, ?>) entry.getValue()), templateSchema);
             validateActionShape(action, id, historical);
             result.add(action);
         }
+        if (result.isEmpty()) throw new IllegalArgumentException("Flow actions must contain at least one active Action: " + id);
         return result;
     }
 

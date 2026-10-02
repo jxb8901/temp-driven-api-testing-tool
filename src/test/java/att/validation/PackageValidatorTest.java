@@ -993,6 +993,29 @@ class PackageValidatorTest {
         catch (Exception e) { throw new RuntimeException(e); } });
     }
 
+    @Test void activeReferencesToDisabledActionsRemainUnresolved() throws Exception {
+        Path directory = tempDir.resolve("templates/x-reference");
+        Files.createDirectories(directory);
+        Files.write(directory.resolve("template.yaml"), ("schemaVersion: att-template/v3.6\nname: Reference\ndescription: Disabled target\nactions:\n"
+                + "  x-disabled: {type: log, message: hidden}\n"
+                + "  read: {type: log, message: '${EXEC.ACTIONS.x-disabled.output.result}'}\n").getBytes("UTF-8"));
+        StageTemplate template = new StageTemplateLoader(tempDir, java.nio.file.Paths.get("templates")).load("x-reference");
+        assertEquals(Collections.singletonList("read"), Arrays.asList(template.actions().get(0).id()));
+
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String, ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "Reference", Collections.<String, Object>emptyMap());
+        att.core.TestCase testCase = new att.core.TestCase(2, "suite", "sheet", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues", StageTemplate.class,
+                att.core.TestCase.class, att.core.StageCaseData.class, FrameworkConfig.class, Path.class, Set.class);
+        values.setAccessible(true);
+        java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator, template, testCase, stage, config, tempDir.resolve("case.xlsx"), new LinkedHashSet<String>()));
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, DiagnosticException.find(error.getCause()).code());
+    }
+
     @Test void validateDefersNestedShapeOfEarlierAssignButStillRejectsUnknownOrRealNullParents() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",1000,tempDir,
                 Collections.<String,ToolConfig>emptyMap(),null,null);

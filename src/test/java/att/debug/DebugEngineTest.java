@@ -110,6 +110,26 @@ class DebugEngineTest {
         assertFalse(overrideLog.contains("from-group"), overrideLog);
     }
 
+    @Test void disabledToolOverrideDoesNotReplaceDebugArguments() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        java.util.Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("value",
+                new ToolArgumentConfig("value", "Value", "Value", true, ""));
+        ToolConfig tool = new ToolConfig("group.x-disabled", "x-disabled", "group", "Disabled", "Disabled tool fixture",
+                java.util.Arrays.asList("/bin/echo", "${value}"), Collections.<String>emptyList(), "txt", arguments, null);
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.singletonMap(tool.key(), tool), null, null);
+        Files.createDirectories(project.resolve("config/tools"));
+        Files.write(project.resolve("config/tools/group.debug.yaml"), ("schemaVersion: att-debug/v1.1\n"
+                + "arguments: {value: from-root}\ntools:\n  x-disabled:\n    arguments: {value: from-disabled-override}\n"
+                + "  x-malformed: [not, a, tool override]\n").getBytes(StandardCharsets.UTF_8));
+
+        DebugEngine.Result result = run(project, config, "tool", "group.x-disabled");
+        assertEquals(ResultStatus.PASS, result.status(), result.diagnostic() == null ? "" : result.diagnostic().format());
+        String log = new String(Files.readAllBytes(result.logPath()), StandardCharsets.UTF_8);
+        assertTrue(log.contains("from-root"), log);
+        assertFalse(log.contains("from-disabled-override"), log);
+    }
+
     @Test void standaloneAndNestedFlowBootstrapPreservesExplicitNull() throws Exception {
         Path project = fixtureWithoutSidecars();
         Files.createDirectories(project.resolve("templates/WRAPPER"));

@@ -81,6 +81,7 @@
           "type": "string"
         }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "message": {
@@ -187,6 +188,7 @@
           "pattern": "^[A-Za-z0-9_.%/-]{1,48}$"
         }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "requestReply": {
@@ -206,6 +208,7 @@
           ]
         }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "pool": {
@@ -234,6 +237,7 @@
           ]
         }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "settings": {
@@ -252,6 +256,7 @@
           "$ref": "#/$defs/pool"
         }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "instance": {
@@ -277,6 +282,7 @@
           "$ref": "#/$defs/pool"
         }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "selection": {
@@ -289,6 +295,7 @@
           ]
         }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     },
     "evidence": {
@@ -322,9 +329,11 @@
               "default": 10000
             }
           },
+          "patternProperties": { "^x-": {} },
           "additionalProperties": false
         }
       },
+      "patternProperties": { "^x-": {} },
       "additionalProperties": false
     }
   }

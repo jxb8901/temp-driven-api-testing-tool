@@ -11,3 +11,5 @@ SSHHelper -> SSH routing or Resource Helper /
 ```
 
 Resource IDs are logical contracts referenced by Templates/expressions or Tool groups. Environment profiles may bind the same DB/MQ/HTTP/SSH logical ID to different descriptors without changing Action YAML.
+
+The lowercase `x-` prefix can disable fields and keyed entries in ATT-owned resource configuration. It does not strip user data such as HTTP header names or DB parameters; see [Configuration](../09_configuration.md#ignore-or-disable-att-owned-configuration-with-x).

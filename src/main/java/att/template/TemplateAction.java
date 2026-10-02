@@ -4,6 +4,8 @@
 
 package att.template;
 
+import att.config.SchemaSupport;
+
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -50,7 +52,8 @@ public class TemplateAction {
 
     public TemplateAction(String key, Map<String, Object> values, String schemaVersion) {
         this.key = key;
-        Map<String, Object> data = values == null ? Collections.<String, Object>emptyMap() : new LinkedHashMap<String, Object>(values);
+        Map<String, Object> data = values == null ? new LinkedHashMap<String, Object>() : new LinkedHashMap<String, Object>(values);
+        removeDisabledKeys(data);
         this.id = text(data.get("id"), key);
         this.type = text(data.get("type"), "tool");
         if (att.Version.TEMPLATE_SCHEMA.equals(schemaVersion) && "log".equals(this.type) && data.containsKey("level"))
@@ -68,14 +71,18 @@ public class TemplateAction {
         this.file = "";
         this.result = ActionResultConfig.none();
         this.db = text(data.get("db"), "");
-        this.query = map(data.get("query"));
-        this.update = map(data.get("update"));
+        this.query = configMap(data.get("query"));
+        this.update = configMap(data.get("update"));
+        if (data.containsKey("query")) data.put("query", this.query);
+        if (data.containsKey("update")) data.put("update", this.update);
         this.assertion = text(data.get("assert"), "");
         this.expected = text(data.get("expected"), "");
         this.actual = text(data.get("actual"), "");
         this.onFailure = failureMode(data.get("onFailure"));
         this.fields = Collections.emptyMap();
-        this.retry = map(data.get("retry"));
+        this.retry = configMap(data.get("retry"));
+        if (data.containsKey("retry")) data.put("retry", this.retry);
+        if (data.containsKey("evidence")) data.put("evidence", cleanEvidence(data.get("evidence")));
         this.evidence = collectors(data.get("evidence"));
         this.timeoutMs = data.get("timeoutMs") == null ? null : Long.valueOf(String.valueOf(data.get("timeoutMs")));
         this.use = text(data.get("use"), "");
@@ -183,16 +190,48 @@ public class TemplateAction {
         return new LinkedHashMap<String, Object>((Map<String, Object>) value);
     }
 
+    private static Map<String, Object> configMap(Object value) {
+        Map<String, Object> result = map(value);
+        removeDisabledKeys(result);
+        return result;
+    }
+
+    private static void removeDisabledKeys(Map<?, ?> map) {
+        java.util.Iterator<?> keys = map.keySet().iterator();
+        while (keys.hasNext()) if (SchemaSupport.isDisabledKey(keys.next())) keys.remove();
+    }
+
+    private static Object cleanEvidence(Object value) {
+        if (!(value instanceof Map)) return value;
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
+            Object collector = entry.getValue();
+            if (collector instanceof Map) {
+                Map<String, Object> fields = new LinkedHashMap<String, Object>();
+                for (Map.Entry<?, ?> field : ((Map<?, ?>) collector).entrySet()) {
+                    if (!SchemaSupport.isDisabledKey(field.getKey())) fields.put(String.valueOf(field.getKey()), field.getValue());
+                }
+                collector = fields;
+            }
+            result.put(String.valueOf(entry.getKey()), collector);
+        }
+        return result;
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, EvidenceCollector> collectors(Object value) {
         if (!(value instanceof Map)) return Collections.<String, EvidenceCollector>emptyMap();
         Map<String, EvidenceCollector> result = new LinkedHashMap<String, EvidenceCollector>();
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
             String id = String.valueOf(entry.getKey());
             if (!(entry.getValue() instanceof Map)) {
                 throw new IllegalArgumentException("Evidence collector must be a map: " + id);
             }
-            result.put(id, new EvidenceCollector(id, (Map<String, Object>) entry.getValue()));
+            Map<String, Object> config = new LinkedHashMap<String, Object>((Map<String, Object>) entry.getValue());
+            removeDisabledKeys(config);
+            result.put(id, new EvidenceCollector(id, config));
         }
         return Collections.unmodifiableMap(result);
     }

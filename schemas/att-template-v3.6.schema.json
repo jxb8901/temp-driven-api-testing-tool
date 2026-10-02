@@ -23,7 +23,10 @@
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
-        "pattern": "^[^.]+$"
+        "pattern": "^(?:x-.*|[^.]+)$"
+      },
+      "patternProperties": {
+        "^x-": {}
       },
       "additionalProperties": {
         "$ref": "#/$defs/action"
@@ -69,6 +72,9 @@
           "minLength": 1,
           "description": "Pure Boolean expression evaluated against the completed attempt only after retryOn matches."
         }
+      },
+      "patternProperties": {
+        "^x-": {}
       },
       "additionalProperties": false
     },
@@ -135,7 +141,10 @@
           "type": "object",
           "minProperties": 1,
           "propertyNames": {
-            "pattern": "^[^.]+$"
+            "pattern": "^(?:x-.*|[^.]+)$"
+          },
+          "patternProperties": {
+            "^x-": {}
           },
           "additionalProperties": {
             "type": "object"

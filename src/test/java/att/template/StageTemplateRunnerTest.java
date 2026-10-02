@@ -379,6 +379,53 @@ class StageTemplateRunnerTest {
         assertTrue(caseLog.contains("status: PASS"));
     }
 
+    @Test void disabledActionAndEvidenceCollectorLeaveNoRuntimeOrAggregationFootprint() throws Exception {
+        StageTemplateLoader.clearForTests();
+        att.TestSchemas.install(tempDir);
+        Path templateDir = tempDir.resolve("templates/x-prefix-runtime");
+        Files.createDirectories(templateDir);
+        Files.write(templateDir.resolve("template.yaml"), ("schemaVersion: att-template/v3.6\nname: x-prefix-runtime\n"
+                + "description: Disabled entries have no runtime effects\nactions:\n"
+                + "  x-disabled.with.dot: {type: unsupported, call: \"#{missing.helper()}\"}\n"
+                + "  call:\n    type: tool\n    call: \"#{sample()}\"\n"
+                + "    evidence:\n      x-disabled: {call: \"#{capture(value='disabled')}\"}\n"
+                + "      snapshot: {call: \"#{capture(value='active')}\"}\n"
+                + "    assert: \"${output.evidence.collectors.snapshot.result} == 'active'\"\n")
+                .getBytes("UTF-8"));
+        StageTemplate template = new StageTemplateLoader(tempDir, Paths.get("templates")).load("x-prefix-runtime");
+
+        Path caseDir = tempDir.resolve("x-prefix-runtime-case");
+        Files.createDirectories(caseDir);
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.beginStage(new StageCaseData("invoke", template.name(), Collections.<String, Object>emptyMap()),
+                template.name(), template.directory());
+        ToolConfig sample = new ToolConfig("sample", "Sample", "test", "sample", "text",
+                Collections.<String, ToolArgumentConfig>emptyMap());
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir,
+                Collections.singletonMap("sample", sample), null, null);
+        SequencedRunner runner = new SequencedRunner(false, true);
+        CaptureBuiltIns builtIns = new CaptureBuiltIns();
+        CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"));
+        List<ValidationResult> results = new StageTemplateRunner(
+                new UnifiedTemplateEngine(new ToolInvoker(tempDir, config, runner), builtIns))
+                .execute("invoke", template, context, log);
+        log.close();
+
+        assertEquals(1, results.size());
+        assertEquals("call", results.get(0).name());
+        assertEquals(ResultStatus.PASS, results.get(0).status());
+        assertEquals(1, runner.calls);
+        assertEquals(1, builtIns.calls);
+        assertEquals("active", builtIns.last.get("value"));
+        assertFalse(((Map<?, ?>) context.resolve("EXEC.ACTIONS")).containsKey("x-disabled.with.dot"));
+        assertNull(context.resolve("EXEC.ACTIONS.call.output.evidence.collectors.x-disabled"));
+        String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
+        assertFalse(caseLog.contains("ACTION x-disabled.with.dot"));
+        assertFalse(caseLog.contains("collector=x-disabled"));
+    }
+
     @Test void actionBoundaryDoesNotRelogInternalSshFailureOrExposeEnvironmentIdentityPath() throws Exception {
         Path caseDir = tempDir.resolve("internal-secret-case");
         Files.createDirectories(caseDir);
