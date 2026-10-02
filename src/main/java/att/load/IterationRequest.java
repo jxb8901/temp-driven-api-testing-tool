@@ -13,7 +13,7 @@ public final class IterationRequest {
     private final Instant startedAt, runStartedAt;
     private final Map<String, Object> inputs;
     private final Path outputDirectory;
-    private final boolean retainSuccessEvidence, retainFailureEvidence;
+    private final boolean retainSuccessEvidence, retainFailureEvidence, captureFailureLog;
     private final BooleanSupplier testdataWaitAllowed;
     private final Long testdataOrdinal;
 
@@ -48,6 +48,16 @@ public final class IterationRequest {
                              String phase, Instant startedAt, String userId, Map<String, Object> inputs,
                              Path outputDirectory, boolean retainSuccessEvidence, boolean retainFailureEvidence,
                              String workloadId, BooleanSupplier testdataWaitAllowed, Long testdataOrdinal) {
+        this(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, retainFailureEvidence,
+                testdataWaitAllowed, testdataOrdinal);
+    }
+
+    private IterationRequest(String runId, Instant runStartedAt, String model, String iterationId, long iteration,
+                             String phase, Instant startedAt, String userId, Map<String, Object> inputs,
+                             Path outputDirectory, boolean retainSuccessEvidence, boolean retainFailureEvidence,
+                             String workloadId, boolean captureFailureLog,
+                             BooleanSupplier testdataWaitAllowed, Long testdataOrdinal) {
         if (runId == null || runId.trim().isEmpty()) throw new IllegalArgumentException("Load runId must not be blank");
         if (!("closed".equals(model) || "arrivalRate".equals(model))) throw new IllegalArgumentException("LOAD.model must be closed or arrivalRate");
         if (iterationId == null || iterationId.trim().isEmpty()) throw new IllegalArgumentException("LOAD.iterationId must not be blank");
@@ -66,6 +76,7 @@ public final class IterationRequest {
         this.outputDirectory = outputDirectory;
         this.retainSuccessEvidence = retainSuccessEvidence;
         this.retainFailureEvidence = retainFailureEvidence;
+        this.captureFailureLog = captureFailureLog || retainFailureEvidence;
         this.workloadId = workloadId;
         this.testdataWaitAllowed = testdataWaitAllowed == null ? () -> true : testdataWaitAllowed;
         if (testdataOrdinal != null && testdataOrdinal.longValue() < 0L)
@@ -91,27 +102,35 @@ public final class IterationRequest {
     }
     public IterationRequest withOutputDirectory(Path directory) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, directory,
-                directory != null, retainFailureEvidence, workloadId, testdataWaitAllowed, testdataOrdinal);
+                directory != null, retainFailureEvidence, workloadId, captureFailureLog, testdataWaitAllowed, testdataOrdinal);
     }
     public IterationRequest withFailureEvidence(boolean enabled) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, retainSuccessEvidence, enabled, workloadId, testdataWaitAllowed, testdataOrdinal);
+                outputDirectory, retainSuccessEvidence, enabled, workloadId, enabled, testdataWaitAllowed, testdataOrdinal);
     }
     public IterationRequest withEvidenceRetention(boolean success, boolean failure) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, success, failure, workloadId, testdataWaitAllowed, testdataOrdinal);
+                outputDirectory, success, failure, workloadId, failure, testdataWaitAllowed, testdataOrdinal);
+    }
+    /** Enables bounded failure-log capture while leaving the post-outcome retention claim to the scheduler. */
+    public IterationRequest withFailureLogCapture(boolean enabled) {
+        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, enabled,
+                testdataWaitAllowed, testdataOrdinal);
     }
     public IterationRequest withWorkloadId(String value) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, retainSuccessEvidence, retainFailureEvidence, value, testdataWaitAllowed, testdataOrdinal);
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, value, captureFailureLog,
+                testdataWaitAllowed, testdataOrdinal);
     }
     public IterationRequest withTestdataWaitAllowed(BooleanSupplier value) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, value, testdataOrdinal);
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, captureFailureLog,
+                value, testdataOrdinal);
     }
     public IterationRequest withTestdataOrdinal(long value) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId,
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, captureFailureLog,
                 testdataWaitAllowed, Long.valueOf(value));
     }
     public String runId() { return runId; }
@@ -127,6 +146,7 @@ public final class IterationRequest {
     public Path outputDirectory() { return outputDirectory; }
     public boolean retainSuccessEvidence() { return retainSuccessEvidence; }
     public boolean retainFailureEvidence() { return retainFailureEvidence; }
+    public boolean captureFailureLog() { return captureFailureLog; }
     public BooleanSupplier testdataWaitAllowed() { return testdataWaitAllowed; }
     public Long testdataOrdinal() { return testdataOrdinal; }
 }

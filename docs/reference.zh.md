@@ -1161,6 +1161,8 @@ Metrics-only iteration 雖有 EXEC.ID，但除非 operation 寫入 artifact 或 
 
 evidence.mode 支援 metrics、failures、samples、all；預設 failures。sampleRate 與 maxSamples 限制保留 evidence。Dropped arrival 不建立 iteration evidence。
 
+Case log capture 會在執行期間依 evidence policy 處理。metrics 不會 serialize 或 buffer per-action log；Load result 仍保留 iteration status、可用的 failure code 及 run counters。failures 與未抽中的 samples 只在記憶體保留最多 65,536 個字元的 rolling tail，failure 取得 retention slot 後才會寫入檔案。Truncation marker 後仍會保留最新的 action 與 runtime failure detail。Buffer 前會先套用 secret redaction。已抽中的 samples 及 all mode 中保留的 iteration 會使用完整的 deferred case log。
+
 evidence.resources.output 支援 inherit（預設）或 none。none 停用可選的人類可讀 resource-output 格式化與物化，但保留 typed result、stdoutFormat/responseFormat parsing、exact project-file String 與 requestFormat 行為。Load 將 resource output 延至 iteration 被保留後才處理；metrics-only iteration 不做 business-output formatting 或 evidence file I/O。
 
 #### Report、metrics 與 thresholds

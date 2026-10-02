@@ -98,6 +98,8 @@ A metrics-only iteration still has EXEC.ID but does not create a per-iteration e
 
 evidence.mode accepts metrics, failures, samples or all; the default is failures. sampleRate and maxSamples bound retained evidence. Dropped arrivals do not create iteration evidence.
 
+Case-log capture follows the evidence policy during execution. metrics skips per-action log serialization and buffering; iteration status, available failure codes and run counters remain in the Load result. failures and unselected samples keep a rolling in-memory tail of at most 65,536 characters, and materialize it only when a failure obtains a retention slot. The latest action and runtime failure details remain at the end of the log, after a truncation marker. Secret redaction is applied before buffering. Selected samples and retained all-mode iterations use full deferred case logs.
+
 evidence.resources.output accepts inherit (default) or none. none disables optional human-readable resource-output formatting and materialization while preserving typed results, stdoutFormat/responseFormat parsing, exact project-file String output and requestFormat behavior. In Load, resource output is deferred until the iteration is retained. Metrics-only iterations do no business-output formatting or evidence file I/O.
 
 #### Reports, metrics and thresholds

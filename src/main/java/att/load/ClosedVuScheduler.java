@@ -108,6 +108,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 } else if (evidenceStore != null) {
                     request = request.withEvidenceRetention(false, false);
                 }
+                if (evidenceStore != null)
+                    request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence());
                 long iterationStarted = timing.now();
                 att.core.ResultStatus status;
                 String errorType = null;

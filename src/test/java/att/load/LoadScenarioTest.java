@@ -531,6 +531,38 @@ class LoadScenarioTest {
         } finally { resources.close(); }
     }
 
+    @Test void deferredFailureEvidenceMaterializesTheBoundedLogAfterRetentionClaim() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/DEFERRED_FAIL_TEMPLATE"));
+        write(project, "templates/DEFERRED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: DEFERRED_FAIL_TEMPLATE\ndescription: deferred failure evidence\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "deferred-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: DEFERRED_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\nevidence: {mode: failures}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("deferred-failure-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("deferred-run", "deferred-failure-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withEvidenceRetention(false, false).withFailureLogCapture(true));
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertNull(result.evidenceRef(), "the executor must leave the retention decision to the scheduler");
+            assertTrue(Files.notExists(result.outputDirectory()));
+
+            IterationResult retained = result.materializeEvidence();
+            assertNotNull(retained.evidenceRef());
+            String caseLog = new String(Files.readAllBytes(retained.evidenceRef().caseLog()), "UTF-8");
+            assertTrue(caseLog.contains("ACTION verify"));
+            assertTrue(caseLog.contains("LOAD OUTCOME"));
+            assertTrue(caseLog.contains("FAIL"));
+        } finally { resources.close(); }
+    }
+
     @Test void reservedSuccessFailureDoesNotOverrideFailureNone() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/RESERVED_FAIL_TEMPLATE"));
@@ -771,6 +803,8 @@ class LoadScenarioTest {
         CountDownLatch releaseFirst = new CountDownLatch(1);
         AtomicInteger calls = new AtomicInteger();
         LoadIterationRunner runner = request -> {
+            assertTrue(request.captureFailureLog(), "failure policy must keep a bounded log until the outcome is known");
+            assertFalse(request.retainSuccessEvidence(), "failures mode must not capture full logs for successful iterations");
             int call = calls.incrementAndGet();
             try {
                 if (call == 1) {

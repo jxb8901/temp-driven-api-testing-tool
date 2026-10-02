@@ -15,6 +15,7 @@ import java.io.Reader;
 import java.io.InputStreamReader;
 import java.nio.charset.CodingErrorAction;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,15 +25,20 @@ import java.util.Map;
  * Appends ordered V2 case, stage and action diagnostics into one UTF-8 case log.
  */
 public class CaseExecutionLog implements AutoCloseable {
+    private static final String TRUNCATION_MARKER = "... earlier case log events omitted ...\n";
     private final Path path;
     private final boolean yamlAnchors;
     private final java.util.function.Consumer<String> mirror;
     private final BufferedWriter writer;
     private final Yaml yaml;
     private final StringBuilder deferred;
-    private final List<String> secretRedactions = new ArrayList<String>();
-    private final java.util.Set<Throwable> loggedInternalErrors =
-            java.util.Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());
+    private final ArrayDeque<String> boundedDeferred;
+    private final int deferredCharacterLimit;
+    private final boolean discarding;
+    private boolean truncated;
+    private int boundedDeferredCharacters;
+    private final List<String> secretRedactions;
+    private final java.util.Set<Throwable> loggedInternalErrors;
 
     public CaseExecutionLog(Path path) throws IOException {
         this(path, false);
@@ -43,31 +49,53 @@ public class CaseExecutionLog implements AutoCloseable {
     }
 
     public CaseExecutionLog(Path path, boolean yamlAnchors, java.util.function.Consumer<String> mirror) throws IOException {
-        this(path, yamlAnchors, mirror, true);
+        this(path, yamlAnchors, mirror, true, 0, false);
     }
 
-    private CaseExecutionLog(Path path, boolean yamlAnchors, java.util.function.Consumer<String> mirror, boolean physical) throws IOException {
+    private CaseExecutionLog(Path path, boolean yamlAnchors, java.util.function.Consumer<String> mirror,
+                             boolean physical, int deferredCharacterLimit, boolean discarding) throws IOException {
         this.path = path;
         this.yamlAnchors = yamlAnchors;
         this.mirror = mirror;
-        if (physical) {
-            if (path.getParent() != null) Files.createDirectories(path.getParent());
-            this.writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8);
-            this.deferred = null;
-        } else {
+        this.discarding = discarding;
+        this.deferredCharacterLimit = deferredCharacterLimit;
+        if (discarding) {
             this.writer = null;
-            this.deferred = new StringBuilder();
+            this.deferred = null;
+            this.boundedDeferred = null;
+            this.yaml = null;
+            this.secretRedactions = java.util.Collections.emptyList();
+            this.loggedInternalErrors = java.util.Collections.emptySet();
+        } else {
+            this.secretRedactions = new ArrayList<String>();
+            this.loggedInternalErrors = java.util.Collections.newSetFromMap(
+                    new IdentityHashMap<Throwable, Boolean>());
+            if (physical) {
+                if (path.getParent() != null) Files.createDirectories(path.getParent());
+                this.writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8);
+                this.deferred = null;
+                this.boundedDeferred = null;
+                this.yaml = new Yaml();
+            } else {
+                this.writer = null;
+                if (deferredCharacterLimit > 0) {
+                    this.deferred = null;
+                    this.boundedDeferred = new ArrayDeque<String>();
+                } else {
+                    this.deferred = new StringBuilder();
+                    this.boundedDeferred = null;
+                }
+                this.yaml = new Yaml();
+            }
         }
-        this.yaml = new Yaml();
     }
 
     /**
-     * Creates an in-memory log for high-volume load successes.  The path is a
-     * logical destination only; no directory or file is created until
-     * {@link #materialize(Path)} is called for a retained failure/sample.
+     * Creates a full deferred log for iterations selected for complete evidence.
+     * The path is logical; no directory or file is created until materialization.
      */
     public static CaseExecutionLog lightweight(Path logicalPath, boolean yamlAnchors) throws IOException {
-        return new CaseExecutionLog(logicalPath, yamlAnchors, null, false);
+        return new CaseExecutionLog(logicalPath, yamlAnchors, null, false, 0, false);
     }
 
     public static CaseExecutionLog lightweight(Path logicalPath) throws IOException {
@@ -79,17 +107,17 @@ public class CaseExecutionLog implements AutoCloseable {
      * buffering, mirroring or file reads. Collector runners own the public log record.
      */
     public static CaseExecutionLog discarding(Path logicalPath) throws IOException {
-        return new CaseExecutionLog(logicalPath, false, null, false) {
-            @Override public void registerSecretRedactions(List<String> values) {}
-            @Override public boolean appendInternalErrorOnce(Throwable error, String content) { return false; }
-            @Override public void append(String section, Object data) {}
-            @Override public void appendRaw(String section, String content) {}
-            @Override public void appendRawFile(String section, Path source, boolean truncated, long totalBytes) {}
-            @Override public void appendRawFile(String section, Path source, boolean truncated, long totalBytes,
-                    List<String> redactions) {}
-            @Override public void appendAction(String section, Map<String, Object> action) {}
-            @Override public void appendToolInvocation(String section, Map<String, Object> invocation) {}
-        };
+        return new CaseExecutionLog(logicalPath, false, null, false, 0, true);
+    }
+
+    /**
+     * Creates a deferred log that retains only its most recent characters.
+     * This keeps failure diagnostics useful while bounding per-iteration memory.
+     */
+    public static CaseExecutionLog bounded(Path logicalPath, boolean yamlAnchors, int maxCharacters) throws IOException {
+        if (maxCharacters <= TRUNCATION_MARKER.length())
+            throw new IllegalArgumentException("Bounded case log must allow the truncation marker and content");
+        return new CaseExecutionLog(logicalPath, yamlAnchors, null, false, maxCharacters, false);
     }
 
     public Path path() {
@@ -98,6 +126,7 @@ public class CaseExecutionLog implements AutoCloseable {
 
     /** Registers resource-specific secret spellings for all subsequent log writes. */
     public synchronized void registerSecretRedactions(List<String> values) {
+        if (discarding) return;
         if (values == null) return;
         for (String value : values) {
             if (value != null && !value.isEmpty() && !secretRedactions.contains(value)) secretRedactions.add(value);
@@ -107,6 +136,7 @@ public class CaseExecutionLog implements AutoCloseable {
 
     /** Appends at most one internal stack trace for the same Throwable in this Case log. */
     public synchronized boolean appendInternalErrorOnce(Throwable error, String content) throws IOException {
+        if (discarding) return false;
         if (error == null || !loggedInternalErrors.add(error)) return false;
         try {
             appendRaw("ATT INTERNAL ERROR", content);
@@ -118,6 +148,7 @@ public class CaseExecutionLog implements AutoCloseable {
     }
 
     public synchronized void append(String section, Object data) throws IOException {
+        if (discarding) return;
         StringBuilder text = new StringBuilder();
         if (abnormal(section, data)) text.append("【!!!!!】");
         text.append("[").append(section).append("]\n");
@@ -134,6 +165,7 @@ public class CaseExecutionLog implements AutoCloseable {
 
     /** Writes resolved user/process content as text instead of YAML-escaping line breaks. */
     public synchronized void appendRaw(String section, String content) throws IOException {
+        if (discarding) return;
         String normalized = normalizeLines(content == null ? "" : content);
         StringBuilder text = new StringBuilder();
         text.append("[").append(section).append("]\n");
@@ -151,6 +183,7 @@ public class CaseExecutionLog implements AutoCloseable {
     /** Redacts sensitive tokens even when they span reader-buffer boundaries. */
     public synchronized void appendRawFile(String section, Path source, boolean truncated, long totalBytes,
                                            List<String> redactions) throws IOException {
+        if (discarding) return;
         if (source == null || !Files.isRegularFile(source)) return;
         write("[" + section + "]\n");
         boolean previousCarriageReturn = false;
@@ -228,23 +261,64 @@ public class CaseExecutionLog implements AutoCloseable {
     }
 
     private synchronized void write(String text) throws IOException {
+        if (discarding) return;
         String safeText = text;
         for (String secret : secretRedactions) safeText = safeText.replace(secret, "[REDACTED_SECRET]");
         if (writer != null) {
             writer.write(safeText);
             writer.flush();
+        } else if (deferredCharacterLimit > 0) {
+            appendBounded(safeText);
         } else {
             deferred.append(safeText);
         }
         if (mirror != null) mirror.accept(safeText);
     }
 
+    private void appendBounded(String text) {
+        int contentLimit = deferredCharacterLimit - TRUNCATION_MARKER.length();
+        if (text.length() >= contentLimit) {
+            if (text.length() > contentLimit || !boundedDeferred.isEmpty()) truncated = true;
+            boundedDeferred.clear();
+            String tail = text.substring(text.length() - contentLimit);
+            boundedDeferred.addLast(tail);
+            boundedDeferredCharacters = tail.length();
+            return;
+        }
+        int overflow = boundedDeferredCharacters + text.length() - contentLimit;
+        boolean removed = overflow > 0;
+        while (overflow > 0 && !boundedDeferred.isEmpty()) {
+            String first = boundedDeferred.removeFirst();
+            if (first.length() <= overflow) {
+                overflow -= first.length();
+                boundedDeferredCharacters -= first.length();
+            } else {
+                String remainder = first.substring(overflow);
+                boundedDeferred.addFirst(remainder);
+                boundedDeferredCharacters -= overflow;
+                overflow = 0;
+            }
+        }
+        if (text.length() > 0) {
+            boundedDeferred.addLast(text);
+            boundedDeferredCharacters += text.length();
+        }
+        if (removed) truncated = true;
+    }
+
     /** Materializes an in-memory log into a caller-selected retained location. */
     public synchronized Path materialize(Path destination) throws IOException {
+        if (discarding) return path;
         if (writer != null) return path;
         Path target = destination == null ? path : destination.toAbsolutePath().normalize();
         if (target.getParent() != null) Files.createDirectories(target.getParent());
-        Files.write(target, deferred.toString().getBytes(StandardCharsets.UTF_8));
+        StringBuilder contents = new StringBuilder(boundedDeferred == null
+                ? deferred.length() + (truncated ? TRUNCATION_MARKER.length() : 0)
+                : boundedDeferredCharacters + (truncated ? TRUNCATION_MARKER.length() : 0));
+        if (truncated) contents.append(TRUNCATION_MARKER);
+        if (boundedDeferred == null) contents.append(deferred);
+        else for (String chunk : boundedDeferred) contents.append(chunk);
+        Files.write(target, contents.toString().getBytes(StandardCharsets.UTF_8));
         return target;
     }
 
@@ -256,11 +330,13 @@ public class CaseExecutionLog implements AutoCloseable {
 
     /** Writes the human-readable action log without repeating the complete state retained in case.yaml. */
     public void appendAction(String section, Map<String, Object> action) throws IOException {
+        if (discarding) return;
         append(section, compactAction(action));
     }
 
     /** Writes one standalone expression Tool invocation as a compact attempt record. */
     public void appendToolInvocation(String section, Map<String, Object> invocation) throws IOException {
+        if (discarding) return;
         append(section, compactAttempt(invocation));
     }
 
