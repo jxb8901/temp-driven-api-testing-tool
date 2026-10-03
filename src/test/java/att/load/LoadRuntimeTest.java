@@ -25,6 +25,9 @@ class LoadRuntimeTest {
     @Test void metricsExcludeWarmupFromSlaAndKeepDropsSeparate() {
         long now = System.currentTimeMillis();
         LoadMetrics metrics = new LoadMetrics("arrivalRate", now);
+        metrics.recordSchedulerWakeup(2);
+        metrics.recordSubmitLag(7L, 1);
+        metrics.recordSubmitLag(3L, 0);
         metrics.onEvent(LoadEvent.started("r", "arrivalRate", "WARMUP", "w-1", null, 1, now, now));
         metrics.onEvent(LoadEvent.completion("r", "arrivalRate", "WARMUP", "w-1", null, 1, now, now, now + 100, ResultStatus.ERROR, null));
         metrics.onEvent(LoadEvent.dropped("r", "arrivalRate", "STEADY", "d-1", 2, now + 1000, now + 1001));
@@ -39,6 +42,11 @@ class LoadRuntimeTest {
         assertEquals(1L, snapshot.longValue("runtimeError"));
         assertEquals(0L, snapshot.longValue("measuredRuntimeError"));
         assertEquals(100L, snapshot.longValue("p95Ms"));
+        assertEquals(1L, snapshot.longValue("schedulerWakeups"));
+        assertEquals(5.0, snapshot.doubleValue("submitLagMeanMs"), 0.00001);
+        assertEquals(7L, snapshot.longValue("submitLagMaxMs"));
+        assertEquals(2L, snapshot.longValue("workerQueueDepthPeak"));
+        assertTrue(((Map<?, ?>) snapshot.value("generator")).containsKey("heapPeakUsedBytes"));
     }
 
     @Test void metricsExposeStablePercentilesClassificationsAndArrivalDimensions() {

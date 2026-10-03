@@ -51,6 +51,9 @@ class LoadReportTest {
         Map<String, Object> mqHelper = new LinkedHashMap<String, Object>();
         mqHelper.put("timeoutCount", 3L); mqHelper.put("active", 0); mqHelper.put("idle", 1);
         resources.put("mq", Collections.<String, Object>singletonMap("broker", mqHelper));
+        Map<String, Object> httpHelper = new LinkedHashMap<String, Object>();
+        httpHelper.put("active", 1); httpHelper.put("idle", 2); httpHelper.put("waiting", 0); httpHelper.put("peakActive", 2);
+        resources.put("http", Collections.<String, Object>singletonMap("gateway", httpHelper));
         LoadRunResult result = new LoadRunResult("run-24", scenario, started, started.plusSeconds(5), snapshot,
                 thresholds, evidence, resources);
 
@@ -78,9 +81,11 @@ class LoadReportTest {
         @SuppressWarnings("unchecked") Map<String, Object> jsonMetrics = (Map<String, Object>) json.get("metrics");
         assertTrue(jsonMetrics.containsKey("phases"));
         assertTrue(jsonMetrics.containsKey("buckets"));
+        assertTrue(((Map<?, ?>) jsonMetrics.get("generator")).containsKey("heapPeakUsedBytes"));
         @SuppressWarnings("unchecked") Map<String, Object> jsonResources = (Map<String, Object>) json.get("resources");
         assertEquals(2L, ((Number) ((Map<?, ?>) ((Map<?, ?>) jsonResources.get("db")).get("orders")).get("timeoutCount")).longValue());
         assertEquals(3L, ((Number) ((Map<?, ?>) ((Map<?, ?>) jsonResources.get("mq")).get("broker")).get("timeoutCount")).longValue());
+        assertEquals(2, ((Number) ((Map<?, ?>) ((Map<?, ?>) jsonResources.get("http")).get("gateway")).get("peakActive")).intValue());
         Map<String, Object> missingReport = new LinkedHashMap<String, Object>(json);
         missingReport.remove("report");
         assertThrows(IllegalArgumentException.class, () -> att.validation.JsonSchemaVerifier.verifyJson(
@@ -94,10 +99,11 @@ class LoadReportTest {
         assertTrue(html.contains("Dropped arrivals"));
         assertTrue(html.contains("SUT failures"));
         assertTrue(html.contains("Phase timing and warm-up separation"));
-        assertTrue(html.contains("Resource diagnostics"));
+        assertTrue(html.contains("Resource and generator diagnostics"));
         assertTrue(html.contains("orders"));
         assertTrue(html.contains("broker"));
         assertTrue(html.contains("timeoutCount"));
+        assertTrue(html.contains("peakActive"));
         assertTrue(html.contains("../samples/00001-deadbeef.json"));
         assertTrue(html.contains("../executions/exec-1/case%20log%3C%26.log"));
         assertTrue(html.contains("payments&lt;&amp;"));

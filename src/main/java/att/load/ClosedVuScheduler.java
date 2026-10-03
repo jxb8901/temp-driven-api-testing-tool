@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -66,6 +67,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
             if (!(executor instanceof IterationExecutor)) throw new IllegalArgumentException("Multi-workload closed scheduling requires IterationExecutor");
             return LoadRunCoordinator.runFrom(scenario, (IterationExecutor) executor, runId, evidenceStore, evidenceOutputRoot);
         }
+        if (executor instanceof IterationExecutor) ((IterationExecutor) executor).initializeOutputNamespace(runId);
         final long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
         final Instant start = LoadSchedulerSupport.instant(startedAt);
         final long runSeed = LoadRandomization.effectiveSeed(scenario, runId);
@@ -87,6 +89,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
         Random random = LoadRandomization.randomForVu(runSeed, LoadRandomization.workloadKey(scenario), userId);
         try {
             while (!cancelled.get()) {
+                metrics.recordSchedulerWakeup(((ThreadPoolExecutor) workers).getQueue().size());
                 long elapsed = timing.now() - startedAt;
                 String phase = LoadPhase.at(scenario, elapsed).name(); if ("COMPLETE".equals(phase)) return;
                 int active = activeUsers(elapsed);

@@ -187,8 +187,8 @@ public final class LoadReportWriter {
     }
 
     private void appendResourceTable(StringBuilder html, Map<String, Object> resources) {
-        html.append("<section class=\"panel\"><h2>Resource diagnostics</h2><p class=\"note\">Pool saturation and acquisition problems are reported separately from application/SUT failures. Credentials and live resource objects are never included.</p>");
-        if (resources == null || resources.isEmpty()) { html.append("<p class=\"empty\">No DB or MQ pool was opened during this run.</p></section>"); return; }
+        html.append("<section class=\"panel\"><h2>Resource and generator diagnostics</h2><p class=\"note\">Pool saturation and ATT generator pressure are reported separately from application/SUT failures. Credentials and live resource objects are never included.</p>");
+        if (resources == null || resources.isEmpty()) { html.append("<p class=\"empty\">No resource diagnostics were collected for this run.</p></section>"); return; }
         html.append("<div class=\"scroll\"><table><thead><tr><th>Resource</th><th>Helper</th><th>Metric</th><th>Value</th></tr></thead><tbody>");
         for (Map.Entry<String, Object> resource : resources.entrySet()) {
             if (!(resource.getValue() instanceof Map)) continue;

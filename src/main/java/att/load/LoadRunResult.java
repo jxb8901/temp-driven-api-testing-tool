@@ -78,7 +78,9 @@ public final class LoadRunResult {
         return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, value, resources, workloads);
     }
     public LoadRunResult withResources(Map<String, Object> value) {
-        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, value, workloads);
+        Map<String, Object> combined = new LinkedHashMap<String, Object>(resources);
+        if (value != null) combined.putAll(value);
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, combined, workloads);
     }
 
     public Map<String, Object> toMap() {

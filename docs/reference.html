@@ -2873,6 +2873,29 @@ retained executions, workload/target identity, status, timing and
 case.log links when available. Aggregate latency percentiles use the
 aggregate latency collector; ATT does not average workload
 percentiles.</p>
+<p>The summary separates generator observations from SUT outcomes.
+<code>metrics.generator</code> includes sampled heap
+used/committed/maximum, observed peak live threads, GC count/time, and
+process CPU when the JVM exposes it. Sampling is event-triggered and
+rate-limited to one sample per 100 ms, so peaks shorter than the
+sampling interval may be missed. <code>schedulerWakeups</code>,
+<code>submitLag*</code>, and <code>workerQueueDepth*</code> describe
+scheduler pressure; arrival drops remain separate from SUT errors.
+<code>resources.http</code> reports active/idle/waiting and observed
+peak connections per HTTP helper alongside DB, MQ, and Render pool/plan
+diagnostics. Testdata mapping and selection counters/cache sizes are
+under <code>resources.generator.testdata</code>; iteration-scoped
+selections are local to one mapping, while user/workload scopes retain
+only their scoped choices. Custom execution-ID reservations use disk
+markers, and <code>resources.executionIds</code> reports their count;
+default monotonic IDs do not use a collision map.</p>
+<p>Run the opt-in 30–60 minute synthetic selection soak with
+<code>mvn -Datt.load.soak=true -Datt.load.soak.durationMinutes=30 -Dtest=LoadTelemetrySoakTest test</code>.
+It checks that post-warm-up retained heap stays within
+<code>max(16 MiB, 25%)</code> of the warm-up checkpoint and iteration
+selection state remains empty.</p>
+<p>See <a href="system-design/load-telemetry.md">Load Generator
+Telemetry</a> for sampling limits and metric interpretation.</p>
 <p>Top-level thresholds apply only to the aggregate run; workload
 thresholds apply only to their individual workload. Root thresholds are
 not inherited into workload thresholds. Threshold failure returns

@@ -108,6 +108,12 @@ evidence.resources.output accepts inherit (default) or none. none disables optio
 
 ATT writes bounded load-summary.json/yaml and a self-contained report/index.html below the run root. The report shows EXEC.ID for retained executions, workload/target identity, status, timing and case.log links when available. Aggregate latency percentiles use the aggregate latency collector; ATT does not average workload percentiles.
 
+The summary separates generator observations from SUT outcomes. `metrics.generator` includes sampled heap used/committed/maximum, observed peak live threads, GC count/time, and process CPU when the JVM exposes it. Sampling is event-triggered and rate-limited to one sample per 100 ms, so peaks shorter than the sampling interval may be missed. `schedulerWakeups`, `submitLag*`, and `workerQueueDepth*` describe scheduler pressure; arrival drops remain separate from SUT errors. `resources.http` reports active/idle/waiting and observed peak connections per HTTP helper alongside DB, MQ, and Render pool/plan diagnostics. Testdata mapping and selection counters/cache sizes are under `resources.generator.testdata`; iteration-scoped selections are local to one mapping, while user/workload scopes retain only their scoped choices. Custom execution-ID reservations use disk markers, and `resources.executionIds` reports their count; default monotonic IDs do not use a collision map.
+
+Run the opt-in 30–60 minute synthetic selection soak with `mvn -Datt.load.soak=true -Datt.load.soak.durationMinutes=30 -Dtest=LoadTelemetrySoakTest test`. It checks that post-warm-up retained heap stays within `max(16 MiB, 25%)` of the warm-up checkpoint and iteration selection state remains empty.
+
+See [Load Generator Telemetry](../../system-design/load-telemetry.md) for sampling limits and metric interpretation.
+
 Top-level thresholds apply only to the aggregate run; workload thresholds apply only to their individual workload. Root thresholds are not inherited into workload thresholds. Threshold failure returns FAIL/exit 1. Invalid config/target returns exit 2; runtime/infrastructure errors return ERROR/exit 3. Generator drops are not SUT errors.
 
 #### Render plans and payload snapshots

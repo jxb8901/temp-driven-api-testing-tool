@@ -29,6 +29,8 @@ All references to one ID in a mapping reuse one selected record. Across Run/Debu
 
 In Load, each referenced ID can set a scope of `workload`, `user`, or `iteration`; the default is `iteration`. A scope keeps the selected record stable for its lifetime. `user` requires a closed-VU workload because arrival-rate execution has no stable user identity. A workload `selection` policy replaces the descriptor's whole policy. It is a selection override, not an import declaration. A one-record descriptor is selected directly and does not need a selection policy.
 
+The resolver retains only workload- and user-scoped choices in its run-level selection map. An iteration choice is held in the current input mapping's local memo table, so repeated references to one ID in that mapping stay consistent while completed iterations leave no selection entry behind. Resolver telemetry reports mapping evaluations, selection requests/evaluations/cache hits, and cache sizes grouped by scope.
+
 ## Direct-reference boundary and evidence
 
 Testdata markers are accepted only in input mappings. Templates, Flows, Tool definitions and Tool invocation arguments cannot use `@{...}` or `%{...}` directly, and cannot read `TESTDATA.*`, `EXEC.TESTDATA`, `EXEC.DATA`, or `EXEC.FIXTURE`; they receive resolved values through `EXEC.INPUT`. This keeps selection policy with the execution boundary and lets reusable components consume ordinary typed input.

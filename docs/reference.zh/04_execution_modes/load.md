@@ -108,6 +108,12 @@ evidence.resources.output 支援 inherit（預設）或 none。none 停用可選
 
 ATT 在 run root 寫入有界 load-summary.json/yaml 與 self-contained report/index.html。Report 對 retained execution 顯示 EXEC.ID、workload/target identity、status、timing；有保留 case.log 時提供 link。Aggregate latency percentile 由 aggregate latency collector 計算，不會平均 workload percentile。
 
+Summary 會將 generator observation 與 SUT outcome 分開。`metrics.generator` 包含 sampled heap used/committed/maximum、觀察到的 peak live threads、GC count/time，以及 JVM 支援時的 process CPU。Sampling 由 event 觸發並限制為每 100 ms 至多一次，較短暫的 peak 可能錯過。`schedulerWakeups`、`submitLag*` 與 `workerQueueDepth*` 描述 scheduler pressure；arrival drops 與 SUT error 分開。`resources.http` 會按 HTTP helper 報告 active/idle/waiting 與觀察到的 peak connections，並與 DB、MQ、Render pool/plan diagnostics 並列。Testdata mapping/selection counters 及 cache sizes 位於 `resources.generator.testdata`；iteration scope 的 selection 只在單次 mapping 內保留，user/workload scope 只保留其範圍所需的選擇。Custom execution ID 以 disk marker 保留，`resources.executionIds` 顯示其數量；default monotonic ID 不使用 collision map。
+
+使用 `mvn -Datt.load.soak=true -Datt.load.soak.durationMinutes=30 -Dtest=LoadTelemetrySoakTest test` 執行 30–60 分鐘的 optional synthetic selection soak。它會檢查 warm-up 後 retained heap 是否維持在 warm-up checkpoint 的 `max(16 MiB, 25%)` 範圍內，並確認 iteration selection state 保持空集合。
+
+Sampling limits 與 metrics 解讀方式見 [Load Generator Telemetry](../../system-design/load-telemetry.zh.md)。
+
 Root thresholds 只套用於 aggregate run；workload thresholds 只套用於個別 workload，不會從 root 繼承。Threshold 失敗回傳 FAIL/exit 1。設定或 target 無效回傳 exit 2；runtime/infrastructure error 回傳 ERROR/exit 3。Generator drop 不屬於 SUT error。
 
 #### Render plan 與 payload snapshot

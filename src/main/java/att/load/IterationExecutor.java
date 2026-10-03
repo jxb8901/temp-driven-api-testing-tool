@@ -69,6 +69,10 @@ public final class IterationExecutor implements LoadIterationRunner {
 
     @Override public IterationResult execute(IterationRequest request) {
         resources.ensureOpen();
+        resources.sampleResourceMetrics();
+        Path runOutput = outputRoot.resolve("load").resolve(safe(request.runId())).toAbsolutePath().normalize();
+        try { resources.initializeExecutionNamespace(runOutput); }
+        catch (IOException error) { throw new IllegalStateException("Unable to isolate Load output namespace", error); }
         Instant started = Instant.now();
         Path executionWorkspace = null;
         Path transientWorkspace = null;
@@ -101,11 +105,10 @@ public final class IterationExecutor implements LoadIterationRunner {
                         : LoadExecutionIdPattern.evaluate(target.execIdFormat(),
                                 "closed".equals(request.model()) ? LoadScenario.Model.CLOSED : LoadScenario.Model.ARRIVAL_RATE,
                                 context, identityEngine, null);
-                resources.reserveExecutionId(executionId, request);
-                ensureUnusedExecutionId(request, executionId);
+                resources.reserveExecutionId(executionId, request, !target.execIdFormat().isEmpty(), runOutput);
             } catch (Exception invalidId) {
                 executionId = resources.nextDefaultExecutionId(request.runId());
-                resources.reserveExecutionId(executionId, request);
+                resources.reserveExecutionId(executionId, request, false, runOutput);
                 executionWorkspace = executionWorkspace(request, executionId);
                 context.finishExecutionIdInitialization(executionId, executionWorkspace, executionWorkspace.resolve("case.log"));
                 log = executionLog(executionWorkspace.resolve("case.log"), request);
@@ -221,6 +224,7 @@ public final class IterationExecutor implements LoadIterationRunner {
         }
         CaseExecutionLog deferredFailureLog = !evidenceAvailable && status != ResultStatus.PASS
                 && (request.captureFailureLog() || request.retainSuccessEvidence()) ? log : null;
+        resources.sampleResourceMetrics();
         return new IterationResult(request.iterationId(), executionId, status, duration, context, results,
                 executionWorkspace, evidenceDirectory, diagnostic, evidenceAvailable,
                 deferredFailureLog, transientWorkspace);
@@ -265,14 +269,6 @@ public final class IterationExecutor implements LoadIterationRunner {
                 .resolve(success ? "samples" : "failures").resolve(executionId).normalize();
     }
 
-    private void ensureUnusedExecutionId(IterationRequest request, String executionId) {
-        Path run = outputRoot.resolve("load").resolve(safe(request.runId()));
-        if (Files.exists(run.resolve("samples").resolve(executionId))
-                || Files.exists(run.resolve("failures").resolve(executionId))
-                || Files.exists(run.resolve("executions").resolve(executionId)))
-            throw new IllegalArgumentException("EXEC.ID already has a Load workspace: " + executionId);
-    }
-
     private void mergeWorkspace(Path source, Path destination) throws IOException {
         if (source == null || !Files.isDirectory(source)) return;
         Files.createDirectories(destination);
@@ -310,6 +306,9 @@ public final class IterationExecutor implements LoadIterationRunner {
     FrameworkConfig config() { return config; }
     LoadRunResources resources() { return resources; }
     Path outputRoot() { return outputRoot; }
+    void initializeOutputNamespace(String runId) throws IOException {
+        resources.initializeExecutionNamespace(outputRoot.resolve("load").resolve(safe(runId)));
+    }
 
     public void close() { if (ownsResources) resources.close(); }
 }
