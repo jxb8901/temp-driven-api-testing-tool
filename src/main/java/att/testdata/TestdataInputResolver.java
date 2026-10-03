@@ -32,9 +32,12 @@ public final class TestdataInputResolver {
     private final Long fallbackRandomSeed;
     private final int stableUserCount;
     private final boolean orderedLoadExhaustion;
+    private final CompiledTestdataMapping compiledLoadMapping;
     private final ConcurrentHashMap<String, Selection> selections;
     private final ConcurrentHashMap<String, AtomicLong> counters;
     private final ConcurrentHashMap<String, SelectionOrder> selectionOrders;
+    private final ConcurrentHashMap<String, PreparedTestdata> preparedTestdata = new ConcurrentHashMap<String, PreparedTestdata>();
+    private final ConcurrentHashMap<String, long[]> randomParameters = new ConcurrentHashMap<String, long[]>();
     private final AtomicLong mappingEvaluations = new AtomicLong();
     private final AtomicLong selectionRequests = new AtomicLong();
     private final AtomicLong selectionEvaluations = new AtomicLong();
@@ -60,8 +63,15 @@ public final class TestdataInputResolver {
     public TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
                                  String workloadId, String model, Long defaultSeed, int stableUserCount,
                                  boolean orderedLoadExhaustion) {
+        this(registry, workloadPolicies, workloadId, model, defaultSeed, stableUserCount,
+                orderedLoadExhaustion, null);
+    }
+
+    public TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
+                                 String workloadId, String model, Long defaultSeed, int stableUserCount,
+                                 boolean orderedLoadExhaustion, CompiledTestdataMapping compiledLoadMapping) {
         this(registry, workloadPolicies, true, workloadId, "", model, defaultSeed, stableUserCount,
-                orderedLoadExhaustion);
+                orderedLoadExhaustion, compiledLoadMapping);
     }
 
     public TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
@@ -81,9 +91,18 @@ public final class TestdataInputResolver {
                                   String model, Long defaultSeed, int stableUserCount,
                                   boolean orderedLoadExhaustion) {
         this(registry, workloadPolicies, load, workloadId, executionScope, model, defaultSeed,
+                stableUserCount, orderedLoadExhaustion, null);
+    }
+
+    private TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
+                                  boolean load, String workloadId, String executionScope,
+                                  String model, Long defaultSeed, int stableUserCount,
+                                  boolean orderedLoadExhaustion, CompiledTestdataMapping compiledLoadMapping) {
+        this(registry, workloadPolicies, load, workloadId, executionScope, model, defaultSeed,
                 stableUserCount, new ConcurrentHashMap<String, Selection>(), new ConcurrentHashMap<String, AtomicLong>(),
                 new ConcurrentHashMap<String, SelectionOrder>(),
-                defaultSeed == null ? Long.valueOf(System.nanoTime()) : defaultSeed, orderedLoadExhaustion);
+                defaultSeed == null ? Long.valueOf(System.nanoTime()) : defaultSeed, orderedLoadExhaustion,
+                compiledLoadMapping);
     }
 
     private TestdataInputResolver(TestdataRegistry registry, Map<String, Object> workloadPolicies,
@@ -92,7 +111,8 @@ public final class TestdataInputResolver {
                                   ConcurrentHashMap<String, Selection> selections,
                                   ConcurrentHashMap<String, AtomicLong> counters,
                                   ConcurrentHashMap<String, SelectionOrder> selectionOrders,
-                                  Long fallbackRandomSeed, boolean orderedLoadExhaustion) {
+                                  Long fallbackRandomSeed, boolean orderedLoadExhaustion,
+                                  CompiledTestdataMapping compiledLoadMapping) {
         this.registry = registry;
         this.workloadPolicies = workloadPolicies == null ? Collections.<String, Object>emptyMap() : workloadPolicies;
         this.load = load;
@@ -102,11 +122,16 @@ public final class TestdataInputResolver {
         this.defaultSeed = defaultSeed;
         this.fallbackRandomSeed = fallbackRandomSeed;
         this.orderedLoadExhaustion = orderedLoadExhaustion;
+        this.compiledLoadMapping = compiledLoadMapping;
         if (stableUserCount < 0) throw new IllegalArgumentException("Load testdata stable user count must not be negative");
         this.stableUserCount = stableUserCount;
         this.selections = selections;
         this.counters = counters;
         this.selectionOrders = selectionOrders;
+        if (load && compiledLoadMapping != null) {
+            for (String id : compiledLoadMapping.references()) preparedTestdata.put(id, prepare(id));
+            for (String id : this.workloadPolicies.keySet()) preparedTestdata.putIfAbsent(id, prepare(id));
+        }
     }
 
     /** Creates a Testcase-local view that shares this Run's selection allocator. */
@@ -114,7 +139,7 @@ public final class TestdataInputResolver {
         if (load) throw new IllegalStateException("Execution scopes are only available for Run testdata selection");
         if (scope == null || scope.trim().isEmpty()) throw new IllegalArgumentException("Testdata execution scope must not be blank");
         return new TestdataInputResolver(registry, workloadPolicies, false, workloadId, scope, model, defaultSeed,
-                stableUserCount, selections, counters, selectionOrders, fallbackRandomSeed, false);
+                stableUserCount, selections, counters, selectionOrders, fallbackRandomSeed, false, null);
     }
 
     public Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
@@ -140,7 +165,43 @@ public final class TestdataInputResolver {
                                                       String userId, String iterationId, Long testdataOrdinal,
                                                       BooleanSupplier selectionWaitAllowed) throws Exception {
         if (!load) throw new IllegalStateException("Frozen Load input resolution requires a Load resolver");
+        if (compiledLoadMapping != null)
+            return resolveCompiledLoadInput(context, userId, iterationId, testdataOrdinal, selectionWaitAllowed);
         return resolve(mapping, context, userId, iterationId, testdataOrdinal, selectionWaitAllowed, true);
+    }
+
+    private Map<String, Object> resolveCompiledLoadInput(CaseRuntimeContext context, String userId,
+                                                          String iterationId, Long testdataOrdinal,
+                                                          BooleanSupplier selectionWaitAllowed) throws Exception {
+        mappingEvaluations.incrementAndGet();
+        if (testdataOrdinal != null && testdataOrdinal.longValue() < 0L)
+            throw new IllegalArgumentException("Testdata ordinal must be >= 0");
+        currentSelectionWaitAllowed.set(selectionWaitAllowed == null ? () -> true : selectionWaitAllowed);
+        try {
+            String evidenceScope = workloadId + "|" + String.valueOf(iterationId);
+            if (!evidenceScope.equals(currentEvidenceScope.get())) {
+                currentEvidenceScope.set(evidenceScope);
+                currentEvidence.set(Collections.<String, Map<String, Object>>emptyMap());
+            }
+            Map<String, Selection> selected = new LinkedHashMap<String, Selection>();
+            Map<String, Object> resolved = compiledLoadMapping.evaluate(new CompiledTestdataMapping.Resolver() {
+                @Override public Object testdata(String id, String path) throws Exception {
+                    return valueAt(id, path, userId, iterationId, testdataOrdinal, selected);
+                }
+                @Override public Object context(String path) throws Exception {
+                    return att.core.CaseRuntimeContext.isOptionalReference(path) ? context.requireOptional(path)
+                            : context.require(att.core.CaseRuntimeContext.requiredReferencePath(path));
+                }
+            });
+            Map<String, Map<String, Object>> metadata = new LinkedHashMap<String, Map<String, Object>>();
+            Map<String, Map<String, Object>> previous = currentEvidence.get();
+            if (previous != null) metadata.putAll(previous);
+            for (Map.Entry<String, Selection> entry : selected.entrySet()) metadata.put(entry.getKey(), entry.getValue().metadata);
+            currentEvidence.set(Collections.unmodifiableMap(metadata));
+            return att.load.LoadIsolation.deepImmutableMap(resolved);
+        } finally {
+            currentSelectionWaitAllowed.remove();
+        }
     }
 
     private Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
@@ -304,6 +365,11 @@ public final class TestdataInputResolver {
         int separator = firstPathSeparator(value);
         String id = separator < 0 ? value : value.substring(0, separator);
         String path = separator < 0 ? "" : value.substring(separator);
+        return valueAt(id, path, userId, iterationId, testdataOrdinal, perMapping);
+    }
+
+    private Object valueAt(String id, String path, String userId, String iterationId, Long testdataOrdinal,
+                           Map<String, Selection> perMapping) throws Exception {
         if (!id.matches("[A-Za-z][A-Za-z0-9_-]*")) throw new IllegalArgumentException("Invalid logical testdata id in @{...}: " + id);
         Selection selection = perMapping.get(id);
         if (selection == null) {
@@ -316,16 +382,11 @@ public final class TestdataInputResolver {
     private Selection select(String id, String userId, String iterationId, Long testdataOrdinal) throws Exception {
         selectionRequests.incrementAndGet();
         if (registry == null) throw new IllegalArgumentException("No testdata registry is configured for reference: " + id);
-        final TestdataDescriptor descriptor = registry.resolve(id);
-        final String layer = registry.layer(id);
-        final WorkloadPolicy override = workloadPolicy(id);
-        if (descriptor.count() == 1 && override != null && override.selection != null)
-            throw new IllegalArgumentException("Load workload selection override is meaningless for one-record testdata: " + id);
-        final TestdataSelectionPolicy policy = override != null && override.selection != null
-                ? override.selection : descriptor.selection();
-        if (descriptor.count() > 1 && policy == null)
-            throw new IllegalArgumentException("Testdata selection policy is required for multiple records: " + id);
-        final String scope = load ? (override == null || override.scope == null ? "iteration" : override.scope) : "execution";
+        final PreparedTestdata prepared = preparedTestdata.computeIfAbsent(id, key -> prepare(key));
+        final TestdataDescriptor descriptor = prepared.descriptor;
+        final String layer = prepared.layer;
+        final TestdataSelectionPolicy policy = prepared.policy;
+        final String scope = prepared.scope;
         if (load && "user".equals(scope) && "arrivalRate".equals(model))
             throw new IllegalArgumentException("scope: user is not supported for arrivalRate workloads in att-load/v1.5");
         if (descriptor.count() == 1) {
@@ -405,7 +466,10 @@ public final class TestdataInputResolver {
                 if ("stop".equals(exhaustion)) throw stop(id, count);
                 randomOrdinal = ordinal % count;
             }
-            index = randomIndex(count, seed ^ id.hashCode(), randomOrdinal);
+            String parameterKey = id + "|" + count + "|" + seed;
+            long[] parameters = randomParameters.computeIfAbsent(parameterKey,
+                    key -> randomParameters(count, seed ^ id.hashCode()));
+            index = randomIndex(count, randomOrdinal, parameters);
         } else if ("roundRobin".equals(strategy)) {
             if (ordinal >= count && "error".equals(exhaustion)) throw exhausted(id, count, exhaustion);
             if (ordinal >= count && "stop".equals(exhaustion)) throw stop(id, count);
@@ -509,6 +573,28 @@ public final class TestdataInputResolver {
         return new WorkloadPolicy(scope, selection);
     }
 
+    private PreparedTestdata prepare(String id) {
+        final TestdataDescriptor descriptor;
+        final String layer;
+        try {
+            descriptor = registry.resolve(id);
+            layer = registry.layer(id);
+        } catch (Exception error) {
+            throw new IllegalArgumentException("Unable to prepare Load testdata '" + id + "': " + error.getMessage(), error);
+        }
+        WorkloadPolicy override = workloadPolicy(id);
+        if (descriptor.count() == 1 && override != null && override.selection != null)
+            throw new IllegalArgumentException("Load workload selection override is meaningless for one-record testdata: " + id);
+        TestdataSelectionPolicy policy = override != null && override.selection != null
+                ? override.selection : descriptor.selection();
+        if (descriptor.count() > 1 && policy == null)
+            throw new IllegalArgumentException("Testdata selection policy is required for multiple records: " + id);
+        String scope = load ? (override == null || override.scope == null ? "iteration" : override.scope) : "execution";
+        if (load && "user".equals(scope) && "arrivalRate".equals(model))
+            throw new IllegalArgumentException("scope: user is not supported for arrivalRate workloads in att-load/v1.5");
+        return new PreparedTestdata(descriptor, layer, policy, scope);
+    }
+
     private static IllegalStateException exhausted(String id, long count, String policy) {
         return new IllegalStateException("Testdata selection exhausted for '" + id + "' after " + count + " records (exhaustion: " + policy + ")");
     }
@@ -550,13 +636,18 @@ public final class TestdataInputResolver {
     }
 
     /** Seeded affine permutation: deterministic, indexable, and O(1) for virtual ranges. */
-    private static long randomIndex(long count, long seed, long ordinal) {
-        if (count <= 1L) return 0L;
+    private static long[] randomParameters(long count, long seed) {
+        if (count <= 1L) return new long[] { 1L, 0L };
         Random random = new Random(seed);
         long multiplier = 1L + random.nextInt((int) (count - 1L));
         while (gcd(multiplier, count) != 1L) multiplier++;
         long offset = random.nextInt((int) count);
-        return (multiplier * ordinal + offset) % count;
+        return new long[] { multiplier, offset };
+    }
+
+    private static long randomIndex(long count, long ordinal, long[] parameters) {
+        if (count <= 1L) return 0L;
+        return (parameters[0] * ordinal + parameters[1]) % count;
     }
 
     private static long gcd(long left, long right) {
@@ -595,6 +686,16 @@ public final class TestdataInputResolver {
         private final String scope;
         private final TestdataSelectionPolicy selection;
         private WorkloadPolicy(String scope, TestdataSelectionPolicy selection) { this.scope = scope; this.selection = selection; }
+    }
+
+    private static final class PreparedTestdata {
+        final TestdataDescriptor descriptor;
+        final String layer;
+        final TestdataSelectionPolicy policy;
+        final String scope;
+        PreparedTestdata(TestdataDescriptor descriptor, String layer, TestdataSelectionPolicy policy, String scope) {
+            this.descriptor = descriptor; this.layer = layer; this.policy = policy; this.scope = scope;
+        }
     }
 
     /** Orders exhaustion decisions after every lower valid Load identity has selected its record. */

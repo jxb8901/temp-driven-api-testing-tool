@@ -31,6 +31,30 @@ class TestdataRuntimeTest {
 
     @BeforeEach void installSchemas() throws Exception { TestSchemas.install(root); }
 
+    @Test void compiledLoadMappingMatchesTheExistingResolverAcrossRepeatedSelections() throws Exception {
+        Path descriptor = write("data/compiled.yaml", "schemaVersion: att-testdata/v1.0\n"
+                + "id: people\nrecords:\n  - name: Ada\n  - name: Lin\n"
+                + "selection: {strategy: random, seed: 7, exhaustion: recycle}\n");
+        TestdataRegistry registry = new TestdataRegistry(root, Collections.<Path>emptyList(), Arrays.asList(descriptor));
+        Map<String, Object> mapping = new LinkedHashMap<String, Object>();
+        mapping.put("name", "@{people.name}");
+        mapping.put("embedded", "person=@{people.name}");
+        mapping.put("literal", Integer.valueOf(7));
+        CompiledTestdataMapping compiled = CompiledTestdataMapping.compile(mapping);
+        TestdataInputResolver ordinary = new TestdataInputResolver(registry, Collections.<String, Object>emptyMap(),
+                "work", "closed", Long.valueOf(23), 1, true);
+        TestdataInputResolver planned = new TestdataInputResolver(registry, Collections.<String, Object>emptyMap(),
+                "work", "closed", Long.valueOf(23), 1, true, compiled);
+
+        for (int iteration = 1; iteration <= 8; iteration++) {
+            String id = "run-VU-1-" + iteration;
+            Map<String, Object> expected = ordinary.resolveFrozenLoadInput(mapping, null, "VU-1", id, null, () -> true);
+            Map<String, Object> actual = planned.resolveFrozenLoadInput(mapping, null, "VU-1", id, null, () -> true);
+            assertEquals(expected, actual);
+            assertEquals(ordinary.selectionEvidence(), planned.selectionEvidence());
+        }
+    }
+
     @Test void exactAndPathReferencesPreserveNativeTypesAndOneChoicePerMapping() throws Exception {
         Path descriptor = write("data/people.yaml", "schemaVersion: att-testdata/v1.0\n"
                 + "id: people\nrecords:\n  - name: Ada\n    active: true\n    tags: [blue, green]\n"

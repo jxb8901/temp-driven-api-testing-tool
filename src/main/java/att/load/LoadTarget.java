@@ -26,6 +26,7 @@ public final class LoadTarget {
     private final StageTemplate template;
     private final FlowRegistry flows;
     private att.template.FileExpressionResolver.FileExpressionSnapshot fileSnapshot;
+    private att.testdata.CompiledTestdataMapping compiledTestdataMapping;
     private final Path templatesRoot;
     private final Path scenarioSource;
 
@@ -44,6 +45,11 @@ public final class LoadTarget {
         this.fileSnapshot = snapshot;
         return this;
     }
+    LoadTarget withCompiledTestdataMapping(att.testdata.CompiledTestdataMapping mapping) {
+        this.compiledTestdataMapping = mapping;
+        return this;
+    }
+    public att.testdata.CompiledTestdataMapping compiledTestdataMapping() { return compiledTestdataMapping; }
     public String scenarioName() {
         if (scenarioSource == null || scenarioSource.getFileName() == null) return id;
         String name = scenarioSource.getFileName().toString();

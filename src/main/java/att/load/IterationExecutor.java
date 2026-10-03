@@ -34,6 +34,10 @@ public final class IterationExecutor implements LoadIterationRunner {
     private final LoadRunResources resources;
     private final Path outputRoot;
     private final FlowRegistry flows;
+    private final att.template.CompiledExecutionPlan executionPlan;
+    private final ToolInvoker tools;
+    private final UnifiedTemplateEngine identityEngine;
+    private final UnifiedTemplateEngine executionEngine;
     private final boolean ownsResources;
     private final att.testdata.TestdataInputResolver testdataResolver;
     private volatile Path initializedRunOutput;
@@ -62,6 +66,13 @@ public final class IterationExecutor implements LoadIterationRunner {
         this.outputRoot = (outputRoot == null ? this.projectRoot.resolve(config.outputDirectory()) : outputRoot)
                 .toAbsolutePath().normalize();
         this.flows = target.flows().freezeFor(target.template());
+        this.executionPlan = att.template.CompiledExecutionPlan.compile(target.template(), this.flows, config);
+        this.resources.registerExecutionPlan(this.executionPlan);
+        this.tools = new ToolInvoker(this.projectRoot, config);
+        this.identityEngine = new UnifiedTemplateEngine(null, null, null, null,
+                new DefaultBuiltInProvider(this.resources.sequences()));
+        this.executionEngine = UnifiedTemplateEngine.withFileSnapshot(tools, this.resources.db(), this.resources.mq(),
+                this.resources.http(), new DefaultBuiltInProvider(this.resources.sequences()), target.fileSnapshot());
         this.ownsResources = resources == null || ownsResources;
         this.testdataResolver = testdataResolver;
         try { this.resources.prepareRenderPlans(target); }
@@ -96,8 +107,6 @@ public final class IterationExecutor implements LoadIterationRunner {
             context.setResourceOutputEnabled(target.resourceOutputEnabled());
             context.setTemplateMetadata(target.template().name(), target.template().directory());
             context.beginExecutionIdInitialization();
-            UnifiedTemplateEngine identityEngine = new UnifiedTemplateEngine(null, null, null, null,
-                    new DefaultBuiltInProvider(resources.sequences()));
             try {
                 if (testdataResolver != null)
                     context.replaceInputValuesFromFrozenSnapshot(testdataResolver.resolveFrozenLoadInput(request.inputs(), context,
@@ -132,11 +141,9 @@ public final class IterationExecutor implements LoadIterationRunner {
             context.beginStage(prepared.stage(), target.template().name(), target.template().directory());
             DbHelperExecutor db = resources.db();
             db.beginCase();
-            ToolInvoker tools = new ToolInvoker(projectRoot, config);
             MqHelperExecutor mq = resources.mq();
-            UnifiedTemplateEngine engine = UnifiedTemplateEngine.withFileSnapshot(tools, db, mq, resources.http(),
-                    new att.template.DefaultBuiltInProvider(resources.sequences()), target.fileSnapshot());
-            results.addAll(new StageTemplateRunner(engine, flows, resources.renderPlans()).execute("LOAD", target.template(), context, log));
+            results.addAll(new StageTemplateRunner(executionEngine, flows, resources.renderPlans(), executionPlan)
+                    .execute("LOAD", target.template(), context, log));
             if (Thread.currentThread().isInterrupted()) resources.db().abortCase();
             else results.addAll(db.finishCase(context, log));
             finalized = true;

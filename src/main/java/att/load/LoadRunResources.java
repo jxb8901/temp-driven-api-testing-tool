@@ -33,6 +33,8 @@ public final class LoadRunResources implements AutoCloseable {
     private final java.util.Set<Path> initializedExecutionNamespaces = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final att.template.SequenceService sequences = new att.template.SequenceService();
     private final att.template.RenderPlanCache renderPlans = new att.template.RenderPlanCache();
+    private final java.util.concurrent.CopyOnWriteArrayList<att.template.CompiledExecutionPlan> executionPlans =
+            new java.util.concurrent.CopyOnWriteArrayList<att.template.CompiledExecutionPlan>();
 
     public LoadRunResources(Path projectRoot, FrameworkConfig config) {
         this(projectRoot, config, new IbmMqClientFactory());
@@ -53,6 +55,11 @@ public final class LoadRunResources implements AutoCloseable {
     public att.exec.HttpHelperExecutor http() { ensureOpen(); return http; }
     public att.template.SequenceService sequences() { ensureOpen(); return sequences; }
     public att.template.RenderPlanCache renderPlans() { ensureOpen(); return renderPlans; }
+    public void registerExecutionPlan(att.template.CompiledExecutionPlan plan) {
+        ensureOpen();
+        if (plan == null) throw new IllegalArgumentException("Load execution plan is required");
+        executionPlans.addIfAbsent(plan);
+    }
     /** Resolves Render sources before the workload start gate, shared by all targets in this Load run. */
     public void prepareRenderPlans(LoadTarget target) throws Exception {
         ensureOpen();
@@ -146,6 +153,15 @@ public final class LoadRunResources implements AutoCloseable {
         ids.put("customExecutionIdsTracked", customExecutionIdsTracked.get());
         ids.put("executionIdCollisionTrackingSize", customExecutionIdsTracked.get());
         result.put("executionIds", ids);
+        long actionPlans = 0L, evaluations = 0L;
+        for (att.template.CompiledExecutionPlan plan : executionPlans) {
+            actionPlans += plan.actionCount(); evaluations += plan.evaluations();
+        }
+        Map<String, Object> execution = new LinkedHashMap<String, Object>();
+        execution.put("executionPlansCompiled", executionPlans.size());
+        execution.put("actionPlansCompiled", actionPlans);
+        execution.put("actionEvaluations", evaluations);
+        result.put("execution", java.util.Collections.unmodifiableMap(execution));
         return result;
     }
     /** Rate-limited, allocation-light observation of shared HTTP pool peaks. */

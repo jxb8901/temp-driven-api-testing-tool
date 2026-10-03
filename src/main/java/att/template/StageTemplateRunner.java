@@ -28,12 +28,18 @@ public class StageTemplateRunner {
     private final ExpressionEvaluator evaluator = new ExpressionEvaluator();
     private final RenderPlanCache renderPlans;
     private final FlowRegistry flows;
+    private final CompiledExecutionPlan executionPlan;
 
     public StageTemplateRunner(UnifiedTemplateEngine templateEngine) { this(templateEngine, null, new RenderPlanCache()); }
     public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows) { this(templateEngine, flows, new RenderPlanCache()); }
     public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows, RenderPlanCache renderPlans) {
+        this(templateEngine, flows, renderPlans, null);
+    }
+    public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows, RenderPlanCache renderPlans,
+                               CompiledExecutionPlan executionPlan) {
         this.templateEngine = templateEngine; this.flows = flows;
         this.renderPlans = renderPlans == null ? new RenderPlanCache() : renderPlans;
+        this.executionPlan = executionPlan;
     }
 
     public List<ValidationResult> execute(String stageName, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log) {
@@ -45,6 +51,8 @@ public class StageTemplateRunner {
     private List<ValidationResult> executeScoped(String stageName, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log) {
         List<ValidationResult> results = new ArrayList<ValidationResult>();
         for (TemplateAction action : template.actions()) {
+            if (executionPlan != null) executionPlan.recordEvaluation();
+            CompiledExecutionPlan.ActionPlan actionPlan = actionPlan(action);
             Instant started = Instant.now();
             List<String> targets = new ArrayList<String>();
             Map<String, Object> output = outcome(targets);
@@ -66,7 +74,8 @@ public class StageTemplateRunner {
             try {
                 context.beginAction(output);
                 String type = action.type().toLowerCase(java.util.Locale.ROOT);
-                if (!action.runWhen().trim().isEmpty() && !evaluateCondition(action.runWhen(), context, log)) {
+                if (!action.runWhen().trim().isEmpty() && !evaluateCondition(action.runWhen(), context, log,
+                        actionPlan == null ? null : actionPlan.runWhen())) {
                     output.put("status", "SKIPPED"); output.put("success", true);
                     output.put("durationMs", Duration.between(started, Instant.now()).toMillis());
                     context.addAction(action.id(), node); recorded = true;
@@ -86,13 +95,13 @@ public class StageTemplateRunner {
                 actionStart.put("status", "START");
                 appendProgress(log, "ACTION", actionStart);
                 if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
-                else if ("tool".equals(type)) toolStatus = executeTool(stageName, template, action, context, log, output, targets, node);
+                else if ("tool".equals(type)) toolStatus = executeTool(stageName, template, action, context, log, output, targets, node, actionPlan);
                 else if ("db".equals(type)) toolStatus = executeDb(stageName, action, context, log, output, targets);
-                else if ("assert".equals(type)) expected = templateEngine.render(action.expected(), context, log);
+                else if ("assert".equals(type)) expected = render(action.expected(), actionPlan == null ? null : actionPlan.expected(), context, log);
                 else if ("log".equals(type)) executeLog(action, context, log, output);
                 else if ("assign".equals(type)) executeAssign(action, context, log, output);
                 else if ("flow".equals(type)) {
-                    FlowExecutionResult flowResult = executeFlow(stageName, action, context, log, output, node);
+                    FlowExecutionResult flowResult = executeFlow(stageName, action, actionPlan, context, log, output, node);
                     toolStatus = flowResult.status;
                     actionDiagnostic = flowResult.diagnostic;
                 }
@@ -102,11 +111,11 @@ public class StageTemplateRunner {
                 recorded = true;
                 context.setActionOutput(output);
                 executionField = "assert";
-                ResultStatus status = toolStatus == null ? applyAssertion(action, output, context, log, invocationSucceeded) : toolStatus;
+                ResultStatus status = toolStatus == null ? applyAssertion(action, output, context, log, invocationSucceeded, actionPlan) : toolStatus;
                 if ("assert".equals(type)) {
                     output.put("result", Boolean.valueOf(status == ResultStatus.PASS));
                     executionField = "actual";
-                    actual = normalizeLines(templateEngine.render(action.actual(), context, log));
+                    actual = normalizeLines(render(action.actual(), actionPlan == null ? null : actionPlan.actual(), context, log));
                     expected = normalizeLines(expected);
                     output.put("expected", expected);
                     output.put("actual", actual);
@@ -115,9 +124,9 @@ public class StageTemplateRunner {
                         || (("tool".equals(type) || "db".equals(type)) && !action.assertion().trim().isEmpty());
                 if ("tool".equals(type) && assertionReport) {
                     executionField = "expected";
-                    expected = normalizeLines(templateEngine.render(action.expected(), context, log));
+                    expected = normalizeLines(render(action.expected(), actionPlan == null ? null : actionPlan.expected(), context, log));
                     executionField = "actual";
-                    actual = normalizeLines(templateEngine.render(action.actual(), context, log));
+                    actual = normalizeLines(render(action.actual(), actionPlan == null ? null : actionPlan.actual(), context, log));
                     output.put("expected", expected);
                     output.put("actual", actual);
                 }
@@ -173,10 +182,19 @@ public class StageTemplateRunner {
         return results;
     }
 
-    private FlowExecutionResult executeFlow(String stageName, TemplateAction action, CaseRuntimeContext context,
+    private CompiledExecutionPlan.ActionPlan actionPlan(TemplateAction action) {
+        return executionPlan == null ? null : executionPlan.action(action);
+    }
+
+    private String render(String source, UnifiedTemplateEngine.CompiledTemplate compiled,
+                          CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        return compiled == null ? templateEngine.render(source, context, log) : templateEngine.render(compiled, context, log);
+    }
+
+    private FlowExecutionResult executeFlow(String stageName, TemplateAction action, CompiledExecutionPlan.ActionPlan actionPlan, CaseRuntimeContext context,
                                              CaseExecutionLog log, Map<String, Object> output, Map<String, Object> node) throws Exception {
         if (flows == null) throw new IllegalStateException("Flow execution is unavailable");
-        FlowDefinition flow = flows.get(action.use());
+        FlowDefinition flow = actionPlan == null ? flows.get(action.use()) : actionPlan.flow();
         if (flow == null) throw new IllegalArgumentException("Unresolved Flow reference '" + action.use() + "'");
         List<ValidationResult> internal = new ArrayList<ValidationResult>();
         CaseRuntimeContext.FlowEvidence evidence = null;
@@ -491,14 +509,14 @@ public class StageTemplateRunner {
     }
 
     private ResultStatus executeTool(String stageName, StageTemplate template, TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log, Map<String, Object> output,
-                             List<String> targets, Map<String, Object> node) throws Exception {
+                             List<String> targets, Map<String, Object> node, CompiledExecutionPlan.ActionPlan plan) throws Exception {
         Map<String, Object> retry = action.retry();
         int maxAttempts = integer(retry.get("maxAttempts"), 1);
         java.util.Set<String> retryOn = strings(retry.get("retryOn"));
         int intervalMs = integer(retry.get("intervalMs"), 0);
         List<Map<String, Object>> attempts = new ArrayList<Map<String, Object>>();
         output.put("attempts", attempts);
-        String kind = templateEngine.callKind(action.call());
+        String kind = plan == null ? templateEngine.callKind(action.call()) : templateEngine.callKind(plan.primaryCall());
         for (int number = 1; number <= maxAttempts; number++) {
             beginAttempt(output, number);
             appendResourceEvent(log, stageName, action.id(), kind, number, "START", null, null);
@@ -506,9 +524,13 @@ public class StageTemplateRunner {
             try {
                 att.exec.ToolInvocationResult result;
                 try {
-                    result = templateEngine.executeToolAttempt(action.call(), context, log,
-                            context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), "", "",
-                            false, !retry.isEmpty());
+                    result = plan == null
+                            ? templateEngine.executeToolAttempt(action.call(), context, log,
+                                context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), "", "",
+                                false, !retry.isEmpty())
+                            : templateEngine.executeToolAttempt(plan.primaryCall(), context, log,
+                                context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), "", "",
+                                false, !retry.isEmpty());
                 } catch (att.exec.ToolExecutionException error) {
                     throw error;
                 } catch (Exception error) {
@@ -920,22 +942,29 @@ public class StageTemplateRunner {
     }
 
     private ResultStatus applyAssertion(TemplateAction action, Map<String, Object> output, CaseRuntimeContext context, CaseExecutionLog log,
-                                        boolean invocationSucceeded) throws Exception {
+                                        boolean invocationSucceeded, CompiledExecutionPlan.ActionPlan plan) throws Exception {
         if (!invocationSucceeded) {
             output.put("status", "ERROR"); output.put("success", false); return ResultStatus.ERROR;
         }
         if (action.assertion() == null || action.assertion().trim().isEmpty()) {
             output.put("status", "PASS"); output.put("success", true); return ResultStatus.PASS;
         }
-        boolean passed = evaluateAssertion(action, output, context, log);
+        boolean passed = evaluateAssertion(action, output, context, log, plan);
         output.put("status", passed ? "PASS" : "FAIL");
         output.put("success", passed);
         return passed ? ResultStatus.PASS : ResultStatus.FAIL;
     }
 
     private boolean evaluateAssertion(TemplateAction action, Map<String, Object> output, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        return evaluateAssertion(action, output, context, log, actionPlan(action));
+    }
+
+    private boolean evaluateAssertion(TemplateAction action, Map<String, Object> output, CaseRuntimeContext context,
+                                      CaseExecutionLog log, CompiledExecutionPlan.ActionPlan plan) throws Exception {
         if (action.assertion() == null || action.assertion().trim().isEmpty()) return true;
-        Object evaluated = templateEngine.evaluate(action.assertion(), context, log);
+        Object evaluated = plan == null || plan.assertion() == null
+                ? templateEngine.evaluate(action.assertion(), context, log)
+                : templateEngine.evaluateCompiledExpression(action.assertion(), plan.assertion(), context, log);
         String rendered = String.valueOf(evaluated);
         boolean passed = evaluated instanceof Boolean ? ((Boolean) evaluated).booleanValue()
                 : evaluator.evaluate(String.valueOf(evaluated));
@@ -947,8 +976,10 @@ public class StageTemplateRunner {
         return passed;
     }
 
-    private boolean evaluateCondition(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
-        Object evaluated = templateEngine.evaluate(expression, context, log);
+    private boolean evaluateCondition(String expression, CaseRuntimeContext context, CaseExecutionLog log,
+                                      att.template.ExpressionBlockEvaluator.CompiledExpression compiled) throws Exception {
+        Object evaluated = compiled == null ? templateEngine.evaluate(expression, context, log)
+                : templateEngine.evaluateCompiledExpression(expression, compiled, context, log);
         return evaluated instanceof Boolean ? ((Boolean) evaluated).booleanValue()
                 : evaluator.evaluate(String.valueOf(evaluated));
     }
@@ -994,7 +1025,10 @@ public class StageTemplateRunner {
         if (action.retry().containsKey("when")) {
             decision.put("whenEvaluated", true);
             try {
-                allowed = RetryCondition.evaluate(action.retry().get("when"), context);
+                CompiledExecutionPlan.ActionPlan plan = actionPlan(action);
+                allowed = plan == null || plan.retryWhen() == null
+                        ? RetryCondition.evaluate(action.retry().get("when"), context)
+                        : RetryCondition.evaluate(plan.retryWhen(), context);
                 decision.put("whenResult", allowed);
             } catch (RuntimeException error) {
                 decision.put("reason", "EXPRESSION_ERROR");

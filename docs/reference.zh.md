@@ -1189,6 +1189,8 @@ Load workload scheduler 啟動前，ATT 會為每個可達的 Render payload glo
 
 使用 `--profile` 時，`performance.json` 會記錄 `renderPlansCompiled`、`renderPlanCacheHits`、`renderPayloadResolutions`、`renderPayloadResolutionCacheHits`、`renderEvaluations`、`renderArtifactWrites` 與 `renderSourceBytes`。這些有界 run totals 分別顯示 source-plan 重用與每次 iteration 的 evaluation；`renderArtifactWrites` 為零，因為 Render 只回傳 String，不會自行寫入 artifact。
 
+Load 啟動時也會編譯所選 Template/Flow action sequence、主要 Tool call 與 argument expression、`runWhen`、assertion 及 `retry.when`。每個 iteration 會使用自己的 Context 評估此 immutable plan。Testdata input mapping 同樣會在 target validation 時編譯；descriptor 與有效 workload policy 只準備一次，record selection 與 Context value 仍會依 iteration 評估。Run summary 的 `resources.execution` 包含 `executionPlansCompiled`、`actionPlansCompiled` 與 `actionEvaluations`。
+
 #### CLI 與範例
 
 單一 workload 可用 --users、--arrival-rate、--warmup、--ramp-up、--duration、--ramp-down、--think-time、--max-concurrent 等 option 覆蓋對應 YAML。多 workload 使用未指定 workload 的 load-model override 會失敗。

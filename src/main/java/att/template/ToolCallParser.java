@@ -13,6 +13,15 @@ import java.util.Map;
 /** Parses the shared V2 #{tool(...)} grammar for validation and execution. */
 public final class ToolCallParser {
     public ParsedCall parse(String expression) {
+        return parse(expression, false);
+    }
+
+    /** Parses a call and compiles each argument expression for repeated evaluation. */
+    public ParsedCall parseCompiled(String expression) {
+        return parse(expression, true);
+    }
+
+    private ParsedCall parse(String expression, boolean compileArguments) {
         String body = expression == null ? "" : expression.trim();
         if (body.startsWith("#{") && body.endsWith("}")) body = body.substring(2, body.length() - 1).trim();
         int open = body.indexOf('(');
@@ -27,7 +36,8 @@ public final class ToolCallParser {
             String key = equals > 0 ? item.substring(0, equals).trim() : "arg" + positional++;
             String value = equals > 0 ? item.substring(equals + 1).trim() : item.trim();
             if (key.isEmpty() || value.isEmpty()) throw new IllegalArgumentException("Invalid tool/function argument: " + item);
-            parsed.add(new Argument(key, value, equals <= 0));
+            parsed.add(new Argument(key, value, equals <= 0,
+                    compileArguments ? new ExpressionBlockEvaluator().compile(value) : null));
         } } catch (ExpressionSyntaxException error) { throw error; }
         catch (IllegalArgumentException error) {
             throw new ExpressionSyntaxException(Math.max(0, open + 1), body.length() - 1,
@@ -219,9 +229,17 @@ public final class ToolCallParser {
     public static final class Argument {
         private final String key, expression;
         private final boolean positional;
-        Argument(String key, String expression, boolean positional) { this.key = key; this.expression = expression; this.positional = positional; }
+        private final ExpressionBlockEvaluator.CompiledExpression compiled;
+        Argument(String key, String expression, boolean positional) {
+            this(key, expression, positional, null);
+        }
+        Argument(String key, String expression, boolean positional,
+                 ExpressionBlockEvaluator.CompiledExpression compiled) {
+            this.key = key; this.expression = expression; this.positional = positional; this.compiled = compiled;
+        }
         public String key() { return key; }
         public String expression() { return expression; }
         public boolean positional() { return positional; }
+        public ExpressionBlockEvaluator.CompiledExpression compiled() { return compiled; }
     }
 }
