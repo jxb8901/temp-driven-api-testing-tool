@@ -1140,7 +1140,7 @@ average concurrency ≈ arrival rate (requests/second) × mean response time (se
 
 For example, 20 HTTP requests/second at a mean 1.5-second response time needs about 30 concurrent connections to avoid the client pool becoming the limiting factor. HTTP defaults to `pool.maxConnections: 50` and `pool.maxConnectionsPerRoute: 20`; raise both as needed for the workload, keeping the per-route value no greater than the total. Add headroom for latency variation and other routes, then confirm with `resources.http` active/idle/waiting/peak observations. Pool capacity is a generator-side ceiling, not a recommendation to send that load to an unverified service.
 
-For MQ request/reply, 10 requests/second with a mean 3-second reply time likewise needs about 30 leased connections. The MQ default `pool.maxSize: 20` can cap that workload before the SUT reaches its limit; configure `pool.maxSize` above the expected in-flight count with suitable headroom. Set `minIdle` when cold connection creation during ramp-up would distort the measurement. Check MQ waiting and timeout metrics alongside response latency to distinguish pool pressure from SUT latency. Recalculate from observed mean latency as load changes; tail latency is useful for headroom, but is not the mean used by the estimate.
+For MQ request/reply, 10 requests/second with a mean 3-second reply time likewise needs about 30 leased connections across the workload. Size `pool.maxSize` for the expected in-flight requests **per physical MQ instance**, not per logical helper. With a single instance (or calls pinned to one instance), that is about 30 plus headroom. With two evenly selected instances, it is about 15 per instance on average; account for selection skew and verify the actual distribution. `resources.mq` reports pool metrics per physical instance, so inspect each pool's waiting and timeout metrics alongside response latency. `minIdle` is applied when that physical pool is first created on use; it does not create or warm the pool before Load starts. To move connection creation out of measured steady-state latency, combine `minIdle` with a Load warm-up/first-use warm-up phase. Recalculate from observed mean latency as load changes; tail latency is useful for headroom, but is not the mean used by the estimate.
 
 duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends real traffic but is excluded from measured threshold aggregates. Optional seed makes closed-VU think-time randomization deterministic.
 
@@ -1718,7 +1718,17 @@ evidence:
     maxChars: 10000
 ~~~
 
-The HTTP connection pool defaults to 50 total connections and 20 per route. Size it for the expected in-flight Load concurrency; `maxConnectionsPerRoute` cannot exceed `maxConnections`.
+The HTTP connection pool has these defaults and limits:
+
+| Pool field | Default | Contract |
+|---|---:|---|
+| `maxConnections` | 50 | Total connections, 1–10000 |
+| `maxConnectionsPerRoute` | 20 | Per-route connections, 1–10000 and no greater than `maxConnections` |
+| `connectionRequestTimeoutMs` | 5000 ms | Maximum wait to lease a connection, 1–3600000 ms |
+| `keepAliveMs` | 30000 ms | Keep-alive duration, 1–3600000 ms |
+| `idleEvictMs` | 60000 ms | Idle connection eviction interval, 1–3600000 ms |
+
+Size the pool for the expected in-flight Load concurrency. For example, the following tuning overrides raise the per-route capacity and shorten the connection-lease wait; values shown here are not defaults:
 
 ~~~yaml
 pool:
