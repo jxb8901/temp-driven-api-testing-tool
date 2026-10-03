@@ -93,7 +93,7 @@ public final class IterationExecutor implements LoadIterationRunner {
                     new DefaultBuiltInProvider(resources.sequences()));
             try {
                 if (testdataResolver != null)
-                    context.replaceInputValues(testdataResolver.resolve(request.inputs(), context,
+                    context.replaceInputValuesFromFrozenSnapshot(testdataResolver.resolveFrozenLoadInput(request.inputs(), context,
                             request.userId(), request.iterationId(), request.testdataOrdinal(),
                             request.testdataWaitAllowed()));
                 executionId = target.execIdFormat().isEmpty()

@@ -993,6 +993,39 @@ class LoadScenarioTest {
         assertEquals("business-value", prepared.context().resolve("CASE.inputs"));
         assertEquals("nested-business-value", prepared.context().resolve("EXEC.INPUT.payload.value"));
         assertNull(prepared.context().resolve("EXEC.INPUT.inputs.value"));
+
+        Path people = write(project, "data/people.yaml", "schemaVersion: att-testdata/v1.0\n"
+                + "id: people\nrecords:\n  - id: ada\n    profile: {labels: [gold, verified]}\n");
+        att.testdata.TestdataRegistry registry = new att.testdata.TestdataRegistry(project,
+                Collections.emptyList(), Collections.singletonList(people));
+        att.testdata.TestdataInputResolver resolver = new att.testdata.TestdataInputResolver(registry,
+                Collections.emptyMap(), "payments", "closed", null, 1, true);
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            IterationExecutor executor = new IterationExecutor(project, config, target, resources,
+                    temp.resolve("input-snapshot-output"), resolver);
+            IterationResult noMarker = executor.execute(request);
+            assertEquals(ResultStatus.PASS, noMarker.status());
+            assertSame(request.inputs().get("payload"), noMarker.context().resolve("EXEC.INPUT.payload"),
+                    "modern Load execution must pass frozen nested values through the resolver and Context");
+            assertThrows(UnsupportedOperationException.class, () -> ((Map<String, Object>) noMarker.context()
+                    .resolve("EXEC.INPUT.payload")).put("value", "mutation"));
+
+            Map<String, Object> markedInputs = new LinkedHashMap<String, Object>();
+            markedInputs.put("input", "ordinary-value");
+            markedInputs.put("record", "@{people}");
+            IterationRequest marked = IterationRequest.closed("run-inputs", "iteration-testdata", 2, "STEADY",
+                    Instant.now(), "VU-1", markedInputs);
+            IterationResult resolved = executor.execute(marked);
+            assertEquals(ResultStatus.PASS, resolved.status());
+            Map<String, Object> record = (Map<String, Object>) resolved.context().resolve("EXEC.INPUT.record");
+            assertEquals("ada", record.get("id"));
+            Map<String, Object> profile = (Map<String, Object>) record.get("profile");
+            assertThrows(UnsupportedOperationException.class, () -> profile.put("name", "Ada"));
+            assertThrows(UnsupportedOperationException.class, () -> ((List<Object>) profile.get("labels")).add("new"));
+        } finally {
+            resources.close();
+        }
     }
 
     @Test void resolvesAndExecutesAConfiguredToolTargetThroughTheSameExecutor() throws Exception {

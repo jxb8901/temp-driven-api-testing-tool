@@ -909,6 +909,14 @@ public final class CaseRuntimeContext {
         setLegacyInputsView(inputs);
     }
 
+    /** Replaces EXEC.INPUT from a Load snapshot whose nested values are already deeply immutable. */
+    public void replaceInputValuesFromFrozenSnapshot(Map<String, Object> inputs) {
+        if (!activeStageInputKeys.isEmpty()) throw new IllegalStateException("Cannot replace EXEC.INPUT while a Stage is active");
+        inputNode.clear();
+        if (inputs != null) inputNode.putAll(inputs);
+        setLegacyInputsView(inputs);
+    }
+
     /** Stores an immutable definition snapshot to be evaluated per execution after ID publication. */
     public void setBootstrapVariables(Map<String, Object> variables) {
         bootstrapVariableDefinitions = variables == null || variables.isEmpty()
