@@ -65,7 +65,7 @@ public final class IterationExecutor implements LoadIterationRunner {
         this.outputRoot = (outputRoot == null ? this.projectRoot.resolve(config.outputDirectory()) : outputRoot)
                 .toAbsolutePath().normalize();
         this.flows = target.flows().freezeFor(target.template());
-        this.executionPlan = att.template.CompiledExecutionPlan.compile(target.template(), this.flows);
+        this.executionPlan = att.template.CompiledExecutionPlan.compile(target.template(), this.flows, config);
         this.resources.registerExecutionPlan(this.executionPlan);
         this.tools = new ToolInvoker(this.projectRoot, config);
         this.identityEngine = new UnifiedTemplateEngine(null, null, null, null,

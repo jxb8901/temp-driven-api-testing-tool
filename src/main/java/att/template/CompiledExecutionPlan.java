@@ -2,6 +2,8 @@ package att.template;
 
 import att.flow.FlowDefinition;
 import att.flow.FlowRegistry;
+import att.config.FrameworkConfig;
+import att.config.ToolConfig;
 
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -24,26 +26,30 @@ public final class CompiledExecutionPlan {
     }
 
     public static CompiledExecutionPlan compile(StageTemplate template, FlowRegistry flows) {
+        return compile(template, flows, null);
+    }
+
+    public static CompiledExecutionPlan compile(StageTemplate template, FlowRegistry flows, FrameworkConfig config) {
         Map<TemplateAction, ActionPlan> compiled = new IdentityHashMap<TemplateAction, ActionPlan>();
         List<ActionPlan> ordered = new ArrayList<ActionPlan>();
         Set<String> visitedFlows = new LinkedHashSet<String>();
         ToolCallParser parser = new ToolCallParser();
-        compileTemplate(template, flows, parser, compiled, ordered, visitedFlows);
+        compileTemplate(template, flows, config, parser, compiled, ordered, visitedFlows);
         return new CompiledExecutionPlan(compiled, ordered);
     }
 
-    private static void compileTemplate(StageTemplate template, FlowRegistry flows, ToolCallParser parser,
+    private static void compileTemplate(StageTemplate template, FlowRegistry flows, FrameworkConfig config, ToolCallParser parser,
                                         Map<TemplateAction, ActionPlan> compiled, List<ActionPlan> orderedActions,
                                         Set<String> visitedFlows) {
         if (template == null) return;
         for (TemplateAction action : template.actions()) {
-            ActionPlan plan = new ActionPlan(action, parser);
+            ActionPlan plan = new ActionPlan(action, parser, flows, config);
             compiled.put(action, plan);
             orderedActions.add(plan);
             if ("flow".equalsIgnoreCase(action.type()) && flows != null && visitedFlows.add(action.use())) {
                 FlowDefinition flow = flows.get(action.use());
                 if (flow != null) compileTemplate(new StageTemplate(flow.name(), flow.directory(), flow.actions(),
-                        flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml")), flows, parser,
+                        flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml")), flows, config, parser,
                         compiled, orderedActions, visitedFlows);
             }
         }
@@ -67,10 +73,14 @@ public final class CompiledExecutionPlan {
         private final UnifiedTemplateEngine.CompiledTemplate expected;
         private final UnifiedTemplateEngine.CompiledTemplate actual;
         private final RetryCondition.CompiledCondition retryWhen;
+        private final FlowDefinition flow;
+        private final ToolConfig configuredTool;
 
-        private ActionPlan(TemplateAction action, ToolCallParser parser) {
+        private ActionPlan(TemplateAction action, ToolCallParser parser, FlowRegistry flows, FrameworkConfig config) {
             primaryCall = "tool".equalsIgnoreCase(action.type()) && !action.call().trim().isEmpty()
                     ? parser.parseCompiled(action.call()) : null;
+            flow = "flow".equalsIgnoreCase(action.type()) && flows != null ? flows.get(action.use()) : null;
+            configuredTool = primaryCall == null || config == null ? null : config.tool(primaryCall.name());
             ExpressionBlockEvaluator compiler = new ExpressionBlockEvaluator();
             runWhen = expression(action.runWhen(), compiler);
             assertion = expression(action.assertion(), compiler);
@@ -93,5 +103,8 @@ public final class CompiledExecutionPlan {
         public UnifiedTemplateEngine.CompiledTemplate expected() { return expected; }
         public UnifiedTemplateEngine.CompiledTemplate actual() { return actual; }
         public RetryCondition.CompiledCondition retryWhen() { return retryWhen; }
+        public FlowDefinition flow() { return flow; }
+        /** Resolved immutable Tool identity, null for built-ins, calls, and standalone plans. */
+        public ToolConfig configuredTool() { return configuredTool; }
     }
 }

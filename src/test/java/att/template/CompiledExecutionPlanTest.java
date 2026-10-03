@@ -1,6 +1,8 @@
 package att.template;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import att.core.*;
 
 import java.nio.file.Paths;
 import java.util.Collections;
@@ -10,12 +12,15 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.nio.file.Path;
+import java.nio.file.Files;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class CompiledExecutionPlanTest {
+    @TempDir Path tempDir;
     @Test void compilesOrderedActionsCallsConditionsAssertionsAndRetryPredicate() {
         Map<String, Object> raw = new LinkedHashMap<String, Object>();
         raw.put("type", "tool");
@@ -62,5 +67,44 @@ class CompiledExecutionPlanTest {
             for (Future<String> result : results) assertEquals("fixture.lookup:${CASE.input}", result.get());
         } finally { workers.shutdownNow(); }
         assertEquals(64L, plan.evaluations());
+    }
+
+    @Test void sharedRunnerKeepsConcurrentIterationContextsIndependentAndMatchesUncompiledResults() throws Exception {
+        Map<String,Object> assign = new LinkedHashMap<String,Object>();
+        assign.put("type", "assign"); assign.put("name", "copy"); assign.put("expression", "${CASE.value}");
+        Map<String,Object> check = new LinkedHashMap<String,Object>();
+        check.put("type", "assert"); check.put("assert", "${ACTIONS.copy.output.value} == ${CASE.value}");
+        StageTemplate template = new StageTemplate("shared", tempDir,
+                java.util.Arrays.asList(new TemplateAction("copy", assign), new TemplateAction("check", check)));
+        CompiledExecutionPlan plan = CompiledExecutionPlan.compile(template, null);
+        UnifiedTemplateEngine sharedEngine = new UnifiedTemplateEngine(null);
+        StageTemplateRunner compiledRunner = new StageTemplateRunner(sharedEngine, null, new RenderPlanCache(), plan);
+        StageTemplateRunner ordinaryRunner = new StageTemplateRunner(new UnifiedTemplateEngine(null));
+        java.util.concurrent.ExecutorService workers = Executors.newFixedThreadPool(8);
+        try {
+            java.util.List<Future<String>> outcomes = new java.util.ArrayList<Future<String>>();
+            for (int i=0;i<32;i++) {
+                final int value=i;
+                outcomes.add(workers.submit(() -> {
+                    Path caseDir=tempDir.resolve("case-"+value); Files.createDirectories(caseDir);
+                    TestCase test=new TestCase(2,"g","s","TC"+value,Collections.<String>emptyList(),
+                            Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
+                    CaseRuntimeContext context=new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
+                    context.put("CASE.value", value);
+                    context.beginStage(new StageCaseData("shared","shared",Collections.<String,Object>emptyMap()),"shared",tempDir);
+                    java.util.List<ValidationResult> actual=compiledRunner.execute("LOAD",template,context,
+                            new CaseExecutionLog(caseDir.resolve("case.log")));
+                    if (actual.get(1).status()!=ResultStatus.PASS) throw new AssertionError("compiled result: "+actual.get(1).status());
+                    Path baselineDir=tempDir.resolve("baseline-"+value); Files.createDirectories(baselineDir);
+                    CaseRuntimeContext baseline=new CaseRuntimeContext(test,baselineDir,"R",tempDir,baselineDir.resolve("case.log"));
+                    baseline.put("CASE.value",value);
+                    baseline.beginStage(new StageCaseData("shared","shared",Collections.<String,Object>emptyMap()),"shared",tempDir);
+                    java.util.List<ValidationResult> expected=ordinaryRunner.execute("LOAD",template,baseline,
+                            new CaseExecutionLog(baselineDir.resolve("case.log")));
+                    return actual.get(1).status()+":"+expected.get(1).status()+":"+context.resolve("ACTIONS.copy.output.value");
+                }));
+            }
+            for(int i=0;i<outcomes.size();i++) assertEquals("PASS:PASS:"+i,outcomes.get(i).get());
+        } finally { workers.shutdownNow(); }
     }
 }

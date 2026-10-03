@@ -98,7 +98,6 @@ public final class LoadRunResources implements AutoCloseable {
         Map<String, Object> execution = new LinkedHashMap<String, Object>();
         execution.put("executionPlansCompiled", executionPlans.size());
         execution.put("actionPlansCompiled", actionPlans);
-        execution.put("executionPlanCacheHits", 0L);
         execution.put("actionEvaluations", evaluations);
         result.put("execution", java.util.Collections.unmodifiableMap(execution));
         return result;

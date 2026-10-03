@@ -101,7 +101,7 @@ public class StageTemplateRunner {
                 else if ("log".equals(type)) executeLog(action, context, log, output);
                 else if ("assign".equals(type)) executeAssign(action, context, log, output);
                 else if ("flow".equals(type)) {
-                    FlowExecutionResult flowResult = executeFlow(stageName, action, context, log, output, node);
+                    FlowExecutionResult flowResult = executeFlow(stageName, action, actionPlan, context, log, output, node);
                     toolStatus = flowResult.status;
                     actionDiagnostic = flowResult.diagnostic;
                 }
@@ -191,10 +191,10 @@ public class StageTemplateRunner {
         return compiled == null ? templateEngine.render(source, context, log) : templateEngine.render(compiled, context, log);
     }
 
-    private FlowExecutionResult executeFlow(String stageName, TemplateAction action, CaseRuntimeContext context,
+    private FlowExecutionResult executeFlow(String stageName, TemplateAction action, CompiledExecutionPlan.ActionPlan actionPlan, CaseRuntimeContext context,
                                              CaseExecutionLog log, Map<String, Object> output, Map<String, Object> node) throws Exception {
         if (flows == null) throw new IllegalStateException("Flow execution is unavailable");
-        FlowDefinition flow = flows.get(action.use());
+        FlowDefinition flow = actionPlan == null ? flows.get(action.use()) : actionPlan.flow();
         if (flow == null) throw new IllegalArgumentException("Unresolved Flow reference '" + action.use() + "'");
         List<ValidationResult> internal = new ArrayList<ValidationResult>();
         CaseRuntimeContext.FlowEvidence evidence = null;
