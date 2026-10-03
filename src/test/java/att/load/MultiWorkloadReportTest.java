@@ -83,7 +83,9 @@ class MultiWorkloadReportTest {
         long selected = 0L;
         for (Object value : mixes.values()) {
             @SuppressWarnings("unchecked") Map<String, Object> entry = (Map<String, Object>) value;
-            selected += ((Number) entry.get("selectedCount")).longValue();
+            long entrySelected = ((Number) entry.get("selectedCount")).longValue();
+            assertTrue(entrySelected > 0L);
+            selected += entrySelected;
             assertTrue(entry.containsKey("metrics"));
         }
         assertTrue(selected > 0L);

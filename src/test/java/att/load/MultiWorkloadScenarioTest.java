@@ -41,7 +41,7 @@ class MultiWorkloadScenarioTest {
                 + "    mix:\n"
                 + "      - id: browse\n        weight: 60\n        target: {type: template, id: BROWSE}\n        inputs: {operation: browse}\n"
                 + "      - id: purchase\n        weight: 30\n        target: {type: flow, id: PURCHASE}\n"
-                + "      - id: report\n        weight: 10\n        target: {type: tool, id: sample.getAcDate, arguments: {format: csv}}\n"
+                + "      - id: report\n        weight: 10\n        target: {type: tool, id: sample.getSeq, arguments: {seqLen: 8}}\n"
                 + "    load: {users: 4, duration: 1s}\n");
         LoadWorkload workload = scenario.workload();
         assertTrue(workload.mixed());
