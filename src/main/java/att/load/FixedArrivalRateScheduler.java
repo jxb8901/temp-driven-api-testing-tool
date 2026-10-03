@@ -5,7 +5,9 @@ import java.time.Instant;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
@@ -27,6 +29,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private final Runnable beforeSubmitHook;
     private final LoadSchedulerStartGate startGate;
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
+    private final Object admissionLock = new Object();
+    private final ConcurrentHashMap<String, TaskHandle> admittedTasks = new ConcurrentHashMap<String, TaskHandle>();
     private volatile ThreadPoolExecutor workers;
     private volatile boolean ownsWorkers = true;
     private volatile Thread controlThread;
@@ -95,7 +99,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             ownsWorkers = true;
         }
         controlThread = Thread.currentThread();
-        schedulerWakeups = new LinkedBlockingQueue<Boolean>();
+        schedulerWakeups = new ArrayBlockingQueue<Boolean>(1);
         long scheduledCount = 0L;
         long admittedTestdataOrdinal = 0L;
         try {
@@ -139,7 +143,9 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         try {
             if (beforeSubmitHook != null) beforeSubmitHook.run();
             metrics.recordWorkerQueueDepth(workers.getQueue().size());
-            workers.submit(() -> {
+            final TaskHandle taskHandle = new TaskHandle();
+            FutureTask<Void> task = new FutureTask<Void>(() -> {
+                boolean cancelledBeforeStart = taskHandle.begin();
                 long iterationStarted = timing.now();
                 metrics.recordSubmitLag(iterationStarted - dueAt, workers.getQueue().size());
                 att.core.ResultStatus status = att.core.ResultStatus.ERROR;
@@ -148,29 +154,33 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 try {
                     LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.started(runId, "arrivalRate", phase, id, null,
                             sequenceValue, dueAt, iterationStarted)));
-                    IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(runStartedAt), "arrivalRate", id,
-                            sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
-                    request = request.withTestdataOrdinal(testdataOrdinal)
-                            .withTestdataWaitAllowed(() -> !cancelled.get() && remainingRunMillis(runStartedAt) > 0L);
-                    if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
-                    Path evidenceRoot = evidenceOutputRoot(id);
-                    if (evidenceRoot != null) {
-                        request = request.withOutputDirectory(evidenceRoot)
-                                .withEvidenceRetention(true, false);
-                    } else if (evidenceStore != null) {
-                        request = request.withEvidenceRetention(false, false);
+                    if (cancelledBeforeStart) {
+                        errorType = "CANCELLED";
+                    } else {
+                        IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(runStartedAt), "arrivalRate", id,
+                                sequenceValue, phase, LoadSchedulerSupport.instant(iterationStarted), null, scenario.inputs(), null);
+                        request = request.withTestdataOrdinal(testdataOrdinal)
+                                .withTestdataWaitAllowed(() -> !cancelled.get() && remainingRunMillis(runStartedAt) > 0L);
+                        if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
+                        Path evidenceRoot = evidenceOutputRoot(id);
+                        if (evidenceRoot != null) {
+                            request = request.withOutputDirectory(evidenceRoot)
+                                    .withEvidenceRetention(true, false);
+                        } else if (evidenceStore != null) {
+                            request = request.withEvidenceRetention(false, false);
+                        }
+                        if (evidenceStore != null)
+                            request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence());
+                        IterationResult result = executor.execute(request);
+                        if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(id)) {
+                            result = result.materializeEvidence();
+                        } else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) {
+                            evidenceStore.releaseEvidence(id);
+                        }
+                        if (result.evidenceRef() == null) result.discardTransientWorkspace();
+                        if (result.testdataStopRequested()) cancelled.set(true);
+                        status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                     }
-                    if (evidenceStore != null)
-                        request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence());
-                    IterationResult result = executor.execute(request);
-                    if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(id)) {
-                        result = result.materializeEvidence();
-                    } else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) {
-                        evidenceStore.releaseEvidence(id);
-                    }
-                    if (result.evidenceRef() == null) result.discardTransientWorkspace();
-                    if (result.testdataStopRequested()) cancelled.set(true);
-                    status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                 } catch (RuntimeException error) {
                     if (evidenceStore != null && !evidenceStore.claimFailureEvidence(id)) evidenceStore.releaseEvidence(id);
                     status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR";
@@ -182,15 +192,38 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                                 sequenceValue, dueAt, iterationStarted, completedAt, status, errorType, evidence)));
                     } finally {
                         inFlight.decrementAndGet();
+                        admittedTasks.remove(id, taskHandle);
                         schedulerWakeups.offer(Boolean.TRUE);
                         synchronized (completionMonitor) { completionMonitor.notifyAll(); }
                     }
                 }
+                return null;
             });
+            taskHandle.future = task;
+            synchronized (admissionLock) {
+                if (cancelled.get()) {
+                    inFlight.decrementAndGet();
+                    signalWorkerChange();
+                    return;
+                }
+                admittedTasks.put(id, taskHandle);
+                try { workers.execute(task); }
+                catch (RejectedExecutionException rejected) {
+                    admittedTasks.remove(id, taskHandle);
+                    inFlight.decrementAndGet();
+                    signalWorkerChange();
+                }
+            }
         } catch (RejectedExecutionException rejected) {
             inFlight.decrementAndGet();
-            schedulerWakeups.offer(Boolean.TRUE);
+            signalWorkerChange();
         }
+    }
+
+    private void signalWorkerChange() {
+        BlockingQueue<Boolean> wakeups = schedulerWakeups;
+        if (wakeups != null) wakeups.offer(Boolean.TRUE);
+        synchronized (completionMonitor) { completionMonitor.notifyAll(); }
     }
 
     private LoadEvent tag(LoadEvent event) {
@@ -270,8 +303,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     }
     private void waitForWorkers() throws InterruptedException {
         ExecutorService value = workers;
-        if (value == null) return;
-        if (ownsWorkers) {
+        if (value != null && ownsWorkers) {
             value.shutdown();
             try { if (!value.awaitTermination(30L, TimeUnit.SECONDS)) value.shutdownNow(); }
             catch (InterruptedException interrupted) {
@@ -279,11 +311,12 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 Thread.interrupted();
             }
         }
-        else synchronized (completionMonitor) {
-            try { while (inFlight.get() > 0) completionMonitor.wait(); }
-            catch (InterruptedException interrupted) {
-                if (!cancelled.get()) throw interrupted;
-                Thread.interrupted();
+        synchronized (completionMonitor) {
+            while (inFlight.get() > 0) {
+                try { completionMonitor.wait(); }
+                catch (InterruptedException interrupted) {
+                    if (!cancelled.get()) throw interrupted;
+                }
             }
         }
     }
@@ -291,6 +324,9 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         cancelled.set(true);
         Thread control = controlThread;
         if (control != null) control.interrupt();
+        synchronized (admissionLock) {
+            for (TaskHandle task : admittedTasks.values()) task.cancel();
+        }
         if (ownsWorkers) shutdown();
         synchronized (completionMonitor) { completionMonitor.notifyAll(); }
     }
@@ -305,6 +341,16 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         }
     }
     private static String safe(String value) { return value == null ? "default" : value.replaceAll("[^A-Za-z0-9_.-]", "_"); }
+    private static final class TaskHandle {
+        private FutureTask<Void> future;
+        private boolean started;
+        private boolean cancelledBeforeStart;
+        synchronized boolean begin() { started = true; return cancelledBeforeStart; }
+        synchronized void cancel() {
+            if (started) future.cancel(true);
+            else cancelledBeforeStart = true;
+        }
+    }
     private static final class NamedFactory implements ThreadFactory {
         private final String prefix; private final AtomicLong index = new AtomicLong();
         NamedFactory(String prefix) { this.prefix = prefix; }

@@ -10,7 +10,6 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -203,12 +202,10 @@ public final class LoadRunCoordinator implements AutoCloseable {
         for (LoadWorkload workload : scenario.workloads())
             slots += workload.model() == LoadScenario.Model.CLOSED ? workload.users() : workload.maxConcurrent();
         int capacity = (int) Math.min(Integer.MAX_VALUE, Math.max(1L, slots));
-        // IterationExecutor is synchronous and can block on SUT I/O. Keep one
-        // execution slot per configured VU/concurrent arrival while sharing a
-        // single bounded pool across workloads.
-        int threads = capacity;
-        return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<Runnable>(capacity), new NamedFactory("att-load-worker"));
+        // IterationExecutor is synchronous and may block on target I/O. Grow
+        // workers on demand to the configured aggregate concurrency ceiling.
+        return LoadWorkerPool.create(LoadWorkerPool.coreSize(capacity), capacity,
+                new NamedFactory("att-load-worker"));
     }
 
     private static final class NamedFactory implements ThreadFactory {

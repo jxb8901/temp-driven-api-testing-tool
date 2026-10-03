@@ -24,7 +24,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -314,26 +313,27 @@ class FixedArrivalRateSchedulerTest {
     void sharedWorkerCancellationDrainsAdmittedArrivalIterationsBeforeReturning() throws Exception {
         LoadScenario scenario = scenario(1000.0, 0L, 0L, 10_000L, 0L, 2);
         CountDownLatch entered = new CountDownLatch(2);
+        CountDownLatch interrupted = new CountDownLatch(2);
         CountDownLatch release = new CountDownLatch(1);
         List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
         LoadIterationRunner runner = request -> {
             entered.countDown();
-            awaitUninterruptibly(release);
+            try { release.await(); }
+            catch (InterruptedException cancelled) { interrupted.countDown(); }
             return result(request.iterationId());
         };
         FixedArrivalRateScheduler scheduler = new FixedArrivalRateScheduler(scenario, runner, "run-26-shared-cancel",
                 events::add, LoadSchedulerTiming.system());
-        ThreadPoolExecutor sharedWorkers = new ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<Runnable>(2));
+        ThreadPoolExecutor sharedWorkers = LoadWorkerPool.create(1, 2,
+                runnable -> new Thread(runnable, "shared-arrival-test-worker"));
+        assertEquals(0, sharedWorkers.getPoolSize(), "the shared pool must start lazily");
         scheduler.useSharedWorkers(sharedWorkers);
         ExecutorService control = Executors.newSingleThreadExecutor();
         Future<LoadRunResult> future = control.submit(scheduler::run);
         try {
             assertTrue(entered.await(5L, TimeUnit.SECONDS), "both admitted arrivals should enter the target");
             scheduler.cancel();
-            assertFalse(future.isDone(), "shared cancellation must wait for admitted iterations to finish");
-            assertEquals(0L, completionCount(events), "no blocked iteration can complete before release");
-            release.countDown();
+            assertTrue(interrupted.await(5L, TimeUnit.SECONDS), "cancellation must interrupt admitted arrival executions");
             LoadRunResult result = future.get(10L, TimeUnit.SECONDS);
             assertEquals(2L, result.metrics().longValue("completed"));
             assertEquals(2L, completionCount(events), "all admitted completions must be included before return");
@@ -350,15 +350,6 @@ class FixedArrivalRateSchedulerTest {
 
     private static long completionCount(List<LoadEvent> events) {
         synchronized (events) { return events.stream().filter(LoadEvent::completed).count(); }
-    }
-
-    private static void awaitUninterruptibly(CountDownLatch latch) {
-        boolean interrupted = false;
-        while (true) {
-            try { latch.await(); break; }
-            catch (InterruptedException ignored) { interrupted = true; }
-        }
-        if (interrupted) Thread.currentThread().interrupt();
     }
 
     private static LoadScenario scenario(double rate, long warmupMs, long rampUpMs, long durationMs,

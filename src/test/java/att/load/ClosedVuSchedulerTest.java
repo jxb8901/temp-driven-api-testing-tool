@@ -13,7 +13,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -120,6 +119,7 @@ class ClosedVuSchedulerTest {
         AtomicInteger inFlight = new AtomicInteger();
         AtomicInteger peakInFlight = new AtomicInteger();
         CountDownLatch allEntered = new CountDownLatch(users);
+        CountDownLatch interrupted = new CountDownLatch(users);
         CountDownLatch release = new CountDownLatch(1);
         LoadIterationRunner runner = request -> {
             virtualUsers.add(request.userId());
@@ -127,27 +127,32 @@ class ClosedVuSchedulerTest {
             int active = inFlight.incrementAndGet();
             peakInFlight.accumulateAndGet(active, Math::max);
             allEntered.countDown();
-            awaitUninterruptibly(release);
-            inFlight.decrementAndGet();
+            try { release.await(); }
+            catch (InterruptedException cancelled) {
+                interrupted.countDown();
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(cancelled);
+            } finally { inFlight.decrementAndGet(); }
             return result(request.iterationId(), ResultStatus.PASS);
         };
 
         ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "run-19-bounded",
                 (java.util.function.Consumer<LoadEvent>) null, LoadSchedulerTiming.system());
-        ThreadPoolExecutor sharedWorkers = new ThreadPoolExecutor(users, users, 0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<Runnable>(users));
+        ThreadPoolExecutor sharedWorkers = LoadWorkerPool.create(Math.min(4, users), users,
+                runnable -> new Thread(runnable, "shared-load-test-worker"));
+        assertEquals(0, sharedWorkers.getPoolSize(), "the bounded shared pool must start lazily");
+        assertTrue(sharedWorkers.getCorePoolSize() < users, "the pool core must stay below configured VUs");
         scheduler.useSharedWorkers(sharedWorkers);
         ExecutorService control = Executors.newSingleThreadExecutor();
         Future<LoadRunResult> future = control.submit(scheduler::run);
         try {
             assertTrue(allEntered.await(10L, TimeUnit.SECONDS), "every configured VU should enter the target concurrently");
             scheduler.cancel();
-            assertFalse(future.isDone(), "cancellation must drain admitted shared iterations");
-            release.countDown();
+            assertTrue(interrupted.await(10L, TimeUnit.SECONDS), "cancellation must interrupt admitted VU executions");
             LoadRunResult result = future.get(10L, TimeUnit.SECONDS);
             assertEquals(users, virtualUsers.size(), "every logical VU should start at least one iteration");
             assertEquals(users, peakInFlight.get(), "configured closed users must be concurrently active in the runner");
-            assertEquals(users, workerThreads.size(), "blocking iterations need one execution thread per configured VU");
+            assertTrue(workerThreads.size() <= users, "lazy worker growth must remain within configured VU capacity");
             assertEquals(users, result.metrics().longValue("completed"));
             assertEquals(0, inFlight.get());
         } finally {
@@ -160,14 +165,6 @@ class ClosedVuSchedulerTest {
         }
     }
 
-    private static void awaitUninterruptibly(CountDownLatch latch) {
-        boolean interrupted = false;
-        while (true) {
-            try { latch.await(); break; }
-            catch (InterruptedException ignored) { interrupted = true; }
-        }
-        if (interrupted) Thread.currentThread().interrupt();
-    }
 
     private static LoadScenario scenario(int users, long warmupMs, long rampUpMs, long durationMs,
                                          long rampDownMs, long thinkTimeMs) {
