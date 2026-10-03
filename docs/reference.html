@@ -2785,13 +2785,17 @@ remain separate from <code>vars</code>.</p>
 repeatedly executes its target and observes execution.thinkTime before
 starting the next iteration. thinkTime may be a duration or a {min, max}
 range.</p>
-<p>Coordinated workloads share a bounded worker executor. Closed virtual
-users remain scheduler state rather than owning one platform thread
-each; the scheduler blocks until the next VU or phase deadline or an
-iteration completion. Arrival-rate scheduling computes phase deadlines
-directly and waits for the next due arrival instead of polling every
-millisecond. Each workload still enforces its configured concurrency
-limit.</p>
+<p>Coordinated workloads share a bounded worker executor sized to the
+aggregate configured concurrency slots. Closed virtual users remain
+scheduler state rather than owning separate control threads; since
+iteration execution is synchronous and may block on target I/O, a worker
+slot remains available for every configured concurrent VU to preserve
+target-side concurrency. The scheduler blocks until the next VU or phase
+deadline or an iteration completion. Arrival-rate scheduling computes
+phase deadlines directly and waits for the next due arrival instead of
+polling every millisecond. Each workload still enforces its configured
+concurrency limit. Cancellation stops new admissions and drains admitted
+iterations before the result snapshot is finalized.</p>
 <p>Arrival-rate workloads use load.arrivalRate, positive
 load.maxConcurrent and overloadPolicy: drop. They schedule against
 absolute due times. Arrivals beyond maxConcurrent are recorded as

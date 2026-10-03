@@ -203,7 +203,10 @@ public final class LoadRunCoordinator implements AutoCloseable {
         for (LoadWorkload workload : scenario.workloads())
             slots += workload.model() == LoadScenario.Model.CLOSED ? workload.users() : workload.maxConcurrent();
         int capacity = (int) Math.min(Integer.MAX_VALUE, Math.max(1L, slots));
-        int threads = (int) Math.min(Math.max(1L, slots), Math.max(2, Runtime.getRuntime().availableProcessors() * 2));
+        // IterationExecutor is synchronous and can block on SUT I/O. Keep one
+        // execution slot per configured VU/concurrent arrival while sharing a
+        // single bounded pool across workloads.
+        int threads = capacity;
         return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,
                 new LinkedBlockingQueue<Runnable>(capacity), new NamedFactory("att-load-worker"));
     }

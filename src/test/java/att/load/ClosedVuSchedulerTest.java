@@ -9,6 +9,14 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -104,25 +112,61 @@ class ClosedVuSchedulerTest {
     }
 
     @Test
-    void manyClosedVirtualUsersShareABoundedWorkerPool() throws Exception {
+    void manyClosedVirtualUsersPreserveConfiguredConcurrencyWithBoundedWorkers() throws Exception {
         int users = 100;
-        LoadScenario scenario = scenario(users, 0L, 0L, 1_500L, 0L, 10L);
+        LoadScenario scenario = scenario(users, 0L, 0L, 10_000L, 0L, 10L);
         Set<String> virtualUsers = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
         Set<String> workerThreads = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+        AtomicInteger inFlight = new AtomicInteger();
+        AtomicInteger peakInFlight = new AtomicInteger();
+        CountDownLatch allEntered = new CountDownLatch(users);
+        CountDownLatch release = new CountDownLatch(1);
         LoadIterationRunner runner = request -> {
             virtualUsers.add(request.userId());
             workerThreads.add(Thread.currentThread().getName());
-            try { Thread.sleep(2L); }
-            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            int active = inFlight.incrementAndGet();
+            peakInFlight.accumulateAndGet(active, Math::max);
+            allEntered.countDown();
+            awaitUninterruptibly(release);
+            inFlight.decrementAndGet();
             return result(request.iterationId(), ResultStatus.PASS);
         };
 
-        new ClosedVuScheduler(scenario, runner, "run-19-bounded",
-                (java.util.function.Consumer<LoadEvent>) null, LoadSchedulerTiming.system()).run();
+        ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "run-19-bounded",
+                (java.util.function.Consumer<LoadEvent>) null, LoadSchedulerTiming.system());
+        ThreadPoolExecutor sharedWorkers = new ThreadPoolExecutor(users, users, 0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<Runnable>(users));
+        scheduler.useSharedWorkers(sharedWorkers);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        Future<LoadRunResult> future = control.submit(scheduler::run);
+        try {
+            assertTrue(allEntered.await(10L, TimeUnit.SECONDS), "every configured VU should enter the target concurrently");
+            scheduler.cancel();
+            assertFalse(future.isDone(), "cancellation must drain admitted shared iterations");
+            release.countDown();
+            LoadRunResult result = future.get(10L, TimeUnit.SECONDS);
+            assertEquals(users, virtualUsers.size(), "every logical VU should start at least one iteration");
+            assertEquals(users, peakInFlight.get(), "configured closed users must be concurrently active in the runner");
+            assertEquals(users, workerThreads.size(), "blocking iterations need one execution thread per configured VU");
+            assertEquals(users, result.metrics().longValue("completed"));
+            assertEquals(0, inFlight.get());
+        } finally {
+            release.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(10L, TimeUnit.SECONDS);
+            sharedWorkers.shutdownNow();
+            sharedWorkers.awaitTermination(10L, TimeUnit.SECONDS);
+        }
+    }
 
-        assertEquals(users, virtualUsers.size(), "every logical VU should start at least one iteration");
-        assertTrue(workerThreads.size() <= Math.max(2, Runtime.getRuntime().availableProcessors() * 2),
-                "platform worker threads must be bounded independently of VU count");
+    private static void awaitUninterruptibly(CountDownLatch latch) {
+        boolean interrupted = false;
+        while (true) {
+            try { latch.await(); break; }
+            catch (InterruptedException ignored) { interrupted = true; }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
     }
 
     private static LoadScenario scenario(int users, long warmupMs, long rampUpMs, long durationMs,

@@ -80,7 +80,9 @@ public final class ClosedVuScheduler implements LoadScheduler {
         final Instant start = LoadSchedulerSupport.instant(startedAt);
         final long runSeed = LoadRandomization.effectiveSeed(scenario, runId);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, 0L);
-        int workerCount = Math.min(scenario.users(), Math.max(2, Runtime.getRuntime().availableProcessors() * 2));
+        // Iteration execution is synchronous and may block on SUT I/O, so worker
+        // capacity must preserve every configured closed VU's concurrent slot.
+        int workerCount = scenario.users();
         if (workers == null) {
             workers = new ThreadPoolExecutor(workerCount, workerCount, 0L, TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<Runnable>(Math.max(1, workerCount)),
@@ -125,14 +127,14 @@ public final class ClosedVuScheduler implements LoadScheduler {
                     user.running = true;
                     inFlight++;
                 }
-                if (cancelled.get()) break;
+                if (cancelled.get() && inFlight == 0) break;
                 if (elapsed >= LoadPhase.totalMs(scenario) && inFlight == 0) break;
                 long next = nextWakeAt(users, now, elapsed, active, startedAt, inFlight);
-                long wait = Math.max(1L, next - now);
+                long wait = cancelled.get() && inFlight > 0 ? Long.MAX_VALUE : Math.max(1L, next - now);
                 VuCompletion arrived;
                 try { arrived = timing.await(completions, wait); }
                 catch (InterruptedException interrupted) {
-                    if (cancelled.get()) break;
+                    if (cancelled.get()) continue;
                     throw interrupted;
                 }
                 if (arrived != null) {

@@ -279,7 +279,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             }
         }
         else synchronized (completionMonitor) {
-            try { while (inFlight.get() > 0 && !cancelled.get()) completionMonitor.wait(); }
+            try { while (inFlight.get() > 0) completionMonitor.wait(); }
             catch (InterruptedException interrupted) {
                 if (!cancelled.get()) throw interrupted;
                 Thread.interrupted();

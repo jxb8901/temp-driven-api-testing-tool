@@ -70,7 +70,7 @@ Bootstrap expression 可使用已初始化的 `EXEC.RUN_ID`、`EXEC.ID`、`EXEC.
 
 Closed workload 使用正整數 load.users。每個穩定 virtual user 重複執行固定 target，並在下一次 iteration 前遵守 execution.thinkTime。thinkTime 可設 duration 或 {min, max} range。
 
-協調執行的 workloads 共用有界 worker executor。Closed virtual user 以 scheduler state 表示，不會各自佔用一條 platform thread；scheduler 會阻塞至下一個 VU/phase deadline 或 iteration 完成。Arrival-rate scheduler 直接計算 phase deadline，並等待下一個 due arrival，無需每毫秒 polling。每個 workload 仍會套用自己的 concurrency 上限。
+協調執行的 workloads 共用有界 worker executor，其大小按各 workload 設定的 concurrency slots 總數計算。Closed virtual user 以 scheduler state 表示，不會各自佔用獨立 control thread；由於 iteration 執行是同步操作，可能因 target I/O 阻塞，因此會為每個已設定的併發 VU 保留 worker slot，以維持 target 端併發量。Scheduler 會阻塞至下一個 VU/phase deadline 或 iteration 完成。Arrival-rate scheduler 直接計算 phase deadline，並等待下一個 due arrival，無需每毫秒 polling。每個 workload 仍會套用自己的 concurrency 上限。Cancellation 會停止新 iteration admission，並等待已 admission 的 iteration 完成後才建立最終結果 snapshot。
 
 Arrival-rate workload 使用 load.arrivalRate、正整數 load.maxConcurrent 與 overloadPolicy: drop。Scheduler 依絕對 due time 排程。超過 maxConcurrent 的 arrival 記為 generator drop；不排隊，也不算 SUT error。Arrival-rate 沒有持續 USER_ID，也不能配置 thinkTime。
 
