@@ -490,11 +490,22 @@ public class UnifiedTemplateEngine {
                                                             String invocationId, String actionId, Long timeoutMs,
                                                             String saveAs, String saveFormat, boolean overwrite,
                                                             boolean bypassCache) throws Exception {
+        return executeToolAttempt(parsed, context, log, invocationId, actionId, timeoutMs, saveAs, saveFormat,
+                overwrite, bypassCache, null, null);
+    }
+
+    /** Executes a compiled primary call against Load-run-resolved immutable Tool/helper identities. */
+    public att.exec.ToolInvocationResult executeToolAttempt(ToolCallParser.ParsedCall parsed,
+                                                            CaseRuntimeContext context, CaseExecutionLog log,
+                                                            String invocationId, String actionId, Long timeoutMs,
+                                                            String saveAs, String saveFormat, boolean overwrite,
+                                                            boolean bypassCache, ToolConfig configuredTool,
+                                                            att.config.SshHelperConfig configuredHelper) throws Exception {
         if (parsed == null) throw new IllegalArgumentException("Compiled Tool call is required");
         DefaultBuiltInProvider.rejectRemoved(parsed.name());
         Map<String, Object> input = resolveArguments(parsed, context, log);
         Object result = executeResolvedCall(parsed.name(), input, context, log, invocationId, true, actionId,
-                timeoutMs, saveAs, saveFormat, overwrite, bypassCache);
+                timeoutMs, saveAs, saveFormat, overwrite, bypassCache, configuredTool, configuredHelper);
         return (att.exec.ToolInvocationResult) result;
     }
 
@@ -535,15 +546,26 @@ public class UnifiedTemplateEngine {
                                        CaseExecutionLog log, String invocationId, boolean attempt, String actionId,
                                        Long timeoutMs, String saveAs, String saveFormat,
                                        boolean overwrite, boolean bypassCache) throws Exception {
+        return executeResolvedCall(name, input, context, log, invocationId, attempt, actionId, timeoutMs,
+                saveAs, saveFormat, overwrite, bypassCache, null, null);
+    }
+
+    private Object executeResolvedCall(String name, Map<String, Object> input, CaseRuntimeContext context,
+                                       CaseExecutionLog log, String invocationId, boolean attempt, String actionId,
+                                       Long timeoutMs, String saveAs, String saveFormat,
+                                       boolean overwrite, boolean bypassCache, ToolConfig boundTool,
+                                       att.config.SshHelperConfig boundHelper) throws Exception {
         CaseRuntimeContext.MetadataScope scope = metadataScope(name, context);
-        try { return executeResolvedCallScoped(name, input, context, log, invocationId, attempt, actionId, timeoutMs, saveAs, saveFormat, overwrite, bypassCache); }
+        try { return executeResolvedCallScoped(name, input, context, log, invocationId, attempt, actionId,
+                timeoutMs, saveAs, saveFormat, overwrite, bypassCache, boundTool, boundHelper); }
         finally { scope.close(); }
     }
 
     private Object executeResolvedCallScoped(String name, Map<String, Object> input, CaseRuntimeContext context,
                                        CaseExecutionLog log, String invocationId, boolean attempt, String actionId,
                                        Long timeoutMs, String saveAs, String saveFormat,
-        boolean overwrite, boolean bypassCache) throws Exception {
+        boolean overwrite, boolean bypassCache, ToolConfig boundTool,
+        att.config.SshHelperConfig boundHelper) throws Exception {
         if (name.startsWith("db.")) {
             if (attempt) return executeDbToolCall(name, input, context, log, invocationId, timeoutMs);
             return executeDbResolvedCall(name, input, context, log, invocationId);
@@ -575,16 +597,19 @@ public class UnifiedTemplateEngine {
             return attempt ? builtInAttempt(name, invocationId, input, output, context, saveAs, overwrite, started, effectiveTimeout) : output;
         }
         if (toolInvoker == null) throw new IllegalStateException("Configured Tool invocation is unavailable: " + name);
-        ToolConfig configured = toolInvoker.tool(name);
+        ToolConfig configured = boundTool == null ? toolInvoker.tool(name) : boundTool;
         if (configured != null && configured.callBacked()) {
-            long effectiveTimeout = toolInvoker.effectiveTimeoutMs(configured.key(), timeoutMs);
+            long effectiveTimeout = toolInvoker.effectiveTimeoutMs(configured, timeoutMs);
             return executeCallBackedTool(configured, input, context, log, invocationId, attempt, effectiveTimeout, bypassCache);
         }
         if (log == null) {
             throw new IllegalStateException("Case execution log is required for process Tool invocation");
         }
         att.exec.ToolInvocationResult result = attempt
-                ? toolInvoker.invokeAttempt(invocationId, name, input, context, log, timeoutMs, saveAs, overwrite)
+                ? (boundTool == null
+                    ? toolInvoker.invokeAttempt(invocationId, name, input, context, log, timeoutMs, saveAs, overwrite)
+                    : toolInvoker.invokeAttempt(invocationId, name, input, context, log, timeoutMs, saveAs, overwrite,
+                            boundTool, boundHelper))
                 : toolInvoker.invokeAttempt(invocationId, name, input, context, log, null, "", false);
         return attempt ? result : result.output();
     }

@@ -4,6 +4,7 @@ import att.flow.FlowDefinition;
 import att.flow.FlowRegistry;
 import att.config.FrameworkConfig;
 import att.config.ToolConfig;
+import att.config.SshHelperConfig;
 
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -75,12 +76,15 @@ public final class CompiledExecutionPlan {
         private final RetryCondition.CompiledCondition retryWhen;
         private final FlowDefinition flow;
         private final ToolConfig configuredTool;
+        private final SshHelperConfig configuredSshHelper;
 
         private ActionPlan(TemplateAction action, ToolCallParser parser, FlowRegistry flows, FrameworkConfig config) {
             primaryCall = "tool".equalsIgnoreCase(action.type()) && !action.call().trim().isEmpty()
                     ? parser.parseCompiled(action.call()) : null;
             flow = "flow".equalsIgnoreCase(action.type()) && flows != null ? flows.get(action.use()) : null;
             configuredTool = primaryCall == null || config == null ? null : config.tool(primaryCall.name());
+            configuredSshHelper = configuredTool == null || configuredTool.sshHelper().isEmpty() || config == null
+                    ? null : config.sshHelper(configuredTool.sshHelper());
             ExpressionBlockEvaluator compiler = new ExpressionBlockEvaluator();
             runWhen = expression(action.runWhen(), compiler);
             assertion = expression(action.assertion(), compiler);
@@ -106,5 +110,6 @@ public final class CompiledExecutionPlan {
         public FlowDefinition flow() { return flow; }
         /** Resolved immutable Tool identity, null for built-ins, calls, and standalone plans. */
         public ToolConfig configuredTool() { return configuredTool; }
+        public SshHelperConfig configuredSshHelper() { return configuredSshHelper; }
     }
 }
