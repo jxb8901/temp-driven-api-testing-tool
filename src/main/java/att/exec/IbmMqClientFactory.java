@@ -90,6 +90,9 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
             try {
                 Class<?> messageClass = Class.forName("com.ibm.mq.MQMessage");
                 Object message = messageClass.getConstructor().newInstance();
+                // IBM MQ enforces this limit while receiving; check the
+                // reported length before allocating and copying its payload.
+                set(message, "maxMsgLength", Integer.valueOf(request.maxBytes()));
                 if (request.correlationId() != null) set(message, "correlationId", request.correlationId());
                 Class<?> optionsClass = Class.forName("com.ibm.mq.MQGetMessageOptions");
                 Object options = optionsClass.getConstructor().newInstance();
@@ -100,6 +103,7 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
                 if (request.correlationId() != null) set(options, "matchOptions", Integer.valueOf(constant(constants, "MQMO_MATCH_CORREL_ID", 0x00000002)));
                 invoke(queue, "get", new Class<?>[]{messageClass, optionsClass}, message, options);
                 int length = ((Number) invoke(message, "getDataLength", new Class<?>[0])).intValue();
+                if (length > request.maxBytes()) throw MqTransport.Exception.responseTooLarge(request.maxBytes());
                 byte[] payload = new byte[length];
                 invoke(message, "readFully", new Class<?>[]{byte[].class}, payload);
                 return new MqTransport.Message(bytes(message, "messageId"), bytes(message, "correlationId"), payload,
@@ -170,6 +174,7 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
         try { return String.valueOf(type.getField(name).get(null)); } catch (Exception ignored) { return fallback; }
     }
     private static MqTransport.Exception translate(Throwable error) {
+        if (error instanceof MqTransport.Exception) return (MqTransport.Exception) error;
         Throwable cause = error instanceof InvocationTargetException && ((InvocationTargetException) error).getCause() != null
                 ? ((InvocationTargetException) error).getCause() : error;
         Integer completion = number(cause, "completionCode");

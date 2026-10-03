@@ -205,8 +205,9 @@ public final class IterationExecutor implements LoadIterationRunner {
                 // included in retained sample/failure evidence.
                 mergeWorkspace(executionWorkspace, evidenceDirectory);
                 if (executionWorkspace != null) Files.createDirectories(executionWorkspace);
-                log.materialize(evidenceDirectory.resolve("case.log"));
-                log.materialize(executionWorkspace.resolve("case.log"));
+                Path evidenceLogPath = evidenceDirectory.resolve("case.log");
+                log.materialize(evidenceLogPath);
+                linkOrCopy(evidenceLogPath, executionWorkspace.resolve("case.log"));
             }
             catch (Exception ignored) { }
         }
@@ -216,11 +217,11 @@ public final class IterationExecutor implements LoadIterationRunner {
                 if (executionWorkspace != null) Files.createDirectories(executionWorkspace);
                 context.materializeResourceOutputs(executionWorkspace);
                 Path resourceOutput = executionWorkspace.resolve("resource-output.yaml");
-                if (Files.isRegularFile(resourceOutput)) Files.copy(resourceOutput, evidenceDirectory.resolve("resource-output.yaml"),
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                if (Files.isRegularFile(resourceOutput)) linkOrCopy(resourceOutput, evidenceDirectory.resolve("resource-output.yaml"));
                 byte[] caseYaml = new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8);
-                Files.write(evidenceDirectory.resolve("case.yaml"), caseYaml);
-                Files.write(executionWorkspace.resolve("case.yaml"), caseYaml);
+                Path evidenceCase = evidenceDirectory.resolve("case.yaml");
+                Files.write(evidenceCase, caseYaml);
+                linkOrCopy(evidenceCase, executionWorkspace.resolve("case.yaml"));
             } catch (Exception ignored) { }
         }
         boolean evidenceAvailable = retainEvidence && evidenceDirectory != null
@@ -290,11 +291,18 @@ public final class IterationExecutor implements LoadIterationRunner {
                 if (!targetPath.startsWith(destination.toAbsolutePath().normalize()))
                     throw new IOException("Load evidence path escapes its workspace");
                 if (Files.isDirectory(current, java.nio.file.LinkOption.NOFOLLOW_LINKS)) Files.createDirectories(targetPath);
-                else if (Files.isRegularFile(current, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                    Files.createDirectories(targetPath.getParent());
-                    Files.copy(current, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                }
+                else if (Files.isRegularFile(current, java.nio.file.LinkOption.NOFOLLOW_LINKS)) linkOrCopy(current, targetPath);
             }
+        }
+    }
+
+    /** Keep both public artifact paths while avoiding duplicate payload writes on filesystems with hard links. */
+    private void linkOrCopy(Path source, Path destination) throws IOException {
+        Files.createDirectories(destination.getParent());
+        Files.deleteIfExists(destination);
+        try { Files.createLink(destination, source); }
+        catch (IOException | UnsupportedOperationException unavailable) {
+            Files.copy(source, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

@@ -26,6 +26,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     private final Semaphore permits;
     private final Set<T> leased = Collections.newSetFromMap(new IdentityHashMap<T, Boolean>());
     private final AtomicInteger total = new AtomicInteger();
+    /** Slots reserved by borrowers whose factory calls are currently outside the pool monitor. */
+    private int creating;
     private final AtomicInteger waiting = new AtomicInteger();
     private final AtomicInteger timeoutCount = new AtomicInteger();
     private final AtomicInteger created = new AtomicInteger();
@@ -57,20 +59,36 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     }
 
     /** Creates the configured idle floor without borrowing or sharing a resource. */
-    public synchronized void ensureMinIdle(int minIdle) {
+    public void ensureMinIdle(int minIdle) {
         if (minIdle < 0 || minIdle > maxSize) throw new IllegalArgumentException("pool minIdle must be from 0 to maxSize");
-        if (closed) throw new IllegalStateException("resource pool is closed");
-        while (!closed && idle.size() < minIdle && total.get() < maxSize) {
+        while (true) {
+            synchronized (this) {
+                if (closed) throw new IllegalStateException("resource pool is closed");
+                if (idle.size() + creating >= minIdle || total.get() >= maxSize) return;
+                total.incrementAndGet();
+                creating++;
+            }
             T value;
             try { value = factory.get(); }
-            catch (RuntimeException error) { failures.incrementAndGet(); throw error; }
+            catch (RuntimeException error) {
+                synchronized (this) { creating--; total.decrementAndGet(); }
+                failures.incrementAndGet(); throw error;
+            }
             if (value == null) {
+                synchronized (this) { creating--; total.decrementAndGet(); }
                 failures.incrementAndGet();
                 throw new IllegalStateException("resource factory returned null");
             }
-            total.incrementAndGet();
-            created.incrementAndGet();
-            idle.offer(value);
+            synchronized (this) {
+                creating--;
+                if (closed) total.decrementAndGet();
+                else {
+                    created.incrementAndGet();
+                    if (!idle.offer(value)) total.decrementAndGet();
+                    else value = null;
+                }
+            }
+            if (value != null) closeQuietly(value);
         }
     }
 
@@ -88,27 +106,52 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             timeoutCount.incrementAndGet();
             throw new PoolTimeoutException("POOL_TIMEOUT", "Timed out waiting for a load resource");
         }
+        T value = null;
+        boolean reserved = false;
+        boolean reservationReleased = false;
         try {
             synchronized (this) {
                 if (closed) throw new IllegalStateException("resource pool is closed");
-                T value = idle.poll();
+                value = idle.poll();
                 if (value == null) {
-                    try { value = factory.get(); }
-                    catch (RuntimeException error) { failures.incrementAndGet(); throw error; }
-                    if (value == null) {
-                        failures.incrementAndGet();
-                        throw new IllegalStateException("resource factory returned null");
-                    }
+                    // The permit bounds active borrowers; reserve the pool slot
+                    // before releasing the monitor so concurrent cold growth
+                    // cannot exceed maxSize.
+                    if (total.get() >= maxSize) throw new IllegalStateException("resource pool capacity invariant violated");
                     total.incrementAndGet();
-                    created.incrementAndGet();
+                    creating++;
+                    reserved = true;
                 }
+            }
+            if (reserved) {
+                try { value = factory.get(); }
+                catch (RuntimeException error) { failures.incrementAndGet(); throw error; }
+                if (value == null) {
+                    failures.incrementAndGet();
+                    throw new IllegalStateException("resource factory returned null");
+                }
+            }
+            synchronized (this) {
+                if (reserved) { creating--; reservationReleased = true; }
+                if (closed) {
+                    if (reserved) total.decrementAndGet();
+                    if (value != null) closeQuietly(value);
+                    throw new IllegalStateException("resource pool is closed");
+                }
+                if (reserved) created.incrementAndGet();
                 leased.add(value);
                 return new Lease(value);
             }
         } catch (RuntimeException error) {
+            if (reserved && !reservationReleased) synchronized (this) {
+                creating--; total.decrementAndGet();
+            }
             permits.release();
             throw error;
         } catch (Exception error) {
+            if (reserved && !reservationReleased) synchronized (this) {
+                creating--; total.decrementAndGet();
+            }
             permits.release();
             throw error;
         }
@@ -159,7 +202,9 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             idle.drainTo(values);
             values.addAll(leased);
             leased.clear();
-            total.set(0);
+            // In-flight factories hold reserved slots and will observe closed
+            // when they publish; keep those reservations counted until then.
+            total.set(creating);
             permits.release(maxSize);
         }
         for (T value : values) closeQuietly(value);

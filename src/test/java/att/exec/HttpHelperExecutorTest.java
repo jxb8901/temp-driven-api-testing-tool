@@ -90,6 +90,7 @@ class HttpHelperExecutorTest {
             else if ("/xml".equals(path)) response = "<root><ok>true</ok></root>".getBytes(StandardCharsets.UTF_8);
             else if ("/status".equals(path)) response = "missing".getBytes(StandardCharsets.UTF_8);
             else if ("/status500".equals(path)) response = "server error".getBytes(StandardCharsets.UTF_8);
+            else if ("/oversize".equals(path)) response = new byte[HttpHelperExecutor.DEFAULT_MAX_RESPONSE_BYTES + 1];
             else response = request.length == 0 ? exchange.getRequestMethod().getBytes(StandardCharsets.UTF_8) : request;
             String responseType = "/json".equals(path) ? "application/json; charset=UTF-8"
                     : "/yaml".equals(path) ? "application/yaml; charset=UTF-8"
@@ -207,6 +208,19 @@ class HttpHelperExecutorTest {
             assertEquals(404, invocation.get("statusCode"));
             assertEquals("text/plain; charset=UTF-8", invocation.get("contentType"));
             assertEquals(7, invocation.get("responseBytes"));
+        }
+    }
+
+    @Test void rejectsDeclaredOversizedResponseAndRetainsTransportStatus() throws Exception {
+        String url = start();
+        FrameworkConfig config = configuration(url, null, null, 5000);
+        try (HttpHelperExecutor http = new HttpHelperExecutor(root, config)) {
+            ToolInvocationResult result = http.execute("paymentApi", "get", args("path", "/oversize"),
+                    context(), 5000L, "large-response", "text");
+            Map<?, ?> error = (Map<?, ?>) result.operationResult().outputMetadata().get("error");
+            assertEquals("HTTP_RESPONSE_TOO_LARGE", error.get("type"));
+            Map<?, ?> invocation = (Map<?, ?>) ((java.util.List<?>) ((Map<?, ?>) result.evidence().get("http")).get("invocations")).get(0);
+            assertEquals(200, invocation.get("statusCode"));
         }
     }
 

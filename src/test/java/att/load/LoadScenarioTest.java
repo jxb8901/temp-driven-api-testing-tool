@@ -433,6 +433,9 @@ class LoadScenarioTest {
             @SuppressWarnings("unchecked") Map<String, Object> reference = (Map<String, Object>) event.get("evidence");
             assertEquals("failures/" + result.executionId(), reference.get("workspace"));
             assertEquals("failures/" + result.executionId() + "/case.log", reference.get("caseLog"));
+            assertTrue(Files.isSameFile(expectedWorkspace.resolve("case.log"),
+                    runDirectory.resolve("failures").resolve(result.executionId()).resolve("case.log")),
+                    "execution and retained evidence paths should reference one canonical log file");
         } finally { resources.close(); }
     }
 
@@ -585,6 +588,7 @@ class LoadScenarioTest {
 
             IterationResult retained = result.materializeEvidence();
             assertNotNull(retained.evidenceRef());
+            assertTrue(Files.isSameFile(retained.outputDirectory().resolve("case.log"), retained.evidenceRef().caseLog()));
             String caseLog = new String(Files.readAllBytes(retained.evidenceRef().caseLog()), "UTF-8");
             assertTrue(caseLog.contains("ACTION verify"));
             assertTrue(caseLog.contains("LOAD OUTCOME"));

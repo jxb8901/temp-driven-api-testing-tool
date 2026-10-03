@@ -5,6 +5,7 @@ import java.util.Arrays;
 
 /** Small IBM MQ-neutral boundary used by MqHelperExecutor and its test doubles. */
 public final class MqTransport {
+    public static final int DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
     private MqTransport() {}
 
     public interface Factory {
@@ -60,12 +61,19 @@ public final class MqTransport {
     public static final class GetRequest {
         private final byte[] correlationId;
         private final int waitMs;
+        private final int maxBytes;
         public GetRequest(byte[] correlationId, int waitMs) {
+            this(correlationId, waitMs, DEFAULT_MAX_RESPONSE_BYTES);
+        }
+        public GetRequest(byte[] correlationId, int waitMs, int maxBytes) {
+            if (maxBytes < 1) throw new IllegalArgumentException("MQ max response bytes must be positive");
             this.correlationId = correlationId == null ? null : Arrays.copyOf(correlationId, correlationId.length);
             this.waitMs = waitMs;
+            this.maxBytes = maxBytes;
         }
         public byte[] correlationId() { return correlationId == null ? null : Arrays.copyOf(correlationId, correlationId.length); }
         public int waitMs() { return waitMs; }
+        public int maxBytes() { return maxBytes; }
     }
 
     public static final class Message {
@@ -102,6 +110,10 @@ public final class MqTransport {
         }
         public static Exception poolTimeout(Throwable cause) {
             return new Exception("MQ connection pool borrow timed out", null, null, "MQ_POOL_TIMEOUT", cause);
+        }
+        public static Exception responseTooLarge(int maxBytes) {
+            return new Exception("MQ reply exceeds maxResponseBytes=" + maxBytes,
+                    null, null, "MQ_RESPONSE_TOO_LARGE", null);
         }
         public Integer completionCode() { return completionCode; }
         public Integer reasonCode() { return reasonCode; }

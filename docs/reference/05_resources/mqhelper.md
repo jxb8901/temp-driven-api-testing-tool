@@ -56,6 +56,8 @@ MQ evidence may contain bounded transport metadata such as helper/instance ident
 
 Call-level responseFormat may override requestReply.responseFormat for receive/request; send does not parse a reply. Instance selection and pool limits belong to the descriptor. See [Appendix C](../appendices/migrations.md) for schema migration.
 
+MQ replies are capped at 10 MiB. The IBM MQ adapter configures the message receive limit before reading and reports `MQ_RESPONSE_TOO_LARGE` when a reply exceeds it. This is a transport-success size rejection and remains distinct from a missing reply or connection failure.
+
 See [Actions and Typed Values](../14_actions.md) for the shared typed-result contract.
 
 ### Descriptor configuration

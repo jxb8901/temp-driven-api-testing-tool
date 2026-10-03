@@ -185,6 +185,7 @@ public final class MqHelperExecutor {
                         received = null;
                     }
                     if (received != null) {
+                        ensureReplyWithinLimit(received);
                         String replyMessageId = id(received.messageId());
                         String correlationId = id(received.correlationId());
                         result.put("replyReceived", true);
@@ -221,6 +222,7 @@ public final class MqHelperExecutor {
                     phase = "mq.get";
                     MqTransport.Message received = replyQueue.get(new MqTransport.GetRequest(correlation, waitMs));
                     ensureWithinDeadline(deadlineNanos, "get message");
+                    ensureReplyWithinLimit(received);
                     result.put("received", true);
                     result.put("messageId", id(received == null ? null : received.messageId()));
                     result.put("receivedCorrelationId", id(received == null ? null : received.correlationId()));
@@ -399,6 +401,12 @@ public final class MqHelperExecutor {
         catch (Exception invalid) { throw new MqResultParseException(format, invalid); }
     }
 
+    private void ensureReplyWithinLimit(MqTransport.Message message) throws MqTransport.Exception {
+        byte[] payload = message == null ? null : message.payload();
+        if (payload != null && payload.length > MqTransport.DEFAULT_MAX_RESPONSE_BYTES)
+            throw MqTransport.Exception.responseTooLarge(MqTransport.DEFAULT_MAX_RESPONSE_BYTES);
+    }
+
     private static final class MqResultParseException extends Exception {
         private MqResultParseException(String format, Throwable cause) {
             super("MQ reply body is not valid " + format, cause);
@@ -524,7 +532,9 @@ public final class MqHelperExecutor {
         Map<String, Object> detail = new LinkedHashMap<String, Object>();
         if (error instanceof MqTransport.Exception) {
             MqTransport.Exception mq = (MqTransport.Exception) error;
-            detail.put("type", "MQ_POOL_TIMEOUT".equals(mq.reason()) ? "MQ_POOL_TIMEOUT" : "MQ_ERROR"); detail.put("message", safe(error, helper));
+            String type = "MQ_POOL_TIMEOUT".equals(mq.reason()) ? "MQ_POOL_TIMEOUT"
+                    : "MQ_RESPONSE_TOO_LARGE".equals(mq.reason()) ? "MQ_RESPONSE_TOO_LARGE" : "MQ_ERROR";
+            detail.put("type", type); detail.put("message", safe(error, helper));
             if (mq.completionCode() != null) detail.put("completionCode", mq.completionCode());
             if (mq.reasonCode() != null) detail.put("reasonCode", mq.reasonCode());
             if (mq.reason() != null) detail.put("reason", mq.reason());

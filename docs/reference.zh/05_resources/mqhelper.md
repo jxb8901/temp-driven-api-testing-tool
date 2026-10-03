@@ -56,6 +56,8 @@ MQ evidence 可包含有界 transport metadata，例如 helper/instance identity
 
 Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFormat；send 不解析 reply。Instance selection 與 pool limits 屬於 descriptor。Schema migration 見 [Appendix C](../appendices/migrations.md)。
 
+MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive limit，超限時回報 `MQ_RESPONSE_TOO_LARGE`。這是 transport 成功後的 size rejection，與 reply 遺失或 connection failure 分開處理。
+
 共用 typed-result 契約見[Action 與型別化值](../14_actions.md)。
 
 ### Descriptor configuration
