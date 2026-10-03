@@ -2726,6 +2726,12 @@ execution</td>
 </tr>
 </tbody>
 </table>
+<p>ATT snapshots each iteration's input map once as a deeply immutable
+tree. Request metadata copies reuse that snapshot, and the Load adapter
+passes its nested values through into the per-iteration
+<code>EXEC.INPUT</code> map without copying them again. A later change
+to the caller's source map cannot affect a started iteration, and
+separate iterations do not share their input snapshots.</p>
 <h4 id="testdata-imports-and-workload-scopes">Testdata imports and
 workload scopes</h4>
 <p>The environment profile contributes the shared <code>testdata</code>

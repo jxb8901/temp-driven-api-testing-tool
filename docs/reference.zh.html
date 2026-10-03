@@ -2478,6 +2478,11 @@ target，不是 transaction mix。</p>
 </tr>
 </tbody>
 </table>
+<p>ATT 會在每個 iteration boundary 將 inputs map snapshot 一次，形成深層
+immutable tree。複製 request metadata 時會重用這個 snapshot；Load
+adapter 會將巢狀 value 直接傳入該 iteration 的 <code>EXEC.INPUT</code>
+map，不再複製巢狀內容。開始 iteration 後，caller 修改來源 map 不會影響該
+iteration；不同 iteration 也不會共用 input snapshot。</p>
 <h4 id="testdata-imports-與-workload-scope">Testdata Imports 與 Workload
 Scope</h4>
 <p>Environment profile 提供共享的 <code>testdata</code> descriptor

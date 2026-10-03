@@ -128,18 +128,33 @@ public final class TestdataInputResolver {
     public Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
                                        String userId, String iterationId, Long testdataOrdinal,
                                        BooleanSupplier selectionWaitAllowed) throws Exception {
+        return resolve(mapping, context, userId, iterationId, testdataOrdinal, selectionWaitAllowed, false);
+    }
+
+    /** Resolves a Load request snapshot that was already deeply frozen by IterationRequest. */
+    public Map<String, Object> resolveFrozenLoadInput(Map<String, Object> mapping, CaseRuntimeContext context,
+                                                      String userId, String iterationId, Long testdataOrdinal,
+                                                      BooleanSupplier selectionWaitAllowed) throws Exception {
+        if (!load) throw new IllegalStateException("Frozen Load input resolution requires a Load resolver");
+        return resolve(mapping, context, userId, iterationId, testdataOrdinal, selectionWaitAllowed, true);
+    }
+
+    private Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
+                                        String userId, String iterationId, Long testdataOrdinal,
+                                        BooleanSupplier selectionWaitAllowed, boolean mappingFrozen) throws Exception {
         if (testdataOrdinal != null && testdataOrdinal.longValue() < 0L)
             throw new IllegalArgumentException("Testdata ordinal must be >= 0");
         currentSelectionWaitAllowed.set(selectionWaitAllowed == null ? () -> true : selectionWaitAllowed);
         try {
-            return resolveMapping(mapping, context, userId, iterationId, testdataOrdinal);
+            return resolveMapping(mapping, context, userId, iterationId, testdataOrdinal, mappingFrozen);
         } finally {
             currentSelectionWaitAllowed.remove();
         }
     }
 
     private Map<String, Object> resolveMapping(Map<String, Object> mapping, CaseRuntimeContext context,
-                                               String userId, String iterationId, Long testdataOrdinal) throws Exception {
+                                               String userId, String iterationId, Long testdataOrdinal,
+                                               boolean mappingFrozen) throws Exception {
         TestdataSyntax.references(mapping);
         String evidenceScope = load ? workloadId + "|" + String.valueOf(iterationId) : executionScope;
         if (!evidenceScope.equals(currentEvidenceScope.get())) {
@@ -150,6 +165,7 @@ public final class TestdataInputResolver {
             return Collections.emptyMap();
         }
         if (!containsMarker(mapping)) {
+            if (load && mappingFrozen) return mapping;
             return immutableMap((Map<?, ?>) deepCopy(mapping));
         }
         Map<String, Selection> selected = new LinkedHashMap<String, Selection>();
@@ -160,6 +176,11 @@ public final class TestdataInputResolver {
         if (previous != null) metadata.putAll(previous);
         for (Map.Entry<String, Selection> entry : selected.entrySet()) metadata.put(entry.getKey(), entry.getValue().metadata);
         currentEvidence.set(Collections.unmodifiableMap(metadata));
+        if (load) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resolvedInputs = (Map<String, Object>) resolved;
+            return att.load.LoadIsolation.deepImmutableMap(resolvedInputs);
+        }
         return immutableMap((Map<?, ?>) resolved);
     }
 
