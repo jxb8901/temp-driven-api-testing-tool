@@ -14,6 +14,7 @@ import att.flow.FlowRegistry;
 import att.template.StageTemplate;
 import att.template.StageTemplateLoader;
 import att.template.StageTemplateRunner;
+import att.template.CompiledExecutionPlan;
 import att.template.UnifiedTemplateEngine;
 import att.exec.ToolInvoker;
 import org.junit.jupiter.api.Test;
