@@ -2,7 +2,6 @@ package att.load;
 
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.Collections;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
 
@@ -58,6 +57,16 @@ public final class IterationRequest {
                              Path outputDirectory, boolean retainSuccessEvidence, boolean retainFailureEvidence,
                              String workloadId, boolean captureFailureLog,
                              BooleanSupplier testdataWaitAllowed, Long testdataOrdinal) {
+        this(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, captureFailureLog,
+                testdataWaitAllowed, testdataOrdinal, false);
+    }
+
+    private IterationRequest(String runId, Instant runStartedAt, String model, String iterationId, long iteration,
+                             String phase, Instant startedAt, String userId, Map<String, Object> inputs,
+                             Path outputDirectory, boolean retainSuccessEvidence, boolean retainFailureEvidence,
+                             String workloadId, boolean captureFailureLog,
+                             BooleanSupplier testdataWaitAllowed, Long testdataOrdinal, boolean inputsFrozen) {
         if (runId == null || runId.trim().isEmpty()) throw new IllegalArgumentException("Load runId must not be blank");
         if (!("closed".equals(model) || "arrivalRate".equals(model))) throw new IllegalArgumentException("LOAD.model must be closed or arrivalRate");
         if (iterationId == null || iterationId.trim().isEmpty()) throw new IllegalArgumentException("LOAD.iterationId must not be blank");
@@ -71,8 +80,7 @@ public final class IterationRequest {
         if (workloadId != null && workloadId.trim().isEmpty()) throw new IllegalArgumentException("LOAD.workloadId must not be blank");
         this.runId = runId; this.model = model; this.iterationId = iterationId; this.iteration = iteration; this.phase = phase;
         this.startedAt = startedAt; this.runStartedAt = runStartedAt == null ? startedAt : runStartedAt; this.userId = userId;
-        this.inputs = inputs == null || inputs.isEmpty() ? Collections.<String, Object>emptyMap()
-                : Collections.unmodifiableMap(LoadIsolation.deepCopyMap(inputs));
+        this.inputs = inputsFrozen ? inputs : LoadIsolation.deepImmutableMap(inputs);
         this.outputDirectory = outputDirectory;
         this.retainSuccessEvidence = retainSuccessEvidence;
         this.retainFailureEvidence = retainFailureEvidence;
@@ -102,36 +110,36 @@ public final class IterationRequest {
     }
     public IterationRequest withOutputDirectory(Path directory) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, directory,
-                directory != null, retainFailureEvidence, workloadId, captureFailureLog, testdataWaitAllowed, testdataOrdinal);
+                directory != null, retainFailureEvidence, workloadId, captureFailureLog, testdataWaitAllowed, testdataOrdinal, true);
     }
     public IterationRequest withFailureEvidence(boolean enabled) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, retainSuccessEvidence, enabled, workloadId, enabled, testdataWaitAllowed, testdataOrdinal);
+                outputDirectory, retainSuccessEvidence, enabled, workloadId, enabled, testdataWaitAllowed, testdataOrdinal, true);
     }
     public IterationRequest withEvidenceRetention(boolean success, boolean failure) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, success, failure, workloadId, failure, testdataWaitAllowed, testdataOrdinal);
+                outputDirectory, success, failure, workloadId, failure, testdataWaitAllowed, testdataOrdinal, true);
     }
     /** Enables bounded failure-log capture while leaving the post-outcome retention claim to the scheduler. */
     public IterationRequest withFailureLogCapture(boolean enabled) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
                 outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, enabled,
-                testdataWaitAllowed, testdataOrdinal);
+                testdataWaitAllowed, testdataOrdinal, true);
     }
     public IterationRequest withWorkloadId(String value) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
                 outputDirectory, retainSuccessEvidence, retainFailureEvidence, value, captureFailureLog,
-                testdataWaitAllowed, testdataOrdinal);
+                testdataWaitAllowed, testdataOrdinal, true);
     }
     public IterationRequest withTestdataWaitAllowed(BooleanSupplier value) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
                 outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, captureFailureLog,
-                value, testdataOrdinal);
+                value, testdataOrdinal, true);
     }
     public IterationRequest withTestdataOrdinal(long value) {
         return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
                 outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, captureFailureLog,
-                testdataWaitAllowed, Long.valueOf(value));
+                testdataWaitAllowed, Long.valueOf(value), true);
     }
     public String runId() { return runId; }
     public String model() { return model; }

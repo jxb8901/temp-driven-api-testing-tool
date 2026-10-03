@@ -778,16 +778,20 @@ class LoadScenarioTest {
         IterationRequest second = IterationRequest.closed("nested-run", "nested-b", 2, "STEADY", Instant.now(), "VU-2", source);
 
         Map<String, Object> firstPayload = (Map<String, Object>) first.inputs().get("payload");
-        ((Map<String, Object>) ((List<?>) firstPayload.get("items")).get(0)).put("value", "A-list");
-        firstPayload.put("value", "A");
         Map<String, Object> secondPayload = (Map<String, Object>) second.inputs().get("payload");
-        ((Map<String, Object>) ((List<?>) secondPayload.get("items")).get(0)).put("value", "B-list");
-        secondPayload.put("value", "B");
+        assertNotSame(firstPayload, secondPayload, "each request freezes its own input tree");
+        assertThrows(UnsupportedOperationException.class, () -> firstPayload.put("value", "runtime-change"));
+        assertThrows(UnsupportedOperationException.class, () -> ((List<Object>) firstPayload.get("items")).set(0, "runtime-change"));
+        assertThrows(UnsupportedOperationException.class, () -> ((Map<String, Object>) ((List<?>) firstPayload.get("items")).get(0))
+                .put("value", "runtime-change"));
 
-        assertEquals("original", sourcePayload.get("value"));
-        assertEquals("original-list", ((Map<?, ?>) sourceItems.get(0)).get("value"));
-        assertEquals("A", firstPayload.get("value"));
-        assertEquals("B", secondPayload.get("value"));
+        sourcePayload.put("value", "source-changed");
+        sourceItem.put("value", "source-list-changed");
+
+        assertEquals("source-changed", sourcePayload.get("value"));
+        assertEquals("source-list-changed", ((Map<?, ?>) sourceItems.get(0)).get("value"));
+        assertEquals("original", firstPayload.get("value"));
+        assertEquals("original", secondPayload.get("value"));
 
         LoadRunResources resources = new LoadRunResources(project, config);
         ExecutorService pool = Executors.newFixedThreadPool(2);
@@ -797,12 +801,15 @@ class LoadScenarioTest {
             Future<IterationResult> secondResult = pool.submit(() -> executor.execute(second));
             IterationResult a = firstResult.get(); IterationResult b = secondResult.get();
             assertEquals(ResultStatus.PASS, a.status()); assertEquals(ResultStatus.PASS, b.status());
-            assertEquals("A", a.context().resolve("EXEC.INPUT.payload.value"));
-            assertEquals("A-list", a.context().resolve("EXEC.INPUT.payload.items[0].value"));
-            assertEquals("B", b.context().resolve("EXEC.INPUT.payload.value"));
-            assertEquals("B-list", b.context().resolve("EXEC.INPUT.payload.items[0].value"));
-            assertEquals("original", sourcePayload.get("value"));
-            assertEquals("original-list", ((Map<?, ?>) sourceItems.get(0)).get("value"));
+            assertEquals("original", a.context().resolve("EXEC.INPUT.payload.value"));
+            assertEquals("original-list", a.context().resolve("EXEC.INPUT.payload.items[0].value"));
+            assertEquals("original", b.context().resolve("EXEC.INPUT.payload.value"));
+            assertEquals("original-list", b.context().resolve("EXEC.INPUT.payload.items[0].value"));
+            a.context().replaceInputValues(Collections.singletonMap("payload", Collections.singletonMap("value", "runtime-A")));
+            assertEquals("runtime-A", a.context().resolve("EXEC.INPUT.payload.value"));
+            assertEquals("original", b.context().resolve("EXEC.INPUT.payload.value"));
+            assertEquals("source-changed", sourcePayload.get("value"));
+            assertEquals("source-list-changed", ((Map<?, ?>) sourceItems.get(0)).get("value"));
         } finally {
             pool.shutdownNow();
             resources.close();
@@ -973,11 +980,18 @@ class LoadScenarioTest {
         Map<String, Object> inputs = new LinkedHashMap<String, Object>();
         inputs.put("inputs", "business-value");
         inputs.put("input", "ordinary-value");
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("value", "nested-business-value");
+        inputs.put("payload", payload);
+        IterationRequest request = IterationRequest.closed("run-inputs", "iteration-inputs", 1, "STEADY", Instant.now(), "VU-1", inputs);
         LoadExecutionContextAdapter.Prepared prepared = new LoadExecutionContextAdapter(project, config, target)
-                .prepare(IterationRequest.closed("run-inputs", "iteration-inputs", 1, "STEADY", Instant.now(), "VU-1", inputs),
+                .prepare(request,
                         "run-inputs-execution-1", temp.resolve("iteration-inputs"), temp.resolve("iteration-inputs/case.log"));
+        assertSame(request.inputs().get("payload"), prepared.testCase().caseData().get("payload"),
+                "the Load adapter must pass the frozen nested values through without another deep copy");
         assertEquals("business-value", prepared.context().resolve("EXEC.INPUT.inputs"));
         assertEquals("business-value", prepared.context().resolve("CASE.inputs"));
+        assertEquals("nested-business-value", prepared.context().resolve("EXEC.INPUT.payload.value"));
         assertNull(prepared.context().resolve("EXEC.INPUT.inputs.value"));
     }
 

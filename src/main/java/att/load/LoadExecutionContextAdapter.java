@@ -47,7 +47,10 @@ public final class LoadExecutionContextAdapter {
     }
 
     TestCase testCase(String caseId, Map<String, Object> inputs) {
-        Map<String, Object> data = inputs == null ? new LinkedHashMap<String, Object>() : LoadIsolation.deepCopyMap(inputs);
+        // IterationRequest owns the deeply frozen tree. Keep only this small
+        // mutable top-level adapter map for the synthesized caseName field.
+        Map<String, Object> data = inputs == null ? new LinkedHashMap<String, Object>()
+                : new LinkedHashMap<String, Object>(inputs);
         if (!data.containsKey("caseName")) data.put("caseName", "LOAD " + target.type() + " " + target.id());
         String rowId = caseId == null ? "iteration-validation" : caseId.replaceAll("[^A-Za-z0-9_.-]", "_");
         return new TestCase(1, "LOAD", target.type(), rowId, Collections.<String>emptyList(), data,
