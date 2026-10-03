@@ -74,6 +74,18 @@ Closed workload 使用正整數 load.users。每個穩定 virtual user 重複執
 
 Arrival-rate workload 使用 load.arrivalRate、正整數 load.maxConcurrent 與 overloadPolicy: drop。Scheduler 依絕對 due time 排程。超過 maxConcurrent 的 arrival 記為 generator drop；不排隊，也不算 SUT error。Arrival-rate 沒有持續 USER_ID，也不能配置 thinkTime。
 
+#### Pacing 與 resource pool sizing
+
+穩定 arrival rate 下，可使用 Little's law 估算平均同時處理中的 request 數：
+
+```text
+平均 concurrency ≈ arrival rate（requests/second）× 平均 response time（seconds）
+```
+
+例如 HTTP 每秒 20 個 request、平均 response time 為 1.5 秒，約需 30 條 concurrent connection，才不會先受 client pool 限制。HTTP 預設 `pool.maxConnections: 50`、`pool.maxConnectionsPerRoute: 20`；請按 workload 需要調整兩者，並確保 per-route 值不大於總數。另為 latency 變化及其他 route 留出 headroom，再查看 `resources.http` 的 active/idle/waiting/peak observations。Pool capacity 是 generator-side 上限，不代表應向未確認承載能力的 service 發送該流量。
+
+MQ request/reply 若每秒 10 個 request、平均 reply time 為 3 秒，同樣約需 30 條 leased connection。MQ 預設 `pool.maxSize: 20` 可能在 SUT 達到上限前先限制 workload；請將 `pool.maxSize` 設在預期 in-flight 數以上並預留適當 headroom。若 cold connection creation 會影響 ramp-up 測量，可設定 `minIdle`。同時查看 MQ waiting 與 timeout metrics，區分 pool pressure 和 SUT latency。負載變化時，請依觀察到的平均 latency 重新估算；tail latency 可用於 headroom 規劃，但不是公式中的平均值。
+
 duration 必填。warmup、rampUp、rampDown 預設為零。Warm-up 送出真實 traffic，但不計入 measured threshold aggregates。可選 seed 使 closed-VU think-time randomization 可重複。
 
 #### Load identity 與輸出路徑
