@@ -20,6 +20,17 @@ evidence:
     maxChars: 10000
 ~~~
 
+The HTTP connection pool defaults to 50 total connections and 20 per route. Size it for the expected in-flight Load concurrency; `maxConnectionsPerRoute` cannot exceed `maxConnections`.
+
+~~~yaml
+pool:
+  maxConnections: 50
+  maxConnectionsPerRoute: 40
+  connectionRequestTimeoutMs: 2000
+~~~
+
+`connectionRequestTimeoutMs` bounds how long an operation waits to lease a pooled connection. A short wait/timeout while service latency remains stable can indicate generator pool saturation; inspect the per-helper active/idle/waiting/peak metrics in Load output.
+
 Call http.<id>.get/post/request as the primary call of a type: tool Action. Response bytes are parsed at this boundary using call responseFormat, the helper default, or Content-Type when auto is selected. Supported response formats are auto, text, json, yaml and xml. The parsed native value is output.result. Optional evidence.output is a bounded human-readable snapshot and never changes that value.
 
 #### Request bodies and project-file Strings
