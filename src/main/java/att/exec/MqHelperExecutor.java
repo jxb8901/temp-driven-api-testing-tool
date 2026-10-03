@@ -400,7 +400,7 @@ public final class MqHelperExecutor {
         }
         try (java.io.InputStreamReader reader = new java.io.InputStreamReader(
                 message == null ? new java.io.ByteArrayInputStream(new byte[0]) : message.payloadStream(), charset)) {
-            return new ToolInvoker(projectRoot, config).parseOutput(reader, format);
+            return ToolInvoker.parseOutput(reader, format, config.xmlNamespaceMode());
         }
         catch (Exception invalid) { throw new MqResultParseException(format, invalid); }
     }

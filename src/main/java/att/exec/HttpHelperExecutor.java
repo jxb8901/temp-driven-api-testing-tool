@@ -439,7 +439,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
         }
         if ("text".equals(format)) return new String(bytes, charset);
         try (InputStreamReader reader = new InputStreamReader(new ByteArrayInputStream(bytes), charset)) {
-            return new ToolInvoker(projectRoot, config).parseOutput(reader, format);
+            return ToolInvoker.parseOutput(reader, format, config.xmlNamespaceMode());
         }
         catch (Exception invalidBody) { throw new HttpFailure("HTTP_RESULT_PARSE_ERROR", "HTTP response body is not valid " + format, invalidBody); }
     }

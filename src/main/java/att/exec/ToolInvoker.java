@@ -764,11 +764,17 @@ public class ToolInvoker {
     }
 
     public Object parseOutput(String text, String outputType) throws Exception {
-        return parseOutput(new StringReader(text), outputType);
+        if (!structured(outputType)) return text;
+        return parseOutput(new StringReader(text), outputType, config.xmlNamespaceMode());
     }
 
     /** Parse a typed result from a reader without first materializing the complete body as a String. */
-    public Object parseOutput(Reader reader, String outputType) throws Exception {
+    public static Object parseOutput(Reader reader, String outputType) throws Exception {
+        return parseOutput(reader, outputType, null);
+    }
+
+    /** Reader-based result parser with the same optional XML namespace projection policy as ToolInvoker. */
+    public static Object parseOutput(Reader reader, String outputType, String xmlNamespaceMode) throws Exception {
         if ("yaml".equalsIgnoreCase(outputType)) {
             synchronized (YamlSupport.parser()) {
                 Object loaded = YamlSupport.parser().load(reader);
@@ -776,7 +782,7 @@ public class ToolInvoker {
             }
         }
         if ("xml".equalsIgnoreCase(outputType)) {
-            return xmlToMap(new InputSource(reader));
+            return xmlToMap(new InputSource(reader), xmlNamespaceMode);
         }
         if ("json".equalsIgnoreCase(outputType)) {
             return att.validation.JsonSupport.mapper().readValue(reader, Object.class);
@@ -791,17 +797,13 @@ public class ToolInvoker {
     private Object parseOutput(Path file, String outputType) throws Exception {
         if ("json".equalsIgnoreCase(outputType)) try (java.io.InputStream input = Files.newInputStream(file)) { return att.validation.JsonSupport.mapper().readValue(input, Object.class); }
         if ("yaml".equalsIgnoreCase(outputType)) try (java.io.Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) { synchronized (YamlSupport.parser()) { Object loaded = YamlSupport.parser().load(reader); return loaded == null ? new LinkedHashMap<String, Object>() : loaded; } }
-        if ("xml".equalsIgnoreCase(outputType)) return xmlToMap(new InputSource(file.toUri().toString()));
+        if ("xml".equalsIgnoreCase(outputType)) return xmlToMap(new InputSource(file.toUri().toString()), config.xmlNamespaceMode());
         return parseOutput(new String(Files.readAllBytes(file), StandardCharsets.UTF_8), outputType);
     }
 
     private boolean structured(String outputType) { return "json".equalsIgnoreCase(outputType) || "yaml".equalsIgnoreCase(outputType) || "xml".equalsIgnoreCase(outputType); }
 
-    private Object xmlToMap(String xml) throws Exception {
-        return xmlToMap(new InputSource(new StringReader(xml)));
-    }
-
-    private Object xmlToMap(InputSource source) throws Exception {
+    private static Object xmlToMap(InputSource source, String xmlNamespaceMode) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -820,13 +822,13 @@ public class ToolInvoker {
             public void fatalError(org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException { throw e; }
         });
         Document document = builder.parse(source);
-        Object value = elementValue(document.getDocumentElement());
+        Object value = elementValue(document.getDocumentElement(), xmlNamespaceMode);
         if (!(value instanceof Map)) return value;
-        Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put("name", xmlName(document.getDocumentElement())); result.putAll((Map<String,Object>) value); return result;
+        Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put("name", xmlName(document.getDocumentElement(), xmlNamespaceMode)); result.putAll((Map<String,Object>) value); return result;
     }
 
     @SuppressWarnings("unchecked")
-    private Object elementValue(Node node) {
+    private static Object elementValue(Node node, String xmlNamespaceMode) {
         NodeList children = node.getChildNodes();
         Map<String, Object> map = new LinkedHashMap<String, Object>();
         Map<String, Object> attributes = new LinkedHashMap<String, Object>();
@@ -834,15 +836,15 @@ public class ToolInvoker {
         if (nodeAttributes != null) for (int i = 0; i < nodeAttributes.getLength(); i++) {
             Node attribute = nodeAttributes.item(i);
             if (attribute.getNodeName().startsWith("xmlns")) continue;
-            attributes.put(xmlName(attribute), attribute.getNodeValue());
+            attributes.put(xmlName(attribute, xmlNamespaceMode), attribute.getNodeValue());
         }
         StringBuilder text = new StringBuilder();
         Map<String, Object> grouped = new LinkedHashMap<String, Object>();
         for (int i = 0; i < children.getLength(); i++) {
             Node child = children.item(i);
             if (child.getNodeType() == Node.ELEMENT_NODE) {
-                String name = xmlName(child);
-                Object item = elementValue(child);
+                String name = xmlName(child, xmlNamespaceMode);
+                Object item = elementValue(child, xmlNamespaceMode);
                 Object existing = grouped.get(name);
                 if (existing == null) grouped.put(name, item);
                 else if (existing instanceof List) ((List<Object>) existing).add(item);
@@ -861,9 +863,9 @@ public class ToolInvoker {
         return map;
     }
 
-    private String xmlName(Node node) {
+    private static String xmlName(Node node, String xmlNamespaceMode) {
         String local = node.getLocalName() == null ? node.getNodeName() : node.getLocalName();
-        if ("ignore".equals(config.xmlNamespaceMode())) return local;
+        if ("ignore".equals(xmlNamespaceMode)) return local;
         String uri = node.getNamespaceURI();
         return "{" + (uri == null ? "" : uri) + "}" + local;
     }

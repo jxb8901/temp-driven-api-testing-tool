@@ -46,6 +46,12 @@ class ToolInvokerTest {
         assertTrue(json.get("decimal") instanceof java.math.BigDecimal);
     }
 
+    @Test void textResultParsingReturnsExistingStringWithoutCopying() throws Exception {
+        String text = new String(new char[4096]).replace('\0', 'x');
+        ToolInvoker invoker = new ToolInvoker(tempDir, new FrameworkConfig(null,null,null,"SIT",10000,null,null,null,null));
+        assertSame(text, invoker.parseOutput(text, "text"));
+    }
+
     @Test void preservesXmlNamespacesWhenConfigured() throws Exception {
         FrameworkConfig preserve = new FrameworkConfig(null,null,null,"SIT",10000,null,null,null,null,null,"","",null,null,1,"preserve");
         Map<?,?> xml = (Map<?,?>) new ToolInvoker(tempDir,preserve).parseOutput("<r:root xmlns:r=\"urn:r\"><r:item r:id=\"1\">A<b>B</b>C</r:item></r:root>","xml");
