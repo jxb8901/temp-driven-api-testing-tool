@@ -108,6 +108,14 @@ ATT 在 run root 寫入有界 load-summary.json/yaml 與 self-contained report/i
 
 Root thresholds 只套用於 aggregate run；workload thresholds 只套用於個別 workload，不會從 root 繼承。Threshold 失敗回傳 FAIL/exit 1。設定或 target 無效回傳 exit 2；runtime/infrastructure error 回傳 ERROR/exit 3。Generator drop 不屬於 SUT error。
 
+#### Render plan 與 payload snapshot
+
+Load workload scheduler 啟動前，ATT 會為每個可達的 Render payload glob 解析一次，並凍結該 run 匹配到的 UTF-8 source content 與已編譯的 reference/expression 結構。Run 進行中對 payload 的編輯、替換或新增 glob match 不影響該 run 的 iterations；下一次 Load run 會重新解析 package。一般 Run 與 Debug 每次 execution 使用新 plan，因此下一次 execution 會讀取編輯後的內容。
+
+每個 iteration 都會以自己的 Context 評估 Context reference、built-in call 及 external call。ATT 重用解析後的結構與 source text，不重用 dynamic rendered result；`seq.next()`、clock/random function 及 external call 等 stateful call 仍會在每次 iteration 執行。Render 在記憶體回傳 String，因此將 `ACTIONS.<id>.output.result` 傳給下游 action 不會建立中間 Render file。只有 operation 明確需要檔案時才使用 `EXEC.OUTPUT_DIR`。
+
+使用 `--profile` 時，`performance.json` 會記錄 `renderPlansCompiled`、`renderPlanCacheHits`、`renderPayloadResolutions`、`renderPayloadResolutionCacheHits`、`renderEvaluations`、`renderArtifactWrites` 與 `renderSourceBytes`。這些有界 run totals 分別顯示 source-plan 重用與每次 iteration 的 evaluation；`renderArtifactWrites` 為零，因為 Render 只回傳 String，不會自行寫入 artifact。
+
 #### CLI 與範例
 
 單一 workload 可用 --users、--arrival-rate、--warmup、--ramp-up、--duration、--ramp-down、--think-time、--max-concurrent 等 option 覆蓋對應 YAML。多 workload 使用未指定 workload 的 load-model override 會失敗。

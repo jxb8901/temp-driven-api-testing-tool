@@ -183,6 +183,79 @@ public class UnifiedTemplateEngine {
         return renderAuthoredText(text, context, log, true);
     }
 
+    /** Compiles authored Render source once; runtime values and calls remain iteration-scoped. */
+    public CompiledTemplate compileTemplate(String text) {
+        String source = text == null ? "" : text;
+        List<CompiledPart> parts = new ArrayList<CompiledPart>();
+        int cursor = 0;
+        while (cursor < source.length()) {
+            int contextStart = source.indexOf("${", cursor);
+            int callStart = source.indexOf("#{", cursor);
+            int fileStart = source.indexOf("&{", cursor);
+            int start = -1;
+            for (int candidate : new int[]{contextStart, callStart, fileStart})
+                if (candidate >= 0 && (start < 0 || candidate < start)) start = candidate;
+            if (start < 0) break;
+            if (start > cursor) parts.add(CompiledPart.literal(source.substring(cursor, start)));
+            int end = findToolEnd(source, start + 2);
+            if (end < 0) throw new ExpressionSyntaxException(start, source.length(), "'}' to close authored expression", "end of text");
+            String authored = source.substring(start, end + 1);
+            if (start == contextStart) {
+                String path = CaseRuntimeContext.requiredReferencePath(authored.substring(2, authored.length() - 1));
+                String reference = authored.substring(2, authored.length() - 1);
+                parts.add(CompiledPart.context(reference, path, CaseRuntimeContext.isOptionalReference(reference)));
+            } else if (start == fileStart) {
+                parts.add(CompiledPart.file(authored, authored.substring(2, authored.length() - 1)));
+            } else {
+                parts.add(CompiledPart.call(authored, expressionBlocks.compile(authored)));
+            }
+            cursor = end + 1;
+        }
+        if (cursor < source.length()) parts.add(CompiledPart.literal(source.substring(cursor)));
+        return new CompiledTemplate(parts);
+    }
+
+    /** Evaluates a compiled Render source against this iteration's Context and call services. */
+    public String render(CompiledTemplate template, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        StringBuilder output = new StringBuilder();
+        for (CompiledPart part : template.parts) {
+            if (part.kind == CompiledPart.LITERAL) output.append(part.source);
+            else if (part.kind == CompiledPart.CONTEXT) {
+                Object value = part.optional ? context.requireOptional(part.expression) : context.require(part.path);
+                output.append(value == null ? "" : String.valueOf(value));
+            } else if (part.kind == CompiledPart.FILE) {
+                String value = evaluateFile(part.path, context, log);
+                output.append(value == null ? "" : value);
+            } else {
+                Object value = evaluateBlock(part.compiled, part.expression, context, log);
+                if (value instanceof Map) throw new IllegalArgumentException("A typed Map cannot be interpolated into text; use an exact typed expression");
+                output.append(value == null ? "" : String.valueOf(value));
+            }
+        }
+        return output.toString();
+    }
+
+    /** Immutable authored source structure. No rendered value is retained here. */
+    public static final class CompiledTemplate {
+        private final List<CompiledPart> parts;
+        private CompiledTemplate(List<CompiledPart> parts) { this.parts = java.util.Collections.unmodifiableList(new ArrayList<CompiledPart>(parts)); }
+    }
+
+    private static final class CompiledPart {
+        static final int LITERAL = 0, CONTEXT = 1, FILE = 2, CALL = 3;
+        final int kind; final String source, expression, path; final boolean optional;
+        final ExpressionBlockEvaluator.CompiledExpression compiled;
+        private CompiledPart(int kind, String source, String expression, String path, boolean optional,
+                             ExpressionBlockEvaluator.CompiledExpression compiled) {
+            this.kind = kind; this.source = source; this.expression = expression; this.path = path;
+            this.optional = optional; this.compiled = compiled;
+        }
+        static CompiledPart literal(String value) { return new CompiledPart(LITERAL, value, null, null, false, null); }
+        static CompiledPart context(String expression, String path, boolean optional) { return new CompiledPart(CONTEXT, null, expression, path, optional, null); }
+        static CompiledPart file(String expression, String path) { return new CompiledPart(FILE, null, expression, path, false, null); }
+        static CompiledPart call(String expression, ExpressionBlockEvaluator.CompiledExpression compiled) { return new CompiledPart(CALL, null, expression, null, false, compiled); }
+    }
+
     /** Renders a non-Case expression scope (for example report filenames or Tool command arguments). */
     public String renderScoped(String text, Map<String, ?> values) throws Exception {
         return renderScoped(text, values, false);
@@ -289,7 +362,12 @@ public class UnifiedTemplateEngine {
     }
 
     public Object evaluateBlock(String expression, final CaseRuntimeContext context, final CaseExecutionLog log) throws Exception {
-        return expressionBlocks.evaluate(expression, new ExpressionBlockEvaluator.Resolver() {
+        return evaluateBlock(expressionBlocks.compile(expression), expression, context, log);
+    }
+
+    private Object evaluateBlock(ExpressionBlockEvaluator.CompiledExpression compiled, String expression,
+                                 final CaseRuntimeContext context, final CaseExecutionLog log) throws Exception {
+        return compiled.evaluate(new ExpressionBlockEvaluator.Resolver() {
             @Override public Object context(String path) { return context.require(path); }
             @Override public Object contextOptional(String path) { return context.requireOptional(path); }
             @Override public Object call(String name, Map<String, Object> arguments) throws Exception {

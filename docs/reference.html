@@ -2873,6 +2873,33 @@ not inherited into workload thresholds. Threshold failure returns
 FAIL/exit 1. Invalid config/target returns exit 2;
 runtime/infrastructure errors return ERROR/exit 3. Generator drops are
 not SUT errors.</p>
+<h4 id="render-plans-and-payload-snapshots">Render plans and payload
+snapshots</h4>
+<p>Before a Load workload scheduler starts, ATT resolves each reachable
+Render payload glob once and freezes the matched UTF-8 source content
+and compiled reference/expression structure for that run. A payload
+edit, replacement, or new glob match made while the run is active does
+not affect its iterations; the next Load run resolves the package again.
+Normal Run and Debug use a fresh plan for each execution, so edits are
+picked up by the next execution.</p>
+<p>Each iteration evaluates Context references, built-in calls, and
+external calls against its own Context. ATT reuses the parsed structure
+and source text, never a dynamic rendered result; stateful calls such as
+<code>seq.next()</code>, clock/random functions, and external calls
+still execute for each iteration. Render returns its String in memory,
+so passing <code>ACTIONS.&lt;id&gt;.output.result</code> to a downstream
+action does not create an intermediate Render file. Use
+<code>EXEC.OUTPUT_DIR</code> only when an operation explicitly needs a
+file.</p>
+<p>With <code>--profile</code>, <code>performance.json</code> records
+<code>renderPlansCompiled</code>, <code>renderPlanCacheHits</code>,
+<code>renderPayloadResolutions</code>,
+<code>renderPayloadResolutionCacheHits</code>,
+<code>renderEvaluations</code>, <code>renderArtifactWrites</code>, and
+<code>renderSourceBytes</code>. These bounded run totals show
+source-plan reuse separately from per-iteration evaluation;
+<code>renderArtifactWrites</code> is zero because Render itself returns
+a String without writing an artifact.</p>
 <h4 id="cli-and-examples">CLI and examples</h4>
 <p>For one workload, options such as --users, --arrival-rate, --warmup,
 --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent

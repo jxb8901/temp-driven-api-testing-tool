@@ -115,13 +115,16 @@ public class FrameworkEngine {
             att.exec.MqHelperExecutor mqHelperExecutor = new att.exec.MqHelperExecutor(projectRoot, suiteConfig);
             att.exec.HttpHelperExecutor httpHelperExecutor = new att.exec.HttpHelperExecutor(projectRoot, suiteConfig);
             UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor, mqHelperExecutor, httpHelperExecutor, runBuiltIns);
-            StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine, suitePlan.flows());
             List<TestCase> cases = suitePlan.cases();
             verbose(options, "[SUITE] file=" + portable(resolve(suite)) + " cases=" + cases.size());
             List<TestResult> suiteResults = new ArrayList<TestResult>();
             try {
                 for (TestCase testCase : cases) {
                     verbose(options, "[CASE] id=" + testCase.caseId() + " status=START");
+                    // A Run Render plan follows one Testcase execution. Nested
+                    // stages and Flows share this runner, while the next
+                    // Testcase observes edits made after the current one.
+                    StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine, suitePlan.flows());
                     TestResult result = runCase(testCase, suiteConfig, options, runId, runStarted, runDirectory,
                             suitePlan, templateRunner, dbHelperExecutor, testdataAllocator);
                     verbose(options, "[CASE] id=" + testCase.caseId() + " status=" + result.status() + " durationMs=" + result.duration().toMillis());
