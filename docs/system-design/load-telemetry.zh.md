@@ -10,4 +10,4 @@ Iteration scope 的 testdata choice 只保留在目前 input mapping 的 memo ta
 mvn -Datt.load.soak=true -Datt.load.soak.durationMinutes=30 -Dtest=LoadTelemetrySoakTest test
 ~~~
 
-Opt-in profile 會以 synthetic no-target selection loop 執行 30–60 分鐘，在 warm-up 與最後 checkpoint 強制 GC，並要求 final retained heap 維持於 warm-up checkpoint 的 `max(16 MiB, 25%)` 範圍內，同時確認 iteration selection state 為空。請以 summary 的 cache 精確數值作為主要 state-growth 指標；retained heap 是 process-level 粗略交叉檢查。
+Opt-in profile 會讓 synthetic Template 經 production `ClosedVuScheduler` 及 `IterationExecutor` 執行 30–60 分鐘。在 warm-up 與最後 checkpoint 強制 GC，並要求 final retained heap 維持於 warm-up checkpoint 的 `max(16 MiB, 25%)` 範圍內。它亦會檢查 iteration selection state 保持空集合、mapping evaluations 持續增加，以及 generator 和 resource sampling 維持 rate-limited。`resources.resourceMetricSamples` 計算 resource observations，每 100 ms 至多一次；最終 resource snapshot maps 會在產生 report 時建立。請以 summary 的 cache 及 sample 精確數值作為主要 state-growth 指標；retained heap 是 process-level 粗略交叉檢查。
