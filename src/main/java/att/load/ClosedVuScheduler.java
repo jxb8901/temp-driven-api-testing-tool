@@ -3,10 +3,9 @@ package att.load;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Random;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -25,7 +24,9 @@ public final class ClosedVuScheduler implements LoadScheduler {
     private final LoadSchedulerStartGate startGate;
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
     private final AtomicLong sequence = new AtomicLong();
-    private volatile ExecutorService workers;
+    private volatile ThreadPoolExecutor workers;
+    private volatile Thread controlThread;
+    private volatile boolean ownsWorkers = true;
 
     public ClosedVuScheduler(LoadScenario scenario, IterationExecutor executor, String runId, Consumer<LoadEvent> listener) {
         this(scenario, executor, runId, listener, LoadSchedulerTiming.system());
@@ -62,6 +63,13 @@ public final class ClosedVuScheduler implements LoadScheduler {
     }
     private static Consumer<LoadEvent> adapt(final LoadEventListener listener) { return listener == null ? null : new Consumer<LoadEvent>() { @Override public void accept(LoadEvent event) { listener.onEvent(event); } }; }
 
+    void useSharedWorkers(ThreadPoolExecutor sharedWorkers) {
+        if (sharedWorkers == null) throw new IllegalArgumentException("Shared Load worker executor is required");
+        if (workers != null) throw new IllegalStateException("Load worker executor is already initialized");
+        workers = sharedWorkers;
+        ownsWorkers = false;
+    }
+
     @Override public LoadRunResult run() throws Exception {
         if (scenario.coordinatorRequired()) {
             if (!(executor instanceof IterationExecutor)) throw new IllegalArgumentException("Multi-workload closed scheduling requires IterationExecutor");
@@ -72,77 +80,141 @@ public final class ClosedVuScheduler implements LoadScheduler {
         final Instant start = LoadSchedulerSupport.instant(startedAt);
         final long runSeed = LoadRandomization.effectiveSeed(scenario, runId);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, 0L);
-        workers = Executors.newFixedThreadPool(scenario.users(), new NamedFactory("att-load-vu-" + safe(scenario.workloadId())));
-        java.util.List<Future<?>> futures = new java.util.ArrayList<Future<?>>();
-        for (int user = 0; user < scenario.users(); user++) {
-            final int userNumber = user;
-            futures.add(workers.submit(() -> runUser(userNumber, startedAt, metrics, runSeed)));
+        int workerCount = Math.min(scenario.users(), Math.max(2, Runtime.getRuntime().availableProcessors() * 2));
+        if (workers == null) {
+            workers = new ThreadPoolExecutor(workerCount, workerCount, 0L, TimeUnit.MILLISECONDS,
+                    new LinkedBlockingQueue<Runnable>(Math.max(1, workerCount)),
+                    new NamedFactory("att-load-vu-" + safe(scenario.workloadId())));
+            ownsWorkers = true;
+        } else {
+            workerCount = Math.min(workerCount, workers.getMaximumPoolSize());
         }
-        try { for (Future<?> future : futures) future.get(); }
-        finally { shutdown(); }
+        workers.prestartAllCoreThreads();
+        java.util.List<VuState> users = new java.util.ArrayList<VuState>(scenario.users());
+        for (int user = 0; user < scenario.users(); user++) {
+            String userId = "VU-" + (user + 1);
+            users.add(new VuState(user, LoadRandomization.randomForVu(runSeed,
+                    LoadRandomization.workloadKey(scenario), userId)));
+        }
+        BlockingQueue<VuCompletion> completions = new LinkedBlockingQueue<VuCompletion>();
+        int inFlight = 0;
+        int dispatchCursor = 0;
+        controlThread = Thread.currentThread();
+        try {
+            while (true) {
+                VuCompletion completion;
+                while ((completion = completions.poll()) != null) {
+                    completion.user.running = false;
+                    inFlight--;
+                    if (!cancelled.get() && completion.completedAt < startedAt + LoadPhase.totalMs(scenario)) {
+                        long think = scenario.thinkTimePolicy().sampleMillis(completion.user.random);
+                        completion.user.readyAt = completion.completedAt + think;
+                    }
+                }
+                long now = timing.now();
+                long elapsed = now - startedAt;
+                metrics.recordSchedulerWakeup(((ThreadPoolExecutor) workers).getQueue().size());
+                int active = activeUsers(elapsed);
+                for (int scanned = 0; scanned < users.size(); scanned++) {
+                    if (cancelled.get() || elapsed >= LoadPhase.totalMs(scenario) || inFlight >= workerCount) break;
+                    int userIndex = dispatchCursor;
+                    dispatchCursor = (dispatchCursor + 1) % users.size();
+                    VuState user = users.get(userIndex);
+                    if (user.running || user.readyAt > now || user.userNumber >= active) continue;
+                    submitIteration(user, startedAt, metrics, completions);
+                    user.running = true;
+                    inFlight++;
+                }
+                if (cancelled.get()) break;
+                if (elapsed >= LoadPhase.totalMs(scenario) && inFlight == 0) break;
+                long next = nextWakeAt(users, now, elapsed, active, startedAt, inFlight);
+                long wait = Math.max(1L, next - now);
+                VuCompletion arrived;
+                try { arrived = timing.await(completions, wait); }
+                catch (InterruptedException interrupted) {
+                    if (cancelled.get()) break;
+                    throw interrupted;
+                }
+                if (arrived != null) {
+                    arrived.user.running = false;
+                    inFlight--;
+                    if (!cancelled.get() && arrived.completedAt < startedAt + LoadPhase.totalMs(scenario)) {
+                        long think = scenario.thinkTimePolicy().sampleMillis(arrived.user.random);
+                        arrived.user.readyAt = arrived.completedAt + think;
+                    }
+                }
+            }
+        } finally { shutdown(); controlThread = null; }
         long endedAt = timing.now(); metrics.finish(endedAt);
         return new LoadRunResult(runId, scenario, start, LoadSchedulerSupport.instant(endedAt), metrics.snapshot());
     }
 
-    private void runUser(int userNumber, long startedAt, LoadMetrics metrics, long runSeed) {
-        long userIteration = 0L; String userId = "VU-" + (userNumber + 1);
-        Random random = LoadRandomization.randomForVu(runSeed, LoadRandomization.workloadKey(scenario), userId);
-        try {
-            while (!cancelled.get()) {
-                metrics.recordSchedulerWakeup(((ThreadPoolExecutor) workers).getQueue().size());
-                long elapsed = timing.now() - startedAt;
-                String phase = LoadPhase.at(scenario, elapsed).name(); if ("COMPLETE".equals(phase)) return;
-                int active = activeUsers(elapsed);
-                if (userNumber >= active) { timing.sleep(1L); continue; }
-                long sequenceValue = LoadSchedulerSupport.next(sequence);
-                long scheduledAt = timing.now();
-                long iteration = ++userIteration;
-                String prefix = scenario.legacyV10() ? runId : runId + "-" + safe(scenario.workloadId());
-                String iterationId = prefix + "-" + userId + "-" + iteration;
-                IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(startedAt), "closed", iterationId,
-                        sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId, scenario.inputs(), null);
-                request = request.withTestdataWaitAllowed(() -> !cancelled.get()
-                        && remainingRunMillis(startedAt) > 0L);
-                if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
-                Path evidenceRoot = evidenceOutputRoot(iterationId);
-                if (evidenceRoot != null) {
-                    request = request.withOutputDirectory(evidenceRoot)
-                            .withEvidenceRetention(true, false);
-                } else if (evidenceStore != null) {
-                    request = request.withEvidenceRetention(false, false);
-                }
-                if (evidenceStore != null)
-                    request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence());
-                long iterationStarted = timing.now();
-                att.core.ResultStatus status;
-                String errorType = null;
-                EvidenceRef evidence = null;
-                LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.started(runId, "closed", phase, iterationId, userId,
-                        sequenceValue, scheduledAt, iterationStarted)));
-                try {
-                    IterationResult result = executor.execute(request);
-                    if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(iterationId)) {
-                        result = result.materializeEvidence();
-                    } else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) {
-                        evidenceStore.releaseEvidence(iterationId);
-                    }
-                    if (result.evidenceRef() == null) result.discardTransientWorkspace();
-                    if (result.testdataStopRequested()) cancelled.set(true);
-                    status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
-                }
-                catch (RuntimeException failure) {
-                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(iterationId)) evidenceStore.releaseEvidence(iterationId);
-                    status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR";
-                }
-                long completedAt = timing.now();
-                LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "closed", phase, iterationId, userId,
-                        sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence)));
-                long remaining = remainingRunMillis(startedAt);
-                if (cancelled.get() || remaining <= 0L) return;
-                long sampledThinkTime = scenario.thinkTimePolicy().sampleMillis(random);
-                sleepThinkTime(Math.min(sampledThinkTime, remaining), startedAt);
+    private void submitIteration(final VuState user, final long startedAt, final LoadMetrics metrics,
+                                 final BlockingQueue<VuCompletion> completions) {
+        final String userId = "VU-" + (user.userNumber + 1);
+        long phaseElapsed = Math.max(0L, timing.now() - startedAt);
+        long runDuration = LoadPhase.totalMs(scenario);
+        if (runDuration > 0L) phaseElapsed = Math.min(phaseElapsed, runDuration - 1L);
+        final String phase = LoadPhase.at(scenario, phaseElapsed).name();
+        final long sequenceValue = LoadSchedulerSupport.next(sequence);
+        final long scheduledAt = timing.now();
+        final long iteration = ++user.iteration;
+        final String prefix = scenario.legacyV10() ? runId : runId + "-" + safe(scenario.workloadId());
+        final String iterationId = prefix + "-" + userId + "-" + iteration;
+        IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(startedAt), "closed", iterationId,
+                sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId, scenario.inputs(), null);
+        request = request.withTestdataWaitAllowed(() -> !cancelled.get() && remainingRunMillis(startedAt) > 0L);
+        if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
+        Path evidenceRoot = evidenceOutputRoot(iterationId);
+        if (evidenceRoot != null) request = request.withOutputDirectory(evidenceRoot).withEvidenceRetention(true, false);
+        else if (evidenceStore != null) request = request.withEvidenceRetention(false, false);
+        if (evidenceStore != null) request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence());
+        final IterationRequest iterationRequest = request;
+        workers.execute(() -> {
+            long iterationStarted = timing.now();
+            att.core.ResultStatus status;
+            String errorType = null;
+            EvidenceRef evidence = null;
+            LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.started(runId, "closed", phase, iterationId, userId,
+                    sequenceValue, scheduledAt, iterationStarted)));
+            try {
+                IterationResult result = executor.execute(iterationRequest);
+                if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(iterationId))
+                    result = result.materializeEvidence();
+                else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) evidenceStore.releaseEvidence(iterationId);
+                if (result.evidenceRef() == null) result.discardTransientWorkspace();
+                if (result.testdataStopRequested()) cancelled.set(true);
+                status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
+            } catch (RuntimeException failure) {
+                if (evidenceStore != null && !evidenceStore.claimFailureEvidence(iterationId)) evidenceStore.releaseEvidence(iterationId);
+                status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR";
             }
-        } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            long completedAt = timing.now();
+            LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "closed", phase, iterationId, userId,
+                    sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence)));
+            completions.offer(new VuCompletion(user, completedAt));
+        });
+    }
+
+    private long nextWakeAt(java.util.List<VuState> users, long now, long elapsed, int active,
+                            long startedAt, int inFlight) {
+        long end = safeAdd(startedAt, LoadPhase.totalMs(scenario));
+        if (elapsed >= LoadPhase.totalMs(scenario) && inFlight > 0) return Long.MAX_VALUE;
+        long next = end;
+        for (VuState user : users) {
+            if (user.running || user.userNumber >= scenario.users()) continue;
+            if (user.userNumber < active && user.readyAt > now) next = Math.min(next, user.readyAt);
+            else if (user.userNumber >= active && elapsed < scenario.warmup().toMillis() + scenario.rampUp().toMillis()) {
+                long activation = scenario.warmup().toMillis()
+                        + (long) Math.floor(((double) scenario.rampUp().toMillis() * user.userNumber) / scenario.users()) + 1L;
+                next = Math.min(next, safeAdd(startedAt, activation));
+            }
+        }
+        if (inFlight > 0 && next <= now) return safeAdd(now, 1L);
+        return Math.max(now + 1L, next);
+    }
+    private static long safeAdd(long left, long right) {
+        try { return Math.addExact(left, right); } catch (ArithmeticException overflow) { return Long.MAX_VALUE; }
     }
 
     private LoadEvent tag(LoadEvent event) {
@@ -176,10 +248,16 @@ public final class ClosedVuScheduler implements LoadScheduler {
         if (LoadPhase.at(scenario, elapsedMs) == LoadPhase.RAMP_DOWN) return Math.max(1, (int) Math.ceil(scenario.users() * LoadPhase.fraction(scenario, elapsedMs)));
         return scenario.users();
     }
-    @Override public void cancel() { cancelled.set(true); shutdown(); }
+    @Override public void cancel() {
+        cancelled.set(true);
+        Thread control = controlThread;
+        if (control != null) control.interrupt();
+        if (ownsWorkers) shutdown();
+    }
     @Override public void close() { cancel(); }
     private void shutdown() {
-        ExecutorService value = workers;
+        ThreadPoolExecutor value = workers;
+        if (!ownsWorkers) return;
         if (value != null) {
             value.shutdownNow();
             try { if (!value.awaitTermination(1L, TimeUnit.SECONDS)) value.shutdownNow(); }
@@ -188,6 +266,19 @@ public final class ClosedVuScheduler implements LoadScheduler {
         }
     }
     private static String safe(String value) { return value == null ? "default" : value.replaceAll("[^A-Za-z0-9_.-]", "_"); }
+    private static final class VuState {
+        final int userNumber;
+        final Random random;
+        long iteration;
+        long readyAt;
+        boolean running;
+        VuState(int userNumber, Random random) { this.userNumber = userNumber; this.random = random; }
+    }
+    private static final class VuCompletion {
+        final VuState user;
+        final long completedAt;
+        VuCompletion(VuState user, long completedAt) { this.user = user; this.completedAt = completedAt; }
+    }
     private static final class NamedFactory implements ThreadFactory {
         private final String prefix; private final AtomicLong index = new AtomicLong();
         NamedFactory(String prefix) { this.prefix = prefix; }

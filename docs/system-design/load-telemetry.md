@@ -4,6 +4,8 @@ ATT reports generator observations separately from SUT outcome metrics. The boun
 
 `schedulerWakeups`, submit-lag counts/mean/maximum, and worker-queue current/peak depth describe scheduler pressure. Arrival drops are capacity outcomes and remain separate from SUT errors. `resources.http` adds active/idle/waiting and observed peak pool connections by helper; DB, MQ and Render diagnostics remain alongside it. Render-plan compilation/cache counters and testdata mapping/selection counters are exposed when those features are used. Custom `EXEC.ID` collision reservations are disk-backed and report their retained marker count; default monotonic IDs allocate no per-ID registry entry.
 
+Load latency percentiles use a bounded primitive `long` reservoir. The run-level report exposes `latencySampleCapacity`, `latencySampleCount`, `latencyObservationCount`, and `latencySampleRate`; exact count, mean, minimum, and maximum remain independent of sampling. Phase and one-second time-bucket latency samples have their own stated capacity. Time series retain the newest 4,096 one-second buckets in a circular ring; older buckets are evicted as new seconds arrive.
+
 Iteration-scoped testdata choices live only in the active input mapping's memo table. The run-scoped resolver map contains only user/workload choices, so its reported iteration cache size should remain zero as iteration count rises. The regular regression suite checks 20,000 synthetic iterations. For a slower retained-heap check, run:
 
 ~~~sh

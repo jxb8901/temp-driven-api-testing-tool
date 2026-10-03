@@ -370,6 +370,19 @@
           "type": "integer",
           "minimum": 0
         },
+        "latencySampleCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencySampleCapacity": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "latencySampleRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
         "errorClassifications": {
           "type": "object",
           "additionalProperties": {
@@ -573,6 +586,23 @@
           "type": "number",
           "minimum": 0
         },
+        "latencyObservationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencySampleCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencySampleCapacity": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "latencySampleRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
         "sutErrorRate": {
           "type": "number",
           "minimum": 0
@@ -641,6 +671,23 @@
         "p99Ms": {
           "type": "number",
           "minimum": 0
+        },
+        "latencyObservationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencySampleCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencySampleCapacity": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "latencySampleRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
         }
       },
       "additionalProperties": true

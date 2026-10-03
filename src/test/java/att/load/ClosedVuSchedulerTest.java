@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -99,6 +101,28 @@ class ClosedVuSchedulerTest {
         assertEquals(ResultStatus.ERROR, completions.get(0).status());
         assertEquals(ResultStatus.PASS, completions.get(1).status());
         assertFalse(completions.get(0).iterationId().equals(completions.get(1).iterationId()));
+    }
+
+    @Test
+    void manyClosedVirtualUsersShareABoundedWorkerPool() throws Exception {
+        int users = 100;
+        LoadScenario scenario = scenario(users, 0L, 0L, 1_500L, 0L, 10L);
+        Set<String> virtualUsers = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+        Set<String> workerThreads = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+        LoadIterationRunner runner = request -> {
+            virtualUsers.add(request.userId());
+            workerThreads.add(Thread.currentThread().getName());
+            try { Thread.sleep(2L); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            return result(request.iterationId(), ResultStatus.PASS);
+        };
+
+        new ClosedVuScheduler(scenario, runner, "run-19-bounded",
+                (java.util.function.Consumer<LoadEvent>) null, LoadSchedulerTiming.system()).run();
+
+        assertEquals(users, virtualUsers.size(), "every logical VU should start at least one iteration");
+        assertTrue(workerThreads.size() <= Math.max(2, Runtime.getRuntime().availableProcessors() * 2),
+                "platform worker threads must be bounded independently of VU count");
     }
 
     private static LoadScenario scenario(int users, long warmupMs, long rampUpMs, long durationMs,

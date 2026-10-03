@@ -2533,6 +2533,11 @@ contract。</p>
 <p>Closed workload 使用正整數 load.users。每個穩定 virtual user
 重複執行固定 target，並在下一次 iteration 前遵守
 execution.thinkTime。thinkTime 可設 duration 或 {min, max} range。</p>
+<p>協調執行的 workloads 共用有界 worker executor。Closed virtual user 以
+scheduler state 表示，不會各自佔用一條 platform thread；scheduler
+會阻塞至下一個 VU/phase deadline 或 iteration 完成。Arrival-rate
+scheduler 直接計算 phase deadline，並等待下一個 due arrival，無需每毫秒
+polling。每個 workload 仍會套用自己的 concurrency 上限。</p>
 <p>Arrival-rate workload 使用 load.arrivalRate、正整數
 load.maxConcurrent 與 overloadPolicy: drop。Scheduler 依絕對 due time
 排程。超過 maxConcurrent 的 arrival 記為 generator drop；不排隊，也不算
@@ -2626,6 +2631,11 @@ mapping/selection counters 及 cache sizes 位於
 只保留其範圍所需的選擇。Custom execution ID 以 disk marker
 保留，<code>resources.executionIds</code> 顯示其數量；default monotonic
 ID 不使用 collision map。</p>
+<p>Latency percentile 使用有界 primitive
+reservoir。<code>latencySampleCapacity</code>、<code>latencySampleCount</code>、<code>latencyObservationCount</code>
+及 <code>latencySampleRate</code> 描述 run-level estimate；精確 latency
+aggregates 仍保持精確。Time series 以 circular ring 保留最新 4,096
+個一秒 bucket。</p>
 <p>新增的 Load summary telemetry 欄位在
 <code>att-load-summary/v1.0</code> 下屬 optional；目前 writer
 會輸出這些欄位，加入 telemetry 前產生的 summary 仍然有效。</p>

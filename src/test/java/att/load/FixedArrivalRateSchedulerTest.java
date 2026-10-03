@@ -56,6 +56,31 @@ class FixedArrivalRateSchedulerTest {
     }
 
     @Test
+    void directArrivalDeadlinesMatchThePhaseIntegralAcrossEveryPhase() {
+        LoadScenario scenario = scenario(7.3, 17L, 113L, 89L, 71L, 4);
+        long start = 5000L;
+        long expectedArrivals = FixedArrivalRateScheduler.arrivalsBeforeDeadline(scenario);
+        for (long sequence = 1L; sequence <= expectedArrivals; sequence++) {
+            long expectedOffset = referenceDueOffset(scenario, sequence);
+            assertEquals(start + expectedOffset,
+                    FixedArrivalRateScheduler.plannedDue(scenario, start, sequence),
+                    "sequence " + sequence);
+        }
+    }
+
+    private static long referenceDueOffset(LoadScenario scenario, long sequence) {
+        double target = sequence - 1.0;
+        long low = 0L;
+        long high = LoadPhase.totalMs(scenario);
+        while (low < high) {
+            long middle = low + (high - low) / 2L;
+            if (FixedArrivalRateScheduler.cumulativeArrivals(scenario, middle) >= target) high = middle;
+            else low = middle + 1L;
+        }
+        return low;
+    }
+
+    @Test
     void capDropsDueArrivalsWithoutFakeVirtualUsers() throws Exception {
         LoadScenario scenario = scenario(1000.0, 0L, 0L, 10L, 0L, 1);
         FakeTiming fake = new FakeTiming();

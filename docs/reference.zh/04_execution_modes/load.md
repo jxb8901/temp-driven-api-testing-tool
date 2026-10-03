@@ -70,6 +70,8 @@ Bootstrap expression 可使用已初始化的 `EXEC.RUN_ID`、`EXEC.ID`、`EXEC.
 
 Closed workload 使用正整數 load.users。每個穩定 virtual user 重複執行固定 target，並在下一次 iteration 前遵守 execution.thinkTime。thinkTime 可設 duration 或 {min, max} range。
 
+協調執行的 workloads 共用有界 worker executor。Closed virtual user 以 scheduler state 表示，不會各自佔用一條 platform thread；scheduler 會阻塞至下一個 VU/phase deadline 或 iteration 完成。Arrival-rate scheduler 直接計算 phase deadline，並等待下一個 due arrival，無需每毫秒 polling。每個 workload 仍會套用自己的 concurrency 上限。
+
 Arrival-rate workload 使用 load.arrivalRate、正整數 load.maxConcurrent 與 overloadPolicy: drop。Scheduler 依絕對 due time 排程。超過 maxConcurrent 的 arrival 記為 generator drop；不排隊，也不算 SUT error。Arrival-rate 沒有持續 USER_ID，也不能配置 thinkTime。
 
 duration 必填。warmup、rampUp、rampDown 預設為零。Warm-up 送出真實 traffic，但不計入 measured threshold aggregates。可選 seed 使 closed-VU think-time randomization 可重複。
@@ -109,6 +111,8 @@ evidence.resources.output 支援 inherit（預設）或 none。none 停用可選
 ATT 在 run root 寫入有界 load-summary.json/yaml 與 self-contained report/index.html。Report 對 retained execution 顯示 EXEC.ID、workload/target identity、status、timing；有保留 case.log 時提供 link。Aggregate latency percentile 由 aggregate latency collector 計算，不會平均 workload percentile。
 
 Summary 會將 generator observation 與 SUT outcome 分開。`metrics.generator` 包含 sampled heap used/committed/maximum、觀察到的 peak live threads、GC count/time，以及 JVM 支援時的 process CPU。Sampling 由 event 觸發並限制為每 100 ms 至多一次，較短暫的 peak 可能錯過。`schedulerWakeups`、`submitLag*` 與 `workerQueueDepth*` 描述 scheduler pressure；arrival drops 與 SUT error 分開。`resources.http` 會按 HTTP helper 報告 active/idle/waiting 與觀察到的 peak connections，並與 DB、MQ、Render pool/plan diagnostics 並列；`resources.resourceMetricSamples` 顯示 rate-limited resource observations 的數量。Testdata mapping/selection counters 及 cache sizes 位於 `resources.generator.testdata`；iteration scope 的 selection 只在單次 mapping 內保留，user/workload scope 只保留其範圍所需的選擇。Custom execution ID 以 disk marker 保留，`resources.executionIds` 顯示其數量；default monotonic ID 不使用 collision map。
+
+Latency percentile 使用有界 primitive reservoir。`latencySampleCapacity`、`latencySampleCount`、`latencyObservationCount` 及 `latencySampleRate` 描述 run-level estimate；精確 latency aggregates 仍保持精確。Time series 以 circular ring 保留最新 4,096 個一秒 bucket。
 
 新增的 Load summary telemetry 欄位在 `att-load-summary/v1.0` 下屬 optional；目前 writer 會輸出這些欄位，加入 telemetry 前產生的 summary 仍然有效。
 
