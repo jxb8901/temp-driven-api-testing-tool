@@ -73,7 +73,7 @@ class CompiledExecutionPlanTest {
         Map<String,Object> assign = new LinkedHashMap<String,Object>();
         assign.put("type", "assign"); assign.put("name", "copy"); assign.put("expression", "${CASE.value}");
         Map<String,Object> check = new LinkedHashMap<String,Object>();
-        check.put("type", "assert"); check.put("assert", "${ACTIONS.copy.output.value} == ${CASE.value}");
+        check.put("type", "assert"); check.put("assert", "${ACTIONS.copy.output.result} == ${CASE.value}");
         StageTemplate template = new StageTemplate("shared", tempDir,
                 java.util.Arrays.asList(new TemplateAction("copy", assign),
                         new TemplateAction("invoke", toolWithRetry()), new TemplateAction("check", check)));
@@ -110,7 +110,7 @@ class CompiledExecutionPlanTest {
                     if (((java.util.List<?>)compiledAttempts).size()!=2 || ((java.util.List<?>)baselineAttempts).size()!=2)
                         throw new AssertionError("retry attempt count differs");
                     return actual.get(1).status()+":"+expected.get(1).status()+":"+
-                            actual.get(2).status()+":"+expected.get(2).status()+":"+context.resolve("ACTIONS.copy.output.value");
+                            actual.get(2).status()+":"+expected.get(2).status()+":"+context.resolve("ACTIONS.copy.output.result");
                 }));
             }
             for(int i=0;i<outcomes.size();i++) assertEquals("FAIL:FAIL:PASS:PASS:"+i,outcomes.get(i).get());
