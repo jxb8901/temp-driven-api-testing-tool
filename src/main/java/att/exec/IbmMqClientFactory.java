@@ -102,7 +102,7 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
                 set(options, "options", Integer.valueOf(flags));
                 set(options, "waitInterval", Integer.valueOf(request.waitMs()));
                 if (request.correlationId() != null) set(options, "matchOptions", Integer.valueOf(constant(constants, "MQMO_MATCH_CORREL_ID", 0x00000002)));
-                invoke(queue, "get", new Class<?>[]{messageClass, optionsClass}, message, options);
+                getWithMaxMessageSize(queue, message, options, request.maxBytes());
                 int length = ((Number) invoke(message, "getDataLength", new Class<?>[0])).intValue();
                 if (length > request.maxBytes()) throw MqTransport.Exception.responseTooLarge(request.maxBytes(), length);
                 byte[] payload = new byte[length];
@@ -144,6 +144,11 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
     static void resizeReceiveBuffer(Object message, int maxBytes) throws Exception {
         if (maxBytes < 1) throw new IllegalArgumentException("MQ receive buffer limit must be positive");
         invoke(message, "resizeBuffer", new Class<?>[]{int.class}, Integer.valueOf(maxBytes));
+    }
+    static void getWithMaxMessageSize(Object queue, Object message, Object options, int maxBytes) throws Exception {
+        if (maxBytes < 1) throw new IllegalArgumentException("MQ receive message limit must be positive");
+        invoke(queue, "get", new Class<?>[]{message.getClass(), options.getClass(), int.class},
+                message, options, Integer.valueOf(maxBytes));
     }
     static MqTransport.Exception translateGetFailure(Throwable error, Object message, int maxBytes) {
         MqTransport.Exception translated = translate(error);

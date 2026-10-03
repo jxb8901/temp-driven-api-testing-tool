@@ -21,6 +21,13 @@ class IbmMqClientFactoryTest {
         public void resizeBuffer(int value) { bufferSize = value; }
         public long getTotalMessageLength() { return totalMessageLength; }
     }
+    public static final class FakeGetOptions {}
+    public static final class FakeMqQueue {
+        int boundedMaximum = -1;
+        boolean unboundedOverloadCalled;
+        public void get(FakeMqMessage message, FakeGetOptions options) { unboundedOverloadCalled = true; }
+        public void get(FakeMqMessage message, FakeGetOptions options, int maxMsgSize) { boundedMaximum = maxMsgSize; }
+    }
     public static final class FakeMqException extends Exception {
         public int completionCode = 2;
         public int reasonCode = 2080;
@@ -44,6 +51,13 @@ class IbmMqClientFactoryTest {
         FakeMqMessage message = new FakeMqMessage();
         IbmMqClientFactory.resizeReceiveBuffer(message, 2048);
         assertEquals(2048, message.bufferSize);
+    }
+
+    @Test void receiveUsesThreeArgumentGetWithConfiguredMaximum() throws Exception {
+        FakeMqQueue queue = new FakeMqQueue();
+        IbmMqClientFactory.getWithMaxMessageSize(queue, new FakeMqMessage(), new FakeGetOptions(), 4096);
+        assertEquals(4096, queue.boundedMaximum);
+        assertFalse(queue.unboundedOverloadCalled);
     }
 
     @Test void truncatedMessageFailedMapsToTooLargeAndPreservesTotalLength() {

@@ -725,6 +725,42 @@ class LoadScenarioTest {
         } finally { resources.close(); }
     }
 
+    @Test void allSuccessEvidenceRetainsEverySuccessfulIteration() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/ALL_EVIDENCE_TEMPLATE"));
+        write(project, "templates/ALL_EVIDENCE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: ALL_EVIDENCE_TEMPLATE\ndescription: all success evidence\nactions:\n"
+                + "  record: {type: log, message: all-mode}\n");
+        Path scenarioFile = write(project, "all-evidence.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: ALL_EVIDENCE_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "evidence: {mode: all, failure: full}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("all-evidence-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            long now = System.currentTimeMillis();
+            for (int sequence = 1; sequence <= 2; sequence++) {
+                String id = "all-run-" + sequence;
+                assertTrue(evidence.reserveSuccessEvidence(id));
+                IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                        IterationRequest.closed("all-run", id, sequence, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                                .withOutputDirectory(outputRoot.resolve("load/all-run/iterations")));
+                assertEquals(ResultStatus.PASS, result.status());
+                assertNotNull(result.evidenceRef());
+                evidence.onEvent(LoadEvent.completed("all-run", "closed", "STEADY", id, "VU-1", sequence,
+                        now, now, now + 1, result.status(), result.evidenceRef()));
+            }
+            Map<String, Object> written = evidence.write(outputRoot.resolve("load/all-run"));
+            assertEquals(2, written.get("count"));
+            assertEquals(2, evidence.events().size());
+        } finally { resources.close(); }
+    }
+
     @Test void successReservedSampleFailureRetainsItsFullDeferredLogAtCapacity() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("templates/SAMPLED_FAIL_TEMPLATE"));
