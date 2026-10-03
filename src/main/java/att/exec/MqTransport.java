@@ -94,6 +94,7 @@ public final class MqTransport {
         public byte[] messageId() { return copy(messageId); }
         public byte[] correlationId() { return copy(correlationId); }
         public byte[] payload() { return copy(payload); }
+        public int payloadLength() { return payload == null ? 0 : payload.length; }
         public Integer ccsid() { return ccsid; }
         public Integer encoding() { return encoding; }
         public String format() { return format; }
@@ -112,7 +113,11 @@ public final class MqTransport {
             return new Exception("MQ connection pool borrow timed out", null, null, "MQ_POOL_TIMEOUT", cause);
         }
         public static Exception responseTooLarge(int maxBytes) {
-            return new Exception("MQ reply exceeds maxResponseBytes=" + maxBytes,
+            return responseTooLarge(maxBytes, -1L);
+        }
+        public static Exception responseTooLarge(int maxBytes, long actualBytes) {
+            String actual = actualBytes >= 0L ? " (messageBytes=" + actualBytes + ")" : "";
+            return new Exception("MQ reply exceeds maxResponseBytes=" + maxBytes + actual,
                     null, null, "MQ_RESPONSE_TOO_LARGE", null);
         }
         public Integer completionCode() { return completionCode; }

@@ -15,6 +15,10 @@ class IbmMqClientFactoryTest {
         public static final String TRANSPORT_MQSERIES_CLIENT = "client";
         public static final String TRANSPORT_MQSERIES = "mqseries";
     }
+    public static final class FakeMqMessage {
+        int bufferSize;
+        public void resizeBuffer(int value) { bufferSize = value; }
+    }
 
     @Test void readsSelectedTransportConstantWithoutCoercingItsType() {
         assertEquals("transport", IbmMqClientFactory.transportPropertyName(StringConstants.class));
@@ -28,5 +32,11 @@ class IbmMqClientFactoryTest {
                 () -> IbmMqClientFactory.transportConstant(MissingBindingsConstant.class, "MQSeries Bindings"));
         assertTrue(error.getMessage().contains("TRANSPORT_MQSERIES_BINDINGS"));
         assertTrue(error.getMessage().contains("allclient"));
+    }
+
+    @Test void receiveBufferUsesSupportedResizeBufferApi() throws Exception {
+        FakeMqMessage message = new FakeMqMessage();
+        IbmMqClientFactory.resizeReceiveBuffer(message, 2048);
+        assertEquals(2048, message.bufferSize);
     }
 }

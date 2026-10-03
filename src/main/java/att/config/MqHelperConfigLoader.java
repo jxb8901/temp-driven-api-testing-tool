@@ -236,12 +236,14 @@ public final class MqHelperConfigLoader {
         String replyQueue = queue(message.get("replyQueue"), "mqhelper.instances[" + instanceId + "].message.replyQueue");
         int waitMs = integer(requestReply.get("waitMs"), 10000, 0, 3600000, "mqhelper.instances[" + instanceId + "].requestReply.waitMs");
         String responseFormat = responseFormat(requestReply.get("responseFormat"), "mqhelper.instances[" + instanceId + "].requestReply.responseFormat");
+        int maxResponseBytes = integer(requestReply.get("maxResponseBytes"), 10 * 1024 * 1024, 1, 1073741824,
+                "mqhelper.instances[" + instanceId + "].requestReply.maxResponseBytes");
         int poolMaxSize = integer(pool.get("maxSize"), 20, 1, 10000, "mqhelper.instances[" + instanceId + "].pool.maxSize");
         int poolMinIdle = integer(pool.get("minIdle"), 0, 0, poolMaxSize, "mqhelper.instances[" + instanceId + "].pool.minIdle");
         long borrowTimeout = durationMs(pool.get("borrowTimeout"), 2000L, "mqhelper.instances[" + instanceId + "].pool.borrowTimeout");
         MqHelperConfig flat = new MqHelperConfig(instanceId, name, description, queueManager, host, port, channel,
                 username, password, charset, encoding, expiry, format, persistence, requestQueue, replyQueue,
-                transport, waitMs, responseFormat, payload, poolMaxSize, poolMinIdle, borrowTimeout, file);
+                transport, waitMs, responseFormat, payload, poolMaxSize, poolMinIdle, borrowTimeout, maxResponseBytes, file);
         return MqHelperConfig.physical(flat, logicalId, instanceId);
     }
 
@@ -277,9 +279,10 @@ public final class MqHelperConfigLoader {
     }
 
     private void validateRequestReplyFields(Map<?, ?> requestReply, String owner) {
-        SchemaSupport.rejectUnknown(requestReply, owner, "waitMs", "responseFormat");
+        SchemaSupport.rejectUnknown(requestReply, owner, "waitMs", "responseFormat", "maxResponseBytes");
         if (requestReply.get("waitMs") != null) integer(requestReply.get("waitMs"), 0, 0, 3600000, owner + ".waitMs");
         if (requestReply.get("responseFormat") != null) responseFormat(requestReply.get("responseFormat"), owner + ".responseFormat");
+        if (requestReply.get("maxResponseBytes") != null) integer(requestReply.get("maxResponseBytes"), 0, 1, 1073741824, owner + ".maxResponseBytes");
     }
 
     private String transport(Object value, String owner) {

@@ -453,7 +453,7 @@ public final class DbHelperExecutor implements AutoCloseable {
                 if (end > 0 && Character.isLowSurrogate(buffer[0])) {
                     utf8Bytes += 4;
                     start = 1;
-                } else utf8Bytes += 3; // Replacement character UTF-8 encoding.
+                } else utf8Bytes += 1; // String.getBytes(UTF_8) replaces malformed surrogates with '?'.
                 pendingHighSurrogate = 0;
             }
             for (int i = start; i < end; i++) {
@@ -461,13 +461,13 @@ public final class DbHelperExecutor implements AutoCloseable {
                 if (Character.isHighSurrogate(c)) {
                     if (i + 1 < end && Character.isLowSurrogate(buffer[i + 1])) { utf8Bytes += 4; i++; }
                     else if (i + 1 == end) pendingHighSurrogate = c;
-                    else utf8Bytes += 3;
-                } else if (Character.isLowSurrogate(c)) utf8Bytes += 3;
+                    else utf8Bytes += 1;
+                } else if (Character.isLowSurrogate(c)) utf8Bytes += 1;
                 else utf8Bytes += c <= 0x7f ? 1 : c <= 0x7ff ? 2 : 3;
                 if (utf8Bytes > limit) throw new LimitException("Text cell exceeded maxCellBytes=" + limit);
             }
         }
-        if (pendingHighSurrogate != 0) utf8Bytes += 3;
+        if (pendingHighSurrogate != 0) utf8Bytes += 1;
         if (utf8Bytes > limit) throw new LimitException("Text cell exceeded maxCellBytes=" + limit);
         return output.toString();
     }

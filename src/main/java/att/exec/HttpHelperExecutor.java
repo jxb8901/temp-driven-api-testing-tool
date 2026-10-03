@@ -8,7 +8,9 @@ import att.core.InternalExceptionLogger;
 import att.validation.JsonSupport;
 import java.io.IOException;
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.Charset;
@@ -166,10 +168,11 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     metadata.put("requestBytes", request.body == null ? 0 : request.body.length);
                     evidence.put("statusCode", status);
                     evidence.put("requestBytes", request.body == null ? 0 : request.body.length);
+                    int maxResponseBytes = helper.maxResponseBytes();
                     long declaredLength = entity == null ? 0L : entity.getContentLength();
-                    if (declaredLength > DEFAULT_MAX_RESPONSE_BYTES)
-                        throw new HttpFailure("HTTP_RESPONSE_TOO_LARGE", "HTTP response exceeds maxResponseBytes=" + DEFAULT_MAX_RESPONSE_BYTES);
-                    byte[] bytes = entity == null ? new byte[0] : readBounded(entity.getContent(), DEFAULT_MAX_RESPONSE_BYTES);
+                    if (declaredLength > maxResponseBytes)
+                        throw new HttpFailure("HTTP_RESPONSE_TOO_LARGE", "HTTP response exceeds maxResponseBytes=" + maxResponseBytes);
+                    byte[] bytes = entity == null ? new byte[0] : readBounded(entity.getContent(), maxResponseBytes);
                     ensureDeadline(deadline, "read");
                     String contentType = response.getFirstHeader("Content-Type") == null ? "" : response.getFirstHeader("Content-Type").getValue();
                     metadata.put("method", method); metadata.put("url", safeUrl(url, helper));
@@ -435,9 +438,13 @@ public final class HttpHelperExecutor implements AutoCloseable {
                 if (parsed.getCharset() != null) charset = parsed.getCharset();
             } catch (Exception invalidCharset) { throw new HttpFailure("HTTP_FORMAT", "Invalid HTTP response charset"); }
         }
-        String text = new String(bytes, charset);
-        if ("text".equals(format)) return text;
-        try { return new ToolInvoker(projectRoot, config).parseOutput(text, format); }
+        if ("text".equals(format)) return new String(bytes, charset);
+        try {
+            if ("json".equals(format)) return att.validation.JsonSupport.mapper().readValue(
+                    new InputStreamReader(new ByteArrayInputStream(bytes), charset), Object.class);
+            String text = new String(bytes, charset);
+            return new ToolInvoker(projectRoot, config).parseOutput(text, format);
+        }
         catch (Exception invalidBody) { throw new HttpFailure("HTTP_RESULT_PARSE_ERROR", "HTTP response body is not valid " + format, invalidBody); }
     }
     private static Map<String, List<String>> responseHeaders(HttpResponse response,

@@ -86,6 +86,27 @@ class PooledMqHelperExecutorTest {
     }
 
     @Test
+    void receiveHonorsConfiguredReplyLimitAtBoundaryAndRejectsOversize() throws Exception {
+        FakeFactory delegate = new FakeFactory();
+        delegate.replyPayload = new byte[]{1, 2, 3, 4};
+        MqHelperConfig helper = new MqHelperConfig("broker", "Broker", "test broker", "QM1", "localhost", 1414,
+                "DEV.APP.SVRCONN", "user", "secret", 1208, null, null, "MQSTR", "asQueue", "", "",
+                "MQSeries Client", 1000, "text", "metadata", 2, 0, 100L, 3, tempDir.resolve("mq.yaml"));
+        PooledMqTransportFactory factory = new PooledMqTransportFactory(delegate, 20, 2000L);
+        MqHelperExecutor executor = new MqHelperExecutor(tempDir, config(helper), factory);
+        Path caseDir = Files.createDirectories(tempDir.resolve("bounded-reply"));
+        Map<String, Object> tooLarge = executor.execute("broker", "receive",
+                map("queue", "REPLY.Q", "waitMs", 0), context(caseDir), null, "oversize").result();
+        assertEquals("MQ_RESPONSE_TOO_LARGE", ((Map<?, ?>) tooLarge.get("error")).get("type"));
+        assertEquals(3, delegate.requestedMaxBytes);
+        delegate.replyPayload = new byte[]{1, 2, 3};
+        Map<String, Object> boundary = executor.execute("broker", "receive",
+                map("queue", "REPLY.Q", "waitMs", 0), context(caseDir), null, "boundary").result();
+        assertEquals(Boolean.TRUE, boundary.get("received"));
+        factory.close();
+    }
+
+    @Test
     void closingRunPoolDisconnectsAnActiveLeaseExactlyOnce() throws Exception {
         FakeFactory delegate = new FakeFactory();
         PooledMqTransportFactory factory = new PooledMqTransportFactory(delegate, 20, 2000L);
@@ -132,6 +153,8 @@ class PooledMqHelperExecutorTest {
         final AtomicInteger disconnects = new AtomicInteger();
         final AtomicInteger queueCloses = new AtomicInteger();
         volatile boolean noMessage;
+        volatile byte[] replyPayload = new byte[0];
+        volatile int requestedMaxBytes;
 
         @Override public MqTransport.Connection connect(MqHelperConfig config) {
             connections.incrementAndGet();
@@ -142,8 +165,9 @@ class PooledMqHelperExecutorTest {
                             return new MqTransport.Message(new byte[]{1}, null, payload);
                         }
                         @Override public MqTransport.Message get(MqTransport.GetRequest request) throws Exception {
+                            requestedMaxBytes = request.maxBytes();
                             if (noMessage) throw new MqTransport.Exception("No message", 2, 2033, "MQRC_NO_MSG_AVAILABLE", null);
-                            return new MqTransport.Message(new byte[]{1}, null, new byte[0]);
+                            return new MqTransport.Message(new byte[]{1}, null, replyPayload);
                         }
                         @Override public void close() { queueCloses.incrementAndGet(); }
                     };

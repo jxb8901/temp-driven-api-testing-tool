@@ -19,6 +19,7 @@ defaults:
   requestReply:
     waitMs: 5000
     responseFormat: xml
+    maxResponseBytes: 10485760
   pool:
     maxSize: 20
 instances:
@@ -68,7 +69,7 @@ MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive
 | `defaults` / `instances[]` settings | inherited then overridden | `connection`, `message`, `requestReply`, `pool`; each instance has an `id` |
 | `connection` | effective fields required | queue manager, host, port and channel as required by transport; port 1–65535; optional username/password |
 | `message` | defaults | CCSID 1208; `format` supports MQSTR/MQHRF2/MQFMT_STRING/MQFMT_NONE/NONE or empty; persistence supports asQueue/persistent/notPersistent/nonPersistent or 0–2 |
-| `requestReply` | defaults | `waitMs` 10000, range 0–3600000; `responseFormat` controls receive/request parsing |
+| `requestReply` | defaults | `waitMs` 10000, range 0–3600000; `responseFormat` controls receive/request parsing; `maxResponseBytes` defaults to 10485760 and accepts 1–1073741824 |
 | `pool` | defaults | maxSize 20 (1–10000), minIdle 0 (not above maxSize), borrowTimeout 2s |
 | `selection.strategy` | descriptor policy | `random` or `roundRobin` |
 | `evidence` | policy | `payload: none|metadata`; raw payload bytes are not structured evidence; optional `output` is human presentation |

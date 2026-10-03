@@ -131,6 +131,51 @@ class DbHelperExecutorTest {
         assertEquals(1, audit.closes);
     }
 
+    @Test void queryLimitsKeepExactJsonAndCellBoundariesAndScaleForLargeRows() throws Exception {
+        Map<String, Object> oneRow = new LinkedHashMap<String, Object>();
+        oneRow.put("ID", "A100"); oneRow.put("STATUS", "READY");
+        int exactBytes = att.validation.JsonSupport.write(Collections.singletonList(oneRow)).getBytes("UTF-8").length;
+        DbHelperExecutor exact = executor(Collections.singletonMap("orders", dbWithLimits("orders", "jdbc:att-test:exact", 1, 5, exactBytes)));
+        assertTrue(exact.execute("orders", "query", "select ONE", "inline", Collections.emptyList(), "exact").success());
+        exact.close();
+
+        DbHelperExecutor underBytes = executor(Collections.singletonMap("orders", dbWithLimits("orders", "jdbc:att-test:under-bytes", 10, 5, exactBytes - 1)));
+        DbInvocationResult byteRejected = underBytes.execute("orders", "query", "select ONE", "inline", Collections.emptyList(), "under-bytes");
+        assertFalse(byteRejected.success());
+        assertEquals("LIMIT_EXCEEDED", ((Map<?, ?>) ((Map<?, ?>) byteRejected.result()).get("error")).get("type"));
+        underBytes.close();
+
+        DbHelperExecutor underCell = executor(Collections.singletonMap("orders", dbWithLimits("orders", "jdbc:att-test:under-cell", 10, 4, exactBytes)));
+        assertFalse(underCell.execute("orders", "query", "select ONE", "inline", Collections.emptyList(), "under-cell").success());
+        underCell.close();
+
+        DbHelperExecutor large = executor(Collections.singletonMap("orders", dbWithLimits("orders", "jdbc:att-test:large", 5000, 16, 1024 * 1024)));
+        DbInvocationResult manyRows = large.execute("orders", "query", "select LARGE", "inline", Collections.emptyList(), "large");
+        assertTrue(manyRows.success());
+        assertEquals(5000, ((Map<?, ?>) manyRows.result()).get("rowCount"));
+        large.close();
+    }
+
+    @Test void clobUtf8AccountingPreservesJavaMalformedSurrogateReplacementBoundary() throws Exception {
+        DbHelperExecutor executor = executor(Collections.singletonMap("orders",
+                dbWithLimits("orders", "jdbc:att-test:clob", 2, 1, 32)));
+        DbInvocationResult result = executor.execute("orders", "query", "select CLOB", "inline",
+                Collections.emptyList(), "clob-surrogate");
+        assertTrue(result.success());
+        Object row = ((List<?>) ((Map<?, ?>) result.result()).get("rows")).get(0);
+        assertEquals("\uD800", ((Map<?, ?>) row).get("TEXT"));
+        executor.close();
+
+        DbHelperExecutor large = executor(Collections.singletonMap("orders",
+                dbWithLimits("orders", "jdbc:att-test:clob-large", 2, 256 * 1024, 300 * 1024)));
+        DbInvocationResult largeResult = large.execute("orders", "query", "select CLOB_LARGE", "inline",
+                Collections.emptyList(), "large-clob");
+        assertTrue(largeResult.success());
+        Object largeRow = ((List<?>) ((Map<?, ?>) largeResult.result()).get("rows")).get(0);
+        assertEquals(256 * 1024, ((String) ((Map<?, ?>) largeRow).get("TEXT")).length());
+        large.close();
+    }
+
     @Test void namedParameterEvidenceCanShowValuesWithoutMaskingCredentials() throws Exception {
         DbHelperConfig visible = new DbHelperConfig("visible", "visible", "Visible DB", "jdbc:att-test:visible",
                 "user", "secret", "", Collections.<String,String>emptyMap(), false, "driverDefault", 5,
@@ -629,6 +674,12 @@ class DbHelperExecutorTest {
                 maxRows, 1024, 8192, "full", "masked", null);
     }
 
+    private DbHelperConfig dbWithLimits(String id, String url, int maxRows, int maxCellBytes, int maxBytes) {
+        return new DbHelperConfig(id, id, id + " DB", url, "user", "secret", "",
+                Collections.<String, String>emptyMap(), false, "driverDefault", 10, "statement", "rollback",
+                maxRows, maxCellBytes, maxBytes, "full", "masked", null);
+    }
+
     private CaseRuntimeContext context() throws Exception {
         return contextWithData(Collections.<String, Object>emptyMap());
     }
@@ -735,7 +786,12 @@ class DbHelperExecutorTest {
         }
 
         private ResultSet rows(final String sql) {
-            final Object[][] values = sql.contains("EMPTY") ? new Object[0][0]
+            final Object[][] values;
+            if (sql.contains("CLOB")) values = new Object[][]{{fakeClob(sql.contains("LARGE") ? repeat('x', 256 * 1024) : "\uD800")}};
+            else if (sql.contains("LARGE")) {
+                values = new Object[5000][2];
+                for (int i = 0; i < values.length; i++) { values[i][0] = "ID-" + i; values[i][1] = "READY"; }
+            } else values = sql.contains("EMPTY") ? new Object[0][0]
                     : sql.contains("SCALAR") ? new Object[][]{{"A100"}}
                     : sql.contains("ONE") || sql.contains("DUP") ? new Object[][]{{"A100", "READY"}}
                     : new Object[][]{{"A100", "READY"}, {"A101", "DONE"}};
@@ -755,13 +811,24 @@ class DbHelperExecutorTest {
         private ResultSetMetaData metadata(final String sql) {
             return proxy(ResultSetMetaData.class, new InvocationHandler() {
                 @Override public Object invoke(Object proxy, Method method, Object[] args) {
-                    if ("getColumnCount".equals(method.getName())) return sql.contains("SCALAR") ? 1 : 2;
+                    if ("getColumnCount".equals(method.getName())) return sql.contains("SCALAR") || sql.contains("CLOB") ? 1 : 2;
                     if ("getColumnLabel".equals(method.getName()) || "getColumnName".equals(method.getName())) {
-                        return sql.contains("DUP") ? "ID" : ((Integer) args[0]) == 1 ? "ID" : "STATUS";
+                        return sql.contains("CLOB") ? "TEXT" : sql.contains("DUP") ? "ID" : ((Integer) args[0]) == 1 ? "ID" : "STATUS";
                     }
                     return defaultValue(method.getReturnType());
                 }
             });
+        }
+
+        private Clob fakeClob(final String value) {
+            return proxy(Clob.class, (object, method, args) -> {
+                if ("length".equals(method.getName())) return (long) value.length();
+                if ("getCharacterStream".equals(method.getName())) return new java.io.StringReader(value);
+                return defaultValue(method.getReturnType());
+            });
+        }
+        private String repeat(char value, int count) {
+            char[] chars = new char[count]; Arrays.fill(chars, value); return new String(chars);
         }
 
         @Override public boolean acceptsURL(String url) { return url != null && url.startsWith("jdbc:att-test:"); }

@@ -116,7 +116,8 @@ public final class HttpHelperConfigLoader {
                 number(pool.get("connectionRequestTimeoutMs"), 5000, "pool.connectionRequestTimeoutMs"),
                 number(pool.get("keepAliveMs"), 30000, "pool.keepAliveMs"),
                 number(pool.get("idleEvictMs"), 60000, "pool.idleEvictMs"), type, username, password, token,
-                trust, secret(tls.get("trustStorePassword"), "tls.trustStorePassword"), responseFormat);
+                trust, secret(tls.get("trustStorePassword"), "tls.trustStorePassword"), responseFormat,
+                bytes(defaults.get("maxResponseBytes"), 10 * 1024 * 1024, "defaults.maxResponseBytes"));
     }
 
     private static Map<?, ?> section(Object value, String field) {
@@ -126,6 +127,13 @@ public final class HttpHelperConfigLoader {
         if (value == null) return fallback;
         if (!(value instanceof Number) || ((Number) value).doubleValue() != ((Number) value).intValue()
                 || ((Number) value).intValue() < 1 || ((Number) value).intValue() > 3600000)
+            throw new IllegalArgumentException("Invalid HTTP " + field + " (must be a positive bounded integer)");
+        return ((Number) value).intValue();
+    }
+    private static int bytes(Object value, int fallback, String field) {
+        if (value == null) return fallback;
+        if (!(value instanceof Number) || ((Number) value).doubleValue() != ((Number) value).intValue()
+                || ((Number) value).intValue() < 1 || ((Number) value).intValue() > 1073741824)
             throw new IllegalArgumentException("Invalid HTTP " + field + " (must be a positive bounded integer)");
         return ((Number) value).intValue();
     }

@@ -33,6 +33,7 @@ public final class MqHelperConfig {
     private final String replyQueue;
     private final int requestReplyWaitMs;
     private final String responseFormat;
+    private final int maxResponseBytes;
     private final String evidencePayload;
     private final Path sourceFile;
     private final int poolMaxSize, poolMinIdle;
@@ -76,6 +77,17 @@ public final class MqHelperConfig {
                           String requestQueue, String replyQueue, String transport, int requestReplyWaitMs,
                           String responseFormat, String evidencePayload, int poolMaxSize, int poolMinIdle,
                           long poolBorrowTimeoutMs, Path sourceFile) {
+        this(id, name, description, queueManager, host, port, channel, username, password, charset, encoding, expiry,
+                format, persistence, requestQueue, replyQueue, transport, requestReplyWaitMs, responseFormat,
+                evidencePayload, poolMaxSize, poolMinIdle, poolBorrowTimeoutMs, 10 * 1024 * 1024, sourceFile);
+    }
+
+    public MqHelperConfig(String id, String name, String description, String queueManager,
+                          String host, int port, String channel, String username, String password,
+                          int charset, Integer encoding, Integer expiry, String format, String persistence,
+                          String requestQueue, String replyQueue, String transport, int requestReplyWaitMs,
+                          String responseFormat, String evidencePayload, int poolMaxSize, int poolMinIdle,
+                          long poolBorrowTimeoutMs, int maxResponseBytes, Path sourceFile) {
         this.id = id;
         this.name = name;
         this.description = description;
@@ -95,6 +107,8 @@ public final class MqHelperConfig {
         this.replyQueue = replyQueue == null ? "" : replyQueue;
         this.requestReplyWaitMs = requestReplyWaitMs;
         this.responseFormat = responseFormat == null ? "text" : responseFormat;
+        if (maxResponseBytes < 1) throw new IllegalArgumentException("MQ maxResponseBytes must be positive");
+        this.maxResponseBytes = maxResponseBytes;
         this.evidencePayload = evidencePayload;
         if (poolMaxSize < 1 || poolMinIdle < 0 || poolMinIdle > poolMaxSize || poolBorrowTimeoutMs < 0L) throw new IllegalArgumentException("Invalid MQ pool configuration");
         this.poolMaxSize = poolMaxSize; this.poolMinIdle = poolMinIdle; this.poolBorrowTimeoutMs = poolBorrowTimeoutMs;
@@ -112,7 +126,7 @@ public final class MqHelperConfig {
                            String requestQueue, String replyQueue, String transport, int requestReplyWaitMs,
                            String responseFormat,
                            String evidencePayload, int poolMaxSize, int poolMinIdle, long poolBorrowTimeoutMs,
-                           Path sourceFile, String logicalId, String instanceId, String selectionStrategy,
+                           int maxResponseBytes, Path sourceFile, String logicalId, String instanceId, String selectionStrategy,
                            boolean group, Map<String, MqHelperConfig> instances) {
         this.id = id;
         this.name = name;
@@ -133,6 +147,7 @@ public final class MqHelperConfig {
         this.replyQueue = replyQueue == null ? "" : replyQueue;
         this.requestReplyWaitMs = requestReplyWaitMs;
         this.responseFormat = responseFormat == null ? "text" : responseFormat;
+        this.maxResponseBytes = maxResponseBytes;
         this.evidencePayload = evidencePayload;
         if (poolMaxSize < 1 || poolMinIdle < 0 || poolMinIdle > poolMaxSize || poolBorrowTimeoutMs < 0L) throw new IllegalArgumentException("Invalid MQ pool configuration");
         this.poolMaxSize = poolMaxSize; this.poolMinIdle = poolMinIdle; this.poolBorrowTimeoutMs = poolBorrowTimeoutMs;
@@ -153,7 +168,7 @@ public final class MqHelperConfig {
                 base.channel(), base.username(), base.password(), base.charset(), base.encoding(), base.expiry(),
                 base.format(), base.persistence(), base.requestQueue(), base.replyQueue(), base.transport(),
                 base.requestReplyWaitMs(), base.responseFormat(),
-                base.evidencePayload(), base.poolMaxSize(), base.poolMinIdle(), base.poolBorrowTimeoutMs(), base.sourceFile(),
+                base.evidencePayload(), base.poolMaxSize(), base.poolMinIdle(), base.poolBorrowTimeoutMs(), base.maxResponseBytes(), base.sourceFile(),
                 logicalId, instanceId, "single", false, Collections.<String, MqHelperConfig>emptyMap());
     }
 
@@ -165,7 +180,7 @@ public final class MqHelperConfig {
         return new MqHelperConfig(id, name, description, first.queueManager(), first.host(), first.port(), first.channel(),
                 "", "", first.charset(), first.encoding(), first.expiry(), first.format(), first.persistence(),
                 first.requestQueue(), first.replyQueue(), first.transport(), first.requestReplyWaitMs(), first.responseFormat(), evidencePayload,
-                first.poolMaxSize(), first.poolMinIdle(), first.poolBorrowTimeoutMs(), sourceFile,
+                first.poolMaxSize(), first.poolMinIdle(), first.poolBorrowTimeoutMs(), first.maxResponseBytes(), sourceFile,
                 id, "", strategy, true, instances);
     }
 
@@ -215,6 +230,7 @@ public final class MqHelperConfig {
     public String replyQueue() { return replyQueue; }
     public int requestReplyWaitMs() { return requestReplyWaitMs; }
     public String responseFormat() { return responseFormat; }
+    public int maxResponseBytes() { return maxResponseBytes; }
     public String evidencePayload() { return evidencePayload; }
     public Path sourceFile() { return sourceFile; }
     public int poolMaxSize() { return poolMaxSize; }

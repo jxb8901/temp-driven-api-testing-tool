@@ -87,12 +87,13 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
             } catch (Exception error) { throw translate(error); }
         }
         @Override public MqTransport.Message get(MqTransport.GetRequest request) throws Exception {
+            Object message = null;
             try {
                 Class<?> messageClass = Class.forName("com.ibm.mq.MQMessage");
-                Object message = messageClass.getConstructor().newInstance();
-                // IBM MQ enforces this limit while receiving; check the
-                // reported length before allocating and copying its payload.
-                set(message, "maxMsgLength", Integer.valueOf(request.maxBytes()));
+                message = messageClass.getConstructor().newInstance();
+                // resizeBuffer is IBM MQ's supported bound for the MQGET
+                // receive buffer; setting an optional field is not effective.
+                resizeReceiveBuffer(message, request.maxBytes());
                 if (request.correlationId() != null) set(message, "correlationId", request.correlationId());
                 Class<?> optionsClass = Class.forName("com.ibm.mq.MQGetMessageOptions");
                 Object options = optionsClass.getConstructor().newInstance();
@@ -103,12 +104,21 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
                 if (request.correlationId() != null) set(options, "matchOptions", Integer.valueOf(constant(constants, "MQMO_MATCH_CORREL_ID", 0x00000002)));
                 invoke(queue, "get", new Class<?>[]{messageClass, optionsClass}, message, options);
                 int length = ((Number) invoke(message, "getDataLength", new Class<?>[0])).intValue();
-                if (length > request.maxBytes()) throw MqTransport.Exception.responseTooLarge(request.maxBytes());
+                if (length > request.maxBytes()) throw MqTransport.Exception.responseTooLarge(request.maxBytes(), length);
                 byte[] payload = new byte[length];
                 invoke(message, "readFully", new Class<?>[]{byte[].class}, payload);
                 return new MqTransport.Message(bytes(message, "messageId"), bytes(message, "correlationId"), payload,
                         number(message, "characterSet"), number(message, "encoding"), stringValue(message, "format"));
-            } catch (Exception error) { throw translate(error); }
+            } catch (Exception error) {
+                MqTransport.Exception translated = translate(error);
+                if (Integer.valueOf(2079).equals(translated.reasonCode())) {
+                    long totalLength = -1L;
+                    try { totalLength = ((Number) invoke(message, "getTotalMessageLength", new Class<?>[0])).longValue(); }
+                    catch (Exception ignored) { }
+                    throw MqTransport.Exception.responseTooLarge(request.maxBytes(), totalLength);
+                }
+                throw translated;
+            }
         }
         @Override public void close() throws Exception { try { invoke(queue, "close", new Class<?>[0]); } catch (Exception error) { throw translate(error); } }
 
@@ -137,6 +147,10 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
         if (!(value instanceof String) || ((String) value).trim().isEmpty())
             throw new IllegalStateException("IBM MQ TRANSPORT_PROPERTY must be a non-blank string constant");
         return (String) value;
+    }
+    static void resizeReceiveBuffer(Object message, int maxBytes) throws Exception {
+        if (maxBytes < 1) throw new IllegalArgumentException("MQ receive buffer limit must be positive");
+        invoke(message, "resizeBuffer", new Class<?>[]{int.class}, Integer.valueOf(maxBytes));
     }
     static Object transportConstant(Class<?> constants, String transport) {
         String constantName;

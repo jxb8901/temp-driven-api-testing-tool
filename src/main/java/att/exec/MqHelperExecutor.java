@@ -174,7 +174,7 @@ public final class MqHelperExecutor {
                     MqTransport.Message received;
                     try {
                         phase = "mq.get";
-                        received = replyQueue.get(new MqTransport.GetRequest(sent == null ? null : sent.messageId(), waitMs));
+                        received = replyQueue.get(new MqTransport.GetRequest(sent == null ? null : sent.messageId(), waitMs, helper.maxResponseBytes()));
                         ensureWithinDeadline(deadlineNanos, "get reply");
                     } catch (MqTransport.Exception noReply) {
                         if (!isNoMessage(noReply)) throw noReply;
@@ -185,7 +185,7 @@ public final class MqHelperExecutor {
                         received = null;
                     }
                     if (received != null) {
-                        ensureReplyWithinLimit(received);
+                        ensureReplyWithinLimit(received, helper.maxResponseBytes());
                         String replyMessageId = id(received.messageId());
                         String correlationId = id(received.correlationId());
                         result.put("replyReceived", true);
@@ -220,9 +220,9 @@ public final class MqHelperExecutor {
                 result.put("waitMs", waitMs); evidence.put("waitMs", waitMs);
                 try {
                     phase = "mq.get";
-                    MqTransport.Message received = replyQueue.get(new MqTransport.GetRequest(correlation, waitMs));
+                    MqTransport.Message received = replyQueue.get(new MqTransport.GetRequest(correlation, waitMs, helper.maxResponseBytes()));
                     ensureWithinDeadline(deadlineNanos, "get message");
-                    ensureReplyWithinLimit(received);
+                    ensureReplyWithinLimit(received, helper.maxResponseBytes());
                     result.put("received", true);
                     result.put("messageId", id(received == null ? null : received.messageId()));
                     result.put("receivedCorrelationId", id(received == null ? null : received.correlationId()));
@@ -401,10 +401,9 @@ public final class MqHelperExecutor {
         catch (Exception invalid) { throw new MqResultParseException(format, invalid); }
     }
 
-    private void ensureReplyWithinLimit(MqTransport.Message message) throws MqTransport.Exception {
-        byte[] payload = message == null ? null : message.payload();
-        if (payload != null && payload.length > MqTransport.DEFAULT_MAX_RESPONSE_BYTES)
-            throw MqTransport.Exception.responseTooLarge(MqTransport.DEFAULT_MAX_RESPONSE_BYTES);
+    private void ensureReplyWithinLimit(MqTransport.Message message, int maxBytes) throws MqTransport.Exception {
+        if (message != null && message.payloadLength() > maxBytes)
+            throw MqTransport.Exception.responseTooLarge(maxBytes);
     }
 
     private static final class MqResultParseException extends Exception {
