@@ -28,7 +28,7 @@ The HTTP connection pool has these defaults and limits:
 | `maxConnectionsPerRoute` | 20 | Per-route connections, 1–10000 and no greater than `maxConnections` |
 | `connectionRequestTimeoutMs` | 5000 ms | Maximum wait to lease a connection, 1–3600000 ms |
 | `keepAliveMs` | 30000 ms | Keep-alive duration, 1–3600000 ms |
-| `idleEvictMs` | 60000 ms | Idle connection eviction interval, 1–3600000 ms |
+| `idleEvictMs` | 60000 ms | Idle age after which a connection is eligible for eviction; checked before requests, 1–3600000 ms |
 
 Size the pool for the expected in-flight Load concurrency. For example, the following tuning overrides raise the per-route capacity and shorten the connection-lease wait; values shown here are not defaults:
 
