@@ -106,9 +106,12 @@ public final class LoadRunResult {
             LoadRunResult value = entry.getValue();
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("status", value.status().name());
-            Map<String, Object> target = new LinkedHashMap<String, Object>();
-            target.put("type", value.scenario().targetType()); target.put("id", value.scenario().targetId());
-            item.put("target", target);
+            if (value.scenario().workload().mixed()) item.put("mix", value.resources().get("mix"));
+            else {
+                Map<String, Object> target = new LinkedHashMap<String, Object>();
+                target.put("type", value.scenario().targetType()); target.put("id", value.scenario().targetId());
+                item.put("target", target);
+            }
             item.put("model", value.scenario().model().wireName());
             item.put("metrics", value.metrics().toMap());
             item.put("thresholds", value.thresholds().toMap());

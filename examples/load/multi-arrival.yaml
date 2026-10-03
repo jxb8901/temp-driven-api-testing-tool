@@ -1,4 +1,4 @@
-schemaVersion: att-load/v1.5
+schemaVersion: att-load/v1.6
 workloads:
 - id: account-date
   target:

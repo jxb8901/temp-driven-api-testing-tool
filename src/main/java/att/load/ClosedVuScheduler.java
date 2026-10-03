@@ -163,16 +163,21 @@ public final class ClosedVuScheduler implements LoadScheduler {
         final long sequenceValue = LoadSchedulerSupport.next(sequence);
         final long scheduledAt = timing.now();
         final long iteration = ++user.iteration;
+        final LoadMixEntry selectedMix = LoadMixSelector.select(scenario.workload(),
+                LoadRandomization.effectiveSeed(scenario, runId), iteration, userId);
         final String prefix = scenario.legacyV10() ? runId : runId + "-" + safe(scenario.workloadId());
         final String iterationId = prefix + "-" + userId + "-" + iteration;
         IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(startedAt), "closed", iterationId,
-                sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId, scenario.inputs(), null);
+                sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId,
+                LoadMixSelector.mergeInputs(scenario.inputs(), selectedMix), null);
         request = request.withTestdataWaitAllowed(() -> !cancelled.get() && remainingRunMillis(startedAt) > 0L);
         if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
         Path evidenceRoot = evidenceOutputRoot(iterationId);
         if (evidenceRoot != null) request = request.withOutputDirectory(evidenceRoot).withEvidenceRetention(true, false);
         else if (evidenceStore != null) request = request.withEvidenceRetention(false, false);
         if (evidenceStore != null) request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence());
+        if (selectedMix != null) request = request.withMixIdentity(selectedMix.id(), selectedMix.targetType(),
+                selectedMix.targetId(), LoadMixSelector.mergeInputs(scenario.inputs(), selectedMix));
         final IterationRequest iterationRequest = request;
         final TaskHandle taskHandle = new TaskHandle();
         FutureTask<Void> task = new FutureTask<Void>(() -> {
@@ -182,7 +187,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
             String errorType = null;
             EvidenceRef evidence = null;
             LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.started(runId, "closed", phase, iterationId, userId,
-                    sequenceValue, scheduledAt, iterationStarted)));
+                    sequenceValue, scheduledAt, iterationStarted), iterationRequest));
             if (cancelledBeforeStart) {
                 status = att.core.ResultStatus.ERROR;
                 errorType = "CANCELLED";
@@ -203,7 +208,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
             long completedAt = timing.now();
             try {
                 LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "closed", phase, iterationId, userId,
-                        sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence)));
+                        sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence), iterationRequest));
             } finally {
                 completions.offer(new VuCompletion(user, completedAt));
                 admittedTasks.remove(iterationId, taskHandle);
@@ -245,9 +250,12 @@ public final class ClosedVuScheduler implements LoadScheduler {
         try { return Math.addExact(left, right); } catch (ArithmeticException overflow) { return Long.MAX_VALUE; }
     }
 
-    private LoadEvent tag(LoadEvent event) {
-        return scenario.legacyV10() ? event : event.withWorkloadIdentity(
-                scenario.workloadId(), scenario.targetType(), scenario.targetId());
+    private LoadEvent tag(LoadEvent event, IterationRequest request) {
+        if (scenario.legacyV10()) return event;
+        String type = request.targetType() == null ? scenario.targetType() : request.targetType();
+        String target = request.targetId() == null ? scenario.targetId() : request.targetId();
+        LoadEvent tagged = event.withWorkloadIdentity(scenario.workloadId(), type, target);
+        return request.mixId() == null ? tagged : tagged.withMixIdentity(request.mixId(), type, target);
     }
 
     private void sleepThinkTime(long millis, long startedAt) throws InterruptedException {

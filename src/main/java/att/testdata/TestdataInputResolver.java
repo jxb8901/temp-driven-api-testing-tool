@@ -142,6 +142,13 @@ public final class TestdataInputResolver {
                 stableUserCount, selections, counters, selectionOrders, fallbackRandomSeed, false, null);
     }
 
+    /** Creates a target-specific compiled mapping view while preserving this workload's selection state. */
+    public TestdataInputResolver forLoadMapping(Map<String, Object> policies, CompiledTestdataMapping mapping) {
+        if (!load) throw new IllegalStateException("Load mapping views require a Load resolver");
+        return new TestdataInputResolver(registry, policies, true, workloadId, executionScope, model, defaultSeed,
+                stableUserCount, selections, counters, selectionOrders, fallbackRandomSeed, orderedLoadExhaustion, mapping);
+    }
+
     public Map<String, Object> resolve(Map<String, Object> mapping, CaseRuntimeContext context,
                                        String userId, String iterationId) throws Exception {
         return resolve(mapping, context, userId, iterationId, null, () -> true);
@@ -388,7 +395,7 @@ public final class TestdataInputResolver {
         final TestdataSelectionPolicy policy = prepared.policy;
         final String scope = prepared.scope;
         if (load && "user".equals(scope) && "arrivalRate".equals(model))
-            throw new IllegalArgumentException("scope: user is not supported for arrivalRate workloads in att-load/v1.5");
+            throw new IllegalArgumentException("scope: user is not supported for arrivalRate workloads in att-load/v1.6");
         if (descriptor.count() == 1) {
             selectionEvaluations.incrementAndGet();
             return selection(descriptor, id, 0L, layer, scope, policy);
@@ -591,7 +598,7 @@ public final class TestdataInputResolver {
             throw new IllegalArgumentException("Testdata selection policy is required for multiple records: " + id);
         String scope = load ? (override == null || override.scope == null ? "iteration" : override.scope) : "execution";
         if (load && "user".equals(scope) && "arrivalRate".equals(model))
-            throw new IllegalArgumentException("scope: user is not supported for arrivalRate workloads in att-load/v1.5");
+            throw new IllegalArgumentException("scope: user is not supported for arrivalRate workloads in att-load/v1.6");
         return new PreparedTestdata(descriptor, layer, policy, scope);
     }
 

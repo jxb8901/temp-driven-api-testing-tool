@@ -8,7 +8,7 @@ import java.util.Map;
 
 /** A compact scheduler/iteration event; only a bounded reference to retained evidence is carried. */
 public final class LoadEvent {
-    private final String runId, workloadId, targetType, targetId, model, phase, iterationId, userId;
+    private final String runId, workloadId, mixId, targetType, targetId, model, phase, iterationId, userId;
     private final long sequence, scheduledAtEpochMs, startedAtEpochMs, completedAtEpochMs, schedulerLagMs, latencyMs;
     private final boolean scheduled, started, completed, dropped;
     private final ResultStatus status;
@@ -26,6 +26,18 @@ public final class LoadEvent {
         this.completedAtEpochMs = completedAtEpochMs; this.schedulerLagMs = schedulerLagMs; this.latencyMs = latencyMs;
         this.scheduled = scheduled; this.started = started; this.completed = completed; this.dropped = dropped; this.status = status;
         this.errorType = errorType; this.evidence = evidence;
+        this.mixId = null;
+    }
+
+    private LoadEvent(LoadEvent source, String mixId, String type, String target) {
+        this.runId = source.runId; this.workloadId = source.workloadId; this.mixId = mixId;
+        this.targetType = type; this.targetId = target; this.model = source.model; this.phase = source.phase;
+        this.iterationId = source.iterationId; this.userId = source.userId; this.sequence = source.sequence;
+        this.scheduledAtEpochMs = source.scheduledAtEpochMs; this.startedAtEpochMs = source.startedAtEpochMs;
+        this.completedAtEpochMs = source.completedAtEpochMs; this.schedulerLagMs = source.schedulerLagMs;
+        this.latencyMs = source.latencyMs; this.scheduled = source.scheduled; this.started = source.started;
+        this.completed = source.completed; this.dropped = source.dropped; this.status = source.status;
+        this.errorType = source.errorType; this.evidence = source.evidence;
     }
 
     /** Returns the same event attributed to one configured workload. */
@@ -35,8 +47,12 @@ public final class LoadEvent {
 
     /** Adds the configured workload and fixed-target identity to retained event data. */
     public LoadEvent withWorkloadIdentity(String workload, String type, String target) {
-        return new LoadEvent(runId, workload, type, target, model, phase, iterationId, userId, sequence, scheduledAtEpochMs, startedAtEpochMs,
+        LoadEvent event = new LoadEvent(runId, workload, type, target, model, phase, iterationId, userId, sequence, scheduledAtEpochMs, startedAtEpochMs,
                 completedAtEpochMs, schedulerLagMs, latencyMs, scheduled, started, completed, dropped, status, errorType, evidence);
+        return mixId == null ? event : new LoadEvent(event, mixId, type, target);
+    }
+    public LoadEvent withMixIdentity(String mix, String type, String target) {
+        return new LoadEvent(this, mix, type, target);
     }
 
     public static LoadEvent completed(String runId, String model, String phase, String iterationId, String userId,
@@ -83,6 +99,7 @@ public final class LoadEvent {
 
     public String runId() { return runId; }
     public String workloadId() { return workloadId; }
+    public String mixId() { return mixId; }
     public String targetType() { return targetType; }
     public String targetId() { return targetId; }
     public String model() { return model; }
@@ -108,6 +125,7 @@ public final class LoadEvent {
     public Map<String, Object> toMap(java.nio.file.Path base) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("runId", runId); if (workloadId != null) result.put("workloadId", workloadId);
+        if (mixId != null) result.put("mixId", mixId);
         if (targetType != null) result.put("targetType", targetType);
         if (targetId != null) result.put("targetId", targetId);
         result.put("model", model); result.put("phase", phase); result.put("iterationId", iterationId);

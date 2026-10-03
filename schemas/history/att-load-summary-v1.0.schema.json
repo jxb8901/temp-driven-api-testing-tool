@@ -1,0 +1,1409 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:load-summary:v1.0",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "status",
+    "exitCode",
+    "runId",
+    "startedAt",
+    "endedAt",
+    "durationMs",
+    "scenario",
+    "timing",
+    "metrics",
+    "thresholds",
+    "resources",
+    "report"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "att-load-summary/v1.0"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "ERROR"
+      ]
+    },
+    "exitCode": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "startedAt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "endedAt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "durationMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "scenario": {
+      "$ref": "#/$defs/scenario"
+    },
+    "timing": {
+      "$ref": "#/$defs/timing"
+    },
+    "metrics": {
+      "$ref": "#/$defs/metrics"
+    },
+    "thresholds": {
+      "$ref": "#/$defs/thresholds"
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "report": {
+      "const": "report/index.html"
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "workloads": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/workloadResult"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "scenario": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/legacyScenario"
+        },
+        {
+          "$ref": "#/$defs/currentScenario"
+        },
+        {
+          "$ref": "#/$defs/multiScenario"
+        }
+      ]
+    },
+    "timing": {
+      "type": "object",
+      "required": [
+        "startedAt",
+        "endedAt",
+        "durationMs",
+        "phases"
+      ],
+      "properties": {
+        "startedAt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "endedAt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "phases": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "$ref": "#/$defs/phaseTiming"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "phaseTiming": {
+      "type": "object",
+      "required": [
+        "phase",
+        "startAt",
+        "endAt",
+        "durationMs",
+        "measured"
+      ],
+      "properties": {
+        "phase": {
+          "enum": [
+            "WARMUP",
+            "RAMP_UP",
+            "STEADY",
+            "RAMP_DOWN"
+          ]
+        },
+        "startAt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "endAt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "measured": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "model",
+        "configuredUsers",
+        "configuredArrivalRatePerSecond",
+        "configuredMaxConcurrent",
+        "scheduled",
+        "measuredScheduled",
+        "started",
+        "measuredStarted",
+        "completed",
+        "iterations",
+        "success",
+        "failure",
+        "runtimeError",
+        "dropped",
+        "measuredDropped",
+        "currentInFlight",
+        "maxInFlight",
+        "activeVus",
+        "maxActiveVus",
+        "warmupCompleted",
+        "measuredCompleted",
+        "measuredSuccess",
+        "measuredFailure",
+        "measuredRuntimeError",
+        "sutErrorRate",
+        "runtimeErrorRate",
+        "droppedRate",
+        "completedThroughput",
+        "achievedArrivalRate",
+        "measuredAchievedArrivalRate",
+        "schedulerLagMeanMs",
+        "schedulerLagMaxMs",
+        "p50Ms",
+        "p90Ms",
+        "p95Ms",
+        "p99Ms",
+        "latencyMinMs",
+        "latencyMeanMs",
+        "latencyMaxMs",
+        "latencyObservationCount",
+        "errorClassifications",
+        "buckets",
+        "phases"
+      ],
+      "properties": {
+        "model": {
+          "enum": [
+            "closed",
+            "arrivalRate"
+          ]
+        },
+        "configuredUsers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "configuredArrivalRatePerSecond": {
+          "type": "number",
+          "minimum": 0
+        },
+        "configuredMaxConcurrent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scheduled": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "measuredScheduled": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "started": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "measuredStarted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "iterations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "success": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "runtimeError": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "measuredDropped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "currentInFlight": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxInFlight": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "activeVus": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxActiveVus": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warmupCompleted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "measuredCompleted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "measuredSuccess": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "measuredFailure": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "measuredRuntimeError": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sutErrorRate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "runtimeErrorRate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "droppedRate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "completedThroughput": {
+          "type": "number",
+          "minimum": 0
+        },
+        "achievedArrivalRate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "measuredAchievedArrivalRate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "schedulerLagMeanMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "schedulerLagMaxMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p50Ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p90Ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95Ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p99Ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "latencyMinMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "latencyMeanMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "latencyMaxMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "latencyObservationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencySampleCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencySampleCapacity": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "latencySampleRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "errorClassifications": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "buckets": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/bucket"
+          }
+        },
+        "phases": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/phaseMetrics"
+          }
+        },
+        "schedulerWakeups": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "submitLagCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "submitLagMaxMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "workerQueueDepth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "workerQueueDepthPeak": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "submitLagMeanMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "generator": {
+          "type": "object",
+          "required": [
+            "sampling",
+            "sampleCount",
+            "heapUsedBytes",
+            "heapPeakUsedBytes",
+            "heapCommittedBytes",
+            "heapPeakCommittedBytes",
+            "heapMaxBytes",
+            "liveThreads",
+            "liveThreadsPeak",
+            "gcMetricsAvailable",
+            "gcCollectionCount",
+            "gcCollectionTimeMs",
+            "processCpuSupported",
+            "processCpuTimeMs",
+            "processCpuPercent",
+            "heapWarmupEndBytes"
+          ],
+          "properties": {
+            "sampling": {
+              "type": "string"
+            },
+            "sampleCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "heapUsedBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "heapPeakUsedBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "heapCommittedBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "heapPeakCommittedBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "heapMaxBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "liveThreads": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "liveThreadsPeak": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "gcMetricsAvailable": {
+              "type": "boolean"
+            },
+            "gcCollectionCount": {
+              "type": "integer"
+            },
+            "gcCollectionTimeMs": {
+              "type": "integer"
+            },
+            "gcMetricsUnavailableReason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "processCpuSupported": {
+              "type": "boolean"
+            },
+            "processCpuTimeMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "processCpuPercent": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "processCpuUnavailableReason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "heapWarmupEndBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "bucket": {
+      "type": "object",
+      "required": [
+        "model",
+        "phase",
+        "scheduled",
+        "started",
+        "completed",
+        "completedTps",
+        "p95Ms",
+        "p99Ms",
+        "sutErrorRate",
+        "droppedRate"
+      ],
+      "properties": {
+        "model": {
+          "enum": [
+            "closed",
+            "arrivalRate"
+          ]
+        },
+        "phase": {
+          "enum": [
+            "WARMUP",
+            "RAMP_UP",
+            "STEADY",
+            "RAMP_DOWN"
+          ]
+        },
+        "scheduled": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "started": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completedTps": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95Ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p99Ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "latencyObservationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencySampleCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencySampleCapacity": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "latencySampleRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "sutErrorRate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "droppedRate": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "phaseMetrics": {
+      "type": "object",
+      "required": [
+        "phase",
+        "measured",
+        "scheduled",
+        "started",
+        "completed",
+        "failure",
+        "dropped",
+        "completedThroughput",
+        "p95Ms",
+        "p99Ms"
+      ],
+      "properties": {
+        "phase": {
+          "enum": [
+            "WARMUP",
+            "RAMP_UP",
+            "STEADY",
+            "RAMP_DOWN"
+          ]
+        },
+        "measured": {
+          "type": "boolean"
+        },
+        "scheduled": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "started": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completedThroughput": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95Ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p99Ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "latencyObservationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencySampleCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencySampleCapacity": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "latencySampleRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "thresholds": {
+      "type": "object",
+      "required": [
+        "status",
+        "results"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL"
+          ]
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/thresholdResult"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "thresholdResult": {
+      "type": "object",
+      "required": [
+        "name",
+        "expected",
+        "actual",
+        "status"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actual": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL"
+          ]
+        },
+        "diagnostic": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "legacyScenario": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "target",
+        "load"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "att-load/v1.0"
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "effectiveSeed": {
+          "type": "integer"
+        },
+        "target": {
+          "type": "object",
+          "required": [
+            "type",
+            "id"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "load": {
+          "type": "object",
+          "required": [
+            "model",
+            "warmup",
+            "rampUp",
+            "duration",
+            "rampDown"
+          ],
+          "properties": {
+            "model": {
+              "enum": [
+                "closed",
+                "arrivalRate"
+              ]
+            },
+            "users": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "arrivalRate": {
+              "type": "string",
+              "minLength": 1
+            },
+            "warmup": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rampUp": {
+              "type": "string",
+              "minLength": 1
+            },
+            "duration": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rampDown": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxConcurrent": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "overloadPolicy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "oneOf": [
+            {
+              "required": [
+                "users"
+              ],
+              "not": {
+                "required": [
+                  "arrivalRate",
+                  "maxConcurrent",
+                  "overloadPolicy"
+                ]
+              }
+            },
+            {
+              "required": [
+                "arrivalRate",
+                "maxConcurrent",
+                "overloadPolicy"
+              ],
+              "not": {
+                "required": [
+                  "users"
+                ]
+              }
+            }
+          ],
+          "additionalProperties": false
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "thinkTime": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "min",
+                    "max"
+                  ],
+                  "properties": {
+                    "min": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "max": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "thinkTimePolicy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "multiScenarioWorkload": {
+      "type": "object",
+      "required": [
+        "id",
+        "target",
+        "load"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "object",
+          "required": [
+            "type",
+            "id"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "template",
+                "flow",
+                "tool"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "load": {
+          "type": "object",
+          "required": [
+            "model",
+            "warmup",
+            "rampUp",
+            "duration",
+            "rampDown"
+          ],
+          "properties": {
+            "model": {
+              "enum": [
+                "closed",
+                "arrivalRate"
+              ]
+            },
+            "users": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "arrivalRate": {
+              "type": "string",
+              "minLength": 1
+            },
+            "warmup": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rampUp": {
+              "type": "string",
+              "minLength": 1
+            },
+            "duration": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rampDown": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxConcurrent": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "overloadPolicy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "thinkTime": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]+(ms|s|m|h)$"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "min",
+                    "max"
+                  ],
+                  "properties": {
+                    "min": {
+                      "type": "string",
+                      "pattern": "^[0-9]+(ms|s|m|h)$"
+                    },
+                    "max": {
+                      "type": "string",
+                      "pattern": "^[0-9]+(ms|s|m|h)$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "thinkTimePolicy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "currentScenarioWorkload": {
+      "type": "object",
+      "required": [
+        "id",
+        "target",
+        "load"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "object",
+          "required": [
+            "type",
+            "id"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "template",
+                "flow",
+                "tool"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "load": {
+          "$ref": "#/$defs/currentLoad"
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "thinkTime": {
+              "type": [
+                "string",
+                "object"
+              ]
+            },
+            "thinkTimePolicy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "testdata": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "enum": [
+                  "workload",
+                  "user",
+                  "iteration"
+                ]
+              },
+              "selection": {
+                "type": "object",
+                "required": [
+                  "strategy"
+                ],
+                "properties": {
+                  "strategy": {
+                    "enum": [
+                      "sequential",
+                      "roundRobin",
+                      "random"
+                    ]
+                  },
+                  "exhaustion": {
+                    "enum": [
+                      "error",
+                      "recycle",
+                      "stop"
+                    ]
+                  },
+                  "seed": {
+                    "type": "integer"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "currentLoad": {
+      "type": "object",
+      "required": [
+        "model",
+        "warmup",
+        "rampUp",
+        "duration",
+        "rampDown"
+      ],
+      "properties": {
+        "model": {
+          "enum": [
+            "closed",
+            "arrivalRate"
+          ]
+        },
+        "users": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "arrivalRate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "warmup": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rampUp": {
+          "type": "string",
+          "minLength": 1
+        },
+        "duration": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rampDown": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "overloadPolicy": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "users"
+          ],
+          "not": {
+            "required": [
+              "arrivalRate",
+              "maxConcurrent",
+              "overloadPolicy"
+            ]
+          }
+        },
+        {
+          "required": [
+            "arrivalRate",
+            "maxConcurrent",
+            "overloadPolicy"
+          ],
+          "not": {
+            "required": [
+              "users"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "currentLoadDefaults": {
+      "type": "object",
+      "properties": {
+        "users": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "arrivalRate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "warmup": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rampUp": {
+          "type": "string",
+          "minLength": 1
+        },
+        "duration": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rampDown": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "overloadPolicy": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "currentScenario": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "workloads"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "att-load/v1.5"
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "effectiveSeed": {
+          "type": "integer"
+        },
+        "load": {
+          "$ref": "#/$defs/currentLoadDefaults"
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "execIdFormat": {
+              "type": "string",
+              "minLength": 1
+            },
+            "thinkTime": {
+              "type": [
+                "string",
+                "object"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "workloads": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/currentScenarioWorkload"
+          }
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "multiScenario": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "workloads"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "enum": [
+            "att-load/v1.1",
+            "att-load/v1.2",
+            "att-load/v1.3"
+          ]
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "effectiveSeed": {
+          "type": "integer"
+        },
+        "workloads": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/multiScenarioWorkload"
+          }
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "execIdFormat": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "workloadResult": {
+      "type": "object",
+      "required": [
+        "status",
+        "target",
+        "model",
+        "metrics",
+        "thresholds"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "ERROR"
+          ]
+        },
+        "target": {
+          "type": "object",
+          "required": [
+            "type",
+            "id"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "template",
+                "flow",
+                "tool"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "model": {
+          "enum": [
+            "closed",
+            "arrivalRate"
+          ]
+        },
+        "metrics": {
+          "$ref": "#/$defs/metrics"
+        },
+        "thresholds": {
+          "$ref": "#/$defs/thresholds"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

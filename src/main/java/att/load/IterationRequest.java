@@ -8,6 +8,7 @@ import java.util.function.BooleanSupplier;
 /** Scheduler-to-executor contract for one load iteration. */
 public final class IterationRequest {
     private final String runId, model, iterationId, phase, userId, workloadId;
+    private final String mixId, targetType, targetId;
     private final long iteration;
     private final Instant startedAt, runStartedAt;
     private final Map<String, Object> inputs;
@@ -90,6 +91,19 @@ public final class IterationRequest {
         if (testdataOrdinal != null && testdataOrdinal.longValue() < 0L)
             throw new IllegalArgumentException("Testdata ordinal must be >= 0");
         this.testdataOrdinal = testdataOrdinal;
+        this.mixId = null; this.targetType = null; this.targetId = null;
+    }
+
+    private IterationRequest(IterationRequest source, String mixId, String targetType, String targetId,
+                             Map<String, Object> selectedInputs) {
+        this.runId = source.runId; this.model = source.model; this.iterationId = source.iterationId;
+        this.iteration = source.iteration; this.phase = source.phase; this.startedAt = source.startedAt;
+        this.runStartedAt = source.runStartedAt; this.userId = source.userId;
+        this.inputs = LoadIsolation.deepImmutableMap(selectedInputs); this.outputDirectory = source.outputDirectory;
+        this.retainSuccessEvidence = source.retainSuccessEvidence; this.retainFailureEvidence = source.retainFailureEvidence;
+        this.captureFailureLog = source.captureFailureLog; this.workloadId = source.workloadId;
+        this.testdataWaitAllowed = source.testdataWaitAllowed; this.testdataOrdinal = source.testdataOrdinal;
+        this.mixId = mixId; this.targetType = targetType; this.targetId = targetId;
     }
 
     public static IterationRequest closed(String iterationId, long iteration, String phase, Instant startedAt,
@@ -109,37 +123,43 @@ public final class IterationRequest {
         return new IterationRequest(runId, "arrivalRate", iterationId, iteration, phase, startedAt, null, inputs, null);
     }
     public IterationRequest withOutputDirectory(Path directory) {
-        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, directory,
-                directory != null, retainFailureEvidence, workloadId, captureFailureLog, testdataWaitAllowed, testdataOrdinal, true);
+        return preserveMix(new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, directory,
+                directory != null, retainFailureEvidence, workloadId, captureFailureLog, testdataWaitAllowed, testdataOrdinal, true));
     }
     public IterationRequest withFailureEvidence(boolean enabled) {
-        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, retainSuccessEvidence, enabled, workloadId, enabled, testdataWaitAllowed, testdataOrdinal, true);
+        return preserveMix(new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+                outputDirectory, retainSuccessEvidence, enabled, workloadId, enabled, testdataWaitAllowed, testdataOrdinal, true));
     }
     public IterationRequest withEvidenceRetention(boolean success, boolean failure) {
-        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
-                outputDirectory, success, failure, workloadId, failure, testdataWaitAllowed, testdataOrdinal, true);
+        return preserveMix(new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+                outputDirectory, success, failure, workloadId, failure, testdataWaitAllowed, testdataOrdinal, true));
     }
     /** Enables bounded failure-log capture while leaving the post-outcome retention claim to the scheduler. */
     public IterationRequest withFailureLogCapture(boolean enabled) {
-        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+        return preserveMix(new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
                 outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, enabled,
-                testdataWaitAllowed, testdataOrdinal, true);
+                testdataWaitAllowed, testdataOrdinal, true));
     }
     public IterationRequest withWorkloadId(String value) {
-        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+        return preserveMix(new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
                 outputDirectory, retainSuccessEvidence, retainFailureEvidence, value, captureFailureLog,
-                testdataWaitAllowed, testdataOrdinal, true);
+                testdataWaitAllowed, testdataOrdinal, true));
+    }
+    public IterationRequest withMixIdentity(String mix, String type, String target, Map<String, Object> selectedInputs) {
+        return new IterationRequest(this, mix, type, target, selectedInputs);
+    }
+    private IterationRequest preserveMix(IterationRequest copy) {
+        return mixId == null ? copy : new IterationRequest(copy, mixId, targetType, targetId, copy.inputs);
     }
     public IterationRequest withTestdataWaitAllowed(BooleanSupplier value) {
-        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+        return preserveMix(new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
                 outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, captureFailureLog,
-                value, testdataOrdinal, true);
+                value, testdataOrdinal, true));
     }
     public IterationRequest withTestdataOrdinal(long value) {
-        return new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
+        return preserveMix(new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
                 outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, captureFailureLog,
-                testdataWaitAllowed, Long.valueOf(value), true);
+                testdataWaitAllowed, Long.valueOf(value), true));
     }
     public String runId() { return runId; }
     public String model() { return model; }
@@ -150,6 +170,9 @@ public final class IterationRequest {
     public Instant runStartedAt() { return runStartedAt; }
     public String userId() { return userId; }
     public String workloadId() { return workloadId; }
+    public String mixId() { return mixId; }
+    public String targetType() { return targetType; }
+    public String targetId() { return targetId; }
     public Map<String, Object> inputs() { return inputs; }
     public Path outputDirectory() { return outputDirectory; }
     public boolean retainSuccessEvidence() { return retainSuccessEvidence; }

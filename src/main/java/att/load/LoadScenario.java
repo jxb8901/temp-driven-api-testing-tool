@@ -182,6 +182,10 @@ public final class LoadScenario {
                 testdataDescriptors).withExecIdFormat(execIdFormat);
     }
 
+    LoadScenario forMixEntry(LoadWorkload workload, LoadMixEntry entry) {
+        return forWorkload(workload.forMixEntry(entry));
+    }
+
     public Map<String, Object> toMap() { return toMap(true, false); }
 
     /** Returns a report-safe scenario projection; business inputs and Tool arguments are never persisted. */

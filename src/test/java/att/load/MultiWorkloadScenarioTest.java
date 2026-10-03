@@ -35,6 +35,49 @@ class MultiWorkloadScenarioTest {
         assertEquals(LoadScenario.Model.ARRIVAL_RATE, scenario.model());
     }
 
+    @Test void parsesAndDeterministicallySelectsWeightedClosedTargetMix() throws Exception {
+        LoadScenario scenario = load("mix.yaml", "schemaVersion: att-load/v1.6\nseed: 91\nworkloads:\n"
+                + "  - id: checkout\n    inputs: {region: HK, operation: common}\n"
+                + "    mix:\n"
+                + "      - id: browse\n        weight: 60\n        target: {type: template, id: BROWSE}\n        inputs: {operation: browse}\n"
+                + "      - id: purchase\n        weight: 30\n        target: {type: flow, id: PURCHASE}\n"
+                + "      - id: report\n        weight: 10\n        target: {type: tool, id: sample.getAcDate, arguments: {format: csv}}\n"
+                + "    load: {users: 4, duration: 1s}\n");
+        LoadWorkload workload = scenario.workload();
+        assertTrue(workload.mixed());
+        assertNull(workload.targetType());
+        assertEquals(3, workload.mix().size());
+        assertNotNull(LoadMixSelector.select(workload, 91L, 1L, "VU-1"));
+        int[] counts = new int[3];
+        for (int i = 1; i <= 10000; i++) {
+            String selected = LoadMixSelector.select(workload, 91L, i, "VU-1").id();
+            if ("browse".equals(selected)) counts[0]++;
+            else if ("purchase".equals(selected)) counts[1]++;
+            else if ("report".equals(selected)) counts[2]++;
+            assertEquals(selected, LoadMixSelector.select(workload, 91L, i, "VU-1").id());
+        }
+        assertEquals(60.0, counts[0] / 100.0, 2.0);
+        assertEquals(30.0, counts[1] / 100.0, 2.0);
+        assertEquals(10.0, counts[2] / 100.0, 2.0);
+        assertEquals("browse", workload.forMixEntry(workload.mix().get(0)).inputs().get("operation"));
+        assertEquals("HK", workload.forMixEntry(workload.mix().get(0)).inputs().get("region"));
+    }
+
+    @Test void rejectsInvalidMixConfigurations() throws Exception {
+        assertInvalid("duplicate-mix.yaml", "schemaVersion: att-load/v1.6\nworkloads:\n"
+                + "- id: m\n  mix:\n  - {id: same, weight: 1, target: {type: template, id: A}}\n"
+                + "  - {id: same, weight: 2, target: {type: template, id: B}}\n  load: {users: 1, duration: 1s}\n",
+                "mix entry id must be unique");
+        assertInvalid("tool-vars-mix.yaml", "schemaVersion: att-load/v1.6\nworkloads:\n"
+                + "- id: m\n  vars: {x: 1}\n  mix:\n"
+                + "  - {id: tool, weight: 1, target: {type: tool, id: sample.getAcDate}}\n  load: {users: 1, duration: 1s}\n",
+                "Tool mix entries do not support");
+        assertInvalid("arrival-mix.yaml", "schemaVersion: att-load/v1.6\nworkloads:\n"
+                + "- id: m\n  mix:\n  - {id: a, weight: 1, target: {type: template, id: A}}\n"
+                + "  load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n",
+                "target mixes are supported only for closed workloads");
+    }
+
     @Test void parsesIndependentClosedVuPoolsAndSumsUsers() throws Exception {
         LoadScenario scenario = load("closed.yaml",
                 "schemaVersion: att-load/v1.3\n"

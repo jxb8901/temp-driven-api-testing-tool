@@ -146,7 +146,9 @@ public final class LoadReportWriter {
             String configured = child.scenario().model() == LoadScenario.Model.CLOSED
                     ? child.scenario().users() + " users"
                     : rate(child.scenario().arrivalRatePerSecond());
-            String target = child.scenario().targetType() + ":" + child.scenario().targetId();
+            String target = child.scenario().workload().mixed()
+                    ? child.scenario().workload().mix().size() + " mixed targets"
+                    : child.scenario().targetType() + ":" + child.scenario().targetId();
             String childStatus = child.status().name();
             html.append("<tr><td><b>").append(escape(entry.getKey())).append("</b></td><td>").append(escape(target))
                     .append("</td><td>").append(escape(child.scenario().model().wireName())).append("</td><td>")
@@ -157,7 +159,30 @@ public final class LoadReportWriter {
                     .append("</td><td class=\"").append("PASS".equals(childStatus) ? "pass\">" : "fail\">")
                     .append(escape(childStatus)).append("</td></tr>");
         }
-        html.append("</tbody></table></div></section>");
+        html.append("</tbody></table></div>");
+        for (Map.Entry<String, LoadRunResult> entry : result.workloads().entrySet()) {
+            LoadRunResult child = entry.getValue();
+            if (!child.scenario().workload().mixed()) continue;
+            Object raw = child.resources().get("mix");
+            if (!(raw instanceof Map)) continue;
+            html.append("<h3>").append(escape(entry.getKey())).append(" mix").append("</h3><div class=\"scroll\"><table><thead><tr><th>Mix entry</th><th>Target</th><th>Weight</th><th>Selected</th><th>Completed TPS</th><th>P95</th><th>Error</th></tr></thead><tbody>");
+            @SuppressWarnings("unchecked") Map<String, Object> mixes = (Map<String, Object>) raw;
+            for (Map.Entry<String, Object> mix : mixes.entrySet()) {
+                if (!(mix.getValue() instanceof Map)) continue;
+                @SuppressWarnings("unchecked") Map<String, Object> item = (Map<String, Object>) mix.getValue();
+                @SuppressWarnings("unchecked") Map<String, Object> target = (Map<String, Object>) item.get("target");
+                @SuppressWarnings("unchecked") Map<String, Object> mixMetrics = (Map<String, Object>) item.get("metrics");
+                html.append("<tr><td>").append(escape(mix.getKey())).append("</td><td>")
+                        .append(escape(target.get("type") + ":" + target.get("id"))).append("</td><td>")
+                        .append(escape(display(item.get("configuredWeight")))).append("</td><td>")
+                        .append(escape(display(item.get("selectedCount")) + " (" + display(item.get("selectedPercent")) + "%)"))
+                        .append("</td><td>").append(rate(mixMetrics.get("completedThroughput"))).append("</td><td>")
+                        .append(display(mixMetrics.get("p95Ms"))).append(" ms</td><td>")
+                        .append(percent(mixMetrics.get("sutErrorRate"))).append("</td></tr>");
+            }
+            html.append("</tbody></table></div>");
+        }
+        html.append("</section>");
     }
 
     private String workloadThresholdSummary(List<ThresholdResult> thresholds) {

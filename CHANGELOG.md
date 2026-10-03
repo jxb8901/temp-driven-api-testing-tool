@@ -2,6 +2,8 @@
 
 ## 3.7.2 - 2026-10-04
 
+- Implement issue #52: add deterministic weighted closed-VU mixes across pre-resolved Template, Flow and Tool targets, with shared run resources, VU-scoped testdata state, mix identity, bounded per-entry metrics, and evidence/report attribution.
+- Advance Load scenarios to `att-load/v1.6` and Load summaries to `att-load-summary/v1.1`; preserve v1.5 and v1.0 schemas as historical contracts.
 - Remove direct local file-path arguments from HTTPHelper and MQHelper; use `&{...}` Strings as HTTP bodies and MQ payloads (#133).
 - Make SSHHelper upload content-based and remove native SSH download (#133).
 - Normalize ATT-owned local Paths in Case logs to `$ATT_HOME` presentation and bound external Path values (#134).
