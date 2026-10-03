@@ -1147,7 +1147,7 @@ Arrival-rate workload 使用 load.arrivalRate、正整數 load.maxConcurrent 與
 
 例如 HTTP 每秒 20 個 request、平均 response time 為 1.5 秒，約需 30 條 concurrent connection，才不會先受 client pool 限制。HTTP 預設 `pool.maxConnections: 50`、`pool.maxConnectionsPerRoute: 20`；請按 workload 需要調整兩者，並確保 per-route 值不大於總數。另為 latency 變化及其他 route 留出 headroom，再查看 `resources.http` 的 active/idle/waiting/peak observations。Pool capacity 是 generator-side 上限，不代表應向未確認承載能力的 service 發送該流量。
 
-MQ request/reply 若每秒 10 個 request、平均 reply time 為 3 秒，同樣約需 30 條 leased connection。MQ 預設 `pool.maxSize: 20` 可能在 SUT 達到上限前先限制 workload；請將 `pool.maxSize` 設在預期 in-flight 數以上並預留適當 headroom。若 cold connection creation 會影響 ramp-up 測量，可設定 `minIdle`。同時查看 MQ waiting 與 timeout metrics，區分 pool pressure 和 SUT latency。負載變化時，請依觀察到的平均 latency 重新估算；tail latency 可用於 headroom 規劃，但不是公式中的平均值。
+MQ request/reply 若每秒 10 個 request、平均 reply time 為 3 秒，整個 workload 約需 30 條 leased connection。`pool.maxSize` 應按每個**實體 MQ instance** 的預期 in-flight request 數 sizing，而非按 logical helper。單一 instance（或 request 固定送往一個 instance）約需 30 條再加 headroom。兩個平均分配的 instance 平均各需約 15 條；亦要考慮 selection skew 並確認實際分佈。`resources.mq` 按實體 instance 顯示 pool metrics，請逐一查看 waiting、timeout 及 response latency。`minIdle` 會在該實體 pool 首次被使用並建立時套用，不會在 Load 開始前建立或預熱 pool。若要避免 connection creation 影響 measured steady state，請配合 Load warm-up / first-use warm-up phase 使用 `minIdle`。負載變化時，請依觀察到的平均 latency 重新估算；tail latency 可用於 headroom 規劃，但不是公式中的平均值。
 
 duration 必填。warmup、rampUp、rampDown 預設為零。Warm-up 送出真實 traffic，但不計入 measured threshold aggregates。可選 seed 使 closed-VU think-time randomization 可重複。
 
@@ -1671,7 +1671,17 @@ evidence:
     maxChars: 10000
 ~~~
 
-HTTP connection pool 預設為總數 50 條、每 route 20 條。請按預期 Load in-flight concurrency sizing；`maxConnectionsPerRoute` 不可大於 `maxConnections`。
+HTTP connection pool 的預設值及限制如下：
+
+| Pool 欄位 | 預設值 | 契約 |
+|---|---:|---|
+| `maxConnections` | 50 | 總 connection 數，1–10000 |
+| `maxConnectionsPerRoute` | 20 | 每 route connection 數，1–10000 且不可大於 `maxConnections` |
+| `connectionRequestTimeoutMs` | 5000 ms | 等待 lease connection 的最長時間，1–3600000 ms |
+| `keepAliveMs` | 30000 ms | Keep-alive 時間，1–3600000 ms |
+| `idleEvictMs` | 60000 ms | Idle connection eviction interval，1–3600000 ms |
+
+請按預期 Load in-flight concurrency sizing。以下 tuning override 提高 per-route capacity 並縮短等待 lease 的時間；例中的值並非預設值：
 
 ~~~yaml
 pool:
