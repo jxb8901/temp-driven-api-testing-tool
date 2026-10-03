@@ -17,7 +17,13 @@ class IbmMqClientFactoryTest {
     }
     public static final class FakeMqMessage {
         int bufferSize;
+        long totalMessageLength;
         public void resizeBuffer(int value) { bufferSize = value; }
+        public long getTotalMessageLength() { return totalMessageLength; }
+    }
+    public static final class FakeMqException extends Exception {
+        public int completionCode = 2;
+        public int reasonCode = 2080;
     }
 
     @Test void readsSelectedTransportConstantWithoutCoercingItsType() {
@@ -38,5 +44,15 @@ class IbmMqClientFactoryTest {
         FakeMqMessage message = new FakeMqMessage();
         IbmMqClientFactory.resizeReceiveBuffer(message, 2048);
         assertEquals(2048, message.bufferSize);
+    }
+
+    @Test void truncatedMessageFailedMapsToTooLargeAndPreservesTotalLength() {
+        FakeMqMessage message = new FakeMqMessage();
+        message.totalMessageLength = 4097L;
+        MqTransport.Exception translated = IbmMqClientFactory.translateGetFailure(
+                new FakeMqException(), message, 2048);
+        assertEquals("MQ_RESPONSE_TOO_LARGE", translated.reason());
+        assertTrue(translated.getMessage().contains("maxResponseBytes=2048"));
+        assertTrue(translated.getMessage().contains("messageBytes=4097"));
     }
 }

@@ -110,14 +110,7 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
                 return new MqTransport.Message(bytes(message, "messageId"), bytes(message, "correlationId"), payload,
                         number(message, "characterSet"), number(message, "encoding"), stringValue(message, "format"));
             } catch (Exception error) {
-                MqTransport.Exception translated = translate(error);
-                if (Integer.valueOf(2079).equals(translated.reasonCode())) {
-                    long totalLength = -1L;
-                    try { totalLength = ((Number) invoke(message, "getTotalMessageLength", new Class<?>[0])).longValue(); }
-                    catch (Exception ignored) { }
-                    throw MqTransport.Exception.responseTooLarge(request.maxBytes(), totalLength);
-                }
-                throw translated;
+                throw translateGetFailure(error, message, request.maxBytes());
             }
         }
         @Override public void close() throws Exception { try { invoke(queue, "close", new Class<?>[0]); } catch (Exception error) { throw translate(error); } }
@@ -151,6 +144,18 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
     static void resizeReceiveBuffer(Object message, int maxBytes) throws Exception {
         if (maxBytes < 1) throw new IllegalArgumentException("MQ receive buffer limit must be positive");
         invoke(message, "resizeBuffer", new Class<?>[]{int.class}, Integer.valueOf(maxBytes));
+    }
+    static MqTransport.Exception translateGetFailure(Throwable error, Object message, int maxBytes) {
+        MqTransport.Exception translated = translate(error);
+        // Without MQGMO_ACCEPT_TRUNCATED_MSG, MQRC_TRUNCATED_MSG_FAILED (2080)
+        // leaves the oversized reply on the queue and is the expected resizeBuffer overflow.
+        if (Integer.valueOf(2080).equals(translated.reasonCode())) {
+            long totalLength = -1L;
+            try { totalLength = ((Number) invoke(message, "getTotalMessageLength", new Class<?>[0])).longValue(); }
+            catch (Exception ignored) { }
+            return MqTransport.Exception.responseTooLarge(maxBytes, totalLength);
+        }
+        return translated;
     }
     static Object transportConstant(Class<?> constants, String transport) {
         String constantName;
