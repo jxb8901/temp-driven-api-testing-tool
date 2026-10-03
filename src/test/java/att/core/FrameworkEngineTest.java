@@ -92,6 +92,43 @@ class FrameworkEngineTest {
         assertTrue(new String(Files.readAllBytes(regenerated), "UTF-8").contains("common.inner.v1"));
     }
 
+    @Test void ordinaryRunReloadsRenderPayloadBetweenTestcases() throws Exception {
+        Path payload = projectRoot.resolve("templates/PAYMENT_INVOKE/payload.txt");
+        writeText(payload, "before-edit");
+        writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
+                "schemaVersion: att-template/v3.4\nname: PAYMENT_INVOKE\ndescription: render edit lifecycle\nactions:\n"
+                        + "  renderPayload: {type: render, payload: payload.txt}\n"
+                        + "  updatePayload: {type: tool, call: \"#{replacePayload()}\"}\n");
+        Path workbook = projectRoot.resolve("testcase/render-lifecycle.xlsx");
+        writeTwoCaseWorkbook(workbook);
+        writeText(projectRoot.resolve("testcase/render-lifecycle.yaml"),
+                "schemaVersion: att-sidecar/v2.1\nid: render-lifecycle\n"
+                        + "excel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\n"
+                        + "stages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
+
+        Path updater = projectRoot.resolve("tools/replace-payload.sh");
+        writeTool(updater, "printf 'after-edit' > '" + payload.toAbsolutePath() + "'\n");
+        FrameworkConfig base = globalConfig();
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>(base.tools());
+        tools.put("replacePayload", new ToolConfig("replacePayload", "Replace payload", "Test payload edit",
+                "./tools/replace-payload.sh", "text", Collections.<String, ToolArgumentConfig>emptyMap()));
+        FrameworkConfig config = new FrameworkConfig(base.outputDirectory(), base.reportDirectory(), base.logDirectory(),
+                base.environment(), base.timeoutMs(), base.templatesRoot(), tools, base.report(), base.run(),
+                Collections.<att.config.SheetGroupConfig>emptyList(), "案例編號", "標籤",
+                Collections.<att.config.DataColumnConfig>emptyList(), Collections.<StageConfig>emptyList());
+        writeSnapshot(workbook, config);
+        writeRuntimeSchemas();
+
+        RunSummary summary = new FrameworkEngine(projectRoot, config).run(ExecutionOptions.parse(new String[]{
+                "run", "--suite", workbook.toString(), "--run-id", "RENDER-CASE-LIFETIME"}));
+
+        assertEquals(2, summary.passed());
+        String firstCase = new String(Files.readAllBytes(summary.results().get(0).caseLogPath()), "UTF-8");
+        String secondCase = new String(Files.readAllBytes(summary.results().get(1).caseLogPath()), "UTF-8");
+        assertTrue(firstCase.contains("before-edit"), firstCase);
+        assertTrue(secondCase.contains("after-edit"), secondCase);
+    }
+
     @Test void runTestdataSelectionAdvancesAcrossTestcasesAndIsStableWithinEachCase() throws Exception {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
                 "schemaVersion: att-template/v3.4\nname: PAYMENT_INVOKE\ndescription: testdata selection\nactions:\n"
@@ -406,6 +443,24 @@ class FrameworkEngineTest {
             row.createCell(1).setCellValue("付款成功");
             row.createCell(2).setCellValue("smoke");
             row.createCell(3).setCellValue("name: PAYMENT_INVOKE");
+            workbook.write(output);
+        }
+    }
+
+    private void writeTwoCaseWorkbook(Path path) throws Exception {
+        Files.createDirectories(path.getParent());
+        try (Workbook workbook = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(path)) {
+            Sheet sheet = workbook.createSheet("支付測試案例集");
+            Row header = sheet.createRow(0);
+            String[] columns = {"案例編號", "案例名稱", "標籤", "執行模板"};
+            for (int index = 0; index < columns.length; index++) header.createCell(index).setCellValue(columns[index]);
+            for (int index = 1; index <= 2; index++) {
+                Row row = sheet.createRow(index);
+                row.createCell(0).setCellValue("TC00" + index);
+                row.createCell(1).setCellValue("Render lifecycle " + index);
+                row.createCell(2).setCellValue("render");
+                row.createCell(3).setCellValue("name: PAYMENT_INVOKE");
+            }
             workbook.write(output);
         }
     }
