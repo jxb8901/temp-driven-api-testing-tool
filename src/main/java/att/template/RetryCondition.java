@@ -29,6 +29,28 @@ public final class RetryCondition {
         } catch (Exception error) { throw diagnostic(error); }
     }
 
+    /** Parses and validates one retry predicate for reuse by a Load run plan. */
+    public static CompiledCondition compile(Object configured) {
+        String expression = expression(configured);
+        validate(configured);
+        return new CompiledCondition(expression, new ExpressionBlockEvaluator().compile(expression));
+    }
+
+    public static boolean evaluate(CompiledCondition compiled, CaseRuntimeContext context) {
+        if (compiled == null) throw new IllegalArgumentException("Compiled retry.when is required");
+        try { return evaluateValidated(compiled.expression, compiled.expressionPlan, context == null ? constantContext() : context); }
+        catch (Exception error) { throw diagnostic(error); }
+    }
+
+    public static final class CompiledCondition {
+        private final String expression;
+        private final ExpressionBlockEvaluator.CompiledExpression expressionPlan;
+        private CompiledCondition(String expression, ExpressionBlockEvaluator.CompiledExpression expressionPlan) {
+            this.expression = expression; this.expressionPlan = expressionPlan;
+        }
+        public String expression() { return expression; }
+    }
+
     public static boolean evaluate(Object configured, CaseRuntimeContext context) {
         String expression = expression(configured);
         validate(configured); // Programmatically-created Actions also obey the authoring policy.
@@ -59,9 +81,15 @@ public final class RetryCondition {
     }
 
     private static boolean evaluateValidated(String expression, final CaseRuntimeContext context) throws Exception {
+        return evaluateValidated(expression, new ExpressionBlockEvaluator().compile(expression), context);
+    }
+
+    private static boolean evaluateValidated(String expression,
+                                             ExpressionBlockEvaluator.CompiledExpression compiled,
+                                             final CaseRuntimeContext context) throws Exception {
         final UnifiedTemplateEngine engine = engine();
         final DefaultBuiltInProvider builtins = new DefaultBuiltInProvider();
-        Object value = new ExpressionBlockEvaluator().evaluate(expression, new ExpressionBlockEvaluator.Resolver() {
+        Object value = compiled.evaluate(new ExpressionBlockEvaluator.Resolver() {
             @Override public Object context(String path) { return context.require(path); }
             @Override public Object contextOptional(String path) { return context.requireOptional(path); }
             @Override public boolean hasContext(String path) { return context.contains(path); }

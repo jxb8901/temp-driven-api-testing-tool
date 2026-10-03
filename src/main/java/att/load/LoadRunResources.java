@@ -25,6 +25,8 @@ public final class LoadRunResources implements AutoCloseable {
     private final java.util.concurrent.ConcurrentMap<String, String> executionIds = new java.util.concurrent.ConcurrentHashMap<String, String>();
     private final att.template.SequenceService sequences = new att.template.SequenceService();
     private final att.template.RenderPlanCache renderPlans = new att.template.RenderPlanCache();
+    private final java.util.concurrent.CopyOnWriteArrayList<att.template.CompiledExecutionPlan> executionPlans =
+            new java.util.concurrent.CopyOnWriteArrayList<att.template.CompiledExecutionPlan>();
 
     public LoadRunResources(Path projectRoot, FrameworkConfig config) {
         this(projectRoot, config, new IbmMqClientFactory());
@@ -45,6 +47,11 @@ public final class LoadRunResources implements AutoCloseable {
     public att.exec.HttpHelperExecutor http() { ensureOpen(); return http; }
     public att.template.SequenceService sequences() { ensureOpen(); return sequences; }
     public att.template.RenderPlanCache renderPlans() { ensureOpen(); return renderPlans; }
+    public void registerExecutionPlan(att.template.CompiledExecutionPlan plan) {
+        ensureOpen();
+        if (plan == null) throw new IllegalArgumentException("Load execution plan is required");
+        executionPlans.addIfAbsent(plan);
+    }
     /** Resolves Render sources before the workload start gate, shared by all targets in this Load run. */
     public void prepareRenderPlans(LoadTarget target) throws Exception {
         ensureOpen();
@@ -84,6 +91,16 @@ public final class LoadRunResources implements AutoCloseable {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("db", dbProvider.metrics()); result.put("mq", mqFactory.metrics());
         result.put("render", renderPlans.stats().toMap());
+        long actionPlans = 0L, evaluations = 0L;
+        for (att.template.CompiledExecutionPlan plan : executionPlans) {
+            actionPlans += plan.actionCount(); evaluations += plan.evaluations();
+        }
+        Map<String, Object> execution = new LinkedHashMap<String, Object>();
+        execution.put("executionPlansCompiled", executionPlans.size());
+        execution.put("actionPlansCompiled", actionPlans);
+        execution.put("executionPlanCacheHits", 0L);
+        execution.put("actionEvaluations", evaluations);
+        result.put("execution", java.util.Collections.unmodifiableMap(execution));
         return result;
     }
     public boolean isClosed() { return closed.get(); }

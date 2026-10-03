@@ -159,6 +159,11 @@ public class UnifiedTemplateEngine {
     /** Returns builtin, db, or tool for the primary call without executing it. */
     public String callKind(String call) {
         ToolCallParser.ParsedCall parsed = callParser.parse(call);
+        return callKind(parsed);
+    }
+
+    public String callKind(ToolCallParser.ParsedCall parsed) {
+        if (parsed == null) throw new IllegalArgumentException("Compiled Tool call is required");
         if (parsed.name().startsWith("db.")) return "db";
         if (parsed.name().startsWith("mq.")) return "mq";
         if (parsed.name().startsWith("http.")) return "http";
@@ -233,6 +238,12 @@ public class UnifiedTemplateEngine {
             }
         }
         return output.toString();
+    }
+
+    /** Evaluates an already parsed boolean/action expression against the current iteration. */
+    public Object evaluateCompiledExpression(String source, ExpressionBlockEvaluator.CompiledExpression compiled,
+                                             CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        return evaluateBlock(compiled, source, context, log);
     }
 
     /** Immutable authored source structure. No rendered value is retained here. */
@@ -470,6 +481,20 @@ public class UnifiedTemplateEngine {
                                                             String invocationId, String actionId, Long timeoutMs, String saveAs,
                                                             String saveFormat, boolean overwrite, boolean bypassCache) throws Exception {
         Object result = executeCall(call, context, log, invocationId, true, actionId, timeoutMs, saveAs, saveFormat, overwrite, bypassCache);
+        return (att.exec.ToolInvocationResult) result;
+    }
+
+    /** Executes a primary Tool call whose authored structure was parsed at Load startup. */
+    public att.exec.ToolInvocationResult executeToolAttempt(ToolCallParser.ParsedCall parsed,
+                                                            CaseRuntimeContext context, CaseExecutionLog log,
+                                                            String invocationId, String actionId, Long timeoutMs,
+                                                            String saveAs, String saveFormat, boolean overwrite,
+                                                            boolean bypassCache) throws Exception {
+        if (parsed == null) throw new IllegalArgumentException("Compiled Tool call is required");
+        DefaultBuiltInProvider.rejectRemoved(parsed.name());
+        Map<String, Object> input = resolveArguments(parsed, context, log);
+        Object result = executeResolvedCall(parsed.name(), input, context, log, invocationId, true, actionId,
+                timeoutMs, saveAs, saveFormat, overwrite, bypassCache);
         return (att.exec.ToolInvocationResult) result;
     }
 
@@ -1314,10 +1339,18 @@ public class UnifiedTemplateEngine {
     private Map<String, Object> resolveArguments(ToolCallParser.ParsedCall call, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         Map<String, Object> input = new LinkedHashMap<String, Object>();
         for (ToolCallParser.Argument argument : call.arguments()) {
-            Object value = resolveArgumentValue(argument.expression().trim(), context, log);
+            Object value = argument.compiled() == null
+                    ? resolveArgumentValue(argument.expression().trim(), context, log)
+                    : resolveArgumentValue(argument.expression().trim(), argument.compiled(), context, log);
             putNested(input, argument.key(), value);
         }
         return input;
+    }
+
+    private Object resolveArgumentValue(String expression, ExpressionBlockEvaluator.CompiledExpression compiled,
+                                        CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
+        if (legacyInterpolatedPath(expression)) return render(expression, context, log);
+        return evaluateBlock(compiled, expression, context, log);
     }
 
     private Object resolveArgumentValue(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {

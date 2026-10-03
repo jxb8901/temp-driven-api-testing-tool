@@ -89,7 +89,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
                 att.testdata.TestdataInputResolver testdataResolver = new att.testdata.TestdataInputResolver(
                         testdataRegistry, workload.testdata(), workload.id(), workload.model().wireName(),
                         scenario.seed(), Math.max(1, workload.users()),
-                        true);
+                        true, target.compiledTestdataMapping());
                 IterationExecutor iterations = new IterationExecutor(projectRoot, config, target, resources, outputRoot,
                         testdataResolver);
                 LoadScheduler scheduler = child.model() == LoadScenario.Model.CLOSED
@@ -123,7 +123,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
             aggregate.finish(endedAt);
             return new LoadRunResult(runId, scenario, startInstant, LoadSchedulerSupport.instant(endedAt), aggregate.snapshot(),
                     LoadThresholdSummary.empty(), Collections.<String, Object>emptyMap(),
-                    Collections.<String, Object>emptyMap(), workloadResults);
+                    resources.metrics(), workloadResults);
         } catch (Exception failure) {
             cancelAll();
             throw failure;
