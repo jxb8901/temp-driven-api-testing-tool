@@ -2817,15 +2817,21 @@ headroom for latency variation and other routes, then confirm with
 capacity is a generator-side ceiling, not a recommendation to send that
 load to an unverified service.</p>
 <p>For MQ request/reply, 10 requests/second with a mean 3-second reply
-time likewise needs about 30 leased connections. The MQ default
-<code>pool.maxSize: 20</code> can cap that workload before the SUT
-reaches its limit; configure <code>pool.maxSize</code> above the
-expected in-flight count with suitable headroom. Set
-<code>minIdle</code> when cold connection creation during ramp-up would
-distort the measurement. Check MQ waiting and timeout metrics alongside
-response latency to distinguish pool pressure from SUT latency.
-Recalculate from observed mean latency as load changes; tail latency is
-useful for headroom, but is not the mean used by the estimate.</p>
+time likewise needs about 30 leased connections across the workload.
+Size <code>pool.maxSize</code> for the expected in-flight requests
+<strong>per physical MQ instance</strong>, not per logical helper. With
+a single instance (or calls pinned to one instance), that is about 30
+plus headroom. With two evenly selected instances, it is about 15 per
+instance on average; account for selection skew and verify the actual
+distribution. <code>resources.mq</code> reports pool metrics per
+physical instance, so inspect each pool's waiting and timeout metrics
+alongside response latency. <code>minIdle</code> is applied when that
+physical pool is first created on use; it does not create or warm the
+pool before Load starts. To move connection creation out of measured
+steady-state latency, combine <code>minIdle</code> with a Load
+warm-up/first-use warm-up phase. Recalculate from observed mean latency
+as load changes; tail latency is useful for headroom, but is not the
+mean used by the estimate.</p>
 <p>duration is required. warmup, rampUp and rampDown default to zero.
 Warm-up sends real traffic but is excluded from measured threshold
 aggregates. Optional seed makes closed-VU think-time randomization
@@ -3805,10 +3811,48 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb63-1"><a href=
 <span id="cb63-13"><a href="#cb63-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
 <span id="cb63-14"><a href="#cb63-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
 <span id="cb63-15"><a href="#cb63-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
-<p>The HTTP connection pool defaults to 50 total connections and 20 per
-route. Size it for the expected in-flight Load concurrency;
-<code>maxConnectionsPerRoute</code> cannot exceed
-<code>maxConnections</code>.</p>
+<p>The HTTP connection pool has these defaults and limits:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Pool field</th>
+<th style="text-align: right;">Default</th>
+<th>Contract</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>maxConnections</code></td>
+<td style="text-align: right;">50</td>
+<td>Total connections, 1–10000</td>
+</tr>
+<tr class="even">
+<td><code>maxConnectionsPerRoute</code></td>
+<td style="text-align: right;">20</td>
+<td>Per-route connections, 1–10000 and no greater than
+<code>maxConnections</code></td>
+</tr>
+<tr class="odd">
+<td><code>connectionRequestTimeoutMs</code></td>
+<td style="text-align: right;">5000 ms</td>
+<td>Maximum wait to lease a connection, 1–3600000 ms</td>
+</tr>
+<tr class="even">
+<td><code>keepAliveMs</code></td>
+<td style="text-align: right;">30000 ms</td>
+<td>Keep-alive duration, 1–3600000 ms</td>
+</tr>
+<tr class="odd">
+<td><code>idleEvictMs</code></td>
+<td style="text-align: right;">60000 ms</td>
+<td>Idle connection eviction interval, 1–3600000 ms</td>
+</tr>
+</tbody>
+</table>
+<p>Size the pool for the expected in-flight Load concurrency. For
+example, the following tuning overrides raise the per-route capacity and
+shorten the connection-lease wait; values shown here are not
+defaults:</p>
 <div class="sourceCode" id="cb64"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb64-1"><a href="#cb64-1" aria-hidden="true" tabindex="-1"></a><span class="fu">pool</span><span class="kw">:</span></span>
 <span id="cb64-2"><a href="#cb64-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxConnections</span><span class="kw">:</span><span class="at"> </span><span class="dv">50</span></span>
