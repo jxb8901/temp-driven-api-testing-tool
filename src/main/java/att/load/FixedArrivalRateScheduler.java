@@ -176,11 +176,12 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                     status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR";
                 }
                 finally {
-                    long completedAt = timing.now(); inFlight.decrementAndGet();
+                    long completedAt = timing.now();
                     try {
                         LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "arrivalRate", phase, id, null,
                                 sequenceValue, dueAt, iterationStarted, completedAt, status, errorType, evidence)));
                     } finally {
+                        inFlight.decrementAndGet();
                         schedulerWakeups.offer(Boolean.TRUE);
                         synchronized (completionMonitor) { completionMonitor.notifyAll(); }
                     }
