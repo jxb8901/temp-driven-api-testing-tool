@@ -19,6 +19,7 @@ defaults:
   requestReply:
     waitMs: 5000
     responseFormat: xml
+    maxResponseBytes: 10485760
   pool:
     maxSize: 20
 instances:
@@ -56,6 +57,8 @@ MQ evidence 可包含有界 transport metadata，例如 helper/instance identity
 
 Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFormat；send 不解析 reply。Instance selection 與 pool limits 屬於 descriptor。Schema migration 見 [Appendix C](../appendices/migrations.md)。
 
+MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive limit，超限時回報 `MQ_RESPONSE_TOO_LARGE`。這是 transport 成功後的 size rejection，與 reply 遺失或 connection failure 分開處理。
+
 共用 typed-result 契約見[Action 與型別化值](../14_actions.md)。
 
 ### Descriptor configuration
@@ -66,7 +69,7 @@ Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFor
 | `defaults` / `instances[]` settings | inherited then overridden | `connection`, `message`, `requestReply`, `pool`; each instance has an `id` |
 | `connection` | effective fields required | queue manager, host, port and channel as required by transport; port 1–65535; optional username/password |
 | `message` | defaults | CCSID 1208; `format` supports MQSTR/MQHRF2/MQFMT_STRING/MQFMT_NONE/NONE or empty; persistence supports asQueue/persistent/notPersistent/nonPersistent or 0–2 |
-| `requestReply` | defaults | `waitMs` 10000, range 0–3600000; `responseFormat` controls receive/request parsing |
+| `requestReply` | defaults | `waitMs` 10000, range 0–3600000; `responseFormat` controls receive/request parsing; `maxResponseBytes` defaults to 10485760 and accepts 1–1073741824 |
 | `pool` | defaults | maxSize 20 (1–10000), minIdle 0 (not above maxSize), borrowTimeout 2s |
 | `selection.strategy` | descriptor policy | `random` or `roundRobin` |
 | `evidence` | policy | `payload: none|metadata`; raw payload bytes are not structured evidence; optional `output` is human presentation |

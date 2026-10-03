@@ -10,6 +10,7 @@ description: Payment service
 baseUrl: https://payments.example.internal
 defaults:
   responseFormat: auto
+  maxResponseBytes: 10485760
   connectTimeoutMs: 5000
   readTimeoutMs: 30000
   followRedirects: false
@@ -44,6 +45,10 @@ The project-file String has no format metadata and does not set HTTP Content-Typ
 #### Failure and evidence
 
 Transport/protocol and response-parse failures are operational errors. A received 4xx/5xx is a completed response and can be asserted through statusCode. HTTP evidence may include helper ID, method, safe URL, response status, content type, byte counts, response format and duration. Credentials and payloads are not implicitly stored. Load can set evidence.resources.output: none to skip optional resource-output formatting, or defer it until the iteration evidence is retained.
+
+HTTP responses are capped at 10 MiB. A larger declared Content-Length is rejected before reading; unknown or incorrect lengths are read through a bounded stream that stops at the first byte beyond the cap. The operation reports `HTTP_RESPONSE_TOO_LARGE` while retaining the received status code in diagnostics. In Load resource diagnostics, HTTP connection pools report active, idle, waiting, and peak counts by helper.
+
+Set `defaults.maxResponseBytes` from 1 through 1073741824 in the HTTP helper descriptor; it defaults to 10485760 (10 MiB).
 
 See [Actions and Typed Values](../14_actions.md) for the shared project-file String and typed-result contract.
 

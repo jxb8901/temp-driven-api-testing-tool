@@ -7,6 +7,10 @@ import att.core.CaseExecutionLog;
 import att.core.InternalExceptionLogger;
 import att.validation.JsonSupport;
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.Charset;
@@ -51,6 +55,8 @@ import att.template.TypedValueFormatter;
 
 /** Run-owned, thread-safe HTTPHelper transport with bounded reusable connections. */
 public final class HttpHelperExecutor implements AutoCloseable {
+    /** Default response ceiling; prevents an untrusted body from becoming an unbounded byte array. */
+    public static final int DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
     private static final ScheduledExecutorService DEADLINE_ABORTER = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "att-http-deadlines");
         thread.setDaemon(true);
@@ -158,7 +164,15 @@ public final class HttpHelperExecutor implements AutoCloseable {
                         continue;
                     }
                     HttpEntity entity = response.getEntity();
-                    byte[] bytes = entity == null ? new byte[0] : EntityUtils.toByteArray(entity);
+                    metadata.put("statusCode", status);
+                    metadata.put("requestBytes", request.body == null ? 0 : request.body.length);
+                    evidence.put("statusCode", status);
+                    evidence.put("requestBytes", request.body == null ? 0 : request.body.length);
+                    int maxResponseBytes = helper.maxResponseBytes();
+                    long declaredLength = entity == null ? 0L : entity.getContentLength();
+                    if (declaredLength > maxResponseBytes)
+                        throw new HttpFailure("HTTP_RESPONSE_TOO_LARGE", "HTTP response exceeds maxResponseBytes=" + maxResponseBytes);
+                    byte[] bytes = entity == null ? new byte[0] : readBounded(entity.getContent(), maxResponseBytes);
                     ensureDeadline(deadline, "read");
                     String contentType = response.getFirstHeader("Content-Type") == null ? "" : response.getFirstHeader("Content-Type").getValue();
                     metadata.put("method", method); metadata.put("url", safeUrl(url, helper));
@@ -210,6 +224,22 @@ public final class HttpHelperExecutor implements AutoCloseable {
             evidence.put("error", diagnostic); evidence.put("durationMs", elapsed(started));
             return result(name, invocationId, null, false, metadata, evidence, diagnostic);
         }
+    }
+
+    private byte[] readBounded(InputStream input, int limit) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(limit, 8192));
+        byte[] buffer = new byte[8192];
+        int count;
+        while ((count = input.read(buffer, 0, Math.min(buffer.length, limit + 1 - output.size()))) >= 0) {
+            if (output.size() + count > limit)
+                throw new HttpFailure("HTTP_RESPONSE_TOO_LARGE", "HTTP response exceeds maxResponseBytes=" + limit);
+            output.write(buffer, 0, count);
+            if (output.size() == limit) {
+                if (input.read() >= 0) throw new HttpFailure("HTTP_RESPONSE_TOO_LARGE", "HTTP response exceeds maxResponseBytes=" + limit);
+                break;
+            }
+        }
+        return output.toByteArray();
     }
 
     private List<String> diagnosticSecrets(HttpHelperConfig helper, Map<String, Object> arguments) {
@@ -408,9 +438,13 @@ public final class HttpHelperExecutor implements AutoCloseable {
                 if (parsed.getCharset() != null) charset = parsed.getCharset();
             } catch (Exception invalidCharset) { throw new HttpFailure("HTTP_FORMAT", "Invalid HTTP response charset"); }
         }
-        String text = new String(bytes, charset);
-        if ("text".equals(format)) return text;
-        try { return new ToolInvoker(projectRoot, config).parseOutput(text, format); }
+        if ("text".equals(format)) return new String(bytes, charset);
+        try {
+            if ("json".equals(format)) return att.validation.JsonSupport.mapper().readValue(
+                    new InputStreamReader(new ByteArrayInputStream(bytes), charset), Object.class);
+            String text = new String(bytes, charset);
+            return new ToolInvoker(projectRoot, config).parseOutput(text, format);
+        }
         catch (Exception invalidBody) { throw new HttpFailure("HTTP_RESULT_PARSE_ERROR", "HTTP response body is not valid " + format, invalidBody); }
     }
     private static Map<String, List<String>> responseHeaders(HttpResponse response,

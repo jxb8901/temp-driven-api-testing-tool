@@ -3501,6 +3501,9 @@ timeout is at least 250ms</td>
 </tr>
 </tbody>
 </table>
+<p>Query result byte limits are accounted one row at a time; CLOB UTF-8
+bytes are counted while reading chunks. This keeps limit enforcement
+linear in the returned data size.</p>
 <p>The root <code>id</code> must match
 <code>^[A-Za-z_][A-Za-z0-9_-]*$</code> and be package-unique ignoring
 case. <code>connection.isolation</code> is <code>driverDefault</code>,
@@ -3560,15 +3563,16 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb59-1"><a href=
 <span id="cb59-14"><a href="#cb59-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">requestReply</span><span class="kw">:</span></span>
 <span id="cb59-15"><a href="#cb59-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">waitMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
 <span id="cb59-16"><a href="#cb59-16" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">responseFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb59-17"><a href="#cb59-17" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">pool</span><span class="kw">:</span></span>
-<span id="cb59-18"><a href="#cb59-18" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxSize</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span></span>
-<span id="cb59-19"><a href="#cb59-19" aria-hidden="true" tabindex="-1"></a><span class="fu">instances</span><span class="kw">:</span></span>
-<span id="cb59-20"><a href="#cb59-20" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> primary</span></span>
-<span id="cb59-21"><a href="#cb59-21" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb59-22"><a href="#cb59-22" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> none</span></span>
-<span id="cb59-23"><a href="#cb59-23" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
-<span id="cb59-24"><a href="#cb59-24" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span></span>
-<span id="cb59-25"><a href="#cb59-25" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
+<span id="cb59-17"><a href="#cb59-17" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxResponseBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">10485760</span></span>
+<span id="cb59-18"><a href="#cb59-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">pool</span><span class="kw">:</span></span>
+<span id="cb59-19"><a href="#cb59-19" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxSize</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span></span>
+<span id="cb59-20"><a href="#cb59-20" aria-hidden="true" tabindex="-1"></a><span class="fu">instances</span><span class="kw">:</span></span>
+<span id="cb59-21"><a href="#cb59-21" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> primary</span></span>
+<span id="cb59-22"><a href="#cb59-22" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb59-23"><a href="#cb59-23" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> none</span></span>
+<span id="cb59-24"><a href="#cb59-24" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
+<span id="cb59-25"><a href="#cb59-25" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span></span>
+<span id="cb59-26"><a href="#cb59-26" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
 <p>A Tool Action calls mq.<id>.send, mq.<id>.receive or mq.<id>.request
 as its primary operation. MQ reply bytes are decoded using received
 CCSID metadata when available, then parsed by responseFormat
@@ -3613,6 +3617,11 @@ for receive/request; send does not parse a reply. Instance selection and
 pool limits belong to the descriptor. See <a
 href="reference/appendices/migrations.md">Appendix C</a> for schema
 migration.</p>
+<p>MQ replies are capped at 10 MiB. The IBM MQ adapter configures the
+message receive limit before reading and reports
+<code>MQ_RESPONSE_TOO_LARGE</code> when a reply exceeds it. This is a
+transport-success size rejection and remains distinct from a missing
+reply or connection failure.</p>
 <p>See <a href="reference/14_actions.md">Actions and Typed Values</a>
 for the shared typed-result contract.</p>
 <h3 id="descriptor-configuration">Descriptor configuration</h3>
@@ -3657,7 +3666,9 @@ asQueue/persistent/notPersistent/nonPersistent or 0–2</td>
 <td><code>requestReply</code></td>
 <td>defaults</td>
 <td><code>waitMs</code> 10000, range 0–3600000;
-<code>responseFormat</code> controls receive/request parsing</td>
+<code>responseFormat</code> controls receive/request parsing;
+<code>maxResponseBytes</code> defaults to 10485760 and accepts
+1–1073741824</td>
 </tr>
 <tr class="even">
 <td><code>pool</code></td>
@@ -3761,13 +3772,14 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb62-1"><a href=
 <span id="cb62-5"><a href="#cb62-5" aria-hidden="true" tabindex="-1"></a><span class="fu">baseUrl</span><span class="kw">:</span><span class="at"> https://payments.example.internal</span></span>
 <span id="cb62-6"><a href="#cb62-6" aria-hidden="true" tabindex="-1"></a><span class="fu">defaults</span><span class="kw">:</span></span>
 <span id="cb62-7"><a href="#cb62-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">responseFormat</span><span class="kw">:</span><span class="at"> auto</span></span>
-<span id="cb62-8"><a href="#cb62-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">connectTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
-<span id="cb62-9"><a href="#cb62-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">readTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">30000</span></span>
-<span id="cb62-10"><a href="#cb62-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">followRedirects</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
-<span id="cb62-11"><a href="#cb62-11" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb62-12"><a href="#cb62-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
-<span id="cb62-13"><a href="#cb62-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb62-14"><a href="#cb62-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
+<span id="cb62-8"><a href="#cb62-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxResponseBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">10485760</span></span>
+<span id="cb62-9"><a href="#cb62-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">connectTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
+<span id="cb62-10"><a href="#cb62-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">readTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">30000</span></span>
+<span id="cb62-11"><a href="#cb62-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">followRedirects</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
+<span id="cb62-12"><a href="#cb62-12" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb62-13"><a href="#cb62-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
+<span id="cb62-14"><a href="#cb62-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb62-15"><a href="#cb62-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
 <p>Call http.<id>.get/post/request as the primary call of a type: tool
 Action. Response bytes are parsed at this boundary using call
 responseFormat, the helper default, or Content-Type when auto is
@@ -3808,6 +3820,15 @@ URL, response status, content type, byte counts, response format and
 duration. Credentials and payloads are not implicitly stored. Load can
 set evidence.resources.output: none to skip optional resource-output
 formatting, or defer it until the iteration evidence is retained.</p>
+<p>HTTP responses are capped at 10 MiB. A larger declared Content-Length
+is rejected before reading; unknown or incorrect lengths are read
+through a bounded stream that stops at the first byte beyond the cap.
+The operation reports <code>HTTP_RESPONSE_TOO_LARGE</code> while
+retaining the received status code in diagnostics. In Load resource
+diagnostics, HTTP connection pools report active, idle, waiting, and
+peak counts by helper.</p>
+<p>Set <code>defaults.maxResponseBytes</code> from 1 through 1073741824
+in the HTTP helper descriptor; it defaults to 10485760 (10 MiB).</p>
 <p>See <a href="reference/14_actions.md">Actions and Typed Values</a>
 for the shared project-file String and typed-result contract.</p>
 <p>DB/MQ/HTTP share the optional

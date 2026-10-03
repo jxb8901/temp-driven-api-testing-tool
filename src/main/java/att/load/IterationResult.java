@@ -92,13 +92,16 @@ public final class IterationResult {
             copyWorkspace(transientWorkspace, evidenceDirectory);
             copyWorkspace(outputDirectory, evidenceDirectory);
             if (context != null) context.materializeResourceOutputs(outputDirectory);
-            copyFile(outputDirectory.resolve("resource-output.yaml"), evidenceDirectory.resolve("resource-output.yaml"));
-            evidenceLog.materialize(outputDirectory.resolve("case.log"));
-            evidenceLog.materialize(evidenceDirectory.resolve("case.log"));
+            Path outputResource = outputDirectory.resolve("resource-output.yaml");
+            if (Files.isRegularFile(outputResource)) linkOrCopy(outputResource, evidenceDirectory.resolve("resource-output.yaml"));
+            Path retainedLog = evidenceDirectory.resolve("case.log");
+            evidenceLog.materialize(retainedLog);
+            linkOrCopy(retainedLog, outputDirectory.resolve("case.log"));
             if (context != null) {
                 byte[] caseYaml = new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8);
-                Files.write(outputDirectory.resolve("case.yaml"), caseYaml);
-                Files.write(evidenceDirectory.resolve("case.yaml"), caseYaml);
+                Path retainedCase = evidenceDirectory.resolve("case.yaml");
+                Files.write(retainedCase, caseYaml);
+                linkOrCopy(retainedCase, outputDirectory.resolve("case.yaml"));
             }
             if (!Files.isRegularFile(evidenceDirectory.resolve("case.log"))) return this;
             deleteWorkspace(transientWorkspace);
@@ -127,11 +130,14 @@ public final class IterationResult {
         deleteWorkspace(outputDirectory);
     }
 
-    private void copyFile(Path source, Path destination) throws IOException {
-        if (!Files.isRegularFile(source)) return;
+    private void linkOrCopy(Path source, Path destination) throws IOException {
         if (source.toAbsolutePath().normalize().equals(destination.toAbsolutePath().normalize())) return;
         Files.createDirectories(destination.getParent());
-        Files.copy(source, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Files.deleteIfExists(destination);
+        try { Files.createLink(destination, source); }
+        catch (IOException | UnsupportedOperationException unavailable) {
+            Files.copy(source, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     private void copyWorkspace(Path source, Path destination) throws IOException {
@@ -148,7 +154,7 @@ public final class IterationResult {
                 if (Files.isDirectory(current, java.nio.file.LinkOption.NOFOLLOW_LINKS)) Files.createDirectories(target);
                 else if (Files.isRegularFile(current, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
                     Files.createDirectories(target.getParent());
-                    Files.copy(current, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    linkOrCopy(current, target);
                 }
             }
         }

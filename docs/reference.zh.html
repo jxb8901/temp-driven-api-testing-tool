@@ -3186,6 +3186,8 @@ values 可能暴露敏感業務數據</td>
 </tr>
 </tbody>
 </table>
+<p>Query result byte limit 逐 row 累加；CLOB UTF-8 bytes 在讀取 chunks
+時計算，使限制檢查隨結果大小線性成長。</p>
 <p>validate、docs、snapshot 與 dry-run 都不會打開 DB
 Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 template call
 會在執行前校驗。</p>
@@ -3236,15 +3238,16 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb56-1"><a href=
 <span id="cb56-14"><a href="#cb56-14" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">requestReply</span><span class="kw">:</span></span>
 <span id="cb56-15"><a href="#cb56-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">waitMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
 <span id="cb56-16"><a href="#cb56-16" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">responseFormat</span><span class="kw">:</span><span class="at"> xml</span></span>
-<span id="cb56-17"><a href="#cb56-17" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">pool</span><span class="kw">:</span></span>
-<span id="cb56-18"><a href="#cb56-18" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxSize</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span></span>
-<span id="cb56-19"><a href="#cb56-19" aria-hidden="true" tabindex="-1"></a><span class="fu">instances</span><span class="kw">:</span></span>
-<span id="cb56-20"><a href="#cb56-20" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> primary</span></span>
-<span id="cb56-21"><a href="#cb56-21" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb56-22"><a href="#cb56-22" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> none</span></span>
-<span id="cb56-23"><a href="#cb56-23" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
-<span id="cb56-24"><a href="#cb56-24" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span></span>
-<span id="cb56-25"><a href="#cb56-25" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
+<span id="cb56-17"><a href="#cb56-17" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxResponseBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">10485760</span></span>
+<span id="cb56-18"><a href="#cb56-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">pool</span><span class="kw">:</span></span>
+<span id="cb56-19"><a href="#cb56-19" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxSize</span><span class="kw">:</span><span class="at"> </span><span class="dv">20</span></span>
+<span id="cb56-20"><a href="#cb56-20" aria-hidden="true" tabindex="-1"></a><span class="fu">instances</span><span class="kw">:</span></span>
+<span id="cb56-21"><a href="#cb56-21" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> primary</span></span>
+<span id="cb56-22"><a href="#cb56-22" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb56-23"><a href="#cb56-23" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">payload</span><span class="kw">:</span><span class="at"> none</span></span>
+<span id="cb56-24"><a href="#cb56-24" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
+<span id="cb56-25"><a href="#cb56-25" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> text</span></span>
+<span id="cb56-26"><a href="#cb56-26" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
 <p>Tool Action 以 primary operation 呼叫 mq.<id>.send、mq.<id>.receive
 或 mq.<id>.request。MQ reply bytes 在收到 CCSID metadata
 時優先按該編碼解碼，再依 responseFormat（text/json/yaml/xml）解析。Typed
@@ -3282,6 +3285,10 @@ parsing 不變。</p>
 requestReply.responseFormat；send 不解析 reply。Instance selection 與
 pool limits 屬於 descriptor。Schema migration 見 <a
 href="reference.zh/appendices/migrations.md">Appendix C</a>。</p>
+<p>MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive
+limit，超限時回報 <code>MQ_RESPONSE_TOO_LARGE</code>。這是 transport
+成功後的 size rejection，與 reply 遺失或 connection failure
+分開處理。</p>
 <p>共用 typed-result 契約見<a href="reference.zh/14_actions.md">Action
 與型別化值</a>。</p>
 <h3 id="descriptor-configuration">Descriptor configuration</h3>
@@ -3326,7 +3333,9 @@ asQueue/persistent/notPersistent/nonPersistent or 0–2</td>
 <td><code>requestReply</code></td>
 <td>defaults</td>
 <td><code>waitMs</code> 10000, range 0–3600000;
-<code>responseFormat</code> controls receive/request parsing</td>
+<code>responseFormat</code> controls receive/request parsing;
+<code>maxResponseBytes</code> defaults to 10485760 and accepts
+1–1073741824</td>
 </tr>
 <tr class="even">
 <td><code>pool</code></td>
@@ -3423,13 +3432,14 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb59-1"><a href=
 <span id="cb59-5"><a href="#cb59-5" aria-hidden="true" tabindex="-1"></a><span class="fu">baseUrl</span><span class="kw">:</span><span class="at"> https://payments.example.internal</span></span>
 <span id="cb59-6"><a href="#cb59-6" aria-hidden="true" tabindex="-1"></a><span class="fu">defaults</span><span class="kw">:</span></span>
 <span id="cb59-7"><a href="#cb59-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">responseFormat</span><span class="kw">:</span><span class="at"> auto</span></span>
-<span id="cb59-8"><a href="#cb59-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">connectTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
-<span id="cb59-9"><a href="#cb59-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">readTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">30000</span></span>
-<span id="cb59-10"><a href="#cb59-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">followRedirects</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
-<span id="cb59-11"><a href="#cb59-11" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb59-12"><a href="#cb59-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
-<span id="cb59-13"><a href="#cb59-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
-<span id="cb59-14"><a href="#cb59-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
+<span id="cb59-8"><a href="#cb59-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxResponseBytes</span><span class="kw">:</span><span class="at"> </span><span class="dv">10485760</span></span>
+<span id="cb59-9"><a href="#cb59-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">connectTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
+<span id="cb59-10"><a href="#cb59-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">readTimeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">30000</span></span>
+<span id="cb59-11"><a href="#cb59-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">followRedirects</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
+<span id="cb59-12"><a href="#cb59-12" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb59-13"><a href="#cb59-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
+<span id="cb59-14"><a href="#cb59-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
+<span id="cb59-15"><a href="#cb59-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
 <p>以 type: tool Action 的 primary call 呼叫
 http.<id>.get/post/request。Response bytes 由此 boundary 解析：使用 call
 responseFormat、helper default，或 auto 時依 Content-Type 判斷。支援
@@ -3467,6 +3477,14 @@ status、content type、byte counts、response format 與
 duration。Credentials/payload 不會隱式保存。Load 可用
 evidence.resources.output: none 略過可選 resource output
 formatting，或將其延至 iteration evidence 保留時。</p>
+<p>HTTP response 上限為 10 MiB。若宣告的 Content-Length
+超過上限，會在讀取前拒絕；未知或錯誤長度則使用有界
+stream，在超出上限的第一個 byte 停止。Operation 會回報
+<code>HTTP_RESPONSE_TOO_LARGE</code>，並在 diagnostics 保留已收到的
+status code。Load resource diagnostics 會依 helper 回報 HTTP connection
+pool 的 active、idle、waiting 與 peak 數量。</p>
+<p>HTTP helper descriptor 的 <code>defaults.maxResponseBytes</code>
+可設為 1 到 1073741824，預設為 10485760（10 MiB）。</p>
 <p>共用 typed-result 契約見<a href="reference.zh/14_actions.md">Action
 與型別化值</a>。</p>
 <p>DB/MQ/HTTP 共用

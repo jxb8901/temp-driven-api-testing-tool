@@ -42,7 +42,7 @@ class MqHelperConfigLoaderTest {
         Files.write(helper, ("schemaVersion: att-mqhelper/v1.2\n" +
                 "id: broker\nname: Broker\ndescription: Test broker\n" +
                 "defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV.APP.SVRCONN, username: att, password: secret}\n" +
-                "  requestReply: {waitMs: 2500}\n" +
+                "  requestReply: {waitMs: 2500, maxResponseBytes: 2097152}\n" +
                 "instances: [{id: primary}]\n").getBytes("UTF-8"));
 
         FrameworkConfig loaded = new FrameworkConfigLoader().load(config);
@@ -52,6 +52,7 @@ class MqHelperConfigLoaderTest {
         assertEquals(2500, broker.requestReplyWaitMs());
         assertEquals("MQSeries Client", broker.transport());
         assertEquals("text", broker.responseFormat());
+        assertEquals(2097152, broker.maxResponseBytes());
         assertTrue(broker.instances().get("primary").credentialsConfigured());
         assertFalse(broker.metadata().toString().contains("secret"));
         assertFalse(broker.toString().contains("secret"));

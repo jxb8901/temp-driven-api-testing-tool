@@ -1523,6 +1523,8 @@ DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout�
 | `evidence.output` | 不啟用 | `format: json\|yaml\|xml\|text\|sqlplus`；`maxChars` 預設 10000（1–1000000） |
 | `pool` | 默認值 | `maxSize` 默認 20、`minIdle` 默認 0、`connectionTimeout` 默認 2s；`maxSize` 為 1–10000，`minIdle` 不可大於 `maxSize`，timeout 至少 250ms |
 
+Query result byte limit 逐 row 累加；CLOB UTF-8 bytes 在讀取 chunks 時計算，使限制檢查隨結果大小線性成長。
+
 validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 template call 會在執行前校驗。
 
 DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
@@ -1550,6 +1552,7 @@ defaults:
   requestReply:
     waitMs: 5000
     responseFormat: xml
+    maxResponseBytes: 10485760
   pool:
     maxSize: 20
 instances:
@@ -1587,6 +1590,8 @@ MQ evidence 可包含有界 transport metadata，例如 helper/instance identity
 
 Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFormat；send 不解析 reply。Instance selection 與 pool limits 屬於 descriptor。Schema migration 見 [Appendix C](reference.zh/appendices/migrations.md)。
 
+MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive limit，超限時回報 `MQ_RESPONSE_TOO_LARGE`。這是 transport 成功後的 size rejection，與 reply 遺失或 connection failure 分開處理。
+
 共用 typed-result 契約見[Action 與型別化值](reference.zh/14_actions.md)。
 
 ### Descriptor configuration
@@ -1597,7 +1602,7 @@ Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFor
 | `defaults` / `instances[]` settings | inherited then overridden | `connection`, `message`, `requestReply`, `pool`; each instance has an `id` |
 | `connection` | effective fields required | queue manager, host, port and channel as required by transport; port 1–65535; optional username/password |
 | `message` | defaults | CCSID 1208; `format` supports MQSTR/MQHRF2/MQFMT_STRING/MQFMT_NONE/NONE or empty; persistence supports asQueue/persistent/notPersistent/nonPersistent or 0–2 |
-| `requestReply` | defaults | `waitMs` 10000, range 0–3600000; `responseFormat` controls receive/request parsing |
+| `requestReply` | defaults | `waitMs` 10000, range 0–3600000; `responseFormat` controls receive/request parsing; `maxResponseBytes` defaults to 10485760 and accepts 1–1073741824 |
 | `pool` | defaults | maxSize 20 (1–10000), minIdle 0 (not above maxSize), borrowTimeout 2s |
 | `selection.strategy` | descriptor policy | `random` or `roundRobin` |
 | `evidence` | policy | `payload: none|metadata`; raw payload bytes are not structured evidence; optional `output` is human presentation |
@@ -1644,6 +1649,7 @@ description: Payment service
 baseUrl: https://payments.example.internal
 defaults:
   responseFormat: auto
+  maxResponseBytes: 10485760
   connectTimeoutMs: 5000
   readTimeoutMs: 30000
   followRedirects: false
@@ -1678,6 +1684,10 @@ Project-file String 不會覆蓋由 resource 管理的 HTTP Content-Type。需�
 #### Failure 與 evidence
 
 Transport/protocol、response-parse failures 屬 operational error。已收到的 4xx/5xx 是 completed response，可對 statusCode 做 assertion。HTTP evidence 可包含 helper ID、method、安全 URL、response status、content type、byte counts、response format 與 duration。Credentials/payload 不會隱式保存。Load 可用 evidence.resources.output: none 略過可選 resource output formatting，或將其延至 iteration evidence 保留時。
+
+HTTP response 上限為 10 MiB。若宣告的 Content-Length 超過上限，會在讀取前拒絕；未知或錯誤長度則使用有界 stream，在超出上限的第一個 byte 停止。Operation 會回報 `HTTP_RESPONSE_TOO_LARGE`，並在 diagnostics 保留已收到的 status code。Load resource diagnostics 會依 helper 回報 HTTP connection pool 的 active、idle、waiting 與 peak 數量。
+
+HTTP helper descriptor 的 `defaults.maxResponseBytes` 可設為 1 到 1073741824，預設為 10485760（10 MiB）。
 
 共用 typed-result 契約見[Action 與型別化值](reference.zh/14_actions.md)。
 

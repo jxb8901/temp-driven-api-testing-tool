@@ -90,6 +90,16 @@ class HttpHelperExecutorTest {
             else if ("/xml".equals(path)) response = "<root><ok>true</ok></root>".getBytes(StandardCharsets.UTF_8);
             else if ("/status".equals(path)) response = "missing".getBytes(StandardCharsets.UTF_8);
             else if ("/status500".equals(path)) response = "server error".getBytes(StandardCharsets.UTF_8);
+            else if ("/oversize".equals(path)) response = new byte[HttpHelperExecutor.DEFAULT_MAX_RESPONSE_BYTES + 1];
+            else if ("/boundary".equals(path)) response = new byte[HttpHelperExecutor.DEFAULT_MAX_RESPONSE_BYTES];
+            else if ("/chunked-oversize".equals(path)) {
+                exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=UTF-8");
+                exchange.sendResponseHeaders(200, 0);
+                try { exchange.getResponseBody().write(new byte[HttpHelperExecutor.DEFAULT_MAX_RESPONSE_BYTES + 1]); }
+                catch (Exception ignored) { }
+                exchange.close();
+                return;
+            }
             else response = request.length == 0 ? exchange.getRequestMethod().getBytes(StandardCharsets.UTF_8) : request;
             String responseType = "/json".equals(path) ? "application/json; charset=UTF-8"
                     : "/yaml".equals(path) ? "application/yaml; charset=UTF-8"
@@ -207,6 +217,43 @@ class HttpHelperExecutorTest {
             assertEquals(404, invocation.get("statusCode"));
             assertEquals("text/plain; charset=UTF-8", invocation.get("contentType"));
             assertEquals(7, invocation.get("responseBytes"));
+        }
+    }
+
+    @Test void rejectsDeclaredOversizedResponseAndRetainsTransportStatus() throws Exception {
+        String url = start();
+        FrameworkConfig config = configuration(url, null, null, 5000);
+        try (HttpHelperExecutor http = new HttpHelperExecutor(root, config)) {
+            ToolInvocationResult result = http.execute("paymentApi", "get", args("path", "/oversize"),
+                    context(), 5000L, "large-response", "text");
+            Map<?, ?> error = (Map<?, ?>) result.operationResult().outputMetadata().get("error");
+            assertEquals("HTTP_RESPONSE_TOO_LARGE", error.get("type"));
+            Map<?, ?> invocation = (Map<?, ?>) ((java.util.List<?>) ((Map<?, ?>) result.evidence().get("http")).get("invocations")).get(0);
+            assertEquals(200, invocation.get("statusCode"));
+        }
+    }
+
+    @Test void acceptsExactResponseBoundaryAndRejectsChunkedOversize() throws Exception {
+        String url = start();
+        FrameworkConfig config = configuration(url, null, null, 10000);
+        try (HttpHelperExecutor http = new HttpHelperExecutor(root, config)) {
+            ToolInvocationResult boundary = http.execute("paymentApi", "get", args("path", "/boundary"),
+                    context(), 15000L, "response-boundary", "text");
+            assertTrue(boundary.executionSuccess());
+            assertEquals(HttpHelperExecutor.DEFAULT_MAX_RESPONSE_BYTES,
+                    boundary.operationResult().outputMetadata().get("responseBytes"));
+            ToolInvocationResult unknownLength = http.execute("paymentApi", "get", args("path", "/chunked-oversize"),
+                    context(), 15000L, "chunked-oversize", "text");
+            assertEquals("HTTP_RESPONSE_TOO_LARGE",
+                    ((Map<?, ?>) unknownLength.operationResult().outputMetadata().get("error")).get("type"));
+            Future<ToolInvocationResult> first = workers.submit(() -> http.execute("paymentApi", "get",
+                    args("path", "/chunked-oversize"), context(), 15000L, "chunked-oversize-1", "text"));
+            Future<ToolInvocationResult> second = workers.submit(() -> http.execute("paymentApi", "get",
+                    args("path", "/chunked-oversize"), context(), 15000L, "chunked-oversize-2", "text"));
+            assertEquals("HTTP_RESPONSE_TOO_LARGE", ((Map<?, ?>) first.get(20L, TimeUnit.SECONDS)
+                    .operationResult().outputMetadata().get("error")).get("type"));
+            assertEquals("HTTP_RESPONSE_TOO_LARGE", ((Map<?, ?>) second.get(20L, TimeUnit.SECONDS)
+                    .operationResult().outputMetadata().get("error")).get("type"));
         }
     }
 

@@ -383,6 +383,9 @@ public final class DbHelperExecutor implements AutoCloseable {
             labels.add(label);
         }
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        // JSON list framing is two brackets plus one comma between rows. Add
+        // each serialized row exactly once instead of reserializing the prefix.
+        long resultBytes = 2L;
         while (resultSet.next()) {
             if (rows.size() >= config.maxRows()) throw new LimitException("Query exceeded maxRows=" + config.maxRows());
             Map<String, Object> row = new LinkedHashMap<String, Object>();
@@ -391,8 +394,10 @@ public final class DbHelperExecutor implements AutoCloseable {
                 catch (LimitException error) { throw error; }
                 catch (Exception error) { throw new SQLException("Unable to convert column '" + labels.get(column - 1) + "'", error); }
             }
+            int rowBytes = jsonBytes(row);
+            resultBytes += rowBytes + (rows.isEmpty() ? 0 : 1);
+            if (resultBytes > config.maxBytes()) throw new LimitException("Query exceeded maxBytes=" + config.maxBytes());
             rows.add(row);
-            if (jsonBytes(rows) > config.maxBytes()) throw new LimitException("Query exceeded maxBytes=" + config.maxBytes());
         }
         return success("query", rows.size(), rows, null, managed);
     }
@@ -408,7 +413,7 @@ public final class DbHelperExecutor implements AutoCloseable {
         if (value instanceof Clob) {
             Clob clob = (Clob) value;
             if (clob.length() > config.maxCellBytes()) throw new LimitException("CLOB exceeded maxCellBytes=" + config.maxCellBytes());
-            try (Reader reader = clob.getCharacterStream()) { return checked(read(reader, config.maxCellBytes()), config); }
+            try (Reader reader = clob.getCharacterStream()) { return read(reader, config.maxCellBytes()); }
         }
         if (value instanceof java.sql.Date || value instanceof java.sql.Time || value instanceof java.sql.Timestamp
                 || value instanceof java.time.temporal.TemporalAccessor) return checked(String.valueOf(value), config);
@@ -437,13 +442,33 @@ public final class DbHelperExecutor implements AutoCloseable {
     private String read(Reader reader, int limit) throws Exception {
         StringBuilder output = new StringBuilder();
         char[] buffer = new char[4096];
+        long utf8Bytes = 0L;
+        char pendingHighSurrogate = 0;
         int read;
         while ((read = reader.read(buffer)) >= 0) {
             output.append(buffer, 0, read);
-            if (output.toString().getBytes(StandardCharsets.UTF_8).length > limit) {
-                throw new LimitException("Text cell exceeded maxCellBytes=" + limit);
+            int end = read;
+            int start = 0;
+            if (pendingHighSurrogate != 0) {
+                if (end > 0 && Character.isLowSurrogate(buffer[0])) {
+                    utf8Bytes += 4;
+                    start = 1;
+                } else utf8Bytes += 1; // String.getBytes(UTF_8) replaces malformed surrogates with '?'.
+                pendingHighSurrogate = 0;
+            }
+            for (int i = start; i < end; i++) {
+                char c = buffer[i];
+                if (Character.isHighSurrogate(c)) {
+                    if (i + 1 < end && Character.isLowSurrogate(buffer[i + 1])) { utf8Bytes += 4; i++; }
+                    else if (i + 1 == end) pendingHighSurrogate = c;
+                    else utf8Bytes += 1;
+                } else if (Character.isLowSurrogate(c)) utf8Bytes += 1;
+                else utf8Bytes += c <= 0x7f ? 1 : c <= 0x7ff ? 2 : 3;
+                if (utf8Bytes > limit) throw new LimitException("Text cell exceeded maxCellBytes=" + limit);
             }
         }
+        if (pendingHighSurrogate != 0) utf8Bytes += 1;
+        if (utf8Bytes > limit) throw new LimitException("Text cell exceeded maxCellBytes=" + limit);
         return output.toString();
     }
 

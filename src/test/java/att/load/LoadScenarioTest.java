@@ -433,6 +433,8 @@ class LoadScenarioTest {
             @SuppressWarnings("unchecked") Map<String, Object> reference = (Map<String, Object>) event.get("evidence");
             assertEquals("failures/" + result.executionId(), reference.get("workspace"));
             assertEquals("failures/" + result.executionId() + "/case.log", reference.get("caseLog"));
+            assertSameFileOrEqualContent(expectedWorkspace.resolve("case.log"),
+                    runDirectory.resolve("failures").resolve(result.executionId()).resolve("case.log"));
         } finally { resources.close(); }
     }
 
@@ -585,6 +587,7 @@ class LoadScenarioTest {
 
             IterationResult retained = result.materializeEvidence();
             assertNotNull(retained.evidenceRef());
+            assertSameFileOrEqualContent(retained.outputDirectory().resolve("case.log"), retained.evidenceRef().caseLog());
             String caseLog = new String(Files.readAllBytes(retained.evidenceRef().caseLog()), "UTF-8");
             assertTrue(caseLog.contains("ACTION verify"));
             assertTrue(caseLog.contains("LOAD OUTCOME"));
@@ -675,7 +678,7 @@ class LoadScenarioTest {
         Path scenarioFile = write(project, "sample.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: SAMPLE_TEMPLATE}\n"
                 + "load: {users: 1, duration: 1s}\n"
-                + "evidence: {success: sample, failure: full, sampleRate: 1.0, maxSamples: 1}\n");
+                + "evidence: {success: sample, failure: full, sampleRate: 1.0, maxSamples: 3}\n");
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.emptyMap(), null, null);
         LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
@@ -692,18 +695,69 @@ class LoadScenarioTest {
             assertNotNull(result.evidenceRef());
             assertTrue(Files.isRegularFile(result.outputDirectory().resolve("case.log")));
             assertTrue(Files.isRegularFile(result.outputDirectory().resolve("case.yaml")));
+            assertSameFileOrEqualContent(result.outputDirectory().resolve("case.log"), result.evidenceRef().caseLog());
+            assertSameFileOrEqualContent(result.outputDirectory().resolve("case.yaml"),
+                    result.evidenceRef().workspace().resolve("case.yaml"));
 
             long now = System.currentTimeMillis();
             evidence.onEvent(LoadEvent.completed("sample-run", "closed", "STEADY", "sample-run-1", "VU-1", 1,
                     now, now, now + 1, result.status(), result.evidenceRef()));
+            for (int sequence = 2; sequence <= 3; sequence++) {
+                String id = "sample-run-" + sequence;
+                assertTrue(evidence.reserveSuccess(id));
+                IterationResult additional = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                        IterationRequest.closed("sample-run", id, sequence, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                                .withOutputDirectory(outputRoot.resolve("load/sample-run/iterations")));
+                assertEquals(ResultStatus.PASS, additional.status());
+                assertNotNull(additional.evidenceRef());
+                assertSameFileOrEqualContent(additional.outputDirectory().resolve("case.log"), additional.evidenceRef().caseLog());
+                evidence.onEvent(LoadEvent.completed("sample-run", "closed", "STEADY", id, "VU-1", sequence,
+                        now, now, now + 1, additional.status(), additional.evidenceRef()));
+            }
             Map<String, Object> written = evidence.write(outputRoot.resolve("load/sample-run"));
-            assertEquals(1, written.get("count"));
+            assertEquals(3, written.get("count"));
             @SuppressWarnings("unchecked") List<Map<String, Object>> items = (List<Map<String, Object>>) written.get("items");
             Path eventFile = outputRoot.resolve("load/sample-run").resolve(String.valueOf(items.get(0).get("path")));
             @SuppressWarnings("unchecked") Map<String, Object> event = JsonSupport.mapper().readValue(eventFile.toFile(), Map.class);
             @SuppressWarnings("unchecked") Map<String, Object> reference = (Map<String, Object>) event.get("evidence");
             assertTrue(String.valueOf(reference.get("workspace")).startsWith("samples/"));
             assertTrue(Files.isRegularFile(outputRoot.resolve("load/sample-run").resolve(String.valueOf(reference.get("caseLog")))));
+        } finally { resources.close(); }
+    }
+
+    @Test void allSuccessEvidenceRetainsEverySuccessfulIteration() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/ALL_EVIDENCE_TEMPLATE"));
+        write(project, "templates/ALL_EVIDENCE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: ALL_EVIDENCE_TEMPLATE\ndescription: all success evidence\nactions:\n"
+                + "  record: {type: log, message: all-mode}\n");
+        Path scenarioFile = write(project, "all-evidence.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: ALL_EVIDENCE_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "evidence: {mode: all, failure: full}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("all-evidence-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            long now = System.currentTimeMillis();
+            for (int sequence = 1; sequence <= 2; sequence++) {
+                String id = "all-run-" + sequence;
+                assertTrue(evidence.reserveSuccessEvidence(id));
+                IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                        IterationRequest.closed("all-run", id, sequence, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                                .withOutputDirectory(outputRoot.resolve("load/all-run/iterations")));
+                assertEquals(ResultStatus.PASS, result.status());
+                assertNotNull(result.evidenceRef());
+                evidence.onEvent(LoadEvent.completed("all-run", "closed", "STEADY", id, "VU-1", sequence,
+                        now, now, now + 1, result.status(), result.evidenceRef()));
+            }
+            Map<String, Object> written = evidence.write(outputRoot.resolve("load/all-run"));
+            assertEquals(2, written.get("count"));
+            assertEquals(2, evidence.events().size());
         } finally { resources.close(); }
     }
 
@@ -1049,6 +1103,26 @@ class LoadScenarioTest {
         assertEquals(Paths.get("scenario.yaml"), options.loadScenario());
         assertEquals("100/s", options.loadArrivalRate());
         assertNull(ExecutionOptions.parse(new String[]{"load"}).loadScenario(), "no scenario selects discovery");
+    }
+
+    private void assertSameFileOrEqualContent(Path first, Path second) throws Exception {
+        assertArrayEquals(Files.readAllBytes(first), Files.readAllBytes(second),
+                "public artifact paths must resolve to identical evidence content");
+        if (hardLinksSupported(first.getParent())) assertTrue(Files.isSameFile(first, second));
+    }
+
+    private boolean hardLinksSupported(Path directory) throws Exception {
+        Path source = Files.createTempFile(directory, "hard-link-probe-", ".tmp");
+        Path target = source.resolveSibling(source.getFileName().toString() + ".link");
+        try {
+            Files.createLink(target, source);
+            return Files.isSameFile(source, target);
+        } catch (UnsupportedOperationException | java.io.IOException unavailable) {
+            return false;
+        } finally {
+            Files.deleteIfExists(target);
+            Files.deleteIfExists(source);
+        }
     }
 
     private Path project() throws Exception {
