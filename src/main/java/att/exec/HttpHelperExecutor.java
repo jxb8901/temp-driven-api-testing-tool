@@ -5,7 +5,6 @@ import att.config.HttpHelperConfig;
 import att.core.CaseRuntimeContext;
 import att.core.CaseExecutionLog;
 import att.core.InternalExceptionLogger;
-import att.validation.JsonSupport;
 import java.io.IOException;
 import java.io.ByteArrayOutputStream;
 import java.io.ByteArrayInputStream;
@@ -439,11 +438,8 @@ public final class HttpHelperExecutor implements AutoCloseable {
             } catch (Exception invalidCharset) { throw new HttpFailure("HTTP_FORMAT", "Invalid HTTP response charset"); }
         }
         if ("text".equals(format)) return new String(bytes, charset);
-        try {
-            if ("json".equals(format)) return att.validation.JsonSupport.mapper().readValue(
-                    new InputStreamReader(new ByteArrayInputStream(bytes), charset), Object.class);
-            String text = new String(bytes, charset);
-            return new ToolInvoker(projectRoot, config).parseOutput(text, format);
+        try (InputStreamReader reader = new InputStreamReader(new ByteArrayInputStream(bytes), charset)) {
+            return new ToolInvoker(projectRoot, config).parseOutput(reader, format);
         }
         catch (Exception invalidBody) { throw new HttpFailure("HTTP_RESULT_PARSE_ERROR", "HTTP response body is not valid " + format, invalidBody); }
     }

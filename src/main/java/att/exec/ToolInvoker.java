@@ -27,6 +27,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.XMLConstants;
 import java.io.StringReader;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -763,17 +764,28 @@ public class ToolInvoker {
     }
 
     public Object parseOutput(String text, String outputType) throws Exception {
+        return parseOutput(new StringReader(text), outputType);
+    }
+
+    /** Parse a typed result from a reader without first materializing the complete body as a String. */
+    public Object parseOutput(Reader reader, String outputType) throws Exception {
         if ("yaml".equalsIgnoreCase(outputType)) {
-            Object loaded = YamlSupport.parser().load(text);
-            return loaded == null ? new LinkedHashMap<String, Object>() : loaded;
+            synchronized (YamlSupport.parser()) {
+                Object loaded = YamlSupport.parser().load(reader);
+                return loaded == null ? new LinkedHashMap<String, Object>() : loaded;
+            }
         }
         if ("xml".equalsIgnoreCase(outputType)) {
-            return xmlToMap(text);
+            return xmlToMap(new InputSource(reader));
         }
         if ("json".equalsIgnoreCase(outputType)) {
-            return att.validation.JsonSupport.mapper().readValue(text, Object.class);
+            return att.validation.JsonSupport.mapper().readValue(reader, Object.class);
         }
-        return text;
+        StringBuilder text = new StringBuilder();
+        char[] buffer = new char[4096];
+        int count;
+        while ((count = reader.read(buffer)) >= 0) if (count > 0) text.append(buffer, 0, count);
+        return text.toString();
     }
 
     private Object parseOutput(Path file, String outputType) throws Exception {

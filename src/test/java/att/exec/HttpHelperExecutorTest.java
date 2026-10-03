@@ -317,7 +317,9 @@ class HttpHelperExecutorTest {
             assertEquals("application/json; charset=UTF-8", ((java.util.List<?>) responseHeaders.get("content-type")).get(0));
             assertEquals(java.util.Arrays.asList("one", "two"), responseHeaders.get("x-multi"));
             assertEquals(Boolean.TRUE, ((Map<?, ?>) http.execute("paymentApi", "get", args("path", "/yaml"), context, 1000L, "yaml", "yaml").output()).get("ok"));
-            assertNotNull(http.execute("paymentApi", "get", args("path", "/xml"), context, 1000L, "xml", "xml").output());
+            Map<?, ?> xml = (Map<?, ?>) http.execute("paymentApi", "get", args("path", "/xml"), context, 1000L, "xml", "xml").output();
+            assertEquals("root", xml.get("name"));
+            assertEquals("true", xml.get("ok"));
             assertEquals(404, http.execute("paymentApi", "get", args("path", "/status"), context, 1000L, "status", "text").operationResult().outputMetadata().get("statusCode"));
             ToolInvocationResult serverError = http.execute("paymentApi", "get", args("path", "/status500"), context, 1000L, "server-error", "text");
             assertTrue(serverError.executionSuccess());
