@@ -74,6 +74,18 @@ Coordinated workloads share a lazy, bounded worker executor whose maximum is the
 
 Arrival-rate workloads use load.arrivalRate, positive load.maxConcurrent and overloadPolicy: drop. They schedule against absolute due times. Arrivals beyond maxConcurrent are recorded as generator drops; they are not queued or counted as SUT errors. Arrival-rate workloads have no persistent USER_ID and cannot configure thinkTime.
 
+#### Pacing and resource-pool sizing
+
+For a steady arrival rate, estimate average in-flight requests with Little's law:
+
+```text
+average concurrency ≈ arrival rate (requests/second) × mean response time (seconds)
+```
+
+For example, 20 HTTP requests/second at a mean 1.5-second response time needs about 30 concurrent connections to avoid the client pool becoming the limiting factor. HTTP defaults to `pool.maxConnections: 50` and `pool.maxConnectionsPerRoute: 20`; raise both as needed for the workload, keeping the per-route value no greater than the total. Add headroom for latency variation and other routes, then confirm with `resources.http` active/idle/waiting/peak observations. Pool capacity is a generator-side ceiling, not a recommendation to send that load to an unverified service.
+
+For MQ request/reply, 10 requests/second with a mean 3-second reply time likewise needs about 30 leased connections. The MQ default `pool.maxSize: 20` can cap that workload before the SUT reaches its limit; configure `pool.maxSize` above the expected in-flight count with suitable headroom. Set `minIdle` when cold connection creation during ramp-up would distort the measurement. Check MQ waiting and timeout metrics alongside response latency to distinguish pool pressure from SUT latency. Recalculate from observed mean latency as load changes; tail latency is useful for headroom, but is not the mean used by the estimate.
+
 duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends real traffic but is excluded from measured threshold aggregates. Optional seed makes closed-VU think-time randomization deterministic.
 
 #### Load identity and output layout
