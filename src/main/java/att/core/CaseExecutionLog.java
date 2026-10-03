@@ -27,6 +27,7 @@ import java.util.Map;
 public class CaseExecutionLog implements AutoCloseable {
     private static final String TRUNCATION_MARKER = "... earlier case log events omitted ...\n";
     private final Path path;
+    private Path projectRoot;
     private final boolean yamlAnchors;
     private final java.util.function.Consumer<String> mirror;
     private final BufferedWriter writer;
@@ -122,6 +123,11 @@ public class CaseExecutionLog implements AutoCloseable {
 
     public Path path() {
         return path;
+    }
+
+    /** Sets the ATT root used to present local paths in human-readable log output. */
+    public synchronized void setProjectRoot(Path projectRoot) {
+        this.projectRoot = projectRoot == null ? null : projectRoot.toAbsolutePath().normalize();
     }
 
     /** Registers resource-specific secret spellings for all subsequent log writes. */
@@ -262,7 +268,7 @@ public class CaseExecutionLog implements AutoCloseable {
 
     private synchronized void write(String text) throws IOException {
         if (discarding) return;
-        String safeText = text;
+        String safeText = PathPresentation.displayText(text, projectRoot);
         for (String secret : secretRedactions) safeText = safeText.replace(secret, "[REDACTED_SECRET]");
         if (writer != null) {
             writer.write(safeText);
@@ -437,6 +443,7 @@ public class CaseExecutionLog implements AutoCloseable {
     private boolean abnormalValue(Object value, IdentityHashMap<Object, Boolean> visited) {
         if (value == null) return false;
         if (value instanceof ResultStatus) return abnormalStatus(String.valueOf(value));
+        if (value instanceof Path) return false;
         if (!(value instanceof Map) && !(value instanceof Iterable) && !value.getClass().isArray()) return false;
         if (visited.put(value, Boolean.TRUE) != null) return false;
         if (value instanceof Map) {
@@ -461,6 +468,8 @@ public class CaseExecutionLog implements AutoCloseable {
     private Object serializable(Object value, IdentityHashMap<Object, Object> copies,
                                 IdentityHashMap<Object, Boolean> active) {
         if (value == null) return null;
+        if (value instanceof Path) return PathPresentation.displayPath((Path) value, projectRoot);
+        if (value instanceof String) return PathPresentation.displayText((String) value, projectRoot);
         boolean container = value instanceof Map || value instanceof Iterable || value.getClass().isArray();
         if (!container) return value;
         if (active.containsKey(value)) throw new IllegalArgumentException("Cyclic data cannot be written to the case log");
@@ -471,7 +480,15 @@ public class CaseExecutionLog implements AutoCloseable {
                 Map<Object, Object> copy = new LinkedHashMap<Object, Object>();
                 if (yamlAnchors) copies.put(value, copy);
                 for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-                    copy.put(serializable(entry.getKey(), copies, active), serializable(entry.getValue(), copies, active));
+                    Object key = serializable(entry.getKey(), copies, active);
+                    Object fieldValue = entry.getValue();
+                    if (key instanceof String && localPathField((String) key) && fieldValue instanceof String) {
+                        try {
+                            Path candidate = java.nio.file.Paths.get((String) fieldValue);
+                            if (candidate.isAbsolute()) fieldValue = PathPresentation.displayPath(candidate, projectRoot);
+                        } catch (java.nio.file.InvalidPathException ignored) { }
+                    }
+                    copy.put(key, serializable(fieldValue, copies, active));
                 }
                 return copy;
             }
@@ -487,5 +504,14 @@ public class CaseExecutionLog implements AutoCloseable {
         } finally {
             active.remove(value);
         }
+    }
+
+    private boolean localPathField(String key) {
+        String normalized = key.toLowerCase(java.util.Locale.ROOT);
+        if (normalized.contains("remote") || normalized.contains("url") || normalized.contains("uri")) return false;
+        return normalized.equals("root") || normalized.equals("path") || normalized.equals("file")
+                || normalized.endsWith("file")
+                || normalized.endsWith("path") || normalized.endsWith("directory")
+                || normalized.endsWith("dir") || normalized.equals("cwd");
     }
 }

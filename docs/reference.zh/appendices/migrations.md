@@ -1,6 +1,12 @@
 ## Appendix C — Migration Notes
 
-### ATT 3.7.1 Testdata Migration
+### ATT 3.7.2 file arguments 與 Case log paths
+
+HTTPHelper call 不再接受 `file`；請直接將 `&{project-relative-file}` 傳入 `body`。MQHelper `send` 和 `request` 不再接受 `file`；請將 expression 傳入 `payload`。SSHHelper `upload` 現在要求 `payload` content，並拒絕 `localPath`；請直接傳入 `&{...}`。SSHHelper 不再支援 `download`，因為它需要 local destination path。若工作必須從主機取回檔案，請明確配置 command-backed Tool。這些變更移除 Resource API 原生的任意 binary local-file input；`&{...}` 提供 UTF-8 text。
+
+Case log 會將 canonical project root 下的 path 顯示為 `$ATT_HOME` 或 `$ATT_HOME/<relative-path>`，並統一使用 `/`。`$ATT_HOME` 只是在 log 中的 presentation token，不是 environment variable、Context root 或 file-expression locator。Runtime resolution 和 filesystem access 仍使用 canonical absolute Path。記錄成 Path value 的 project 外路徑會以受限的 `$EXTERNAL/<basename>` 顯示。
+
+### Previous release Testdata Migration
 
 將 global configuration 從 `att-config/v2.10` 升至 `att-config/v2.11`，並將 Load scenario 從 `att-load/v1.4` 升至 `att-load/v1.5`。舊 schema 仍登錄於 `schemas/history/`，供 migration diagnostics 使用。`att-testdata/v1.0` 是新增契約：在選定的 environment profile `testdata` list 加入 descriptor path，再於 Case/Stage、Debug 或 Load workload input map 使用 `@{id}`。Load scenario 可在頂層加入 package-relative `testdata` paths，形成僅適用於該次 Load 的 overlay。不同 layer 的同名 ID 會完整取代 descriptor；同一 layer 內的重複 ID 無效。多筆 records 的 descriptor 必須有明確 selection policy。沒有 testdata reference 的既有 package 不需要新增 descriptor。
 
@@ -15,7 +21,7 @@ ATT 3.6.2 將型別化 operation result、外部 parsing、project-file String�
 | Command Tool result.format | 將 parsing 設定移至 Tool descriptor 的 stdoutFormat。 |
 | 共用 Action result.format/path/overwrite | 移除。output.result 是 native logical typed value；沒有隱式檔案替代方案。 |
 | Render result.format/path 或 renderAs/saveAs | 移除舊欄位。Project-file expression 回傳 exact UTF-8 String，不建立結果檔或 targetFiles。 |
-| 透過 targetFiles 傳遞 Render 檔案 | 直接將 project-file String 傳入 HTTP body 或 MQ payload。 |
+| 透過 targetFiles 傳遞 Render 檔案 | 直接將 project-file String 傳入 HTTP body、MQ payload 或 SSH upload payload。 |
 | 在 project-file String 使用 requestFormat | 移除。requestFormat 僅供抽象 Map/List；String + requestFormat 會失敗。 |
 | Dynamic 或不安全 file locator | 改為一個 static project-relative file。Absolute path、glob、dynamic locator、missing file、directory、非 UTF-8 bytes 及 symlink escape 都會被拒絕。 |
 | Log file | 直接將 value 傳入 Log.value。 |
@@ -65,7 +71,7 @@ ATT 3.6.2 使用 `att-template/v3.6` 與 `att-flow/v3.6` 作為 active schemas�
 | Render result.format/path/overwrite 或 renderAs/saveAs | 移除舊 persistence 欄位。Project-file expression 回傳 exact UTF-8 String，不會隱式建立結果檔。 |
 | Log file | 將 typed value 直接傳入 Log.value |
 | Log fields | 將 typed map/list 放入 Log.value，並指定 Log.format |
-| Render targetFiles handoff 至 HTTP/MQ | 將 project-file String 直接作為 HTTP body 或 MQ payload |
+| Render targetFiles handoff 至 HTTP/MQ/SSH | 將 project-file String 直接作為 HTTP body、MQ payload 或 SSH upload payload |
 | 在 Render result 使用 requestFormat | 移除；requestFormat 留給抽象 Map/List |
 
 Project-file path 相對於 canonical project root。`./` 與 `../` 只有在 canonical target 仍位於該 root 內時才允許。v1 沒有 glob 或 dynamic locator；target 必須是 regular strict-UTF-8 file。

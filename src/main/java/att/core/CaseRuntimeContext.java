@@ -102,6 +102,7 @@ public final class CaseRuntimeContext {
     private Path caseOutputDir;
     private Path caseLogPath;
     private Path commandWorkingDirectory;
+    private Path projectRoot;
     private final String mode;
     private String currentStage;
     private Map<String, Object> currentActions;
@@ -700,8 +701,11 @@ public final class CaseRuntimeContext {
 
     /** Adds only curated component metadata; credentials/config objects never enter META. */
     public void setProject(Path projectRoot) {
-        setComponentMetadata("PROJECT", mapOf("root", projectRoot.toAbsolutePath().normalize().toString(), "id", projectRoot.getFileName() == null ? "" : projectRoot.getFileName().toString()));
+        this.projectRoot = projectRoot.toAbsolutePath().normalize();
+        setComponentMetadata("PROJECT", mapOf("root", this.projectRoot.toString(), "id", projectRoot.getFileName() == null ? "" : projectRoot.getFileName().toString()));
     }
+
+    public Path projectRoot() { return projectRoot; }
 
     public void setTargetMetadata(String type, String id) {
         setComponentMetadata("TARGET", mapOf("type", type, "id", id));

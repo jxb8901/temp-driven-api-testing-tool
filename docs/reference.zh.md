@@ -1,7 +1,7 @@
-# ATT V3.7.1 使用手冊與參考
+# ATT V3.7.2 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 3.7.1
+Version: 3.7.2
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -121,7 +121,8 @@ Status: 規範性使用者文件；由模組化來源自動生成
 - [Appendix A — Schema 與 Version Matrix](#appendix-a-schema-與-version-matrix)
 - [Appendix B — Compatibility 與 Deprecated Aliases](#appendix-b-compatibility-與-deprecated-aliases)
 - [Appendix C — Migration Notes](#appendix-c-migration-notes)
-  - [ATT 3.7.1 Testdata Migration](#att-371-testdata-migration)
+  - [ATT 3.7.2 file arguments 與 Case log paths](#att-372-file-arguments-與-case-log-paths)
+  - [Previous release Testdata Migration](#previous-release-testdata-migration)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
   - [Environment profile migration](#environment-profile-migration)
@@ -446,7 +447,7 @@ sendRequest:
 
 HTTP/MQ 請將 String 直接傳給 body/payload。Resource 使用其配置的 charset/CCSID 編碼原文；Content-Type 與 MQ transport metadata 仍由 resource 管理。`&{...}` 可用於 Tool/Helper call argument、Assign expression、Log value 和其他 typed value 位置。
 
-requestFormat 僅供 Map 或 List 等抽象結構化值使用。此類 body 必須明確指定格式，例如 requestFormat=json。String 與 requestFormat 同時出現會失敗，確保 project-file result 不會被靜默 parse/serialize。只有 resource 呼叫明確定義 file 參數時，raw file input 才仍可使用。
+requestFormat 僅供 Map 或 List 等抽象結構化值使用。此類 body 必須明確指定格式，例如 requestFormat=json。String 與 requestFormat 同時出現會失敗，確保 project-file result 不會被靜默 parse/serialize。HTTP、MQ、SSH Resource call 會將 project-file content 作為 String value 消費，不會解析 local file-path argument。
 
 ### Tool、DB 與 Flow 結果
 
@@ -813,7 +814,7 @@ Descriptor 和 generated record 語法見[Testdata Registry 與 Input Mapping](r
 
 Expression language 由本章定義；可用 roots 與求值時機由欄位的 semantic owner 定義：[Tool command/call](reference.zh/05_resources/tools.md)、[Load execIdFormat 與 vars](reference.zh/04_execution_modes/load.md)、[Debug vars](reference.zh/04_execution_modes/debug.md)、[report filename](reference.zh/09_configuration.md)。`${path?}` 只允許缺少的 map/list path 回傳 null；語法錯誤與非法 scope 仍會失敗。Expression syntax 或缺少的必需 Context path 會提供結構化 diagnostic；見[Validation](reference.zh/12_validation_diagnostics.md)。
 
-已移除 presentation-only `dbText`／`misc.dbText`、`prettyPrint`／`misc.prettyPrint`／`format.pretty` 和所有 local `file.*`／legacy file alias。DB result 保持 typed；顯示時改用 Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` 加 `format: sqlplus`，Map/List 則使用 `format: json` 或 `yaml`。Project content 使用 `&{...}`；remote filesystem 使用 SSHHelper `stat`／`mkdirs`／`move`／`delete`，傳輸使用 `upload`／`download`。ATT local output 由 framework 管理。移除的 API 會提供 migration diagnostic。
+已移除 presentation-only `dbText`／`misc.dbText`、`prettyPrint`／`misc.prettyPrint`／`format.pretty` 和所有 local `file.*`／legacy file alias。DB result 保持 typed；顯示時改用 Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` 加 `format: sqlplus`，Map/List 則使用 `format: json` 或 `yaml`。Project content 使用 `&{...}`，並將 String 傳入 HTTP body、MQ payload 或 SSH upload payload。SSHHelper upload 只接受 content；native SSH download 已移除。ATT local output 由 framework 管理。移除的 API 會提供 migration diagnostic。
 
 ### Retry condition 的生命週期
 
@@ -927,11 +928,7 @@ Debug 不建立或更新普通 `latest-run.yaml`。Exit code：`0` PASS、`1` FA
 
 當 debug target 無法解析時，先確認 target kind 及 identifier，再用 `--input <path>` 排除 sidecar discovery 因素。Template/Flow debug 會尋找 `<target directory>/debug.yaml`；grouped Tool debug 會尋找 `config/tools/<group>.debug.yaml`。只會驗證 selected target 的 dependency closure，因此不需要無關 workbook 或 Case 檔案。
 
-MQ 的 `file` argument 在 Debug、Run、Load 使用相同的安全路徑規則：
-
-- 絕對路徑必須解析為 ATT package root 內的 regular file。即使 Load 尚未建立 lazy iteration workspace，也會直接按 package root 驗證。
-- 相對路徑會在目前 active Case output directory 下解析；`..` traversal、symlink payload、symlink escape、directory 及非 regular file 會在 MQ connect/open/put/get 前被拒絕。
-- 遺失或不安全 payload 會直接指出 payload path。尚未建立 MQ connection，因此應先修正路徑，再檢查 broker credential 或 queue 狀態。
+Debug、Run、Load 都使用相同的 `&{project-relative-file}` expression，再將 UTF-8 String 傳入 HTTP `body`、MQ `payload` 或 SSH upload `payload`。這些 Resource Helper 不會解析各自的 local path。Validation 會在外部 I/O 前解析 project file；舊 HTTP/MQ `file`、SSH upload `localPath` 及 SSH `download` call 均會被拒絕。
 
 按 output directory 分辨排錯階段：
 
@@ -1265,7 +1262,7 @@ execIdFormat 只允許 deterministic、side-effect-free built-ins；external cal
 
 ## 07 Resources 與 Integrations
 
-Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 是同級 integration/resource 類型。SSHHelper 為 command-backed Tool 提供路由，也提供 `ssh.<helperId>.execute|upload|download` Resource Helper operation；它們最終收斂到 common operation-result/evidence contract。
+Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 是同級 integration/resource 類型。SSHHelper 為 command-backed Tool 提供路由，也提供 `ssh.<helperId>.execute|upload` 及 remote filesystem operation；最後收斂到 common operation-result/evidence contract。
 
 ```text
 Tool      -> process/call operation --\
@@ -1594,7 +1591,7 @@ send:
 
 ATT 使用配置的 MQ charset/CCSID 編碼完全相同的 file text，不會 parse/serialize。String 不應提供 requestFormat。Project-file expression 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。
 
-Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。String + requestFormat 會被拒絕。payload 與 file 互斥。file 可用於明確的 raw file input；project-file expression 不建立檔案或 targetFiles。
+Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。String + requestFormat 會被拒絕。MQ send/request call 不接受 local file path；`file` 是 unknown argument。Project-file expression 不建立檔案或 targetFiles。
 
 #### Evidence、response parsing 與 Load
 
@@ -1710,7 +1707,7 @@ sendRequest:
 
 HTTP 在 charset encoding boundary 傳送完全相同的 String，不會 parse/serialize。String 不可搭配 requestFormat。
 
-Map/List 是抽象結構化值，需明確指定 requestFormat，例如 body=${EXEC.INPUT.request}, requestFormat=json。requestFormat 支援 text、json、yaml、xml，且只用於 Map/List。String + requestFormat 會被拒絕。body 和 file 互斥；file 是 HTTP call 明確支援的 raw file input。Project-file expression 不建立結果檔，也沒有 targetFiles。
+Map/List 是抽象結構化值，需明確指定 requestFormat，例如 body=${EXEC.INPUT.request}, requestFormat=json。requestFormat 支援 text、json、yaml、xml，且只用於 Map/List。String + requestFormat 會被拒絕。HTTP call 不接受 local file path；`file` 是 unknown argument。Project-file expression 不建立結果檔，也沒有 targetFiles。
 
 Project-file String 不會覆蓋由 resource 管理的 HTTP Content-Type。需要特定 media type 時請配置 contentType/header。Request charset/header 與 response parsing 都由 HTTPHelper 管理，與 Action result/Log formatting 分開。
 
@@ -1730,7 +1727,7 @@ DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentatio
 
 #### SSH Resource Helper operation
 
-SSHHelper 也支援在一般 `type: tool` Action 中使用共用 Resource Helper 形式：`ssh.<helperId>.execute`、`ssh.<helperId>.upload` `ssh.<helperId>.download`、`ssh.<helperId>.stat`、`ssh.<helperId>.mkdirs`、`ssh.<helperId>.move` 及 `ssh.<helperId>.delete`。Helper ID 是邏輯 ID；native Resource Helper call 使用 `single`、`random` 或 `roundRobin` 選取一個實體 instance。Native Resource Helper call 不支援 `selection.strategy: all`，會在 validation 時拒絕；`all` 只供 command-backed Tool fan-out 使用。這些呼叫會在未建立 SSH connection 前完成驗證，並共用 helper 的並發上限及 identity 遮蔽規則。
+SSHHelper 也支援在一般 `type: tool` Action 中使用共用 Resource Helper 形式：`ssh.<helperId>.execute`、`ssh.<helperId>.upload`、`ssh.<helperId>.stat`、`ssh.<helperId>.mkdirs`、`ssh.<helperId>.move` 及 `ssh.<helperId>.delete`。Helper ID 是邏輯 ID；native Resource Helper call 使用 `single`、`random` 或 `roundRobin` 選取一個實體 instance。Native Resource Helper call 不支援 `selection.strategy: all`，會在 validation 時拒絕；`all` 只供 command-backed Tool fan-out 使用。這些呼叫會在未建立 SSH connection 前完成驗證，並共用 helper 的並發上限及 identity 遮蔽規則。
 
 ```yaml
 actions:
@@ -1750,21 +1747,13 @@ actions:
         payload=${EXEC.VARS.requestText},
         overwrite=true
       )}
-  downloadResponse:
-    type: tool
-    call: >-
-      #{ssh.application.download(
-        remotePath='/srv/app/response.json',
-        localPath='ssh/response.json',
-        overwrite=true
-      )}
 ```
 
 `execute` 需要 `command`，可接受 `stdoutFormat: text|json|yaml|xml` 及 `timeoutMs`。`text` 原樣回傳 stdout String；structured format 會把 stdout 解析為原生 Map/List/scalar。Timeout、遠端 non-zero exit 或 parse failure 會回傳不同 category 的 operation error，並保留有界 stderr、exit code、byte count 及 transport evidence。Resource SSH 的 non-zero exit 會令 operation 失敗，與下文 legacy command-backed Tool 的 fan-out 契約不同。
 
-`upload` 需要 `remotePath`，以及 `localPath`／`payload` 二選一。Local file 必須是 package 或目前 Case output 內的 regular non-symlink file。Payload 必須解析為 String 或 byte array；Map/List 會被拒絕，不會隱式序列化。Remote absolute path 可用；upload 的 `overwrite` 預設為 `true`。
+`upload` 需要 `remotePath` 及 String 或 byte array `payload`。上傳 project file 時，直接傳入 `&{...}` 回傳的 UTF-8 String；SSHHelper 不接受或解析 local filesystem path。Map/List 會被拒絕，不會隱式序列化。Remote absolute path 可用；upload 的 `overwrite` 預設為 `true`。
 
-`download` 需要 `remotePath` 及 Case-output-relative 的 `localPath`。ATT 先寫入 temporary file，再移入受控 Case output directory；不會解析下載 bytes。Download 的 `overwrite` 預設為 `false`，已有檔案必須明確使用 `overwrite: true`。Typed result 是包含 remote path、保留後 local path 及 byte count 的 transfer summary。
+SSHHelper 不提供 `download` operation，因下載必須定義 local destination path。若工作確實要從主機取回檔案，請使用明確配置的 command-backed Tool。
 
 所有 operation 只接受 named arguments。Unknown operation/helper/argument、重複 argument、錯誤 format／timeout、缺少 required field、upload source 衝突及不安全 local path 都會在外部執行前驗證失敗。Runtime evidence 包含 logical helper、選定 instance、host/port、operation、transport、時間及 transfer/command 詳情；command input 和 represented payload 不會複製到 evidence。由 environment 提供的 identity path 仍會遮蔽。
 
@@ -1778,13 +1767,13 @@ Native SSH failure 在 invocation `error.category` 和 `SSH.error.category` 發�
 | `SSH_TIMEOUT` / `SSH_POOL_TIMEOUT` | Operation/connect deadline 或 concurrency wait 到期。 |
 | `SSH_REMOTE_EXIT` | Remote command 完成但 exit 非零（OpenSSH 255 使用上述類別）。 |
 | `SSH_RESULT_PARSE_ERROR` | stdout parsing 失敗。 |
-| `SSH_UPLOAD_ERROR` / `SSH_DOWNLOAD_ERROR` | Connection setup 後對應 transfer 失敗，包括 remote permission、missing path 或 protocol error。 |
-| `SSH_PATH` / `SSH_ARGUMENT` | Local containment/security check 或 argument validation 失敗。 |
+| `SSH_UPLOAD_ERROR` | Connection setup 後 upload 失敗，包括 remote permission、missing path 或 protocol error。 |
+| `SSH_ARGUMENT` | Argument validation 失敗。 |
 | `SSH_INTERRUPTED` | Caller 中斷 operation。 |
 
 Transfer connection/channel failure 保留 `phase: connect|channel`；timeout evidence 亦保留相應 timeout budget。所有 failure 都保留選定 operation 與實際 transport。Transfer error 仍不可自動 timeout replay。
 
-Native Resource Helper call 使用一個 absolute Action deadline，涵蓋 concurrency pool wait、connection 與 channel setup，以及 command 或 SFTP operation。Per-call `timeoutMs` 或 helper `timeouts.commandTimeoutMs` 只設定 operation limit，不能延長 enclosing Action deadline。`timeouts.connectTimeoutMs` 只在剩餘 deadline 內限制 connection establishment，不會額外增加 operation 時間。execute/upload/download/stat/mkdirs/move/delete 均遵守此契約。Native `execute`、read-only `stat` 與 idempotent `mkdirs` 的 `SSH_TIMEOUT`／`SSH_POOL_TIMEOUT` 可使用 Action `retryOn: [TIMEOUT]`，call-backed Tool 亦相同，並沿用共用 `retry.when` 控制重播。Native `upload`、`download`、`move`、`delete` 拒絕 timeout retry，因為 timeout 後的 mutation outcome 可能不確定。Validation 與 runtime 共用同一 operation policy。SFTP Action 會在 deadline 到達時返回，但 concurrency lease 會由 cleanup worker 持有，直到 transfer worker 與 transport 終止。
+Native Resource Helper call 使用一個 absolute Action deadline，涵蓋 concurrency pool wait、connection 與 channel setup，以及 command 或 SFTP operation。Per-call `timeoutMs` 或 helper `timeouts.commandTimeoutMs` 只設定 operation limit，不能延長 enclosing Action deadline。`timeouts.connectTimeoutMs` 只在剩餘 deadline 內限制 connection establishment，不會額外增加 operation 時間。execute/upload/stat/mkdirs/move/delete 均遵守此契約。Native `execute`、read-only `stat` 與 idempotent `mkdirs` 的 `SSH_TIMEOUT`／`SSH_POOL_TIMEOUT` 可使用 Action `retryOn: [TIMEOUT]`，call-backed Tool 亦相同，並沿用共用 `retry.when` 控制重播。Native `upload`、`move`、`delete` 拒絕 timeout retry，因為 timeout 後的 mutation outcome 可能不確定。Validation 與 runtime 共用同一 operation policy。SFTP Action 會在 deadline 到達時返回，但 concurrency lease 會由 cleanup worker 持有，直到 transfer worker 與 transport 終止。
 
 SSHHelper 讓 command-backed Tool 使用穩定的邏輯應用伺服器 ID，而非在 Tool group 中寫入實體主機。`att-sshhelper/v1.0` YAML descriptor 含 `id`、可選 `name`／`description`、可選 `defaults`（`user`、`port`、`identityFile`）、非空有序 `instances`、可選 `selection.strategy` 和 `fanout.maxConcurrency`（預設 4、範圍 1–256）。每個 instance 需有 `id`／`host`，`user` 必須由 instance 或 defaults 提供。Instance 欄位覆蓋 defaults；port 預設 22，必須在 1–65535。Helper 和 instance ID 符合 `[A-Za-z_][A-Za-z0-9_-]*`，忽略大小寫後不可重複。無效 host/user、未知欄位、重複 ID、缺少 user、不安全路徑和無效 strategy 都會在 SSH 執行前失敗。
 
@@ -2556,7 +2545,7 @@ ATT 會把缺失路徑視作作者/運行時錯誤，而不是靜默渲染成空
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.7.1",
+  "attVersion": "3.7.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2648,7 +2637,13 @@ Deterministic legacy alias 在可一對一映射時可以保留並產生 migrati
 
 ## Appendix C — Migration Notes
 
-### ATT 3.7.1 Testdata Migration
+### ATT 3.7.2 file arguments 與 Case log paths
+
+HTTPHelper call 不再接受 `file`；請直接將 `&{project-relative-file}` 傳入 `body`。MQHelper `send` 和 `request` 不再接受 `file`；請將 expression 傳入 `payload`。SSHHelper `upload` 現在要求 `payload` content，並拒絕 `localPath`；請直接傳入 `&{...}`。SSHHelper 不再支援 `download`，因為它需要 local destination path。若工作必須從主機取回檔案，請明確配置 command-backed Tool。這些變更移除 Resource API 原生的任意 binary local-file input；`&{...}` 提供 UTF-8 text。
+
+Case log 會將 canonical project root 下的 path 顯示為 `$ATT_HOME` 或 `$ATT_HOME/<relative-path>`，並統一使用 `/`。`$ATT_HOME` 只是在 log 中的 presentation token，不是 environment variable、Context root 或 file-expression locator。Runtime resolution 和 filesystem access 仍使用 canonical absolute Path。記錄成 Path value 的 project 外路徑會以受限的 `$EXTERNAL/<basename>` 顯示。
+
+### Previous release Testdata Migration
 
 將 global configuration 從 `att-config/v2.10` 升至 `att-config/v2.11`，並將 Load scenario 從 `att-load/v1.4` 升至 `att-load/v1.5`。舊 schema 仍登錄於 `schemas/history/`，供 migration diagnostics 使用。`att-testdata/v1.0` 是新增契約：在選定的 environment profile `testdata` list 加入 descriptor path，再於 Case/Stage、Debug 或 Load workload input map 使用 `@{id}`。Load scenario 可在頂層加入 package-relative `testdata` paths，形成僅適用於該次 Load 的 overlay。不同 layer 的同名 ID 會完整取代 descriptor；同一 layer 內的重複 ID 無效。多筆 records 的 descriptor 必須有明確 selection policy。沒有 testdata reference 的既有 package 不需要新增 descriptor。
 
@@ -2663,7 +2658,7 @@ ATT 3.6.2 將型別化 operation result、外部 parsing、project-file String�
 | Command Tool result.format | 將 parsing 設定移至 Tool descriptor 的 stdoutFormat。 |
 | 共用 Action result.format/path/overwrite | 移除。output.result 是 native logical typed value；沒有隱式檔案替代方案。 |
 | Render result.format/path 或 renderAs/saveAs | 移除舊欄位。Project-file expression 回傳 exact UTF-8 String，不建立結果檔或 targetFiles。 |
-| 透過 targetFiles 傳遞 Render 檔案 | 直接將 project-file String 傳入 HTTP body 或 MQ payload。 |
+| 透過 targetFiles 傳遞 Render 檔案 | 直接將 project-file String 傳入 HTTP body、MQ payload 或 SSH upload payload。 |
 | 在 project-file String 使用 requestFormat | 移除。requestFormat 僅供抽象 Map/List；String + requestFormat 會失敗。 |
 | Dynamic 或不安全 file locator | 改為一個 static project-relative file。Absolute path、glob、dynamic locator、missing file、directory、非 UTF-8 bytes 及 symlink escape 都會被拒絕。 |
 | Log file | 直接將 value 傳入 Log.value。 |
@@ -2713,7 +2708,7 @@ ATT 3.6.2 使用 `att-template/v3.6` 與 `att-flow/v3.6` 作為 active schemas�
 | Render result.format/path/overwrite 或 renderAs/saveAs | 移除舊 persistence 欄位。Project-file expression 回傳 exact UTF-8 String，不會隱式建立結果檔。 |
 | Log file | 將 typed value 直接傳入 Log.value |
 | Log fields | 將 typed map/list 放入 Log.value，並指定 Log.format |
-| Render targetFiles handoff 至 HTTP/MQ | 將 project-file String 直接作為 HTTP body 或 MQ payload |
+| Render targetFiles handoff 至 HTTP/MQ/SSH | 將 project-file String 直接作為 HTTP body、MQ payload 或 SSH upload payload |
 | 在 Render result 使用 requestFormat | 移除；requestFormat 留給抽象 Map/List |
 
 Project-file path 相對於 canonical project root。`./` 與 `../` 只有在 canonical target 仍位於該 root 內時才允許。v1 沒有 glob 或 dynamic locator；target 必須是 regular strict-UTF-8 file。

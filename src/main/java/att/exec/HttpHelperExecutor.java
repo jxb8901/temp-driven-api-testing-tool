@@ -14,10 +14,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
@@ -61,13 +58,11 @@ public final class HttpHelperExecutor implements AutoCloseable {
         thread.setDaemon(true);
         return thread;
     });
-    private final Path projectRoot;
     private final FrameworkConfig config;
     private final Map<String, Client> clients = new ConcurrentHashMap<String, Client>();
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public HttpHelperExecutor(Path projectRoot, FrameworkConfig config) {
-        this.projectRoot = projectRoot.toAbsolutePath().normalize();
         this.config = config;
     }
 
@@ -113,7 +108,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
             if (log != null) log.registerSecretRedactions(diagnosticSecrets(helper, arguments));
             Map<String, Object> args = arguments == null ? Collections.<String, Object>emptyMap() : arguments;
             phase = "http.request";
-            Request request = request(helper, operation, args, context);
+            Request request = request(helper, operation, args);
             metadata.put("responseFormat", request.responseFormat);
             evidence.put("responseFormat", request.responseFormat);
             metadata.put("method", request.method);
@@ -276,10 +271,9 @@ public final class HttpHelperExecutor implements AutoCloseable {
         return new ToolInvocationResult(name, id, body, invocation, success, operation);
     }
 
-    private Request request(HttpHelperConfig helper, String operation, Map<String, Object> args,
-                            CaseRuntimeContext context) throws Exception {
+    private Request request(HttpHelperConfig helper, String operation, Map<String, Object> args) throws Exception {
         for (String key : args.keySet()) if (!("method".equals(key) || "path".equals(key) || "query".equals(key)
-                || "headers".equals(key) || "file".equals(key) || "body".equals(key) || "contentType".equals(key)
+                || "headers".equals(key) || "body".equals(key) || "contentType".equals(key)
                 || "connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
                 || "connectionRequestTimeoutMs".equals(key) || "followRedirects".equals(key)
                 || "responseFormat".equals(key) || "requestFormat".equals(key)))
@@ -296,11 +290,9 @@ public final class HttpHelperExecutor implements AutoCloseable {
             throw new HttpFailure("HTTP_ARGUMENT", "Unsupported HTTP method: " + method);
         if (!"request".equalsIgnoreCase(operation) && args.containsKey("method"))
             throw new HttpFailure("HTTP_ARGUMENT", "method is only valid for http.<id>.request");
-        if (args.containsKey("body") && args.containsKey("file"))
-            throw new HttpFailure("HTTP_ARGUMENT", "HTTP body and file are mutually exclusive");
         if (args.containsKey("requestFormat") && !args.containsKey("body"))
             throw new HttpFailure("HTTP_ARGUMENT", "requestFormat requires a structured body");
-        if (("GET".equals(method) || "HEAD".equals(method)) && (args.containsKey("body") || args.containsKey("file")))
+        if (("GET".equals(method) || "HEAD".equals(method)) && args.containsKey("body"))
             throw new HttpFailure("HTTP_ARGUMENT", "HTTP GET/HEAD do not accept a request body");
         String path = args.get("path") == null ? "" : string(args.get("path"), "path");
         if (path.startsWith("//") || path.contains("?") || path.contains("#"))
@@ -337,11 +329,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
         } else if ("bearer".equals(helper.authType())) putHeader(headers, "Authorization", "Bearer " + helper.token());
         if (args.get("contentType") != null) putHeader(headers, "Content-Type", string(args.get("contentType"), "contentType"));
         byte[] body = null;
-        if (args.containsKey("file")) {
-            try { body = Files.readAllBytes(payloadFile(string(args.get("file"), "file"), context)); }
-            catch (IOException invalid) { throw new HttpFailure("HTTP_ARGUMENT", "HTTP request file is missing or unsafe"); }
-        }
-        else if (args.containsKey("body")) {
+        if (args.containsKey("body")) {
             Object suppliedBody = args.get("body");
             boolean structured = suppliedBody instanceof Map || suppliedBody instanceof Iterable
                     || suppliedBody != null && suppliedBody.getClass().isArray();
@@ -402,20 +390,6 @@ public final class HttpHelperExecutor implements AutoCloseable {
     private static boolean containsHeader(Map<String, String> headers, String name) {
         for (String key : headers.keySet()) if (key.equalsIgnoreCase(name)) return true;
         return false;
-    }
-    private Path payloadFile(String value, CaseRuntimeContext context) throws IOException {
-        Path file = Paths.get(value);
-        Path logical = file.isAbsolute() ? file.normalize() : context.caseOutputDirectory().resolve(file).normalize();
-        if (Files.isSymbolicLink(logical) || !Files.isRegularFile(logical, LinkOption.NOFOLLOW_LINKS))
-            throw new IOException("HTTP request file is missing or unsafe");
-        Path real = logical.toRealPath();
-        Path project = projectRoot.toRealPath();
-        boolean caseContained = false;
-        Path caseDirectory = context.caseOutputDirectory();
-        if (Files.isDirectory(caseDirectory, LinkOption.NOFOLLOW_LINKS))
-            caseContained = real.startsWith(caseDirectory.toRealPath());
-        if (!caseContained && !real.startsWith(project)) throw new IOException("HTTP request file escapes ATT package");
-        return real;
     }
     private String resolveResponseFormat(String contentType, String requestedFormat) {
         if (!"auto".equals(requestedFormat)) return requestedFormat;

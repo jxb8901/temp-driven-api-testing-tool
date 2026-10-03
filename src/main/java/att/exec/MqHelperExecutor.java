@@ -127,20 +127,13 @@ public final class MqHelperExecutor {
         String phase = "mq.resolve";
         try {
             if ("send".equals(operation) || "request".equals(operation)) {
-                Path payloadFile = null;
-                byte[] payload;
-                if (args.containsKey("file")) {
-                    payloadFile = payloadFile(string(args.get("file"), "file"), context);
-                    payload = Files.readAllBytes(payloadFile);
-                } else {
-                    payload = payloadBytes(args.get("payload"), args.get("requestFormat"), helper);
-                }
+                byte[] payload = payloadBytes(args.get("payload"), args.get("requestFormat"), helper);
                 String queue = "send".equals(operation)
                         ? effectiveQueue(args.get("queue"), helper.requestQueue(),
                                 "mq." + logical.logicalId() + ".send queue (or message.requestQueue)")
                         : effectiveQueue(args.get("requestQueue"), helper.requestQueue(), "requestQueue");
-                result.put("queue", queue); if (payloadFile != null) result.put("payloadFile", payloadFile.toString()); result.put("bytes", payload.length);
-                evidence.put("queue", queue); if (payloadFile != null) evidence.put("payloadFile", portable(payloadFile)); evidence.put("bytes", payload.length);
+                result.put("queue", queue); result.put("bytes", payload.length);
+                evidence.put("queue", queue); evidence.put("bytes", payload.length);
                 phase = "mq.connect";
                 connection = factory.connect(helper);
                 ensureWithinDeadline(deadlineNanos, "connect");
@@ -313,8 +306,7 @@ public final class MqHelperExecutor {
                                    MqHelperConfig helper) {
         if (!("send".equals(operation) || "receive".equals(operation) || "request".equals(operation))) throw new IllegalArgumentException("Unknown MQ operation: " + operation);
         for (String key : args.keySet()) if (!allowed(operation, key)) throw new IllegalArgumentException("Unknown MQ " + operation + " argument '" + key + "' for mq." + instance);
-        if (("send".equals(operation) || "request".equals(operation)) && args.get("file") == null && args.get("payload") == null) throw new IllegalArgumentException("mq." + instance + "." + operation + " requires file or payload");
-        if (args.get("file") != null && args.get("payload") != null) throw new IllegalArgumentException("MQ file and payload are mutually exclusive");
+        if (("send".equals(operation) || "request".equals(operation)) && args.get("payload") == null) throw new IllegalArgumentException("mq." + instance + "." + operation + " requires payload");
         if (args.containsKey("requestFormat") && args.get("payload") == null) throw new IllegalArgumentException("requestFormat requires a Map/List payload");
         if (args.containsKey("payload")) validateRequestPayload(args.get("payload"), args.get("requestFormat"));
         if ("request".equals(operation) && args.get("requestQueue") == null && helper.requestQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires requestQueue or configured message.requestQueue on the selected instance");
@@ -329,9 +321,9 @@ public final class MqHelperExecutor {
     }
 
     private boolean allowed(String operation, String key) {
-        if ("send".equals(operation)) return "queue".equals(key) || "file".equals(key) || "payload".equals(key) || "requestFormat".equals(key) || "instance".equals(key);
+        if ("send".equals(operation)) return "queue".equals(key) || "payload".equals(key) || "requestFormat".equals(key) || "instance".equals(key);
         if ("receive".equals(operation)) return "queue".equals(key) || "waitMs".equals(key) || "correlationId".equals(key) || "instance".equals(key) || "responseFormat".equals(key);
-        return "requestQueue".equals(key) || "replyQueue".equals(key) || "file".equals(key) || "payload".equals(key) || "requestFormat".equals(key) || "waitMs".equals(key) || "instance".equals(key) || "responseFormat".equals(key);
+        return "requestQueue".equals(key) || "replyQueue".equals(key) || "payload".equals(key) || "requestFormat".equals(key) || "waitMs".equals(key) || "instance".equals(key) || "responseFormat".equals(key);
     }
 
     private void validateRequestPayload(Object payload, Object format) {
@@ -353,21 +345,6 @@ public final class MqHelperExecutor {
         return String.valueOf(payload == null ? "" : payload).getBytes(charset);
     }
 
-    private Path payloadFile(String value, CaseRuntimeContext context) throws IOException {
-        Path path = Paths.get(value);
-        Path logical = path.isAbsolute() ? path.normalize() : context.caseOutputDirectory().resolve(path).normalize();
-        if (!path.isAbsolute() && !logical.startsWith(context.caseOutputDirectory().normalize())) throw new IOException("MQ payload path escapes the Case output directory: " + value);
-        if (Files.isSymbolicLink(logical) || !Files.isRegularFile(logical, LinkOption.NOFOLLOW_LINKS)) throw new IOException("MQ payload file does not exist or is unsafe: " + value);
-        Path real = logical.toRealPath();
-        if (path.isAbsolute()) {
-            Path packageRoot = projectRoot.toRealPath();
-            if (!real.startsWith(packageRoot)) throw new IOException("MQ payload file escapes the ATT package: " + value);
-        } else {
-            Path caseRoot = context.caseOutputDirectory().toRealPath();
-            if (!real.startsWith(caseRoot)) throw new IOException("MQ payload file escapes the Case output directory: " + value);
-        }
-        return real;
-    }
 
     private String effectiveQueue(Object value, String fallback, String name) {
         return value == null ? string(fallback, name) : string(value, name);

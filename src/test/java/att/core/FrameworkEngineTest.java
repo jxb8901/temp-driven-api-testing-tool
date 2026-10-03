@@ -256,7 +256,8 @@ class FrameworkEngineTest {
         assertEquals(caseDirectory.toRealPath(), Paths.get(environment.get(1)).toRealPath());
         String caseYaml = new String(Files.readAllBytes(caseDirectory.resolve("case.yaml")), "UTF-8");
         Map<?, ?> persistedCase = (Map<?, ?>) new org.yaml.snakeyaml.Yaml().load(caseYaml);
-        assertEquals(caseDirectory.toRealPath(), Paths.get(String.valueOf(persistedCase.get("outputDirectory"))).toRealPath());
+        assertEquals(att.core.PathPresentation.displayPath(caseDirectory.toRealPath(), projectRoot),
+                String.valueOf(persistedCase.get("outputDirectory")));
         assertFalse(caseYaml.contains(".in-progress"));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/events.jsonl")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-V2/ci/summary.json")));

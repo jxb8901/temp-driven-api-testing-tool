@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.7.2 - 2026-10-04
+
+- Remove direct local file-path arguments from HTTPHelper and MQHelper; use `&{...}` Strings as HTTP bodies and MQ payloads (#133).
+- Make SSHHelper upload content-based and remove native SSH download (#133).
+- Normalize ATT-owned local Paths in Case logs to `$ATT_HOME` presentation and bound external Path values (#134).
+- Upgrade ATT product version to 3.7.2.
+
 ## 3.7.1 - 2026-10-02
 
 - Parse structured HTTP and MQ responses directly from readers, avoiding an intermediate full-body String for bounded response payloads (#121).

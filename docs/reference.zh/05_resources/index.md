@@ -1,6 +1,6 @@
 ## 07 Resources 與 Integrations
 
-Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 是同級 integration/resource 類型。SSHHelper 為 command-backed Tool 提供路由，也提供 `ssh.<helperId>.execute|upload|download` Resource Helper operation；它們最終收斂到 common operation-result/evidence contract。
+Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 是同級 integration/resource 類型。SSHHelper 為 command-backed Tool 提供路由，也提供 `ssh.<helperId>.execute|upload` 及 remote filesystem operation；最後收斂到 common operation-result/evidence contract。
 
 ```text
 Tool      -> process/call operation --\

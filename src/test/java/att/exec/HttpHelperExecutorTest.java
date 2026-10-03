@@ -301,12 +301,9 @@ class HttpHelperExecutorTest {
                 assertTrue(call.executionSuccess(), String.valueOf(call.operationResult().diagnostic()));
                 assertEquals(200, call.operationResult().outputMetadata().get("statusCode"));
             }
-            byte[] payload = new byte[]{0, 1, 2, (byte) 255};
-            Path file = context.caseOutputDirectory().resolve("payload.bin");
-            Files.write(file, payload);
-            ToolInvocationResult binary = http.execute("paymentApi", "post", args("path", "/echo", "file", file.toString()), context, 1000L, "file", "text");
-            assertFalse(binary.executionSuccess());
-            assertEquals("HTTP_FORMAT", ((Map<?, ?>) binary.operationResult().outputMetadata().get("error")).get("type"));
+            ToolInvocationResult obsoleteFile = http.execute("paymentApi", "post", args("path", "/echo", "file", "payload.bin"), context, 1000L, "file", "text");
+            assertFalse(obsoleteFile.executionSuccess());
+            assertEquals("HTTP_ARGUMENT", ((Map<?, ?>) obsoleteFile.operationResult().outputMetadata().get("error")).get("type"));
             ToolInvocationResult json = http.execute("paymentApi", "get", args("path", "/json", "query", args("a b", "c&d")), context, 1000L, "json", "json");
             assertTrue(json.executionSuccess(), String.valueOf(json.operationResult().diagnostic()));
             assertEquals(Boolean.TRUE, ((Map<?, ?>) json.output()).get("ok"));

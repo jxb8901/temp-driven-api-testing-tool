@@ -98,7 +98,7 @@ public final class IterationResult {
             evidenceLog.materialize(retainedLog);
             linkOrCopy(retainedLog, outputDirectory.resolve("case.log"));
             if (context != null) {
-                byte[] caseYaml = new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8);
+                byte[] caseYaml = new org.yaml.snakeyaml.Yaml().dump(att.core.PathPresentation.displayStructure(context.caseTree(), context.projectRoot())).getBytes(StandardCharsets.UTF_8);
                 Path retainedCase = evidenceDirectory.resolve("case.yaml");
                 Files.write(retainedCase, caseYaml);
                 linkOrCopy(retainedCase, outputDirectory.resolve("case.yaml"));

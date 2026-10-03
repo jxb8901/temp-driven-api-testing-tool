@@ -702,6 +702,7 @@ public class StageTemplateRunner {
                 att.exec.ToolInvocationResult result;
                 try (CaseExecutionLog executorLog = CaseExecutionLog.discarding(log == null
                         ? context.caseOutputDirectory().resolve("case.log") : log.path())) {
+                    executorLog.setProjectRoot(context.projectRoot());
                     result = templateEngine.executeToolAttempt(collector.call(), context, executorLog,
                             invocationId, collector.timeoutMs(), "", false, true);
                 }

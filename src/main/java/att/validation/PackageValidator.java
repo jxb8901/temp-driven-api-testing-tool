@@ -17,7 +17,6 @@ import att.template.ToolCallParser;
 import att.template.EvidenceCollector;
 
 import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -1990,7 +1989,7 @@ public final class PackageValidator {
             String key = argument.key();
             if (argument.positional()) throw new IllegalArgumentException("HTTP call requires named arguments");
             if (!("method".equals(key) || "path".equals(key) || "query".equals(key) || "headers".equals(key)
-                    || "file".equals(key) || "body".equals(key) || "contentType".equals(key)
+                    || "body".equals(key) || "contentType".equals(key)
                     || "connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
                     || "connectionRequestTimeoutMs".equals(key) || "followRedirects".equals(key)))
                 throw new IllegalArgumentException("Unknown HTTP argument: " + key);
@@ -2021,10 +2020,8 @@ public final class PackageValidator {
             throw new IllegalArgumentException("http.<helper>.request requires method");
         if (!"request".equals(parts[2]) && supplied.contains("method"))
             throw new IllegalArgumentException("HTTP method argument is only valid with request()");
-        if (supplied.contains("file") && supplied.contains("body"))
-            throw new IllegalArgumentException("HTTP file and body are mutually exclusive");
         if (("get".equals(parts[2]) || "head".equals(parts[2]))
-                && (supplied.contains("file") || supplied.contains("body")))
+                && supplied.contains("body"))
             throw new IllegalArgumentException("HTTP GET/HEAD do not accept a request body");
     }
 
@@ -2041,11 +2038,11 @@ public final class PackageValidator {
         Set<String> allowed = new LinkedHashSet<String>();
         Set<String> required = new LinkedHashSet<String>();
         if ("send".equals(operation)) {
-            allowed.add("queue"); allowed.add("file"); allowed.add("payload"); allowed.add("requestFormat"); allowed.add("instance");
+            allowed.add("queue"); allowed.add("payload"); allowed.add("requestFormat"); allowed.add("instance");
         } else if ("receive".equals(operation)) {
             allowed.add("queue"); allowed.add("waitMs"); allowed.add("correlationId"); allowed.add("instance"); allowed.add("responseFormat");
         } else if ("request".equals(operation)) {
-            allowed.add("requestQueue"); allowed.add("replyQueue"); allowed.add("file"); allowed.add("payload");
+            allowed.add("requestQueue"); allowed.add("replyQueue"); allowed.add("payload");
             allowed.add("requestFormat"); allowed.add("responseFormat"); allowed.add("waitMs"); allowed.add("instance");
         } else {
             throw new IllegalArgumentException("Unknown MQ operation '" + operation + "'; use send, receive, or request");
@@ -2086,11 +2083,8 @@ public final class PackageValidator {
                 }
             }
         }
-        if (("send".equals(operation) || "request".equals(operation))
-                && supplied.contains("file") == supplied.contains("payload"))
-            throw new IllegalArgumentException("MQ send/request requires exactly one file or payload");
-        if (supplied.contains("file") && supplied.contains("requestFormat"))
-            throw new IllegalArgumentException("MQ requestFormat is only valid with a structured payload");
+        if (("send".equals(operation) || "request".equals(operation)) && !supplied.contains("payload"))
+            throw new IllegalArgumentException("MQ send/request requires payload; resolve project files with &{...}");
         if ("send".equals(operation) && !supplied.contains("queue")) {
             boolean hasDefault = selected != null ? !selected.requestQueue().isEmpty() : allInstancesHaveRequestQueue(helper, true);
             if (!hasDefault) throw new IllegalArgumentException("Missing effective send queue: provide queue or configure message.requestQueue on every selectable instance");
@@ -2115,7 +2109,7 @@ public final class PackageValidator {
     private void validateSshCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || !"ssh".equals(parts[0]) || parts[1].isEmpty())
-            throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|download|stat|mkdirs|move|delete: " + parsed.name());
+            throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|stat|mkdirs|move|delete: " + parsed.name());
         att.config.SshHelperConfig helper = config.sshHelper(parts[1]);
         if (helper == null) throw new IllegalArgumentException("Unknown sshhelper instance '" + parts[1] + "'");
         if ("all".equals(helper.strategy()))
@@ -2126,11 +2120,8 @@ public final class PackageValidator {
         if ("execute".equals(operation)) {
             allowed.add("command"); allowed.add("stdoutFormat"); allowed.add("timeoutMs"); required.add("command");
         } else if ("upload".equals(operation)) {
-            allowed.add("remotePath"); allowed.add("localPath"); allowed.add("payload");
+            allowed.add("remotePath"); allowed.add("payload");
             allowed.add("overwrite"); allowed.add("timeoutMs"); required.add("remotePath");
-        } else if ("download".equals(operation)) {
-            allowed.add("remotePath"); allowed.add("localPath"); allowed.add("overwrite");
-            allowed.add("timeoutMs"); required.add("remotePath"); required.add("localPath");
         } else if ("move".equals(operation)) {
             allowed.addAll(java.util.Arrays.asList("sourcePath", "targetPath", "overwrite", "timeoutMs"));
             required.add("sourcePath"); required.add("targetPath");
@@ -2138,7 +2129,7 @@ public final class PackageValidator {
             allowed.add("remotePath"); allowed.add("timeoutMs"); required.add("remotePath");
             if ("delete".equals(operation)) allowed.add("missingOk");
         } else {
-            throw new IllegalArgumentException("Unknown SSH operation '" + operation + "'; use execute, upload, download, stat, mkdirs, move, or delete");
+            throw new IllegalArgumentException("Unknown SSH operation '" + operation + "'; use execute, upload, stat, mkdirs, move, or delete");
         }
         Set<String> supplied = new LinkedHashSet<String>();
         for (ToolCallParser.Argument argument : parsed.arguments()) {
@@ -2161,7 +2152,7 @@ public final class PackageValidator {
                 if (!(literal instanceof String) || !String.valueOf(literal).toLowerCase(java.util.Locale.ROOT)
                         .matches("text|json|yaml|xml"))
                     throw new IllegalArgumentException("SSH stdoutFormat must be text, json, yaml, or xml");
-            } else if ("command".equals(key) || "localPath".equals(key) || "remotePath".equals(key) || "sourcePath".equals(key) || "targetPath".equals(key)) {
+            } else if ("command".equals(key) || "remotePath".equals(key) || "sourcePath".equals(key) || "targetPath".equals(key)) {
                 if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty())
                     throw new IllegalArgumentException("SSH " + key + " must be a non-blank string");
                 if ("remotePath".equals(key) || "sourcePath".equals(key) || "targetPath".equals(key)) {
@@ -2172,28 +2163,13 @@ public final class PackageValidator {
                     for (int index = 0; index < value.length(); index++)
                         if (Character.isISOControl(value.charAt(index))) throw new IllegalArgumentException("SSH remotePath must not contain control characters");
                 }
-                if ("localPath".equals(key)) validateSshStaticLocalPath(String.valueOf(literal), "download".equals(operation));
             } else if ("payload".equals(key) && (literal instanceof Map || literal instanceof List)) {
                 throw new IllegalArgumentException("SSH upload payload must be a String or byte[]; Map/List requires an explicit representation");
             }
         }
         for (String key : required) if (!supplied.contains(key)) throw new IllegalArgumentException("Missing required SSH argument '" + key + "' for " + parsed.name());
-        if ("upload".equals(operation) && supplied.contains("localPath") == supplied.contains("payload"))
-            throw new IllegalArgumentException("SSH upload requires exactly one of localPath or payload");
-    }
-
-    private void validateSshStaticLocalPath(String value, boolean caseOutputOnly) {
-        try {
-            Path path = Paths.get(value).normalize();
-            if (caseOutputOnly && (path.isAbsolute() || path.startsWith("..")))
-                throw new IllegalArgumentException("SSH download localPath must be a case-output-relative path");
-            if (!caseOutputOnly && path.startsWith(".."))
-                throw new IllegalArgumentException("SSH upload localPath must stay under the ATT package or case output");
-            if (!caseOutputOnly && path.isAbsolute() && !path.startsWith(projectRoot.toAbsolutePath().normalize()))
-                throw new IllegalArgumentException("SSH localPath must stay under the ATT package or case output");
-        } catch (InvalidPathException invalid) {
-            throw new IllegalArgumentException("SSH localPath is not a valid path", invalid);
-        }
+        if ("upload".equals(operation) && !supplied.contains("payload"))
+            throw new IllegalArgumentException("SSH upload requires payload content; resolve project files with &{...}");
     }
 
     private boolean allInstancesHaveRequestQueue(att.config.MqHelperConfig helper, boolean request) {

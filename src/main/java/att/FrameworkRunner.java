@@ -54,15 +54,15 @@ public final class FrameworkRunner {
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
                     output.put("status", debug.status().name()); output.put("exitCode", debug.exitCode());
-                    output.put("durationMs", debug.durationMs()); output.put("log", debug.logPath().toString());
-                    output.put("result", debug.resultPath().toString()); System.out.println(att.validation.JsonSupport.write(output));
+                    output.put("durationMs", debug.durationMs()); output.put("log", att.core.PathPresentation.displayPath(debug.logPath(), root));
+                    output.put("result", att.core.PathPresentation.displayPath(debug.resultPath(), root)); System.out.println(att.validation.JsonSupport.write(output));
                 } else {
                     String consoleStatus = debug.status() == att.core.ResultStatus.INVALID ? "ERROR" : debug.status().name();
                     System.out.println("DEBUG " + consoleStatus + " | Target: " + options.debugTargetType() + " " + options.debugTargetId()
                             + " | Duration: " + debug.durationMs() + "ms");
                     if (!options.quiet()) {
-                        System.out.println("Log: " + debug.logPath());
-                        System.out.println("Result: " + debug.resultPath());
+                        System.out.println("Log: " + att.core.PathPresentation.displayPath(debug.logPath(), root));
+                        System.out.println("Result: " + att.core.PathPresentation.displayPath(debug.resultPath(), root));
                     }
                     if (debug.diagnostic() != null) System.err.println(debug.diagnostic().format());
                 }
@@ -162,19 +162,19 @@ public final class FrameworkRunner {
             }
             RunSummary summary = new FrameworkEngine(root, config).run(options, validation.diagnostics, profile);
             if ("json".equals(options.format())) {
-                java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>(); output.put("total", summary.total()); output.put("passed", summary.passed()); output.put("failed", summary.failed()); output.put("error", summary.error()); output.put("skipped", summary.skipped()); output.put("invalid", summary.invalid()); output.put("report", summary.reportPath().toString()); System.out.println(att.validation.JsonSupport.write(output));
+                java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>(); output.put("total", summary.total()); output.put("passed", summary.passed()); output.put("failed", summary.failed()); output.put("error", summary.error()); output.put("skipped", summary.skipped()); output.put("invalid", summary.invalid()); output.put("report", att.core.PathPresentation.displayPath(summary.reportPath(), root)); System.out.println(att.validation.JsonSupport.write(output));
             } else if (!options.quiet()) {
                 System.out.printf(options.verbose() ? "[4/4] Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n" : "Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n",
                         summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid());
-                System.out.println("Report: " + summary.reportPath());
+                System.out.println("Report: " + att.core.PathPresentation.displayPath(summary.reportPath(), root));
             } else {
                 System.out.printf("Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n",
                         summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid());
-                System.out.println("Report: " + summary.reportPath());
+                System.out.println("Report: " + att.core.PathPresentation.displayPath(summary.reportPath(), root));
                 for (att.core.TestResult result : summary.results()) {
                     if (result.status() == att.core.ResultStatus.PASS || result.status() == att.core.ResultStatus.SKIPPED) continue;
                     System.err.println("[RUN] " + result.status() + " case=" + result.caseId()
-                            + " caseLog=" + result.caseLogPath());
+                            + " caseLog=" + att.core.PathPresentation.displayPath(result.caseLogPath(), root));
                 }
             }
             if (summary.exitCode() != 0) System.exit(summary.exitCode());

@@ -80,16 +80,16 @@ class MqHelperExecutorTest {
         }
     }
 
-    @Test void sendPreservesPayloadBytesAndNeverCopiesPayloadIntoEvidence() throws Exception {
+    @Test void sendEncodesProjectFileStringAndNeverCopiesPayloadIntoEvidence() throws Exception {
         Path caseDir = tempDir.resolve("case"); Files.createDirectories(caseDir);
         Path payload = tempDir.resolve("payload.bin");
-        byte[] bytes = new byte[]{0, 1, (byte) 0xff, 10, 13}; Files.write(payload, bytes);
+        byte[] bytes = "payload".getBytes(java.nio.charset.StandardCharsets.UTF_8); Files.write(payload, bytes);
         FakeFactory factory = new FakeFactory();
         MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "send",
-                map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "send-1");
+                map("queue", "REQUEST.Q", "payload", text(payload)), context(caseDir), null, "send-1");
 
         assertTrue(result.success());
-        assertArrayEquals(bytes, factory.putPayload);
+        assertArrayEquals("payload".getBytes(java.nio.charset.StandardCharsets.UTF_8), factory.putPayload);
         assertEquals("", factory.putRequest == null ? null : factory.putRequest.replyQueue());
         assertEquals(bytes.length, result.result().get("bytes"));
         assertEquals("single", result.operationResult().outputMetadata().get("selectionStrategy"));
@@ -110,7 +110,7 @@ class MqHelperExecutorTest {
         factory.noMessage = true;
 
         MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "request",
-                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString()),
+                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "payload", text(payload)),
                 context(lazyIterationDirectory), null, "lazy-load-request");
 
         assertFalse(result.success(), result.result().toString());
@@ -118,68 +118,13 @@ class MqHelperExecutorTest {
         assertEquals(1, factory.connectedInstances.size(), "MQ connect must be reached after payload validation");
     }
 
-    @Test void absolutePayloadOutsidePackageReportsContainmentInsteadOfMissingWorkspace() throws Exception {
-        Path outside = tempDir.resolveSibling("att-mq-outside-payload-" + System.nanoTime() + ".xml");
-        Files.write(outside, new byte[]{1});
-        Path missingIterationDirectory = tempDir.resolve("output/load/missing/iterations/iteration-1");
+    @Test void directFileArgumentIsRejectedBeforeMqConnection() throws Exception {
         FakeFactory factory = new FakeFactory();
-        try {
-            MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "send",
-                    map("queue", "REQUEST.Q", "file", outside.toString()), context(missingIterationDirectory), null, "outside-payload");
-
-            assertFalse(result.success());
-            String message = String.valueOf(((Map<?, ?>) result.result().get("error")).get("message"));
-            assertTrue(message.contains("escapes the ATT package"), message);
-            assertFalse(message.contains("NoSuchFileException"), message);
-            assertTrue(factory.connectedInstances.isEmpty());
-        } finally {
-            Files.deleteIfExists(outside);
-        }
-    }
-
-    @Test void genuinelyMissingAbsolutePayloadNamesPayloadEvenWhenWorkspaceIsLazy() throws Exception {
-        Path missingPayload = tempDir.resolve("templates/flows/mqtest/missing.xml");
-        Path missingIterationDirectory = tempDir.resolve("output/load/missing-payload/iterations/iteration-1");
-        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), new FakeFactory()).execute("broker", "send",
-                map("queue", "REQUEST.Q", "file", missingPayload.toString()), context(missingIterationDirectory), null, "missing-payload");
-
+        MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "send",
+                map("queue", "REQUEST.Q", "file", "/outside/request.xml"), context(tempDir.resolve("lazy")), null, "legacy-file");
         assertFalse(result.success());
-        String message = String.valueOf(((Map<?, ?>) result.result().get("error")).get("message"));
-        assertTrue(message.contains("MQ payload file does not exist or is unsafe"), message);
-        assertFalse(message.contains("NoSuchFileException"), message);
-    }
-
-    @Test void relativePayloadTraversalAndSymlinkEscapeRemainRejected() throws Exception {
-        Path caseDir = tempDir.resolve("relative-case");
-        Files.createDirectories(caseDir);
-        Path outside = tempDir.resolve("relative-outside.xml");
-        Files.write(outside, new byte[]{1});
-        FakeFactory traversalFactory = new FakeFactory();
-        MqInvocationResult traversal = new MqHelperExecutor(tempDir, config(), traversalFactory).execute("broker", "send",
-                map("queue", "REQUEST.Q", "file", "../relative-outside.xml"), context(caseDir), null, "relative-traversal");
-        assertFalse(traversal.success());
-        assertTrue(String.valueOf(((Map<?, ?>) traversal.result().get("error")).get("message")).contains("escapes the Case output directory"));
-        assertTrue(traversalFactory.connectedInstances.isEmpty());
-
-        Path link = tempDir.resolve("templates/linked-payload.xml");
-        Files.createDirectories(link.getParent());
-        try {
-            Files.createSymbolicLink(link, outside);
-        } catch (UnsupportedOperationException | SecurityException unsupported) {
-            Files.deleteIfExists(outside);
-            return;
-        }
-        try {
-            FakeFactory linkFactory = new FakeFactory();
-            MqInvocationResult symlink = new MqHelperExecutor(tempDir, config(), linkFactory).execute("broker", "send",
-                    map("queue", "REQUEST.Q", "file", link.toString()), context(caseDir), null, "absolute-symlink");
-            assertFalse(symlink.success());
-            assertTrue(String.valueOf(((Map<?, ?>) symlink.result().get("error")).get("message")).contains("does not exist or is unsafe"));
-            assertTrue(linkFactory.connectedInstances.isEmpty());
-        } finally {
-            Files.deleteIfExists(link);
-            Files.deleteIfExists(outside);
-        }
+        assertTrue(String.valueOf(((Map<?, ?>) result.result().get("error")).get("message")).contains("Unknown MQ send argument 'file'"));
+        assertTrue(factory.connectedInstances.isEmpty());
     }
 
     @Test void requestMatchesReplyCorrelationAndKeepsReplyInMemoryByDefault() throws Exception {
@@ -188,7 +133,7 @@ class MqHelperExecutorTest {
         FakeFactory factory = new FakeFactory();
         factory.reply = new MqTransport.Message(new byte[]{3, 4}, new byte[]{1, 2}, "reply".getBytes("UTF-8"));
         MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "request",
-                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString(), "waitMs", 321),
+                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "payload", text(payload), "waitMs", 321),
                 context(caseDir), null, "request-1");
 
         assertTrue(result.success());
@@ -213,7 +158,7 @@ class MqHelperExecutorTest {
 
         FakeFactory sendFactory = new FakeFactory();
         MqInvocationResult send = new MqHelperExecutor(tempDir, defaults, sendFactory).execute("broker", "send",
-                map("file", payload.toString()), context(caseDir), null, "send-default-queue");
+                map("payload", text(payload)), context(caseDir), null, "send-default-queue");
         assertTrue(send.success());
         assertEquals("REQUEST.DEFAULT", send.result().get("queue"));
 
@@ -225,7 +170,7 @@ class MqHelperExecutorTest {
 
         FakeFactory requestFactory = new FakeFactory();
         MqInvocationResult request = new MqHelperExecutor(tempDir, defaults, requestFactory).execute("broker", "request",
-                map("file", payload.toString()), context(caseDir), null, "request-default-queues");
+                map("payload", text(payload)), context(caseDir), null, "request-default-queues");
         assertTrue(request.success());
         assertEquals("REQUEST.DEFAULT", request.result().get("queue"));
         assertEquals("REPLY.DEFAULT", requestFactory.putRequest.replyQueue());
@@ -233,7 +178,7 @@ class MqHelperExecutorTest {
 
         FakeFactory overrideFactory = new FakeFactory();
         MqInvocationResult override = new MqHelperExecutor(tempDir, defaults, overrideFactory).execute("broker", "send",
-                map("queue", "REQUEST.EXPLICIT", "file", payload.toString()), context(caseDir), null,
+                map("queue", "REQUEST.EXPLICIT", "payload", text(payload)), context(caseDir), null,
                 "send-explicit-queue");
         assertTrue(override.success());
         assertEquals("REQUEST.EXPLICIT", override.result().get("queue"));
@@ -243,15 +188,14 @@ class MqHelperExecutorTest {
         for (String operation : new String[]{"send", "receive", "request"}) {
             Path caseDir = tempDir.resolve("retry-" + operation);
             Files.createDirectories(caseDir);
-            Files.write(caseDir.resolve("payload.bin"), new byte[]{1, 2, 3});
             FakeFactory factory = new FakeFactory();
             if ("send".equals(operation) || "request".equals(operation)) factory.firstPutDelayMs = 300L;
             else factory.firstGetDelayMs = 300L;
             Map<String, Object> args = "send".equals(operation)
-                    ? map("queue", "REQUEST.Q", "file", "payload.bin")
+                    ? map("queue", "REQUEST.Q", "payload", "request")
                     : "receive".equals(operation)
                     ? map("queue", "REPLY.Q", "waitMs", 100)
-                    : map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", "payload.bin", "waitMs", 100);
+                    : map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "payload", "request", "waitMs", 100);
             String call = "#{mq.broker." + operation + "(" + callArguments(args) + ")}";
             Map<String, Object> retry = map("maxAttempts", 2, "intervalMs", 0, "retryOn", Collections.singletonList("TIMEOUT"));
             TemplateAction action = new TemplateAction("mqRetry", map("type", "tool", "call", call,
@@ -289,7 +233,7 @@ class MqHelperExecutorTest {
         FakeFactory factory = new FakeFactory();
         factory.reply = new MqTransport.Message(new byte[]{3}, new byte[]{1, 2}, "reply".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new MqHelperExecutor(tempDir, config(), factory).execute("broker", "request",
-                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString()),
+                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "payload", text(payload)),
                 context(caseDir), null, "request-2", "request", "responses/reply.txt", "raw", false));
         assertTrue(factory.connectedInstances.isEmpty());
     }
@@ -378,7 +322,7 @@ class MqHelperExecutorTest {
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1});
         FakeFactory sendFactory = new FakeFactory();
         MqInvocationResult send = new MqHelperExecutor(tempDir, config(), sendFactory).execute("broker", "send",
-                map("queue", "REQUEST.Q", "file", payload.toString(), "responseFormat", "json"),
+                map("queue", "REQUEST.Q", "payload", text(payload), "responseFormat", "json"),
                 context(caseDir), null, "send-response-format");
         assertFalse(send.success());
         assertTrue(sendFactory.connectedInstances.isEmpty());
@@ -388,7 +332,7 @@ class MqHelperExecutorTest {
         Path caseDir = tempDir.resolve("none-evidence-case"); Files.createDirectories(caseDir);
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1, 2});
         MqInvocationResult result = new MqHelperExecutor(tempDir, config("none"), new FakeFactory()).execute("broker", "send",
-                map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "send-none");
+                map("queue", "REQUEST.Q", "payload", text(payload)), context(caseDir), null, "send-none");
 
         assertTrue(result.success());
         assertFalse(result.evidence().containsKey("payloadEvidence"));
@@ -399,7 +343,7 @@ class MqHelperExecutorTest {
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{1});
         FakeFactory factory = new FakeFactory();
         MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "send",
-                map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "send-save",
+                map("queue", "REQUEST.Q", "payload", text(payload)), context(caseDir), null, "send-save",
                 "send", "sent.bin", "raw", false);
 
         assertFalse(result.success());
@@ -430,7 +374,7 @@ class MqHelperExecutorTest {
         Path payload = caseDir.resolve("request.bin"); Files.write(payload, new byte[]{7, 8, 9});
         FakeFactory factory = new FakeFactory(); factory.noMessage = true;
         MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "request",
-                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString(), "waitMs", 321),
+                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "payload", text(payload), "waitMs", 321),
                 context(caseDir), null, "request-2033");
 
         assertFalse(result.success());
@@ -474,7 +418,7 @@ class MqHelperExecutorTest {
         MqInvocationResult result;
         try (CaseExecutionLog log = new CaseExecutionLog(logPath)) {
             result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "send",
-                    map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "internal-1",
+                    map("queue", "REQUEST.Q", "payload", text(payload)), context(caseDir), null, "internal-1",
                     "send", null, "text", false, log);
         }
 
@@ -509,7 +453,7 @@ class MqHelperExecutorTest {
         FakeFactory factory = new FakeFactory();
 
         MqInvocationResult result = new MqHelperExecutor(tempDir, configured, factory).execute("payment", "send",
-                map("instance", "payment-b", "queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "send-selected");
+                map("instance", "payment-b", "queue", "REQUEST.Q", "payload", text(payload)), context(caseDir), null, "send-selected");
 
         assertTrue(result.success());
         assertEquals("payment", result.result().get("mqHelper"));
@@ -529,7 +473,7 @@ class MqHelperExecutorTest {
         MqHelperExecutor executor = new MqHelperExecutor(tempDir, configured, factory);
         for (int index = 0; index < 256; index++) {
             MqInvocationResult result = executor.execute("payment", "send",
-                    map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "random-" + index);
+                    map("queue", "REQUEST.Q", "payload", text(payload)), context(caseDir), null, "random-" + index);
             assertTrue(result.success());
             assertEquals("random", result.operationResult().outputMetadata().get("selectionStrategy"));
         }
@@ -555,7 +499,7 @@ class MqHelperExecutorTest {
                     if (invocation < 8) ready.countDown();
                     start.await();
                     return executor.execute("payment", "send",
-                            map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null,
+                            map("queue", "REQUEST.Q", "payload", text(payload)), context(caseDir), null,
                             "concurrent-" + invocation);
                 }));
             }
@@ -578,7 +522,7 @@ class MqHelperExecutorTest {
         FakeFactory factory = new FakeFactory();
         factory.reply = new MqTransport.Message(new byte[]{2}, new byte[]{1}, new byte[]{3});
         MqInvocationResult result = new MqHelperExecutor(tempDir, multiConfig("roundRobin"), factory).execute("payment", "request",
-                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "file", payload.toString()),
+                map("requestQueue", "REQUEST.Q", "replyQueue", "REPLY.Q", "payload", text(payload)),
                 context(caseDir), null, "request-same-instance");
 
         assertTrue(result.success());
@@ -596,11 +540,11 @@ class MqHelperExecutorTest {
             Files.write(payload, privateValue.getBytes("UTF-8"));
             MqHelperConfig helper = new MqHelperConfig("broker", "Broker", "test broker", "QM1", "localhost", 1414,
                     "DEV.APP.SVRCONN", "user", "secret", 1208, "MQSTR", "asQueue", 10000, "metadata", tempDir.resolve("mq.yaml"));
-            Map<String, att.config.ToolArgumentConfig> arguments = Collections.singletonMap("file",
-                    new att.config.ToolArgumentConfig("file", "File", "", true, ""));
+            Map<String, att.config.ToolArgumentConfig> arguments = Collections.singletonMap("payload",
+                    new att.config.ToolArgumentConfig("payload", "Payload", "", true, ""));
             att.config.ToolConfig tool = new att.config.ToolConfig("broker.send", "send", "broker",
                     "Send", "MQ collector", Collections.<String>emptyList(),
-                    "#{mq.broker.send(queue='REQUEST.Q', file=${input.file})}", Collections.<String>emptyList(),
+                    "#{mq.broker.send(queue='REQUEST.Q', payload=${input.payload})}", Collections.<String>emptyList(),
                     "", arguments, null, null);
             FrameworkConfig configured = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
                     Collections.singletonMap(tool.key(), tool), Collections.emptyMap(), Collections.singletonMap("broker", helper),
@@ -610,9 +554,9 @@ class MqHelperExecutorTest {
                     "MQRC_Q_MGR_NOT_AVAILABLE", null);
             MqHelperExecutor mq = new MqHelperExecutor(tempDir, configured, factory);
             CaseRuntimeContext runtime = context(caseDir);
-            runtime.beginStage(new StageCaseData("invoke", "T", map("file", payload.toString())), "T", tempDir);
+            runtime.beginStage(new StageCaseData("invoke", "T", map("payload", text(payload))), "T", tempDir);
             TemplateAction action = new TemplateAction("call", map("type", "tool", "call", "#{upper('ok')}",
-                    "evidence", map("brokerFailure", map("call", "#{broker.send(file=${EXEC.INPUT.file})}",
+                    "evidence", map("brokerFailure", map("call", "#{broker.send(payload=${EXEC.INPUT.payload})}",
                             "onFailure", mode))));
             List<att.core.ValidationResult> results;
             Path caseLogPath = caseDir.resolve("case.log");
@@ -774,6 +718,11 @@ class MqHelperExecutorTest {
         Map<String,Object> result = new LinkedHashMap<String,Object>();
         for (int index = 0; index < values.length; index += 2) result.put(String.valueOf(values[index]), values[index + 1]);
         return result;
+    }
+
+    private static String text(Path path) {
+        try { return new String(Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8); }
+        catch (java.io.IOException error) { throw new AssertionError(error); }
     }
 
     private String callArguments(Map<String, Object> args) {

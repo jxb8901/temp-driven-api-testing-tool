@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT V3.7.1 Reference Manual</title>
+  <title>ATT V3.7.2 Reference Manual</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,12 +233,12 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT V3.7.1 Reference Manual</h1>
+<h1 class="title">ATT V3.7.2 Reference Manual</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
-<li><a href="#att-v371-reference-manual"
-id="toc-att-v371-reference-manual">ATT V3.7.1 Reference Manual</a>
+<li><a href="#att-v372-reference-manual"
+id="toc-att-v372-reference-manual">ATT V3.7.2 Reference Manual</a>
 <ul>
 <li><a href="#01-overview-and-product-model"
 id="toc-01-overview-and-product-model">01 Overview and Product Model</a>
@@ -519,8 +519,11 @@ Compatibility and Deprecated Aliases</a></li>
 <li><a href="#appendix-c--migration-notes"
 id="toc-appendix-c--migration-notes">Appendix C — Migration Notes</a>
 <ul>
-<li><a href="#att-371-testdata-migration"
-id="toc-att-371-testdata-migration">ATT 3.7.1 testdata
+<li><a href="#att-372-file-arguments-and-case-log-paths"
+id="toc-att-372-file-arguments-and-case-log-paths">ATT 3.7.2 file
+arguments and case-log paths</a></li>
+<li><a href="#previous-release-testdata-migration"
+id="toc-previous-release-testdata-migration">Previous release testdata
 migration</a></li>
 <li><a href="#historical-schema-migration"
 id="toc-historical-schema-migration">Historical schema
@@ -550,8 +553,8 @@ id="toc-advanced-diagnostics">Advanced diagnostics</a></li>
 </ul></li>
 </ul>
 </nav>
-<h1 id="att-v371-reference-manual">ATT V3.7.1 Reference Manual</h1>
-<p>Author: Jeffrey + ChatGPT Version: 3.7.1 Status: Normative end-user
+<h1 id="att-v372-reference-manual">ATT V3.7.2 Reference Manual</h1>
+<p>Author: Jeffrey + ChatGPT Version: 3.7.2 Status: Normative end-user
 documentation; generated from modular sources</p>
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
 
@@ -1202,9 +1205,9 @@ expressions, Log values and other typed value positions.</p>
 <p>requestFormat is for abstract structured values such as Map or List.
 Such a body requires an explicit format, for example requestFormat=json.
 Combining requestFormat with a <code>String</code> fails; a project-file
-result is never silently parsed and serialized. A raw file input remains
-available only for resource calls that explicitly define a file
-argument.</p>
+result is never silently parsed and serialized. HTTP, MQ, and SSH
+Resource calls consume project-file content as String values and do not
+resolve local file-path arguments.</p>
 <h3 id="tool-db-and-flow-results">Tool, DB and Flow results</h3>
 <p>A command-backed Tool declares stdoutFormat in its Tool
 descriptor:</p>
@@ -2233,11 +2236,10 @@ DB results typed and migrate display calls to Log
 <code>value: ${EXEC.ACTIONS.queryOrders.output.result}</code> with
 <code>format: sqlplus</code>; use <code>format: json</code> or
 <code>yaml</code> for Maps/Lists. Read project content with
-<code>&amp;{...}</code> and inspect or change remote files with
-SSHHelper <code>stat</code>, <code>mkdirs</code>, <code>move</code>, and
-<code>delete</code>; use <code>upload</code>/<code>download</code> for
-transfers. ATT local output remains framework-owned. Removed calls fail
-with migration guidance.</p>
+<code>&amp;{...}</code> and pass its String to HTTP body, MQ payload, or
+SSH upload payload. SSHHelper upload accepts content only; native SSH
+download was removed. ATT local output remains framework-owned. Removed
+calls fail with migration guidance.</p>
 <h3 id="retry-condition-lifecycle">Retry-condition lifecycle</h3>
 <p><code>retry.when</code> runs after the current attempt completes,
 only after retryOn matches and while another attempt is available.
@@ -2478,20 +2480,13 @@ sidecar discovery from the diagnosis. Template and Flow debug discover
 discovers <code>config/tools/&lt;group&gt;.debug.yaml</code>. The
 selected target's dependency closure is validated, so an unrelated
 workbook or Case file is not a prerequisite.</p>
-<p>MQ <code>file</code> arguments follow the same safe path rules in
-Debug, Run and Load:</p>
-<ul>
-<li>An absolute path must resolve to a regular file inside the ATT
-package root. It is validated against the package root even when Load
-has not materialized a lazy iteration workspace yet.</li>
-<li>A relative path is resolved under the active Case output directory.
-<code>..</code> traversal, symlink payloads, symlink escapes,
-directories and non-regular files are rejected before MQ
-connect/open/put/get.</li>
-<li>A missing or unsafe payload reports the payload path directly. No MQ
-connection is attempted, so a path error should be fixed before
-investigating broker credentials or queue state.</li>
-</ul>
+<p>Use the same <code>&amp;{project-relative-file}</code> expression in
+Debug, Run and Load, then pass its UTF-8 String as HTTP
+<code>body</code>, MQ <code>payload</code>, or SSH upload
+<code>payload</code>. These Resource Helpers do not resolve separate
+local paths. Validation resolves project files before external I/O;
+obsolete HTTP/MQ <code>file</code>, SSH upload <code>localPath</code>,
+and SSH <code>download</code> calls are rejected.</p>
 <p>Use the output directory to separate diagnosis stages:</p>
 <table>
 <thead>
@@ -3074,8 +3069,8 @@ C</a> for schema migration.</p>
 Integrations</h2>
 <p>Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper are peer
 integration/resource types. SSHHelper routes command-backed Tools and
-exposes <code>ssh.&lt;helperId&gt;.execute|upload|download</code>
-Resource Helper operations. They converge on the common
+exposes <code>ssh.&lt;helperId&gt;.execute|upload</code> plus remote
+filesystem operations. It converges on the common
 operation-result/evidence contract.</p>
 <pre class="text"><code>Tool      -&gt; process/call operation --\
 DBHelper  -&gt; JDBC operation ----------+--&gt; Action output
@@ -3628,9 +3623,9 @@ supply requestFormat for a project-file String; MQ transport metadata
 remains resource-owned.</p>
 <p>A Map/List is an abstract structured value and requires requestFormat
 (text/json/yaml/xml), for example payload=${EXEC.INPUT.request},
-requestFormat=json. String + requestFormat is rejected. payload and file
-are mutually exclusive. file remains available for explicit raw file
-input; a project-file expression does not create a file or
+requestFormat=json. String + requestFormat is rejected. MQ send/request
+calls do not accept local file paths; <code>file</code> is an unknown
+argument. A project-file expression does not create a file or
 targetFiles.</p>
 <h4 id="evidence-response-parsing-and-load">Evidence, response parsing
 and Load</h4>
@@ -3887,8 +3882,8 @@ with requestFormat.</p>
 <p>A Map/List is an abstract structured value and requires explicit
 requestFormat, such as body=${EXEC.INPUT.request}, requestFormat=json.
 requestFormat accepts text, json, yaml or xml and applies only to
-Map/List. String + requestFormat is rejected. body and file are mutually
-exclusive; file is explicit raw file input supported by the HTTP call. A
+Map/List. String + requestFormat is rejected. HTTP calls do not accept
+local file paths; <code>file</code> is an unknown argument. A
 project-file expression creates no result file and has no
 targetFiles.</p>
 <p>The project-file String has no format metadata and does not set HTTP
@@ -3940,7 +3935,6 @@ operations</h4>
 normal <code>type: tool</code> Action:
 <code>ssh.&lt;helperId&gt;.execute</code>,
 <code>ssh.&lt;helperId&gt;.upload</code>,
-<code>ssh.&lt;helperId&gt;.download</code>,
 <code>ssh.&lt;helperId&gt;.stat</code>,
 <code>ssh.&lt;helperId&gt;.mkdirs</code>,
 <code>ssh.&lt;helperId&gt;.move</code>, and
@@ -3968,15 +3962,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb66-1"><a href=
 <span id="cb66-14"><a href="#cb66-14" aria-hidden="true" tabindex="-1"></a>        remotePath=&#39;/srv/app/request.json&#39;,</span>
 <span id="cb66-15"><a href="#cb66-15" aria-hidden="true" tabindex="-1"></a>        payload=${EXEC.VARS.requestText},</span>
 <span id="cb66-16"><a href="#cb66-16" aria-hidden="true" tabindex="-1"></a>        overwrite=true</span>
-<span id="cb66-17"><a href="#cb66-17" aria-hidden="true" tabindex="-1"></a>      )}</span>
-<span id="cb66-18"><a href="#cb66-18" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">downloadResponse</span><span class="kw">:</span></span>
-<span id="cb66-19"><a href="#cb66-19" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb66-20"><a href="#cb66-20" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb66-21"><a href="#cb66-21" aria-hidden="true" tabindex="-1"></a>      #{ssh.application.download(</span>
-<span id="cb66-22"><a href="#cb66-22" aria-hidden="true" tabindex="-1"></a>        remotePath=&#39;/srv/app/response.json&#39;,</span>
-<span id="cb66-23"><a href="#cb66-23" aria-hidden="true" tabindex="-1"></a>        localPath=&#39;ssh/response.json&#39;,</span>
-<span id="cb66-24"><a href="#cb66-24" aria-hidden="true" tabindex="-1"></a>        overwrite=true</span>
-<span id="cb66-25"><a href="#cb66-25" aria-hidden="true" tabindex="-1"></a>      )}</span></code></pre></div>
+<span id="cb66-17"><a href="#cb66-17" aria-hidden="true" tabindex="-1"></a>      )}</span></code></pre></div>
 <p><code>execute</code> requires <code>command</code> and accepts
 <code>stdoutFormat: text|json|yaml|xml</code> plus
 <code>timeoutMs</code>. Text returns the exact stdout String; the
@@ -3986,20 +3972,15 @@ error with a distinct category and retains bounded stderr, exit code,
 byte counts and transport evidence. SSH resource execution treats a
 non-zero exit as an operation failure; this is separate from the legacy
 command-backed Tool fan-out contract described below.</p>
-<p><code>upload</code> requires <code>remotePath</code> and exactly one
-of <code>localPath</code> or <code>payload</code>. A local file must be
-a regular non-symlink file under the package or current Case output. A
-represented payload must resolve to a String or byte array; Map/List
-values are rejected rather than implicitly serialized. Absolute remote
-paths are allowed. Upload overwrite defaults to <code>true</code>.</p>
-<p><code>download</code> requires an absolute or relative
-<code>remotePath</code> and a Case-output-relative
-<code>localPath</code>. ATT writes through a temporary file and moves it
-into the controlled Case output directory; it does not parse the
-downloaded bytes. Download overwrite defaults to <code>false</code>, and
-an existing destination must be explicitly replaced with
-<code>overwrite: true</code>. The typed result is a transfer summary
-containing remote path, retained local path and byte count.</p>
+<p><code>upload</code> requires <code>remotePath</code> and a String or
+byte-array <code>payload</code>. To upload a project file, pass the
+UTF-8 String returned by <code>&amp;{...}</code> directly; SSHHelper
+does not accept or resolve local filesystem paths. Map/List values are
+rejected rather than implicitly serialized. Absolute remote paths are
+allowed. Upload overwrite defaults to <code>true</code>.</p>
+<p>SSHHelper has no <code>download</code> operation because downloading
+requires a local destination path. Use an explicitly configured
+command-backed Tool when host-level file retrieval is required.</p>
 <p>All operations accept only named arguments. Unknown operations,
 helper IDs, arguments, duplicate arguments, invalid formats, invalid
 timeout values, missing required fields, upload source conflicts and
@@ -4049,14 +4030,13 @@ the category above).</td>
 <td>stdout parsing failed.</td>
 </tr>
 <tr class="odd">
-<td><code>SSH_UPLOAD_ERROR</code> / <code>SSH_DOWNLOAD_ERROR</code></td>
-<td>The corresponding transfer failed after connection setup, including
-remote permission/missing-path/protocol errors.</td>
+<td><code>SSH_UPLOAD_ERROR</code></td>
+<td>The upload failed after connection setup, including remote
+permission/missing-path/protocol errors.</td>
 </tr>
 <tr class="even">
-<td><code>SSH_PATH</code> / <code>SSH_ARGUMENT</code></td>
-<td>Local containment/security checks or argument validation
-failed.</td>
+<td><code>SSH_ARGUMENT</code></td>
+<td>Argument validation failed.</td>
 </tr>
 <tr class="odd">
 <td><code>SSH_INTERRUPTED</code></td>
@@ -4076,18 +4056,18 @@ command or SFTP operation. A per-call <code>timeoutMs</code> or helper
 cannot extend the enclosing Action deadline.
 <code>timeouts.connectTimeoutMs</code> caps connection establishment
 within the remaining deadline; it does not add time to the operation.
-The timeout applies to execute/upload/download/stat/mkdirs/move/delete.
-Native <code>execute</code>, read-only <code>stat</code>, and idempotent
+The timeout applies to execute/upload/stat/mkdirs/move/delete. Native
+<code>execute</code>, read-only <code>stat</code>, and idempotent
 <code>mkdirs</code> <code>SSH_TIMEOUT</code> and
 <code>SSH_POOL_TIMEOUT</code> failures may use Action
 <code>retryOn: [TIMEOUT]</code>, including through call-backed Tools;
 common <code>retry.when</code> controls replay. Native
-<code>upload</code>, <code>download</code>, <code>move</code>, and
-<code>delete</code> reject timeout retry because their mutation outcome
-may be uncertain after timeout. Validation and runtime use the same
-operation policy. A timed-out SFTP Action returns at its deadline while
-its concurrency lease remains held by the cleanup worker until the
-transfer worker and transport terminate.</p>
+<code>upload</code>, <code>move</code>, and <code>delete</code> reject
+timeout retry because their mutation outcome may be uncertain after
+timeout. Validation and runtime use the same operation policy. A
+timed-out SFTP Action returns at its deadline while its concurrency
+lease remains held by the cleanup worker until the transfer worker and
+transport terminate.</p>
 <p>SSHHelper routes a command-backed Tool to a stable logical
 application-server ID instead of embedding a physical host in the Tool
 group. The <code>att-sshhelper/v1.0</code> YAML descriptor contains
@@ -6040,7 +6020,7 @@ reports and archives before sharing.</p>
 <div class="sourceCode" id="cb92"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb92-1"><a href="#cb92-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
 <span id="cb92-2"><a href="#cb92-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb92-3"><a href="#cb92-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.7.1&quot;</span><span class="fu">,</span></span>
+<span id="cb92-3"><a href="#cb92-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.7.2&quot;</span><span class="fu">,</span></span>
 <span id="cb92-4"><a href="#cb92-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
 <span id="cb92-5"><a href="#cb92-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
 <span id="cb92-6"><a href="#cb92-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
@@ -6238,7 +6218,30 @@ scope isolation or the common result/evidence contract. Deprecated
 CLI/authoring forms remain documented in their owning chapter or
 CHANGELOG only when users still need a migration path.</p>
 <h2 id="appendix-c--migration-notes">Appendix C — Migration Notes</h2>
-<h3 id="att-371-testdata-migration">ATT 3.7.1 testdata migration</h3>
+<h3 id="att-372-file-arguments-and-case-log-paths">ATT 3.7.2 file
+arguments and case-log paths</h3>
+<p>HTTPHelper calls no longer accept <code>file</code>; pass
+<code>&amp;{project-relative-file}</code> directly as <code>body</code>.
+MQHelper <code>send</code> and <code>request</code> no longer accept
+<code>file</code>; pass the expression as <code>payload</code>.
+SSHHelper <code>upload</code> now requires content in
+<code>payload</code> and rejects <code>localPath</code>; pass
+<code>&amp;{...}</code> directly. SSHHelper no longer supports
+<code>download</code>, because it requires a local destination path. Use
+a deliberately configured command-backed Tool for workflows that must
+retrieve files from a host. These changes remove native arbitrary-binary
+local-file input from these Resource APIs; <code>&amp;{...}</code>
+supplies UTF-8 text.</p>
+<p>Case logs display paths under the canonical project root as
+<code>$ATT_HOME</code> or <code>$ATT_HOME/&lt;relative-path&gt;</code>,
+with <code>/</code> separators. <code>$ATT_HOME</code> is a presentation
+token in logs, not an environment variable, Context root, or
+file-expression locator. Runtime resolution and filesystem access
+continue to use canonical absolute Paths. Paths outside the project root
+use a bounded <code>$EXTERNAL/&lt;basename&gt;</code> presentation when
+logged as Path values.</p>
+<h3 id="previous-release-testdata-migration">Previous release testdata
+migration</h3>
 <p>Change global configuration from <code>att-config/v2.10</code> to
 <code>att-config/v2.11</code> and Load scenarios from
 <code>att-load/v1.4</code> to <code>att-load/v1.5</code>. The previous
@@ -6302,8 +6305,8 @@ targetFiles.</td>
 </tr>
 <tr class="even">
 <td>Render file handoff through targetFiles</td>
-<td>Pass the project-file String directly as HTTP body or MQ payload, or
-use an explicit resource file argument.</td>
+<td>Pass the project-file String directly as HTTP body, MQ payload, or
+SSH upload payload.</td>
 </tr>
 <tr class="odd">
 <td>requestFormat on a project-file String</td>
@@ -6443,9 +6446,9 @@ returns the exact UTF-8 String and creates no implicit result file.</td>
 <td>Put a typed map/list in Log.value and select Log.format</td>
 </tr>
 <tr class="odd">
-<td>Render targetFiles handoff to HTTP/MQ</td>
-<td>Pass the project-file String directly as HTTP body or MQ
-payload</td>
+<td>Render targetFiles handoff to HTTP/MQ/SSH</td>
+<td>Pass the project-file String directly as HTTP body, MQ payload, or
+SSH upload payload</td>
 </tr>
 <tr class="even">
 <td>requestFormat on rendered output</td>

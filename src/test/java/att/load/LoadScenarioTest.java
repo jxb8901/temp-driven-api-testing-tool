@@ -415,7 +415,7 @@ class LoadScenarioTest {
             assertTrue(Files.isRegularFile(expectedWorkspace.resolve("case.yaml")));
             @SuppressWarnings("unchecked") Map<String, Object> caseYaml = new org.yaml.snakeyaml.Yaml().load(
                     new String(Files.readAllBytes(expectedWorkspace.resolve("case.yaml")), "UTF-8"));
-            assertEquals(expectedWorkspace.toString(), caseYaml.get("outputDirectory"));
+            assertEquals(att.core.PathPresentation.displayPath(expectedWorkspace, project), caseYaml.get("outputDirectory"));
             assertNotNull(result.evidenceRef());
 
             LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(

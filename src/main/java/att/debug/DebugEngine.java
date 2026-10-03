@@ -136,9 +136,9 @@ public final class DebugEngine {
         target.put("id", targetId);
         result.put("target", target);
         result.put("debugId", debugDirectory.getFileName().toString());
-        result.put("outputDirectory", debugDirectory.toString());
-        result.put("log", logPath.toString());
-        result.put("artifacts", artifacts.toString());
+        result.put("outputDirectory", att.core.PathPresentation.displayPath(debugDirectory, projectRoot));
+        result.put("log", att.core.PathPresentation.displayPath(logPath, projectRoot));
+        result.put("artifacts", att.core.PathPresentation.displayPath(artifacts, projectRoot));
 
         DebugInput input = null;
         CaseRuntimeContext context = null;
@@ -158,13 +158,14 @@ public final class DebugEngine {
             if (options.verbose() && !options.quiet())
                 consoleLine(console, "[DEBUG] START target=" + targetType + ":" + targetId
                         + " input=" + (options.debugInput() == null ? "auto" : options.debugInput())
-                        + " output=" + debugDirectory);
+                        + " output=" + att.core.PathPresentation.displayPath(debugDirectory, projectRoot));
             log = new CaseExecutionLog(logPath, config.caseLogYamlAnchors(),
                     options.verbose() && !options.quiet()
                             ? new att.core.CaseLogConsoleMirror("debug:" + targetType + ":" + targetId, console)
                             : null);
+            log.setProjectRoot(projectRoot);
             input = loadInput(options, targetType, targetId);
-            result.put("input", input.path.toString());
+            result.put("input", att.core.PathPresentation.displayPath(input.path, projectRoot));
             ResolvedTarget resolved = resolveTarget(targetType, targetId, input);
             StageCaseData stage = input.stage(resolved.template.name());
             TestCase testCase = syntheticCase(targetType, targetId, input, stage);
@@ -176,7 +177,8 @@ public final class DebugEngine {
                     "vars", DiagnosticCodes.DEBUG_INVALID, att.core.ExecutionBootstrapVariables.Scope.DEBUG);
             if (options.verbose() && !options.quiet())
                 consoleLine(console, "[DEBUG] INPUT target=" + targetType + ":" + targetId
-                        + " case=" + testCase.caseId() + " resolved=" + input.path);
+                        + " case=" + testCase.caseId() + " resolved="
+                        + att.core.PathPresentation.displayPath(input.path, projectRoot));
 
             new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
                     resolved.flows, input.path, "debug", testCase.caseData(), input.vars);
@@ -256,7 +258,7 @@ public final class DebugEngine {
                 if (stageStarted && !stageFinished) {
                     try { context.finishStage(status.name(), Duration.between(started, Instant.now()).toMillis()); } catch (Exception ignored) { }
                 }
-                try { Files.write(artifacts.resolve("case.yaml"), new Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8)); }
+                try { Files.write(artifacts.resolve("case.yaml"), new Yaml().dump(att.core.PathPresentation.displayStructure(context.caseTree(), projectRoot)).getBytes(StandardCharsets.UTF_8)); }
                 catch (Exception ignored) { /* result.yaml still records the primary outcome */ }
             }
             if (log != null) try { log.close(); } catch (Exception ignored) { }
@@ -270,9 +272,9 @@ public final class DebugEngine {
         result.put("durationMs", Long.valueOf(durationMs));
         result.put("caseId", "DEBUG." + targetType + "." + safeRowId(targetId));
         result.put("actions", actionMaps(actionResults));
-        if (context != null) result.put("case", context.caseTree());
+        if (context != null) result.put("case", att.core.PathPresentation.displayStructure(context.caseTree(), projectRoot));
         if (diagnostic != null) result.put("diagnostic", diagnostic.toDiagnostic().toMap());
-        Files.write(resultPath, new Yaml().dump(result).getBytes(StandardCharsets.UTF_8));
+        Files.write(resultPath, new Yaml().dump(att.core.PathPresentation.displayStructure(result, projectRoot)).getBytes(StandardCharsets.UTF_8));
         return new Result(status, exitCode, durationMs, debugDirectory, logPath, resultPath, diagnostic);
     }
 
