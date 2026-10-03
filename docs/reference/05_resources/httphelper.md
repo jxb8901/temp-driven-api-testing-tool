@@ -20,7 +20,17 @@ evidence:
     maxChars: 10000
 ~~~
 
-The HTTP connection pool defaults to 50 total connections and 20 per route. Size it for the expected in-flight Load concurrency; `maxConnectionsPerRoute` cannot exceed `maxConnections`.
+The HTTP connection pool has these defaults and limits:
+
+| Pool field | Default | Contract |
+|---|---:|---|
+| `maxConnections` | 50 | Total connections, 1–10000 |
+| `maxConnectionsPerRoute` | 20 | Per-route connections, 1–10000 and no greater than `maxConnections` |
+| `connectionRequestTimeoutMs` | 5000 ms | Maximum wait to lease a connection, 1–3600000 ms |
+| `keepAliveMs` | 30000 ms | Keep-alive duration, 1–3600000 ms |
+| `idleEvictMs` | 60000 ms | Idle connection eviction interval, 1–3600000 ms |
+
+Size the pool for the expected in-flight Load concurrency. For example, the following tuning overrides raise the per-route capacity and shorten the connection-lease wait; values shown here are not defaults:
 
 ~~~yaml
 pool:
