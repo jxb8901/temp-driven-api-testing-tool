@@ -3,7 +3,8 @@ package att.load;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -24,7 +25,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private final Runnable beforeSubmitHook;
     private final LoadSchedulerStartGate startGate;
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
-    private volatile ExecutorService workers;
+    private volatile ThreadPoolExecutor workers;
     private final AtomicInteger inFlight = new AtomicInteger();
 
     public FixedArrivalRateScheduler(LoadScenario scenario, IterationExecutor executor, String runId, Consumer<LoadEvent> listener) {
@@ -70,14 +71,18 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             if (!(executor instanceof IterationExecutor)) throw new IllegalArgumentException("Multi-workload arrival scheduling requires IterationExecutor");
             return LoadRunCoordinator.runFrom(scenario, (IterationExecutor) executor, runId, evidenceStore, evidenceOutputRoot);
         }
+        if (executor instanceof IterationExecutor) ((IterationExecutor) executor).initializeOutputNamespace(runId);
         long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
         Instant start = LoadSchedulerSupport.instant(startedAt);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, LoadPhase.totalMs(scenario));
-        workers = Executors.newFixedThreadPool(scenario.maxConcurrent(), new NamedFactory("att-load-arrival-" + safe(scenario.workloadId())));
+        workers = new ThreadPoolExecutor(scenario.maxConcurrent(), scenario.maxConcurrent(), 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<Runnable>(scenario.maxConcurrent()),
+                new NamedFactory("att-load-arrival-" + safe(scenario.workloadId())));
         long scheduledCount = 0L;
         long admittedTestdataOrdinal = 0L;
         try {
             while (!cancelled.get()) {
+                metrics.recordSchedulerWakeup(workers.getQueue().size());
                 long elapsed = timing.now() - startedAt;
                 long total = LoadPhase.totalMs(scenario);
                 long desired = elapsed >= total ? arrivalsBeforeDeadline(scenario) : arrivalsDueAt(scenario, elapsed);
@@ -104,8 +109,10 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         inFlight.incrementAndGet();
         try {
             if (beforeSubmitHook != null) beforeSubmitHook.run();
+            metrics.recordWorkerQueueDepth(workers.getQueue().size());
             workers.submit(() -> {
                 long iterationStarted = timing.now();
+                metrics.recordSubmitLag(iterationStarted - dueAt, workers.getQueue().size());
                 att.core.ResultStatus status = att.core.ResultStatus.ERROR;
                 String errorType = "RUNTIME_ERROR";
                 EvidenceRef evidence = null;

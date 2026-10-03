@@ -40,6 +40,10 @@ public final class LoadMetrics implements LoadEventListener {
     private final AtomicLong latencySumMs = new AtomicLong();
     private final AtomicLong latencyMinMs = new AtomicLong(Long.MAX_VALUE), latencyMaxMs = new AtomicLong();
     private final AtomicLong schedulerLagCount = new AtomicLong(), schedulerLagSumMs = new AtomicLong(), schedulerLagMaxMs = new AtomicLong();
+    private final AtomicLong schedulerWakeups = new AtomicLong();
+    private final AtomicLong submitLagCount = new AtomicLong(), submitLagSumMs = new AtomicLong(), submitLagMaxMs = new AtomicLong();
+    private final AtomicInteger workerQueueDepth = new AtomicInteger(), workerQueueDepthPeak = new AtomicInteger();
+    private final GeneratorTelemetry generatorTelemetry = new GeneratorTelemetry();
     private final AtomicLong measuredWindowStartMs = new AtomicLong(NO_TIMESTAMP);
     private final String model;
     private final long startedAtEpochMs;
@@ -75,6 +79,7 @@ public final class LoadMetrics implements LoadEventListener {
 
     @Override public void onEvent(LoadEvent event) {
         if (event == null) return;
+        generatorTelemetry.sample(isWarmup(event));
         if (event.scheduled()) {
             scheduled.incrementAndGet();
             if (!isWarmup(event)) measuredScheduled.incrementAndGet();
@@ -148,6 +153,32 @@ public final class LoadMetrics implements LoadEventListener {
     public int currentInFlight() { return inFlight.get(); }
     public int maxInFlight() { return maxInFlight.get(); }
 
+    public void recordSchedulerWakeup(int queueDepth) {
+        schedulerWakeups.incrementAndGet();
+        recordWorkerQueueDepth(queueDepth);
+    }
+    public void recordSubmitLag(long millis, int queueDepth) {
+        long value = Math.max(0L, millis);
+        submitLagCount.incrementAndGet(); submitLagSumMs.addAndGet(value); updateMax(submitLagMaxMs, value);
+        recordWorkerQueueDepth(queueDepth);
+    }
+    public void recordWorkerQueueDepth(int depth) {
+        int value = Math.max(0, depth); workerQueueDepth.set(value); updateMax(workerQueueDepthPeak, value);
+    }
+    public void mergeSchedulerTelemetry(Map<String, Object> values) {
+        if (values == null) return;
+        Object wakeups = values.get("schedulerWakeups");
+        if (wakeups instanceof Number) schedulerWakeups.addAndGet(((Number) wakeups).longValue());
+        Object count = values.get("submitLagCount"), mean = values.get("submitLagMeanMs"), maximum = values.get("submitLagMaxMs");
+        if (count instanceof Number) {
+            long n = ((Number) count).longValue(); submitLagCount.addAndGet(n);
+            if (mean instanceof Number) submitLagSumMs.addAndGet(Math.round(((Number) mean).doubleValue() * n));
+        }
+        if (maximum instanceof Number) updateMax(submitLagMaxMs, ((Number) maximum).longValue());
+        Object peak = values.get("workerQueueDepthPeak");
+        if (peak instanceof Number) updateMax(workerQueueDepthPeak, ((Number) peak).intValue());
+    }
+
     public LoadMetricsSnapshot snapshot() {
         List<Long> sorted;
         synchronized (latencies) { sorted = new ArrayList<Long>(latencies); }
@@ -196,6 +227,13 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("schedulerLagCount", schedulerLagCount.get());
         result.put("schedulerLagMeanMs", schedulerLagCount.get() == 0L ? 0.0 : ((double) schedulerLagSumMs.get()) / schedulerLagCount.get());
         result.put("schedulerLagMaxMs", schedulerLagMaxMs.get());
+        result.put("schedulerWakeups", schedulerWakeups.get());
+        result.put("submitLagCount", submitLagCount.get());
+        result.put("submitLagMeanMs", submitLagCount.get() == 0L ? 0.0 : ((double) submitLagSumMs.get()) / submitLagCount.get());
+        result.put("submitLagMaxMs", submitLagMaxMs.get());
+        result.put("workerQueueDepth", workerQueueDepth.get());
+        result.put("workerQueueDepthPeak", workerQueueDepthPeak.get());
+        result.put("generator", generatorTelemetry.snapshot());
         result.put("errorClassifications", classificationSnapshot());
         result.put("latencySampleCount", sorted.size());
         result.put("latencySampleCapacity", MAX_LATENCIES);

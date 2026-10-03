@@ -136,6 +136,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
                 }
                 phase = "http.execute";
                 try (CloseableHttpResponse response = client.http.execute(call)) {
+                    client.observe(client.manager.getTotalStats());
                     ensureDeadline(deadline, "response");
                     int status = response.getStatusLine().getStatusCode();
                     if (request.followRedirects && redirectStatus(status) && response.getFirstHeader("Location") != null) {
@@ -443,6 +444,26 @@ public final class HttpHelperExecutor implements AutoCloseable {
         if (closed.get()) { created.close(); throw new HttpFailure("HTTP_CLOSED", "HTTP resources are closed"); }
         return created;
     }
+    /** Current pooled HTTP connection counts, grouped by configured helper. */
+    public Map<String, Object> metrics() {
+        observeMetrics();
+        Map<String, Object> result = new java.util.TreeMap<String, Object>();
+        for (Map.Entry<String, Client> entry : clients.entrySet()) {
+            org.apache.http.pool.PoolStats stats = entry.getValue().manager.getTotalStats();
+            Map<String, Object> item = new LinkedHashMap<String, Object>();
+            item.put("active", stats.getLeased()); item.put("idle", stats.getAvailable());
+            item.put("waiting", stats.getPending()); item.put("max", stats.getMax());
+            item.put("peakActive", entry.getValue().peakActive.get());
+            item.put("peakIdle", entry.getValue().peakIdle.get());
+            item.put("peakWaiting", entry.getValue().peakWaiting.get());
+            result.put(entry.getKey(), item);
+        }
+        return result;
+    }
+    /** Updates high-water marks without constructing the report snapshot maps. */
+    public void observeMetrics() {
+        for (Client client : clients.values()) client.observe(client.manager.getTotalStats());
+    }
     private static int capped(int configured, Integer override, long deadline) {
         int requested = override == null ? configured : override.intValue();
         if (deadline == Long.MAX_VALUE) return requested;
@@ -515,6 +536,14 @@ public final class HttpHelperExecutor implements AutoCloseable {
     private static final class Client implements AutoCloseable {
         private final PoolingHttpClientConnectionManager manager;
         private final CloseableHttpClient http;
+        private final java.util.concurrent.atomic.AtomicInteger peakActive = new java.util.concurrent.atomic.AtomicInteger();
+        private final java.util.concurrent.atomic.AtomicInteger peakIdle = new java.util.concurrent.atomic.AtomicInteger();
+        private final java.util.concurrent.atomic.AtomicInteger peakWaiting = new java.util.concurrent.atomic.AtomicInteger();
+        private void observe(org.apache.http.pool.PoolStats stats) {
+            peakActive.accumulateAndGet(stats.getLeased(), Math::max);
+            peakIdle.accumulateAndGet(stats.getAvailable(), Math::max);
+            peakWaiting.accumulateAndGet(stats.getPending(), Math::max);
+        }
         private Client(HttpHelperConfig helper) throws Exception {
             SSLContextBuilder builder = SSLContextBuilder.create();
             if (helper.trustStore() != null)

@@ -38,6 +38,10 @@ public final class TestdataInputResolver {
     private final ConcurrentHashMap<String, SelectionOrder> selectionOrders;
     private final ConcurrentHashMap<String, PreparedTestdata> preparedTestdata = new ConcurrentHashMap<String, PreparedTestdata>();
     private final ConcurrentHashMap<String, long[]> randomParameters = new ConcurrentHashMap<String, long[]>();
+    private final AtomicLong mappingEvaluations = new AtomicLong();
+    private final AtomicLong selectionRequests = new AtomicLong();
+    private final AtomicLong selectionEvaluations = new AtomicLong();
+    private final AtomicLong selectionCacheHits = new AtomicLong();
     private final ThreadLocal<Map<String, Map<String, Object>>> currentEvidence = new ThreadLocal<Map<String, Map<String, Object>>>();
     private final ThreadLocal<String> currentEvidenceScope = new ThreadLocal<String>();
     private final ThreadLocal<BooleanSupplier> currentSelectionWaitAllowed = new ThreadLocal<BooleanSupplier>();
@@ -169,6 +173,7 @@ public final class TestdataInputResolver {
     private Map<String, Object> resolveCompiledLoadInput(CaseRuntimeContext context, String userId,
                                                           String iterationId, Long testdataOrdinal,
                                                           BooleanSupplier selectionWaitAllowed) throws Exception {
+        mappingEvaluations.incrementAndGet();
         if (testdataOrdinal != null && testdataOrdinal.longValue() < 0L)
             throw new IllegalArgumentException("Testdata ordinal must be >= 0");
         currentSelectionWaitAllowed.set(selectionWaitAllowed == null ? () -> true : selectionWaitAllowed);
@@ -215,6 +220,7 @@ public final class TestdataInputResolver {
     private Map<String, Object> resolveMapping(Map<String, Object> mapping, CaseRuntimeContext context,
                                                String userId, String iterationId, Long testdataOrdinal,
                                                boolean mappingFrozen) throws Exception {
+        mappingEvaluations.incrementAndGet();
         TestdataSyntax.references(mapping);
         String evidenceScope = load ? workloadId + "|" + String.valueOf(iterationId) : executionScope;
         if (!evidenceScope.equals(currentEvidenceScope.get())) {
@@ -251,6 +257,28 @@ public final class TestdataInputResolver {
         List<String> ids = new ArrayList<String>(evidence.keySet());
         Collections.sort(ids);
         for (String id : ids) result.put(id, evidence.get(id));
+        return Collections.unmodifiableMap(result);
+    }
+
+    /** Bounded counters and live cache sizes for Load generator telemetry. */
+    public Map<String, Object> telemetry() {
+        long workload = 0L, user = 0L, iteration = 0L, execution = 0L;
+        for (String key : selections.keySet()) {
+            if (key.endsWith("|workload")) workload++;
+            else if (key.contains("|user|")) user++;
+            else if (key.contains("|iteration|")) iteration++;
+            else execution++;
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("mappingEvaluations", mappingEvaluations.get());
+        result.put("selectionRequests", selectionRequests.get());
+        result.put("selectionEvaluations", selectionEvaluations.get());
+        result.put("selectionCacheHits", selectionCacheHits.get());
+        Map<String, Object> sizes = new LinkedHashMap<String, Object>();
+        sizes.put("workload", workload); sizes.put("user", user);
+        sizes.put("iteration", iteration); sizes.put("execution", execution);
+        sizes.put("total", (long) selections.size());
+        result.put("selectionCacheSizesByScope", sizes);
         return Collections.unmodifiableMap(result);
     }
 
@@ -352,6 +380,7 @@ public final class TestdataInputResolver {
     }
 
     private Selection select(String id, String userId, String iterationId, Long testdataOrdinal) throws Exception {
+        selectionRequests.incrementAndGet();
         if (registry == null) throw new IllegalArgumentException("No testdata registry is configured for reference: " + id);
         final PreparedTestdata prepared = preparedTestdata.computeIfAbsent(id, key -> prepare(key));
         final TestdataDescriptor descriptor = prepared.descriptor;
@@ -360,7 +389,10 @@ public final class TestdataInputResolver {
         final String scope = prepared.scope;
         if (load && "user".equals(scope) && "arrivalRate".equals(model))
             throw new IllegalArgumentException("scope: user is not supported for arrivalRate workloads in att-load/v1.5");
-        if (descriptor.count() == 1) return selection(descriptor, id, 0L, layer, scope, policy);
+        if (descriptor.count() == 1) {
+            selectionEvaluations.incrementAndGet();
+            return selection(descriptor, id, 0L, layer, scope, policy);
+        }
 
         final String scopeKey;
         if (!load) scopeKey = executionScope + "|" + id + "|execution";
@@ -372,9 +404,18 @@ public final class TestdataInputResolver {
             if (iterationId == null || iterationId.trim().isEmpty()) throw new IllegalArgumentException("scope: iteration requires an iterationId");
             scopeKey = workloadId + "|" + id + "|iteration|" + iterationId;
         }
-        Selection selected;
+        // Iteration selections are already memoized in valueAt's per-mapping
+        // map. Keeping them in the resolver-level map extends their lifetime
+        // to the complete run and makes retained state grow with iterations.
+        // User and workload selections intentionally remain cached at their
+        // configured lifetime.
+        if (load && "iteration".equals(scope))
+            return choose(descriptor, id, layer, scope, policy, scopeKey, userId,
+                    iterationId, testdataOrdinal, currentSelectionWaitAllowed.get());
+
+        Selection selected = selections.get(scopeKey);
+        if (selected != null) selectionCacheHits.incrementAndGet();
         if (orderedLoadExhaustion) {
-            selected = selections.get(scopeKey);
             if (selected == null) {
                 Selection candidate = choose(descriptor, id, layer, scope, policy, scopeKey, userId,
                         iterationId, testdataOrdinal, currentSelectionWaitAllowed.get());
@@ -382,7 +423,7 @@ public final class TestdataInputResolver {
                 selected = previous == null ? candidate : previous;
             }
         } else {
-            selected = selections.computeIfAbsent(scopeKey,
+            if (selected == null) selected = selections.computeIfAbsent(scopeKey,
                     key -> choose(descriptor, id, layer, scope, policy, key, userId, iterationId,
                             testdataOrdinal, currentSelectionWaitAllowed.get()));
         }
@@ -393,6 +434,7 @@ public final class TestdataInputResolver {
                              TestdataSelectionPolicy policy, String scopeKey,
                              String userId, String iterationId, Long testdataOrdinal,
                              BooleanSupplier selectionWaitAllowed) {
+        selectionEvaluations.incrementAndGet();
         String strategy = policy == null ? "sequential" : policy.strategy();
         String exhaustion = policy == null ? "error" : policy.exhaustion();
         long ordinal;

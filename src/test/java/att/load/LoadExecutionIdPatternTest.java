@@ -76,6 +76,8 @@ class LoadExecutionIdPatternTest {
         installConfig();
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config.yaml"), root);
         try (LoadRunResources resources = new LoadRunResources(root, config)) {
+            Path runOutput = root.resolve("output/load/RUN");
+            resources.initializeExecutionNamespace(runOutput);
             Set<String> ids = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
             ExecutorService pool = Executors.newFixedThreadPool(4);
             try {
@@ -88,7 +90,7 @@ class LoadExecutionIdPatternTest {
                                     "STEADY", Instant.now(), "VU-" + workload, Collections.emptyMap())
                                     .withWorkloadId(workload);
                             String id = resources.nextDefaultExecutionId(request.runId());
-                            resources.reserveExecutionId(id, request);
+                            resources.reserveExecutionId(id, request, false, runOutput);
                             assertTrue(ids.add(id));
                             assertEquals("RUN", request.runId());
                         }
@@ -101,10 +103,51 @@ class LoadExecutionIdPatternTest {
             assertEquals(200, ids.size());
             IterationRequest duplicate = IterationRequest.closed("RUN", "duplicate", 1, "STEADY",
                     Instant.now(), "VU-1", Collections.emptyMap()).withWorkloadId("work0");
-            assertThrows(IllegalArgumentException.class, () -> resources.reserveExecutionId(ids.iterator().next(), duplicate));
+            assertDoesNotThrow(() -> resources.reserveExecutionId(ids.iterator().next(), duplicate, false, runOutput));
+            resources.reserveExecutionId("custom-id", duplicate, true, runOutput);
+            assertThrows(IllegalArgumentException.class,
+                    () -> resources.reserveExecutionId("CUSTOM-ID", duplicate, true, runOutput));
         }
         try (LoadRunResources fresh = new LoadRunResources(root, config)) {
             assertEquals("RUN-execution-1", fresh.nextDefaultExecutionId("RUN"));
+        }
+    }
+
+    @Test void customIdReservationsAreAtomicAndExistingOutputIsRejectedAtStartup() throws Exception {
+        assertFalse(java.lang.reflect.Modifier.isSynchronized(LoadRunResources.class
+                .getMethod("initializeExecutionNamespace", Path.class).getModifiers()),
+                "scheduled iterations must use the lock-free initialized namespace fast path");
+        installConfig();
+        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config.yaml"), root);
+        Path runOutput = root.resolve("output/load/custom-run");
+        try (LoadRunResources resources = new LoadRunResources(root, config)) {
+            resources.initializeExecutionNamespace(runOutput);
+            ExecutorService pool = Executors.newFixedThreadPool(8);
+            try {
+                List<Future<Boolean>> attempts = new ArrayList<Future<Boolean>>();
+                for (int index = 0; index < 32; index++) {
+                    final int item = index;
+                    attempts.add(pool.submit(() -> {
+                        IterationRequest request = IterationRequest.closed("custom-run", "iteration-" + item, item + 1,
+                                "STEADY", Instant.now(), "VU-1", Collections.emptyMap());
+                        try {
+                            resources.reserveExecutionId("shared-custom-id", request, true, runOutput);
+                            return true;
+                        } catch (IllegalArgumentException duplicate) { return false; }
+                    }));
+                }
+                int winners = 0;
+                for (Future<Boolean> attempt : attempts) if (attempt.get()) winners++;
+                assertEquals(1, winners);
+            } finally { pool.shutdownNow(); }
+        }
+
+        Path occupied = root.resolve("occupied/load/old-run/samples");
+        Files.createDirectories(occupied);
+        Files.write(occupied.resolve("retained"), new byte[] {1});
+        try (LoadRunResources resources = new LoadRunResources(root, config)) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> resources.initializeExecutionNamespace(root.resolve("occupied/load/old-run")));
         }
     }
 
