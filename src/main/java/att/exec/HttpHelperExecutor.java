@@ -446,10 +446,10 @@ public final class HttpHelperExecutor implements AutoCloseable {
     }
     /** Current pooled HTTP connection counts, grouped by configured helper. */
     public Map<String, Object> metrics() {
+        observeMetrics();
         Map<String, Object> result = new java.util.TreeMap<String, Object>();
         for (Map.Entry<String, Client> entry : clients.entrySet()) {
             org.apache.http.pool.PoolStats stats = entry.getValue().manager.getTotalStats();
-            entry.getValue().observe(stats);
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("active", stats.getLeased()); item.put("idle", stats.getAvailable());
             item.put("waiting", stats.getPending()); item.put("max", stats.getMax());
@@ -459,6 +459,10 @@ public final class HttpHelperExecutor implements AutoCloseable {
             result.put(entry.getKey(), item);
         }
         return result;
+    }
+    /** Updates high-water marks without constructing the report snapshot maps. */
+    public void observeMetrics() {
+        for (Client client : clients.values()) client.observe(client.manager.getTotalStats());
     }
     private static int capped(int configured, Integer override, long deadline) {
         int requested = override == null ? configured : override.intValue();

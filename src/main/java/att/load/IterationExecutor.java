@@ -36,6 +36,7 @@ public final class IterationExecutor implements LoadIterationRunner {
     private final FlowRegistry flows;
     private final boolean ownsResources;
     private final att.testdata.TestdataInputResolver testdataResolver;
+    private volatile Path initializedRunOutput;
 
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target) {
         this(projectRoot, config, target, new LoadRunResources(projectRoot, config), true,
@@ -69,10 +70,12 @@ public final class IterationExecutor implements LoadIterationRunner {
 
     @Override public IterationResult execute(IterationRequest request) {
         resources.ensureOpen();
-        resources.sampleResourceMetrics();
         Path runOutput = outputRoot.resolve("load").resolve(safe(request.runId())).toAbsolutePath().normalize();
-        try { resources.initializeExecutionNamespace(runOutput); }
-        catch (IOException error) { throw new IllegalStateException("Unable to isolate Load output namespace", error); }
+        if (!runOutput.equals(initializedRunOutput)) {
+            try { initializeOutputNamespace(runOutput); }
+            catch (IOException error) { throw new IllegalStateException("Unable to isolate Load output namespace", error); }
+        }
+        resources.sampleResourceMetrics();
         Instant started = Instant.now();
         Path executionWorkspace = null;
         Path transientWorkspace = null;
@@ -224,7 +227,6 @@ public final class IterationExecutor implements LoadIterationRunner {
         }
         CaseExecutionLog deferredFailureLog = !evidenceAvailable && status != ResultStatus.PASS
                 && (request.captureFailureLog() || request.retainSuccessEvidence()) ? log : null;
-        resources.sampleResourceMetrics();
         return new IterationResult(request.iterationId(), executionId, status, duration, context, results,
                 executionWorkspace, evidenceDirectory, diagnostic, evidenceAvailable,
                 deferredFailureLog, transientWorkspace);
@@ -307,7 +309,11 @@ public final class IterationExecutor implements LoadIterationRunner {
     LoadRunResources resources() { return resources; }
     Path outputRoot() { return outputRoot; }
     void initializeOutputNamespace(String runId) throws IOException {
-        resources.initializeExecutionNamespace(outputRoot.resolve("load").resolve(safe(runId)));
+        initializeOutputNamespace(outputRoot.resolve("load").resolve(safe(runId)).toAbsolutePath().normalize());
+    }
+    private void initializeOutputNamespace(Path runOutput) throws IOException {
+        resources.initializeExecutionNamespace(runOutput);
+        initializedRunOutput = runOutput;
     }
 
     public void close() { if (ownsResources) resources.close(); }

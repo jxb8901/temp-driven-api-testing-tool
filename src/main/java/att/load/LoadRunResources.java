@@ -28,6 +28,8 @@ public final class LoadRunResources implements AutoCloseable {
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final AtomicLong executionSequence = new AtomicLong();
     private final AtomicLong customExecutionIdsTracked = new AtomicLong();
+    private final AtomicLong lastResourceMetricSampleNanos = new AtomicLong(Long.MIN_VALUE);
+    private final AtomicLong resourceMetricSamples = new AtomicLong();
     private final java.util.Set<Path> initializedExecutionNamespaces = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final att.template.SequenceService sequences = new att.template.SequenceService();
     private final att.template.RenderPlanCache renderPlans = new att.template.RenderPlanCache();
@@ -66,9 +68,11 @@ public final class LoadRunResources implements AutoCloseable {
         return runId + "-execution-" + sequence;
     }
     /** Validates an isolated run output namespace once, before any iteration writes into it. */
-    public synchronized void initializeExecutionNamespace(Path runDirectory) throws IOException {
+    public void initializeExecutionNamespace(Path runDirectory) throws IOException {
         ensureOpen();
         Path run = runDirectory.toAbsolutePath().normalize();
+        // Schedulers initialize before starting workers. Standalone executor
+        // callers retain a lock-free fast path after that one-time validation.
         if (initializedExecutionNamespaces.contains(run)) return;
         for (String name : new String[] {"samples", "failures", "executions"}) {
             Path directory = run.resolve(name);
@@ -136,6 +140,7 @@ public final class LoadRunResources implements AutoCloseable {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("db", dbProvider.metrics()); result.put("mq", mqFactory.metrics());
         result.put("http", http.metrics());
+        result.put("resourceMetricSamples", resourceMetricSamples.get());
         result.put("render", renderPlans.stats().toMap());
         Map<String, Object> ids = new LinkedHashMap<String, Object>();
         ids.put("customExecutionIdsTracked", customExecutionIdsTracked.get());
@@ -143,11 +148,25 @@ public final class LoadRunResources implements AutoCloseable {
         result.put("executionIds", ids);
         return result;
     }
-    /** Samples shared pool gauges between iterations so completed runs retain their observed peaks. */
+    /** Rate-limited, allocation-light observation of shared HTTP pool peaks. */
     public void sampleResourceMetrics() {
         ensureOpen();
-        dbProvider.metrics(); mqFactory.metrics(); http.metrics();
+        sampleResourceMetricsAt(System.nanoTime());
     }
+    boolean sampleResourceMetricsAt(long nowNanos) {
+        ensureOpen();
+        while (true) {
+            long previous = lastResourceMetricSampleNanos.get();
+            if (previous != Long.MIN_VALUE && nowNanos - previous < GeneratorTelemetry.SAMPLE_INTERVAL_NANOS)
+                return false;
+            if (lastResourceMetricSampleNanos.compareAndSet(previous, nowNanos)) {
+                http.observeMetrics();
+                resourceMetricSamples.incrementAndGet();
+                return true;
+            }
+        }
+    }
+    long resourceMetricSamples() { return resourceMetricSamples.get(); }
     public boolean isClosed() { return closed.get(); }
     public void ensureOpen() { if (closed.get()) throw new IllegalStateException("Load run resources are closed"); }
 

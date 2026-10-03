@@ -114,6 +114,9 @@ class LoadExecutionIdPatternTest {
     }
 
     @Test void customIdReservationsAreAtomicAndExistingOutputIsRejectedAtStartup() throws Exception {
+        assertFalse(java.lang.reflect.Modifier.isSynchronized(LoadRunResources.class
+                .getMethod("initializeExecutionNamespace", Path.class).getModifiers()),
+                "scheduled iterations must use the lock-free initialized namespace fast path");
         installConfig();
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config.yaml"), root);
         Path runOutput = root.resolve("output/load/custom-run");

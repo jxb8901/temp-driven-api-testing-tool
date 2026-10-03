@@ -205,14 +205,7 @@
         "latencyObservationCount",
         "errorClassifications",
         "buckets",
-        "phases",
-        "schedulerWakeups",
-        "submitLagCount",
-        "submitLagMeanMs",
-        "submitLagMaxMs",
-        "workerQueueDepth",
-        "workerQueueDepthPeak",
-        "generator"
+        "phases"
       ],
       "properties": {
         "model": {

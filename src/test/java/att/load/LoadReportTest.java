@@ -73,6 +73,15 @@ class LoadReportTest {
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
                 Paths.get("schemas/att-load-summary-v1.0.schema.json"),
                 new String(Files.readAllBytes(runDirectory.resolve("load-summary.json")), StandardCharsets.UTF_8)));
+        Map<String, Object> legacySummary = new LinkedHashMap<String, Object>(json);
+        Map<String, Object> legacyMetrics = new LinkedHashMap<String, Object>((Map<String, Object>) json.get("metrics"));
+        for (String added : java.util.Arrays.asList("schedulerWakeups", "submitLagCount", "submitLagMeanMs",
+                "submitLagMaxMs", "workerQueueDepth", "workerQueueDepthPeak", "generator"))
+            legacyMetrics.remove(added);
+        legacySummary.put("metrics", legacyMetrics);
+        assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
+                Paths.get("schemas/att-load-summary-v1.0.schema.json"), att.validation.JsonSupport.write(legacySummary)),
+                "previously valid v1.0 summaries remain valid when new telemetry fields are absent");
         assertEquals("att-load-summary/v1.0", json.get("schemaVersion"));
         assertEquals("PASS", json.get("status"));
         assertTrue(json.containsKey("timing"));
