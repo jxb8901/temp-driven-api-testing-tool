@@ -244,6 +244,9 @@ public final class FrameworkRunner {
             profile.counter("loadStarted", result.metrics().longValue("started"));
             profile.counter("loadCompleted", result.metrics().longValue("completed"));
             profile.counter("loadDropped", result.metrics().longValue("dropped"));
+            java.util.Map<String, Object> renderStats = (java.util.Map<String, Object>) resourceMetrics.get("render");
+            for (java.util.Map.Entry<String, Object> entry : renderStats.entrySet())
+                profile.counter(entry.getKey(), ((Number) entry.getValue()).longValue());
             profile.write(runDirectory);
             int exitCode = result.exitCode();
             progress.finish(result.status().name());

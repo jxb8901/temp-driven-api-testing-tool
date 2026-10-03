@@ -24,6 +24,7 @@ public final class LoadRunResources implements AutoCloseable {
     private final AtomicLong executionSequence = new AtomicLong();
     private final java.util.concurrent.ConcurrentMap<String, String> executionIds = new java.util.concurrent.ConcurrentHashMap<String, String>();
     private final att.template.SequenceService sequences = new att.template.SequenceService();
+    private final att.template.RenderPlanCache renderPlans = new att.template.RenderPlanCache();
 
     public LoadRunResources(Path projectRoot, FrameworkConfig config) {
         this(projectRoot, config, new IbmMqClientFactory());
@@ -43,6 +44,12 @@ public final class LoadRunResources implements AutoCloseable {
     public MqHelperExecutor mq() { ensureOpen(); return mq; }
     public att.exec.HttpHelperExecutor http() { ensureOpen(); return http; }
     public att.template.SequenceService sequences() { ensureOpen(); return sequences; }
+    public att.template.RenderPlanCache renderPlans() { ensureOpen(); return renderPlans; }
+    /** Resolves Render sources before the workload start gate, shared by all targets in this Load run. */
+    public void prepareRenderPlans(LoadTarget target) throws Exception {
+        ensureOpen();
+        renderPlans.freeze(target.template(), target.flows() == null ? null : target.flows().freezeFor(target.template()));
+    }
     public String nextDefaultExecutionId(String runId) {
         return nextExecutionId(runId);
     }
@@ -76,6 +83,7 @@ public final class LoadRunResources implements AutoCloseable {
         ensureOpen();
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("db", dbProvider.metrics()); result.put("mq", mqFactory.metrics());
+        result.put("render", renderPlans.stats().toMap());
         return result;
     }
     public boolean isClosed() { return closed.get(); }

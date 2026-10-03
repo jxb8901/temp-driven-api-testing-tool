@@ -63,6 +63,8 @@ public final class IterationExecutor implements LoadIterationRunner {
         this.flows = target.flows().freezeFor(target.template());
         this.ownsResources = resources == null || ownsResources;
         this.testdataResolver = testdataResolver;
+        try { this.resources.prepareRenderPlans(target); }
+        catch (Exception error) { throw new IllegalArgumentException("Unable to freeze Load Render plans", error); }
     }
 
     @Override public IterationResult execute(IterationRequest request) {
@@ -128,7 +130,7 @@ public final class IterationExecutor implements LoadIterationRunner {
             MqHelperExecutor mq = resources.mq();
             UnifiedTemplateEngine engine = UnifiedTemplateEngine.withFileSnapshot(tools, db, mq, resources.http(),
                     new att.template.DefaultBuiltInProvider(resources.sequences()), target.fileSnapshot());
-            results.addAll(new StageTemplateRunner(engine, flows).execute("LOAD", target.template(), context, log));
+            results.addAll(new StageTemplateRunner(engine, flows, resources.renderPlans()).execute("LOAD", target.template(), context, log));
             if (Thread.currentThread().isInterrupted()) resources.db().abortCase();
             else results.addAll(db.finishCase(context, log));
             finalized = true;

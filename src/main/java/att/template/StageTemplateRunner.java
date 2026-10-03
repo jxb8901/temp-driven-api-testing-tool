@@ -26,11 +26,15 @@ import java.util.Map;
 public class StageTemplateRunner {
     private final UnifiedTemplateEngine templateEngine;
     private final ExpressionEvaluator evaluator = new ExpressionEvaluator();
-    private final RenderPayloadResolver payloadResolver = new RenderPayloadResolver();
+    private final RenderPlanCache renderPlans;
     private final FlowRegistry flows;
 
-    public StageTemplateRunner(UnifiedTemplateEngine templateEngine) { this(templateEngine, null); }
-    public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows) { this.templateEngine = templateEngine; this.flows = flows; }
+    public StageTemplateRunner(UnifiedTemplateEngine templateEngine) { this(templateEngine, null, new RenderPlanCache()); }
+    public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows) { this(templateEngine, flows, new RenderPlanCache()); }
+    public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows, RenderPlanCache renderPlans) {
+        this.templateEngine = templateEngine; this.flows = flows;
+        this.renderPlans = renderPlans == null ? new RenderPlanCache() : renderPlans;
+    }
 
     public List<ValidationResult> execute(String stageName, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log) {
         try (UnifiedTemplateEngine.SourceScope ignored = templateEngine.pushSourceDirectory(template.directory())) {
@@ -235,28 +239,27 @@ public class StageTemplateRunner {
 
     private void executeRender(TemplateAction action, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log,
                                Map<String, Object> output, List<String> targets) throws Exception {
-        Path templateRoot = template.directory().toRealPath();
-        List<Path> matches = payloadResolver.resolve(template.directory(), action.payload());
+        RenderPlanCache.Plan plan = renderPlans.get(template, action.payload(), templateEngine);
+        List<RenderPlanCache.Source> matches = plan.sources();
         Map<String, Object> multiple = new LinkedHashMap<String, Object>();
         List<Map<String, Object>> sourceEvidence = new ArrayList<Map<String, Object>>();
         Object single = null;
         long started = System.nanoTime();
         for (int index = 0; index < matches.size(); index++) {
-            Path source = matches.get(index);
-            String relative = RenderPayloadResolver.portable(templateRoot.relativize(source));
-            String content = PayloadCache.readUtf8(source);
+            RenderPlanCache.Source source = matches.get(index);
+            String relative = source.relative();
             String rendered;
-            try { rendered = templateEngine.render(content, context, log); }
+            try { rendered = templateEngine.render(source.compiled(), context, log); renderPlans.recordEvaluation(); }
             catch (Exception error) {
                 throw att.config.YamlSupport.locateText(att.validation.DiagnosticException.wrap(
                         att.validation.DiagnosticCodes.TEMPLATE_INVALID, "Unable to render payload", error, null, null,
-                        "Check the payload expression and available Context values."), source, "actions." + action.id() + ".payload");
+                        "Check the payload expression and available Context values."), source.path(), "actions." + action.id() + ".payload");
             }
             Object value = rendered;
             if (matches.size() == 1) single = value; else multiple.put(relative, value);
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("source", relative);
-            item.put("sourceBytes", Long.valueOf(Files.size(source))); item.put("renderedChars", Integer.valueOf(rendered.length()));
+            item.put("sourceBytes", Long.valueOf(source.bytes())); item.put("renderedChars", Integer.valueOf(rendered.length()));
             sourceEvidence.add(item);
         }
         output.put("result", matches.size() == 1 ? single : multiple);
