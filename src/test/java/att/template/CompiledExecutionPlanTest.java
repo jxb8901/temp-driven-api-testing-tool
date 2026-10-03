@@ -120,7 +120,7 @@ class CompiledExecutionPlanTest {
     private static Map<String,Object> toolWithRetry() {
         Map<String,Object> raw=new LinkedHashMap<String,Object>();
         raw.put("type","tool"); raw.put("call","#{upper(value=${CASE.value})}");
-        raw.put("runWhen","${CASE.enabled}"); raw.put("assert","1 == 2");
+        raw.put("runWhen","${CASE.enabled}"); raw.put("assert","1 == 2"); raw.put("onFailure","continue");
         Map<String,Object> retry=new LinkedHashMap<String,Object>();
         retry.put("maxAttempts",2); retry.put("retryOn",Collections.singletonList("ASSERTION"));
         retry.put("when","${CASE.retryAllowed}"); raw.put("retry",retry);
