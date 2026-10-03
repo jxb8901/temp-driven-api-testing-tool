@@ -2906,6 +2906,17 @@ file.</p>
 source-plan reuse separately from per-iteration evaluation;
 <code>renderArtifactWrites</code> is zero because Render itself returns
 a String without writing an artifact.</p>
+<p>Load startup also compiles the selected Template/Flow action
+sequence, primary Tool calls and argument expressions,
+<code>runWhen</code>, assertions, and <code>retry.when</code>. Each
+iteration evaluates that immutable plan against its own Context.
+Testdata input mappings are likewise compiled during target validation;
+descriptors and effective workload policies are prepared once, while
+record selection and Context values remain iteration-specific. The run
+summary's <code>resources.execution</code> contains
+<code>executionPlansCompiled</code>, <code>actionPlansCompiled</code>,
+<code>executionPlanCacheHits</code>, and
+<code>actionEvaluations</code>.</p>
 <h4 id="cli-and-examples">CLI and examples</h4>
 <p>For one workload, options such as --users, --arrival-rate, --warmup,
 --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent
