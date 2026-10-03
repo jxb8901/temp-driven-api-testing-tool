@@ -388,6 +388,134 @@
           "additionalProperties": {
             "$ref": "#/$defs/phaseMetrics"
           }
+        },
+        "schedulerWakeups": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "submitLagCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "submitLagMaxMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "workerQueueDepth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "workerQueueDepthPeak": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "submitLagMeanMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "generator": {
+          "type": "object",
+          "required": [
+            "sampling",
+            "sampleCount",
+            "heapUsedBytes",
+            "heapPeakUsedBytes",
+            "heapCommittedBytes",
+            "heapPeakCommittedBytes",
+            "heapMaxBytes",
+            "liveThreads",
+            "liveThreadsPeak",
+            "gcMetricsAvailable",
+            "gcCollectionCount",
+            "gcCollectionTimeMs",
+            "processCpuSupported",
+            "processCpuTimeMs",
+            "processCpuPercent",
+            "heapWarmupEndBytes"
+          ],
+          "properties": {
+            "sampling": {
+              "type": "string"
+            },
+            "sampleCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "heapUsedBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "heapPeakUsedBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "heapCommittedBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "heapPeakCommittedBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "heapMaxBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "liveThreads": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "liveThreadsPeak": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "gcMetricsAvailable": {
+              "type": "boolean"
+            },
+            "gcCollectionCount": {
+              "type": "integer"
+            },
+            "gcCollectionTimeMs": {
+              "type": "integer"
+            },
+            "gcMetricsUnavailableReason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "processCpuSupported": {
+              "type": "boolean"
+            },
+            "processCpuTimeMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "processCpuPercent": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "processCpuUnavailableReason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "heapWarmupEndBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": true
@@ -859,41 +987,94 @@
     },
     "currentScenarioWorkload": {
       "type": "object",
-      "required": ["id", "target", "load"],
+      "required": [
+        "id",
+        "target",
+        "load"
+      ],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
         "target": {
           "type": "object",
-          "required": ["type", "id"],
+          "required": [
+            "type",
+            "id"
+          ],
           "properties": {
-            "type": { "enum": ["template", "flow", "tool"] },
-            "id": { "type": "string", "minLength": 1 }
+            "type": {
+              "enum": [
+                "template",
+                "flow",
+                "tool"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
           },
           "additionalProperties": false
         },
-        "load": { "$ref": "#/$defs/currentLoad" },
+        "load": {
+          "$ref": "#/$defs/currentLoad"
+        },
         "execution": {
           "type": "object",
           "properties": {
-            "thinkTime": { "type": ["string", "object"] },
-            "thinkTimePolicy": { "type": "string", "minLength": 1 }
+            "thinkTime": {
+              "type": [
+                "string",
+                "object"
+              ]
+            },
+            "thinkTimePolicy": {
+              "type": "string",
+              "minLength": 1
+            }
           },
           "additionalProperties": false
         },
         "testdata": {
           "type": "object",
-          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+          },
           "additionalProperties": {
             "type": "object",
             "properties": {
-              "scope": { "enum": ["workload", "user", "iteration"] },
+              "scope": {
+                "enum": [
+                  "workload",
+                  "user",
+                  "iteration"
+                ]
+              },
               "selection": {
                 "type": "object",
-                "required": ["strategy"],
+                "required": [
+                  "strategy"
+                ],
                 "properties": {
-                  "strategy": { "enum": ["sequential", "roundRobin", "random"] },
-                  "exhaustion": { "enum": ["error", "recycle", "stop"] },
-                  "seed": { "type": "integer" }
+                  "strategy": {
+                    "enum": [
+                      "sequential",
+                      "roundRobin",
+                      "random"
+                    ]
+                  },
+                  "exhaustion": {
+                    "enum": [
+                      "error",
+                      "recycle",
+                      "stop"
+                    ]
+                  },
+                  "seed": {
+                    "type": "integer"
+                  }
                 },
                 "additionalProperties": false
               }
@@ -901,67 +1082,178 @@
             "additionalProperties": false
           }
         },
-        "thresholds": { "type": "object", "additionalProperties": true }
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": true
+        }
       },
       "additionalProperties": false
     },
     "currentLoad": {
       "type": "object",
-      "required": ["model", "warmup", "rampUp", "duration", "rampDown"],
+      "required": [
+        "model",
+        "warmup",
+        "rampUp",
+        "duration",
+        "rampDown"
+      ],
       "properties": {
-        "model": { "enum": ["closed", "arrivalRate"] },
-        "users": { "type": "integer", "minimum": 1 },
-        "arrivalRate": { "type": "string", "minLength": 1 },
-        "warmup": { "type": "string", "minLength": 1 },
-        "rampUp": { "type": "string", "minLength": 1 },
-        "duration": { "type": "string", "minLength": 1 },
-        "rampDown": { "type": "string", "minLength": 1 },
-        "maxConcurrent": { "type": "integer", "minimum": 1 },
-        "overloadPolicy": { "type": "string", "minLength": 1 }
+        "model": {
+          "enum": [
+            "closed",
+            "arrivalRate"
+          ]
+        },
+        "users": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "arrivalRate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "warmup": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rampUp": {
+          "type": "string",
+          "minLength": 1
+        },
+        "duration": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rampDown": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "overloadPolicy": {
+          "type": "string",
+          "minLength": 1
+        }
       },
       "oneOf": [
-        { "required": ["users"], "not": { "required": ["arrivalRate", "maxConcurrent", "overloadPolicy"] } },
-        { "required": ["arrivalRate", "maxConcurrent", "overloadPolicy"], "not": { "required": ["users"] } }
+        {
+          "required": [
+            "users"
+          ],
+          "not": {
+            "required": [
+              "arrivalRate",
+              "maxConcurrent",
+              "overloadPolicy"
+            ]
+          }
+        },
+        {
+          "required": [
+            "arrivalRate",
+            "maxConcurrent",
+            "overloadPolicy"
+          ],
+          "not": {
+            "required": [
+              "users"
+            ]
+          }
+        }
       ],
       "additionalProperties": false
     },
     "currentLoadDefaults": {
       "type": "object",
       "properties": {
-        "users": { "type": "integer", "minimum": 1 },
-        "arrivalRate": { "type": "string", "minLength": 1 },
-        "warmup": { "type": "string", "minLength": 1 },
-        "rampUp": { "type": "string", "minLength": 1 },
-        "duration": { "type": "string", "minLength": 1 },
-        "rampDown": { "type": "string", "minLength": 1 },
-        "maxConcurrent": { "type": "integer", "minimum": 1 },
-        "overloadPolicy": { "type": "string", "minLength": 1 }
+        "users": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "arrivalRate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "warmup": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rampUp": {
+          "type": "string",
+          "minLength": 1
+        },
+        "duration": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rampDown": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "overloadPolicy": {
+          "type": "string",
+          "minLength": 1
+        }
       },
       "additionalProperties": false
     },
     "currentScenario": {
       "type": "object",
-      "required": ["schemaVersion", "workloads"],
+      "required": [
+        "schemaVersion",
+        "workloads"
+      ],
       "properties": {
-        "schemaVersion": { "const": "att-load/v1.5" },
-        "seed": { "type": "integer" },
-        "effectiveSeed": { "type": "integer" },
-        "load": { "$ref": "#/$defs/currentLoadDefaults" },
+        "schemaVersion": {
+          "const": "att-load/v1.5"
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "effectiveSeed": {
+          "type": "integer"
+        },
+        "load": {
+          "$ref": "#/$defs/currentLoadDefaults"
+        },
         "execution": {
           "type": "object",
           "properties": {
-            "execIdFormat": { "type": "string", "minLength": 1 },
-            "thinkTime": { "type": ["string", "object"] }
+            "execIdFormat": {
+              "type": "string",
+              "minLength": 1
+            },
+            "thinkTime": {
+              "type": [
+                "string",
+                "object"
+              ]
+            }
           },
           "additionalProperties": false
         },
         "workloads": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/currentScenarioWorkload" }
+          "items": {
+            "$ref": "#/$defs/currentScenarioWorkload"
+          }
         },
-        "thresholds": { "type": "object", "additionalProperties": true },
-        "evidence": { "type": "object", "additionalProperties": true }
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true
+        }
       },
       "additionalProperties": false
     },

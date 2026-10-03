@@ -11,6 +11,11 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 /** Run-scoped owner for resources shared by load iterations. */
 public final class LoadRunResources implements AutoCloseable {
@@ -22,7 +27,10 @@ public final class LoadRunResources implements AutoCloseable {
     private final PooledMqTransportFactory mqFactory;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final AtomicLong executionSequence = new AtomicLong();
-    private final java.util.concurrent.ConcurrentMap<String, String> executionIds = new java.util.concurrent.ConcurrentHashMap<String, String>();
+    private final AtomicLong customExecutionIdsTracked = new AtomicLong();
+    private final AtomicLong lastResourceMetricSampleNanos = new AtomicLong(Long.MIN_VALUE);
+    private final AtomicLong resourceMetricSamples = new AtomicLong();
+    private final java.util.Set<Path> initializedExecutionNamespaces = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final att.template.SequenceService sequences = new att.template.SequenceService();
     private final att.template.RenderPlanCache renderPlans = new att.template.RenderPlanCache();
 
@@ -59,12 +67,60 @@ public final class LoadRunResources implements AutoCloseable {
         if (sequence <= 0L) throw new IllegalStateException("Load execution identity sequence exhausted");
         return runId + "-execution-" + sequence;
     }
-    /** Atomically reserves a generated identity; collisions fail instead of silently changing the ID. */
-    public void reserveExecutionId(String executionId, IterationRequest request) {
+    /** Validates an isolated run output namespace once, before any iteration writes into it. */
+    public void initializeExecutionNamespace(Path runDirectory) throws IOException {
         ensureOpen();
-        String owner = request.workloadId() + "/" + request.iterationId();
-        String existing = executionIds.putIfAbsent(executionId.toLowerCase(java.util.Locale.ROOT), owner);
-        if (existing != null) throw new IllegalArgumentException("Duplicate EXEC.ID '" + executionId + "' in Load run; it is already assigned to " + existing);
+        Path run = runDirectory.toAbsolutePath().normalize();
+        // Schedulers initialize before starting workers. Standalone executor
+        // callers retain a lock-free fast path after that one-time validation.
+        if (initializedExecutionNamespaces.contains(run)) return;
+        for (String name : new String[] {"samples", "failures", "executions"}) {
+            Path directory = run.resolve(name);
+            if (Files.exists(directory)) {
+                if (!Files.isDirectory(directory))
+                    throw new IllegalArgumentException("Load output namespace is not a directory: " + directory);
+                try (java.nio.file.DirectoryStream<Path> entries = Files.newDirectoryStream(directory)) {
+                    if (entries.iterator().hasNext())
+                        throw new IllegalArgumentException("Load output namespace already contains retained output: " + directory);
+                }
+            }
+        }
+        initializedExecutionNamespaces.add(run);
+    }
+
+    /** Custom identities use atomic disk reservations so collision state does not grow in the JVM. */
+    public void reserveExecutionId(String executionId, IterationRequest request, boolean custom,
+                                   Path runDirectory) {
+        ensureOpen();
+        if (!custom) return; // Default IDs are unique by the run-scoped AtomicLong.
+        String runId = request.runId();
+        if (executionId.toLowerCase(java.util.Locale.ROOT).matches(
+                java.util.regex.Pattern.quote(runId.toLowerCase(java.util.Locale.ROOT)) + "-execution-[1-9][0-9]*"))
+            throw new IllegalArgumentException("Custom EXEC.ID uses the reserved default-ID namespace: " + executionId);
+        Path run = runDirectory.toAbsolutePath().normalize();
+        try { initializeExecutionNamespace(run); }
+        catch (IOException failure) { throw new IllegalStateException("Unable to isolate Load output namespace", failure); }
+        Path marker = run.resolve(".exec-id-reservations").resolve(identityKey(executionId) + ".id");
+        try {
+            Files.createDirectories(marker.getParent());
+            Files.write(marker, (request.workloadId() + "/" + request.iterationId()).getBytes(StandardCharsets.UTF_8),
+                    java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE);
+            customExecutionIdsTracked.incrementAndGet();
+        } catch (java.nio.file.FileAlreadyExistsException duplicate) {
+            throw new IllegalArgumentException("Duplicate custom EXEC.ID '" + executionId + "' in Load run", duplicate);
+        } catch (IOException failure) {
+            throw new IllegalStateException("Unable to reserve custom EXEC.ID '" + executionId + "'", failure);
+        }
+    }
+
+    private static String identityKey(String executionId) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256")
+                    .digest(executionId.toLowerCase(java.util.Locale.ROOT).getBytes(StandardCharsets.UTF_8));
+            StringBuilder value = new StringBuilder(hash.length * 2);
+            for (byte item : hash) value.append(String.format(java.util.Locale.ROOT, "%02x", item & 0xff));
+            return value.toString();
+        } catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
     public HikariDbPool dbPool(String helperId, att.config.FrameworkConfig config) {
         ensureOpen();
@@ -83,9 +139,34 @@ public final class LoadRunResources implements AutoCloseable {
         ensureOpen();
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("db", dbProvider.metrics()); result.put("mq", mqFactory.metrics());
+        result.put("http", http.metrics());
+        result.put("resourceMetricSamples", resourceMetricSamples.get());
         result.put("render", renderPlans.stats().toMap());
+        Map<String, Object> ids = new LinkedHashMap<String, Object>();
+        ids.put("customExecutionIdsTracked", customExecutionIdsTracked.get());
+        ids.put("executionIdCollisionTrackingSize", customExecutionIdsTracked.get());
+        result.put("executionIds", ids);
         return result;
     }
+    /** Rate-limited, allocation-light observation of shared HTTP pool peaks. */
+    public void sampleResourceMetrics() {
+        ensureOpen();
+        sampleResourceMetricsAt(System.nanoTime());
+    }
+    boolean sampleResourceMetricsAt(long nowNanos) {
+        ensureOpen();
+        while (true) {
+            long previous = lastResourceMetricSampleNanos.get();
+            if (previous != Long.MIN_VALUE && nowNanos - previous < GeneratorTelemetry.SAMPLE_INTERVAL_NANOS)
+                return false;
+            if (lastResourceMetricSampleNanos.compareAndSet(previous, nowNanos)) {
+                http.observeMetrics();
+                resourceMetricSamples.incrementAndGet();
+                return true;
+            }
+        }
+    }
+    long resourceMetricSamples() { return resourceMetricSamples.get(); }
     public boolean isClosed() { return closed.get(); }
     public void ensureOpen() { if (closed.get()) throw new IllegalStateException("Load run resources are closed"); }
 

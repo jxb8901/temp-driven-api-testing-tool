@@ -65,6 +65,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
     }
 
     public LoadRunResult run() throws Exception {
+        resources.initializeExecutionNamespace(outputRoot.resolve("load").resolve(runId));
         final LoadSchedulerTiming timing = LoadSchedulerTiming.system();
         final long rateWindow = LoadPhase.totalMs(scenario);
         final LoadMetrics[] aggregateHolder = new LoadMetrics[1];
@@ -79,6 +80,8 @@ public final class LoadRunCoordinator implements AutoCloseable {
         final LoadSchedulerStartGate startGate = new LoadSchedulerStartGate(scenario.workloads().size());
         final att.testdata.TestdataRegistry testdataRegistry = new att.testdata.TestdataRegistry(
                 projectRoot, config.testdataDescriptors(), scenario.testdataDescriptors());
+        final Map<String, att.testdata.TestdataInputResolver> testdataResolvers =
+                new LinkedHashMap<String, att.testdata.TestdataInputResolver>();
         coordinatorWorkers = Executors.newFixedThreadPool(scenario.workloads().size(), new NamedFactory("att-load-workload"));
         Map<String, Future<LoadRunResult>> futures = new LinkedHashMap<String, Future<LoadRunResult>>();
         try {
@@ -90,6 +93,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
                         testdataRegistry, workload.testdata(), workload.id(), workload.model().wireName(),
                         scenario.seed(), Math.max(1, workload.users()),
                         true);
+                testdataResolvers.put(workload.id(), testdataResolver);
                 IterationExecutor iterations = new IterationExecutor(projectRoot, config, target, resources, outputRoot,
                         testdataResolver);
                 LoadScheduler scheduler = child.model() == LoadScenario.Model.CLOSED
@@ -115,15 +119,39 @@ public final class LoadRunCoordinator implements AutoCloseable {
             LoadThresholdEvaluator evaluator = new LoadThresholdEvaluator();
             for (LoadWorkload workload : scenario.workloads()) {
                 LoadRunResult childResult = futures.get(workload.id()).get();
+                aggregate.mergeSchedulerTelemetry(childResult.metrics().values());
                 LoadScenario child = scenario.forWorkload(workload);
                 childResult = childResult.withThresholds(evaluator.evaluate(child, childResult.metrics()));
                 workloadResults.put(workload.id(), childResult);
             }
             long endedAt = timing.now();
             aggregate.finish(endedAt);
-            return new LoadRunResult(runId, scenario, startInstant, LoadSchedulerSupport.instant(endedAt), aggregate.snapshot(),
+            LoadRunResult result = new LoadRunResult(runId, scenario, startInstant, LoadSchedulerSupport.instant(endedAt), aggregate.snapshot(),
                     LoadThresholdSummary.empty(), Collections.<String, Object>emptyMap(),
                     Collections.<String, Object>emptyMap(), workloadResults);
+            Map<String, Object> testdata = new LinkedHashMap<String, Object>();
+            Map<String, Object> perWorkload = new LinkedHashMap<String, Object>();
+            long mappings = 0L, requests = 0L, evaluations = 0L, cacheHits = 0L;
+            Map<String, Long> sizes = new LinkedHashMap<String, Long>();
+            for (Map.Entry<String, att.testdata.TestdataInputResolver> entry : testdataResolvers.entrySet()) {
+                Map<String, Object> snapshot = entry.getValue().telemetry();
+                perWorkload.put(entry.getKey(), snapshot);
+                mappings += ((Number) snapshot.get("mappingEvaluations")).longValue();
+                requests += ((Number) snapshot.get("selectionRequests")).longValue();
+                evaluations += ((Number) snapshot.get("selectionEvaluations")).longValue();
+                cacheHits += ((Number) snapshot.get("selectionCacheHits")).longValue();
+                @SuppressWarnings("unchecked") Map<String, Object> scopeSizes = (Map<String, Object>) snapshot.get("selectionCacheSizesByScope");
+                for (Map.Entry<String, Object> size : scopeSizes.entrySet())
+                    sizes.put(size.getKey(), sizes.getOrDefault(size.getKey(), 0L) + ((Number) size.getValue()).longValue());
+            }
+            testdata.put("mappingEvaluations", mappings); testdata.put("selectionRequests", requests);
+            testdata.put("selectionEvaluations", evaluations); testdata.put("selectionCacheHits", cacheHits);
+            testdata.put("selectionCacheSizesByScope", sizes); testdata.put("workloads", perWorkload);
+            Map<String, Object> generator = new LinkedHashMap<String, Object>();
+            generator.put("testdata", testdata);
+            Map<String, Object> resourceSnapshot = new LinkedHashMap<String, Object>();
+            resourceSnapshot.put("generator", generator);
+            return result.withResources(resourceSnapshot);
         } catch (Exception failure) {
             cancelAll();
             throw failure;

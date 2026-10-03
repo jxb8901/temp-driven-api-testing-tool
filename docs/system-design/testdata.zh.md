@@ -29,6 +29,8 @@ Input mapping 會在解析值發布至 `EXEC.INPUT` 前執行：
 
 Load 中每個被引用 ID 可設定 `workload`、`user` 或 `iteration` scope；預設為 `iteration`。同一 scope lifetime 會沿用所選 record。`user` 需要 closed-VU workload，因為 arrival-rate 沒有穩定 user identity。Workload `selection` policy 會完整取代 descriptor policy；這是選取覆蓋，不是 import 宣告。單筆 descriptor 直接選取，不必設定 selection。
 
+Resolver 的 run-level selection map 只保留 workload/user scope。Iteration 選擇只存在目前 input mapping 的 local memo table，因此同一 mapping 重複引用 ID 仍會得到相同 record，而已完成的 iteration 不會留下 cache entry。Resolver telemetry 會按 scope 報告 mapping evaluations、selection requests/evaluations/cache hits 及 cache sizes。
+
 ## Direct Reference Boundary 與 Evidence
 
 Testdata marker 只允許出現在 input mapping。Template、Flow、Tool definition 及 Tool invocation arguments 不可直接使用 `@{...}` 或 `%{...}`，也不可讀取 `TESTDATA.*`、`EXEC.TESTDATA`、`EXEC.DATA` 或 `EXEC.FIXTURE`；它們透過 `EXEC.INPUT` 接收已解析值。Selection policy 因此留在 execution boundary，可重用元件只需消費一般型別的 input。

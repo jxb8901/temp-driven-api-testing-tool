@@ -139,6 +139,44 @@ class TestdataRuntimeTest {
         assertThrows(IllegalArgumentException.class, () -> arrivalRate.resolve(mapping, null, null, "a1"));
     }
 
+    @Test void iterationSelectionsDoNotAccumulateButUserAndWorkloadCachesRemainScoped() throws Exception {
+        Path descriptor = write("data/bounded-scope.yaml", "schemaVersion: att-testdata/v1.0\n"
+                + "id: scoped\nrecords: [first, second]\n"
+                + "selection: {strategy: sequential, exhaustion: recycle}\n");
+        TestdataRegistry registry = new TestdataRegistry(root, Collections.<Path>emptyList(), Arrays.asList(descriptor));
+        Map<String, Object> mapping = new LinkedHashMap<String, Object>();
+        mapping.put("first", "@{scoped}"); mapping.put("sameChoice", "@{scoped}");
+        Map<String, Object> iterationPolicy = Collections.<String, Object>singletonMap("scoped",
+                Collections.<String, Object>singletonMap("scope", "iteration"));
+        TestdataInputResolver iterations = new TestdataInputResolver(registry, iterationPolicy, "iterations", "closed", null, 1);
+        for (int i = 1; i <= 20000; i++) {
+            Map<String, Object> resolved = iterations.resolve(mapping, null, "VU-1", "run-VU-1-" + i);
+            assertEquals(resolved.get("first"), resolved.get("sameChoice"));
+        }
+        @SuppressWarnings("unchecked") Map<String, Object> iterationSizes =
+                (Map<String, Object>) iterations.telemetry().get("selectionCacheSizesByScope");
+        assertEquals(0L, iterationSizes.get("iteration"));
+        assertEquals(20000L, iterations.telemetry().get("selectionEvaluations"));
+
+        TestdataInputResolver users = new TestdataInputResolver(registry,
+                Collections.<String, Object>singletonMap("scoped", Collections.<String, Object>singletonMap("scope", "user")),
+                "users", "closed", null, 1);
+        users.resolve(mapping, null, "VU-1", "run-VU-1-1");
+        users.resolve(mapping, null, "VU-1", "run-VU-1-2");
+        @SuppressWarnings("unchecked") Map<String, Object> userSizes =
+                (Map<String, Object>) users.telemetry().get("selectionCacheSizesByScope");
+        assertEquals(1L, userSizes.get("user"));
+
+        TestdataInputResolver workload = new TestdataInputResolver(registry,
+                Collections.<String, Object>singletonMap("scoped", Collections.<String, Object>singletonMap("scope", "workload")),
+                "workload", "closed", null, 1);
+        workload.resolve(mapping, null, "VU-1", "run-VU-1-1");
+        workload.resolve(mapping, null, "VU-1", "run-VU-1-2");
+        @SuppressWarnings("unchecked") Map<String, Object> workloadSizes =
+                (Map<String, Object>) workload.telemetry().get("selectionCacheSizesByScope");
+        assertEquals(1L, workloadSizes.get("workload"));
+    }
+
     @Test void closedLoadExhaustionWaitsForLowerValidIdentitiesBeforeStopOrError() throws Exception {
         for (String exhaustion : Arrays.asList("stop", "error")) {
             String id = "ordered" + exhaustion;
