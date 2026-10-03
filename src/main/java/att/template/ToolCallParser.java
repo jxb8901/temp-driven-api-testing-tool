@@ -230,6 +230,9 @@ public final class ToolCallParser {
         private final String key, expression;
         private final boolean positional;
         private final ExpressionBlockEvaluator.CompiledExpression compiled;
+        Argument(String key, String expression, boolean positional) {
+            this(key, expression, positional, null);
+        }
         Argument(String key, String expression, boolean positional,
                  ExpressionBlockEvaluator.CompiledExpression compiled) {
             this.key = key; this.expression = expression; this.positional = positional; this.compiled = compiled;
