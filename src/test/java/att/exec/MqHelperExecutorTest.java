@@ -346,6 +346,24 @@ class MqHelperExecutorTest {
         assertEquals("ok", ((Map<?, ?>) result.result().get("result")).get("status"));
     }
 
+    @Test void structuredMqRepliesParseYamlAndXmlWithoutTextRoundTrip() throws Exception {
+        for (String format : new String[]{"yaml", "xml"}) {
+            Path caseDir = tempDir.resolve("structured-" + format); Files.createDirectories(caseDir);
+            FakeFactory factory = new FakeFactory();
+            String body = "yaml".equals(format) ? "status: ok\ncount: 2\n" : "<reply><status>ok</status><count>2</count></reply>";
+            factory.reply = new MqTransport.Message(new byte[]{3}, new byte[]{1}, body.getBytes("UTF-8"), 1208, null, "MQSTR");
+
+            MqInvocationResult result = new MqHelperExecutor(tempDir, config(), factory).execute("broker", "receive",
+                    map("queue", "REPLY.Q", "responseFormat", format), context(caseDir), null,
+                    "receive-" + format, null, null, "json", false);
+
+            assertTrue(result.success(), String.valueOf(result.result().get("error")));
+            Map<?, ?> parsed = (Map<?, ?>) result.result().get("result");
+            assertEquals("ok", parsed.get("status"));
+            assertEquals("yaml".equals(format) ? 2 : "2", parsed.get("count"));
+        }
+    }
+
     @Test void invalidMqResponseFormatIsReportedWithoutLeakingPayloadAndSendRejectsItBeforeConnecting() throws Exception {
         Path caseDir = tempDir.resolve("invalid-response-case"); Files.createDirectories(caseDir);
         FakeFactory factory = new FakeFactory();

@@ -2,6 +2,8 @@
 package att.exec;
 
 import java.util.Arrays;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 
 /** Small IBM MQ-neutral boundary used by MqHelperExecutor and its test doubles. */
 public final class MqTransport {
@@ -95,6 +97,8 @@ public final class MqTransport {
         public byte[] correlationId() { return copy(correlationId); }
         public byte[] payload() { return copy(payload); }
         public int payloadLength() { return payload == null ? 0 : payload.length; }
+        /** Read the privately owned payload without making another full-size defensive copy. */
+        public InputStream payloadStream() { return new ByteArrayInputStream(payload == null ? new byte[0] : payload); }
         public Integer ccsid() { return ccsid; }
         public Integer encoding() { return encoding; }
         public String format() { return format; }

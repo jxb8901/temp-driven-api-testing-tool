@@ -190,16 +190,16 @@ public final class MqHelperExecutor {
                         String correlationId = id(received.correlationId());
                         result.put("replyReceived", true);
                         result.put("replyMessageId", replyMessageId); result.put("replyCorrelationId", correlationId);
-                        result.put("replyBytes", received.payload() == null ? 0 : received.payload().length);
+                        result.put("replyBytes", received.payloadLength());
                         result.put("waitMs", waitMs);
                         evidence.put("replyReceived", true);
                         evidence.put("replyMessageId", replyMessageId); evidence.put("replyCorrelationId", correlationId);
-                        evidence.put("replyBytes", received.payload() == null ? 0 : received.payload().length);
+                        evidence.put("replyBytes", received.payloadLength());
                         addReplyMetadata(result, evidence, received);
                         phase = "mq.parseReply";
                         Object business = represent(received, effectiveResponseFormat, helper);
                         result.put("result", business);
-                        saveIfRequested(result, context, log, actionId, savePath, representation, received.payload(), business, overwrite);
+                        saveIfRequested(result, context, log, actionId, savePath, representation, business, overwrite);
                         success = true;
                     }
                 }
@@ -226,17 +226,16 @@ public final class MqHelperExecutor {
                     result.put("received", true);
                     result.put("messageId", id(received == null ? null : received.messageId()));
                     result.put("receivedCorrelationId", id(received == null ? null : received.correlationId()));
-                    result.put("bytes", received == null || received.payload() == null ? 0 : received.payload().length);
+                    result.put("bytes", received == null ? 0 : received.payloadLength());
                     evidence.put("received", true);
                     evidence.put("messageId", id(received == null ? null : received.messageId()));
                     evidence.put("receivedCorrelationId", id(received == null ? null : received.correlationId()));
-                    evidence.put("bytes", received == null || received.payload() == null ? 0 : received.payload().length);
+                    evidence.put("bytes", received == null ? 0 : received.payloadLength());
                     addReplyMetadata(result, evidence, received);
                     phase = "mq.parseReply";
                     Object business = represent(received, effectiveResponseFormat, helper);
                     result.put("result", business);
-                    saveIfRequested(result, context, log, actionId, savePath, representation,
-                            received == null ? null : received.payload(), business, overwrite);
+                    saveIfRequested(result, context, log, actionId, savePath, representation, business, overwrite);
                     success = true;
                 } catch (MqTransport.Exception noReply) {
                     if (!isNoMessage(noReply)) throw noReply;
@@ -392,12 +391,17 @@ public final class MqHelperExecutor {
     }
 
     private Object represent(MqTransport.Message message, String format, MqHelperConfig helper) throws Exception {
-        byte[] payload = message == null ? null : message.payload();
         int ccsid = message == null || message.ccsid() == null || message.ccsid().intValue() <= 0
                 ? helper.charset() : message.ccsid().intValue();
-        String text = new String(payload == null ? new byte[0] : payload, mqCharset(ccsid));
-        if ("text".equals(format)) return text;
-        try { return new ToolInvoker(projectRoot, config).parseOutput(text, format); }
+        Charset charset = mqCharset(ccsid);
+        if ("text".equals(format)) {
+            byte[] payload = message == null ? null : message.payload();
+            return new String(payload == null ? new byte[0] : payload, charset);
+        }
+        try (java.io.InputStreamReader reader = new java.io.InputStreamReader(
+                message == null ? new java.io.ByteArrayInputStream(new byte[0]) : message.payloadStream(), charset)) {
+            return ToolInvoker.parseOutput(reader, format, config.xmlNamespaceMode());
+        }
         catch (Exception invalid) { throw new MqResultParseException(format, invalid); }
     }
 
@@ -413,12 +417,12 @@ public final class MqHelperExecutor {
     }
 
     private void saveIfRequested(Map<String, Object> result, CaseRuntimeContext context, CaseExecutionLog log, String actionId,
-                                 String savePath, String format, byte[] raw, Object value, boolean overwrite) throws Exception {
+                                 String savePath, String format, Object value, boolean overwrite) throws Exception {
         if (savePath == null || savePath.trim().isEmpty()) return;
         if ("console".equalsIgnoreCase(savePath.trim())) {
             if (log == null) throw new IOException("MQ result.path=console requires the active Case execution log");
             log.appendRaw("ACTION " + (actionId == null || actionId.trim().isEmpty() ? "MQ" : actionId) + " RESULT",
-                    consoleValue(format, raw, value));
+                    consoleValue(format, value));
             return;
         }
         Path root = (context.inFlow() ? context.actionOutputDir(actionId) : context.caseOutputDirectory())
@@ -437,7 +441,7 @@ public final class MqHelperExecutor {
         result.put("outputFile", target.toString());
     }
 
-    private String consoleValue(String format, byte[] raw, Object value) throws Exception {
+    private String consoleValue(String format, Object value) throws Exception {
         return new ObjectOutputCodec().encode(value, format);
     }
 
