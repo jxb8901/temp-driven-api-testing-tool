@@ -75,7 +75,8 @@ class CompiledExecutionPlanTest {
         Map<String,Object> check = new LinkedHashMap<String,Object>();
         check.put("type", "assert"); check.put("assert", "${ACTIONS.copy.output.value} == ${CASE.value}");
         StageTemplate template = new StageTemplate("shared", tempDir,
-                java.util.Arrays.asList(new TemplateAction("copy", assign), new TemplateAction("check", check)));
+                java.util.Arrays.asList(new TemplateAction("copy", assign),
+                        new TemplateAction("invoke", toolWithRetry()), new TemplateAction("check", check)));
         CompiledExecutionPlan plan = CompiledExecutionPlan.compile(template, null);
         UnifiedTemplateEngine sharedEngine = new UnifiedTemplateEngine(null);
         StageTemplateRunner compiledRunner = new StageTemplateRunner(sharedEngine, null, new RenderPlanCache(), plan);
@@ -91,20 +92,38 @@ class CompiledExecutionPlanTest {
                             Collections.<String,Object>emptyMap(),Collections.emptyMap(),null);
                     CaseRuntimeContext context=new CaseRuntimeContext(test,caseDir,"R",tempDir,caseDir.resolve("case.log"));
                     context.put("CASE.value", value);
+                    context.put("CASE.enabled", Boolean.TRUE); context.put("CASE.retryAllowed", Boolean.TRUE);
                     context.beginStage(new StageCaseData("shared","shared",Collections.<String,Object>emptyMap()),"shared",tempDir);
                     java.util.List<ValidationResult> actual=compiledRunner.execute("LOAD",template,context,
                             new CaseExecutionLog(caseDir.resolve("case.log")));
-                    if (actual.get(1).status()!=ResultStatus.PASS) throw new AssertionError("compiled result: "+actual.get(1).status());
+                    if (actual.get(1).status()!=ResultStatus.FAIL || actual.get(2).status()!=ResultStatus.PASS)
+                        throw new AssertionError("compiled result: "+actual);
                     Path baselineDir=tempDir.resolve("baseline-"+value); Files.createDirectories(baselineDir);
                     CaseRuntimeContext baseline=new CaseRuntimeContext(test,baselineDir,"R",tempDir,baselineDir.resolve("case.log"));
                     baseline.put("CASE.value",value);
+                    baseline.put("CASE.enabled", Boolean.TRUE); baseline.put("CASE.retryAllowed", Boolean.TRUE);
                     baseline.beginStage(new StageCaseData("shared","shared",Collections.<String,Object>emptyMap()),"shared",tempDir);
                     java.util.List<ValidationResult> expected=ordinaryRunner.execute("LOAD",template,baseline,
                             new CaseExecutionLog(baselineDir.resolve("case.log")));
-                    return actual.get(1).status()+":"+expected.get(1).status()+":"+context.resolve("ACTIONS.copy.output.value");
+                    Object compiledAttempts=context.resolve("ACTIONS.invoke.output.attempts");
+                    Object baselineAttempts=baseline.resolve("ACTIONS.invoke.output.attempts");
+                    if (((java.util.List<?>)compiledAttempts).size()!=2 || ((java.util.List<?>)baselineAttempts).size()!=2)
+                        throw new AssertionError("retry attempt count differs");
+                    return actual.get(1).status()+":"+expected.get(1).status()+":"+
+                            actual.get(2).status()+":"+expected.get(2).status()+":"+context.resolve("ACTIONS.copy.output.value");
                 }));
             }
-            for(int i=0;i<outcomes.size();i++) assertEquals("PASS:PASS:"+i,outcomes.get(i).get());
+            for(int i=0;i<outcomes.size();i++) assertEquals("FAIL:FAIL:PASS:PASS:"+i,outcomes.get(i).get());
         } finally { workers.shutdownNow(); }
+    }
+
+    private static Map<String,Object> toolWithRetry() {
+        Map<String,Object> raw=new LinkedHashMap<String,Object>();
+        raw.put("type","tool"); raw.put("call","#{upper(value=${CASE.value})}");
+        raw.put("runWhen","${CASE.enabled}"); raw.put("assert","1 == 2");
+        Map<String,Object> retry=new LinkedHashMap<String,Object>();
+        retry.put("maxAttempts",2); retry.put("retryOn",Collections.singletonList("ASSERTION"));
+        retry.put("when","${CASE.retryAllowed}"); raw.put("retry",retry);
+        return raw;
     }
 }
