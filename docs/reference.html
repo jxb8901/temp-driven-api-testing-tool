@@ -2785,6 +2785,16 @@ remain separate from <code>vars</code>.</p>
 repeatedly executes its target and observes execution.thinkTime before
 starting the next iteration. thinkTime may be a duration or a {min, max}
 range.</p>
+<p>Coordinated workloads share a lazy, bounded worker executor whose
+maximum is the aggregate configured concurrency slots. It creates
+platform threads as blocking iterations need them, up to each workload's
+configured limit. Closed virtual users remain scheduler state rather
+than eagerly owning control threads. The scheduler blocks until the next
+VU or phase deadline or an iteration completion. Arrival-rate scheduling
+computes phase deadlines directly and waits for the next due arrival
+instead of polling every millisecond. Cancellation stops new admissions,
+interrupts that workload's admitted iterations, and drains their
+completion events before finalizing its result snapshot.</p>
 <p>Arrival-rate workloads use load.arrivalRate, positive
 load.maxConcurrent and overloadPolicy: drop. They schedule against
 absolute due times. Arrivals beyond maxConcurrent are recorded as
@@ -2891,6 +2901,12 @@ are local to one mapping, while user/workload scopes retain only their
 scoped choices. Custom execution-ID reservations use disk markers, and
 <code>resources.executionIds</code> reports their count; default
 monotonic IDs do not use a collision map.</p>
+<p>Latency percentiles use bounded primitive reservoirs.
+<code>latencySampleCapacity</code>, <code>latencySampleCount</code>,
+<code>latencyObservationCount</code>, and <code>latencySampleRate</code>
+describe the run-level estimate; exact latency aggregates remain exact.
+The time series keep the newest 4,096 one-second buckets in a circular
+ring.</p>
 <p>The new Load summary telemetry fields are optional under
 <code>att-load-summary/v1.0</code>; current writers emit them, and
 summaries produced before this telemetry was added remain valid.</p>

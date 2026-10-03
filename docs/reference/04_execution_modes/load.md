@@ -70,6 +70,8 @@ Bootstrap expressions may use initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT
 
 Closed workloads use positive load.users. Each stable virtual user repeatedly executes its target and observes execution.thinkTime before starting the next iteration. thinkTime may be a duration or a {min, max} range.
 
+Coordinated workloads share a lazy, bounded worker executor whose maximum is the aggregate configured concurrency slots. It creates platform threads as blocking iterations need them, up to each workload's configured limit. Closed virtual users remain scheduler state rather than eagerly owning control threads. The scheduler blocks until the next VU or phase deadline or an iteration completion. Arrival-rate scheduling computes phase deadlines directly and waits for the next due arrival instead of polling every millisecond. Cancellation stops new admissions, interrupts that workload's admitted iterations, and drains their completion events before finalizing its result snapshot.
+
 Arrival-rate workloads use load.arrivalRate, positive load.maxConcurrent and overloadPolicy: drop. They schedule against absolute due times. Arrivals beyond maxConcurrent are recorded as generator drops; they are not queued or counted as SUT errors. Arrival-rate workloads have no persistent USER_ID and cannot configure thinkTime.
 
 duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends real traffic but is excluded from measured threshold aggregates. Optional seed makes closed-VU think-time randomization deterministic.
@@ -109,6 +111,8 @@ evidence.resources.output accepts inherit (default) or none. none disables optio
 ATT writes bounded load-summary.json/yaml and a self-contained report/index.html below the run root. The report shows EXEC.ID for retained executions, workload/target identity, status, timing and case.log links when available. Aggregate latency percentiles use the aggregate latency collector; ATT does not average workload percentiles.
 
 The summary separates generator observations from SUT outcomes. `metrics.generator` includes sampled heap used/committed/maximum, observed peak live threads, GC count/time, and process CPU when the JVM exposes it. Sampling is event-triggered and rate-limited to one sample per 100 ms, so peaks shorter than the sampling interval may be missed. `schedulerWakeups`, `submitLag*`, and `workerQueueDepth*` describe scheduler pressure; arrival drops remain separate from SUT errors. `resources.http` reports active/idle/waiting and observed peak connections per HTTP helper alongside DB, MQ, and Render pool/plan diagnostics; `resources.resourceMetricSamples` reports the count of rate-limited resource observations. Testdata mapping and selection counters/cache sizes are under `resources.generator.testdata`; iteration-scoped selections are local to one mapping, while user/workload scopes retain only their scoped choices. Custom execution-ID reservations use disk markers, and `resources.executionIds` reports their count; default monotonic IDs do not use a collision map.
+
+Latency percentiles use bounded primitive reservoirs. `latencySampleCapacity`, `latencySampleCount`, `latencyObservationCount`, and `latencySampleRate` describe the run-level estimate; exact latency aggregates remain exact. The time series keep the newest 4,096 one-second buckets in a circular ring.
 
 The new Load summary telemetry fields are optional under `att-load-summary/v1.0`; current writers emit them, and summaries produced before this telemetry was added remain valid.
 

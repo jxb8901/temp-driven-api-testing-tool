@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -27,6 +28,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
     private final LoadEvidenceStore evidenceStore;
     private final Map<String, LoadScheduler> schedulers = new LinkedHashMap<String, LoadScheduler>();
     private volatile ExecutorService coordinatorWorkers;
+    private volatile ThreadPoolExecutor sharedIterationWorkers;
 
     /** Resolves and validates every workload target before any scheduler is started. */
     public static LoadRunResult runFrom(LoadScenario scenario, IterationExecutor seedExecutor, String runId,
@@ -78,6 +80,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
             }
         };
         final LoadSchedulerStartGate startGate = new LoadSchedulerStartGate(scenario.workloads().size());
+        sharedIterationWorkers = createSharedIterationWorkers();
         final att.testdata.TestdataRegistry testdataRegistry = new att.testdata.TestdataRegistry(
                 projectRoot, config.testdataDescriptors(), scenario.testdataDescriptors());
         final Map<String, att.testdata.TestdataInputResolver> testdataResolvers =
@@ -100,6 +103,9 @@ public final class LoadRunCoordinator implements AutoCloseable {
                         ? new ClosedVuScheduler(child, iterations, runId, aggregateListener, timing, evidenceStore, outputRoot, startGate)
                         : new FixedArrivalRateScheduler(child, iterations, runId, aggregateListener, timing, null,
                                 evidenceStore, outputRoot, startGate);
+                if (scheduler instanceof ClosedVuScheduler)
+                    ((ClosedVuScheduler) scheduler).useSharedWorkers(sharedIterationWorkers);
+                else ((FixedArrivalRateScheduler) scheduler).useSharedWorkers(sharedIterationWorkers);
                 schedulers.put(workload.id(), scheduler);
             }
             for (Map.Entry<String, LoadScheduler> entry : schedulers.entrySet())
@@ -176,11 +182,30 @@ public final class LoadRunCoordinator implements AutoCloseable {
 
     private void shutdownCoordinator() {
         ExecutorService workers = coordinatorWorkers;
-        if (workers == null) return;
-        workers.shutdownNow();
-        try { workers.awaitTermination(1L, TimeUnit.SECONDS); }
-        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
-        finally { coordinatorWorkers = null; }
+        if (workers != null) {
+            workers.shutdownNow();
+            try { workers.awaitTermination(1L, TimeUnit.SECONDS); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            finally { coordinatorWorkers = null; }
+        }
+        ThreadPoolExecutor iterations = sharedIterationWorkers;
+        if (iterations != null) {
+            iterations.shutdownNow();
+            try { iterations.awaitTermination(1L, TimeUnit.SECONDS); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            finally { sharedIterationWorkers = null; }
+        }
+    }
+
+    private ThreadPoolExecutor createSharedIterationWorkers() {
+        long slots = 0L;
+        for (LoadWorkload workload : scenario.workloads())
+            slots += workload.model() == LoadScenario.Model.CLOSED ? workload.users() : workload.maxConcurrent();
+        int capacity = (int) Math.min(Integer.MAX_VALUE, Math.max(1L, slots));
+        // IterationExecutor is synchronous and may block on target I/O. Grow
+        // workers on demand to the configured aggregate concurrency ceiling.
+        return LoadWorkerPool.create(LoadWorkerPool.coreSize(capacity), capacity,
+                new NamedFactory("att-load-worker"));
     }
 
     private static final class NamedFactory implements ThreadFactory {

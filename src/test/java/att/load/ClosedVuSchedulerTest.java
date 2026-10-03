@@ -9,6 +9,15 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -100,6 +109,62 @@ class ClosedVuSchedulerTest {
         assertEquals(ResultStatus.PASS, completions.get(1).status());
         assertFalse(completions.get(0).iterationId().equals(completions.get(1).iterationId()));
     }
+
+    @Test
+    void manyClosedVirtualUsersPreserveConfiguredConcurrencyWithBoundedWorkers() throws Exception {
+        int users = 100;
+        LoadScenario scenario = scenario(users, 0L, 0L, 10_000L, 0L, 10L);
+        Set<String> virtualUsers = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+        Set<String> workerThreads = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+        AtomicInteger inFlight = new AtomicInteger();
+        AtomicInteger peakInFlight = new AtomicInteger();
+        CountDownLatch allEntered = new CountDownLatch(users);
+        CountDownLatch interrupted = new CountDownLatch(users);
+        CountDownLatch release = new CountDownLatch(1);
+        LoadIterationRunner runner = request -> {
+            virtualUsers.add(request.userId());
+            workerThreads.add(Thread.currentThread().getName());
+            int active = inFlight.incrementAndGet();
+            peakInFlight.accumulateAndGet(active, Math::max);
+            allEntered.countDown();
+            try { release.await(); }
+            catch (InterruptedException cancelled) {
+                interrupted.countDown();
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(cancelled);
+            } finally { inFlight.decrementAndGet(); }
+            return result(request.iterationId(), ResultStatus.PASS);
+        };
+
+        ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "run-19-bounded",
+                (java.util.function.Consumer<LoadEvent>) null, LoadSchedulerTiming.system());
+        ThreadPoolExecutor sharedWorkers = LoadWorkerPool.create(Math.min(4, users), users,
+                runnable -> new Thread(runnable, "shared-load-test-worker"));
+        assertEquals(0, sharedWorkers.getPoolSize(), "the bounded shared pool must start lazily");
+        assertTrue(sharedWorkers.getCorePoolSize() < users, "the pool core must stay below configured VUs");
+        scheduler.useSharedWorkers(sharedWorkers);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        Future<LoadRunResult> future = control.submit(scheduler::run);
+        try {
+            assertTrue(allEntered.await(10L, TimeUnit.SECONDS), "every configured VU should enter the target concurrently");
+            scheduler.cancel();
+            assertTrue(interrupted.await(10L, TimeUnit.SECONDS), "cancellation must interrupt admitted VU executions");
+            LoadRunResult result = future.get(10L, TimeUnit.SECONDS);
+            assertEquals(users, virtualUsers.size(), "every logical VU should start at least one iteration");
+            assertEquals(users, peakInFlight.get(), "configured closed users must be concurrently active in the runner");
+            assertTrue(workerThreads.size() <= users, "lazy worker growth must remain within configured VU capacity");
+            assertEquals(users, result.metrics().longValue("completed"));
+            assertEquals(0, inFlight.get());
+        } finally {
+            release.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(10L, TimeUnit.SECONDS);
+            sharedWorkers.shutdownNow();
+            sharedWorkers.awaitTermination(10L, TimeUnit.SECONDS);
+        }
+    }
+
 
     private static LoadScenario scenario(int users, long warmupMs, long rampUpMs, long durationMs,
                                          long rampDownMs, long thinkTimeMs) {

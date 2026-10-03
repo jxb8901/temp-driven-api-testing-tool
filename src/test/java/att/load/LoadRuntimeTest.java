@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -153,6 +154,53 @@ class LoadRuntimeTest {
         assertEquals(observations, ((Number) bucket.get("latencyMaxMs")).longValue());
         assertEquals((observations + 1) / 2.0, ((Number) bucket.get("latencyMeanMs")).doubleValue(), 0.00001);
         assertTrue(((Number) bucket.get("p95Ms")).longValue() > 45_000L, "bucket p95 must include late samples");
+    }
+
+    @Test void concurrentCompletionsKeepExactCountersAndBoundedPrimitiveSamples() throws Exception {
+        long now = 1_700_350_000_000L;
+        int threadCount = 16;
+        int perThread = 2_000;
+        LoadMetrics metrics = new LoadMetrics("arrivalRate", now, 1_000L);
+        CountDownLatch ready = new CountDownLatch(threadCount);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService workers = Executors.newFixedThreadPool(threadCount);
+        try {
+            for (int thread = 0; thread < threadCount; thread++) {
+                final int offset = thread * perThread;
+                workers.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    for (int index = 1; index <= perThread; index++) {
+                        long latency = offset + index;
+                        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "parallel-" + latency,
+                                null, latency, now + 1_000L, now + 1_000L, now + 1_000L + latency, ResultStatus.PASS));
+                    }
+                    return null;
+                });
+            }
+            assertTrue(ready.await(5L, TimeUnit.SECONDS));
+            start.countDown();
+            workers.shutdown();
+            assertTrue(workers.awaitTermination(20L, TimeUnit.SECONDS));
+        } finally {
+            start.countDown();
+            workers.shutdownNow();
+        }
+        metrics.finish(now + 2_000L);
+        LoadMetricsSnapshot snapshot = metrics.snapshot();
+        assertEquals(threadCount * (long) perThread, snapshot.longValue("completed"));
+        assertEquals(threadCount * (long) perThread, snapshot.longValue("latencyObservationCount"));
+        assertEquals(LoadMetrics.MAX_LATENCIES, snapshot.longValue("latencySampleCount"));
+        assertEquals(LoadMetrics.MAX_LATENCIES, snapshot.longValue("latencySampleCapacity"));
+        assertEquals(((double) LoadMetrics.MAX_LATENCIES) / (threadCount * (long) perThread),
+                snapshot.doubleValue("latencySampleRate"), 0.000001);
+        assertEquals((threadCount * (long) perThread + 1L) / 2.0,
+                snapshot.doubleValue("latencyMeanMs"), 0.00001);
+        assertEquals(LoadMetrics.MAX_BUCKETS, snapshot.longValue("timeSeriesBucketCapacity"));
+        Map<String, Object> bucket = snapshot.buckets().get(String.valueOf(now + 1_000L));
+        assertNotNull(bucket);
+        assertEquals(threadCount * (long) perThread, ((Number) bucket.get("completed")).longValue());
+        assertEquals(threadCount * (long) perThread, ((Number) bucket.get("latencyObservationCount")).longValue());
     }
 
     @Test void throughputAndBucketTpsUseDeterministicMeasuredCounts() {

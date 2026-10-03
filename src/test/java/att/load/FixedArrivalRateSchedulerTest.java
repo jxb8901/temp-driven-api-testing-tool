@@ -24,6 +24,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -53,6 +54,31 @@ class FixedArrivalRateSchedulerTest {
         assertEquals(3000L, FixedArrivalRateScheduler.plannedDue(scenario, 0L, 201L));
         assertTrue(FixedArrivalRateScheduler.plannedDue(scenario, 0L, 1L)
                 < FixedArrivalRateScheduler.plannedDue(scenario, 0L, 2L));
+    }
+
+    @Test
+    void directArrivalDeadlinesMatchThePhaseIntegralAcrossEveryPhase() {
+        LoadScenario scenario = scenario(7.3, 17L, 113L, 89L, 71L, 4);
+        long start = 5000L;
+        long expectedArrivals = FixedArrivalRateScheduler.arrivalsBeforeDeadline(scenario);
+        for (long sequence = 1L; sequence <= expectedArrivals; sequence++) {
+            long expectedOffset = referenceDueOffset(scenario, sequence);
+            assertEquals(start + expectedOffset,
+                    FixedArrivalRateScheduler.plannedDue(scenario, start, sequence),
+                    "sequence " + sequence);
+        }
+    }
+
+    private static long referenceDueOffset(LoadScenario scenario, long sequence) {
+        double target = sequence - 1.0;
+        long low = 0L;
+        long high = LoadPhase.totalMs(scenario);
+        while (low < high) {
+            long middle = low + (high - low) / 2L;
+            if (FixedArrivalRateScheduler.cumulativeArrivals(scenario, middle) >= target) high = middle;
+            else low = middle + 1L;
+        }
+        return low;
     }
 
     @Test
@@ -281,6 +307,49 @@ class FixedArrivalRateSchedulerTest {
             assertFalse(thread.isAlive() && thread.getName().startsWith("att-load-arrival-"),
                     "scheduler worker leaked: " + thread.getName());
         }
+    }
+
+    @Test
+    void sharedWorkerCancellationDrainsAdmittedArrivalIterationsBeforeReturning() throws Exception {
+        LoadScenario scenario = scenario(1000.0, 0L, 0L, 10_000L, 0L, 2);
+        CountDownLatch entered = new CountDownLatch(2);
+        CountDownLatch interrupted = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        LoadIterationRunner runner = request -> {
+            entered.countDown();
+            try { release.await(); }
+            catch (InterruptedException cancelled) { interrupted.countDown(); }
+            return result(request.iterationId());
+        };
+        FixedArrivalRateScheduler scheduler = new FixedArrivalRateScheduler(scenario, runner, "run-26-shared-cancel",
+                events::add, LoadSchedulerTiming.system());
+        ThreadPoolExecutor sharedWorkers = LoadWorkerPool.create(1, 2,
+                runnable -> new Thread(runnable, "shared-arrival-test-worker"));
+        assertEquals(0, sharedWorkers.getPoolSize(), "the shared pool must start lazily");
+        scheduler.useSharedWorkers(sharedWorkers);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        Future<LoadRunResult> future = control.submit(scheduler::run);
+        try {
+            assertTrue(entered.await(5L, TimeUnit.SECONDS), "both admitted arrivals should enter the target");
+            scheduler.cancel();
+            assertTrue(interrupted.await(5L, TimeUnit.SECONDS), "cancellation must interrupt admitted arrival executions");
+            LoadRunResult result = future.get(10L, TimeUnit.SECONDS);
+            assertEquals(2L, result.metrics().longValue("completed"));
+            assertEquals(2L, completionCount(events), "all admitted completions must be included before return");
+            assertFalse(sharedWorkers.isShutdown(), "a child scheduler must not shut down the coordinator's pool");
+        } finally {
+            release.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(10L, TimeUnit.SECONDS);
+            sharedWorkers.shutdownNow();
+            sharedWorkers.awaitTermination(10L, TimeUnit.SECONDS);
+        }
+    }
+
+    private static long completionCount(List<LoadEvent> events) {
+        synchronized (events) { return events.stream().filter(LoadEvent::completed).count(); }
     }
 
     private static LoadScenario scenario(double rate, long warmupMs, long rampUpMs, long durationMs,
