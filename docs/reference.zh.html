@@ -2559,13 +2559,18 @@ workload 需要調整兩者，並確保 per-route 值不大於總數。另為 la
 變化及其他 route 留出 headroom，再查看 <code>resources.http</code> 的
 active/idle/waiting/peak observations。Pool capacity 是 generator-side
 上限，不代表應向未確認承載能力的 service 發送該流量。</p>
-<p>MQ request/reply 若每秒 10 個 request、平均 reply time 為 3
-秒，同樣約需 30 條 leased connection。MQ 預設
-<code>pool.maxSize: 20</code> 可能在 SUT 達到上限前先限制 workload；請將
-<code>pool.maxSize</code> 設在預期 in-flight 數以上並預留適當
-headroom。若 cold connection creation 會影響 ramp-up 測量，可設定
-<code>minIdle</code>。同時查看 MQ waiting 與 timeout metrics，區分 pool
-pressure 和 SUT latency。負載變化時，請依觀察到的平均 latency
+<p>MQ request/reply 若每秒 10 個 request、平均 reply time 為 3 秒，整個
+workload 約需 30 條 leased connection。<code>pool.maxSize</code>
+應按每個<strong>實體 MQ instance</strong> 的預期 in-flight request 數
+sizing，而非按 logical helper。單一 instance（或 request 固定送往一個
+instance）約需 30 條再加 headroom。兩個平均分配的 instance 平均各需約 15
+條；亦要考慮 selection skew 並確認實際分佈。<code>resources.mq</code>
+按實體 instance 顯示 pool metrics，請逐一查看 waiting、timeout 及
+response latency。<code>minIdle</code> 會在該實體 pool
+首次被使用並建立時套用，不會在 Load 開始前建立或預熱 pool。若要避免
+connection creation 影響 measured steady state，請配合 Load warm-up /
+first-use warm-up phase 使用
+<code>minIdle</code>。負載變化時，請依觀察到的平均 latency
 重新估算；tail latency 可用於 headroom 規劃，但不是公式中的平均值。</p>
 <p>duration 必填。warmup、rampUp、rampDown 預設為零。Warm-up 送出真實
 traffic，但不計入 measured threshold aggregates。可選 seed 使 closed-VU
@@ -3460,9 +3465,46 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb60-1"><a href=
 <span id="cb60-13"><a href="#cb60-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">output</span><span class="kw">:</span></span>
 <span id="cb60-14"><a href="#cb60-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">format</span><span class="kw">:</span><span class="at"> json</span></span>
 <span id="cb60-15"><a href="#cb60-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">maxChars</span><span class="kw">:</span><span class="at"> </span><span class="dv">10000</span></span></code></pre></div>
-<p>HTTP connection pool 預設為總數 50 條、每 route 20 條。請按預期 Load
-in-flight concurrency sizing；<code>maxConnectionsPerRoute</code>
-不可大於 <code>maxConnections</code>。</p>
+<p>HTTP connection pool 的預設值及限制如下：</p>
+<table>
+<thead>
+<tr class="header">
+<th>Pool 欄位</th>
+<th style="text-align: right;">預設值</th>
+<th>契約</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>maxConnections</code></td>
+<td style="text-align: right;">50</td>
+<td>總 connection 數，1–10000</td>
+</tr>
+<tr class="even">
+<td><code>maxConnectionsPerRoute</code></td>
+<td style="text-align: right;">20</td>
+<td>每 route connection 數，1–10000 且不可大於
+<code>maxConnections</code></td>
+</tr>
+<tr class="odd">
+<td><code>connectionRequestTimeoutMs</code></td>
+<td style="text-align: right;">5000 ms</td>
+<td>等待 lease connection 的最長時間，1–3600000 ms</td>
+</tr>
+<tr class="even">
+<td><code>keepAliveMs</code></td>
+<td style="text-align: right;">30000 ms</td>
+<td>Keep-alive 時間，1–3600000 ms</td>
+</tr>
+<tr class="odd">
+<td><code>idleEvictMs</code></td>
+<td style="text-align: right;">60000 ms</td>
+<td>Idle connection eviction interval，1–3600000 ms</td>
+</tr>
+</tbody>
+</table>
+<p>請按預期 Load in-flight concurrency sizing。以下 tuning override 提高
+per-route capacity 並縮短等待 lease 的時間；例中的值並非預設值：</p>
 <div class="sourceCode" id="cb61"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a><span class="fu">pool</span><span class="kw">:</span></span>
 <span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">maxConnections</span><span class="kw">:</span><span class="at"> </span><span class="dv">50</span></span>
