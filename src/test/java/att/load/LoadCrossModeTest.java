@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,6 +63,8 @@ class LoadCrossModeTest {
                 att.config.ProcessOutputConfig.defaults());
         StageTemplate template = new StageTemplateLoader(project, config.templatesRoot(), false).loadSelected("SHARED");
         FlowRegistry flows = new FlowRegistry(project, config.templatesRoot(), false);
+        CompiledExecutionPlan plan = CompiledExecutionPlan.compile(template, flows, config);
+        assertSame(mq, plan.action(template.actions().get(0)).primaryTarget().mq());
         NoReplyFactory runFactory = new NoReplyFactory();
         CaseRuntimeContext testcase = testcaseContext(project, template, Collections.<String,Object>emptyMap());
         Files.createDirectories(testcase.caseOutputDirectory());
@@ -147,6 +150,38 @@ class LoadCrossModeTest {
             for (int index = 0; index < results.size(); index++) assertEquals("iteration-" + index, results.get(index).get());
         } finally {
             workers.shutdownNow();
+        }
+    }
+
+    @Test void loadCompilesCallBackedToolImplementationAndUsesBoundTarget() throws Exception {
+        Path project = fixture();
+        Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("value",
+                new ToolArgumentConfig("value", "Value", "Value", true, ""));
+        ToolConfig wrapper = new ToolConfig("wrapped", "wrapped", "", "Wrapped", "Call-backed wrapper",
+                Collections.<String>emptyList(), "#{upper(value=${input.value})}",
+                Collections.<String>emptyList(), "text", arguments, null, null);
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"),
+                "SIT", 10000, Paths.get("templates"), Collections.singletonMap("wrapped", wrapper), null, null);
+        write(project, "templates/CALLBACK/template.yaml", "schemaVersion: att-template/v3.6\n"
+                + "name: CALLBACK\ndescription: call-backed Load target\nactions:\n"
+                + "  invoke:\n    type: tool\n    call: \"#{wrapped(value=${EXEC.INPUT.value})}\"\n");
+        StageTemplate template = new StageTemplateLoader(project, config.templatesRoot(), false).loadSelected("CALLBACK");
+        CompiledExecutionPlan plan = CompiledExecutionPlan.compile(template, new FlowRegistry(project, config.templatesRoot(), false), config);
+        CompiledExecutionPlan.ActionPlan actionPlan = plan.action(template.actions().get(0));
+        assertEquals("upper", actionPlan.configuredToolCall().name());
+
+        Path scenarioFile = write(project, "call-backed-load.yaml", "schemaVersion: att-load/v1.5\n"
+                + "workloads:\n  - id: wrapped\n    target: {type: template, id: CALLBACK}\n"
+                + "    inputs: {value: bound-input}\n    load: {users: 1, duration: 1s}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationResult result = new IterationExecutor(project, config, target, resources).execute(
+                    IterationRequest.closed("call-backed", "call-backed-1", 1, "STEADY", Instant.now(), "VU-1",
+                            Collections.<String, Object>singletonMap("value", "bound-input")));
+            assertEquals(ResultStatus.PASS, result.status(), result.validations().toString());
+            assertEquals("BOUND-INPUT", result.context().resolve("EXEC.ACTIONS.invoke.output.result"));
         }
     }
 

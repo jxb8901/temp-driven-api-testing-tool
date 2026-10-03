@@ -530,7 +530,8 @@ public class StageTemplateRunner {
                                 false, !retry.isEmpty())
                             : templateEngine.executeToolAttempt(plan.primaryCall(), context, log,
                                 context.qualifiedActionId(action.id()), action.id(), action.timeoutMs(), "", "",
-                                false, !retry.isEmpty(), plan.configuredTool(), plan.configuredSshHelper());
+                                false, !retry.isEmpty(), plan.configuredTool(), plan.configuredSshHelper(),
+                                plan.configuredToolCall(), plan.primaryTarget(), plan.configuredToolTarget());
                 } catch (att.exec.ToolExecutionException error) {
                     throw error;
                 } catch (Exception error) {

@@ -68,7 +68,16 @@ public final class MqHelperExecutor {
                                       CaseRuntimeContext context, Long timeoutMs, String invocationId,
                                       String actionId, String savePath, String saveFormat, boolean overwrite,
                                       CaseExecutionLog log) {
-        MqHelperConfig logical = config.mqHelper(instance);
+        return execute(instance, operation, arguments, context, timeoutMs, invocationId, actionId, savePath,
+                saveFormat, overwrite, log, null);
+    }
+
+    /** Executes against the helper identity bound by the Load execution plan. */
+    public MqInvocationResult execute(String instance, String operation, Map<String, Object> arguments,
+                                      CaseRuntimeContext context, Long timeoutMs, String invocationId,
+                                      String actionId, String savePath, String saveFormat, boolean overwrite,
+                                      CaseExecutionLog log, MqHelperConfig resolvedLogical) {
+        MqHelperConfig logical = resolvedLogical == null ? config.mqHelper(instance) : resolvedLogical;
         if (logical == null) return failure(instance, operation, invocationId, "MQ_CONFIG", "Unknown MQ helper instance '" + instance + "'", null);
         Map<String, Object> args = arguments == null ? Collections.<String, Object>emptyMap() : arguments;
         MqHelperConfig helper;
