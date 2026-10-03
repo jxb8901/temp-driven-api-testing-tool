@@ -54,8 +54,12 @@ public final class DbHelperExecutor implements AutoCloseable {
     }
     public void recordResourceOutput(String helperId, DbInvocationResult result, att.core.CaseRuntimeContext context,
             CaseExecutionLog log) {
+        recordResourceOutput(helperId, result, context, log, null);
+    }
+    public void recordResourceOutput(String helperId, DbInvocationResult result, att.core.CaseRuntimeContext context,
+            CaseExecutionLog log, DbHelperConfig resolvedHelper) {
         if (context == null) return;
-        DbHelperConfig configured = helper(helperId);
+        DbHelperConfig configured = resolvedHelper == null ? helper(helperId) : resolvedHelper;
         List<String> secrets = new ArrayList<String>();
         if (!configured.password().isEmpty()) secrets.add(configured.password());
         for (Map.Entry<String, String> entry : configured.properties().entrySet())
@@ -169,7 +173,14 @@ public final class DbHelperExecutor implements AutoCloseable {
     public DbInvocationResult execute(String instance, String operation, String sql, String source,
                                       List<?> params, List<String> parameterNames, String invocationId, Long timeoutMs,
                                       CaseExecutionLog log) {
-        DbHelperConfig config = helper(instance);
+        return execute(instance, operation, sql, source, params, parameterNames, invocationId, timeoutMs, log, null);
+    }
+
+    /** Executes against the helper identity bound by the Load execution plan. */
+    public DbInvocationResult execute(String instance, String operation, String sql, String source,
+                                      List<?> params, List<String> parameterNames, String invocationId, Long timeoutMs,
+                                      CaseExecutionLog log, DbHelperConfig resolvedHelper) {
+        DbHelperConfig config = resolvedHelper == null ? helper(instance) : resolvedHelper;
         if (config == null) throw new IllegalArgumentException("Unknown dbhelper instance: " + instance);
         if (!("query".equals(operation) || "update".equals(operation))) {
             throw new IllegalArgumentException("DB operation must be query or update: " + operation);

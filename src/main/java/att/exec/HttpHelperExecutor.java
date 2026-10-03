@@ -82,6 +82,13 @@ public final class HttpHelperExecutor implements AutoCloseable {
     public ToolInvocationResult execute(String logicalId, String operation, Map<String, Object> arguments,
                                         CaseRuntimeContext context, Long actionTimeoutMs, String invocationId,
                                         String format, CaseExecutionLog log) {
+        return execute(logicalId, operation, arguments, context, actionTimeoutMs, invocationId, format, log, null);
+    }
+
+    /** Executes against the helper identity bound by the Load execution plan. */
+    public ToolInvocationResult execute(String logicalId, String operation, Map<String, Object> arguments,
+                                        CaseRuntimeContext context, Long actionTimeoutMs, String invocationId,
+                                        String format, CaseExecutionLog log, HttpHelperConfig resolvedHelper) {
         String name = "http." + logicalId + "." + operation;
         long started = System.nanoTime();
         long deadline = actionTimeoutMs == null ? Long.MAX_VALUE
@@ -95,7 +102,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
         String phase = "http.resolve";
         try {
             if (closed.get()) throw new HttpFailure("HTTP_CLOSED", "HTTP resources are closed");
-            HttpHelperConfig helper = config.httpHelper(logicalId);
+            HttpHelperConfig helper = resolvedHelper == null ? config.httpHelper(logicalId) : resolvedHelper;
             if (helper == null) throw new HttpFailure("HTTP_CONFIG", "Unknown HTTP helper: " + logicalId);
             helperForDiagnostics = helper;
             if (log != null) log.registerSecretRedactions(diagnosticSecrets(helper, arguments));

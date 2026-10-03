@@ -83,6 +83,10 @@ public class ToolInvoker {
     public long effectiveTimeoutMs(String toolName, Long actionTimeoutMs) {
         if (actionTimeoutMs != null) return actionTimeoutMs.longValue();
         ToolConfig tool = config.tool(toolName);
+        return effectiveTimeoutMs(tool, actionTimeoutMs);
+    }
+    public long effectiveTimeoutMs(ToolConfig tool, Long actionTimeoutMs) {
+        if (actionTimeoutMs != null) return actionTimeoutMs.longValue();
         return tool != null && tool.timeoutMs() != null ? tool.timeoutMs().longValue() : config.timeoutMs();
     }
     public long defaultTimeoutMs(Long actionTimeoutMs) {
@@ -93,6 +97,12 @@ public class ToolInvoker {
     public Map<String, Object> prepareInput(String toolName, Map<String, Object> input) {
         ToolConfig tool = config.tool(toolName);
         if (tool == null) throw new IllegalArgumentException("Unknown configured tool: " + toolName);
+        return prepareInput(tool, input);
+    }
+
+    /** Applies the argument contract using the Tool identity resolved at Load startup. */
+    public Map<String, Object> prepareInput(ToolConfig tool, Map<String, Object> input) {
+        if (tool == null) throw new IllegalArgumentException("Resolved configured Tool is required");
         Map<String, Object> resolved = resolveMap(input == null ? java.util.Collections.<String, Object>emptyMap() : input);
         normalizeSinglePositionalArgument(tool, resolved);
         validateArguments(tool, resolved);
@@ -112,6 +122,14 @@ public class ToolInvoker {
         return invoke(invocationId, toolName, input, context, log, false, timeoutMs, saveAs, overwrite);
     }
 
+    /** Executes with immutable Load-run Tool and SSH-helper identities already resolved. */
+    public ToolInvocationResult invokeAttempt(String invocationId, String toolName, Map<String, Object> input,
+            CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs, String saveAs, boolean overwrite,
+            ToolConfig resolvedTool, SshHelperConfig resolvedHelper) throws Exception {
+        return invoke(invocationId, toolName, input, context, log, false, timeoutMs, saveAs, overwrite,
+                resolvedTool, resolvedHelper);
+    }
+
     public ToolInvocationResult invokeAttempt(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, Long timeoutMs) throws Exception {
         return invokeAttempt(invocationId, toolName, input, context, log, timeoutMs, "");
     }
@@ -121,7 +139,13 @@ public class ToolInvoker {
     }
 
     private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input, CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction, Long actionTimeoutMs, String saveAs, boolean overwrite) throws Exception {
-        ToolConfig tool = config.tool(toolName);
+        return invoke(invocationId, toolName, input, context, log, recordAction, actionTimeoutMs, saveAs, overwrite,
+                config.tool(toolName), null);
+    }
+
+    private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input,
+            CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction, Long actionTimeoutMs,
+            String saveAs, boolean overwrite, ToolConfig tool, SshHelperConfig resolvedHelper) throws Exception {
         if (tool == null) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_INVALID,
                     "Unknown configured tool '" + toolName + "'", "Available tools: " + String.join(", ", config.tools().keySet()),
@@ -131,13 +155,14 @@ public class ToolInvoker {
         if (tool.callBacked()) throw new IllegalStateException("call-backed Tool must be executed by the unified expression engine: " + toolName);
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(toolName) : invocationId;
         Instant started = Instant.now();
-        Map<String, Object> resolvedInput = prepareInput(toolName, input);
+        Map<String, Object> resolvedInput = prepareInput(tool, input);
 
         List<String> logicalArgv = expandCommand(tool, resolvedInput);
-        SshHelperConfig helper = tool.sshHelper().isEmpty() ? null : config.sshHelper(tool.sshHelper());
+        SshHelperConfig helper = tool.sshHelper().isEmpty() ? null
+                : (resolvedHelper == null ? config.sshHelper(tool.sshHelper()) : resolvedHelper);
         if (!tool.sshHelper().isEmpty() && helper == null) throw new IllegalStateException("Missing SSH helper: " + tool.sshHelper());
         String strategy = helper == null ? "" : (tool.sshSelectionStrategy().isEmpty() ? helper.strategy() : tool.sshSelectionStrategy());
-        long timeoutMs = effectiveTimeoutMs(toolName, actionTimeoutMs);
+        long timeoutMs = effectiveTimeoutMs(tool, actionTimeoutMs);
         if (helper != null && "all".equals(strategy))
             return invokeAll(id, toolName, tool, helper, strategy, resolvedInput, logicalArgv, timeoutMs, saveAs, overwrite, context, log, recordAction, started);
         String instance = helper == null ? "" : helper.select(strategy);

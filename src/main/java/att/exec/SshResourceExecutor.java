@@ -69,13 +69,20 @@ public final class SshResourceExecutor {
     public ToolInvocationResult execute(String helperId, String operation, Map<String, Object> arguments,
                                         CaseRuntimeContext context, Long requestedTimeoutMs,
                                         String invocationId, CaseExecutionLog log) {
+        return execute(helperId, operation, arguments, context, requestedTimeoutMs, invocationId, log, null);
+    }
+
+    /** Executes against the helper identity bound by the Load execution plan. */
+    public ToolInvocationResult execute(String helperId, String operation, Map<String, Object> arguments,
+                                        CaseRuntimeContext context, Long requestedTimeoutMs,
+                                        String invocationId, CaseExecutionLog log, SshHelperConfig resolvedHelper) {
         String name = "ssh." + helperId + "." + operation;
         String id = invocationId == null || invocationId.trim().isEmpty()
                 ? context.nextInvocationId(name) : invocationId;
         Instant started = Instant.now();
         Map<String, Object> supplied = arguments == null ? Collections.<String, Object>emptyMap() : arguments;
         Map<String, Object> safeInput = safeInput(supplied);
-        SshHelperConfig helper = config.sshHelper(helperId);
+        SshHelperConfig helper = resolvedHelper == null ? config.sshHelper(helperId) : resolvedHelper;
         SshConfig target = null;
         Semaphore permit = null;
         PermitLease lease = null;

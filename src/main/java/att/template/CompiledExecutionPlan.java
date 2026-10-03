@@ -4,6 +4,10 @@ import att.flow.FlowDefinition;
 import att.flow.FlowRegistry;
 import att.config.FrameworkConfig;
 import att.config.ToolConfig;
+import att.config.SshHelperConfig;
+import att.config.DbHelperConfig;
+import att.config.MqHelperConfig;
+import att.config.HttpHelperConfig;
 
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -75,12 +79,22 @@ public final class CompiledExecutionPlan {
         private final RetryCondition.CompiledCondition retryWhen;
         private final FlowDefinition flow;
         private final ToolConfig configuredTool;
+        private final SshHelperConfig configuredSshHelper;
+        private final ToolCallParser.ParsedCall configuredToolCall;
+        private final TargetBinding primaryTarget;
+        private final TargetBinding configuredToolTarget;
 
         private ActionPlan(TemplateAction action, ToolCallParser parser, FlowRegistry flows, FrameworkConfig config) {
             primaryCall = "tool".equalsIgnoreCase(action.type()) && !action.call().trim().isEmpty()
                     ? parser.parseCompiled(action.call()) : null;
             flow = "flow".equalsIgnoreCase(action.type()) && flows != null ? flows.get(action.use()) : null;
             configuredTool = primaryCall == null || config == null ? null : config.tool(primaryCall.name());
+            configuredSshHelper = configuredTool == null || configuredTool.sshHelper().isEmpty() || config == null
+                    ? null : config.sshHelper(configuredTool.sshHelper());
+            configuredToolCall = configuredTool == null || !configuredTool.callBacked()
+                    ? null : parser.parseCompiled(configuredTool.call());
+            primaryTarget = TargetBinding.resolve(primaryCall, config);
+            configuredToolTarget = TargetBinding.resolve(configuredToolCall, config);
             ExpressionBlockEvaluator compiler = new ExpressionBlockEvaluator();
             runWhen = expression(action.runWhen(), compiler);
             assertion = expression(action.assertion(), compiler);
@@ -106,5 +120,39 @@ public final class CompiledExecutionPlan {
         public FlowDefinition flow() { return flow; }
         /** Resolved immutable Tool identity, null for built-ins, calls, and standalone plans. */
         public ToolConfig configuredTool() { return configuredTool; }
+        public SshHelperConfig configuredSshHelper() { return configuredSshHelper; }
+        /** Compiled implementation call for a call-backed configured Tool. */
+        public ToolCallParser.ParsedCall configuredToolCall() { return configuredToolCall; }
+        public TargetBinding primaryTarget() { return primaryTarget; }
+        public TargetBinding configuredToolTarget() { return configuredToolTarget; }
+    }
+
+    /** Immutable identity for a configured call target resolved during Load compilation. */
+    public static final class TargetBinding {
+        private final ToolConfig tool;
+        private final DbHelperConfig db;
+        private final MqHelperConfig mq;
+        private final HttpHelperConfig http;
+        private final SshHelperConfig ssh;
+        private TargetBinding(ToolConfig tool, DbHelperConfig db, MqHelperConfig mq,
+                              HttpHelperConfig http, SshHelperConfig ssh) {
+            this.tool = tool; this.db = db; this.mq = mq; this.http = http; this.ssh = ssh;
+        }
+        private static TargetBinding resolve(ToolCallParser.ParsedCall call, FrameworkConfig config) {
+            if (call == null || config == null) return null;
+            String name = call.name();
+            String[] parts = name.split("\\.", -1);
+            if (parts.length < 2) return new TargetBinding(config.tool(name), null, null, null, null);
+            if ("db".equals(parts[0])) return new TargetBinding(null, config.dbHelper(parts[1]), null, null, null);
+            if ("mq".equals(parts[0])) return new TargetBinding(null, null, config.mqHelper(parts[1]), null, null);
+            if ("http".equals(parts[0])) return new TargetBinding(null, null, null, config.httpHelper(parts[1]), null);
+            if ("ssh".equals(parts[0])) return new TargetBinding(null, null, null, null, config.sshHelper(parts[1]));
+            return new TargetBinding(config.tool(name), null, null, null, null);
+        }
+        public ToolConfig tool() { return tool; }
+        public DbHelperConfig db() { return db; }
+        public MqHelperConfig mq() { return mq; }
+        public HttpHelperConfig http() { return http; }
+        public SshHelperConfig ssh() { return ssh; }
     }
 }

@@ -14,6 +14,7 @@ import att.flow.FlowRegistry;
 import att.template.StageTemplate;
 import att.template.StageTemplateLoader;
 import att.template.StageTemplateRunner;
+import att.template.CompiledExecutionPlan;
 import att.template.UnifiedTemplateEngine;
 import att.exec.ToolInvoker;
 import org.junit.jupiter.api.Test;
@@ -28,12 +29,17 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -58,6 +64,8 @@ class LoadCrossModeTest {
                 att.config.ProcessOutputConfig.defaults());
         StageTemplate template = new StageTemplateLoader(project, config.templatesRoot(), false).loadSelected("SHARED");
         FlowRegistry flows = new FlowRegistry(project, config.templatesRoot(), false);
+        CompiledExecutionPlan plan = CompiledExecutionPlan.compile(template, flows, config);
+        assertSame(mq, plan.action(template.actions().get(0)).primaryTarget().mq());
         NoReplyFactory runFactory = new NoReplyFactory();
         CaseRuntimeContext testcase = testcaseContext(project, template, Collections.<String,Object>emptyMap());
         Files.createDirectories(testcase.caseOutputDirectory());
@@ -103,6 +111,79 @@ class LoadCrossModeTest {
         assertTrue(html.contains("TIMEOUT"), html);
         assertTrue(html.contains("2033"), html);
         assertTrue(html.contains("MQRC_NO_MSG_AVAILABLE"), html);
+    }
+
+    @Test void sharedIterationExecutorRunsConfiguredToolAndNestedFlowWithIsolatedInputs() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = config();
+        Path scenarioFile = write(project, "concurrent-tool-load.yaml", "schemaVersion: att-load/v1.5\n"
+                + "workloads:\n  - id: shared\n    target: {type: template, id: SHARED}\n"
+                + "    inputs: {value: seed}\n    load: {users: 1, duration: 1s}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        ExecutorService workers = Executors.newFixedThreadPool(8);
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationExecutor executor = new IterationExecutor(project, config, target, resources,
+                    temp.resolve("concurrent-configured-tool-load"));
+            List<Future<String>> results = new java.util.ArrayList<Future<String>>();
+            for (int index = 0; index < 24; index++) {
+                final int iteration = index;
+                results.add(workers.submit(new Callable<String>() {
+                    @Override public String call() {
+                        String input = "iteration-" + iteration;
+                        IterationResult result = executor.execute(IterationRequest.closed("shared-engine-load",
+                                "iteration-" + iteration, iteration + 1L, "STEADY", Instant.now(),
+                                "VU-" + (iteration + 1), Collections.<String, Object>singletonMap("value", input)));
+                        assertEquals(ResultStatus.PASS, result.status(), result.validations().toString());
+                        assertEquals(3, result.validations().size());
+                        assertEquals(input, result.context().resolve("EXEC.INPUT.value"));
+                        assertEquals(input, String.valueOf(result.context().resolve("EXEC.ACTIONS.invoke.output.result")).trim());
+                        Map<?, ?> stages = (Map<?, ?>) result.context().caseTree().get("STAGES");
+                        String stageKey = String.valueOf(stages.keySet().iterator().next());
+                        assertEquals("flow=" + input,
+                                CaseRuntimeContext.getPath(result.context().caseTree(), "STAGES." + stageKey
+                                        + ".TEMPLATE.ACTIONS.nested.flow.actions.flowLog.output.result"));
+                        return String.valueOf(result.context().resolve("EXEC.INPUT.value"));
+                    }
+                }));
+            }
+            for (int index = 0; index < results.size(); index++) assertEquals("iteration-" + index, results.get(index).get());
+        } finally {
+            workers.shutdownNow();
+        }
+    }
+
+    @Test void loadCompilesCallBackedToolImplementationAndUsesBoundTarget() throws Exception {
+        Path project = fixture();
+        Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("value",
+                new ToolArgumentConfig("value", "Value", "Value", true, ""));
+        ToolConfig wrapper = new ToolConfig("wrapped", "wrapped", "", "Wrapped", "Call-backed wrapper",
+                Collections.<String>emptyList(), "#{upper(value=${input.value})}",
+                Collections.<String>emptyList(), "text", arguments, null, null);
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"),
+                "SIT", 10000, Paths.get("templates"), Collections.singletonMap("wrapped", wrapper), null, null);
+        write(project, "templates/CALLBACK/template.yaml", "schemaVersion: att-template/v3.6\n"
+                + "name: CALLBACK\ndescription: call-backed Load target\nactions:\n"
+                + "  invoke:\n    type: tool\n    call: \"#{wrapped(value=${EXEC.INPUT.value})}\"\n");
+        StageTemplate template = new StageTemplateLoader(project, config.templatesRoot(), false).loadSelected("CALLBACK");
+        CompiledExecutionPlan plan = CompiledExecutionPlan.compile(template, new FlowRegistry(project, config.templatesRoot(), false), config);
+        CompiledExecutionPlan.ActionPlan actionPlan = plan.action(template.actions().get(0));
+        assertEquals("upper", actionPlan.configuredToolCall().name());
+
+        Path scenarioFile = write(project, "call-backed-load.yaml", "schemaVersion: att-load/v1.5\n"
+                + "workloads:\n  - id: wrapped\n    target: {type: template, id: CALLBACK}\n"
+                + "    inputs: {value: bound-input}\n    load: {users: 1, duration: 1s}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        try (LoadRunResources resources = new LoadRunResources(project, config)) {
+            IterationResult result = new IterationExecutor(project, config, target, resources).execute(
+                    IterationRequest.closed("call-backed", "call-backed-1", 1, "STEADY", Instant.now(), "VU-1",
+                            Collections.<String, Object>singletonMap("value", "bound-input")));
+            assertEquals(ResultStatus.PASS, result.status(), result.validations().toString());
+            assertEquals("BOUND-INPUT", result.context().resolve("EXEC.ACTIONS.invoke.output.result"));
+        }
     }
 
     private void assertMqTimeout(CaseRuntimeContext context, List<att.core.ValidationResult> results) {
