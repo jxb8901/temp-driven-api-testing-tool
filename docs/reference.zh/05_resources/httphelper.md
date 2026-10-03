@@ -20,6 +20,27 @@ evidence:
     maxChars: 10000
 ~~~
 
+HTTP connection pool 的預設值及限制如下：
+
+| Pool 欄位 | 預設值 | 契約 |
+|---|---:|---|
+| `maxConnections` | 50 | 總 connection 數，1–10000 |
+| `maxConnectionsPerRoute` | 20 | 每 route connection 數，1–10000 且不可大於 `maxConnections` |
+| `connectionRequestTimeoutMs` | 5000 ms | 等待 lease connection 的最長時間，1–3600000 ms |
+| `keepAliveMs` | 30000 ms | Keep-alive 時間，1–3600000 ms |
+| `idleEvictMs` | 60000 ms | Connection 閒置達此時間後符合 eviction 條件；ATT 在 request 前檢查，1–3600000 ms |
+
+請按預期 Load in-flight concurrency sizing。以下 tuning override 提高 per-route capacity 並縮短等待 lease 的時間；例中的值並非預設值：
+
+~~~yaml
+pool:
+  maxConnections: 50
+  maxConnectionsPerRoute: 40
+  connectionRequestTimeoutMs: 2000
+~~~
+
+`connectionRequestTimeoutMs` 限制等待取得 pooled connection 的時間。若 service latency 穩定但 pool 等候/timeout 增加，可能表示 generator pool 飽和；請查看 Load output 中按 helper 區分的 active/idle/waiting/peak metrics。
+
 以 type: tool Action 的 primary call 呼叫 http.<id>.get/post/request。Response bytes 由此 boundary 解析：使用 call responseFormat、helper default，或 auto 時依 Content-Type 判斷。支援 auto、text、json、yaml、xml。解析後的 native value 發布於 output.result。可選 evidence.output 是有長度上限的人類可讀 snapshot，不會改變該值。
 
 #### Request body 與 project-file String

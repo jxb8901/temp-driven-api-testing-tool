@@ -1137,6 +1137,18 @@ Closed workload 使用正整數 load.users。每個穩定 virtual user 重複執
 
 Arrival-rate workload 使用 load.arrivalRate、正整數 load.maxConcurrent 與 overloadPolicy: drop。Scheduler 依絕對 due time 排程。超過 maxConcurrent 的 arrival 記為 generator drop；不排隊，也不算 SUT error。Arrival-rate 沒有持續 USER_ID，也不能配置 thinkTime。
 
+#### Pacing 與 resource pool sizing
+
+穩定 arrival rate 下，可使用 Little's law 估算平均同時處理中的 request 數：
+
+```text
+平均 concurrency ≈ arrival rate（requests/second）× 平均 response time（seconds）
+```
+
+例如 HTTP 每秒 20 個 request、平均 response time 為 1.5 秒，約需 30 條 concurrent connection，才不會先受 client pool 限制。HTTP 預設 `pool.maxConnections: 50`、`pool.maxConnectionsPerRoute: 20`；請按 workload 需要調整兩者，並確保 per-route 值不大於總數。另為 latency 變化及其他 route 留出 headroom，再查看 `resources.http` 的 active/idle/waiting/peak observations。Pool capacity 是 generator-side 上限，不代表應向未確認承載能力的 service 發送該流量。
+
+MQ request/reply 若每秒 10 個 request、平均 reply time 為 3 秒，整個 workload 約需 30 條 leased connection。`pool.maxSize` 應按每個**實體 MQ instance** 的預期 in-flight request 數 sizing，而非按 logical helper。單一 instance（或 request 固定送往一個 instance）約需 30 條再加 headroom。兩個平均分配的 instance 平均各需約 15 條；亦要考慮 selection skew 並確認實際分佈。`resources.mq` 按實體 instance 顯示 pool metrics，請逐一查看 waiting、timeout 及 response latency。`minIdle` 會在該實體 pool 首次被使用並建立時套用，不會在 Load 開始前建立或預熱 pool。若要避免 connection creation 影響 measured steady state，請配合 Load warm-up / first-use warm-up phase 使用 `minIdle`。負載變化時，請依觀察到的平均 latency 重新估算；tail latency 可用於 headroom 規劃，但不是公式中的平均值。
+
 duration 必填。warmup、rampUp、rampDown 預設為零。Warm-up 送出真實 traffic，但不計入 measured threshold aggregates。可選 seed 使 closed-VU think-time randomization 可重複。
 
 #### Load identity 與輸出路徑
@@ -1658,6 +1670,27 @@ evidence:
     format: json
     maxChars: 10000
 ~~~
+
+HTTP connection pool 的預設值及限制如下：
+
+| Pool 欄位 | 預設值 | 契約 |
+|---|---:|---|
+| `maxConnections` | 50 | 總 connection 數，1–10000 |
+| `maxConnectionsPerRoute` | 20 | 每 route connection 數，1–10000 且不可大於 `maxConnections` |
+| `connectionRequestTimeoutMs` | 5000 ms | 等待 lease connection 的最長時間，1–3600000 ms |
+| `keepAliveMs` | 30000 ms | Keep-alive 時間，1–3600000 ms |
+| `idleEvictMs` | 60000 ms | Connection 閒置達此時間後符合 eviction 條件；ATT 在 request 前檢查，1–3600000 ms |
+
+請按預期 Load in-flight concurrency sizing。以下 tuning override 提高 per-route capacity 並縮短等待 lease 的時間；例中的值並非預設值：
+
+~~~yaml
+pool:
+  maxConnections: 50
+  maxConnectionsPerRoute: 40
+  connectionRequestTimeoutMs: 2000
+~~~
+
+`connectionRequestTimeoutMs` 限制等待取得 pooled connection 的時間。若 service latency 穩定但 pool 等候/timeout 增加，可能表示 generator pool 飽和；請查看 Load output 中按 helper 區分的 active/idle/waiting/peak metrics。
 
 以 type: tool Action 的 primary call 呼叫 http.<id>.get/post/request。Response bytes 由此 boundary 解析：使用 call responseFormat、helper default，或 auto 時依 Content-Type 判斷。支援 auto、text、json、yaml、xml。解析後的 native value 發布於 output.result。可選 evidence.output 是有長度上限的人類可讀 snapshot，不會改變該值。
 

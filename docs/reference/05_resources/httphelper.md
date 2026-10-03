@@ -20,6 +20,27 @@ evidence:
     maxChars: 10000
 ~~~
 
+The HTTP connection pool has these defaults and limits:
+
+| Pool field | Default | Contract |
+|---|---:|---|
+| `maxConnections` | 50 | Total connections, 1–10000 |
+| `maxConnectionsPerRoute` | 20 | Per-route connections, 1–10000 and no greater than `maxConnections` |
+| `connectionRequestTimeoutMs` | 5000 ms | Maximum wait to lease a connection, 1–3600000 ms |
+| `keepAliveMs` | 30000 ms | Keep-alive duration, 1–3600000 ms |
+| `idleEvictMs` | 60000 ms | Idle age after which a connection is eligible for eviction; checked before requests, 1–3600000 ms |
+
+Size the pool for the expected in-flight Load concurrency. For example, the following tuning overrides raise the per-route capacity and shorten the connection-lease wait; values shown here are not defaults:
+
+~~~yaml
+pool:
+  maxConnections: 50
+  maxConnectionsPerRoute: 40
+  connectionRequestTimeoutMs: 2000
+~~~
+
+`connectionRequestTimeoutMs` bounds how long an operation waits to lease a pooled connection. A short wait/timeout while service latency remains stable can indicate generator pool saturation; inspect the per-helper active/idle/waiting/peak metrics in Load output.
+
 Call http.<id>.get/post/request as the primary call of a type: tool Action. Response bytes are parsed at this boundary using call responseFormat, the helper default, or Content-Type when auto is selected. Supported response formats are auto, text, json, yaml and xml. The parsed native value is output.result. Optional evidence.output is a bounded human-readable snapshot and never changes that value.
 
 #### Request bodies and project-file Strings
