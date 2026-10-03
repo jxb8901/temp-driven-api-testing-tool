@@ -1679,7 +1679,7 @@ HTTP connection pool 的預設值及限制如下：
 | `maxConnectionsPerRoute` | 20 | 每 route connection 數，1–10000 且不可大於 `maxConnections` |
 | `connectionRequestTimeoutMs` | 5000 ms | 等待 lease connection 的最長時間，1–3600000 ms |
 | `keepAliveMs` | 30000 ms | Keep-alive 時間，1–3600000 ms |
-| `idleEvictMs` | 60000 ms | Idle connection eviction interval，1–3600000 ms |
+| `idleEvictMs` | 60000 ms | Connection 閒置達此時間後符合 eviction 條件；ATT 在 request 前檢查，1–3600000 ms |
 
 請按預期 Load in-flight concurrency sizing。以下 tuning override 提高 per-route capacity 並縮短等待 lease 的時間；例中的值並非預設值：
 
