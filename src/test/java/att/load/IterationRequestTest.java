@@ -53,6 +53,27 @@ class IterationRequestTest {
         assertEquals("PURCHASE", item.get("targetId"));
     }
 
+    @Test void mixedMetadataCopiesReuseTheAlreadyFrozenInputTree() {
+        Map<String, Object> nested = new LinkedHashMap<String, Object>();
+        nested.put("value", "frozen");
+        List<Object> entries = new ArrayList<Object>();
+        entries.add(nested);
+        Map<String, Object> input = new LinkedHashMap<String, Object>();
+        input.put("nested", nested);
+        input.put("entries", entries);
+        IterationRequest mixed = IterationRequest.closed("mixed-run", "mixed-iteration", 1, "STEADY",
+                Instant.now(), "VU-1", input).withWorkloadId("checkout")
+                .withMixIdentity("purchase", "flow", "PURCHASE");
+
+        assertTreeReused(mixed, mixed.withOutputDirectory(java.nio.file.Paths.get("output")));
+        assertTreeReused(mixed, mixed.withFailureEvidence(false));
+        assertTreeReused(mixed, mixed.withEvidenceRetention(false, true));
+        assertTreeReused(mixed, mixed.withFailureLogCapture(false));
+        assertTreeReused(mixed, mixed.withWorkloadId("checkout-again"));
+        assertTreeReused(mixed, mixed.withTestdataWaitAllowed(() -> false));
+        assertTreeReused(mixed, mixed.withTestdataOrdinal(3L));
+    }
+
     private static void assertTreeReused(IterationRequest source, IterationRequest copy) {
         assertSame(source.inputs(), copy.inputs());
         assertSame(source.inputs().get("nested"), copy.inputs().get("nested"));

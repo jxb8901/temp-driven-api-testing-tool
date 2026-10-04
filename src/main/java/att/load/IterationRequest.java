@@ -99,7 +99,8 @@ public final class IterationRequest {
         this.runId = source.runId; this.model = source.model; this.iterationId = source.iterationId;
         this.iteration = source.iteration; this.phase = source.phase; this.startedAt = source.startedAt;
         this.runStartedAt = source.runStartedAt; this.userId = source.userId;
-        this.inputs = LoadIsolation.deepImmutableMap(selectedInputs); this.outputDirectory = source.outputDirectory;
+        this.inputs = selectedInputs == source.inputs ? source.inputs : LoadIsolation.deepImmutableMap(selectedInputs);
+        this.outputDirectory = source.outputDirectory;
         this.retainSuccessEvidence = source.retainSuccessEvidence; this.retainFailureEvidence = source.retainFailureEvidence;
         this.captureFailureLog = source.captureFailureLog; this.workloadId = source.workloadId;
         this.testdataWaitAllowed = source.testdataWaitAllowed; this.testdataOrdinal = source.testdataOrdinal;
@@ -147,6 +148,9 @@ public final class IterationRequest {
     }
     public IterationRequest withMixIdentity(String mix, String type, String target, Map<String, Object> selectedInputs) {
         return new IterationRequest(this, mix, type, target, selectedInputs);
+    }
+    public IterationRequest withMixIdentity(String mix, String type, String target) {
+        return new IterationRequest(this, mix, type, target, inputs);
     }
     private IterationRequest preserveMix(IterationRequest copy) {
         return mixId == null ? copy : new IterationRequest(copy, mixId, targetType, targetId, copy.inputs);

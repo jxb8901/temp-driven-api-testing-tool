@@ -37,6 +37,15 @@ public final class LoadRunCoordinator implements AutoCloseable {
                                  LoadEvidenceStore evidenceStore, Path outputRoot) throws Exception {
         Path root = seedExecutor.projectRoot();
         FrameworkConfig config = seedExecutor.config();
+        return runFrom(root, config, scenario, seedExecutor.resources(), runId, evidenceStore,
+                outputRoot == null ? seedExecutor.outputRoot() : outputRoot);
+    }
+
+    /** Resolves every workload target before scheduling without requiring a synthetic seed target. */
+    public static LoadRunResult runFrom(Path projectRoot, FrameworkConfig config, LoadScenario scenario,
+                                        LoadRunResources resources, String runId,
+                                        LoadEvidenceStore evidenceStore, Path outputRoot) throws Exception {
+        Path root = projectRoot.toAbsolutePath().normalize();
         Map<String, LoadTarget> targets = new LinkedHashMap<String, LoadTarget>();
         LoadTargetResolver resolver = new LoadTargetResolver(root, config);
         LoadTargetValidator validator = new LoadTargetValidator(root, config);
@@ -56,7 +65,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
             }
         }
         try (LoadRunCoordinator coordinator = new LoadRunCoordinator(root, config, scenario, targets,
-                seedExecutor.resources(), outputRoot == null ? seedExecutor.outputRoot() : outputRoot,
+                resources, outputRoot == null ? root.resolve(config.outputDirectory()) : outputRoot,
                 runId, evidenceStore)) {
             return coordinator.run();
         }

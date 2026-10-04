@@ -2,6 +2,7 @@ package att.load;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.BlockingQueue;
@@ -167,17 +168,17 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 LoadRandomization.effectiveSeed(scenario, runId), iteration, userId);
         final String prefix = scenario.legacyV10() ? runId : runId + "-" + safe(scenario.workloadId());
         final String iterationId = prefix + "-" + userId + "-" + iteration;
+        Map<String, Object> selectedInputs = LoadMixSelector.mergeInputs(scenario.inputs(), selectedMix);
         IterationRequest request = new IterationRequest(runId, LoadSchedulerSupport.instant(startedAt), "closed", iterationId,
                 sequenceValue, phase, LoadSchedulerSupport.instant(scheduledAt), userId,
-                LoadMixSelector.mergeInputs(scenario.inputs(), selectedMix), null);
+                selectedInputs, null);
         request = request.withTestdataWaitAllowed(() -> !cancelled.get() && remainingRunMillis(startedAt) > 0L);
         if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
         Path evidenceRoot = evidenceOutputRoot(iterationId);
         if (evidenceRoot != null) request = request.withOutputDirectory(evidenceRoot).withEvidenceRetention(true, false);
         else if (evidenceStore != null) request = request.withEvidenceRetention(false, false);
         if (evidenceStore != null) request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence());
-        if (selectedMix != null) request = request.withMixIdentity(selectedMix.id(), selectedMix.targetType(),
-                selectedMix.targetId(), LoadMixSelector.mergeInputs(scenario.inputs(), selectedMix));
+        if (selectedMix != null) request = request.withMixIdentity(selectedMix.id(), selectedMix.targetType(), selectedMix.targetId());
         final IterationRequest iterationRequest = request;
         final TaskHandle taskHandle = new TaskHandle();
         FutureTask<Void> task = new FutureTask<Void>(() -> {

@@ -268,8 +268,7 @@ public class CaseExecutionLog implements AutoCloseable {
 
     private synchronized void write(String text) throws IOException {
         if (discarding) return;
-        String safeText = PathPresentation.displayText(text, projectRoot);
-        for (String secret : secretRedactions) safeText = safeText.replace(secret, "[REDACTED_SECRET]");
+        String safeText = PathPresentation.displayText(redactSecrets(text), projectRoot);
         if (writer != null) {
             writer.write(safeText);
             writer.flush();
@@ -468,8 +467,12 @@ public class CaseExecutionLog implements AutoCloseable {
     private Object serializable(Object value, IdentityHashMap<Object, Object> copies,
                                 IdentityHashMap<Object, Boolean> active) {
         if (value == null) return null;
-        if (value instanceof Path) return PathPresentation.displayPath((Path) value, projectRoot);
-        if (value instanceof String) return PathPresentation.displayText((String) value, projectRoot);
+        if (value instanceof Path) {
+            String path = value.toString();
+            String redacted = redactSecrets(path);
+            return path.equals(redacted) ? PathPresentation.displayPath((Path) value, projectRoot) : redacted;
+        }
+        if (value instanceof String) return PathPresentation.displayText(redactSecrets((String) value), projectRoot);
         boolean container = value instanceof Map || value instanceof Iterable || value.getClass().isArray();
         if (!container) return value;
         if (active.containsKey(value)) throw new IllegalArgumentException("Cyclic data cannot be written to the case log");
@@ -483,8 +486,11 @@ public class CaseExecutionLog implements AutoCloseable {
                     Object key = serializable(entry.getKey(), copies, active);
                     Object fieldValue = entry.getValue();
                     if (key instanceof String && localPathField((String) key) && fieldValue instanceof String) {
-                        try {
-                            Path candidate = java.nio.file.Paths.get((String) fieldValue);
+                        String originalPath = (String) fieldValue;
+                        String redactedPath = redactSecrets(originalPath);
+                        if (!redactedPath.equals(originalPath)) fieldValue = redactedPath;
+                        else try {
+                            Path candidate = java.nio.file.Paths.get(originalPath);
                             if (candidate.isAbsolute()) fieldValue = PathPresentation.displayPath(candidate, projectRoot);
                         } catch (java.nio.file.InvalidPathException ignored) { }
                     }
@@ -513,5 +519,11 @@ public class CaseExecutionLog implements AutoCloseable {
                 || normalized.endsWith("file")
                 || normalized.endsWith("path") || normalized.endsWith("directory")
                 || normalized.endsWith("dir") || normalized.equals("cwd");
+    }
+
+    private String redactSecrets(String value) {
+        String redacted = value;
+        for (String secret : secretRedactions) redacted = redacted.replace(secret, "[REDACTED_SECRET]");
+        return redacted;
     }
 }

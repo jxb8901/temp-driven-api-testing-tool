@@ -192,6 +192,27 @@ class CaseExecutionLogTest {
         assertTrue(output.flushes > 0);
     }
 
+    @Test void redactsProjectRootSecretsBeforePathPresentation() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("secret project"));
+        String secret = root.resolve("private-token").toString();
+        Path file = tempDir.resolve("secret-path.log");
+        CaseExecutionLog log = new CaseExecutionLog(file);
+        log.setProjectRoot(root);
+        log.registerSecretRedactions(java.util.Collections.singletonList(secret));
+
+        log.appendRaw("ERROR", "credential=" + secret);
+        Map<String, Object> values = new LinkedHashMap<String, Object>();
+        values.put("identityFile", secret);
+        log.append("SSH", values);
+
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("credential=[REDACTED_SECRET]"));
+        assertTrue(text.contains("identityFile:"));
+        assertTrue(occurrences(text, "[REDACTED_SECRET]") >= 2);
+        assertFalse(text.contains(secret));
+        assertFalse(text.contains("private-token"));
+    }
+
     @Test void concurrentMirrorsKeepEachAppendedChunkAtomicAndIdentifiable() throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         PrintStream output = new PrintStream(bytes, true, "UTF-8");

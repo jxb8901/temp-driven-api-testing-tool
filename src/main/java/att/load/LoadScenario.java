@@ -115,7 +115,7 @@ public final class LoadScenario {
     public List<LoadWorkload> workloads() { return workloads; }
     public boolean multiWorkload() { return workloads.size() > 1; }
     public boolean legacyV10() { return Version.LOAD_SCHEMA_V1_0.equals(schemaVersion); }
-    boolean coordinatorRequired() { return !legacyV10() && !workloadView && !policyOnly; }
+    public boolean coordinatorRequired() { return !legacyV10() && !workloadView && !policyOnly; }
     public boolean policyOnly() { return policyOnly; }
     public boolean hasWorkloads() { return !workloads.isEmpty(); }
     public LoadWorkload workload() {
