@@ -1,5 +1,20 @@
 # Documentation contracts and terminology
 
+## Editorial baseline
+
+Current ATT documentation follows the [Google Developer Documentation Style Guide](https://developers.google.com/style) unless an ATT-specific rule below overrides it. Write for a global developer audience in clear, direct English. Use sentence case for page titles and headings. Standalone Markdown pages have exactly one H1. Do not number headings to show sequence; use numbered lists for procedures. Use imperative headings for tasks and descriptive noun phrases for concepts and reference sections.
+
+Prefer descriptive link text over positional references such as “above,” “below,” or “Chapter 6.” Write “for example” or “such as” instead of the abbreviation `e.g.` Replace `and/or` with clear alternatives such as “either,” “both,” or “one or both.” Avoid subjective difficulty words such as “easy,” “simple,” and “simply” unless a measurable qualification makes the claim objective.
+
+ATT-specific rules take precedence where the external guide conflicts with product contracts:
+
+- Preserve canonical ATT terms and capitalization, including Testcase, Stage, Template, Flow, Action, Tool, Resource, Context, Debug, Load, CLI, and helper names.
+- Keep code identifiers, schema fields, Context paths, filenames, command-line options, and literal values exactly as authored.
+- In Traditional Chinese prose, keep canonical ATT technical terms in English as defined by the terminology policy below.
+- Reference source modules are composed according to `docs/reference-manifest.txt`; the existing numbered structural headings in those fragments remain protected by the assembly contract until they are converted into standalone pages.
+
+The documentation release gate checks editable English Markdown for standalone-page H1 count, numbered headings outside Reference assembly fragments, `e.g.`, `and/or`, and selected positional cross-references. It ignores fenced and inline code, Markdown link destinations, generated Reference Markdown/HTML, and historical documentation. Generated Reference outputs remain freshness-checked against their source modules. Keep EN/ZH structure checks and the ATT-specific contract checks in force.
+
 Reference is the normative source of truth for ATT public behavior. README, Quick Start and examples explain narrower tasks and link to the owning Reference section.
 
 Each contract has one semantic owner:

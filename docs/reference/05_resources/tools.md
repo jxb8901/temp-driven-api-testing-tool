@@ -80,7 +80,7 @@ callApi:
 
 The call resolves the explicit `${EXEC.ACTIONS...}` and `${EXEC.INPUT...}` references first and creates Tool inputs named `requestText` and `environment`. The command then substitutes `${input.requestText}` and `${input.environment}` from those inputs; `${input.environment}` does not read global configuration directly. The legacy `${requestText}` / `${ENVIRONMENT}` spelling and `${TOOL.input.*}` remain compatible only when each name is declared and emit `CONTEXT_TOOL_INPUT_SHORTHAND`.
 
-Each command token also accepts built-in calls through the same expression engine. Built-ins see only the declared Tool-input aliases shown above, and calls may be nested:
+Each command token also accepts built-in calls through the same expression engine. Built-ins see only the declared Tool-input aliases introduced in [Tool-definition `command` expressions](#tool-definition-command-expressions), and calls may be nested:
 
 ```yaml
 command:

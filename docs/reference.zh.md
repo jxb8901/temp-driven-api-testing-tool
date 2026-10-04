@@ -1,7 +1,7 @@
-# ATT V3.7.2 使用手冊與參考
+# ATT V3.7.3 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 3.7.2
+Version: 3.7.3
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -121,9 +121,9 @@ Status: 規範性使用者文件；由模組化來源自動生成
 - [Appendix A — Schema 與 Version Matrix](#appendix-a-schema-與-version-matrix)
 - [Appendix B — Compatibility 與 Deprecated Aliases](#appendix-b-compatibility-與-deprecated-aliases)
 - [Appendix C — Migration Notes](#appendix-c-migration-notes)
-  - [ATT 3.7.2 file arguments 與 Case log paths](#att-372-file-arguments-與-case-log-paths)
+  - [File arguments 與 Case log paths](#file-arguments-與-case-log-paths)
   - [Previous release Testdata Migration](#previous-release-testdata-migration)
-  - [ATT 3.7.2 Load mix migration](#att-372-load-mix-migration)
+  - [Load mix migration](#load-mix-migration)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
   - [Environment profile migration](#environment-profile-migration)
@@ -2577,7 +2577,7 @@ ATT 會把缺失路徑視作作者/運行時錯誤，而不是靜默渲染成空
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.7.2",
+  "attVersion": "3.7.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2669,7 +2669,7 @@ Deterministic legacy alias 在可一對一映射時可以保留並產生 migrati
 
 ## Appendix C — Migration Notes
 
-### ATT 3.7.2 file arguments 與 Case log paths
+### File arguments 與 Case log paths
 
 HTTPHelper call 不再接受 `file`；請直接將 `&{project-relative-file}` 傳入 `body`。MQHelper `send` 和 `request` 不再接受 `file`；請將 expression 傳入 `payload`。SSHHelper `upload` 現在要求 `payload` content，並拒絕 `localPath`；請直接傳入 `&{...}`。SSHHelper 不再支援 `download`，因為它需要 local destination path。若工作必須從主機取回檔案，請明確配置 command-backed Tool。這些變更移除 Resource API 原生的任意 binary local-file input；`&{...}` 提供 UTF-8 text。
 
@@ -2726,7 +2726,7 @@ Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader �
 
 Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[Action 與型別化值](reference.zh/14_actions.md)、[Runtime 與 Context 模型](reference.zh/03_runtime_context.md)、[Load 模式](reference.zh/04_execution_modes/load.md)與[Schema 矩陣](reference.zh/appendices/schema_matrix.md)。
 
-### ATT 3.7.2 Load mix migration
+### Load mix migration
 
 現有 `att-load/v1.5` 檔案仍相容。升級至 `att-load/v1.6` 後，可將 workload 的 `target` 改為 `mix`，設定 closed-user weighted target mix。每個 entry 需要唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool target。現行 summary contract 為 `att-load-summary/v1.1`；v1.0 保留作歷史格式。
 

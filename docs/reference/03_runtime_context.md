@@ -26,38 +26,38 @@ EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing di
 
 ### META field inventory and lifecycle
 
-The public META root contains only `PROJECT`, `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER` as listed below. META contains descriptive fields only. A path may be absent when its component is not active.
+The public META root contains only `PROJECT`, `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER`. META contains descriptive fields only. A path may be absent when its component is not active.
 
 | Public path | Meaning, type and example | Modes and availability | Scope and when absent |
 |---|---|---|---|
-| META.PROJECT.id | Project directory name; String, e.g. `payment-att`. | Run, Debug, Load; after project binding. | Execution-wide. |
-| META.PROJECT.root | Normalized project-root path; String, e.g. `/srv/att/payment`. | Run, Debug, Load; after project binding. | Execution-wide. |
+| META.PROJECT.id | Project directory name; String, for example, `payment-att`. | Run, Debug, Load; after project binding. | Execution-wide. |
+| META.PROJECT.root | Normalized project-root path; String, for example, `/srv/att/payment`. | Run, Debug, Load; after project binding. | Execution-wide. |
 | META.SOURCE.type | Source kind; String: `testcase`, `debug` or `load`. | Run, Debug, Load. | Execution-wide. |
-| META.SOURCE.path | Normalized absolute source path; String, e.g. `/srv/att/payment/testcase/payment.xlsx`, `/srv/att/payment/debug.yaml` or `/srv/att/payment/load/payment.yaml`. | Run, Debug, Load when a source file exists. | Execution-wide; absent for an in-memory source. |
-| META.SOURCE.caseId | Canonical TestCase or synthetic Debug Case ID; String, e.g. `payment.default.P001`. | Run, Debug. | Execution-wide; absent in Load. |
-| META.SOURCE.workbookId | Workbook identifier; String, e.g. `payment`. | Run. | Execution-wide; absent outside workbook Cases. |
-| META.SOURCE.groupId | Workbook group identifier; String, e.g. `default`. | Run. | Execution-wide; absent outside workbook Cases. |
-| META.SOURCE.rowCaseId | Case ID from the workbook row; String, e.g. `P001`. | Run. | Execution-wide; absent outside workbook Cases. |
-| META.SOURCE.sheet | Workbook sheet name; String, e.g. `Payment`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
-| META.SOURCE.row | One-based workbook row number; Number, e.g. `12`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
-| META.SOURCE.workbook | Optional workbook label; String when present, e.g. `payment_regression.xlsx`. | Run when supplied by the adapter. | Execution-wide; optional and otherwise absent. |
-| META.SOURCE.scenario | Load scenario basename without its suffix; String, e.g. `payment-smoke`. | Load. | Execution-wide; absent outside Load. |
+| META.SOURCE.path | Normalized absolute source path; String, for example, `/srv/att/payment/testcase/payment.xlsx`, `/srv/att/payment/debug.yaml` or `/srv/att/payment/load/payment.yaml`. | Run, Debug, Load when a source file exists. | Execution-wide; absent for an in-memory source. |
+| META.SOURCE.caseId | Canonical TestCase or synthetic Debug Case ID; String, for example, `payment.default.P001`. | Run, Debug. | Execution-wide; absent in Load. |
+| META.SOURCE.workbookId | Workbook identifier; String, for example, `payment`. | Run. | Execution-wide; absent outside workbook Cases. |
+| META.SOURCE.groupId | Workbook group identifier; String, for example, `default`. | Run. | Execution-wide; absent outside workbook Cases. |
+| META.SOURCE.rowCaseId | Case ID from the workbook row; String, for example, `P001`. | Run. | Execution-wide; absent outside workbook Cases. |
+| META.SOURCE.sheet | Workbook sheet name; String, for example, `Payment`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
+| META.SOURCE.row | One-based workbook row number; Number, for example, `12`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
+| META.SOURCE.workbook | Optional workbook label; String when present, for example, `payment_regression.xlsx`. | Run when supplied by the adapter. | Execution-wide; optional and otherwise absent. |
+| META.SOURCE.scenario | Load scenario basename without its suffix; String, for example, `payment-smoke`. | Load. | Execution-wide; absent outside Load. |
 | META.TARGET.type | Resolved target kind; String: `testcase`, `template`, `flow` or `tool`. | Run, Debug, Load; after target selection. | Execution-wide. |
-| META.TARGET.id | Resolved target identifier; String, e.g. `PAYMENT_INVOKE` or `payment.flow.v1`. | Run, Debug, Load; after target selection. | Execution-wide. |
-| META.TEMPLATE.id | Active Template or resolved Load execution-wrapper ID; String, e.g. `PAYMENT_INVOKE`. | Run/Debug while a Stage runs; Load after target resolution and while its wrapper runs. | Component scope; absent before target/template resolution, restored or removed after the scope. In Load Flow/Tool targets this is the resolved synthetic wrapper. |
-| META.TEMPLATE.path | Normalized Template or execution-wrapper directory; String, e.g. `/srv/att/templates/PAYMENT_INVOKE`. | Same availability as META.TEMPLATE.id. | Component scope; absent before resolution, restored or removed after the scope. |
-| META.FLOW.id | Active Flow ID; String, e.g. `payment.request.v1`. | Run, Debug, Load while that Flow invocation runs. | Invocation scope; push on entry, restore on return, absent when inactive. |
-| META.FLOW.invocationId | Caller Action ID; String, e.g. `sendRequest`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
-| META.FLOW.depth | One-based nested Flow depth; Number, e.g. `1`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
-| META.TOOL.id | Active configured Tool or built-in name; String, e.g. `payment.queryOrder` or `upper`. | Run, Debug, Load during the invocation. | Invocation scope; never retained as the “last Tool” after return. |
-| META.TOOL.type | Invocation kind; String, e.g. `tool` or `builtin`. | Same availability as META.TOOL.id. | Invocation scope; absent after return unless an outer invocation remains. |
-| META.DBHELPER.id | Logical DBHelper ID; String, e.g. `orders`. | Run, Debug, Load during a DBHelper operation/DB Action. | Invocation scope; absent after return unless an outer scope remains. |
+| META.TARGET.id | Resolved target identifier; String, for example, `PAYMENT_INVOKE` or `payment.flow.v1`. | Run, Debug, Load; after target selection. | Execution-wide. |
+| META.TEMPLATE.id | Active Template or resolved Load execution-wrapper ID; String, for example, `PAYMENT_INVOKE`. | Run/Debug while a Stage runs; Load after target resolution and while its wrapper runs. | Component scope; absent before target/template resolution, restored or removed after the scope. In Load Flow/Tool targets this is the resolved synthetic wrapper. |
+| META.TEMPLATE.path | Normalized Template or execution-wrapper directory; String, for example, `/srv/att/templates/PAYMENT_INVOKE`. | Same availability as META.TEMPLATE.id. | Component scope; absent before resolution, restored or removed after the scope. |
+| META.FLOW.id | Active Flow ID; String, for example, `payment.request.v1`. | Run, Debug, Load while that Flow invocation runs. | Invocation scope; push on entry, restore on return, absent when inactive. |
+| META.FLOW.invocationId | Caller Action ID; String, for example, `sendRequest`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
+| META.FLOW.depth | One-based nested Flow depth; Number, for example, `1`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
+| META.TOOL.id | Active configured Tool or built-in name; String, for example, `payment.queryOrder` or `upper`. | Run, Debug, Load during the invocation. | Invocation scope; never retained as the “last Tool” after return. |
+| META.TOOL.type | Invocation kind; String, for example, `tool` or `builtin`. | Same availability as META.TOOL.id. | Invocation scope; absent after return unless an outer invocation remains. |
+| META.DBHELPER.id | Logical DBHelper ID; String, for example, `orders`. | Run, Debug, Load during a DBHelper operation/DB Action. | Invocation scope; absent after return unless an outer scope remains. |
 | META.DBHELPER.type | Resource kind; String, `dbhelper`. | Same availability as META.DBHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
-| META.MQHELPER.id | Logical MQHelper ID; String, e.g. `payment`. | Run, Debug, Load during an MQHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
+| META.MQHELPER.id | Logical MQHelper ID; String, for example, `payment`. | Run, Debug, Load during an MQHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
 | META.MQHELPER.type | Resource kind; String, `mqhelper`. | Same availability as META.MQHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
-| META.HTTPHELPER.id | Logical HTTPHelper ID; String, e.g. `payment`. | Run, Debug, Load during an HTTPHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
+| META.HTTPHELPER.id | Logical HTTPHelper ID; String, for example, `payment`. | Run, Debug, Load during an HTTPHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
 | META.HTTPHELPER.type | Resource kind; String, `httphelper`. | Same availability as META.HTTPHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
-| META.SSHHELPER.id | Logical SSHHelper ID; String, e.g. `application`. | Run, Debug, Load during an SSH Resource Helper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
+| META.SSHHELPER.id | Logical SSHHelper ID; String, for example, `application`. | Run, Debug, Load during an SSH Resource Helper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
 | META.SSHHELPER.type | Resource kind; String, `sshhelper`. | Same availability as META.SSHHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
 
 META.SSHHELPER exposes only the logical helper ID and resource type. SSH endpoint, user, identity file and credentials stay private to the executor and are not META fields.

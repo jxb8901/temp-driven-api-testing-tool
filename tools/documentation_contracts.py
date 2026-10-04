@@ -193,6 +193,87 @@ def chapter_label_errors(text):
     return errors
 
 
+POSITIONAL_REFERENCE = re.compile(
+    r"\b(?:see|refer to)\b[^.!?;]{0,100}\b(?:above|below|following section|"
+    r"preceding section|chapter\s+\d+)\b|"
+    r"\b(?:described|explained|listed|defined|discussed|covered|shown)"
+    r"\s+(?:the\s+)?(?:above|below)\b|"
+    r"\b(?:commands?|options?|sections?|tables?|examples?|procedures?|steps?|items?)"
+    r"\s+(?:above|below|following|preceding)\b|"
+    r"\b(?:above|below|following|preceding)\s+(?:section|table|example|procedure|step)\b",
+    re.I,
+)
+NUMBERED_HEADING = re.compile(r"^#{1,6}\s+\d+(?:\.\d+)*\b")
+
+
+def editorial_source_files(root):
+    """Return editable current English Markdown, excluding generated manuals and history."""
+    candidates = {root / "README.md"}
+    for directory in (root / "docs", root / "examples"):
+        if directory.is_dir():
+            candidates.update(directory.rglob("*.md"))
+    generated = {root / "docs" / name for name in
+                 ("reference.md", "reference.zh.md")}
+    return sorted(path for path in candidates
+                  if path.is_file()
+                  and path not in generated
+                  and "history" not in path.relative_to(root).parts
+                  and not path.name.lower().endswith(".zh.md")
+                  and "reference.zh" not in path.relative_to(root).parts)
+
+
+def standalone_markdown(path, root):
+    """Whether an editable Markdown file is presented as a standalone page."""
+    rel = path.relative_to(root).as_posix()
+    if rel.startswith("docs/reference/"):
+        return path.name == "README.md"
+    return (rel == "README.md" or rel.startswith(("docs/", "examples/")))
+
+
+def editorial_errors(text, standalone=False, allow_reference_structure=False):
+    """Check low-noise Google-style rules on authored prose, not code samples."""
+    errors = []
+    prose = []
+    headings = []
+    fence_char = None
+    fence_length = 0
+    for lineno, line in enumerate(text.splitlines(), 1):
+        fence = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence:
+            marker = fence.group(1)
+            if fence_char is None:
+                fence_char, fence_length = marker[0], len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_length:
+                fence_char, fence_length = None, 0
+            continue
+        if fence_char is not None:
+            continue
+        heading = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", line)
+        if heading:
+            headings.append((lineno, len(heading.group(1)), heading.group(2)))
+            if NUMBERED_HEADING.match(line) and not allow_reference_structure:
+                errors.append("line %d: remove a numeric sequence prefix from the heading" % lineno)
+        # Inline code and Markdown link destinations contain identifiers or
+        # examples, so they are not treated as editorial prose.
+        plain = re.sub(r"`[^`]*`", "", line)
+        plain = re.sub(r"\]\([^)]*\)", "]", plain)
+        prose.append((lineno, plain))
+
+    if standalone:
+        h1s = [lineno for lineno, level, _ in headings if level == 1]
+        if len(h1s) != 1:
+            errors.append("expected exactly one H1, found %d" % len(h1s))
+
+    for lineno, line in prose:
+        if re.search(r"\be\.g\.", line, re.I):
+            errors.append("line %d: use 'for example' or 'such as' instead of 'e.g.'" % lineno)
+        if re.search(r"\band/or\b", line, re.I):
+            errors.append("line %d: replace 'and/or' with an unambiguous alternative" % lineno)
+        if POSITIONAL_REFERENCE.search(line):
+            errors.append("line %d: replace a positional cross-reference with descriptive link text" % lineno)
+    return errors
+
+
 def current_files(root):
     files = {root / "README.md"}
     for directory, suffixes in (("docs", (".md", ".html")),
@@ -259,6 +340,17 @@ def validate(root=ROOT):
                 errors.append(rel + ": use canonical English ATT terms in ZH prose")
         if re.search(r"\$\{output\.replyReceived\}", text):
             errors.append(rel + ": use output.result.replyReceived")
+    for path in editorial_source_files(root):
+        rel = path.relative_to(root).as_posix()
+        try:
+            errors += [rel + ": " + error for error in
+                       editorial_errors(
+                           path.read_text(encoding="utf-8"),
+                           standalone_markdown(path, root),
+                           allow_reference_structure=rel.startswith("docs/reference/")
+                           and path.name != "README.md")]
+        except ValueError as exc:
+            errors.append(rel + ": " + str(exc))
     return errors
 
 

@@ -121,7 +121,7 @@ duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends
 
 #### Load identity and output layout
 
-Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Bootstrap vars are evaluated after that identity is published, so they can use EXEC.ID and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See the execution ID initialization section below for field availability and function restrictions.
+Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Bootstrap vars are evaluated after that identity is published, so they can use EXEC.ID and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See [Load execution ID initialization](#load-execution-id-initialization) for field availability and function restrictions.
 
 Generated IDs must be non-empty, path-safe segments. Duplicate IDs fail before the target starts; ATT does not silently append a suffix.
 

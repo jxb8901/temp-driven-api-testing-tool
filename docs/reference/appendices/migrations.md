@@ -1,6 +1,6 @@
 ## Appendix C — Migration Notes
 
-### ATT 3.7.2 file arguments and case-log paths
+### File arguments and case-log paths
 
 HTTPHelper calls no longer accept `file`; pass `&{project-relative-file}` directly as `body`. MQHelper `send` and `request` no longer accept `file`; pass the expression as `payload`. SSHHelper `upload` now requires content in `payload` and rejects `localPath`; pass `&{...}` directly. SSHHelper no longer supports `download`, because it requires a local destination path. Use a deliberately configured command-backed Tool for workflows that must retrieve files from a host. These changes remove native arbitrary-binary local-file input from these Resource APIs; `&{...}` supplies UTF-8 text.
 

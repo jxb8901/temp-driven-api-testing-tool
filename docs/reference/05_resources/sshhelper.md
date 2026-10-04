@@ -24,7 +24,7 @@ actions:
       )}
 ```
 
-`execute` requires `command` and accepts `stdoutFormat: text|json|yaml|xml` plus `timeoutMs`. Text returns the exact stdout String; the structured formats parse stdout into the native Map/List/scalar result. A timeout, non-zero remote exit, or parse failure returns an operation error with a distinct category and retains bounded stderr, exit code, byte counts and transport evidence. SSH resource execution treats a non-zero exit as an operation failure; this is separate from the legacy command-backed Tool fan-out contract described below.
+`execute` requires `command` and accepts `stdoutFormat: text|json|yaml|xml` plus `timeoutMs`. Text returns the exact stdout String; the structured formats parse stdout into the native Map/List/scalar result. A timeout, non-zero remote exit, or parse failure returns an operation error with a distinct category and retains bounded stderr, exit code, byte counts and transport evidence. SSH resource execution treats a non-zero exit as an operation failure. The command-backed Tool fan-out contract has different failure semantics.
 
 `upload` requires `remotePath` and a String or byte-array `payload`. To upload a project file, pass the UTF-8 String returned by `&{...}` directly; SSHHelper does not accept or resolve local filesystem paths. Map/List values are rejected rather than implicitly serialized. Absolute remote paths are allowed. Upload overwrite defaults to `true`.
 

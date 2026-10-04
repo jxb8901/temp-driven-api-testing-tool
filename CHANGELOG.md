@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.7.3 - 2026-10-04
+
+- Adopt the Google Developer Documentation Style Guide as the editorial baseline for current ATT documentation, with ATT-specific terminology and identifier exceptions (#144).
+- Add deterministic editorial checks for standalone-page H1 counts, numbered headings, ambiguous abbreviations, and selected positional references; exclude generated Reference outputs from editorial lint while preserving freshness and EN/ZH structure checks.
+- Remove sequence numbers from Quick Start headings and clarify current documentation wording covered by the new checks.
+- Upgrade ATT product version to 3.7.3.
+
 ## 3.7.2 - 2026-10-04
 
 - Implement issue #52: add deterministic weighted closed-VU mixes across pre-resolved Template, Flow and Tool targets, with shared run resources, VU-scoped testdata state, mix identity, bounded per-entry metrics, and evidence/report attribution.

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT V3.7.2 Reference Manual</title>
+  <title>ATT V3.7.3 Reference Manual</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,12 +233,12 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT V3.7.2 Reference Manual</h1>
+<h1 class="title">ATT V3.7.3 Reference Manual</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
-<li><a href="#att-v372-reference-manual"
-id="toc-att-v372-reference-manual">ATT V3.7.2 Reference Manual</a>
+<li><a href="#att-v373-reference-manual"
+id="toc-att-v373-reference-manual">ATT V3.7.3 Reference Manual</a>
 <ul>
 <li><a href="#01-overview-and-product-model"
 id="toc-01-overview-and-product-model">01 Overview and Product Model</a>
@@ -519,9 +519,9 @@ Compatibility and Deprecated Aliases</a></li>
 <li><a href="#appendix-c--migration-notes"
 id="toc-appendix-c--migration-notes">Appendix C — Migration Notes</a>
 <ul>
-<li><a href="#att-372-file-arguments-and-case-log-paths"
-id="toc-att-372-file-arguments-and-case-log-paths">ATT 3.7.2 file
-arguments and case-log paths</a></li>
+<li><a href="#file-arguments-and-case-log-paths"
+id="toc-file-arguments-and-case-log-paths">File arguments and case-log
+paths</a></li>
 <li><a href="#previous-release-testdata-migration"
 id="toc-previous-release-testdata-migration">Previous release testdata
 migration</a></li>
@@ -553,8 +553,8 @@ id="toc-advanced-diagnostics">Advanced diagnostics</a></li>
 </ul></li>
 </ul>
 </nav>
-<h1 id="att-v372-reference-manual">ATT V3.7.2 Reference Manual</h1>
-<p>Author: Jeffrey + ChatGPT Version: 3.7.2 Status: Normative end-user
+<h1 id="att-v373-reference-manual">ATT V3.7.3 Reference Manual</h1>
+<p>Author: Jeffrey + ChatGPT Version: 3.7.3 Status: Normative end-user
 documentation; generated from modular sources</p>
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
 
@@ -1572,8 +1572,8 @@ lifecycle</h3>
 <code>SOURCE</code>, <code>TARGET</code>, <code>TEMPLATE</code>,
 <code>FLOW</code>, <code>TOOL</code>, <code>DBHELPER</code>,
 <code>MQHELPER</code>, <code>HTTPHELPER</code>, and
-<code>SSHHELPER</code> as listed below. META contains descriptive fields
-only. A path may be absent when its component is not active.</p>
+<code>SSHHELPER</code>. META contains descriptive fields only. A path
+may be absent when its component is not active.</p>
 <table>
 <thead>
 <tr class="header">
@@ -1586,13 +1586,14 @@ only. A path may be absent when its component is not active.</p>
 <tbody>
 <tr class="odd">
 <td>META.PROJECT.id</td>
-<td>Project directory name; String, e.g. <code>payment-att</code>.</td>
+<td>Project directory name; String, for example,
+<code>payment-att</code>.</td>
 <td>Run, Debug, Load; after project binding.</td>
 <td>Execution-wide.</td>
 </tr>
 <tr class="even">
 <td>META.PROJECT.root</td>
-<td>Normalized project-root path; String, e.g.
+<td>Normalized project-root path; String, for example,
 <code>/srv/att/payment</code>.</td>
 <td>Run, Debug, Load; after project binding.</td>
 <td>Execution-wide.</td>
@@ -1606,7 +1607,7 @@ only. A path may be absent when its component is not active.</p>
 </tr>
 <tr class="even">
 <td>META.SOURCE.path</td>
-<td>Normalized absolute source path; String, e.g.
+<td>Normalized absolute source path; String, for example,
 <code>/srv/att/payment/testcase/payment.xlsx</code>,
 <code>/srv/att/payment/debug.yaml</code> or
 <code>/srv/att/payment/load/payment.yaml</code>.</td>
@@ -1615,51 +1616,54 @@ only. A path may be absent when its component is not active.</p>
 </tr>
 <tr class="odd">
 <td>META.SOURCE.caseId</td>
-<td>Canonical TestCase or synthetic Debug Case ID; String, e.g.
+<td>Canonical TestCase or synthetic Debug Case ID; String, for example,
 <code>payment.default.P001</code>.</td>
 <td>Run, Debug.</td>
 <td>Execution-wide; absent in Load.</td>
 </tr>
 <tr class="even">
 <td>META.SOURCE.workbookId</td>
-<td>Workbook identifier; String, e.g. <code>payment</code>.</td>
+<td>Workbook identifier; String, for example, <code>payment</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
 <tr class="odd">
 <td>META.SOURCE.groupId</td>
-<td>Workbook group identifier; String, e.g. <code>default</code>.</td>
+<td>Workbook group identifier; String, for example,
+<code>default</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
 <tr class="even">
 <td>META.SOURCE.rowCaseId</td>
-<td>Case ID from the workbook row; String, e.g. <code>P001</code>.</td>
+<td>Case ID from the workbook row; String, for example,
+<code>P001</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
 <tr class="odd">
 <td>META.SOURCE.sheet</td>
-<td>Workbook sheet name; String, e.g. <code>Payment</code>.</td>
+<td>Workbook sheet name; String, for example, <code>Payment</code>.</td>
 <td>Run when supplied by the workbook adapter.</td>
 <td>Execution-wide; absent for Debug/Load or when unavailable.</td>
 </tr>
 <tr class="even">
 <td>META.SOURCE.row</td>
-<td>One-based workbook row number; Number, e.g. <code>12</code>.</td>
+<td>One-based workbook row number; Number, for example,
+<code>12</code>.</td>
 <td>Run when supplied by the workbook adapter.</td>
 <td>Execution-wide; absent for Debug/Load or when unavailable.</td>
 </tr>
 <tr class="odd">
 <td>META.SOURCE.workbook</td>
-<td>Optional workbook label; String when present, e.g.
+<td>Optional workbook label; String when present, for example,
 <code>payment_regression.xlsx</code>.</td>
 <td>Run when supplied by the adapter.</td>
 <td>Execution-wide; optional and otherwise absent.</td>
 </tr>
 <tr class="even">
 <td>META.SOURCE.scenario</td>
-<td>Load scenario basename without its suffix; String, e.g.
+<td>Load scenario basename without its suffix; String, for example,
 <code>payment-smoke</code>.</td>
 <td>Load.</td>
 <td>Execution-wide; absent outside Load.</td>
@@ -1673,15 +1677,15 @@ only. A path may be absent when its component is not active.</p>
 </tr>
 <tr class="even">
 <td>META.TARGET.id</td>
-<td>Resolved target identifier; String, e.g. <code>PAYMENT_INVOKE</code>
-or <code>payment.flow.v1</code>.</td>
+<td>Resolved target identifier; String, for example,
+<code>PAYMENT_INVOKE</code> or <code>payment.flow.v1</code>.</td>
 <td>Run, Debug, Load; after target selection.</td>
 <td>Execution-wide.</td>
 </tr>
 <tr class="odd">
 <td>META.TEMPLATE.id</td>
-<td>Active Template or resolved Load execution-wrapper ID; String, e.g.
-<code>PAYMENT_INVOKE</code>.</td>
+<td>Active Template or resolved Load execution-wrapper ID; String, for
+example, <code>PAYMENT_INVOKE</code>.</td>
 <td>Run/Debug while a Stage runs; Load after target resolution and while
 its wrapper runs.</td>
 <td>Component scope; absent before target/template resolution, restored
@@ -1690,34 +1694,37 @@ resolved synthetic wrapper.</td>
 </tr>
 <tr class="even">
 <td>META.TEMPLATE.path</td>
-<td>Normalized Template or execution-wrapper directory; String, e.g.
-<code>/srv/att/templates/PAYMENT_INVOKE</code>.</td>
+<td>Normalized Template or execution-wrapper directory; String, for
+example, <code>/srv/att/templates/PAYMENT_INVOKE</code>.</td>
 <td>Same availability as META.TEMPLATE.id.</td>
 <td>Component scope; absent before resolution, restored or removed after
 the scope.</td>
 </tr>
 <tr class="odd">
 <td>META.FLOW.id</td>
-<td>Active Flow ID; String, e.g. <code>payment.request.v1</code>.</td>
+<td>Active Flow ID; String, for example,
+<code>payment.request.v1</code>.</td>
 <td>Run, Debug, Load while that Flow invocation runs.</td>
 <td>Invocation scope; push on entry, restore on return, absent when
 inactive.</td>
 </tr>
 <tr class="even">
 <td>META.FLOW.invocationId</td>
-<td>Caller Action ID; String, e.g. <code>sendRequest</code>.</td>
+<td>Caller Action ID; String, for example,
+<code>sendRequest</code>.</td>
 <td>Same availability as META.FLOW.id.</td>
 <td>Invocation scope; absent when no Flow is active.</td>
 </tr>
 <tr class="odd">
 <td>META.FLOW.depth</td>
-<td>One-based nested Flow depth; Number, e.g. <code>1</code>.</td>
+<td>One-based nested Flow depth; Number, for example,
+<code>1</code>.</td>
 <td>Same availability as META.FLOW.id.</td>
 <td>Invocation scope; absent when no Flow is active.</td>
 </tr>
 <tr class="even">
 <td>META.TOOL.id</td>
-<td>Active configured Tool or built-in name; String, e.g.
+<td>Active configured Tool or built-in name; String, for example,
 <code>payment.queryOrder</code> or <code>upper</code>.</td>
 <td>Run, Debug, Load during the invocation.</td>
 <td>Invocation scope; never retained as the “last Tool” after
@@ -1725,7 +1732,7 @@ return.</td>
 </tr>
 <tr class="odd">
 <td>META.TOOL.type</td>
-<td>Invocation kind; String, e.g. <code>tool</code> or
+<td>Invocation kind; String, for example, <code>tool</code> or
 <code>builtin</code>.</td>
 <td>Same availability as META.TOOL.id.</td>
 <td>Invocation scope; absent after return unless an outer invocation
@@ -1733,7 +1740,7 @@ remains.</td>
 </tr>
 <tr class="even">
 <td>META.DBHELPER.id</td>
-<td>Logical DBHelper ID; String, e.g. <code>orders</code>.</td>
+<td>Logical DBHelper ID; String, for example, <code>orders</code>.</td>
 <td>Run, Debug, Load during a DBHelper operation/DB Action.</td>
 <td>Invocation scope; absent after return unless an outer scope
 remains.</td>
@@ -1747,7 +1754,7 @@ remains.</td>
 </tr>
 <tr class="even">
 <td>META.MQHELPER.id</td>
-<td>Logical MQHelper ID; String, e.g. <code>payment</code>.</td>
+<td>Logical MQHelper ID; String, for example, <code>payment</code>.</td>
 <td>Run, Debug, Load during an MQHelper operation.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
@@ -1761,7 +1768,8 @@ remains.</td>
 </tr>
 <tr class="even">
 <td>META.HTTPHELPER.id</td>
-<td>Logical HTTPHelper ID; String, e.g. <code>payment</code>.</td>
+<td>Logical HTTPHelper ID; String, for example,
+<code>payment</code>.</td>
 <td>Run, Debug, Load during an HTTPHelper operation.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
@@ -1775,7 +1783,8 @@ remains.</td>
 </tr>
 <tr class="even">
 <td>META.SSHHELPER.id</td>
-<td>Logical SSHHelper ID; String, e.g. <code>application</code>.</td>
+<td>Logical SSHHelper ID; String, for example,
+<code>application</code>.</td>
 <td>Run, Debug, Load during an SSH Resource Helper operation.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
@@ -2529,9 +2538,10 @@ rendered inputs with the selected environment.</td>
 <p>Load-specific evidence retention (<code>metrics</code>,
 <code>failures</code>, <code>samples</code>, <code>all</code>) does not
 apply to a standalone Debug invocation. Debug always keeps its
-invocation result and artifacts under its own debug directory; see the
-Load evidence retention section in Chapter 4 when the same target is
-exercised by a load run.</p>
+invocation result and artifacts under its own debug directory. For the
+same target in a load run, see <a
+href="reference/04_execution_modes/load.md#evidence-and-resource-output">Load
+evidence and resource output</a>.</p>
 <h4 id="configuration-examples">Configuration examples</h4>
 <p>The following examples show the supported placement of debug values.
 Every file is a complete <code>att-debug/v1.1</code> document.</p>
@@ -2886,8 +2896,9 @@ default run-scoped ID. Otherwise, ATT evaluates it once during
 initialization with the ordinary ${...} / #{...} engine. Bootstrap vars
 are evaluated after that identity is published, so they can use EXEC.ID
 and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID;
-arrival-rate cannot. See the execution ID initialization section below
-for field availability and function restrictions.</p>
+arrival-rate cannot. See <a
+href="#load-execution-id-initialization">Load execution ID
+initialization</a> for field availability and function restrictions.</p>
 <p>Generated IDs must be non-empty, path-safe segments. Duplicate IDs
 fail before the target starts; ATT does not silently append a
 suffix.</p>
@@ -3272,7 +3283,9 @@ remain compatible only when each name is declared and emit
 <code>CONTEXT_TOOL_INPUT_SHORTHAND</code>.</p>
 <p>Each command token also accepts built-in calls through the same
 expression engine. Built-ins see only the declared Tool-input aliases
-shown above, and calls may be nested:</p>
+introduced in <a
+href="#tool-definition-command-expressions">Tool-definition
+<code>command</code> expressions</a>, and calls may be nested:</p>
 <div class="sourceCode" id="cb50"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span></span>
 <span id="cb50-2"><a href="#cb50-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
@@ -4017,8 +4030,8 @@ structured formats parse stdout into the native Map/List/scalar result.
 A timeout, non-zero remote exit, or parse failure returns an operation
 error with a distinct category and retains bounded stderr, exit code,
 byte counts and transport evidence. SSH resource execution treats a
-non-zero exit as an operation failure; this is separate from the legacy
-command-backed Tool fan-out contract described below.</p>
+non-zero exit as an operation failure. The command-backed Tool fan-out
+contract has different failure semantics.</p>
 <p><code>upload</code> requires <code>remotePath</code> and a String or
 byte-array <code>payload</code>. To upload a project file, pass the
 UTF-8 String returned by <code>&amp;{...}</code> directly; SSHHelper
@@ -4434,16 +4447,16 @@ retry interval is outside that timeout.</p>
 <p>A direct <code>query</code> Action may also use the standard retry
 block with <code>maxAttempts</code> 2–10, <code>intervalMs</code>
 0–3,600,000, and a non-empty unique <code>retryOn</code> list containing
-<code>ASSERTION</code> and/or <code>TIMEOUT</code>. An explicit Action
-<code>timeoutMs</code> overrides the helper's statement-timeout default;
-without it, the helper default applies. JDBC query timeout is rounded up
-to whole seconds while ATT retains millisecond deadline cancellation.
-<code>ASSERTION</code> requires an Action <code>assert</code>. Ordinary
-SQL errors are terminal. Retry-enabled query attempts are retained in
-<code>output.attempts[n]</code>; the top-level
-<code>output.result</code> / <code>output.evidence</code> represent the
-final or winning attempt, with <code>winningAttempt</code> or
-<code>finalAttempt</code> recording the terminal attempt number.</p>
+<code>ASSERTION</code>, <code>TIMEOUT</code>, or both. An explicit
+Action <code>timeoutMs</code> overrides the helper's statement-timeout
+default; without it, the helper default applies. JDBC query timeout is
+rounded up to whole seconds while ATT retains millisecond deadline
+cancellation. <code>ASSERTION</code> requires an Action
+<code>assert</code>. Ordinary SQL errors are terminal. Retry-enabled
+query attempts are retained in <code>output.attempts[n]</code>; the
+top-level <code>output.result</code> / <code>output.evidence</code>
+represent the final or winning attempt, with <code>winningAttempt</code>
+or <code>finalAttempt</code> recording the terminal attempt number.</p>
 <p>Direct <code>update</code> Actions support <code>timeoutMs</code> but
 deliberately reject <code>retry</code>. A timeout or database/transport
 failure cannot generally prove whether a mutation reached or committed
@@ -4594,7 +4607,7 @@ environments:</p>
 <p>The common config keeps the existing templates, testcase roots,
 run/execution/report settings, <code>toolGroups</code>, and global
 <code>tools</code> registry. The profile layer contains typed
-DB/MQ/SSH/HTTP descriptor lists; the example below shows DB/MQ
+DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ
 bindings:</p>
 <div class="sourceCode" id="cb77"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/config.yaml</span></span>
@@ -6067,7 +6080,7 @@ reports and archives before sharing.</p>
 <div class="sourceCode" id="cb93"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb93-1"><a href="#cb93-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
 <span id="cb93-2"><a href="#cb93-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb93-3"><a href="#cb93-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.7.2&quot;</span><span class="fu">,</span></span>
+<span id="cb93-3"><a href="#cb93-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.7.3&quot;</span><span class="fu">,</span></span>
 <span id="cb93-4"><a href="#cb93-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
 <span id="cb93-5"><a href="#cb93-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
 <span id="cb93-6"><a href="#cb93-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
@@ -6265,8 +6278,8 @@ scope isolation or the common result/evidence contract. Deprecated
 CLI/authoring forms remain documented in their owning chapter or
 CHANGELOG only when users still need a migration path.</p>
 <h2 id="appendix-c--migration-notes">Appendix C — Migration Notes</h2>
-<h3 id="att-372-file-arguments-and-case-log-paths">ATT 3.7.2 file
-arguments and case-log paths</h3>
+<h3 id="file-arguments-and-case-log-paths">File arguments and case-log
+paths</h3>
 <p>HTTPHelper calls no longer accept <code>file</code>; pass
 <code>&amp;{project-relative-file}</code> directly as <code>body</code>.
 MQHelper <code>send</code> and <code>request</code> no longer accept

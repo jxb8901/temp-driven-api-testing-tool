@@ -71,7 +71,7 @@ config/
 └── mqhelpers/{sit,uat}/payment.yaml
 ```
 
-The common config keeps the existing templates, testcase roots, run/execution/report settings, `toolGroups`, and global `tools` registry. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists; the example below shows DB/MQ bindings:
+The common config keeps the existing templates, testcase roots, run/execution/report settings, `toolGroups`, and global `tools` registry. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
 
 ```yaml
 # config/config.yaml

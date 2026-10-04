@@ -1,7 +1,7 @@
-# ATT V3.7.2 Reference Manual
+# ATT V3.7.3 Reference Manual
 
 Author: Jeffrey + ChatGPT
-Version: 3.7.2
+Version: 3.7.3
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -121,7 +121,7 @@ Status: Normative end-user documentation; generated from modular sources
 - [Appendix A — Schema and Version Matrix](#appendix-a-schema-and-version-matrix)
 - [Appendix B — Compatibility and Deprecated Aliases](#appendix-b-compatibility-and-deprecated-aliases)
 - [Appendix C — Migration Notes](#appendix-c-migration-notes)
-  - [ATT 3.7.2 file arguments and case-log paths](#att-372-file-arguments-and-case-log-paths)
+  - [File arguments and case-log paths](#file-arguments-and-case-log-paths)
   - [Previous release testdata migration](#previous-release-testdata-migration)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
@@ -641,38 +641,38 @@ EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing di
 
 ### META field inventory and lifecycle
 
-The public META root contains only `PROJECT`, `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER` as listed below. META contains descriptive fields only. A path may be absent when its component is not active.
+The public META root contains only `PROJECT`, `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER`. META contains descriptive fields only. A path may be absent when its component is not active.
 
 | Public path | Meaning, type and example | Modes and availability | Scope and when absent |
 |---|---|---|---|
-| META.PROJECT.id | Project directory name; String, e.g. `payment-att`. | Run, Debug, Load; after project binding. | Execution-wide. |
-| META.PROJECT.root | Normalized project-root path; String, e.g. `/srv/att/payment`. | Run, Debug, Load; after project binding. | Execution-wide. |
+| META.PROJECT.id | Project directory name; String, for example, `payment-att`. | Run, Debug, Load; after project binding. | Execution-wide. |
+| META.PROJECT.root | Normalized project-root path; String, for example, `/srv/att/payment`. | Run, Debug, Load; after project binding. | Execution-wide. |
 | META.SOURCE.type | Source kind; String: `testcase`, `debug` or `load`. | Run, Debug, Load. | Execution-wide. |
-| META.SOURCE.path | Normalized absolute source path; String, e.g. `/srv/att/payment/testcase/payment.xlsx`, `/srv/att/payment/debug.yaml` or `/srv/att/payment/load/payment.yaml`. | Run, Debug, Load when a source file exists. | Execution-wide; absent for an in-memory source. |
-| META.SOURCE.caseId | Canonical TestCase or synthetic Debug Case ID; String, e.g. `payment.default.P001`. | Run, Debug. | Execution-wide; absent in Load. |
-| META.SOURCE.workbookId | Workbook identifier; String, e.g. `payment`. | Run. | Execution-wide; absent outside workbook Cases. |
-| META.SOURCE.groupId | Workbook group identifier; String, e.g. `default`. | Run. | Execution-wide; absent outside workbook Cases. |
-| META.SOURCE.rowCaseId | Case ID from the workbook row; String, e.g. `P001`. | Run. | Execution-wide; absent outside workbook Cases. |
-| META.SOURCE.sheet | Workbook sheet name; String, e.g. `Payment`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
-| META.SOURCE.row | One-based workbook row number; Number, e.g. `12`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
-| META.SOURCE.workbook | Optional workbook label; String when present, e.g. `payment_regression.xlsx`. | Run when supplied by the adapter. | Execution-wide; optional and otherwise absent. |
-| META.SOURCE.scenario | Load scenario basename without its suffix; String, e.g. `payment-smoke`. | Load. | Execution-wide; absent outside Load. |
+| META.SOURCE.path | Normalized absolute source path; String, for example, `/srv/att/payment/testcase/payment.xlsx`, `/srv/att/payment/debug.yaml` or `/srv/att/payment/load/payment.yaml`. | Run, Debug, Load when a source file exists. | Execution-wide; absent for an in-memory source. |
+| META.SOURCE.caseId | Canonical TestCase or synthetic Debug Case ID; String, for example, `payment.default.P001`. | Run, Debug. | Execution-wide; absent in Load. |
+| META.SOURCE.workbookId | Workbook identifier; String, for example, `payment`. | Run. | Execution-wide; absent outside workbook Cases. |
+| META.SOURCE.groupId | Workbook group identifier; String, for example, `default`. | Run. | Execution-wide; absent outside workbook Cases. |
+| META.SOURCE.rowCaseId | Case ID from the workbook row; String, for example, `P001`. | Run. | Execution-wide; absent outside workbook Cases. |
+| META.SOURCE.sheet | Workbook sheet name; String, for example, `Payment`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
+| META.SOURCE.row | One-based workbook row number; Number, for example, `12`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
+| META.SOURCE.workbook | Optional workbook label; String when present, for example, `payment_regression.xlsx`. | Run when supplied by the adapter. | Execution-wide; optional and otherwise absent. |
+| META.SOURCE.scenario | Load scenario basename without its suffix; String, for example, `payment-smoke`. | Load. | Execution-wide; absent outside Load. |
 | META.TARGET.type | Resolved target kind; String: `testcase`, `template`, `flow` or `tool`. | Run, Debug, Load; after target selection. | Execution-wide. |
-| META.TARGET.id | Resolved target identifier; String, e.g. `PAYMENT_INVOKE` or `payment.flow.v1`. | Run, Debug, Load; after target selection. | Execution-wide. |
-| META.TEMPLATE.id | Active Template or resolved Load execution-wrapper ID; String, e.g. `PAYMENT_INVOKE`. | Run/Debug while a Stage runs; Load after target resolution and while its wrapper runs. | Component scope; absent before target/template resolution, restored or removed after the scope. In Load Flow/Tool targets this is the resolved synthetic wrapper. |
-| META.TEMPLATE.path | Normalized Template or execution-wrapper directory; String, e.g. `/srv/att/templates/PAYMENT_INVOKE`. | Same availability as META.TEMPLATE.id. | Component scope; absent before resolution, restored or removed after the scope. |
-| META.FLOW.id | Active Flow ID; String, e.g. `payment.request.v1`. | Run, Debug, Load while that Flow invocation runs. | Invocation scope; push on entry, restore on return, absent when inactive. |
-| META.FLOW.invocationId | Caller Action ID; String, e.g. `sendRequest`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
-| META.FLOW.depth | One-based nested Flow depth; Number, e.g. `1`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
-| META.TOOL.id | Active configured Tool or built-in name; String, e.g. `payment.queryOrder` or `upper`. | Run, Debug, Load during the invocation. | Invocation scope; never retained as the “last Tool” after return. |
-| META.TOOL.type | Invocation kind; String, e.g. `tool` or `builtin`. | Same availability as META.TOOL.id. | Invocation scope; absent after return unless an outer invocation remains. |
-| META.DBHELPER.id | Logical DBHelper ID; String, e.g. `orders`. | Run, Debug, Load during a DBHelper operation/DB Action. | Invocation scope; absent after return unless an outer scope remains. |
+| META.TARGET.id | Resolved target identifier; String, for example, `PAYMENT_INVOKE` or `payment.flow.v1`. | Run, Debug, Load; after target selection. | Execution-wide. |
+| META.TEMPLATE.id | Active Template or resolved Load execution-wrapper ID; String, for example, `PAYMENT_INVOKE`. | Run/Debug while a Stage runs; Load after target resolution and while its wrapper runs. | Component scope; absent before target/template resolution, restored or removed after the scope. In Load Flow/Tool targets this is the resolved synthetic wrapper. |
+| META.TEMPLATE.path | Normalized Template or execution-wrapper directory; String, for example, `/srv/att/templates/PAYMENT_INVOKE`. | Same availability as META.TEMPLATE.id. | Component scope; absent before resolution, restored or removed after the scope. |
+| META.FLOW.id | Active Flow ID; String, for example, `payment.request.v1`. | Run, Debug, Load while that Flow invocation runs. | Invocation scope; push on entry, restore on return, absent when inactive. |
+| META.FLOW.invocationId | Caller Action ID; String, for example, `sendRequest`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
+| META.FLOW.depth | One-based nested Flow depth; Number, for example, `1`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
+| META.TOOL.id | Active configured Tool or built-in name; String, for example, `payment.queryOrder` or `upper`. | Run, Debug, Load during the invocation. | Invocation scope; never retained as the “last Tool” after return. |
+| META.TOOL.type | Invocation kind; String, for example, `tool` or `builtin`. | Same availability as META.TOOL.id. | Invocation scope; absent after return unless an outer invocation remains. |
+| META.DBHELPER.id | Logical DBHelper ID; String, for example, `orders`. | Run, Debug, Load during a DBHelper operation/DB Action. | Invocation scope; absent after return unless an outer scope remains. |
 | META.DBHELPER.type | Resource kind; String, `dbhelper`. | Same availability as META.DBHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
-| META.MQHELPER.id | Logical MQHelper ID; String, e.g. `payment`. | Run, Debug, Load during an MQHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
+| META.MQHELPER.id | Logical MQHelper ID; String, for example, `payment`. | Run, Debug, Load during an MQHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
 | META.MQHELPER.type | Resource kind; String, `mqhelper`. | Same availability as META.MQHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
-| META.HTTPHELPER.id | Logical HTTPHelper ID; String, e.g. `payment`. | Run, Debug, Load during an HTTPHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
+| META.HTTPHELPER.id | Logical HTTPHelper ID; String, for example, `payment`. | Run, Debug, Load during an HTTPHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
 | META.HTTPHELPER.type | Resource kind; String, `httphelper`. | Same availability as META.HTTPHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
-| META.SSHHELPER.id | Logical SSHHelper ID; String, e.g. `application`. | Run, Debug, Load during an SSH Resource Helper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
+| META.SSHHELPER.id | Logical SSHHelper ID; String, for example, `application`. | Run, Debug, Load during an SSH Resource Helper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
 | META.SSHHELPER.type | Resource kind; String, `sshhelper`. | Same availability as META.SSHHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
 
 META.SSHHELPER exposes only the logical helper ID and resource type. SSH endpoint, user, identity file and credentials stay private to the executor and are not META fields.
@@ -959,7 +959,7 @@ Use the output directory to separate diagnosis stages:
 | MQ reports a missing/unsafe payload | Verify the absolute package path or the relative Case-output path; remove traversal and symlinks. |
 | The action runs but output is unexpected | Read `case.log`, `result.yaml` and the action artifacts under `output/debug/<debugId>/`; compare rendered inputs with the selected environment. |
 
-Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does not apply to a standalone Debug invocation. Debug always keeps its invocation result and artifacts under its own debug directory; see the Load evidence retention section in Chapter 4 when the same target is exercised by a load run.
+Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does not apply to a standalone Debug invocation. Debug always keeps its invocation result and artifacts under its own debug directory. For the same target in a load run, see [Load evidence and resource output](reference/04_execution_modes/load.md#evidence-and-resource-output).
 
 #### Configuration examples
 
@@ -1174,7 +1174,7 @@ duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends
 
 #### Load identity and output layout
 
-Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Bootstrap vars are evaluated after that identity is published, so they can use EXEC.ID and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See the execution ID initialization section below for field availability and function restrictions.
+Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Bootstrap vars are evaluated after that identity is published, so they can use EXEC.ID and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See [Load execution ID initialization](#load-execution-id-initialization) for field availability and function restrictions.
 
 Generated IDs must be non-empty, path-safe segments. Duplicate IDs fail before the target starts; ATT does not silently append a suffix.
 
@@ -1407,7 +1407,7 @@ callApi:
 
 The call resolves the explicit `${EXEC.ACTIONS...}` and `${EXEC.INPUT...}` references first and creates Tool inputs named `requestText` and `environment`. The command then substitutes `${input.requestText}` and `${input.environment}` from those inputs; `${input.environment}` does not read global configuration directly. The legacy `${requestText}` / `${ENVIRONMENT}` spelling and `${TOOL.input.*}` remain compatible only when each name is declared and emit `CONTEXT_TOOL_INPUT_SHORTHAND`.
 
-Each command token also accepts built-in calls through the same expression engine. Built-ins see only the declared Tool-input aliases shown above, and calls may be nested:
+Each command token also accepts built-in calls through the same expression engine. Built-ins see only the declared Tool-input aliases introduced in [Tool-definition `command` expressions](#tool-definition-command-expressions), and calls may be nested:
 
 ```yaml
 command:
@@ -1827,7 +1827,7 @@ actions:
       )}
 ```
 
-`execute` requires `command` and accepts `stdoutFormat: text|json|yaml|xml` plus `timeoutMs`. Text returns the exact stdout String; the structured formats parse stdout into the native Map/List/scalar result. A timeout, non-zero remote exit, or parse failure returns an operation error with a distinct category and retains bounded stderr, exit code, byte counts and transport evidence. SSH resource execution treats a non-zero exit as an operation failure; this is separate from the legacy command-backed Tool fan-out contract described below.
+`execute` requires `command` and accepts `stdoutFormat: text|json|yaml|xml` plus `timeoutMs`. Text returns the exact stdout String; the structured formats parse stdout into the native Map/List/scalar result. A timeout, non-zero remote exit, or parse failure returns an operation error with a distinct category and retains bounded stderr, exit code, byte counts and transport evidence. SSH resource execution treats a non-zero exit as an operation failure. The command-backed Tool fan-out contract has different failure semantics.
 
 `upload` requires `remotePath` and a String or byte-array `payload`. To upload a project file, pass the UTF-8 String returned by `&{...}` directly; SSHHelper does not accept or resolve local filesystem paths. Map/List values are rejected rather than implicitly serialized. Absolute remote paths are allowed. Upload overwrite defaults to `true`.
 
@@ -1990,7 +1990,7 @@ Tool Action timeout overrides Tool descriptor timeout, which overrides global ti
 
 Direct DB Actions may declare `timeoutMs` from 1 to 3,600,000 ms. When present, `Action.timeoutMs` overrides `DBHelper.statement.timeoutSeconds`; otherwise the helper timeout is used. Each retry attempt gets a fresh Action timeout, and the retry interval is outside that timeout.
 
-A direct `query` Action may also use the standard retry block with `maxAttempts` 2–10, `intervalMs` 0–3,600,000, and a non-empty unique `retryOn` list containing `ASSERTION` and/or `TIMEOUT`. An explicit Action `timeoutMs` overrides the helper's statement-timeout default; without it, the helper default applies. JDBC query timeout is rounded up to whole seconds while ATT retains millisecond deadline cancellation. `ASSERTION` requires an Action `assert`. Ordinary SQL errors are terminal. Retry-enabled query attempts are retained in `output.attempts[n]`; the top-level `output.result` / `output.evidence` represent the final or winning attempt, with `winningAttempt` or `finalAttempt` recording the terminal attempt number.
+A direct `query` Action may also use the standard retry block with `maxAttempts` 2–10, `intervalMs` 0–3,600,000, and a non-empty unique `retryOn` list containing `ASSERTION`, `TIMEOUT`, or both. An explicit Action `timeoutMs` overrides the helper's statement-timeout default; without it, the helper default applies. JDBC query timeout is rounded up to whole seconds while ATT retains millisecond deadline cancellation. `ASSERTION` requires an Action `assert`. Ordinary SQL errors are terminal. Retry-enabled query attempts are retained in `output.attempts[n]`; the top-level `output.result` / `output.evidence` represent the final or winning attempt, with `winningAttempt` or `finalAttempt` recording the terminal attempt number.
 
 Direct `update` Actions support `timeoutMs` but deliberately reject `retry`. A timeout or database/transport failure cannot generally prove whether a mutation reached or committed at the server, so generic automatic replay could duplicate business state. Application-specific idempotent retry must be modeled explicitly instead.
 
@@ -2067,7 +2067,7 @@ config/
 └── mqhelpers/{sit,uat}/payment.yaml
 ```
 
-The common config keeps the existing templates, testcase roots, run/execution/report settings, `toolGroups`, and global `tools` registry. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists; the example below shows DB/MQ bindings:
+The common config keeps the existing templates, testcase roots, run/execution/report settings, `toolGroups`, and global `tools` registry. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
 
 ```yaml
 # config/config.yaml
@@ -2665,7 +2665,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.7.2",
+  "attVersion": "3.7.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2757,7 +2757,7 @@ Deterministic legacy aliases may remain readable with migration warnings. Aliase
 
 ## Appendix C — Migration Notes
 
-### ATT 3.7.2 file arguments and case-log paths
+### File arguments and case-log paths
 
 HTTPHelper calls no longer accept `file`; pass `&{project-relative-file}` directly as `body`. MQHelper `send` and `request` no longer accept `file`; pass the expression as `payload`. SSHHelper `upload` now requires content in `payload` and rejects `localPath`; pass `&{...}` directly. SSHHelper no longer supports `download`, because it requires a local destination path. Use a deliberately configured command-backed Tool for workflows that must retrieve files from a host. These changes remove native arbitrary-binary local-file input from these Resource APIs; `&{...}` supplies UTF-8 text.
 

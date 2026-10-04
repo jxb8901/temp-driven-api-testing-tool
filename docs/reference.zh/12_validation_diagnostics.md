@@ -84,7 +84,7 @@ ATT 會把缺失路徑視作作者/運行時錯誤，而不是靜默渲染成空
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.7.2",
+  "attVersion": "3.7.3",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

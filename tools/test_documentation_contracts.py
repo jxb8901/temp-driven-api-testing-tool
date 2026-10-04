@@ -3,9 +3,10 @@ import unittest
 from pathlib import Path
 from documentation_contracts import (active_schemas, stale_claims, current_html,
                                      manifest_errors, structure_errors, overview_resource_errors,
-                                     chapter_label_errors)
+                                     chapter_label_errors, editorial_errors,
+                                     editorial_source_files, standalone_markdown)
 
-VERSION = "3.7.2"
+VERSION = "3.7.3"
 CATALOG = """schemaVersion: att-schema-catalog/v3.0
 schemas:
   att-load/v1.6: att-load-v1.6.schema.json
@@ -30,7 +31,7 @@ class DocumentationContractsTest(unittest.TestCase):
                 self.assertTrue(stale_claims(text, self.active, VERSION))
 
     def test_current_schemas_pass(self):
-        self.assertEqual([], stale_claims("ATT 3.7.2; att-load/v1.6; config v2.11; att-testdata/v1.0",
+        self.assertEqual([], stale_claims("ATT 3.7.3; att-load/v1.6; config v2.11; att-testdata/v1.0",
                                           self.active, VERSION))
 
     def test_testdata_mapping_example_is_bootstrap_safe_and_uses_selected_record_paths(self):
@@ -180,6 +181,38 @@ class DocumentationContractsTest(unittest.TestCase):
         self.assertTrue(structure_errors(good.replace("## Appendix D — Lookup D", "")))
         self.assertTrue(structure_errors(good.replace("## 03", "## 04")
                                              .replace("## 05", "## 03")))
+
+    def test_editorial_lint_catches_requested_patterns(self):
+        text = ("# Page title\n\n## 1. Setup\n\n"
+                "See Chapter 4 for details. Use e.g. YAML and/or JSON.\n")
+        errors = editorial_errors(text, standalone=True)
+        self.assertEqual(4, len(errors))
+        self.assertFalse(any("exactly one H1" in error for error in errors))
+        self.assertTrue(any("numeric sequence prefix" in error for error in errors))
+        self.assertTrue(any("positional cross-reference" in error for error in errors))
+        self.assertTrue(any("e.g." in error for error in errors))
+        self.assertTrue(any("and/or" in error for error in errors))
+
+    def test_editorial_lint_ignores_code_and_generated_reference_artifacts(self):
+        text = ("# Page title\n\nInline `e.g.` and `and/or` identifiers.\n"
+                "```markdown\n## 2. Example\ne.g. this and/or that\n````\n")
+        self.assertEqual([], editorial_errors(text, standalone=True))
+        root = Path(__file__).resolve().parents[1]
+        files = editorial_source_files(root)
+        rels = {path.relative_to(root).as_posix() for path in files}
+        self.assertIn("docs/reference/03_runtime_context.md", rels)
+        self.assertNotIn("docs/reference.md", rels)
+        self.assertNotIn("docs/reference.html", rels)
+        self.assertNotIn("docs/history/09_Reference_Manual_V3.md", rels)
+        self.assertFalse(standalone_markdown(root / "docs/reference/03_runtime_context.md", root))
+        self.assertEqual([], editorial_errors("## 04 Runtime and Context Model\n",
+                                              allow_reference_structure=True))
+
+    def test_editorial_lint_requires_one_h1_for_standalone_pages(self):
+        self.assertTrue(any("found 0" in error for error in
+                            editorial_errors("## Missing title\n", standalone=True)))
+        self.assertTrue(any("found 2" in error for error in
+                            editorial_errors("# One\n# Two\n", standalone=True)))
 
 
 if __name__ == "__main__":

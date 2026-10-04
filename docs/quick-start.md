@@ -1,4 +1,4 @@
-# ATT V3.7.2 Quick Start
+# ATT V3.7.3 Quick Start
 
 [中文快速入门](quick-start.zh.md) · [Reference Manual](reference.html)
 
@@ -6,7 +6,7 @@ This guide gets you from a clean checkout to a successful ATT run with the small
 
 The checked-in Quick Start example is intentionally offline: the first case uses only `assign`, `log`, and `assert`. The second case adds ATT's local sample Tool without requiring a database, MQ server, API endpoint, credentials, or network access.
 
-## 1. What you will run
+## What you will run
 
 ATT's normal authoring path is:
 
@@ -36,7 +36,7 @@ The workbook contains two cases:
 
 You do not need to understand every ATT schema before running them.
 
-## 2. Prerequisites
+## Prerequisites
 
 ATT requires Java 8 or later. From the repository root, make the launcher executable on macOS/Linux if necessary:
 
@@ -50,9 +50,9 @@ Check the CLI:
 ./att.sh version
 ```
 
-On Windows, use `att.bat` instead of `./att.sh` in the commands below.
+On Windows, replace `./att.sh` with `att.bat` in each command.
 
-## 3. Inspect the workbook and sidecar
+## Inspect the workbook and sidecar
 
 Open `testcase/quick_start.xlsx`. The second header row contains the physical Excel column names used by the sidecar:
 
@@ -84,7 +84,7 @@ The `(yaml)` marker on `Use Tool` preserves Excel `true`/`false` as a Boolean in
 
 The generated `testcase/quick_start.xml` is the normalized snapshot ATT executes against. Do not edit it manually.
 
-## 4. Understand the Template
+## Understand the Template
 
 Both rows select `QUICK_START`, implemented by `templates/QUICK_START/template.yaml`.
 
@@ -117,7 +117,7 @@ For this tutorial:
 
 That is enough Context knowledge for a first run. The complete model is in [Runtime and Context](reference/03_runtime_context.md) and [Expressions](reference/07_expressions.md).
 
-## 5. Regenerate the snapshot
+## Regenerate the snapshot
 
 ATT keeps the Excel workbook and its normalized XML snapshot in sync. Run:
 
@@ -127,7 +127,7 @@ ATT keeps the Excel workbook and its normalized XML snapshot in sync. Run:
 
 If you edit the workbook later, run the same command again and review the resulting XML diff before committing it.
 
-## 6. Validate before execution
+## Validate before execution
 
 First validate the whole package:
 
@@ -139,7 +139,7 @@ Validation checks schemas, workbook/snapshot consistency, Template references, e
 
 For a normal package you should fix validation errors before running anything.
 
-## 7. Run your first case
+## Run your first case
 
 Run only the completely offline case:
 
@@ -161,7 +161,7 @@ The high-level status model is:
 
 You do not need the detailed aggregation rules yet; see [Validation and Troubleshooting](reference/12_validation_diagnostics.md) when troubleshooting real suites.
 
-## 8. Inspect the result
+## Inspect the result
 
 ATT writes each normal run below `output/<runId>/` and updates `output/latest-run.yaml` only for a completed run.
 
@@ -178,7 +178,7 @@ Then generate or inspect the HTML report using the normal report workflow docume
 
 For the Quick Start case, `case.log` should include the line written by `showInput`, and the final assertion should compare the workbook's `Amount` with `Expected`.
 
-## 9. See a controlled failure
+## See a controlled failure
 
 A useful way to learn ATT is to make one business assertion fail without breaking the framework.
 
@@ -193,7 +193,7 @@ The case should now be `FAIL`, not `ERROR`: ATT executed successfully, but the a
 
 Change the value back to `100` and regenerate the snapshot when finished.
 
-## 10. Add a real Tool call
+## Add a real Tool call
 
 The same Template already contains one optional Tool Action:
 
@@ -222,7 +222,7 @@ Testcase input -> Template Action -> Tool -> Action output/evidence
 
 For complete Tool configuration, command-backed vs call-backed behavior, arguments, outputs, and evidence, use [Resources - Tool](reference/05_resources/tools.md).
 
-## 11. Run the whole Quick Start workbook
+## Run the whole Quick Start workbook
 
 Once both individual cases make sense, run them together:
 
@@ -250,7 +250,7 @@ inspect log/report
 
 That loop is the foundation for larger SIT/UAT packages.
 
-## 12. What to learn next
+## What to learn next
 
 Do not try to learn every ATT feature from this tutorial. Follow the Reference chapter that matches the task you are doing:
 
@@ -272,4 +272,4 @@ Do not try to learn every ATT feature from this tutorial. Follow the Reference c
 
 For direct DB Actions specifically, remember the safety boundary: `query` may retry `ASSERTION`/`TIMEOUT`, while `update` supports `timeoutMs` but rejects automatic retry. See the [DBHelper Reference](reference/05_resources/dbhelper.md) for the full contract.
 
-For field-by-field supported behavior, use the generated [ATT V3.7.2 Reference Manual](reference.html) rather than extending this tutorial into a second manual.
+For field-by-field supported behavior, use the generated [ATT V3.7.3 Reference Manual](reference.html) rather than extending this tutorial into a second manual.

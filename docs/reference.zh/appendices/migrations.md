@@ -1,6 +1,6 @@
 ## Appendix C — Migration Notes
 
-### ATT 3.7.2 file arguments 與 Case log paths
+### File arguments 與 Case log paths
 
 HTTPHelper call 不再接受 `file`；請直接將 `&{project-relative-file}` 傳入 `body`。MQHelper `send` 和 `request` 不再接受 `file`；請將 expression 傳入 `payload`。SSHHelper `upload` 現在要求 `payload` content，並拒絕 `localPath`；請直接傳入 `&{...}`。SSHHelper 不再支援 `download`，因為它需要 local destination path。若工作必須從主機取回檔案，請明確配置 command-backed Tool。這些變更移除 Resource API 原生的任意 binary local-file input；`&{...}` 提供 UTF-8 text。
 
@@ -57,7 +57,7 @@ Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader �
 
 Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[Action 與型別化值](../14_actions.md)、[Runtime 與 Context 模型](../03_runtime_context.md)、[Load 模式](../04_execution_modes/load.md)與[Schema 矩陣](schema_matrix.md)。
 
-### ATT 3.7.2 Load mix migration
+### Load mix migration
 
 現有 `att-load/v1.5` 檔案仍相容。升級至 `att-load/v1.6` 後，可將 workload 的 `target` 改為 `mix`，設定 closed-user weighted target mix。每個 entry 需要唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool target。現行 summary contract 為 `att-load-summary/v1.1`；v1.0 保留作歷史格式。
 
