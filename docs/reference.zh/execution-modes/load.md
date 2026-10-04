@@ -145,7 +145,7 @@ Metrics-only iteration 雖有 `EXEC.ID`，但除非 operation 寫入 artifact �
 
 `evidence.mode` 支援 `metrics`、`failures`、`samples`、`all`；預設為 `failures`。這些 mode 分別將 effective success/failure policy 預設為 `none/none`、`none/full`、`sample/full`、`full/full`。`evidence.success` 與 `evidence.failure` 可各自覆寫預設。`sampleRate` 與 `maxSamples` 限制保留 evidence。Dropped arrival 不建立 iteration evidence。
 
-Case-log evidence 依 effective success/failure policy 及剩餘 retention capacity 保留。Failure policy 為 `full` 時，保留的 failure 會包含經 redaction 的 execution log；sampled success 和 full-success policy 會按 selection 保留 success log。超過 evidence capacity 的 iterations 不會保留 log。例如 `mode: metrics, failure: full` 會在仍有容量時保留 failure log；`mode: failures, failure: none` 會停用 failure log。Deferred capture 和 storage 的實作細節見 [Load scheduler design](../../system-design/load-scheduler.zh.md)。
+Case-log capture 依 effective success/failure policy 及剩餘 retention capacity 決定。Failure policy 為 `full` 且仍有 `maxSamples` slot 時，符合條件的 failure（包括 `samples` 中未被抽中的 success）會保留經 redaction 的 rolling log tail，上限為 65,536 個字符。ATT 只會在 failure 取得 retention slot 後 materialize failure log。Tail 被截斷時會加上 marker 標示較早事件已省略，並在末尾保留最新的 action 和 runtime failure details。容量耗盡後不再保留 failure log。Sampled success 和 full-success policy 會保留完整的 deferred log。例如 `mode: metrics, failure: full` 會在容量允許時進行有界 failure capture；`mode: failures, failure: none` 則會停用此功能。Implementation 和 storage 細節見 [Load scheduler design](../../system-design/load-scheduler.zh.md)。
 
 evidence.resources.output 支援 inherit（預設）或 none。none 停用可選的人類可讀 resource-output 格式化與物化，但保留 typed result、stdoutFormat/responseFormat parsing、exact project-file String 與 requestFormat 行為。Load 將 resource output 延至 iteration 被保留後才處理；metrics-only iteration 不做 business-output formatting 或 evidence file I/O。
 
@@ -162,6 +162,10 @@ Summary 會將 generator observation 與 SUT outcome 分開。`metrics.generator
 Sampling limits、metrics 解讀方式和 maintainer verification 請看 [Load Generator Telemetry](../../system-design/load-telemetry.zh.md)。
 
 Root thresholds 只套用於 aggregate run；workload thresholds 只套用於個別 workload，不會從 root 繼承。Threshold 失敗回傳 FAIL/exit 1。設定或 target 無效回傳 exit 2；runtime/infrastructure error 回傳 ERROR/exit 3。Generator drop 不屬於 SUT error。
+
+## 取消 Load run
+
+取消時，ATT 會停止新的 admission，並 interrupt 已 admission 的 iterations。已 admission 工作的 completion events 會先 drain 並計入 outcomes，之後才 finalize workload results 和 metrics。
 
 ## 了解 Load 執行期間的 payload 變化
 

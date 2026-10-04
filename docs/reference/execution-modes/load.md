@@ -145,7 +145,7 @@ A metrics-only iteration still has `EXEC.ID` but does not create a per-iteration
 
 `evidence.mode` accepts `metrics`, `failures`, `samples` or `all`; the default is `failures`. These modes set the default effective success/failure policies to `none/none`, `none/full`, `sample/full` and `full/full`, respectively. Explicit `evidence.success` and `evidence.failure` values override those defaults independently. `sampleRate` and `maxSamples` bound retained evidence. Dropped arrivals do not create iteration evidence.
 
-Case-log evidence follows the effective success/failure policies and remaining retention capacity. With failure policy `full`, a retained failure includes its redacted execution log; sampled successes and full-success policies retain the success log according to their selection. ATT does not retain logs for iterations that exceed the configured evidence capacity. For example, `mode: metrics, failure: full` enables failure logs while capacity remains, while `mode: failures, failure: none` disables them. See [Load scheduler design](../../system-design/load-scheduler.md) for deferred capture and storage behavior.
+Case-log capture follows the effective success/failure policies and remaining retention capacity. With failure policy `full` and a `maxSamples` slot available, eligible failures—including unselected successes under `samples`—retain a redacted rolling log tail of at most 65,536 characters. ATT materializes the failure log only when the failure claims a retention slot. If the tail is truncated, a marker identifies the omitted earlier events, and the latest action and runtime failure details remain at the end. Failure logs are not retained after capacity is exhausted. Sampled successes and full-success policies retain full deferred logs. For example, `mode: metrics, failure: full` enables bounded failure capture while capacity remains, while `mode: failures, failure: none` disables it. See [Load scheduler design](../../system-design/load-scheduler.md) for implementation and storage details.
 
 evidence.resources.output accepts inherit (default) or none. none disables optional human-readable resource-output formatting and materialization while preserving typed results, stdoutFormat/responseFormat parsing, exact project-file String output and requestFormat behavior. In Load, resource output is deferred until the iteration is retained. Metrics-only iterations do no business-output formatting or evidence file I/O.
 
@@ -162,6 +162,10 @@ The new Load summary telemetry fields are optional under `att-load-summary/v1.1`
 For sampling limits and maintainer verification, see [Load Generator Telemetry](../../system-design/load-telemetry.md).
 
 Top-level thresholds apply only to the aggregate run; workload thresholds apply only to their individual workload. Root thresholds are not inherited into workload thresholds. Threshold failure returns FAIL/exit 1. Invalid config/target returns exit 2; runtime/infrastructure errors return ERROR/exit 3. Generator drops are not SUT errors.
+
+## Cancel a Load run
+
+Cancellation stops new admissions and interrupts admitted iterations. ATT drains completion events for admitted work and accounts for those outcomes before finalizing workload results and metrics.
 
 ## Understand payload changes during a Load run
 

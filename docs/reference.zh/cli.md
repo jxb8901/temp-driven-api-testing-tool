@@ -42,6 +42,8 @@
 | `./att.sh validate --selected <selection>` | 校驗選中依賴閉包 |
 | `./att.sh validate --package --format json` | 向 stdout 輸出單個校驗 JSON 文檔 |
 
+在 Windows 上，`att.bat snapshot`、`att.bat validate` 和 `att.bat docs` 不會調用已配置的 Testcase Tool。Validation 會檢查 `.sh` path 和文件是否存在，但不檢查 POSIX launch/executable compatibility；warning 會列出受影響的 Tool。Validation PASS 只確認這些腳本的配置，不能證明它們可在 Windows 執行。執行 `run` 前，請提供並測試 Windows-native equivalent。啟動器和 Tool 相容性見 [Windows launcher and Tool compatibility](appendices/limits-defaults.md)。
+
 ### 執行 Testcase
 
 | 語法 | 說明 |

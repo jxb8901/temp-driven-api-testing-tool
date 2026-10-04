@@ -2975,16 +2975,21 @@ success/failure policies to <code>none/none</code>,
 override those defaults independently. <code>sampleRate</code> and
 <code>maxSamples</code> bound retained evidence. Dropped arrivals do not
 create iteration evidence.</p>
-<p>Case-log evidence follows the effective success/failure policies and
-remaining retention capacity. With failure policy <code>full</code>, a
-retained failure includes its redacted execution log; sampled successes
-and full-success policies retain the success log according to their
-selection. ATT does not retain logs for iterations that exceed the
-configured evidence capacity. For example,
-<code>mode: metrics, failure: full</code> enables failure logs while
-capacity remains, while <code>mode: failures, failure: none</code>
-disables them. See <a href="system-design/load-scheduler.md">Load
-scheduler design</a> for deferred capture and storage behavior.</p>
+<p>Case-log capture follows the effective success/failure policies and
+remaining retention capacity. With failure policy <code>full</code> and
+a <code>maxSamples</code> slot available, eligible failures—including
+unselected successes under <code>samples</code>—retain a redacted
+rolling log tail of at most 65,536 characters. ATT materializes the
+failure log only when the failure claims a retention slot. If the tail
+is truncated, a marker identifies the omitted earlier events, and the
+latest action and runtime failure details remain at the end. Failure
+logs are not retained after capacity is exhausted. Sampled successes and
+full-success policies retain full deferred logs. For example,
+<code>mode: metrics, failure: full</code> enables bounded failure
+capture while capacity remains, while
+<code>mode: failures, failure: none</code> disables it. See <a
+href="system-design/load-scheduler.md">Load scheduler design</a> for
+implementation and storage details.</p>
 <p>evidence.resources.output accepts inherit (default) or none. none
 disables optional human-readable resource-output formatting and
 materialization while preserving typed results,
@@ -3033,6 +3038,10 @@ not inherited into workload thresholds. Threshold failure returns
 FAIL/exit 1. Invalid config/target returns exit 2;
 runtime/infrastructure errors return ERROR/exit 3. Generator drops are
 not SUT errors.</p>
+<h4 id="cancel-a-load-run">Cancel a Load run</h4>
+<p>Cancellation stops new admissions and interrupts admitted iterations.
+ATT drains completion events for admitted work and accounts for those
+outcomes before finalizing workload results and metrics.</p>
 <h4 id="understand-payload-changes-during-a-load-run">Understand payload
 changes during a Load run</h4>
 <p>Before a Load workload starts, ATT resolves each reachable Render
@@ -5384,6 +5393,16 @@ equivalent to <code>--all</code> when no selector is supplied</td>
 </tr>
 </tbody>
 </table>
+<p>On Windows, <code>att.bat snapshot</code>,
+<code>att.bat validate</code>, and <code>att.bat docs</code> do not
+invoke configured Testcase Tools. Validation checks <code>.sh</code>
+paths and file existence but skips POSIX launch and executable
+compatibility; it warns with the affected Tools. A validation PASS
+confirms configuration for those scripts, not that they can run on
+Windows. Provide and test Windows-native equivalents before
+<code>run</code>. See <a
+href="reference/appendices/limits-defaults.md">Windows launcher and Tool
+compatibility</a>.</p>
 <h4 id="run-testcases">Run Testcases</h4>
 <table>
 <thead>

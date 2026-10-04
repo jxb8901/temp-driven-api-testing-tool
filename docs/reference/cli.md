@@ -42,6 +42,8 @@
 | `./att.sh validate --selected <selection>` | Validate selected dependency closure |
 | `./att.sh validate --package --format json` | Emit one validation JSON document to stdout |
 
+On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not invoke configured Testcase Tools. Validation checks `.sh` paths and file existence but skips POSIX launch and executable compatibility; it warns with the affected Tools. A validation PASS confirms configuration for those scripts, not that they can run on Windows. Provide and test Windows-native equivalents before `run`. See [Windows launcher and Tool compatibility](appendices/limits-defaults.md).
+
 ### Run Testcases
 
 | Syntax | Notes |

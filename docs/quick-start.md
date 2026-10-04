@@ -1,12 +1,12 @@
 # ATT v3.7.3 quick start
 
-[中文快速入门](quick-start.zh.md) · [Reference Manual](reference.html)
+[中文快速入門](quick-start.zh.md) · [Reference Manual](reference.html)
 
 This guide gets you from a clean checkout to a successful ATT run with the smallest useful example. It deliberately teaches the normal Run workflow first. Debug, Load, DB/MQ, environments, retry, and the full Context model come later as next steps.
 
 Here, **Testcase** means an authored normalized workbook row. A **Case execution** is one Run of that row. They share a Case ID but describe different things; this guide uses Testcase for workbook data and Case execution for runtime results.
 
-The checked-in Quick Start example is intentionally offline: the first case uses only `assign`, `log`, and `assert`. The second case adds ATT's local sample Tool without requiring a database, MQ server, API endpoint, credentials, or network access.
+The checked-in Quick Start example is intentionally offline: the first Testcase uses only `assign`, `log`, and `assert`. The second Testcase adds ATT's local sample Tool without requiring a database, MQ server, API endpoint, credentials, or network access.
 
 ## What you will run
 
@@ -178,7 +178,7 @@ output/<runId>/
 
 2. Open or regenerate the HTML report using [Results, Reports, and Evidence](reference/results-reports-evidence.md).
 
-For the Quick Start case, `case.log` should include the line written by `showInput`, and the final assertion should compare the workbook's `Amount` with `Expected`.
+For the `QS001` Case execution, `case.log` should include the line written by `showInput`, and the final assertion should compare the workbook's `Amount` with `Expected`.
 
 ## Create and restore a controlled failure
 
@@ -247,7 +247,7 @@ Once both Testcases make sense, run them together:
 
 ### Expected result
 
-Both Testcases should complete with `PASS` after you restore `QS001`'s `Expected` value.
+The Case executions for both Testcases should have `PASS` status after you restore `QS001`'s `Expected` value.
 
 You now have the basic ATT authoring loop:
 

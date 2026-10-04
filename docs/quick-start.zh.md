@@ -6,7 +6,7 @@
 
 本指南中，**Testcase** 指作者編寫並正規化的 Workbook row；**Case execution** 指 Run 對該 row 的一次執行。兩者共用 Case ID，但概念不同；本文使用 Testcase 表示 Workbook data，使用 Case execution 表示 runtime 結果。
 
-已提交的 Quick Start 例子刻意保持離線可執行：第一個 Case 只使用 `assign`、`log`、`assert`；第二個 Case 再加入 ATT 內置的本地 sample Tool，不需要資料庫、MQ、API endpoint、credential 或網絡連線。
+已提交的 Quick Start 例子刻意保持離線可執行：第一個 Testcase 只使用 `assign`、`log`、`assert`；第二個 Testcase 再加入 ATT 內置的本地 sample Tool，不需要資料庫、MQ、API endpoint、credential 或網絡連線。
 
 ## 你將會執行甚麼
 
@@ -89,7 +89,7 @@ stages:
 
 ## 看懂最小 Template
 
-兩行案例都選擇 `QUICK_START`，實作位於 `templates/QUICK_START/template.yaml`。
+兩個 Testcase 都選擇 `QUICK_START`，實作位於 `templates/QUICK_START/template.yaml`。
 
 第一次只需要掌握三個概念：
 
@@ -176,7 +176,7 @@ output/<runId>/
 
 只有完整完成的 Run 才會更新 `output/latest-run.yaml`。
 
-Quick Start 的 `case.log` 應包含 `showInput` 寫出的訊息，而最後的 assertion 會比較 Excel 的 `Amount` 與 `Expected`。
+`QS001` 的 Case execution `case.log` 應包含 `showInput` 寫出的訊息，而最後的 assertion 會比較 Excel 的 `Amount` 與 `Expected`。
 
 2. 開啟或重新產生 HTML 報表，請看 [Results, Reports, and Evidence](reference.zh/results-reports-evidence.md)。完整 report、Action evidence、attempt history 及輸出格式都在該頁說明。
 
@@ -247,7 +247,7 @@ Testcase input -> Template Action -> Tool -> Action output/evidence
 
 ### 預期結果
 
-還原 `QS001` 的 `Expected` 值後，兩個 Testcase 的 execution 都應為 `PASS`。
+還原 `QS001` 的 `Expected` 值後，兩個 Testcase 對應的 Case execution 都應為 `PASS`。
 
 到這裡你已經完成 ATT 最重要的日常循環：
 

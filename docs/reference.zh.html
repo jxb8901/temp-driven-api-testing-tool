@@ -2704,14 +2704,18 @@ evidence</h4>
 與 <code>evidence.failure</code> 可各自覆寫預設。<code>sampleRate</code>
 與 <code>maxSamples</code> 限制保留 evidence。Dropped arrival 不建立
 iteration evidence。</p>
-<p>Case-log evidence 依 effective success/failure policy 及剩餘
-retention capacity 保留。Failure policy 為 <code>full</code> 時，保留的
-failure 會包含經 redaction 的 execution log；sampled success 和
-full-success policy 會按 selection 保留 success log。超過 evidence
-capacity 的 iterations 不會保留 log。例如
-<code>mode: metrics, failure: full</code> 會在仍有容量時保留 failure
-log；<code>mode: failures, failure: none</code> 會停用 failure
-log。Deferred capture 和 storage 的實作細節見 <a
+<p>Case-log capture 依 effective success/failure policy 及剩餘 retention
+capacity 決定。Failure policy 為 <code>full</code> 且仍有
+<code>maxSamples</code> slot 時，符合條件的 failure（包括
+<code>samples</code> 中未被抽中的 success）會保留經 redaction 的 rolling
+log tail，上限為 65,536 個字符。ATT 只會在 failure 取得 retention slot
+後 materialize failure log。Tail 被截斷時會加上 marker
+標示較早事件已省略，並在末尾保留最新的 action 和 runtime failure
+details。容量耗盡後不再保留 failure log。Sampled success 和 full-success
+policy 會保留完整的 deferred log。例如
+<code>mode: metrics, failure: full</code> 會在容量允許時進行有界 failure
+capture；<code>mode: failures, failure: none</code>
+則會停用此功能。Implementation 和 storage 細節見 <a
 href="system-design/load-scheduler.zh.md">Load scheduler
 design</a>。</p>
 <p>evidence.resources.output 支援 inherit（預設）或 none。none
@@ -2757,6 +2761,10 @@ Telemetry</a>。</p>
 只套用於個別 workload，不會從 root 繼承。Threshold 失敗回傳 FAIL/exit
 1。設定或 target 無效回傳 exit 2；runtime/infrastructure error 回傳
 ERROR/exit 3。Generator drop 不屬於 SUT error。</p>
+<h4 id="取消-load-run">取消 Load run</h4>
+<p>取消時，ATT 會停止新的 admission，並 interrupt 已 admission 的
+iterations。已 admission 工作的 completion events 會先 drain 並計入
+outcomes，之後才 finalize workload results 和 metrics。</p>
 <h4 id="了解-load-執行期間的-payload-變化">了解 Load 執行期間的 payload
 變化</h4>
 <p>Load workload 啟動前，ATT 會為每個可達的 Render payload glob
@@ -4918,6 +4926,16 @@ Snapshot；等同於 <code>--all</code></td>
 </tr>
 </tbody>
 </table>
+<p>在 Windows
+上，<code>att.bat snapshot</code>、<code>att.bat validate</code> 和
+<code>att.bat docs</code> 不會調用已配置的 Testcase Tool。Validation
+會檢查 <code>.sh</code> path 和文件是否存在，但不檢查 POSIX
+launch/executable compatibility；warning 會列出受影響的 Tool。Validation
+PASS 只確認這些腳本的配置，不能證明它們可在 Windows 執行。執行
+<code>run</code> 前，請提供並測試 Windows-native equivalent。啟動器和
+Tool 相容性見 <a
+href="reference.zh/appendices/limits-defaults.md">Windows launcher and
+Tool compatibility</a>。</p>
 <h4 id="執行-testcase">執行 Testcase</h4>
 <table>
 <thead>
