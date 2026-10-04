@@ -1,6 +1,6 @@
 # CLI 參考
 
-## 命令
+## 選擇命令
 
 | 命令 | 目的 | 是否調用外部 Tool |
 |---|---|---:|
@@ -16,21 +16,36 @@
 | `build` | 歸檔最新已完成 run | 否 |
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 
-## 命令語法
+## 按任務查閱語法、option 和範例
 
-表格中使用 Linux/macOS 啟動器 `./att.sh`。Windows 上使用 `att.bat`，命令與選項相同。`att.bat snapshot`、`att.bat validate` 和 `att.bat docs` 不會觸發配置的 testcase Tool。Windows 校驗會檢查 `.sh` 文件是否存在並路徑是否安全，跳過 POSIX 啟動/可執行兼容性，並輸出一條警告列出受影響 Tool；一次校驗 PASS 並不證明這些腳本能在 Windows 上運行。運行前請提供並測試 Windows 原生等價物。二進制發布要求 Java 8+；源碼樹 `att.bat` 會在可用時使用 Maven，否則要求存在 `target\classes`。
+### 查看 help 和版本
 
 | 語法 | 說明 |
 |---|---|
 | `./att.sh` 或 `./att.sh help` | 顯示幫助 |
 | `./att.sh version` | 輸出版本 |
+
+### 產生 Workbook snapshot
+
+| 語法 | 說明 |
+|---|---|
 | `./att.sh snapshot` | 未指定 selector 時遞歸生成 `testcase.root` 下所有 Snapshot；等同於 `--all` |
 | `./att.sh snapshot --suite <xlsx>` | 生成一個同名 XML Snapshot |
 | `./att.sh snapshot --all` | 遞歸生成 `testcase.root` 下所有 Snapshot |
 | `./att.sh snapshot --suite-dir <dir>` | 在某目錄下遞歸生成 Snapshot |
+
+### 驗證 package
+
+| 語法 | 說明 |
+|---|---|
 | `./att.sh validate --package` | 校驗整個包；默認範圍 |
 | `./att.sh validate --selected <selection>` | 校驗選中依賴閉包 |
 | `./att.sh validate --package --format json` | 向 stdout 輸出單個校驗 JSON 文檔 |
+
+### 執行 Testcase
+
+| 語法 | 說明 |
+|---|---|
 | `./att.sh run --all` | 運行所有發現的 Case |
 | `./att.sh run --suite <xlsx>` | 運行一個 Workbook；可重復 |
 | `./att.sh run --suite-dir <dir>` | 在目錄下發現 Workbook |
@@ -47,6 +62,11 @@
 | `./att.sh run <selection> --format json` | 輸出機器可讀摘要 |
 | `./att.sh run <selection> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
 | `./att.sh run <selection> --verbose` | 為兼容性保留；詳細實時進度已是默認行為 |
+
+### Debug component
+
+| 語法 | 說明 |
+|---|---|
 | `./att.sh debug` | 發現可運行的 Tool、Template 和 Flow；只顯示實際存在的默認 sidecar |
 | `./att.sh debug template <id>` | 執行一個 Template；自動發現 `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | 執行一個規範 Flow；自動發現 `<flow-dir>/debug.yaml` |
@@ -58,6 +78,11 @@
 | `./att.sh debug <type> <id> --output-dir <dir>` | 將 debug 輸出隔離到 `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | 輸出緊湊機器可讀摘要；完整證據仍在 `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
+
+### 執行 Load scenario
+
+| 語法 | 說明 |
+|---|---|
 | `./att.sh load` | 發現 `load/` 下有效的 `att-load/*` scenario；報告無效的已聲明 scenario |
 | `./att.sh load <scenario.yaml> --quiet` | 抑制定期實時進度；保留最終摘要和錯誤 |
 | `./att.sh load <scenario.yaml> --verbose` | 為兼容性保留；有界實時進度已是默認行為 |
@@ -65,10 +90,16 @@
 | `./att.sh load <scenario.yaml> --set input.path=<yaml-value>` | 覆蓋單 workload `EXEC.INPUT`；多 workload scenario 不支持未限定覆蓋 |
 | `./att.sh load <scenario.yaml> --set arg.name=<yaml-value>` | 覆蓋單 workload Tool scenario 的 argument |
 | `./att.sh load <scenario.yaml> --set vars.path=<yaml-value>` | 覆蓋單 workload Template/Flow bootstrap vars |
+
+### 管理報表和 package 輸出
+
+| 語法 | 說明 |
+|---|---|
 | `./att.sh report --run-id <id>` | 重建 `report/index.html` 和 `report/junit.html` |
 | `./att.sh docs` | 生成 `build/docs/index.html` |
 | `./att.sh build` | 在 `build/` 中歸檔最新完成 run |
 | `./att.sh clean` | 刪除文檔化生成輸出 |
+
 
 ## Typed overrides and quick Load
 

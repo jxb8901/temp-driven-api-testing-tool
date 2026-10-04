@@ -15,6 +15,8 @@ Status: Normative end-user documentation; generated from modular sources
   - [Package boundaries](#package-boundaries)
   - [How to use this manual](#how-to-use-this-manual)
 - [Test authoring](#test-authoring)
+  - [Author and run a Testcase](#author-and-run-a-testcase)
+  - [Distinguish Testcases from Case executions](#distinguish-testcases-from-case-executions)
   - [Authoring contracts](#authoring-contracts)
   - [Workbook](#workbook)
   - [Stage](#stage)
@@ -23,6 +25,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Authoring lifecycle](#authoring-lifecycle)
   - [Test data ownership](#test-data-ownership)
   - [Testdata registry and input mapping](#testdata-registry-and-input-mapping)
+  - [Advanced workbook and Snapshot details](#advanced-workbook-and-snapshot-details)
 - [Actions and typed values](#actions-and-typed-values)
   - [Action types](#action-types)
   - [Separate logical values from representations](#separate-logical-values-from-representations)
@@ -71,38 +74,39 @@ Status: Normative end-user documentation; generated from modular sources
   - [Tool Timeout precedence](#tool-timeout-precedence)
   - [Direct DB timeout and retry eligibility](#direct-db-timeout-and-retry-eligibility)
 - [Configuration and environments](#configuration-and-environments)
+  - [Find a configuration task](#find-a-configuration-task)
   - [Configuration layers and precedence](#configuration-layers-and-precedence)
   - [Ignore or disable ATT-owned configuration with `x-`](#ignore-or-disable-att-owned-configuration-with-x)
-  - [Multi-environment profiles in current ATT](#multi-environment-profiles-in-current-att)
+  - [Select an environment profile](#select-an-environment-profile)
   - [Schema catalog](#schema-catalog)
-  - [Global configuration](#global-configuration)
+  - [Set package-wide options](#set-package-wide-options)
   - [Identifier and path constraints](#identifier-and-path-constraints)
   - [Topology and secrets](#topology-and-secrets)
   - [Cross-mode consistency](#cross-mode-consistency)
   - [Separate configuration files](#separate-configuration-files)
   - [`config.report.fileNamePattern`](#configreportfilenamepattern)
-  - [Feature configuration owners](#feature-configuration-owners)
+  - [Configuration owners](#configuration-owners)
 - [CLI reference](#cli-reference)
-  - [Commands](#commands)
-  - [Command syntax](#command-syntax)
+  - [Choose a command](#choose-a-command)
+  - [Find syntax, options, and examples by task](#find-syntax-options-and-examples-by-task)
   - [Typed overrides and quick Load](#typed-overrides-and-quick-load)
   - [Debug inputs and outputs](#debug-inputs-and-outputs)
   - [Exit codes](#exit-codes)
   - [Complete option matrix](#complete-option-matrix)
-- [Results, reports, and Evidence](#results-reports-and-evidence)
-  - [Run directory](#run-directory)
-  - [Human-readable HTML report](#human-readable-html-report)
-  - [Tool Evidence collector failures](#tool-evidence-collector-failures)
-  - [Result Workbook](#result-workbook)
-  - [JUnit XML](#junit-xml)
-  - [CI JSON summary](#ci-json-summary)
-  - [Run manifest and reproducibility](#run-manifest-and-reproducibility)
-  - [Documentation, archive, and clean](#documentation-archive-and-clean)
-  - [Run, execution and Evidence navigation](#run-execution-and-evidence-navigation)
-  - [Generated-output schema summary](#generated-output-schema-summary)
+- [Results, reports, and evidence](#results-reports-and-evidence)
+  - [Find artifacts for a Run](#find-artifacts-for-a-run)
+  - [Find Case execution results in the HTML report](#find-case-execution-results-in-the-html-report)
+  - [Diagnose Tool evidence collector failures](#diagnose-tool-evidence-collector-failures)
+  - [Add execution results to a Workbook](#add-execution-results-to-a-workbook)
+  - [Export JUnit results](#export-junit-results)
+  - [Read the CI JSON summary](#read-the-ci-json-summary)
+  - [Reproduce a Run](#reproduce-a-run)
+  - [Generate docs and manage package output](#generate-docs-and-manage-package-output)
+  - [Trace execution identity to an artifact](#trace-execution-identity-to-an-artifact)
+  - [Inspect generated-output schemas](#inspect-generated-output-schemas)
   - [Reading `case.log` and `case.yaml`](#reading-caselog-and-caseyaml)
 - [Validation and troubleshooting](#validation-and-troubleshooting)
-  - [Where to look first](#where-to-look-first)
+  - [Choose your first diagnostic step](#choose-your-first-diagnostic-step)
   - [Start with validation](#start-with-validation)
   - [Common questions](#common-questions)
   - [Security reminders](#security-reminders)
@@ -142,7 +146,7 @@ Testcase
               `-- Flow -> ordered Actions
 ```
 
-A **Testcase** is one normalized workbook row. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper, MQHelper, HTTPHelper or SSHHelper used by Actions or permitted expression calls.
+A **Testcase** is one authored, normalized workbook row. A **Case execution** is one Run execution of that Testcase; its full Case ID identifies the Testcase and is reused in execution results and evidence. Use *Testcase* when discussing workbook data and authoring, and *Case execution* when discussing runtime status, logs, reports, and artifacts. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper, MQHelper, HTTPHelper or SSHHelper used by Actions or permitted expression calls.
 
 ### Execution modes are peers
 
@@ -179,15 +183,30 @@ For a guided package build, use [Quick Start](quick-start.md). The rest of this 
 | Goal | Go to |
 |---|---|
 | Build the first ATT package | [Quick Start](quick-start.md) |
-| Understand the core ATT model | [Product model](reference/overview.md#product-model) |
+| Understand the core ATT model | [Product model](reference/overview.md), [Test Authoring](reference/test-authoring.md), [Actions](reference/actions.md), [Runtime and Context](reference/runtime-context.md), and [Run mode](reference/execution-modes/run.md) |
 | Configure DB/MQ/HTTP/SSH | [Resources](reference/resources/overview.md) |
 | Find a CLI option | [CLI Reference](reference/cli.md) |
 | Diagnose a failure | [Validation and Troubleshooting](reference/validation-diagnostics.md) |
-| Upgrade an older package | [Appendix C](reference/appendices/migrations.md) |
+| Upgrade an older package | [Migration Notes](reference/appendices/migrations.md) |
 
 Reference defines the public contract; README, Quick Start and examples explain that contract for narrower tasks. Each contract has one semantic owner; other chapters summarize and link to that owner.
 
 ## Test authoring
+
+### Author and run a Testcase
+
+A Testcase is one normalized workbook row; Run creates one Case execution from each selected row. Use this workflow to author, validate, and execute a change.
+
+1. Edit the workbook and map its columns in the Sidecar.
+2. Generate the Snapshot and review its diff.
+3. Validate the package with ./att.sh validate --package.
+4. Use [Debug](reference/execution-modes/debug.md) to isolate a Template, Flow, or Tool, then use [Run](reference/execution-modes/run.md) to create Case executions.
+
+The following sections define each authoring contract. See [Advanced workbook and Snapshot details](#advanced-workbook-and-snapshot-details) for formula cells, multi-row headers, and XML serialization.
+
+### Distinguish Testcases from Case executions
+
+A **Testcase** is the authored workbook row after sidecar mapping and snapshot normalization. Its full Case ID is `workbookId.groupId.rowCaseId`. A **Case execution** is one runtime execution of that Testcase by Run, with its own status and evidence. The identifier is shared; the concepts are not synonyms. This page uses *Testcase* for workbook content and *Case execution* for runtime work.
 
 ### Authoring contracts
 
@@ -199,7 +218,7 @@ This chapter explains the normal day-to-day workflow in the same order that data
 | Reusable Template logic | Flow |
 | One ordered operation | Action |
 | External capability | Resource |
-| Case/stage business input | EXEC.INPUT |
+| Testcase/Stage business input | EXEC.INPUT |
 | Cross-Action mutable state | EXEC.VARS |
 
 ### Workbook
@@ -236,7 +255,7 @@ stages:
 
 The root `id` is mandatory and must be unique across the package. `excel.sheet` accepts one sheet name or comma-separated `groupId=sheetName` entries. If one sheet is given without a group ID, ATT uses `default`. Full Case IDs always have the form `workbookId.groupId.rowCaseId` and must be unique across the package.
 
-After editing Excel, run `./att.sh snapshot --suite testcase/payment_regression.xlsx`. The generated `payment_regression.xml` uses schema `att-testcases/v2.4` and stores only normalized sidecar-mapped semantics. It preserves group, Case, tag, map/list, and stage order, uses explicit value types, and excludes styles and unrelated workbook content. String values containing LF or XML-special `&`, `<`, or `>` characters use CDATA; literal `]]>` content is split across adjacent CDATA sections and reconstructs exactly when parsed. Spaces/tabs immediately before LF use `&#32;`/`&#9;` between CDATA sections, preserving the value without Git trailing-whitespace warnings. Review and commit the XML with the xlsx; do not edit it manually.
+After editing Excel, run `./att.sh snapshot --suite testcase/payment_regression.xlsx`. The generated `payment_regression.xml` uses schema `att-testcases/v2.4` and stores only normalized sidecar-mapped semantics. It preserves group, Case, tag, map/list, and stage order, uses explicit value types, and excludes styles and unrelated workbook content. Review and commit the XML with the xlsx; do not edit it manually.
 
 Ordinary `run` and every `validate` mode remain read-only and fail before output creation if the XML is missing, invalid, non-canonical, or stale. `run --update-snapshot` explicitly permits ATT to refresh only changed snapshots for the selected complete workbooks before applying the same verification and validation gates. It never writes partial Case/tag snapshots, does not invoke tools during update, rejects snapshot symlinks, and also performs the authorized update when combined with `--dry-run`. Byte-identical snapshots are not rewritten.
 
@@ -266,35 +285,6 @@ The final `(yaml)` is the ATT parsing marker. In the last example, the physical 
 `N/A`, `NA`, `NULL`, `NONE`, empty cells, and whitespace-only values normalize to blank. An ordinary blank data value becomes the empty string. A blank `(yaml)` cell remains blank rather than being parsed.
 
 A required stage selector rejects a blank value. An optional stage with a blank selector is skipped.
-
-#### Formula, date, percentage, and scientific notation cells
-
-V2.4 rejects formula cells in configured Case ID, tags, case-data, stage-selector, and stage-data columns. Formula definitions and cached/displayed results can diverge and therefore cannot produce a trustworthy semantic snapshot. Recalculate in Excel and paste the result as a literal value, or calculate it in a dedicated ATT step.
-
-Merged regions intersecting configured testcase columns below `excel.headerRows` are likewise rejected. Merged presentation cells wholly inside the configured header area remain allowed.
-
-For non-formula cells, ATT imports the displayed text. The exact representation follows the workbook's cell format and the runtime locale:
-
-| Excel value and format | Context value |
-|---|---|
-| `45292` formatted `yyyy-mm-dd` | `2024-01-01` |
-| `0.125` formatted `0.0%` | `12.5%` |
-| `123000` formatted `0.00E+00` | `1.23E+05` |
-| `000123` stored/formatted as text | `000123` |
-
-An ordinary column remains a string. A `(yaml)` column may convert displayed text into another YAML type. Quote a YAML scalar when text such as a date, percentage, scientific number, account number, or code must stay a string.
-
-#### Multi-row headers
-
-`headerRows: 2` means rows 1–2 are headers and data begins at row 3. ATT scans each physical column top-to-bottom and uses its last non-empty trimmed header cell:
-
-```text
-Row 1: Basic data |           | Execution |
-Row 2: Case ID    | Case name | Template  | Parameters
-Effective: Case ID, Case name, Template, Parameters
-```
-
-ATT does not concatenate parent and child labels. Header matching removes spaces, tabs, line breaks, non-breaking spaces, and other Unicode whitespace from both the effective Excel header and configured sidecar/report label; matching otherwise remains case-sensitive. For example, `案例 編號`, `案例\n編號`, and `案例編號` identify the same column. Every effective header must exist exactly once after this normalization, so two physical headers that differ only by whitespace are a duplicate-header error. Testcase loading and result-workbook writing use this same projection; result columns that do not already exist are written to the final header row.
 
 #### Workbook Sidecar
 
@@ -339,11 +329,11 @@ A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.6`
 
 ### Authoring lifecycle
 
-After changing a Workbook, generate its Snapshot, review and commit the diff. After changing a Sidecar, Template, Flow or Resource, run `./att.sh validate --package`. Use [Debug](reference/execution-modes/debug.md) to isolate an authoring check and [Run](reference/execution-modes/run.md) to execute Testcases. Follow [Quick Start](quick-start.md) to build the first package.
+After changing a Workbook, generate its Snapshot, review and commit the diff. After changing a Sidecar, Template, Flow or Resource, run `./att.sh validate --package`. Use [Debug](reference/execution-modes/debug.md) to isolate an authoring check and [Run](reference/execution-modes/run.md) to create Case executions from Testcases. Follow [Quick Start](quick-start.md) to build the first package.
 
 ### Test data ownership
 
-Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage business inputs enter `EXEC.INPUT`; [Context](reference/runtime-context.md) defines their scope and lifetime. Environment selection belongs to [Configuration](reference/configuration.md).
+Workbook/Sidecar/Snapshot defines Testcase data. Testcase and Stage business inputs enter `EXEC.INPUT`; [Context](reference/runtime-context.md) defines their scope and lifetime. Run turns each selected Testcase into a Case execution. Environment selection belongs to [Configuration](reference/configuration.md).
 
 ### Testdata registry and input mapping
 
@@ -377,6 +367,41 @@ selection: {strategy: roundRobin, exhaustion: stop}
 ~~~
 
 An environment profile's `testdata` list declares the shared registry. A Load scenario may declare its own top-level `testdata` imports; matching IDs replace the whole environment descriptor for that Load only. Duplicate IDs within one layer fail. Ordinary Run/Debug activate referenced IDs lazily, while `validate --package` checks every configured descriptor. Templates, Flows, and Tool definitions receive resolved values through `EXEC.INPUT`; they cannot contain direct `@{...}` or `%{...}` references. See [Environment and Test Data](reference/configuration.md), [Load](reference/execution-modes/load.md), and the maintainer [testdata design](system-design/testdata.md).
+
+### Advanced workbook and Snapshot details
+
+#### Normalize XML text safely
+
+String values containing LF or XML-special `&`, `<`, or `>` characters use CDATA; literal `]]>` content is split across adjacent CDATA sections and reconstructs exactly when parsed. Spaces/tabs immediately before LF use `&#32;`/`&#9;` between CDATA sections, preserving the value without Git trailing-whitespace warnings. Review and commit the XML with the xlsx; do not edit it manually.
+
+#### Formula, date, percentage, and scientific notation cells
+
+V2.4 rejects formula cells in configured Case ID, tags, case-data, stage-selector, and stage-data columns. Formula definitions and cached/displayed results can diverge and therefore cannot produce a trustworthy semantic snapshot. Recalculate in Excel and paste the result as a literal value, or calculate it in a dedicated ATT step.
+
+Merged regions intersecting configured testcase columns below `excel.headerRows` are likewise rejected. Merged presentation cells wholly inside the configured header area remain allowed.
+
+For non-formula cells, ATT imports the displayed text. The exact representation follows the workbook's cell format and the runtime locale:
+
+| Excel value and format | Context value |
+|---|---|
+| `45292` formatted `yyyy-mm-dd` | `2024-01-01` |
+| `0.125` formatted `0.0%` | `12.5%` |
+| `123000` formatted `0.00E+00` | `1.23E+05` |
+| `000123` stored/formatted as text | `000123` |
+
+An ordinary column remains a string. A `(yaml)` column may convert displayed text into another YAML type. Quote a YAML scalar when text such as a date, percentage, scientific number, account number, or code must stay a string.
+
+#### Multi-row headers
+
+`headerRows: 2` means rows 1–2 are headers and data begins at row 3. ATT scans each physical column top-to-bottom and uses its last non-empty trimmed header cell:
+
+```text
+Row 1: Basic data |           | Execution |
+Row 2: Case ID    | Case name | Template  | Parameters
+Effective: Case ID, Case name, Template, Parameters
+```
+
+ATT does not concatenate parent and child labels. Header matching removes spaces, tabs, line breaks, non-breaking spaces, and other Unicode whitespace from both the effective Excel header and configured sidecar/report label; matching otherwise remains case-sensitive. For example, `案例 編號`, `案例\n編號`, and `案例編號` identify the same column. Every effective header must exist exactly once after this normalization, so two physical headers that differ only by whitespace are a duplicate-header error. Testcase loading and result-workbook writing use this same projection; result columns that do not already exist are written to the final header row.
 
 ## Actions and typed values
 
@@ -857,7 +882,7 @@ All three share the execution model. Each mode owns its inputs, identity/bootstr
 
 ### Run mode
 
-Run is workbook-driven Testcase execution.
+Run executes selected authored Testcases from a workbook. Each selected Testcase produces one Case execution with a status and evidence record. Use *Testcase* for the normalized workbook row and *Case execution* for that runtime result; the Case ID is the shared identifier.
 
 ```sh
 ./att.sh run --all
@@ -865,13 +890,13 @@ Run is workbook-driven Testcase execution.
 ./att.sh run --all --tag smoke --exclude-tag slow
 ```
 
-ATT loads the effective configuration/environment, verifies canonical workbook snapshots, validates the selected dependency closure, reserves a unique Run ID, then executes selected Cases in Stage order. A Stage resolves its selector to a Template; Actions execute in YAML order subject to `runWhen` and `onFailure`.
+ATT loads the effective configuration/environment, verifies canonical workbook snapshots, validates the selected dependency closure, reserves a unique Run ID, then starts a Case execution for each selected Testcase. Stages run in order. Each Stage resolves its selector to a Template; Actions execute in YAML order subject to `runWhen` and `onFailure`.
 
 Run evidence is written directly below `output/<RunID>/`. The completed run publishes `run.yaml`, Case directories/logs, result workbooks, HTML/CI outputs as configured, and only after completion updates `latest-run.yaml`. A pre-existing Run ID is rejected rather than overwritten. `run --update-snapshot` is the explicit opt-in snapshot refresh path before validation/execution.
 
 Status aggregation preserves severity: ERROR > INVALID > FAIL > PASS > SKIPPED. Process exit code is `0` when the run completes without failing status, `1` for test/assertion failure, `2` for invalid command/configuration/validation, and `3` for runtime/infrastructure error.
 
-Use the [CLI Reference](reference/cli.md) for exact selectors and options, [Reliability](reference/reliability-execution-control.md) for execution control, and [Results, Reports, and Evidence](reference/results-reports-evidence.md) for artifact contracts.
+See the [CLI Reference](reference/cli.md) for selectors and options, [Reliability and Execution Control](reference/reliability-execution-control.md) for Stage and Action control, and [Results, Reports, and Evidence](reference/results-reports-evidence.md) for artifact contracts.
 
 ### Standalone Debug
 
@@ -885,7 +910,7 @@ Debug executes one Template, Flow or Tool without requiring a workbook Testcase.
 
 Run `./att.sh debug` with no target to list statically valid runnable Tools, Templates and Flows with copyable commands. A default sidecar path is displayed only when that regular non-symlink file exists. Discovery validates selected target dependencies but does not create Debug output or invoke Tools. Use `--format json` for machine-readable discovery output.
 
-Debug input uses the current `schemaVersion: att-debug/v1.1`. Supported top-level data is `case`, optional `stage`, `inputs`, `vars`, `arguments`, and grouped `tools.<localKey>.arguments`. `inputs` is adapted into canonical `EXEC.INPUT`; Template/Flow `vars` is evaluated as a typed bootstrap tree and seeds canonical `EXEC.VARS` before a target starts. Tool Debug uses `arguments` and does not support `vars`. Framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input. Schema migration is documented in [Appendix C](reference/appendices/migrations.md).
+Debug input uses the current `schemaVersion: att-debug/v1.1`. Supported top-level data is `case`, optional `stage`, `inputs`, `vars`, `arguments`, and grouped `tools.<localKey>.arguments`. `inputs` is adapted into canonical `EXEC.INPUT`; Template/Flow `vars` is evaluated as a typed bootstrap tree and seeds canonical `EXEC.VARS` before a target starts. Tool Debug uses `arguments` and does not support `vars`. Framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input. Schema migration is documented in [Migration Notes](reference/appendices/migrations.md).
 
 #### Standalone Debug bootstrap data
 
@@ -948,12 +973,12 @@ Use the output directory to separate diagnosis stages:
 | Symptom | Check |
 |---|---|
 | `Debug input file does not exist` | Add the sidecar beside the selected target or pass `--input` explicitly. |
-| `Debug input uses a historical schemaVersion` | Use the active Debug schema; see [Appendix C](reference/appendices/migrations.md); add `vars` only when a Flow/Template needs caller-prepared `EXEC.VARS`. |
+| `Debug input uses a historical schemaVersion` | Use the active Debug schema; see [Migration Notes](reference/appendices/migrations.md); add `vars` only when a Flow/Template needs caller-prepared `EXEC.VARS`. |
 | `target` or dependency validation fails | Confirm the target type/id and inspect the reported dependency field; unrelated workbook files are not required. |
 | MQ reports a missing/unsafe payload | Verify the absolute package path or the relative Case-output path; remove traversal and symlinks. |
 | The action runs but output is unexpected | Read `case.log`, `result.yaml` and the action artifacts under `output/debug/<debugId>/`; compare rendered inputs with the selected environment. |
 
-Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does not apply to a standalone Debug invocation. Debug always keeps its invocation result and artifacts under its own debug directory. For the same target in a load run, see [Load evidence and resource output](reference/execution-modes/load.md#evidence-and-resource-output).
+Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does not apply to a standalone Debug invocation. Debug always keeps its invocation result and artifacts under its own debug directory. For the same target in a load run, see [Load evidence and resource output](reference/execution-modes/load.md#choose-which-iteration-evidence-to-retain).
 
 ##### Configuration examples
 
@@ -1053,7 +1078,7 @@ Descriptors using the previous workload schema remain compatible and are normali
 
 Run `./att.sh load` with no scenario to discover valid full Load descriptors under `load/`. Only YAML declaring `schemaVersion: att-load/*` is considered; unrelated YAML is ignored, while invalid declared descriptors are shown with their diagnostics. Discovery resolves and validates targets without starting a scheduler or making resource calls.
 
-#### Scenario shape
+#### Define a Load scenario
 
 ~~~yaml
 schemaVersion: att-load/v1.6
@@ -1091,7 +1116,7 @@ execution:
   execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
 ~~~
 
-#### Closed workload target mix
+#### Distribute closed-user work across targets
 
 A workload can declare `mix` instead of `target` to distribute each closed user's next iteration across pre-resolved targets. Every entry has a unique `id`, a positive integer `weight`, and a Template, Flow or Tool `target`. The selector uses the run seed, workload ID, stable VU ID and that VU's iteration number; changing targets does not reset the VU or its think-time stream. Weights express selection probability, not a promise that a short run will match the exact ratio.
 
@@ -1130,29 +1155,29 @@ A target accepts template, flow or tool; Tool targets may provide named argument
 
 ATT snapshots each iteration's input map once as a deeply immutable tree. Request metadata copies reuse that snapshot, and the Load adapter passes its nested values through into the per-iteration `EXEC.INPUT` map without copying them again. A later change to the caller's source map cannot affect a started iteration, and separate iterations do not share their input snapshots.
 
-#### Testdata imports and workload scopes
+#### Map inputs and choose testdata
 
 The environment profile contributes the shared `testdata` descriptor list. A scenario's optional top-level `testdata` list imports package-relative YAML files as a Load-only overlay. A matching local ID replaces the whole environment descriptor for that scenario; records and selection settings are not merged. Duplicate IDs within either layer fail validation.
 
 Use `inputs` to map `@{id}`, `@{id.path}`, or scalar interpolation into `EXEC.INPUT`. Each ID is selected once for a mapping, and the configured `scope` controls how long that choice is reused: `workload`, `user`, or `iteration`. If omitted, Load uses `iteration`. `user` requires a closed-VU workload and is invalid for `arrivalRate`. The workload `testdata` map is policy only; it does not import descriptors. Its optional `selection` object replaces the descriptor's entire selection policy. Policies support `sequential`, `roundRobin`, or seeded `random`, with exhaustion behavior `error` (default), `recycle`, or `stop`. `stop` ends that workload cleanly after its records are consumed. A one-record descriptor needs no selection policy.
 
-Selection evidence records only the testdata ID, source layer, record index, generated sequence where applicable, scope, strategy, and random seed. It never includes the record contents. Run and Debug load only IDs used in mappings; Load validates referenced IDs and explicit workload policies before starting the scheduler.
+Selection evidence records only the testdata ID, source layer, record index, generated sequence where applicable, scope, strategy, and random seed. It never includes record contents. Run and Debug load only IDs used in mappings; Load validates referenced IDs and explicit workload policies before starting.
 
-#### Per-execution bootstrap vars
+#### Initialize Template and Flow variables
 
 After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are ready, ATT evaluates each workload's `vars` tree before starting its Template or Flow. Exact `${...}` references preserve native types, mixed text becomes a string, `#{...}` uses the ordinary typed expression parser, and nested maps/lists are evaluated recursively. References between vars are declaration-order independent; missing vars and dependency cycles fail before the target starts. Each iteration owns its evaluated maps/lists, so concurrent users and workloads cannot share mutations. The first normal `assign` may replace a bootstrapped variable.
 
 Bootstrap expressions may use initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.LOAD`, other `EXEC.VARS.<name>` values, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, invocation-scoped metadata, and Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are unavailable. Only safe pure built-ins are permitted. Tool arguments remain separate from `vars`.
 
-#### Workload models
+#### Choose a closed-user or arrival-rate workload
 
 Closed workloads use positive load.users. Each stable virtual user repeatedly executes its target and observes execution.thinkTime before starting the next iteration. thinkTime may be a duration or a {min, max} range.
 
-Coordinated workloads share a lazy, bounded worker executor whose maximum is the aggregate configured concurrency slots. It creates platform threads as blocking iterations need them, up to each workload's configured limit. Closed virtual users remain scheduler state rather than eagerly owning control threads. The scheduler blocks until the next VU or phase deadline or an iteration completion. Arrival-rate scheduling computes phase deadlines directly and waits for the next due arrival instead of polling every millisecond. Cancellation stops new admissions, interrupts that workload's admitted iterations, and drains their completion events before finalizing its result snapshot.
-
 Arrival-rate workloads use load.arrivalRate, positive load.maxConcurrent and overloadPolicy: drop. They schedule against absolute due times. Arrivals beyond maxConcurrent are recorded as generator drops; they are not queued or counted as SUT errors. Arrival-rate workloads have no persistent USER_ID and cannot configure thinkTime.
 
-#### Pacing and Resource-pool sizing
+Closed workloads preserve the configured number of virtual users while iterations run synchronously. For scheduler and worker-pool implementation details, see [Load scheduler design](system-design/load-scheduler.md).
+
+#### Set pacing and size Resource pools
 
 For a steady arrival rate, estimate average in-flight requests with Little's law:
 
@@ -1166,9 +1191,9 @@ For MQ request/reply, 10 requests/second with a mean 3-second reply time likewis
 
 duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends real traffic but is excluded from measured threshold aggregates. Optional seed makes closed-VU think-time randomization deterministic.
 
-#### Load identity and output layout
+#### Identify iterations and find their artifacts
 
-Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Bootstrap vars are evaluated after that identity is published, so they can use EXEC.ID and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See [Load execution ID initialization](#load-execution-id-initialization) for field availability and function restrictions.
+Each started iteration has a unique `EXEC.ID` across the Load run and shares `EXEC.RUN_ID`. If `execution.execIdFormat` is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates the configured format once during initialization with the ordinary `${...}` / `#{...}` engine. Bootstrap vars are evaluated after that identity is published, so they can use `EXEC.ID` and `EXEC.OUTPUT_DIR`. Closed workloads can use `EXEC.LOAD.USER_ID`; arrival-rate cannot. See [Check execution ID fields before use](#check-execution-id-fields-before-use) for field availability and function restrictions.
 
 Generated IDs must be non-empty, path-safe segments. Duplicate IDs fail before the target starts; ATT does not silently append a suffix.
 
@@ -1186,43 +1211,41 @@ output/load/<RUN_ID>/
 └── samples/<EXEC.ID>/case.yaml
 ~~~
 
-A metrics-only iteration still has EXEC.ID but does not create a per-iteration execution directory unless an operation writes an artifact or a retention decision materializes evidence. EXEC.OUTPUT_DIR remains the logical planned path at executions/<EXEC.ID> while the iteration runs. Retained failures and sampled successes receive an evidence copy under failures/<EXEC.ID>/ or samples/<EXEC.ID>/. The report and evidence summary show EXEC.ID and link to case.log when it exists. Helper resource-output formatting is deferred until retention; explicit Tool evidence collectors still execute because they are author-requested diagnostic operations.
+A metrics-only iteration still has `EXEC.ID` but does not create a per-iteration execution directory unless an operation writes an artifact or retention materializes evidence. `EXEC.OUTPUT_DIR` remains the logical planned path at `executions/<EXEC.ID>` while the iteration runs. Retained failures and sampled successes receive an evidence copy under `failures/<EXEC.ID>/` or `samples/<EXEC.ID>/`. The report and evidence summary show `EXEC.ID` and link to `case.log` when it exists. Optional Resource output formatting is deferred until an iteration is retained; explicit Tool evidence collectors still run because they are part of the requested scenario.
 
-#### Evidence and Resource output
+#### Choose which iteration evidence to retain
 
 `evidence.mode` accepts `metrics`, `failures`, `samples` or `all`; the default is `failures`. These modes set the default effective success/failure policies to `none/none`, `none/full`, `sample/full` and `full/full`, respectively. Explicit `evidence.success` and `evidence.failure` values override those defaults independently. `sampleRate` and `maxSamples` bound retained evidence. Dropped arrivals do not create iteration evidence.
 
-Case-log capture follows the effective success/failure policies and remaining retention capacity before each iteration starts. If the effective failure policy is `full` and a `maxSamples` slot remains available, failures (including unselected successes under `samples`) keep a redacted rolling in-memory tail of at most 65,536 characters; ATT materializes it only when a failure claims a retention slot. Once no failure can be retained because `maxSamples` is zero or exhausted, per-action serialization and buffering are skipped. A slot reserved by an in-flight iteration may conservatively make the scheduler skip capture for other iterations. The latest action and runtime failure details remain at the end of a retained log, after a truncation marker. Selected sampled successes and retained full-success evidence use full deferred case logs; if a success-reserved iteration fails, its full deferred log remains available for failure evidence using that same reserved slot. For example, `mode: metrics, failure: full` enables bounded failure capture when capacity remains, while `mode: failures, failure: none` skips failure capture.
+Case-log evidence follows the effective success/failure policies and remaining retention capacity. With failure policy `full`, a retained failure includes its redacted execution log; sampled successes and full-success policies retain the success log according to their selection. ATT does not retain logs for iterations that exceed the configured evidence capacity. For example, `mode: metrics, failure: full` enables failure logs while capacity remains, while `mode: failures, failure: none` disables them. See [Load scheduler design](system-design/load-scheduler.md) for deferred capture and storage behavior.
 
 evidence.resources.output accepts inherit (default) or none. none disables optional human-readable resource-output formatting and materialization while preserving typed results, stdoutFormat/responseFormat parsing, exact project-file String output and requestFormat behavior. In Load, resource output is deferred until the iteration is retained. Metrics-only iterations do no business-output formatting or evidence file I/O.
 
-#### Reports, metrics and thresholds
+#### Read Load results and apply thresholds
 
 ATT writes bounded load-summary.json/yaml and a self-contained report/index.html below the run root. The report shows EXEC.ID for retained executions, workload/target identity, status, timing and case.log links when available. Aggregate latency percentiles use the aggregate latency collector; ATT does not average workload percentiles.
 
-The summary separates generator observations from SUT outcomes. `metrics.generator` includes sampled heap used/committed/maximum, observed peak live threads, GC count/time, and process CPU when the JVM exposes it. Sampling is event-triggered and rate-limited to one sample per 100 ms, so peaks shorter than the sampling interval may be missed. `schedulerWakeups`, `submitLag*`, and `workerQueueDepth*` describe scheduler pressure; arrival drops remain separate from SUT errors. `resources.http` reports active/idle/waiting and observed peak connections per HTTP helper alongside DB, MQ, and Render pool/plan diagnostics; `resources.resourceMetricSamples` reports the count of rate-limited resource observations. Testdata mapping and selection counters/cache sizes are under `resources.generator.testdata`; iteration-scoped selections are local to one mapping, while user/workload scopes retain only their scoped choices. Custom execution-ID reservations use disk markers, and `resources.executionIds` reports their count; default monotonic IDs do not use a collision map.
+The summary separates generator observations from SUT outcomes. `metrics.generator` includes sampled heap used/committed/maximum, observed peak live threads, GC count/time, and process CPU when the JVM exposes it. Sampling is limited to one observation per 100 ms, so brief peaks may be missed. `schedulerWakeups`, `submitLag*`, and `workerQueueDepth*` describe scheduler pressure; arrival drops remain separate from SUT errors. `resources.http` reports active/idle/waiting and observed peak connections per HTTP helper alongside DB, MQ, and Render pool/plan diagnostics; `resources.resourceMetricSamples` reports the number of rate-limited resource observations. `resources.executionIds` reports custom execution-ID reservation counts. Testdata mapping and selection counts are under `resources.generator.testdata`; interpretation and implementation limits are documented in [Load Generator Telemetry](system-design/load-telemetry.md).
 
-Latency percentiles use bounded primitive reservoirs. `latencySampleCapacity`, `latencySampleCount`, `latencyObservationCount`, and `latencySampleRate` describe the run-level estimate; exact latency aggregates remain exact. The time series keep the newest 4,096 one-second buckets in a circular ring.
+`latencySampleCapacity`, `latencySampleCount`, `latencyObservationCount`, and `latencySampleRate` describe the run-level percentile estimate; exact latency aggregates remain exact. Time-series output retains the newest 4,096 one-second buckets. ATT does not average per-workload percentiles to calculate the overall percentile.
 
 The new Load summary telemetry fields are optional under `att-load-summary/v1.1`; current writers emit them, and summaries produced before this telemetry was added remain valid.
 
-Run the opt-in 30–60 minute synthetic selection soak with `mvn -Datt.load.soak=true -Datt.load.soak.durationMinutes=30 -Dtest=LoadTelemetrySoakTest test`. It checks that post-warm-up retained heap stays within `max(16 MiB, 25%)` of the warm-up checkpoint and iteration selection state remains empty.
-
-See [Load Generator Telemetry](system-design/load-telemetry.md) for sampling limits and metric interpretation.
+For sampling limits and maintainer verification, see [Load Generator Telemetry](system-design/load-telemetry.md).
 
 Top-level thresholds apply only to the aggregate run; workload thresholds apply only to their individual workload. Root thresholds are not inherited into workload thresholds. Threshold failure returns FAIL/exit 1. Invalid config/target returns exit 2; runtime/infrastructure errors return ERROR/exit 3. Generator drops are not SUT errors.
 
-#### Render plans and payload snapshots
+#### Understand payload changes during a Load run
 
-Before a Load workload scheduler starts, ATT resolves each reachable Render payload glob once and freezes the matched UTF-8 source content and compiled reference/expression structure for that run. A payload edit, replacement, or new glob match made while the run is active does not affect its iterations; the next Load run resolves the package again. Normal Run and Debug use a fresh plan for each execution, so edits are picked up by the next execution.
+Before a Load workload starts, ATT resolves each reachable Render payload glob once and freezes the matched UTF-8 source content for that run. A payload edit, replacement, or new glob match made while the run is active does not affect its iterations; the next Load run resolves the package again. Normal Run and Debug use a fresh plan for each execution, so edits are picked up by the next execution.
 
-Each iteration evaluates Context references, built-in calls, and external calls against its own Context. ATT reuses the parsed structure and source text, never a dynamic rendered result; stateful calls such as `seq.next()`, clock/random functions, and external calls still execute for each iteration. Render returns its String in memory, so passing `ACTIONS.<id>.output.result` to a downstream action does not create an intermediate Render file. Use `EXEC.OUTPUT_DIR` only when an operation explicitly needs a file.
+Each iteration evaluates Context references, built-in calls, and external calls against its own Context. Stateful calls such as `seq.next()`, clock/random functions, and external calls run for each iteration. Render returns its String in memory, so passing `ACTIONS.<id>.output.result` to a downstream action does not create an intermediate Render file. Use `EXEC.OUTPUT_DIR` only when an operation explicitly needs a file.
 
-With `--profile`, `performance.json` records `renderPlansCompiled`, `renderPlanCacheHits`, `renderPayloadResolutions`, `renderPayloadResolutionCacheHits`, `renderEvaluations`, `renderArtifactWrites`, and `renderSourceBytes`. These bounded run totals show source-plan reuse separately from per-iteration evaluation; `renderArtifactWrites` is zero because Render itself returns a String without writing an artifact.
+With `--profile`, `performance.json` records `renderPlansCompiled`, `renderPlanCacheHits`, `renderPayloadResolutions`, `renderPayloadResolutionCacheHits`, `renderEvaluations`, `renderArtifactWrites`, and `renderSourceBytes`. See [Load scheduler design](system-design/load-scheduler.md) for how Load prepares plans and reuses immutable source data across iterations.
 
 Load startup also compiles the selected Template/Flow action sequence, primary Tool calls and argument expressions, `runWhen`, assertions, and `retry.when`. Each iteration evaluates that immutable plan against its own Context. Testdata input mappings are likewise compiled during target validation; descriptors and effective workload policies are prepared once, while record selection and Context values remain iteration-specific. The run summary's `resources.execution` contains `executionPlansCompiled`, `actionPlansCompiled`, and `actionEvaluations`.
 
-#### CLI and examples
+#### Override workload settings from the CLI
 
 For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent can override matching YAML values. Unscoped load-model overrides fail for multi-workload scenarios.
 
@@ -1251,9 +1274,9 @@ evidence: {mode: failures}
 ./att.sh load --debug tool fpp.invokeApi --set arg.requestId=42
 ~~~
 
-Copyable examples and field descriptions are maintained in [examples/load/README.md](../examples/load/README.md). Schema migration is documented in [Appendix C](reference/appendices/migrations.md).
+Copyable examples and field descriptions are maintained in [examples/load/README.md](../examples/load/README.md). Schema migration is documented in [Migration Notes](reference/appendices/migrations.md).
 
-#### Load execution ID initialization
+#### Check execution ID fields before use
 
 Load uses schema att-load/v1.6. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
 
@@ -1276,7 +1299,7 @@ execution:
 IDs must be non-empty, path-safe single segments and unique within the Load run. Duplicate or unsafe values fail before the target starts; ATT does not append a hidden suffix.
 
 
-execIdFormat permits deterministic, side-effect-free built-ins only; external calls, seq.next(), random, clock and filesystem functions are rejected. See [Appendix C](reference/appendices/migrations.md) for schema migration.
+execIdFormat permits deterministic, side-effect-free built-ins only; external calls, seq.next(), random, clock and filesystem functions are rejected. See [Migration Notes](reference/appendices/migrations.md) for schema migration.
 
 ## Resources and integrations
 
@@ -1673,7 +1696,7 @@ A Map/List is an abstract structured value and requires requestFormat (text/json
 
 MQ evidence may contain bounded transport metadata such as helper/instance identity, operation, safe queue names, message IDs, CCSID, byte counts, response format, duration and failure classification. Payload capture is controlled by evidence.payload; human-readable result snapshots are separately controlled by evidence.output. Load can disable resource snapshots with evidence.resources.output: none; otherwise formatting is deferred until the iteration is retained. Typed result and response parsing do not change.
 
-Call-level responseFormat may override requestReply.responseFormat for receive/request; send does not parse a reply. Instance selection and pool limits belong to the descriptor. See [Appendix C](reference/appendices/migrations.md) for schema migration.
+Call-level responseFormat may override requestReply.responseFormat for receive/request; send does not parse a reply. Instance selection and pool limits belong to the descriptor. See [Migration Notes](reference/appendices/migrations.md) for schema migration.
 
 MQ replies are capped at 10 MiB. The IBM MQ adapter configures the message receive limit before reading and reports `MQ_RESPONSE_TOO_LARGE` when a reply exceeds it. This is a transport-success size rejection and remains distinct from a missing reply or connection failure.
 
@@ -1996,6 +2019,15 @@ Direct `update` Actions support `timeoutMs` but deliberately reject `retry`. A t
 
 This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../schemas) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
 
+### Find a configuration task
+
+| Task | Start here |
+|---|---|
+| Choose SIT, UAT, or another resource profile | [Select an environment profile](#select-an-environment-profile) |
+| Set output, Run IDs, or report defaults | [Set package-wide options](#set-package-wide-options) |
+| Find the owner of a Tool or helper contract | [Configuration owners](#configuration-owners) |
+| Migrate or validate a schema | [Schema catalog](#schema-catalog) and [Migration notes](reference/appendices/migrations.md) |
+
 ### Configuration layers and precedence
 
 | Layer | Source | Owns |
@@ -2046,7 +2078,7 @@ Disabled entries do not supply required fields: `x-schemaVersion` cannot replace
 
 Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXEC.INPUT`, `EXEC.VARS`, arbitrary maps, DB `params`/`parameters`, and Tool invocation argument values remain data and retain their names. For example, `x-correlation-id` is still an HTTP header or input key unless it is itself the key of an ATT-owned configuration collection.
 
-### Multi-environment profiles in current ATT
+### Select an environment profile
 
 `att-config/v2.11` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper, HTTPHelper and testdata descriptor lists as a whole. See the resource chapters and [Testdata Registry and Input Mapping](reference/test-authoring.md) for each binding.
 
@@ -2149,13 +2181,13 @@ This design keeps Testcases, Templates, Flows, and Actions reusable and makes va
 
 Keep non-secret topology in YAML: JDBC URL, MQ host/port, queue manager, channel, pool sizes, and timeouts. Keep DB/MQ usernames and passwords in `${ENV:NAME}` references backed by the local environment or CI secret store. DBHelper resolves complete `${ENV:NAME}` values for the URL, username, password, and string-valued connection properties. MQHelper resolves `${ENV:NAME}` only for username/password; host, queue manager, channel, and numeric port are normally literal values in the selected descriptor. Resolved secrets remain absent from profile metadata, diagnostics, reports, and generated documentation.
 
-Use profiles when the same test package is promoted across environments and only infrastructure bindings change. Use separate top-level configs when testcase/template roots, report policy, or package structure intentionally differ. See [Appendix C](reference/appendices/migrations.md) for complete-config migration.
+Use profiles when the same test package is promoted across environments and only infrastructure bindings change. Use separate top-level configs when testcase/template roots, report policy, or package structure intentionally differ. See [Migration Notes](reference/appendices/migrations.md) for complete-config migration.
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) is authoritative for active schema registrations. Package validation checks registrations; archived schemas do not become active runtime contracts. See the complete matrix in [Appendix A](reference/appendices/schema-matrix.md).
+[`schemas/catalog.yaml`](../schemas/catalog.yaml) is authoritative for active schema registrations. Package validation checks registrations; archived schemas do not become active runtime contracts. See the complete matrix in [Schema and Version Matrix](reference/appendices/schema-matrix.md).
 
-### Global configuration
+### Set package-wide options
 
 ```yaml
 schemaVersion: att-config/v2.11
@@ -2190,6 +2222,8 @@ environments:
     testdata: [config/testdata/accounts.yaml]
 ```
 
+#### Set runtime and package paths
+
 | Path | Required/default | Constraints |
 |---|---|---|
 | `schemaVersion` | required | Current: `att-config/v2.11`; the previous schema remains compatible. The example uses the active schema. |
@@ -2203,12 +2237,22 @@ environments:
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
 | `execution.processOutput.memoryLimitBytes` | `65536` | Integer 1024–1048576; in-memory head/tail preview per stdout/stderr stream |
 | `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
+| `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
+
+#### Configure report output
+
+| Path | Required/default | Constraints |
+|---|---|---|
 | `report.mode` | `append-to-copy` | `append-to-copy` or `none`; `none` skips result-workbook creation |
 | `report.fileNamePattern` | `${suiteName}.result.xlsx` | Result workbook filename pattern |
 | `report.columns` | `{}` | Supported keys: `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, `runTime`, `execId`; each value is a string column label |
 | `report.html.caseLogInlineLimitBytes` | `32768` | Integer 0–1048576 UTF-8 bytes; larger logs use a bounded head/tail preview plus artifact link |
 | `report.junit.caseLogEmbedThresholdBytes` | `10240` | Integer 0–1048576 UTF-8 bytes; 0 always links |
-| `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
+
+#### Configure Resource and environment registries
+
+| Path | Required/default | Constraints |
+|---|---|---|
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.6` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.2` YAML paths; normalized duplicates are rejected |
@@ -2218,6 +2262,7 @@ environments:
 | `environments.<profile>.testdata` | `[]` | Unique package-relative YAML paths available to that selected environment |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
+
 
 Allowed global object properties are:
 
@@ -2238,7 +2283,7 @@ Allowed global object properties are:
 | `xml` | `namespaceMode`, `x-*` |
 | `ssh` | `host`, `user`, `port`, `identityFile` |
 
-See [Appendix C](reference/appendices/migrations.md) for removed configuration fields.
+See [Migration Notes](reference/appendices/migrations.md) for removed configuration fields.
 
 ### Identifier and path constraints
 
@@ -2313,7 +2358,7 @@ ${EXEC.ID}
 A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
 
 
-### Feature configuration owners
+### Configuration owners
 
 | Contract | Semantic owner |
 |---|---|
@@ -2328,7 +2373,7 @@ A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references 
 
 ## CLI reference
 
-### Commands
+### Choose a command
 
 | Command | Purpose | External tools? |
 |---|---|---:|
@@ -2344,21 +2389,36 @@ A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references 
 | `build` | Archive the latest completed run | No |
 | `clean` | Remove documented ATT-generated output | No |
 
-### Command syntax
+### Find syntax, options, and examples by task
 
-The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` with the same command and options. `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not invoke configured testcase tools. Windows validation checks `.sh` file existence and path safety, skips POSIX launch/executable compatibility, and emits one warning listing affected tools; a validation PASS does not prove those scripts can run on Windows. Provide and test Windows-native equivalents before `run`. Binary releases require Java 8+. Source-tree `att.bat` compiles with Maven when available and otherwise requires existing `target\classes`.
+#### Check help and version
 
 | Syntax | Notes |
 |---|---|
 | `./att.sh` or `./att.sh help` | Show help |
 | `./att.sh version` | Print version |
+
+#### Generate workbook snapshots
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh snapshot` | Generate snapshots recursively below `testcase.root`; equivalent to `--all` when no selector is supplied |
 | `./att.sh snapshot --suite <xlsx>` | Generate one same-basename XML snapshot |
 | `./att.sh snapshot --all` | Generate snapshots recursively below `testcase.root` |
 | `./att.sh snapshot --suite-dir <dir>` | Generate snapshots recursively below a directory |
+
+#### Validate a package
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh validate --package` | Validate complete package; default scope |
 | `./att.sh validate --selected <selection>` | Validate selected dependency closure |
 | `./att.sh validate --package --format json` | Emit one validation JSON document to stdout |
+
+#### Run Testcases
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh run --all` | Run all discovered cases |
 | `./att.sh run --suite <xlsx>` | Run one workbook; repeatable |
 | `./att.sh run --suite-dir <dir>` | Discover workbooks below a directory |
@@ -2378,6 +2438,11 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh run <selection> --format json` | Emit machine-readable summary |
 | `./att.sh run <selection> --quiet` | Suppress detailed live progress; keep the final summary and errors |
 | `./att.sh run <selection> --verbose` | Accepted for compatibility; detailed live progress is already the default |
+
+#### Debug a component
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh debug` | Discover runnable Tools, Templates, and Flows; show only existing default sidecars |
 | `./att.sh debug template <id>` | Execute one Template; auto-discover `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | Execute one canonical Flow; auto-discover `<flow-dir>/debug.yaml` |
@@ -2389,6 +2454,11 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh debug <type> <id> --output-dir <dir>` | Isolate debug output below `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | Emit a compact machine-readable console summary; full evidence remains in `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | Suppress detailed live progress; keep the final summary and errors |
+
+#### Run a Load scenario
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh load` | Discover valid `att-load/*` scenarios under `load/`; report invalid declared scenarios |
 | `./att.sh load <scenario.yaml> --quiet` | Suppress periodic live progress; keep the final summary and errors |
 | `./att.sh load <scenario.yaml> --verbose` | Accepted for compatibility; bounded live progress is already the default |
@@ -2396,10 +2466,16 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh load <scenario.yaml> --set input.path=<yaml-value>` | Override one-workload `EXEC.INPUT`; repeatable, not valid for multi-workload scenarios |
 | `./att.sh load <scenario.yaml> --set arg.name=<yaml-value>` | Override a Tool argument in a one-workload Tool scenario |
 | `./att.sh load <scenario.yaml> --set vars.path=<yaml-value>` | Override one-workload Template/Flow bootstrap vars |
+
+#### Manage reports and package output
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh report --run-id <id>` | Regenerate `report/index.html` and `report/junit.html` |
 | `./att.sh docs` | Generate `build/docs/index.html` |
 | `./att.sh build` | Archive latest completed run in `build/` |
 | `./att.sh clean` | Remove documented generated outputs |
+
 
 Options are command-specific. Unknown commands/options and missing option values are errors. `--package` and `--selected` are mutually exclusive. Selected validation and run require an explicit selection.
 
@@ -2463,9 +2539,18 @@ Repeatable `--set <input|arg|vars>.<path>=<yaml-value>` applies safe-YAML typed 
 
 The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id`, `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--set`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them.
 
-## Results, reports, and Evidence
+## Results, reports, and evidence
 
-### Run directory
+Run executes authored Testcases and records one Case execution for each selected row. A Testcase is workbook data; a Case execution is the runtime result identified by the same full Case ID. Use the runtime term when reading statuses, logs, reports, and evidence.
+
+| Task | Go to |
+|---|---|
+| Find run files and execution artifacts | [Find artifacts for a Run](#find-artifacts-for-a-run) |
+| Read a status or inspect a failed Action | [Find Case execution results](#find-case-execution-results-in-the-html-report) |
+| Export JUnit or CI results | [Export JUnit results](#export-junit-results) or [Read the CI JSON summary](#read-the-ci-json-summary) |
+| Reproduce a completed run | [Reproduce a Run](#reproduce-a-run) |
+
+### Find artifacts for a Run
 
 ```text
 <outputDirectory>/<RunID>/
@@ -2481,15 +2566,15 @@ The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `
 
 Run and Case IDs appear unchanged after validation. A run is completed only when its `run.yaml` state is `COMPLETE`; interrupted work remains directly below its reserved Run ID for debugging.
 
-### Human-readable HTML report
+### Find Case execution results in the HTML report
 
-`report/index.html` is the primary end-user report. It can be opened without a web server. Groups are summarized by `workbookId.groupId`; the interface labels `groupId` as Sheet because it maps to one physical sheet. Cases supports Workbook/Sheet/Status dropdowns, case-insensitive search over workbook/group/full Case ID/tags, and ascending/descending sorting from every column heading. Duration sorting is numeric.
+`report/index.html` is the primary end-user report. It can be opened without a web server. Groups are summarized by `workbookId.groupId`; the interface labels `groupId` as Sheet because it maps to one physical sheet. The Cases view supports Workbook/Sheet/Status dropdowns, case-insensitive search over workbook/group/full Case ID/tags, and ascending/descending sorting from every column heading. Duration sorting is numeric.
 
 An expanded case contains the full Case ID and name, status and duration, Expected and Actual results, one row per recorded action result, a bounded detailed execution-log preview, and explicit `.log`/`case.yaml` artifact links. Each Action Results row has independent Stage, Action, Description, Status, and Message columns; Description is the final rendered action description and is also persisted in `run.yaml` and CI JSON. `report.html.caseLogInlineLimitBytes` controls the head/tail preview; `0` keeps only the artifact link. For compatibility, Expected remains the ordered LF-joined non-blank assert descriptions and `expected` values; Actual is the ordered LF-joined non-blank runtime `actual` values. `case.yaml` holds the complete structured final Stage/Template/Action/Tool/DB state. Depending on what ran, these artifacts include selected templates, executed or skipped stages/actions, assertion messages, Tool argv/stdout/stderr/retry evidence, DB source/parameter/result/finalization evidence, diagnostics, and saved payload/Tool/DB-output paths. Workbook ID, group ID, and tags are persisted per case in `run.yaml`, so `report --run-id` regenerates equivalent controls and grouping.
 
 `report/junit.html` is a human-readable JUnit projection. It displays counts and one row per testcase with status, duration, and embedded case-log content or a relative artifact link.
 
-### Tool Evidence collector failures
+### Diagnose Tool evidence collector failures
 
 An evidence collector is post-operation observability, not the primary Tool result. With `onFailure: continue`, the primary Action may remain `PASS` while the collector is independently recorded as `ERROR`:
 
@@ -2502,17 +2587,17 @@ evidence:
     onFailure: continue
 ```
 
-Inspect `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>` (or the equivalent `ACTIONS` compatibility view). The record contains `status`, `success`, `invocationId`, `result`, `error`, and the bounded/redacted underlying operation `evidence`; when an operation supplies structured diagnostics, `operationDiagnostic` retains safe fields from the native operation diagnostic. `diagnostic` identifies the collector failure and its source file/field. `error.message` is populated from the underlying exception, operation status/exit code, or a safe fallback. Resource identity and fields such as SSH helper/instance, exit code, bounded stderr, MQ reason codes, HTTP status, and timeout details remain under `evidence` when provided by the executor. Failed collector evidence is bounded/redacted; raw input, payload, argv, output, resolved command text and the failed `result` are not published. See [Appendix D](reference/appendices/limits-defaults.md) for the exact projection, numeric budgets and security guarantees.
+Inspect `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>` (or the equivalent `ACTIONS` compatibility view). The record contains `status`, `success`, `invocationId`, `result`, `error`, and the bounded/redacted underlying operation `evidence`; when an operation supplies structured diagnostics, `operationDiagnostic` retains safe fields from the native operation diagnostic. `diagnostic` identifies the collector failure and its source file/field. `error.message` is populated from the underlying exception, operation status/exit code, or a safe fallback. Resource identity and fields such as SSH helper/instance, exit code, bounded stderr, MQ reason codes, HTTP status, and timeout details remain under `evidence` when provided by the executor. Failed collector evidence is bounded/redacted; raw input, payload, argv, output, resolved command text and the failed `result` are not published. See [Limits, Security Guarantees, and Advanced Diagnostics](reference/appendices/limits-defaults.md) for the exact projection, numeric budgets and security guarantees.
 
 For retries, inspect `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`. Earlier failed collector records remain available after a later successful attempt; the top-level collector record follows the final/winning attempt. With `onFailure: stop`, the Action can fail, but its diagnostic still includes the collector's root-cause message and preserved evidence. The same structured record is written to the `EVIDENCE <action> attempt=<n> collector=<id>` block in `case.log`, so the basic resource, category, message, exit code, and bounded stderr can be diagnosed without opening internal exception traces. Existing capture limits and secret redaction continue to apply; collector wrapping does not enable unbounded raw output.
 
-### Result Workbook
+### Add execution results to a Workbook
 
-ATT copies the source workbook and appends configured result columns using `report.mode: append-to-copy`. Set `report.mode: none` for CI or large runs that do not need a copied workbook. Global `report.fileNamePattern` controls the copy filename. Sidecar `report.columns` changes workbook labels only. Supported mappings include `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, and `runTime`; Expected/Actual cells retain LF characters and use wrapped text. Row matching reads the Case ID with the same Excel `DataFormatter` and whitespace normalization as testcase loading, so displayed formats such as numeric leading zeroes identify the same Case during execution and report writing.
+ATT copies the source workbook and appends configured result columns using `report.mode: append-to-copy`. Set `report.mode: none` for CI or large runs that do not need a copied workbook. Global `report.fileNamePattern` controls the copy filename. Sidecar `report.columns` changes workbook labels only. Supported mappings include `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, and `runTime`; Expected/Actual cells retain LF characters and use wrapped text. Row matching reads the Testcase's Case ID with the same Excel `DataFormatter` and whitespace normalization as Testcase loading, so displayed formats such as numeric leading zeroes identify the same Testcase in execution results.
 
-### JUnit XML
+### Export JUnit results
 
-Each ATT case maps to one `<testcase>`:
+Each Case execution maps to one JUnit `<testcase>`:
 
 | ATT status | JUnit representation |
 |---|---|
@@ -2524,15 +2609,15 @@ Each ATT case maps to one `<testcase>`:
 
 Text is XML-escaped. JUnit XML and HTML use `report.junit.caseLogEmbedThresholdBytes`. Logs at or below the threshold are embedded; larger logs use a relative link. `0` always links.
 
-### CI JSON summary
+### Read the CI JSON summary
 
 `ci/summary.json` uses `schemaVersion: att-ci-summary/v2.1` and contains ATT/run IDs, environment, timing, aggregate status/counts, duration statistics, per-case records, diagnostic counts, report/artifact paths, and the input-manifest hash.
 
-### Run manifest and reproducibility
+### Reproduce a Run
 
 `run.yaml` uses `schemaVersion: att-run/v2.1` and records ATT/build identity, Java/OS/locale/timezone, validation mode, environment, timestamps, status/summary, output paths, and SHA-256 inputs for effective configuration, tool-group files, call-backed Tool SQL files (`tool-sql`), workbook, sidecar, resolved templates/payloads, package-local tool files, and schema/catalog version.
 
-### Documentation, archive, and clean
+### Generate docs and manage package output
 
 | Command | Output/behavior |
 |---|---|
@@ -2547,7 +2632,7 @@ The Testcases section renders one table per Sheet below each workbook heading. T
 
 Clean never removes testcase, template, tool, configuration, documentation, schema, or other source files. It canonicalizes paths, rejects source/package roots and external symlink targets, is idempotent, and reports what it removed.
 
-### Run, execution and Evidence navigation
+### Trace execution identity to an artifact
 
 | Identity | Meaning | Scope | Artifact role |
 |---|---|---|---|
@@ -2560,7 +2645,7 @@ Normal Run stores functional Cases under output/<RUN_ID>/executions/<EXEC.ID>/. 
 DIAG is evidence-only. Do not reference DIAG, EXEC.MODE or arbitrary scheduler counters in expressions; pass business variation through EXEC.INPUT.
 
 
-### Generated-output schema summary
+### Inspect generated-output schemas
 
 | Artifact | Required top-level contract |
 |---|---|
@@ -2579,9 +2664,9 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 
 ## Validation and troubleshooting
 
-### Where to look first
+### Choose your first diagnostic step
 
-Run `validate --package` and fix the diagnostic's file/field first. For runtime failures, inspect the report status/message, then the execution's `case.log`, `case.yaml` and Action evidence. [Reliability](reference/reliability-execution-control.md) defines FAIL versus ERROR, continuation and retries; [Results](reference/results-reports-evidence.md) identifies collector failure paths. See [Appendix D](reference/appendices/limits-defaults.md) for Windows launchers, Java SSH negotiation and stack-trace policy.
+Run `validate --package` and fix the diagnostic's file/field first. A **Testcase** is an authored normalized workbook row; a **Case execution** is one Run of that row, identified by the same Case ID. For runtime failures, inspect the Case execution's report status/message, then its `case.log`, `case.yaml`, and Action evidence. [Reliability and Execution Control](reference/reliability-execution-control.md) defines FAIL versus ERROR, continuation, and retries; [Results, Reports, and Evidence](reference/results-reports-evidence.md) identifies collector failure paths. [Limits, Security Guarantees, and Advanced Diagnostics](reference/appendices/limits-defaults.md) covers Windows launchers, Java SSH negotiation, and stack-trace policy.
 
 ### Start with validation
 
@@ -2591,7 +2676,7 @@ Run this after every workbook, sidecar, template, helper, or tool change:
 ./att.sh validate --package
 ```
 
-For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. ATT validates descriptors against the active schemas in [Appendix A](reference/appendices/schema-matrix.md). Superseded schema files under `schemas/history/` are historical references, not runtime compatibility contracts. Update the declared `schemaVersion` and migrate fields to the active contract before validation. Diagnostics retain the original violation, file and YAML field location and provide migration guidance; they never rewrite descriptors. For example, replace a historical Render action with an Assign using `&{path}` and pass the resulting String as described in [Actions and Typed Values](reference/actions.md). Unsupported versions fail before execution.
+For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. ATT validates descriptors against the active schemas in the [Schema and Version Matrix](reference/appendices/schema-matrix.md). Superseded schema files under `schemas/history/` are historical references, not runtime compatibility contracts. Update the declared `schemaVersion` and migrate fields to the active contract before validation. Diagnostics retain the original violation, file, and YAML field location and provide migration guidance; they never rewrite descriptors. For example, replace a historical Render Action with an Assign using `&{path}` and pass the resulting String as described in [Actions and Typed Values](reference/actions.md). Unsupported versions fail before execution.
 
 Current schemas are in [`schemas/`](../schemas); older definitions are under [`schemas/history/`](../schemas/history). `validate --package` checks every catalog-registered schema resource, even when the package does not use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. Validation never rewrites YAML. Review the migration guidance, update the file, then rerun package validation for each selected `--env`.
 
@@ -2603,20 +2688,20 @@ Then use the diagnostic code and structured location. Do not automate against me
 | `ATT-CTX` | Unknown or ambiguous Context path | Inspect requested/current/missing fields, nearest suggestion, or canonical candidates |
 | `ATT-STG` | Blank required selector, invalid selector YAML, duplicate stage key | Check selector form, `name`, aliases, and required flag |
 | `ATT-TPL` | Unknown/duplicate template, invalid action or payload | Check symbolic name/full path, descriptor, action type, and local files |
-| `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with [Configuration](reference/configuration.md) and remove unsupported fields |
+| `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with [Configuration and Environments](reference/configuration.md) and remove unsupported fields |
 | `ATT-TOOL` | Unknown/missing argument, process or parse failure | Compare call contract; inspect exit code and bounded stdout/stderr capture evidence |
 | `ATT-PATH` | Illegal ID or escaping path | Remove illegal characters and keep content below configured roots |
 | `ATT-RUN` | Timeout, non-zero exit, render/runtime failure | Inspect case log and action/tool evidence |
 
 ### Common questions
 
-#### Why is the case ID rejected although excel displays it correctly?
+#### Why is the Testcase ID rejected although Excel displays it correctly?
 
 ATT imports displayed cell text, then applies strict ID safety checks. Check hidden leading/trailing whitespace, trailing `.`, path characters, controls, and Windows device names. Store identifiers as text to preserve leading zeroes.
 
-#### Can two sheets both contain `TC001`?
+#### Can two sheets contain the same row ID?
 
-Yes. Give sheets different group IDs, producing IDs such as `payment.payment.TC001` and `payment.batch.TC001`.
+Yes. Give the sheets different group IDs. The rows then define different Testcases, such as `payment.payment.TC001` and `payment.batch.TC001`, and Run can create a separate Case execution for each.
 
 #### Why did `N/A` become empty?
 
@@ -2628,7 +2713,7 @@ ATT treats an absent path as an authoring/runtime error instead of silently rend
 
 #### Why did a fail become error?
 
-A false assertion is FAIL. Invalid expression syntax/navigation, tool failure, timeout, parse failure, I/O failure, or runtime exception is ERROR. Inspect the action evidence rather than only the final aggregate status.
+A false assertion makes the Case execution FAIL. Invalid expression syntax/navigation, Tool failure, timeout, parse failure, I/O failure, or runtime exception makes it ERROR. Inspect the Action evidence rather than only the final Run status.
 
 #### Why did a Tool Run more than once?
 
@@ -2784,7 +2869,7 @@ ATT 3.6.2 separates typed operation results, external parsing, project-file Stri
 | Log file | Pass the value directly to Log.value. |
 | Log fields | Put the typed map/list in Log.value and select Log.format. |
 | HTTP/MQ common result formatting | Use responseFormat for ingress parsing; optional evidence.output.format is human presentation only. |
-| Older active resource/config schema versions | Use the active schema from [Appendix A](reference/appendices/schema-matrix.md) and migrate the listed fields. Historical schemas are not active contracts. |
+| Older active resource/config schema versions | Use the active schema from [Schema and Version Matrix](reference/appendices/schema-matrix.md) and migrate the listed fields. Historical schemas are not active contracts. |
 
 A project-file String passed to HTTP:
 
@@ -2816,7 +2901,7 @@ Unsupported schema versions fail before execution and include migration guidance
 
 ### Historical schema migration
 
-ATT 3.6.2 uses `att-template/v3.6` and `att-flow/v3.6` as the active schemas. The published `att-template/v3.5`, `att-flow/v3.5`, and older definitions remain under `schemas/history/`; their historical DB and Render Actions are compatibility-only and are not part of the active contract. When migrating those descriptors, change their schema versions to v3.6 and apply the field changes below.
+ATT 3.6.2 uses `att-template/v3.6` and `att-flow/v3.6` as the active schemas. The published `att-template/v3.5`, `att-flow/v3.5`, and older definitions remain under `schemas/history/`; their historical DB and Render Actions are compatibility-only and are not part of the active contract. When migrating those descriptors, change their schema versions to v3.6 and apply the migration table's field changes.
 
 | Historical configuration | 3.6.2 form |
 |---|---|

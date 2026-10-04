@@ -254,6 +254,11 @@ id="toc-如何使用本手冊">如何使用本手冊</a></li>
 </ul></li>
 <li><a href="#test-authoring" id="toc-test-authoring">Test authoring</a>
 <ul>
+<li><a href="#編寫並執行-testcase"
+id="toc-編寫並執行-testcase">編寫並執行 Testcase</a></li>
+<li><a href="#區分-testcase-與-case-execution"
+id="toc-區分-testcase-與-case-execution">區分 Testcase 與 Case
+execution</a></li>
 <li><a href="#編寫契約" id="toc-編寫契約">編寫契約</a></li>
 <li><a href="#workbook" id="toc-workbook">Workbook</a></li>
 <li><a href="#stage" id="toc-stage">Stage</a></li>
@@ -266,6 +271,9 @@ data ownership</a></li>
 <li><a href="#testdata-registry-與-input-mapping"
 id="toc-testdata-registry-與-input-mapping">Testdata registry 與 input
 mapping</a></li>
+<li><a href="#進階-workbook-與-snapshot-細節"
+id="toc-進階-workbook-與-snapshot-細節">進階 Workbook 與 Snapshot
+細節</a></li>
 </ul></li>
 <li><a href="#actions-與-typed-values"
 id="toc-actions-與-typed-values">Actions 與 typed values</a>
@@ -374,17 +382,19 @@ retry eligibility</a></li>
 <li><a href="#configuration-與-environments"
 id="toc-configuration-與-environments">Configuration 與 environments</a>
 <ul>
+<li><a href="#按任務查找配置"
+id="toc-按任務查找配置">按任務查找配置</a></li>
 <li><a href="#配置層與優先級"
 id="toc-配置層與優先級">配置層與優先級</a></li>
 <li><a href="#使用-x--忽略或停用-att-配置項"
 id="toc-使用-x--忽略或停用-att-配置項">使用 <code>X-</code> 忽略或停用
 ATT 配置項</a></li>
-<li><a href="#att-多環境-profile-選擇"
-id="toc-att-多環境-profile-選擇">ATT 多環境 profile 選擇</a></li>
+<li><a href="#選擇-environment-profile"
+id="toc-選擇-environment-profile">選擇 environment profile</a></li>
 <li><a href="#schema-catalog" id="toc-schema-catalog">Schema
 catalog</a></li>
-<li><a href="#global-configuration" id="toc-global-configuration">Global
-configuration</a></li>
+<li><a href="#設定-package-wide-options"
+id="toc-設定-package-wide-options">設定 package-wide options</a></li>
 <li><a href="#標識符和路徑約束"
 id="toc-標識符和路徑約束">標識符和路徑約束</a></li>
 <li><a href="#topology-與-secrets" id="toc-topology-與-secrets">Topology
@@ -395,14 +405,15 @@ id="toc-cross-mode-consistency">Cross-mode consistency</a></li>
 id="toc-分開的-configuration-files">分開的 Configuration files</a></li>
 <li><a href="#configreportfilenamepattern"
 id="toc-configreportfilenamepattern"><code>config.report.fileNamePattern</code></a></li>
-<li><a href="#feature-configuration-owners"
-id="toc-feature-configuration-owners">Feature configuration
-owners</a></li>
+<li><a href="#configuration-owners"
+id="toc-configuration-owners">Configuration owners</a></li>
 </ul></li>
 <li><a href="#cli-參考" id="toc-cli-參考">CLI 參考</a>
 <ul>
-<li><a href="#命令" id="toc-命令">命令</a></li>
-<li><a href="#命令語法" id="toc-命令語法">命令語法</a></li>
+<li><a href="#選擇命令" id="toc-選擇命令">選擇命令</a></li>
+<li><a href="#按任務查閱語法option-和範例"
+id="toc-按任務查閱語法option-和範例">按任務查閱語法、option
+和範例</a></li>
 <li><a href="#typed-overrides-and-quick-load"
 id="toc-typed-overrides-and-quick-load">Typed overrides and quick
 Load</a></li>
@@ -413,27 +424,33 @@ id="toc-debug-input-與-output">Debug input 與 output</a></li>
 id="toc-完整-cli-option-matrix">完整 CLI option matrix</a></li>
 </ul></li>
 <li><a href="#結果報告與-evidence"
-id="toc-結果報告與-evidence">結果、報告與 Evidence</a>
+id="toc-結果報告與-evidence">結果、報告與 evidence</a>
 <ul>
-<li><a href="#運行目錄" id="toc-運行目錄">運行目錄</a></li>
-<li><a href="#人類可讀-html-報告" id="toc-人類可讀-html-報告">人類可讀
-HTML 報告</a></li>
-<li><a href="#tool-evidence-collector-失敗"
-id="toc-tool-evidence-collector-失敗">Tool Evidence collector
+<li><a href="#查找-run-artifacts" id="toc-查找-run-artifacts">查找 Run
+artifacts</a></li>
+<li><a href="#在-html-報表中查看-case-execution-結果"
+id="toc-在-html-報表中查看-case-execution-結果">在 HTML 報表中查看 Case
+execution 結果</a></li>
+<li><a href="#診斷-tool-evidence-collector-失敗"
+id="toc-診斷-tool-evidence-collector-失敗">診斷 Tool evidence collector
 失敗</a></li>
-<li><a href="#結果-workbook" id="toc-結果-workbook">結果
+<li><a href="#將-execution-結果寫入-workbook"
+id="toc-將-execution-結果寫入-workbook">將 execution 結果寫入
 Workbook</a></li>
-<li><a href="#junit-xml" id="toc-junit-xml">JUnit XML</a></li>
-<li><a href="#ci-json-彙總" id="toc-ci-json-彙總">CI JSON 彙總</a></li>
-<li><a href="#運行清單與可復現性"
-id="toc-運行清單與可復現性">運行清單與可復現性</a></li>
-<li><a href="#文檔歸檔和清理"
-id="toc-文檔歸檔和清理">文檔、歸檔和清理</a></li>
-<li><a href="#runexecution-與-evidence-導覽"
-id="toc-runexecution-與-evidence-導覽">Run、execution 與 Evidence
-導覽</a></li>
-<li><a href="#生成輸出模式摘要"
-id="toc-生成輸出模式摘要">生成輸出模式摘要</a></li>
+<li><a href="#匯出-junit-結果" id="toc-匯出-junit-結果">匯出 JUnit
+結果</a></li>
+<li><a href="#查看-ci-json-彙總" id="toc-查看-ci-json-彙總">查看 CI JSON
+彙總</a></li>
+<li><a href="#重現-run" id="toc-重現-run">重現 Run</a></li>
+<li><a href="#生成文檔並管理-package-輸出"
+id="toc-生成文檔並管理-package-輸出">生成文檔並管理 package
+輸出</a></li>
+<li><a href="#從-execution-identity-追蹤-artifact"
+id="toc-從-execution-identity-追蹤-artifact">從 execution identity 追蹤
+artifact</a></li>
+<li><a href="#查閱-generated-output-schemas"
+id="toc-查閱-generated-output-schemas">查閱 generated-output
+schemas</a></li>
 <li><a href="#reading-caselog-and-caseyaml"
 id="toc-reading-caselog-and-caseyaml">Reading <code>case.log</code> and
 <code>case.yaml</code></a></li>
@@ -441,7 +458,8 @@ id="toc-reading-caselog-and-caseyaml">Reading <code>case.log</code> and
 <li><a href="#validation-與-troubleshooting"
 id="toc-validation-與-troubleshooting">Validation 與 troubleshooting</a>
 <ul>
-<li><a href="#診斷順序" id="toc-診斷順序">診斷順序</a></li>
+<li><a href="#選擇第一個診斷步驟"
+id="toc-選擇第一個診斷步驟">選擇第一個診斷步驟</a></li>
 <li><a href="#先從-validation-開始" id="toc-先從-validation-開始">先從
 Validation 開始</a></li>
 <li><a href="#常見問題" id="toc-常見問題">常見問題</a></li>
@@ -521,9 +539,13 @@ id="toc-advanced-diagnostics">Advanced diagnostics</a></li>
               |     |-- Tool
               |     `-- DB
               `-- Flow -&gt; ordered Actions</code></pre>
-<p><strong>Testcase</strong> 是一個標準化 workbook
-row；<strong>Stage</strong> 選擇 Template 並提供 stage-private
-data；<strong>Template</strong> 是可執行 scenario
+<p><strong>Testcase</strong> 是作者編寫並正規化的 Workbook
+row。<strong>Case execution</strong> 是 Run 對該 Testcase
+的一次執行；其完整 Case ID 標識 Testcase，並沿用於執行結果和
+evidence。討論 Workbook data 和 authoring 時使用 <em>Testcase</em>；討論
+runtime status、日誌、報表和 artifacts 時使用 <em>Case
+execution</em>。<strong>Stage</strong> 選擇 Template 並提供
+stage-private data；<strong>Template</strong> 是可執行 scenario
 邊界；<strong>Flow</strong> 是具有獨立 Action scope 的可重用 Template
 邏輯；<strong>Action</strong>
 是一個有序工作單元；<strong>Resource</strong> 是 Action 或允許的
@@ -597,7 +619,11 @@ YAML。</p>
 </tr>
 <tr class="even">
 <td>理解核心 ATT model</td>
-<td><a href="reference.zh/overview.md">Product model</a></td>
+<td><a href="reference.zh/overview.md">Product model</a>、<a
+href="reference.zh/test-authoring.md">Test Authoring</a>、<a
+href="reference.zh/actions.md">Actions</a>、<a
+href="reference.zh/runtime-context.md">Runtime and Context</a> 和 <a
+href="reference.zh/execution-modes/run.md">Run mode</a></td>
 </tr>
 <tr class="odd">
 <td>配置 DB/MQ/HTTP/SSH</td>
@@ -614,7 +640,8 @@ Troubleshooting</a></td>
 </tr>
 <tr class="even">
 <td>升級舊 package</td>
-<td><a href="reference.zh/appendices/migrations.md">Appendix C</a></td>
+<td><a href="reference.zh/appendices/migrations.md">Migration
+Notes</a></td>
 </tr>
 </tbody>
 </table>
@@ -622,6 +649,30 @@ Troubleshooting</a></td>
 按特定任務說明這份 contract。每項 contract 由一個 semantic owner
 定義，其他章節提供摘要並連結至 owner。</p>
 <h2 id="test-authoring">Test authoring</h2>
+<h3 id="編寫並執行-testcase">編寫並執行 Testcase</h3>
+<p>Testcase 是一個正規化 Workbook row；Run 會為每個選中的 row 建立一次
+Case execution。按以下流程編寫、驗證和執行變更。</p>
+<ol type="1">
+<li>編輯 Workbook，並在 Sidecar 中映射欄位。</li>
+<li>產生 Snapshot 並檢查差異。</li>
+<li>使用 ./att.sh validate --package 驗證 package。</li>
+<li>使用 <a href="reference.zh/execution-modes/debug.md">Debug</a> 隔離
+Template、Flow 或 Tool，再使用 <a
+href="reference.zh/execution-modes/run.md">Run</a> 建立 Case
+execution。</li>
+</ol>
+<p>以下各節定義 authoring contract。公式單元格、多行表頭和 XML
+序列化詳情見<a href="#進階-workbook-與-snapshot-細節">進階 Workbook 與
+Snapshot 細節</a>。</p>
+<h3 id="區分-testcase-與-case-execution">區分 Testcase 與 Case
+execution</h3>
+<p><strong>Testcase</strong> 是 Sidecar mapping 和 Snapshot
+normalization 後由作者編寫的 Workbook row。它的完整 Case ID 格式為
+<code>workbookId.groupId.rowCaseId</code>。<strong>Case
+execution</strong> 是 Run 對該 Testcase 的一次 runtime 執行，並有自己的
+status 和 evidence。兩者共用 identifier，但概念不同。本頁使用
+<em>Testcase</em> 表示 Workbook 內容，使用 <em>Case execution</em>
+表示執行工作。</p>
 <h3 id="編寫契約">編寫契約</h3>
 <p>本章說明正常日常工作流中的數據流轉順序。</p>
 <table>
@@ -649,7 +700,7 @@ Troubleshooting</a></td>
 <td>Resource</td>
 </tr>
 <tr class="odd">
-<td>Case/Stage business input</td>
+<td>Testcase/Stage business input</td>
 <td>EXEC.INPUT</td>
 </tr>
 <tr class="even">
@@ -696,13 +747,8 @@ sheet 名稱，或以逗號分隔的 <code>groupId=sheetName</code>
 <code>payment_regression.xml</code> 使用模式
 <code>att-testcases/v2.4</code>，並僅存儲歸一化後的 Sidecar
 映射語義。它保留 group、Case、標簽、map/list 和 Stage
-順序，使用顯式值類型，並排除樣式和無關 Workbook 內容。包含 LF 或 XML
-特殊字符 <code>&amp;</code>、<code>&lt;</code>、<code>&gt;</code>
-的字符串值會使用 CDATA；文字 <code>]]&gt;</code> 會被拆分成相鄰 CDATA
-段，並在解析時精確重建。LF 前的空格或製表符會使用
-<code>&amp;#32;</code>/<code>&amp;#9;</code> 插入兩個 CDATA
-段之間，從而保留值而不觸發 Git 行尾空白警告。請審查並提交該
-XML；不要手工修改它。</p>
+順序，使用顯式值類型，並排除樣式和無關 Workbook 內容。請審查並提交生成的
+XML；不要手工修改。</p>
 <p>普通 <code>run</code> 和每一種 <code>validate</code>
 模式都會保持只讀，如果 XML
 缺失、無效、非規範或過期，則會在輸出創建前失敗。<code>run --update-snapshot</code>
@@ -729,59 +775,6 @@ Excel 表頭名是 <code>請求(yaml)</code>。</p>
 <code>(yaml)</code> 單元格則保持為空白，不進行解析。</p>
 <p>必需 Stage 選擇器會拒絕空白值。可選 Stage
 如果選擇器為空白，則跳過。</p>
-<h4
-id="公式日期百分比和科學記數法單元格">公式、日期、百分比和科學記數法單元格</h4>
-<p>V2.4 會拒絕在配置的 Case ID、標簽、Case 數據、Stage 選擇器和 Stage
-數據列中使用公式單元格。公式定義與緩存/顯示結果可能不一致，因此不能用於生成可信的語義
-Snapshot。請在 Excel 中重新計算後將結果粘貼為字面值，或者在專門的 ATT
-步驟中進行計算。</p>
-<p>與配置 Testcase 列相交且位於 <code>excel.headerRows</code>
-以下的合並區域也會被拒絕。完全位於配置表頭區域內的合並展示單元格則允許。</p>
-<p>對於非公式單元格，ATT 導入顯示文本。其精確表示遵循 Workbook
-單元格格式和運行時區域設置：</p>
-<table>
-<thead>
-<tr class="header">
-<th>Excel 值與格式</th>
-<th>Context 值</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>45292</code> 格式化為 <code>yyyy-mm-dd</code></td>
-<td><code>2024-01-01</code></td>
-</tr>
-<tr class="even">
-<td><code>0.125</code> 格式化為 <code>0.0%</code></td>
-<td><code>12.5%</code></td>
-</tr>
-<tr class="odd">
-<td><code>123000</code> 格式化為 <code>0.00E+00</code></td>
-<td><code>1.23E+05</code></td>
-</tr>
-<tr class="even">
-<td><code>000123</code> 以文本形式存儲/格式化</td>
-<td><code>000123</code></td>
-</tr>
-</tbody>
-</table>
-<p>普通列仍然是字符串。<code>(yaml)</code> 列可能將顯示文本轉換為其他
-YAML
-類型。對於日期、百分比、科學計數、賬號或代碼這類文本，應該使用引號把
-YAML 標量包起來，以便保持為字符串。</p>
-<h4 id="多行表頭">多行表頭</h4>
-<p><code>headerRows: 2</code> 表示第 1–2 行是表頭，數據從第 3
-行開始。ATT
-會掃描每個物理列從上到下，使用最後一個非空且已去除首尾空白的表頭單元格：</p>
-<pre class="text"><code>第 1 行：基础数据 |           | 执行 |
-第 2 行：Case ID    | Case name | Template  | Parameters
-有效值：Case ID, Case name, Template, Parameters</code></pre>
-<p>ATT 不會拼接父子標簽。表頭匹配會移除空格、製表符、換行符、NBSP
-以及其他 Unicode
-空白字符；匹配其餘部分仍區分大小寫。例如，<code>案例 編號</code>、<code>案例\n編號</code>、<code>案例編號</code>
-會被視為同一列。每個有效表頭在歸一化後必須唯一，因此僅因空白差異而不同的兩個物理表頭會被認為是重復表頭錯誤。Testcase
-加載和結果 Workbook
-寫回使用相同的投影邏輯；結果列如果原本不存在，則會寫入最終表頭行。</p>
 <h4 id="workbook--sidecar">Workbook / Sidecar</h4>
 <table>
 <thead>
@@ -894,15 +887,16 @@ lifetime。</p>
 Sidecar、Template、Flow 或 Resource 後執行
 <code>./att.sh validate --package</code>。用 <a
 href="reference.zh/execution-modes/debug.md">Debug</a> 隔離檢查，再以 <a
-href="reference.zh/execution-modes/run.md">Run</a> 執行
-Testcase。循序建立第一個 package 請使用 <a
+href="reference.zh/execution-modes/run.md">Run</a> 從 Testcase 建立 Case
+execution。循序建立第一個 package 請使用 <a
 href="quick-start.zh.md">Quick Start</a>。</p>
 <h3 id="test-data-ownership">Test data ownership</h3>
-<p>Workbook/Sidecar/Snapshot 定義 Testcase data；Case 與 Stage 的
+<p>Workbook/Sidecar/Snapshot 定義 Testcase data；Testcase 與 Stage 的
 business input 進入 <code>EXEC.INPUT</code>。<a
 href="reference.zh/runtime-context.md">Context</a> 定義 scope 與
-lifetime；environment selection 由 <a
-href="reference.zh/configuration.md">Configuration</a> 定義。</p>
+lifetime；Run 會把每個選中的 Testcase 轉為 Case execution。Environment
+selection 由 <a href="reference.zh/configuration.md">Configuration</a>
+定義。</p>
 <h3 id="testdata-registry-與-input-mapping">Testdata registry 與 input
 mapping</h3>
 <p>可用 <code>att-testdata/v1.0</code> descriptor 儲存可重用
@@ -938,24 +932,24 @@ grammar 會評估 literal、selected-record <code>@{...}</code> reference 及
 <code>${...}</code> Context reference；不會評估 built-in
 call。<code>#{...}</code>、<code>&amp;{...}</code> 和
 <code>%{...}</code> 都不是 input-mapping expression。</p>
-<div class="sourceCode" id="cb8"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-testdata/v1.0</span></span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> accounts</span></span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="fu">records</span><span class="kw">:</span></span>
-<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-100&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">tier</span><span class="kw">:</span><span class="at"> gold</span><span class="kw">}</span></span>
-<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-200&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">tier</span><span class="kw">:</span><span class="at"> silver</span><span class="kw">}</span></span>
-<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> sequential</span><span class="kw">,</span><span class="at"> </span><span class="fu">exhaustion</span><span class="kw">:</span><span class="at"> recycle</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-testdata/v1.0</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> accounts</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="fu">records</span><span class="kw">:</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-100&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">tier</span><span class="kw">:</span><span class="at"> gold</span><span class="kw">}</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-200&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">tier</span><span class="kw">:</span><span class="at"> silver</span><span class="kw">}</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> sequential</span><span class="kw">,</span><span class="at"> </span><span class="fu">exhaustion</span><span class="kw">:</span><span class="at"> recycle</span><span class="kw">}</span></span></code></pre></div>
 <p>Generated records 為 virtual 並可按 index 存取；ATT 只物化被選中的
 record。Inclusive integer range 上限為 1,000,000 筆，且
 <code>%{seq}</code> 是唯一支援的 generated-record substitution：</p>
-<div class="sourceCode" id="cb9"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-testdata/v1.0</span></span>
-<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> generatedAccounts</span></span>
-<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="fu">records</span><span class="kw">:</span></span>
-<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">generate</span><span class="kw">:</span></span>
-<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">seq</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">from</span><span class="kw">:</span><span class="at"> </span><span class="dv">100</span><span class="kw">,</span><span class="at"> </span><span class="fu">to</span><span class="kw">:</span><span class="at"> </span><span class="dv">999999</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;%06d&quot;</span><span class="kw">}</span></span>
-<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">record</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-%{seq}&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">amount</span><span class="kw">:</span><span class="at"> </span><span class="dv">42</span><span class="kw">}</span></span>
-<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> roundRobin</span><span class="kw">,</span><span class="at"> </span><span class="fu">exhaustion</span><span class="kw">:</span><span class="at"> stop</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-testdata/v1.0</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> generatedAccounts</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="fu">records</span><span class="kw">:</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">generate</span><span class="kw">:</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">seq</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">from</span><span class="kw">:</span><span class="at"> </span><span class="dv">100</span><span class="kw">,</span><span class="at"> </span><span class="fu">to</span><span class="kw">:</span><span class="at"> </span><span class="dv">999999</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;%06d&quot;</span><span class="kw">}</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">record</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-%{seq}&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">amount</span><span class="kw">:</span><span class="at"> </span><span class="dv">42</span><span class="kw">}</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> roundRobin</span><span class="kw">,</span><span class="at"> </span><span class="fu">exhaustion</span><span class="kw">:</span><span class="at"> stop</span><span class="kw">}</span></span></code></pre></div>
 <p>Environment profile 的 <code>testdata</code> list 宣告共享
 registry。Load scenario 可在頂層宣告本地 <code>testdata</code>
 imports；同 ID 會在該次 Load 完整取代 environment descriptor。單一 layer
@@ -967,6 +961,69 @@ descriptors。Template、Flow 與 Tool 定義只能透過 <code>EXEC.INPUT</code
 href="reference.zh/configuration.md">Environment 與 Test Data</a>、<a
 href="reference.zh/execution-modes/load.md">Load</a> 及維護者的 <a
 href="system-design/testdata.zh.md">testdata design</a>。</p>
+<h3 id="進階-workbook-與-snapshot-細節">進階 Workbook 與 Snapshot
+細節</h3>
+<h4 id="安全地正規化-xml-文字">安全地正規化 XML 文字</h4>
+<p>包含 LF 或 XML 特殊字符
+<code>&amp;</code>、<code>&lt;</code>、<code>&gt;</code>
+的字符串值會使用 CDATA；文字 <code>]]&gt;</code> 會被拆分成相鄰 CDATA
+段，並在解析時精確重建。LF 前的空格或製表符會使用
+<code>&amp;#32;</code>/<code>&amp;#9;</code> 插入兩個 CDATA
+段之間，從而保留值而不觸發 Git 行尾空白警告。請審查並提交該
+XML；不要手工修改它。</p>
+<h4
+id="公式日期百分比和科學記數法單元格">公式、日期、百分比和科學記數法單元格</h4>
+<p>V2.4 會拒絕在配置的 Case ID、標簽、Case 數據、Stage 選擇器和 Stage
+數據列中使用公式單元格。公式定義與緩存/顯示結果可能不一致，因此不能用於生成可信的語義
+Snapshot。請在 Excel 中重新計算後將結果粘貼為字面值，或者在專門的 ATT
+步驟中進行計算。</p>
+<p>與配置 Testcase 列相交且位於 <code>excel.headerRows</code>
+以下的合並區域也會被拒絕。完全位於配置表頭區域內的合並展示單元格則允許。</p>
+<p>對於非公式單元格，ATT 導入顯示文本。其精確表示遵循 Workbook
+單元格格式和運行時區域設置：</p>
+<table>
+<thead>
+<tr class="header">
+<th>Excel 值與格式</th>
+<th>Context 值</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>45292</code> 格式化為 <code>yyyy-mm-dd</code></td>
+<td><code>2024-01-01</code></td>
+</tr>
+<tr class="even">
+<td><code>0.125</code> 格式化為 <code>0.0%</code></td>
+<td><code>12.5%</code></td>
+</tr>
+<tr class="odd">
+<td><code>123000</code> 格式化為 <code>0.00E+00</code></td>
+<td><code>1.23E+05</code></td>
+</tr>
+<tr class="even">
+<td><code>000123</code> 以文本形式存儲/格式化</td>
+<td><code>000123</code></td>
+</tr>
+</tbody>
+</table>
+<p>普通列仍然是字符串。<code>(yaml)</code> 列可能將顯示文本轉換為其他
+YAML
+類型。對於日期、百分比、科學計數、賬號或代碼這類文本，應該使用引號把
+YAML 標量包起來，以便保持為字符串。</p>
+<h4 id="多行表頭">多行表頭</h4>
+<p><code>headerRows: 2</code> 表示第 1–2 行是表頭，數據從第 3
+行開始。ATT
+會掃描每個物理列從上到下，使用最後一個非空且已去除首尾空白的表頭單元格：</p>
+<pre class="text"><code>第 1 行：基础数据 |           | 执行 |
+第 2 行：Case ID    | Case name | Template  | Parameters
+有效值：Case ID, Case name, Template, Parameters</code></pre>
+<p>ATT 不會拼接父子標簽。表頭匹配會移除空格、製表符、換行符、NBSP
+以及其他 Unicode
+空白字符；匹配其餘部分仍區分大小寫。例如，<code>案例 編號</code>、<code>案例\n編號</code>、<code>案例編號</code>
+會被視為同一列。每個有效表頭在歸一化後必須唯一，因此僅因空白差異而不同的兩個物理表頭會被認為是重復表頭錯誤。Testcase
+加載和結果 Workbook
+寫回使用相同的投影邏輯；結果列如果原本不存在，則會寫入最終表頭行。</p>
 <h2 id="actions-與-typed-values">Actions 與 typed values</h2>
 <p>本章定義 ATT 現行 Action 契約。Template 使用
 att-template/v3.6。每個完成的 Action 都會在 output.result
@@ -2051,16 +2108,19 @@ scheduling、selection、reporting 不會建立另一套 Template 或 expression
 <p>三者共用 execution model；各模式分別定義 input、identity/bootstrap
 lifecycle、CLI behavior 與 output layout。</p>
 <h3 id="run-模式">Run 模式</h3>
-<p>Run 是 workbook-driven Testcase execution。</p>
+<p>Run 會執行 Workbook 中經選擇的 authored Testcase。每個選中的 Testcase
+會產生一次 Case execution，並有自己的狀態和 evidence record。討論正規化
+Workbook row 時使用 <em>Testcase</em>；討論 runtime 結果時使用 <em>Case
+execution</em>；兩者共用同一個 Case ID。</p>
 <div class="sourceCode" id="cb23"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--all</span></span>
 <span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--suite</span> testcase/payment.xlsx <span class="at">--case</span> payment.payment.TC001</span>
 <span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--all</span> <span class="at">--tag</span> smoke <span class="at">--exclude-tag</span> slow</span></code></pre></div>
 <p>ATT 先載入 effective configuration/environment、驗證 canonical
-workbook snapshot、驗證 selected dependency closure、保留唯一 Run
-ID，然後依 Stage 順序執行 selected Case。Stage 將 selector 解析成
-Template；Action 依 YAML 順序並受 <code>runWhen</code> /
-<code>onFailure</code> 控制。</p>
+workbook snapshot 和 selected dependency closure、保留唯一 Run
+ID，然後為每個選中的 Testcase 啟動一次 Case execution。Stages
+依序執行。每個 Stage selector 都會解析為 Template；Action 按 YAML
+順序執行，並受 <code>runWhen</code> / <code>onFailure</code> 控制。</p>
 <p>Run evidence 直接寫到
 <code>output/&lt;RunID&gt;/</code>。完成後才發布
 <code>run.yaml</code>、Case directories/logs、結果 workbook、HTML/CI
@@ -2072,8 +2132,12 @@ output，並更新 <code>latest-run.yaml</code>。已存在的 Run ID
 表示沒有失敗狀態、<code>1</code> 表示測試/assertion
 failure、<code>2</code> 表示 command/configuration/validation
 無效、<code>3</code> 表示 runtime/infrastructure error。</p>
-<p>精確 selector/option 見第 10 章；執行控制見第 8 章；artifact contract
-見第 11 章。</p>
+<p>selector 和 option 請看 <a href="reference.zh/cli.md">CLI
+Reference</a>，Stage 和 Action control 請看 <a
+href="reference.zh/reliability-execution-control.md">Reliability and
+Execution Control</a>，artifact contract 請看 <a
+href="reference.zh/results-reports-evidence.md">Results, Reports, and
+Evidence</a>。</p>
 <h3 id="standalone-debug">Standalone Debug</h3>
 <p>Debug 可在沒有 workbook Testcase 的情況下執行單一 Template、Flow 或
 Tool。</p>
@@ -2099,7 +2163,7 @@ seed canonical <code>EXEC.VARS</code>。Tool Debug 使用
 <code>arguments</code>，不支援 <code>vars</code>。Framework-owned
 identity、output、Actions、resource metadata 與 compatibility view
 不能被 user input 覆寫。Schema migration 見 <a
-href="reference.zh/appendices/migrations.md">Appendix C</a>。</p>
+href="reference.zh/appendices/migrations.md">Migration Notes</a>。</p>
 <h4 id="standalone-debug-bootstrap-data">Standalone Debug bootstrap
 data</h4>
 <p>三種 input contract 有意分開：</p>
@@ -2233,7 +2297,7 @@ path。Validation 會在外部 I/O 前解析 project file；舊 HTTP/MQ
 <tr class="even">
 <td><code>Debug input uses a historical schemaVersion</code></td>
 <td>使用 active Debug schema；見 <a
-href="reference.zh/appendices/migrations.md">Appendix C</a>；只有
+href="reference.zh/appendices/migrations.md">Migration Notes</a>；只有
 Flow/Template 需要 caller-prepared <code>EXEC.VARS</code> 時才加入
 <code>vars</code>。</td>
 </tr>
@@ -2258,8 +2322,10 @@ artifacts，並對照 rendered inputs 與 selected environment。</td>
 <p>Load 專用的 evidence
 retention（<code>metrics</code>、<code>failures</code>、<code>samples</code>、<code>all</code>）不適用於
 standalone Debug invocation。Debug 會在自己的 debug directory 保留
-invocation result 與 artifacts；同一 target 若由 load run 執行，請參考
-<a href="reference.zh/execution-modes/load.md">Load</a>。</p>
+invocation result 與 artifacts；同一 target 若由 Load run 執行，請參考
+<a
+href="reference.zh/execution-modes/load.md#選擇要保留的-iteration-evidence">Load
+evidence retention</a>。</p>
 <h5 id="cli-configuration-examples">CLI configuration examples</h5>
 <p><code>run</code>、<code>debug</code> 和 <code>load</code>
 默認採用交互式 verbose 行為。Lifecycle、Case、Stage、Action、Resource
@@ -2387,7 +2453,7 @@ vars 與 pacing。Root defaults 可供多個 workload 共用，workload-local
 <code>schemaVersion: att-load/*</code> 的 YAML；其他 YAML
 會忽略，無效的已宣告 descriptor 則附 diagnostic 顯示。Discovery 會
 resolve 並驗證 target，但不啟動 scheduler 或呼叫 resource。</p>
-<h4 id="scenario-結構">Scenario 結構</h4>
+<h4 id="定義-load-scenario">定義 Load scenario</h4>
 <div class="sourceCode" id="cb38"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.6</span></span>
 <span id="cb38-2"><a href="#cb38-2" aria-hidden="true" tabindex="-1"></a><span class="fu">testdata</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">examples/testdata/generated-account.yaml</span><span class="kw">]</span></span>
@@ -2422,7 +2488,8 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb38-1"><a href=
 <span id="cb38-31"><a href="#cb38-31" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> none</span></span>
 <span id="cb38-32"><a href="#cb38-32" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span></span>
 <span id="cb38-33"><a href="#cb38-33" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">execIdFormat</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}&quot;</span></span></code></pre></div>
-<h4 id="closed-workload-target-mix">Closed workload target mix</h4>
+<h4 id="將-closed-user-work-分配到多個-target">將 closed-user work
+分配到多個 target</h4>
 <p>Workload 可用 <code>mix</code> 代替 <code>target</code>，讓每位
 closed user 的下一次 iteration 在預先 resolve 的 targets 之間選擇。每個
 entry 包含唯一 <code>id</code>、正整數 <code>weight</code>，以及
@@ -2502,8 +2569,7 @@ immutable tree。複製 request metadata 時會重用這個 snapshot；Load
 adapter 會將巢狀 value 直接傳入該 iteration 的 <code>EXEC.INPUT</code>
 map，不再複製巢狀內容。開始 iteration 後，caller 修改來源 map 不會影響該
 iteration；不同 iteration 也不會共用 input snapshot。</p>
-<h4 id="testdata-imports-與-workload-scope">Testdata imports 與 workload
-scope</h4>
+<h4 id="映射-inputs-並選擇-testdata">映射 inputs 並選擇 testdata</h4>
 <p>Environment profile 提供共享的 <code>testdata</code> descriptor
 list。Scenario 可選擇在頂層宣告 package-relative YAML
 <code>testdata</code> imports，形成僅供該次 Load 使用的 overlay。同 ID
@@ -2529,7 +2595,8 @@ descriptor 不需要 selection policy。</p>
 index、適用時的 generated sequence、scope、strategy 與 random
 seed，不包含 record 內容。Run/Debug 只載入 mapping 有引用的 ID；Load
 會在 scheduler 啟動前驗證被引用的 ID 及 workload policy。</p>
-<h4 id="每次執行的-bootstrap-vars">每次執行的 Bootstrap vars</h4>
+<h4 id="初始化-template-和-flow-variables">初始化 Template 和 Flow
+variables</h4>
 <p>Scheduler identity 及唯一 EXEC.ID/EXEC.OUTPUT_DIR 初始化完成後，ATT
 會在 Template 或 Flow 開始前評估 workload 的 vars tree。完整
 <code>${...}</code> reference
@@ -2548,26 +2615,23 @@ metadata。<code>EXEC.ACTIONS</code>、action-local
 Tool/DB/MQ/HTTP/SSH/process/filesystem 或 stateful calls
 不可用。只允許安全的純 built-in。Tool arguments 與 vars 是不同
 contract。</p>
-<h4 id="workload-模型">Workload 模型</h4>
+<h4 id="選擇-closed-user-或-arrival-rate-workload">選擇 closed-user 或
+arrival-rate workload</h4>
 <p>Closed workload 使用正整數 load.users。每個穩定 virtual user
 重複執行固定 target，並在下一次 iteration 前遵守
 execution.thinkTime。thinkTime 可設 duration 或 {min, max} range。</p>
-<p>協調執行的 workloads 共用延遲建立、有界的 worker
-executor，其最大容量為各 workload 設定的 concurrency slots 總數。同步
-iteration 因 target I/O 阻塞時，executor 才按需求建立 platform
-thread，最多達到各 workload 設定的 concurrency 上限。Closed virtual user
-以 scheduler state 表示，不會預先各自佔用 control thread。Scheduler
-會阻塞至下一個 VU/phase deadline 或 iteration 完成。Arrival-rate
-scheduler 直接計算 phase deadline，並等待下一個 due arrival，無需每毫秒
-polling。Cancellation 會停止新 iteration admission、中斷該 workload 已
-admission 的 iteration，並等待 completion event 完成後才建立最終結果
-snapshot。</p>
-<p>Arrival-rate workload 使用 load.arrivalRate、正整數
-load.maxConcurrent 與 overloadPolicy: drop。Scheduler 依絕對 due time
-排程。超過 maxConcurrent 的 arrival 記為 generator drop；不排隊，也不算
-SUT error。Arrival-rate 沒有持續 USER_ID，也不能配置 thinkTime。</p>
-<h4 id="pacing-與-resource-pool-sizing">Pacing 與 Resource pool
-sizing</h4>
+<p>Arrival-rate workload 使用 <code>load.arrivalRate</code>、正整數
+<code>load.maxConcurrent</code> 與
+<code>overloadPolicy: drop</code>。Scheduler 依絕對 due time 排程。超過
+maxConcurrent 的 arrival 記為 generator drop；不排隊，也不算 SUT
+error。Arrival-rate 沒有持續 USER_ID，也不能配置
+<code>thinkTime</code>。</p>
+<p>Closed workload 會在 iteration 同步執行時保留配置的 virtual user
+數量。Scheduler 和 worker-pool implementation 請看 <a
+href="system-design/load-scheduler.zh.md">Load scheduler
+design</a>。</p>
+<h4 id="設定-pacing-並估算-resource-pool-容量">設定 pacing 並估算
+Resource pool 容量</h4>
 <p>穩定 arrival rate 下，可使用 Little's law 估算平均同時處理中的
 request 數：</p>
 <pre class="text"><code>平均 concurrency ≈ arrival rate（requests/second）× 平均 response time（seconds）</code></pre>
@@ -2594,15 +2658,18 @@ first-use warm-up phase 使用
 <p>duration 必填。warmup、rampUp、rampDown 預設為零。Warm-up 送出真實
 traffic，但不計入 measured threshold aggregates。可選 seed 使 closed-VU
 think-time randomization 可重複。</p>
-<h4 id="load-identity-與輸出路徑">Load identity 與輸出路徑</h4>
-<p>每個開始的 iteration 在 Load run 內有唯一 EXEC.ID，並共用
-EXEC.RUN_ID。省略 execution.execIdFormat 時 ATT 使用預設 run-scoped
-ID；有設定時，在 initialization 使用一般 ${...} / #{...} engine
-求值一次。Bootstrap vars 在 ID 發布後才評估，因此可讀 EXEC.ID 與
-EXEC.OUTPUT_DIR。Closed workload 可讀 EXEC.LOAD.USER_ID；arrival-rate
-沒有此欄位。欄位可用時機及 function 限制見<a
-href="reference.zh/runtime-context.md">Runtime and Context
-Model</a>。</p>
+<h4 id="識別-iterations-並查看其-artifacts">識別 iterations 並查看其
+artifacts</h4>
+<p>每個開始的 iteration 在 Load run 內有唯一
+<code>EXEC.ID</code>，並共用 <code>EXEC.RUN_ID</code>。省略
+<code>execution.execIdFormat</code> 時 ATT 使用預設 run-scoped
+ID；有設定時，使用一般 <code>${...}</code> / <code>#{...}</code> engine
+求值一次。Bootstrap vars 在 ID 發布後才評估，因此可讀取
+<code>EXEC.ID</code> 與 <code>EXEC.OUTPUT_DIR</code>。Closed workload
+可讀取 <code>EXEC.LOAD.USER_ID</code>；arrival-rate
+沒有此欄位。欄位初始化時機與 function 限制見 <a
+href="#檢查-execution-id-可用欄位">Check execution ID fields before
+use</a>。</p>
 <p>產生的 ID 必須非空且是安全的 path segment。重複 ID 會在 target
 啟動前失敗；ATT 不會靜默附加 suffix。</p>
 <pre class="text"><code>output/load/&lt;RUN_ID&gt;/
@@ -2616,16 +2683,19 @@ Model</a>。</p>
 ├── failures/&lt;EXEC.ID&gt;/case.yaml
 ├── samples/&lt;EXEC.ID&gt;/case.log
 └── samples/&lt;EXEC.ID&gt;/case.yaml</code></pre>
-<p>Metrics-only iteration 雖有 EXEC.ID，但除非 operation 寫入 artifact
-或 retention decision 要求 materialize evidence，否則不會建立
-per-iteration execution directory。iteration 執行期間 EXEC.OUTPUT_DIR
-維持 executions/&lt;EXEC.ID&gt; 的 logical planned path。保留的 failure
-或 sampled success 會將 evidence 複製到 failures/&lt;EXEC.ID&gt;/ 或
-samples/&lt;EXEC.ID&gt;/。Report/evidence summary 顯示 EXEC.ID；有保留
-case.log 時提供連結。Helper resource-output formatting 會延遲至
-retention；明確要求的 Tool evidence collector 仍會執行，因為它是
-author-requested diagnostic operation。</p>
-<h4 id="evidence-與-resource-output">Evidence 與 Resource output</h4>
+<p>Metrics-only iteration 雖有 <code>EXEC.ID</code>，但除非 operation
+寫入 artifact 或 retention materialize evidence，否則不會建立
+per-iteration execution directory。Iteration 執行期間
+<code>EXEC.OUTPUT_DIR</code> 維持
+<code>executions/&lt;EXEC.ID&gt;</code> 的 logical planned path。保留的
+failure 或 sampled success 會將 evidence 複製到
+<code>failures/&lt;EXEC.ID&gt;/</code> 或
+<code>samples/&lt;EXEC.ID&gt;/</code>。Report/evidence summary 顯示
+<code>EXEC.ID</code>；有保留 <code>case.log</code> 時提供連結。Optional
+Resource output formatting 會延遲至 iteration 被保留後；明確要求的 Tool
+evidence collector 仍會執行。</p>
+<h4 id="選擇要保留的-iteration-evidence">選擇要保留的 iteration
+evidence</h4>
 <p><code>evidence.mode</code> 支援
 <code>metrics</code>、<code>failures</code>、<code>samples</code>、<code>all</code>；預設為
 <code>failures</code>。這些 mode 分別將 effective success/failure policy
@@ -2634,30 +2704,24 @@ author-requested diagnostic operation。</p>
 與 <code>evidence.failure</code> 可各自覆寫預設。<code>sampleRate</code>
 與 <code>maxSamples</code> 限制保留 evidence。Dropped arrival 不建立
 iteration evidence。</p>
-<p>Case log capture 會在每個 iteration 開始前依 effective
-success/failure policy 及剩餘 retention capacity 決定。Effective failure
-policy 為 <code>full</code> 且仍有可用的 <code>maxSamples</code> slot
-時，failure（包括 <code>samples</code> 中未抽中的
-success）會在記憶體保留經 redaction 的 rolling tail，最多 65,536
-字元；只有 failure claim 到 retention slot
-後才會物化。<code>maxSamples</code> 為零或已用盡、因此不能再保留 failure
-時，會略過 per-action serialization 與 buffering。In-flight iteration
-已預留的 slot 可能令 scheduler 保守地略過其他 iteration 的
-capture。保留的 log 會在 truncation marker 後保留最新 action 與 runtime
-failure detail。已抽中的 success 與保留的 full-success evidence 使用完整
-deferred case log；若已預留 success slot 的 iteration
-最後失敗，系統仍會保留其完整 deferred log，並使用該 slot 保存 failure
-evidence。例如 <code>mode: metrics, failure: full</code>
-會在仍有容量時啟用 bounded failure
-capture；<code>mode: failures, failure: none</code> 則會略過 failure
-capture。</p>
+<p>Case-log evidence 依 effective success/failure policy 及剩餘
+retention capacity 保留。Failure policy 為 <code>full</code> 時，保留的
+failure 會包含經 redaction 的 execution log；sampled success 和
+full-success policy 會按 selection 保留 success log。超過 evidence
+capacity 的 iterations 不會保留 log。例如
+<code>mode: metrics, failure: full</code> 會在仍有容量時保留 failure
+log；<code>mode: failures, failure: none</code> 會停用 failure
+log。Deferred capture 和 storage 的實作細節見 <a
+href="system-design/load-scheduler.zh.md">Load scheduler
+design</a>。</p>
 <p>evidence.resources.output 支援 inherit（預設）或 none。none
 停用可選的人類可讀 resource-output 格式化與物化，但保留 typed
 result、stdoutFormat/responseFormat parsing、exact project-file String
 與 requestFormat 行為。Load 將 resource output 延至 iteration
 被保留後才處理；metrics-only iteration 不做 business-output formatting
 或 evidence file I/O。</p>
-<h4 id="reportmetrics-與-thresholds">Report、metrics 與 thresholds</h4>
+<h4 id="查看-load-結果並設定-thresholds">查看 Load 結果並設定
+thresholds</h4>
 <p>ATT 在 run root 寫入有界 load-summary.json/yaml 與 self-contained
 report/index.html。Report 對 retained execution 顯示
 EXEC.ID、workload/target identity、status、timing；有保留 case.log
@@ -2666,73 +2730,60 @@ EXEC.ID、workload/target identity、status、timing；有保留 case.log
 <p>Summary 會將 generator observation 與 SUT outcome
 分開。<code>metrics.generator</code> 包含 sampled heap
 used/committed/maximum、觀察到的 peak live threads、GC count/time，以及
-JVM 支援時的 process CPU。Sampling 由 event 觸發並限制為每 100 ms
-至多一次，較短暫的 peak
-可能錯過。<code>schedulerWakeups</code>、<code>submitLag*</code> 與
+JVM 支援時的 process CPU。Sampling 限制為每 100 ms 至多一次，較短暫的
+peak 可能錯過。<code>schedulerWakeups</code>、<code>submitLag*</code> 與
 <code>workerQueueDepth*</code> 描述 scheduler pressure；arrival drops 與
 SUT error 分開。<code>resources.http</code> 會按 HTTP helper 報告
 active/idle/waiting 與觀察到的 peak connections，並與 DB、MQ、Render
 pool/plan diagnostics 並列；<code>resources.resourceMetricSamples</code>
-顯示 rate-limited resource observations 的數量。Testdata
-mapping/selection counters 及 cache sizes 位於
-<code>resources.generator.testdata</code>；iteration scope 的 selection
-只在單次 mapping 內保留，user/workload scope
-只保留其範圍所需的選擇。Custom execution ID 以 disk marker
-保留，<code>resources.executionIds</code> 顯示其數量；default monotonic
-ID 不使用 collision map。</p>
-<p>Latency percentile 使用有界 primitive
-reservoir。<code>latencySampleCapacity</code>、<code>latencySampleCount</code>、<code>latencyObservationCount</code>
-及 <code>latencySampleRate</code> 描述 run-level estimate；精確 latency
-aggregates 仍保持精確。Time series 以 circular ring 保留最新 4,096
-個一秒 bucket。</p>
+顯示 rate-limited resource observations
+的數量。<code>resources.executionIds</code> 顯示 custom execution-ID
+reservation 數量。Testdata mapping/selection counts 位於
+<code>resources.generator.testdata</code>；解讀方式和 implementation
+limits 見 <a href="system-design/load-telemetry.zh.md">Load Generator
+Telemetry</a>。</p>
+<p><code>latencySampleCapacity</code>、<code>latencySampleCount</code>、<code>latencyObservationCount</code>
+及 <code>latencySampleRate</code> 描述 run-level percentile
+estimate；精確 latency aggregates 仍保持精確。Time-series output
+保留最新 4,096 個一秒 bucket。ATT 不會平均 workload percentile
+來計算整體 percentile。</p>
 <p>新增的 Load summary telemetry 欄位在
 <code>att-load-summary/v1.1</code> 下屬 optional；目前 writer
 會輸出這些欄位，加入 telemetry 前產生的 summary 仍然有效。</p>
-<p>使用
-<code>mvn -Datt.load.soak=true -Datt.load.soak.durationMinutes=30 -Dtest=LoadTelemetrySoakTest test</code>
-執行 30–60 分鐘的 optional synthetic selection soak。它會檢查 warm-up 後
-retained heap 是否維持在 warm-up checkpoint 的
-<code>max(16 MiB, 25%)</code> 範圍內，並確認 iteration selection state
-保持空集合。</p>
-<p>Sampling limits 與 metrics 解讀方式見 <a
+<p>Sampling limits、metrics 解讀方式和 maintainer verification 請看 <a
 href="system-design/load-telemetry.zh.md">Load Generator
 Telemetry</a>。</p>
 <p>Root thresholds 只套用於 aggregate run；workload thresholds
 只套用於個別 workload，不會從 root 繼承。Threshold 失敗回傳 FAIL/exit
 1。設定或 target 無效回傳 exit 2；runtime/infrastructure error 回傳
 ERROR/exit 3。Generator drop 不屬於 SUT error。</p>
-<h4 id="render-plan-與-payload-snapshot">Render plan 與 payload
-Snapshot</h4>
-<p>Load workload scheduler 啟動前，ATT 會為每個可達的 Render payload
-glob 解析一次，並凍結該 run 匹配到的 UTF-8 source content 與已編譯的
-reference/expression 結構。Run 進行中對 payload 的編輯、替換或新增 glob
-match 不影響該 run 的 iterations；下一次 Load run 會重新解析
-package。一般 Run 與 Debug 每次 execution 使用新 plan，因此下一次
-execution 會讀取編輯後的內容。</p>
+<h4 id="了解-load-執行期間的-payload-變化">了解 Load 執行期間的 payload
+變化</h4>
+<p>Load workload 啟動前，ATT 會為每個可達的 Render payload glob
+解析一次，並凍結該 run 匹配到的 UTF-8 source content。Run 進行中對
+payload 的編輯、替換或新增 glob match 不影響該 run 的 iterations；下一次
+Load run 會重新解析 package。一般 Run 與 Debug 每次 execution 使用新
+plan，因此下一次 execution 會讀取編輯後的內容。</p>
 <p>每個 iteration 都會以自己的 Context 評估 Context reference、built-in
-call 及 external call。ATT 重用解析後的結構與 source text，不重用
-dynamic rendered result；<code>seq.next()</code>、clock/random function
-及 external call 等 stateful call 仍會在每次 iteration 執行。Render
+call 及 external call。<code>seq.next()</code>、clock/random function 及
+external call 等 stateful call 會在每次 iteration 執行。Render
 在記憶體回傳 String，因此將
 <code>ACTIONS.&lt;id&gt;.output.result</code> 傳給下游 action
 不會建立中間 Render file。只有 operation 明確需要檔案時才使用
 <code>EXEC.OUTPUT_DIR</code>。</p>
 <p>使用 <code>--profile</code> 時，<code>performance.json</code> 會記錄
 <code>renderPlansCompiled</code>、<code>renderPlanCacheHits</code>、<code>renderPayloadResolutions</code>、<code>renderPayloadResolutionCacheHits</code>、<code>renderEvaluations</code>、<code>renderArtifactWrites</code>
-與 <code>renderSourceBytes</code>。這些有界 run totals 分別顯示
-source-plan 重用與每次 iteration 的
-evaluation；<code>renderArtifactWrites</code> 為零，因為 Render 只回傳
-String，不會自行寫入 artifact。</p>
-<p>Load 啟動時也會編譯所選 Template/Flow action sequence、主要 Tool call
-與 argument expression、<code>runWhen</code>、assertion 及
-<code>retry.when</code>。每個 iteration 會使用自己的 Context 評估此
-immutable plan。Testdata input mapping 同樣會在 target validation
-時編譯；descriptor 與有效 workload policy 只準備一次，record selection
-與 Context value 仍會依 iteration 評估。Run summary 的
-<code>resources.execution</code> 包含
+與 <code>renderSourceBytes</code>。Load 如何準備 plans 並在 iterations
+間重用 immutable source data，請看 <a
+href="system-design/load-scheduler.zh.md">Load scheduler
+design</a>。</p>
+<p>使用 <code>--profile</code> 時，<code>performance.json</code> 的
+<code>resources.execution</code> 會包含
 <code>executionPlansCompiled</code>、<code>actionPlansCompiled</code> 與
-<code>actionEvaluations</code>。</p>
-<h4 id="cli-與範例">CLI 與範例</h4>
+<code>actionEvaluations</code>。Plan 和 resolver reuse 的 implementation
+見 <a href="system-design/load-scheduler.zh.md">Load scheduler
+design</a>。</p>
+<h4 id="從-cli-覆蓋-workload-設定">從 CLI 覆蓋 workload 設定</h4>
 <p>單一 workload 可用
 --users、--arrival-rate、--warmup、--ramp-up、--duration、--ramp-down、--think-time、--max-concurrent
 等 option 覆蓋對應 YAML。多 workload 使用未指定 workload 的 load-model
@@ -2774,10 +2825,9 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb43-1"><a href="#
 <span id="cb43-9"><a href="#cb43-9" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> tool fpp.invokeApi <span class="at">--set</span> arg.requestId=42</span></code></pre></div>
 <p>可複製範例與欄位說明見 <a
 href="../examples/load/README.md">examples/load/README.md</a>；schema
-migration 見 <a href="reference.zh/appendices/migrations.md">Appendix
-C</a>。</p>
-<h4 id="load-execution-id-initialization">Load execution ID
-initialization</h4>
+migration 見 <a href="reference.zh/appendices/migrations.md">Migration
+Notes</a>。</p>
+<h4 id="檢查-execution-id-可用欄位">檢查 execution ID 可用欄位</h4>
 <p>Load 使用 att-load/v1.6。設定 execution.execIdFormat 時，ATT 在每個
 iteration initialization 使用一般 ${...} / #{...} engine
 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及
@@ -2804,7 +2854,7 @@ suffix。</p>
 <p>execIdFormat 只允許 deterministic、side-effect-free
 built-ins；external calls、seq.next()、random、clock 與 filesystem
 functions 都會被拒絕。Schema migration 見 <a
-href="reference.zh/appendices/migrations.md">Appendix C</a>。</p>
+href="reference.zh/appendices/migrations.md">Migration Notes</a>。</p>
 <h2 id="resources-與-integrations">Resources 與 integrations</h2>
 <p>Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 是同級
 integration/resource 類型。SSHHelper 為 command-backed Tool
@@ -3332,7 +3382,7 @@ parsing 不變。</p>
 <p>Call-level responseFormat 可覆蓋 receive/request 的
 requestReply.responseFormat；send 不解析 reply。Instance selection 與
 pool limits 屬於 descriptor。Schema migration 見 <a
-href="reference.zh/appendices/migrations.md">Appendix C</a>。</p>
+href="reference.zh/appendices/migrations.md">Migration Notes</a>。</p>
 <p>MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive
 limit，超限時回報 <code>MQ_RESPONSE_TOO_LARGE</code>。這是 transport
 成功後的 size rejection，與 reply 遺失或 connection failure
@@ -4041,6 +4091,36 @@ environments</h2>
 <p>本章是作者編寫配置時的權威閱讀參考。下面提到的 <a
 href="../schemas"><code>schemas/</code></a>
 仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。</p>
+<h3 id="按任務查找配置">按任務查找配置</h3>
+<table>
+<thead>
+<tr class="header">
+<th>任務</th>
+<th>從這裡開始</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>選擇 SIT、UAT 或其他 Resource profile</td>
+<td><a href="#選擇-environment-profile">選擇 environment
+profile</a></td>
+</tr>
+<tr class="even">
+<td>設定輸出、Run ID 或報表默認值</td>
+<td><a href="#設定-package-wide-options">設定 package-wide
+options</a></td>
+</tr>
+<tr class="odd">
+<td>查找 Tool 或 Helper contract 的 owner</td>
+<td><a href="#configuration-owners">Configuration owners</a></td>
+</tr>
+<tr class="even">
+<td>遷移或校驗 schema</td>
+<td><a href="#schema-catalog">Schema catalog</a> 和 <a
+href="reference.zh/appendices/migrations.md">Migration notes</a></td>
+</tr>
+</tbody>
+</table>
 <h3 id="配置層與優先級">配置層與優先級</h3>
 <table>
 <thead>
@@ -4156,7 +4236,7 @@ headers、<code>EXEC.INPUT</code>、<code>EXEC.VARS</code>、任意 maps、DB
 values 中的 key 都是資料，名稱會原樣保留。例如，除非
 <code>x-correlation-id</code> 本身是 ATT 擁有的配置 collection
 key，否則它仍是一般 HTTP header 或 input key。</p>
-<h3 id="att-多環境-profile-選擇">ATT 多環境 profile 選擇</h3>
+<h3 id="選擇-environment-profile">選擇 environment profile</h3>
 <p><code>att-config/v2.11</code> 是現行 profile 契約。Profile
 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper 與 testdata
 descriptor lists。各 Helper 與 testdata descriptor 的設定方式及 <a
@@ -4278,14 +4358,15 @@ metadata、diagnostics、reports 或 generated docs。</p>
 <p>當同一 package 只在基礎設施綁定上不同，應使用 profiles；當
 testcase/template root、report policy 或 package structure
 有意不同，才使用不同 top-level config。完整 config migration 見 <a
-href="reference.zh/appendices/migrations.md">Appendix C</a>。</p>
+href="reference.zh/appendices/migrations.md">Migration Notes</a>。</p>
 <h3 id="schema-catalog">Schema catalog</h3>
 <p><a
 href="../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a> 是
 active schema 的 source of truth。Package validation 檢查
 registrations；封存 schema 不會成為 active runtime contract。完整矩陣見
-<a href="reference.zh/appendices/schema-matrix.md">Appendix A</a>。</p>
-<h3 id="global-configuration">Global configuration</h3>
+<a href="reference.zh/appendices/schema-matrix.md">Schema and Version
+Matrix</a>。</p>
+<h3 id="設定-package-wide-options">設定 package-wide options</h3>
 <p>以下 configuration example 與 field table 和英文版共用相同
 contract；欄位名與 literal values 保留英文。</p>
 <div class="sourceCode" id="cb78"><pre
@@ -4317,6 +4398,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb78-1"><a href=
 <span id="cb78-26"><a href="#cb78-26" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">UAT</span><span class="kw">:</span></span>
 <span id="cb78-27"><a href="#cb78-27" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/uat/orders.yaml</span><span class="kw">]</span></span>
 <span id="cb78-28"><a href="#cb78-28" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/uat/payment.yaml</span><span class="kw">]</span></span></code></pre></div>
+<h4 id="設定-runtime-和-package-路徑">設定 runtime 和 package 路徑</h4>
 <table>
 <thead>
 <tr class="header">
@@ -4388,17 +4470,34 @@ stream</td>
 maximum bytes streamed to each process artifact</td>
 </tr>
 <tr class="even">
+<td><code>xml.namespaceMode</code></td>
+<td><code>ignore</code></td>
+<td><code>ignore</code> or <code>preserve</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="配置報表輸出">配置報表輸出</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Path</th>
+<th>Required/default</th>
+<th>Constraints</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
 <td><code>report.mode</code></td>
 <td><code>append-to-copy</code></td>
 <td><code>append-to-copy</code> or <code>none</code>; <code>none</code>
 skips result-workbook creation</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>report.fileNamePattern</code></td>
 <td><code>${suiteName}.result.xlsx</code></td>
 <td>Result workbook filename pattern</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>report.columns</code></td>
 <td><code>{}</code></td>
 <td>Supported keys: <code>result</code>, <code>durationMs</code>,
@@ -4406,69 +4505,77 @@ skips result-workbook creation</td>
 <code>caseLog</code>, <code>reportLink</code>, <code>runTime</code>,
 <code>execId</code>; each value is a string column label</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>report.html.caseLogInlineLimitBytes</code></td>
 <td><code>32768</code></td>
 <td>Integer 0–1048576 UTF-8 bytes; larger logs use a bounded head/tail
 preview plus artifact link</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>report.junit.caseLogEmbedThresholdBytes</code></td>
 <td><code>10240</code></td>
 <td>Integer 0–1048576 UTF-8 bytes; 0 always links</td>
 </tr>
-<tr class="odd">
-<td><code>xml.namespaceMode</code></td>
-<td><code>ignore</code></td>
-<td><code>ignore</code> or <code>preserve</code></td>
+</tbody>
+</table>
+<h4 id="配置-resource-和-environment-registries">配置 Resource 和
+environment registries</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Path</th>
+<th>Required/default</th>
+<th>Constraints</th>
 </tr>
-<tr class="even">
+</thead>
+<tbody>
+<tr class="odd">
 <td><code>toolGroups</code></td>
 <td><code>[]</code></td>
 <td>Unique safe package-relative tool-group YAML paths</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>dbhelpers</code></td>
 <td><code>[]</code></td>
 <td>Unique package-contained <code>att-dbhelper/v2.6</code> YAML paths;
 normalized duplicates are rejected</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>mqhelpers</code></td>
 <td><code>[]</code></td>
 <td>Unique package-contained <code>att-mqhelper/v1.2</code> YAML paths;
 normalized duplicates are rejected</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>sshhelpers</code></td>
 <td><code>[]</code></td>
 <td>Unique package-contained <code>att-sshhelper/v1.0</code> YAML
 paths</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>httphelpers</code></td>
 <td><code>[]</code></td>
 <td>Unique package-contained <code>att-httphelper/v1.1</code> YAML
 paths</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>environments</code></td>
 <td>absent</td>
 <td>Non-empty map of profile names; profiles may contain configured
 resource and testdata descriptor lists</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>environments.&lt;profile&gt;.testdata</code></td>
 <td><code>[]</code></td>
 <td>Unique package-relative YAML paths available to that selected
 environment</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>ssh</code></td>
 <td>absent</td>
 <td>Optional SSH target for inline global tools</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>tools</code></td>
 <td><code>{}</code></td>
 <td>Map of reusable tool contracts</td>
@@ -4555,8 +4662,8 @@ environment</td>
 </tr>
 </tbody>
 </table>
-<p>See <a href="reference.zh/appendices/migrations.md">Appendix C</a>
-for removed configuration fields.</p>
+<p>See <a href="reference.zh/appendices/migrations.md">Migration
+Notes</a> for removed configuration fields.</p>
 <h3 id="標識符和路徑約束">標識符和路徑約束</h3>
 <p>Run ID 和完整 Case ID 會直接用作目錄名，ATT 不會對合法標識做 slug
 化或哈希處理。</p>
@@ -4626,7 +4733,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb80-1"><a href=
 <p>但不支持如
 <code>${RUN_ID}</code>、<code>${WORKBOOK_ID}</code>、<code>${ENVIRONMENT}</code>、<code>${EXEC.INPUT.caseId}</code>
 等運行時值引用。</p>
-<h3 id="feature-configuration-owners">Feature configuration owners</h3>
+<h3 id="configuration-owners">Configuration owners</h3>
 <table>
 <thead>
 <tr class="header">
@@ -4672,7 +4779,7 @@ href="reference.zh/reliability-execution-control.md">Reliability</a></td>
 </tbody>
 </table>
 <h2 id="cli-參考">CLI 參考</h2>
-<h3 id="命令">命令</h3>
+<h3 id="選擇命令">選擇命令</h3>
 <table>
 <thead>
 <tr class="header">
@@ -4740,15 +4847,8 @@ Load</td>
 </tr>
 </tbody>
 </table>
-<h3 id="命令語法">命令語法</h3>
-<p>表格中使用 Linux/macOS 啟動器 <code>./att.sh</code>。Windows 上使用
-<code>att.bat</code>，命令與選項相同。<code>att.bat snapshot</code>、<code>att.bat validate</code>
-和 <code>att.bat docs</code> 不會觸發配置的 testcase Tool。Windows
-校驗會檢查 <code>.sh</code> 文件是否存在並路徑是否安全，跳過 POSIX
-啟動/可執行兼容性，並輸出一條警告列出受影響 Tool；一次校驗 PASS
-並不證明這些腳本能在 Windows 上運行。運行前請提供並測試 Windows
-原生等價物。二進制發布要求 Java 8+；源碼樹 <code>att.bat</code>
-會在可用時使用 Maven，否則要求存在 <code>target\classes</code>。</p>
+<h3 id="按任務查閱語法option-和範例">按任務查閱語法、option 和範例</h3>
+<h4 id="查看-help-和版本">查看 help 和版本</h4>
 <table>
 <thead>
 <tr class="header">
@@ -4765,6 +4865,17 @@ Load</td>
 <td><code>./att.sh version</code></td>
 <td>輸出版本</td>
 </tr>
+</tbody>
+</table>
+<h4 id="產生-workbook-snapshot">產生 Workbook snapshot</h4>
+<table>
+<thead>
+<tr class="header">
+<th>語法</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
 <tr class="odd">
 <td><code>./att.sh snapshot</code></td>
 <td>未指定 selector 時遞歸生成 <code>testcase.root</code> 下所有
@@ -4782,6 +4893,17 @@ Snapshot；等同於 <code>--all</code></td>
 <td><code>./att.sh snapshot --suite-dir &lt;dir&gt;</code></td>
 <td>在某目錄下遞歸生成 Snapshot</td>
 </tr>
+</tbody>
+</table>
+<h4 id="驗證-package">驗證 package</h4>
+<table>
+<thead>
+<tr class="header">
+<th>語法</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
 <tr class="odd">
 <td><code>./att.sh validate --package</code></td>
 <td>校驗整個包；默認範圍</td>
@@ -4794,120 +4916,153 @@ Snapshot；等同於 <code>--all</code></td>
 <td><code>./att.sh validate --package --format json</code></td>
 <td>向 stdout 輸出單個校驗 JSON 文檔</td>
 </tr>
-<tr class="even">
+</tbody>
+</table>
+<h4 id="執行-testcase">執行 Testcase</h4>
+<table>
+<thead>
+<tr class="header">
+<th>語法</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
 <td><code>./att.sh run --all</code></td>
 <td>運行所有發現的 Case</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run --suite &lt;xlsx&gt;</code></td>
 <td>運行一個 Workbook；可重復</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run --suite-dir &lt;dir&gt;</code></td>
 <td>在目錄下發現 Workbook</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --case &lt;workbookId.groupId.rowCaseId&gt;</code></td>
 <td>包含一個完整 Case ID</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --tag &lt;tag&gt;</code></td>
 <td>包含一個標簽</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --exclude-tag &lt;tag&gt;</code></td>
 <td>排除一個標簽</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --dry-run</code></td>
 <td>僅校驗/規劃，不執行 Tool</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --update-snapshot</code></td>
 <td>在校驗前顯式刷新已更改的完整 WorkbookSnapshot</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --fail-fast</code></td>
 <td>在首次 FAIL/ERROR 後停止調度</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --rerun-failed</code></td>
 <td>重新選擇先前 FAIL/ERROR 的 Case</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --run-id &lt;id&gt;</code></td>
 <td>設置最終 run 目錄名</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --output-dir &lt;dir&gt;</code></td>
 <td>覆蓋輸出根目錄</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --ci-output junit,json</code></td>
 <td>寫出 CI XML/JSON 與 JUnit HTML</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --format json</code></td>
 <td>輸出機器可讀摘要</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --quiet</code></td>
 <td>抑制詳細實時進度；保留最終摘要和錯誤</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --verbose</code></td>
 <td>為兼容性保留；詳細實時進度已是默認行為</td>
 </tr>
-<tr class="even">
+</tbody>
+</table>
+<h4 id="debug-component">Debug component</h4>
+<table>
+<thead>
+<tr class="header">
+<th>語法</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
 <td><code>./att.sh debug</code></td>
 <td>發現可運行的 Tool、Template 和 Flow；只顯示實際存在的默認
 sidecar</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh debug template &lt;id&gt;</code></td>
 <td>執行一個 Template；自動發現
 <code>&lt;template-dir&gt;/debug.yaml</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh debug flow &lt;id&gt;</code></td>
 <td>執行一個規範 Flow；自動發現
 <code>&lt;flow-dir&gt;/debug.yaml</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh debug tool &lt;id&gt;</code></td>
 <td>執行一個 Tool；自動發現
 <code>config/tools/&lt;group&gt;.debug.yaml</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --input &lt;file&gt;</code></td>
 <td>覆蓋目標自動發現的 debug 輸入</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --set input.path=&lt;yaml-value&gt;</code></td>
 <td>覆蓋 typed <code>EXEC.INPUT</code> 值；可重復使用</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh debug tool &lt;id&gt; --set arg.name=&lt;yaml-value&gt;</code></td>
 <td>覆蓋一個 Tool argument；可重復使用</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --set vars.path=&lt;yaml-value&gt;</code></td>
 <td>在 expression evaluation 前覆蓋 Template/Flow bootstrap
 <code>EXEC.VARS</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --output-dir &lt;dir&gt;</code></td>
 <td>將 debug 輸出隔離到
 <code>&lt;dir&gt;/debug/&lt;debugId&gt;/</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --format json</code></td>
 <td>輸出緊湊機器可讀摘要；完整證據仍在 <code>result.yaml</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --quiet</code></td>
 <td>抑制詳細實時進度；保留最終摘要和錯誤</td>
 </tr>
+</tbody>
+</table>
+<h4 id="執行-load-scenario">執行 Load scenario</h4>
+<table>
+<thead>
+<tr class="header">
+<th>語法</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
 <tr class="odd">
 <td><code>./att.sh load</code></td>
 <td>發現 <code>load/</code> 下有效的 <code>att-load/*</code>
@@ -4939,20 +5094,31 @@ scenario；報告無效的已聲明 scenario</td>
 <td><code>./att.sh load &lt;scenario.yaml&gt; --set vars.path=&lt;yaml-value&gt;</code></td>
 <td>覆蓋單 workload Template/Flow bootstrap vars</td>
 </tr>
-<tr class="even">
+</tbody>
+</table>
+<h4 id="管理報表和-package-輸出">管理報表和 package 輸出</h4>
+<table>
+<thead>
+<tr class="header">
+<th>語法</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
 <td><code>./att.sh report --run-id &lt;id&gt;</code></td>
 <td>重建 <code>report/index.html</code> 和
 <code>report/junit.html</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh docs</code></td>
 <td>生成 <code>build/docs/index.html</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh build</code></td>
 <td>在 <code>build/</code> 中歸檔最新完成 run</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh clean</code></td>
 <td>刪除文檔化生成輸出</td>
 </tr>
@@ -5087,8 +5253,40 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb84-1"><a href="#
 closed-VU。其餘 selection/output 選項仍受各 command
 約束：<code>--suite</code>、<code>--suite-dir</code>、<code>--case</code>/<code>--case-id</code>、<code>--tag</code>、<code>--exclude-tag</code>、<code>--all</code>、<code>--run-id</code>、<code>--output-dir</code>、<code>--format</code>、<code>--quiet</code>、<code>--verbose</code>、<code>--ci-output</code>、<code>--dry-run</code>、<code>--fail-fast</code>、<code>--rerun-failed</code>、<code>--update-snapshot</code>、<code>--package</code>、<code>--selected</code>、<code>--input</code>、<code>--set</code>、<code>--queue</code>、<code>--parallel</code>、<code>--allow-parallel-runs</code>、<code>--profile</code>、<code>--config</code>、<code>--env</code>
 和 <code>--help</code> 只在對應 command contract 允許時有效。</p>
-<h2 id="結果報告與-evidence">結果、報告與 Evidence</h2>
-<h3 id="運行目錄">運行目錄</h3>
+<h2 id="結果報告與-evidence">結果、報告與 evidence</h2>
+<p>Run 會執行 authored Testcase，並為每個選中的 row 記錄一次 Case
+execution。Testcase 是 Workbook data；Case execution 是使用相同完整 Case
+ID 標識的 runtime result。閱讀 status、日誌、報表和 evidence 時使用 Case
+execution。</p>
+<table>
+<thead>
+<tr class="header">
+<th>任務</th>
+<th>前往</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>查找 Run files 和 execution artifacts</td>
+<td><a href="#查找-run-artifacts">查找 Run artifacts</a></td>
+</tr>
+<tr class="even">
+<td>查看狀態或檢查失敗的 Action</td>
+<td><a href="#在-html-報表中查看-case-execution-結果">在 HTML 報表中查看
+Case execution 結果</a></td>
+</tr>
+<tr class="odd">
+<td>匯出 JUnit 或 CI 結果</td>
+<td><a href="#匯出-junit-結果">匯出 JUnit 結果</a>或<a
+href="#查看-ci-json-彙總">查看 CI JSON 彙總</a></td>
+</tr>
+<tr class="even">
+<td>重現已完成的 Run</td>
+<td><a href="#重現-run">重現 Run</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="查找-run-artifacts">查找 Run artifacts</h3>
 <pre class="text"><code>&lt;outputDirectory&gt;/&lt;RunID&gt;/
 ├── run.yaml
 ├── events.jsonl
@@ -5101,12 +5299,14 @@ closed-VU。其餘 selection/output 選項仍受各 command
 <p>Run ID 和 Case ID 在校驗後保持原樣。只有 <code>run.yaml</code> 狀態為
 <code>COMPLETE</code> 才表示運行完成；中斷工作會直接保留在已保留的 Run
 ID 目錄中供調試。</p>
-<h3 id="人類可讀-html-報告">人類可讀 HTML 報告</h3>
+<h3 id="在-html-報表中查看-case-execution-結果">在 HTML 報表中查看 Case
+execution 結果</h3>
 <p><code>report/index.html</code>
-是主要終端用戶報表。可以直接從磁盤打開。組按
+是主要終端用戶報表，可以直接從磁盤打開。組按
 <code>workbookId.groupId</code> 彙總；界面把 <code>groupId</code> 標記為
-Sheet。Case 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full
-Case ID/tag 的大小寫不敏感搜索，以及每列標題的升序/降序排序。Duration
+Sheet。Cases view 支持 Workbook/Sheet/Status 下拉框、對
+workbook/group/full Case ID/tag
+的大小寫不敏感搜索，以及每列標題的升序/降序排序。Duration
 按數值排序。</p>
 <p>展開的 Case 包含完整 Case ID、名稱、狀態、持續時間、Expected 和
 Actual 結果、每條記錄 Action 結果的一行、詳細執行日誌，以及
@@ -5115,7 +5315,8 @@ Actual 結果、每條記錄 Action 結果的一行、詳細執行日誌，以�
 JSON。為兼容既有報表，Expected 仍是所有 assert Action 非空最終
 description 與 <code>expected</code> 的有序 LF 聯接；Actual
 是所有非空運行時 <code>actual</code> 的有序 LF 聯接。</p>
-<h3 id="tool-evidence-collector-失敗">Tool Evidence collector 失敗</h3>
+<h3 id="診斷-tool-evidence-collector-失敗">診斷 Tool evidence collector
+失敗</h3>
 <p>Evidence collector 是 operation 完成後的 observability，不是 primary
 Tool result。使用 <code>onFailure: continue</code> 時，primary Action
 可以維持 <code>PASS</code>，而 collector 會獨立記錄為
@@ -5143,7 +5344,8 @@ code、HTTP status 和 timeout detail 等 resource identity/field 會留在
 bounded/redacted；raw input、payload、argv、output、resolved command
 text 與 failed <code>result</code> 不會發布。完整 projection、numeric
 budgets 與 security guarantees 見 <a
-href="reference.zh/appendices/limits-defaults.md">Appendix D</a>。</p>
+href="reference.zh/appendices/limits-defaults.md">Limits, Security
+Guarantees, and Advanced Diagnostics</a>。</p>
 <p>有 retry 時，請查看
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>。即使後一個
 attempt 成功，較早的 failed collector record 仍會保留；top-level
@@ -5156,7 +5358,8 @@ block，因此不必打開 internal exception trace，便可看到基本
 resource、category、message、exit code 和 bounded stderr。既有 capture
 limit 與 secret redaction 仍然有效；collector wrapper 不會開放無上限 raw
 output。</p>
-<h3 id="結果-workbook">結果 Workbook</h3>
+<h3 id="將-execution-結果寫入-workbook">將 execution 結果寫入
+Workbook</h3>
 <p>ATT 會復制源 Workbook，並使用
 <code>report.mode: append-to-copy</code>
 追加配置的結果列。<code>report.mode: none</code> 跳過 result
@@ -5167,8 +5370,9 @@ Workbook，適合不需要 copy 的 CI 或大型 run。Global
 單元格保留 LF 字符並以換行文本顯示。結果回填使用與 testcase loader
 相同的 Excel 顯示格式和空白規範化規則讀取 Case
 ID，因此帶前導零等數字格式的 ID 在執行與報表寫入時會匹配同一 Case。</p>
-<h3 id="junit-xml">JUnit XML</h3>
-<p>每個 ATT Case 對應一個 <code>&lt;testcase&gt;</code>：</p>
+<h3 id="匯出-junit-結果">匯出 JUnit 結果</h3>
+<p>每個 Case execution 對應一個 JUnit
+<code>&lt;testcase&gt;</code>：</p>
 <table>
 <thead>
 <tr class="header">
@@ -5202,19 +5406,19 @@ ID，因此帶前導零等數字格式的 ID 在執行與報表寫入時會匹�
 <p>文本會被 XML 轉義。JUnit XML 與 HTML 使用
 <code>report.junit.caseLogEmbedThresholdBytes</code>。低於或等於閾值的日誌會被嵌入；更大的日誌使用相對鏈接。<code>0</code>
 始終使用鏈接。</p>
-<h3 id="ci-json-彙總">CI JSON 彙總</h3>
+<h3 id="查看-ci-json-彙總">查看 CI JSON 彙總</h3>
 <p><code>ci/summary.json</code> 使用
 <code>schemaVersion: att-ci-summary/v2.1</code>，包含 ATT/Run
 ID、環境、時間、聚合狀態/統計、持續時間統計、每個 Case
 記錄、診斷計數、報表/產物路徑以及輸入清單哈希。</p>
-<h3 id="運行清單與可復現性">運行清單與可復現性</h3>
+<h3 id="重現-run">重現 Run</h3>
 <p><code>run.yaml</code> 使用
 <code>schemaVersion: att-run/v2.1</code>，記錄
 ATT/構建身份、Java/OS/locale/timezone、校驗模式、環境、時間戳、狀態/摘要、輸出路徑，以及有效配置、Tool
 group 文件、call-backed Tool SQL
 文件（<code>tool-sql</code>）、Workbook、Sidecar、解析
 Template/負載、包內 Tool 文件和 schema/catalog 版本的 SHA-256 hash。</p>
-<h3 id="文檔歸檔和清理">文檔、歸檔和清理</h3>
+<h3 id="生成文檔並管理-package-輸出">生成文檔並管理 package 輸出</h3>
 <table>
 <thead>
 <tr class="header">
@@ -5243,8 +5447,8 @@ Template/負載、包內 Tool 文件和 schema/catalog 版本的 SHA-256 hash。
 </tr>
 </tbody>
 </table>
-<h3 id="runexecution-與-evidence-導覽">Run、execution 與 Evidence
-導覽</h3>
+<h3 id="從-execution-identity-追蹤-artifact">從 execution identity 追蹤
+artifact</h3>
 <table>
 <thead>
 <tr class="header">
@@ -5286,7 +5490,8 @@ retained rows 的 EXEC.ID，有保留 case.log 時提供連結。Debug 使用同
 debug ID 作為 EXEC.RUN_ID 與 EXEC.ID。</p>
 <p>DIAG 是 evidence-only。Expression 不可讀取 DIAG、EXEC.MODE 或任意
 scheduler counter；業務差異請透過 EXEC.INPUT 傳入。</p>
-<h3 id="生成輸出模式摘要">生成輸出模式摘要</h3>
+<h3 id="查閱-generated-output-schemas">查閱 generated-output
+schemas</h3>
 <table>
 <thead>
 <tr class="header">
@@ -5309,8 +5514,8 @@ scheduler counter；業務差異請透過 EXEC.INPUT 傳入。</p>
 </tr>
 <tr class="even">
 <td>JUnit XML</td>
-<td>一個 testsuite，含 test/failure/error/skipped 計數，以及每個 ATT
-Testcase 的 testcase</td>
+<td>一個 testsuite，含 test/failure/error/skipped 計數，以及每個 Case
+execution 的 testcase</td>
 </tr>
 </tbody>
 </table>
@@ -5329,32 +5534,38 @@ find abnormal blocks; PASS, SKIPPED and informational blocks remain
 unmarked.</p>
 <h2 id="validation-與-troubleshooting">Validation 與
 troubleshooting</h2>
-<h3 id="診斷順序">診斷順序</h3>
+<h3 id="選擇第一個診斷步驟">選擇第一個診斷步驟</h3>
 <p>先執行 <code>validate --package</code> 並修正 diagnostic 的
-file/field。Runtime 失敗先看 report status/message，再看該 execution 的
+file/field。<strong>Testcase</strong> 是作者編寫並正規化的 Workbook
+row；<strong>Case execution</strong> 是 Run 對該 row
+的一次執行，兩者使用相同 Case ID。Runtime 失敗先看 Case execution 的
+report status/message，再看其
 <code>case.log</code>、<code>case.yaml</code> 與 Action
 evidence。<code>FAIL</code> 與 <code>ERROR</code> 的區分、continuation
 與 Retry 見 <a
-href="reference.zh/reliability-execution-control.md">Reliability</a>；collector
-failure path 見 <a
-href="reference.zh/results-reports-evidence.md">Results</a>。Windows
-launcher、Java SSH negotiation 與 stack-trace policy 見 <a
-href="reference.zh/appendices/limits-defaults.md">Appendix D</a>。</p>
+href="reference.zh/reliability-execution-control.md">Reliability and
+Execution Control</a>；collector failure path 見 <a
+href="reference.zh/results-reports-evidence.md">Results, Reports, and
+Evidence</a>。<a
+href="reference.zh/appendices/limits-defaults.md">Limits, Security
+Guarantees, and Advanced Diagnostics</a> 說明 Windows launcher、Java SSH
+negotiation 與 stack-trace policy。</p>
 <h3 id="先從-validation-開始">先從 Validation 開始</h3>
 <p>每次修改 workbook、sidecar、template、helper 或 tool 後執行：</p>
 <div class="sourceCode" id="cb87"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb87-1"><a href="#cb87-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>針對單一環境可執行
 <code>./att.sh validate --config config/config.yaml --env SIT --package</code>。ATT
-僅接受 <a href="reference.zh/appendices/schema-matrix.md">Appendix A</a>
-列出的 active schemas。<code>schemas/history/</code> 中的舊 schema
-僅供歷史參考，不是 runtime compatibility contract。請先更新
-<code>schemaVersion</code> 並將欄位遷移至現行契約，再執行
-validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration
-guidance；ATT 不會改寫 descriptor。例如，將 historical Render action
-改為使用 <code>&amp;{path}</code> 的 Assign，再依<a
-href="reference.zh/actions.md">Action 與型別化值</a>傳遞 resulting
-String。Unsupported version 會在執行前失敗。</p>
+僅接受 <a href="reference.zh/appendices/schema-matrix.md">Schema and
+Version Matrix</a> 列出的 active schemas。<code>schemas/history/</code>
+中的舊 schema 僅供歷史參考，不是 runtime compatibility
+contract。請先更新 <code>schemaVersion</code>
+並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及
+YAML 欄位位置，並提供 migration guidance；ATT 不會改寫
+descriptor。例如，將 historical Render Action 改為使用
+<code>&amp;{path}</code> 的 Assign，再依<a
+href="reference.zh/actions.md">Actions and Typed Values</a>傳遞
+resulting String。Unsupported version 會在執行前失敗。</p>
 <p>現行 schema 位於 <a
 href="../schemas"><code>schemas/</code></a>，較舊定義位於 <a
 href="../schemas/history"><code>schemas/history/</code></a>。<code>validate --package</code>
@@ -5396,8 +5607,8 @@ validation。</p>
 <tr class="odd">
 <td><code>ATT-CFG</code></td>
 <td>未知字段、重復鍵、schema 類型/枚舉錯誤</td>
-<td>對照<a
-href="reference.zh/configuration.md">Configuration</a>並移除不支持字段</td>
+<td>對照 <a href="reference.zh/configuration.md">Configuration and
+Environments</a> 並移除不支持字段</td>
 </tr>
 <tr class="even">
 <td><code>ATT-TOOL</code></td>
@@ -5417,17 +5628,18 @@ href="reference.zh/configuration.md">Configuration</a>並移除不支持字段</
 </tbody>
 </table>
 <h3 id="常見問題">常見問題</h3>
-<h4 id="為什麼-excel-看起來沒問題但-case-id-被拒絕">為什麼 Excel
-看起來沒問題，但 case ID 被拒絕？</h4>
+<h4 id="為什麼-testcase-id-被拒絕excel-卻顯示正確">為什麼 Testcase ID
+被拒絕，Excel 卻顯示正確？</h4>
 <p>ATT 導入的是顯示單元格文本，然後應用嚴格的 ID
 安全檢查。檢查隱藏的首尾空白、尾隨
 <code>.</code>、路徑字符、控制字符以及 Windows
 設備名。以文本形式保存標識符，以保留前導零。</p>
-<h4 id="兩張-sheet-能同時包含-tc001-嗎">兩張 Sheet 能同時包含
-<code>TC001</code> 嗎？</h4>
-<p>可以。給 sheet 不同的 group ID，即可生成例如
-<code>payment.payment.TC001</code> 和 <code>payment.batch.TC001</code>
-這樣的 ID。</p>
+<h4 id="兩張-sheet-可以使用相同的-row-id-嗎">兩張 Sheet 可以使用相同的
+row ID 嗎？</h4>
+<p>可以。給兩張 sheet 不同的 group ID，讓兩行形成不同 Testcase，例如
+<code>payment.payment.TC001</code> 和
+<code>payment.batch.TC001</code>；Run 會為它們各自建立 Case
+execution。</p>
 <h4 id="為什麼-na-變成空了">為什麼 <code>N/A</code> 變成空了？</h4>
 <p>ATT 會在數據映射和 Stage 選擇前，把
 <code>N/A</code>、<code>NA</code>、<code>NULL</code>、<code>NONE</code>、空和僅空白值歸一化為
@@ -5443,9 +5655,10 @@ validation 能識別 canonical current-scope replacement 時，會以
 warning。<code>ATT-CTX-002</code>
 會列出所有衝突候選，以便你加長後綴或使用規範路徑。聲明的可選字段即使值為空白，仍然是有效空字符串。</p>
 <h4 id="為什麼-fail-變成-error">為什麼 Fail 變成 error？</h4>
-<p>假斷言是 FAIL。無效表達式語法/導航、Tool 失敗、超時、解析失敗、I/O
-失敗或運行時異常，都是 ERROR。應查看 Action
-證據，而不只看最終聚合狀態。</p>
+<p>Assertion 為 false 會令 Case execution 變成
+FAIL。無效表達式語法/導航、Tool 失敗、超時、解析失敗、I/O
+失敗或運行時異常會令它變成 ERROR。應查看 Action 證據，而不只看最終 Run
+狀態。</p>
 <h4 id="為什麼-tool-跑了不止一次">為什麼 Tool 跑了不止一次？</h4>
 <p>它的 Action 啟用了重試，並收到了符合條件的非零退出碼。查看 Case
 日誌中的嘗試列表和最終 Action 記錄。</p>
@@ -5765,9 +5978,9 @@ locator、missing file、directory、非 UTF-8 bytes 及 symlink escape
 </tr>
 <tr class="even">
 <td>舊 active resource/config schema</td>
-<td>使用 <a href="reference.zh/appendices/schema-matrix.md">Appendix
-A</a> 的 active schema，並遷移上述欄位。Historical schemas 不是 active
-contracts。</td>
+<td>使用 <a href="reference.zh/appendices/schema-matrix.md">Schema and
+Version Matrix</a> 的 active schema，並遷移上述欄位。Historical schemas
+不是 active contracts。</td>
 </tr>
 </tbody>
 </table>

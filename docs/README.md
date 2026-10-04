@@ -41,7 +41,7 @@ Minimal offline workflow:
 
 - **Quick Start** is the tutorial for a first successful run.
 - **Reference** is the supported public contract. Use the generated [English](reference.html) or [繁體中文](reference.zh.html) manual, or the matching [English](reference/) and [繁體中文](reference.zh/) source modules.
-- **System Design** explains maintainer-facing implementation architecture: [runtime execution](system-design/runtime-execution.md) and SSHHelper [English](system-design/sshhelper.md) / [中文](system-design/sshhelper.zh.md).
+- **System Design** explains maintainer-facing implementation architecture: [runtime execution](system-design/runtime-execution.md), [Load scheduler](system-design/load-scheduler.md) / [Load scheduler 中文](system-design/load-scheduler.zh.md), [Load telemetry](system-design/load-telemetry.md) / [Load telemetry 中文](system-design/load-telemetry.zh.md), and SSHHelper [English](system-design/sshhelper.md) / [中文](system-design/sshhelper.zh.md).
 - **CHANGELOG** records release chronology: [CHANGELOG.md](../CHANGELOG.md).
 - **History** preserves superseded, version-specific, migration, compatibility, and issue-specific material: [history/README.md](history/README.md).
 

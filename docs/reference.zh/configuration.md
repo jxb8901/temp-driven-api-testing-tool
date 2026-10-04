@@ -2,6 +2,15 @@
 
 本章是作者編寫配置時的權威閱讀參考。下面提到的 [`schemas/`](../../schemas/) 仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
 
+## 按任務查找配置
+
+| 任務 | 從這裡開始 |
+|---|---|
+| 選擇 SIT、UAT 或其他 Resource profile | [選擇 environment profile](#選擇-environment-profile) |
+| 設定輸出、Run ID 或報表默認值 | [設定 package-wide options](#設定-package-wide-options) |
+| 查找 Tool 或 Helper contract 的 owner | [Configuration owners](#configuration-owners) |
+| 遷移或校驗 schema | [Schema catalog](#schema-catalog) 和 [Migration notes](appendices/migrations.md) |
+
 ## 配置層與優先級
 
 | 層級 | 來源 | 所管轄內容 |
@@ -53,7 +62,7 @@ actions:
 
 不要用此規則移除 user data 中的 key。HTTP headers、`EXEC.INPUT`、`EXEC.VARS`、任意 maps、DB `params`/`parameters` 和 Tool invocation argument values 中的 key 都是資料，名稱會原樣保留。例如，除非 `x-correlation-id` 本身是 ATT 擁有的配置 collection key，否則它仍是一般 HTTP header 或 input key。
 
-## ATT 多環境 profile 選擇
+## 選擇 environment profile
 
 `att-config/v2.11` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper 與 testdata descriptor lists。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](test-authoring.md) 見對應章節。
 
@@ -157,13 +166,13 @@ CI 對每個目標環境分別執行 `validate --package` 和 `run --all`：
 
 YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager、channel、pool size 和 timeout。DB/MQ username/password 應使用 `${ENV:NAME}`，由本地環境或 CI secret store 提供。DBHelper 對 URL、username、password 及 string-valued connection properties 支持完整 `${ENV:NAME}`；MQHelper 僅對 username/password 支持該解析，host、queue manager、channel 和 numeric port 通常直接寫在 selected descriptor 中。resolved secret 不會進入 profile metadata、diagnostics、reports 或 generated docs。
 
-當同一 package 只在基礎設施綁定上不同，應使用 profiles；當 testcase/template root、report policy 或 package structure 有意不同，才使用不同 top-level config。完整 config migration 見 [Appendix C](appendices/migrations.md)。
+當同一 package 只在基礎設施綁定上不同，應使用 profiles；當 testcase/template root、report policy 或 package structure 有意不同，才使用不同 top-level config。完整 config migration 見 [Migration Notes](appendices/migrations.md)。
 
 ## Schema catalog
 
-[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 是 active schema 的 source of truth。Package validation 檢查 registrations；封存 schema 不會成為 active runtime contract。完整矩陣見 [Appendix A](appendices/schema-matrix.md)。
+[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 是 active schema 的 source of truth。Package validation 檢查 registrations；封存 schema 不會成為 active runtime contract。完整矩陣見 [Schema and Version Matrix](appendices/schema-matrix.md)。
 
-## Global configuration
+## 設定 package-wide options
 
 以下 configuration example 與 field table 和英文版共用相同 contract；欄位名與 literal values 保留英文。
 
@@ -198,6 +207,8 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
+### 設定 runtime 和 package 路徑
+
 | Path | Required/default | Constraints |
 |---|---|---|
 | `schemaVersion` | required | 現行版本：`att-config/v2.11`；上一版 schema 仍受支援。本例採用現行 schema。 |
@@ -211,12 +222,22 @@ environments:
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
 | `execution.processOutput.memoryLimitBytes` | `65536` | Integer 1024–1048576; in-memory head/tail preview per stdout/stderr stream |
 | `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
+| `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
+
+### 配置報表輸出
+
+| Path | Required/default | Constraints |
+|---|---|---|
 | `report.mode` | `append-to-copy` | `append-to-copy` or `none`; `none` skips result-workbook creation |
 | `report.fileNamePattern` | `${suiteName}.result.xlsx` | Result workbook filename pattern |
 | `report.columns` | `{}` | Supported keys: `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, `runTime`, `execId`; each value is a string column label |
 | `report.html.caseLogInlineLimitBytes` | `32768` | Integer 0–1048576 UTF-8 bytes; larger logs use a bounded head/tail preview plus artifact link |
 | `report.junit.caseLogEmbedThresholdBytes` | `10240` | Integer 0–1048576 UTF-8 bytes; 0 always links |
-| `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
+
+### 配置 Resource 和 environment registries
+
+| Path | Required/default | Constraints |
+|---|---|---|
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.6` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.2` YAML paths; normalized duplicates are rejected |
@@ -226,6 +247,7 @@ environments:
 | `environments.<profile>.testdata` | `[]` | Unique package-relative YAML paths available to that selected environment |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
+
 
 Allowed global object properties are:
 
@@ -246,7 +268,7 @@ Allowed global object properties are:
 | `xml` | `namespaceMode`, `x-*` |
 | `ssh` | `host`, `user`, `port`, `identityFile` |
 
-See [Appendix C](appendices/migrations.md) for removed configuration fields.
+See [Migration Notes](appendices/migrations.md) for removed configuration fields.
 
 ## 標識符和路徑約束
 
@@ -301,7 +323,7 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 但不支持如 `${RUN_ID}`、`${WORKBOOK_ID}`、`${ENVIRONMENT}`、`${EXEC.INPUT.caseId}` 等運行時值引用。
 
 
-## Feature configuration owners
+## Configuration owners
 
 | Contract | Semantic owner |
 |---|---|

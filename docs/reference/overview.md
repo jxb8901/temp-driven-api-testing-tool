@@ -15,7 +15,7 @@ Testcase
               `-- Flow -> ordered Actions
 ```
 
-A **Testcase** is one normalized workbook row. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper, MQHelper, HTTPHelper or SSHHelper used by Actions or permitted expression calls.
+A **Testcase** is one authored, normalized workbook row. A **Case execution** is one Run execution of that Testcase; its full Case ID identifies the Testcase and is reused in execution results and evidence. Use *Testcase* when discussing workbook data and authoring, and *Case execution* when discussing runtime status, logs, reports, and artifacts. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper, MQHelper, HTTPHelper or SSHHelper used by Actions or permitted expression calls.
 
 ## Execution modes are peers
 
@@ -52,10 +52,10 @@ For a guided package build, use [Quick Start](../quick-start.md). The rest of th
 | Goal | Go to |
 |---|---|
 | Build the first ATT package | [Quick Start](../quick-start.md) |
-| Understand the core ATT model | [Product model](overview.md#product-model) |
+| Understand the core ATT model | [Product model](overview.md), [Test Authoring](test-authoring.md), [Actions](actions.md), [Runtime and Context](runtime-context.md), and [Run mode](execution-modes/run.md) |
 | Configure DB/MQ/HTTP/SSH | [Resources](resources/overview.md) |
 | Find a CLI option | [CLI Reference](cli.md) |
 | Diagnose a failure | [Validation and Troubleshooting](validation-diagnostics.md) |
-| Upgrade an older package | [Appendix C](appendices/migrations.md) |
+| Upgrade an older package | [Migration Notes](appendices/migrations.md) |
 
 Reference defines the public contract; README, Quick Start and examples explain that contract for narrower tasks. Each contract has one semantic owner; other chapters summarize and link to that owner.

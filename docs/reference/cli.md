@@ -1,6 +1,6 @@
 # CLI reference
 
-## Commands
+## Choose a command
 
 | Command | Purpose | External tools? |
 |---|---|---:|
@@ -16,21 +16,36 @@
 | `build` | Archive the latest completed run | No |
 | `clean` | Remove documented ATT-generated output | No |
 
-## Command syntax
+## Find syntax, options, and examples by task
 
-The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` with the same command and options. `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not invoke configured testcase tools. Windows validation checks `.sh` file existence and path safety, skips POSIX launch/executable compatibility, and emits one warning listing affected tools; a validation PASS does not prove those scripts can run on Windows. Provide and test Windows-native equivalents before `run`. Binary releases require Java 8+. Source-tree `att.bat` compiles with Maven when available and otherwise requires existing `target\classes`.
+### Check help and version
 
 | Syntax | Notes |
 |---|---|
 | `./att.sh` or `./att.sh help` | Show help |
 | `./att.sh version` | Print version |
+
+### Generate workbook snapshots
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh snapshot` | Generate snapshots recursively below `testcase.root`; equivalent to `--all` when no selector is supplied |
 | `./att.sh snapshot --suite <xlsx>` | Generate one same-basename XML snapshot |
 | `./att.sh snapshot --all` | Generate snapshots recursively below `testcase.root` |
 | `./att.sh snapshot --suite-dir <dir>` | Generate snapshots recursively below a directory |
+
+### Validate a package
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh validate --package` | Validate complete package; default scope |
 | `./att.sh validate --selected <selection>` | Validate selected dependency closure |
 | `./att.sh validate --package --format json` | Emit one validation JSON document to stdout |
+
+### Run Testcases
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh run --all` | Run all discovered cases |
 | `./att.sh run --suite <xlsx>` | Run one workbook; repeatable |
 | `./att.sh run --suite-dir <dir>` | Discover workbooks below a directory |
@@ -50,6 +65,11 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh run <selection> --format json` | Emit machine-readable summary |
 | `./att.sh run <selection> --quiet` | Suppress detailed live progress; keep the final summary and errors |
 | `./att.sh run <selection> --verbose` | Accepted for compatibility; detailed live progress is already the default |
+
+### Debug a component
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh debug` | Discover runnable Tools, Templates, and Flows; show only existing default sidecars |
 | `./att.sh debug template <id>` | Execute one Template; auto-discover `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | Execute one canonical Flow; auto-discover `<flow-dir>/debug.yaml` |
@@ -61,6 +81,11 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh debug <type> <id> --output-dir <dir>` | Isolate debug output below `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | Emit a compact machine-readable console summary; full evidence remains in `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | Suppress detailed live progress; keep the final summary and errors |
+
+### Run a Load scenario
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh load` | Discover valid `att-load/*` scenarios under `load/`; report invalid declared scenarios |
 | `./att.sh load <scenario.yaml> --quiet` | Suppress periodic live progress; keep the final summary and errors |
 | `./att.sh load <scenario.yaml> --verbose` | Accepted for compatibility; bounded live progress is already the default |
@@ -68,10 +93,16 @@ The tables use the Linux/macOS launcher `./att.sh`. On Windows, use `att.bat` wi
 | `./att.sh load <scenario.yaml> --set input.path=<yaml-value>` | Override one-workload `EXEC.INPUT`; repeatable, not valid for multi-workload scenarios |
 | `./att.sh load <scenario.yaml> --set arg.name=<yaml-value>` | Override a Tool argument in a one-workload Tool scenario |
 | `./att.sh load <scenario.yaml> --set vars.path=<yaml-value>` | Override one-workload Template/Flow bootstrap vars |
+
+### Manage reports and package output
+
+| Syntax | Notes |
+|---|---|
 | `./att.sh report --run-id <id>` | Regenerate `report/index.html` and `report/junit.html` |
 | `./att.sh docs` | Generate `build/docs/index.html` |
 | `./att.sh build` | Archive latest completed run in `build/` |
 | `./att.sh clean` | Remove documented generated outputs |
+
 
 Options are command-specific. Unknown commands/options and missing option values are errors. `--package` and `--selected` are mutually exclusive. Selected validation and run require an explicit selection.
 

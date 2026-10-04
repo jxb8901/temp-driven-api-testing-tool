@@ -10,7 +10,7 @@ Debug 可在沒有 workbook Testcase 的情況下執行單一 Template、Flow �
 
 不帶 target 執行 `./att.sh debug`，會列出 statically valid、可執行的 Tool、Template 和 Flow，附 copyable command。只會顯示實際存在的 regular non-symlink default sidecar。Discovery 會檢查 selected target dependencies，但不建立 Debug output，也不呼叫 Tool。可用 `--format json` 取得 machine-readable 結果。
 
-Debug input 使用現行 `schemaVersion: att-debug/v1.1`。Top-level 支援 `case`、可選 `stage`、`inputs`、`vars`、`arguments`，以及 grouped `tools.<localKey>.arguments`。`inputs` 會適配到 canonical `EXEC.INPUT`；Template/Flow 的 `vars` 會以 typed bootstrap tree 評估，並在 target 開始前 seed canonical `EXEC.VARS`。Tool Debug 使用 `arguments`，不支援 `vars`。Framework-owned identity、output、Actions、resource metadata 與 compatibility view 不能被 user input 覆寫。Schema migration 見 [Appendix C](../appendices/migrations.md)。
+Debug input 使用現行 `schemaVersion: att-debug/v1.1`。Top-level 支援 `case`、可選 `stage`、`inputs`、`vars`、`arguments`，以及 grouped `tools.<localKey>.arguments`。`inputs` 會適配到 canonical `EXEC.INPUT`；Template/Flow 的 `vars` 會以 typed bootstrap tree 評估，並在 target 開始前 seed canonical `EXEC.VARS`。Tool Debug 使用 `arguments`，不支援 `vars`。Framework-owned identity、output、Actions、resource metadata 與 compatibility view 不能被 user input 覆寫。Schema migration 見 [Migration Notes](../appendices/migrations.md)。
 
 ## Standalone Debug bootstrap data
 
@@ -73,12 +73,12 @@ Debug、Run、Load 都使用相同的 `&{project-relative-file}` expression，�
 | 症狀 | 檢查 |
 |---|---|
 | `Debug input file does not exist` | 在 selected target 旁加入 sidecar，或明確傳入 `--input`。 |
-| `Debug input uses a historical schemaVersion` | 使用 active Debug schema；見 [Appendix C](../appendices/migrations.md)；只有 Flow/Template 需要 caller-prepared `EXEC.VARS` 時才加入 `vars`。 |
+| `Debug input uses a historical schemaVersion` | 使用 active Debug schema；見 [Migration Notes](../appendices/migrations.md)；只有 Flow/Template 需要 caller-prepared `EXEC.VARS` 時才加入 `vars`。 |
 | `target` 或 dependency validation 失敗 | 確認 target type/id，並查看回報的 dependency field；不需要無關 workbook。 |
 | MQ 回報 payload 遺失或不安全 | 核對 package 內的絕對路徑或 Case-output 內的相對路徑，移除 traversal 及 symlink。 |
 | action 已執行但輸出不符預期 | 查看 `output/debug/<debugId>/` 下的 `case.log`、`result.yaml` 及 action artifacts，並對照 rendered inputs 與 selected environment。 |
 
-Load 專用的 evidence retention（`metrics`、`failures`、`samples`、`all`）不適用於 standalone Debug invocation。Debug 會在自己的 debug directory 保留 invocation result 與 artifacts；同一 target 若由 load run 執行，請參考 [Load](load.md)。
+Load 專用的 evidence retention（`metrics`、`failures`、`samples`、`all`）不適用於 standalone Debug invocation。Debug 會在自己的 debug directory 保留 invocation result 與 artifacts；同一 target 若由 Load run 執行，請參考 [Load evidence retention](load.md#選擇要保留的-iteration-evidence)。
 
 ### CLI configuration examples
 
