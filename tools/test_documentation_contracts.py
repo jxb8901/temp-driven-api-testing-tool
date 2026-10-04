@@ -222,11 +222,13 @@ class DocumentationContractsTest(unittest.TestCase):
                 "## `config.report.fileNamePattern`",
             "docs/reference.zh/results-reports-evidence.md":
                 "## Reading `case.log` and `case.yaml`",
+            "docs/reference/actions.md": "## Tool, DB and Flow results",
+            "docs/reference.zh/actions.md": "## Tool、DB 與 Flow 結果",
         }
         for rel, expected in headings.items():
             with self.subTest(path=rel):
                 actual = [line for line in (root / rel).read_text(encoding="utf-8").splitlines()
-                          if line.startswith("## ") and "`" in line]
+                          if line.startswith("## ")]
                 self.assertIn(expected, actual)
 
     def test_numbered_heading_rule_ignores_numeric_noun_phrases(self):

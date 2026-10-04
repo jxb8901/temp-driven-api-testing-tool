@@ -27,7 +27,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Action 類型](#action-類型)
   - [區分邏輯值與表示方式](#區分邏輯值與表示方式)
   - [Project-file expression 回傳 string](#project-file-expression-回傳-string)
-  - [Tool、db 與 Flow 結果](#tooldb-與-flow-結果)
+  - [Tool、DB 與 Flow 結果](#tooldb-與-flow-結果)
   - [Tool Evidence collector](#tool-evidence-collector)
   - [Log：將型別化值轉成人類可讀日誌](#log將型別化值轉成人類可讀日誌)
   - [Expressions 與變數 scope](#expressions-與變數-scope)
@@ -444,7 +444,7 @@ HTTP/MQ 請將 String 直接傳給 body/payload。Resource 使用其配置的 ch
 
 requestFormat 僅供 Map 或 List 等抽象結構化值使用。此類 body 必須明確指定格式，例如 requestFormat=json。String 與 requestFormat 同時出現會失敗，確保 project-file result 不會被靜默 parse/serialize。HTTP、MQ、SSH Resource call 會將 project-file content 作為 String value 消費，不會解析 local file-path argument。
 
-### Tool、db 與 Flow 結果
+### Tool、DB 與 Flow 結果
 
 Command-backed Tool 在 Tool descriptor 宣告 stdoutFormat：
 

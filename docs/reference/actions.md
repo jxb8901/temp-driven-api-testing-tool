@@ -63,7 +63,7 @@ For HTTP or MQ, pass the `String` as the body/payload. The resource encodes the 
 
 requestFormat is for abstract structured values such as Map or List. Such a body requires an explicit format, for example requestFormat=json. Combining requestFormat with a `String` fails; a project-file result is never silently parsed and serialized. HTTP, MQ, and SSH Resource calls consume project-file content as String values and do not resolve local file-path arguments.
 
-## Tool, db and Flow results
+## Tool, DB and Flow results
 
 A command-backed Tool declares stdoutFormat in its Tool descriptor:
 

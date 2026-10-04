@@ -64,7 +64,7 @@ HTTP/MQ 請將 String 直接傳給 body/payload。Resource 使用其配置的 ch
 
 requestFormat 僅供 Map 或 List 等抽象結構化值使用。此類 body 必須明確指定格式，例如 requestFormat=json。String 與 requestFormat 同時出現會失敗，確保 project-file result 不會被靜默 parse/serialize。HTTP、MQ、SSH Resource call 會將 project-file content 作為 String value 消費，不會解析 local file-path argument。
 
-## Tool、db 與 Flow 結果
+## Tool、DB 與 Flow 結果
 
 Command-backed Tool 在 Tool descriptor 宣告 stdoutFormat：
 
