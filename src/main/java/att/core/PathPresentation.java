@@ -18,7 +18,7 @@ public final class PathPresentation {
     private static final Pattern ABSOLUTE_PATH_TOKEN = Pattern.compile("(?<![A-Za-z0-9_/:])(?:[A-Za-z]:[\\\\/]|//|\\\\\\\\|/)");
     private static final String[] DIAGNOSTIC_PROSE_BOUNDARIES = {
             " to ", " from ", " because ", " while ", " when ", " after ", " before ",
-            " during ", " and then ", " then ", " but ", " (Permission denied)",
+            " during ", " and ", " or ", " then ", " but ", " (Permission denied)",
             " (Access is denied)", " (No such file or directory)", " (File exists)",
             " (The system cannot find the file specified)"
     };
@@ -136,8 +136,7 @@ public final class PathPresentation {
 
     static boolean isRemoteField(String field) {
         if (field == null) return false;
-        String key = field.toLowerCase(java.util.Locale.ROOT);
-        return key.contains("remote") || key.contains("url") || key.contains("uri");
+        return isRemotePathField(field) || isUrlOrUriField(field);
     }
 
     static boolean isDiagnosticField(String field) {
@@ -151,12 +150,24 @@ public final class PathPresentation {
     }
 
     static boolean isLocalPathField(String field) {
-        if (field == null || field.toLowerCase(java.util.Locale.ROOT).contains("remote")) return false;
+        if (field == null || isRemotePathField(field) || isUrlOrUriField(field)) return false;
         String key = field.toLowerCase(java.util.Locale.ROOT);
-        if (key.contains("url") || key.contains("uri")) return false;
         return key.equals("path") || key.equals("file") || key.equals("directory") || key.equals("dir")
                 || key.equals("cwd") || key.equals("root") || key.endsWith("path") || key.endsWith("file")
                 || key.endsWith("directory") || key.endsWith("dir");
+    }
+
+    private static boolean isRemotePathField(String field) {
+        String key = field.toLowerCase(java.util.Locale.ROOT).replace("_", "").replace("-", "");
+        boolean pathLike = key.endsWith("path") || key.endsWith("file")
+                || key.endsWith("directory") || key.endsWith("dir");
+        return pathLike && (key.startsWith("remote") || key.endsWith("remotepath")
+                || key.endsWith("remotefile") || key.endsWith("remotedirectory") || key.endsWith("remotedir"));
+    }
+
+    private static boolean isUrlOrUriField(String field) {
+        String key = field.toLowerCase(java.util.Locale.ROOT).replace("_", "").replace("-", "");
+        return key.equals("url") || key.endsWith("url") || key.equals("uri") || key.endsWith("uri");
     }
 
     static boolean isAbsolutePathText(String value) {

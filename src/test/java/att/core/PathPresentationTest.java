@@ -100,6 +100,8 @@ class PathPresentationTest {
         Path root = Files.createDirectories(temp.resolve("project"));
         assertEquals("Failed copying $EXTERNAL/source.txt to $EXTERNAL/target.txt", PathPresentation.displayDiagnosticText(
                 "Failed copying /tmp/source.txt to /var/private/target.txt", root));
+        assertEquals("Mismatch between $EXTERNAL/source file.txt and $EXTERNAL/target file.txt", PathPresentation.displayDiagnosticText(
+                "Mismatch between /tmp/source file.txt and /var/private/target file.txt", root));
         assertEquals("Could not read $EXTERNAL/source.txt because access was denied", PathPresentation.displayDiagnosticText(
                 "Could not read /tmp/source.txt because access was denied", root));
         assertEquals("Could not read $EXTERNAL/source.txt while preparing $EXTERNAL/target.txt.", PathPresentation.displayDiagnosticText(
@@ -110,5 +112,18 @@ class PathPresentationTest {
         Path root = Files.createDirectories(temp.resolve("project"));
         assertEquals("Failed copying $EXTERNAL/source.txt, then $EXTERNAL/target.txt!", PathPresentation.displayDiagnosticText(
                 "Failed copying /tmp/source.txt, then /var/private/target.txt!", root));
+    }
+
+    @Test void classifiesLocalAndRemotePathFieldsByMeaningfulSuffixes() throws Exception {
+        Path root = Files.createDirectories(temp.resolve("project"));
+        Path key = Files.createDirectories(temp.resolve("private")).resolve("ssh-key.pem");
+        Map<String, Object> fields = new LinkedHashMap<String, Object>();
+        fields.put("securityFile", key.toString());
+        fields.put("remotePath", "/srv/app/request.xml");
+        fields.put("requestUrl", "https://api.example.test/v1/resource");
+        Map<?, ?> displayed = (Map<?, ?>) PathPresentation.displayStructure(fields, root);
+        assertEquals("$EXTERNAL/ssh-key.pem", displayed.get("securityFile"));
+        assertEquals("/srv/app/request.xml", displayed.get("remotePath"));
+        assertEquals("https://api.example.test/v1/resource", displayed.get("requestUrl"));
     }
 }
