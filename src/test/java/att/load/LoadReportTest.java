@@ -71,7 +71,7 @@ class LoadReportTest {
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper()
                 .readValue(runDirectory.resolve("load-summary.json").toFile(), Map.class);
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.0.schema.json"),
+                Paths.get("schemas/att-load-summary-v1.1.schema.json"),
                 new String(Files.readAllBytes(runDirectory.resolve("load-summary.json")), StandardCharsets.UTF_8)));
         Map<String, Object> legacySummary = new LinkedHashMap<String, Object>(json);
         Map<String, Object> legacyMetrics = new LinkedHashMap<String, Object>((Map<String, Object>) json.get("metrics"));
@@ -80,9 +80,9 @@ class LoadReportTest {
             legacyMetrics.remove(added);
         legacySummary.put("metrics", legacyMetrics);
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.0.schema.json"), att.validation.JsonSupport.write(legacySummary)),
-                "previously valid v1.0 summaries remain valid when new telemetry fields are absent");
-        assertEquals("att-load-summary/v1.0", json.get("schemaVersion"));
+                Paths.get("schemas/att-load-summary-v1.1.schema.json"), att.validation.JsonSupport.write(legacySummary)),
+                "summaries with optional telemetry fields remain valid when new telemetry fields are absent");
+        assertEquals("att-load-summary/v1.1", json.get("schemaVersion"));
         assertEquals("PASS", json.get("status"));
         assertTrue(json.containsKey("timing"));
         assertTrue(json.containsKey("resources"));
@@ -98,7 +98,7 @@ class LoadReportTest {
         Map<String, Object> missingReport = new LinkedHashMap<String, Object>(json);
         missingReport.remove("report");
         assertThrows(IllegalArgumentException.class, () -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.0.schema.json"),
+                Paths.get("schemas/att-load-summary-v1.1.schema.json"),
                 att.validation.JsonSupport.write(missingReport)));
 
         String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);

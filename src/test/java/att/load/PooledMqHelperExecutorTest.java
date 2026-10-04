@@ -38,9 +38,9 @@ class PooledMqHelperExecutorTest {
         Path payload = caseDir.resolve("request.bin");
         Files.write(payload, new byte[]{1, 2, 3});
 
-        assertTrue(executor.execute("broker", "send", map("queue", "REQUEST.Q", "file", payload.toString()),
+        assertTrue(executor.execute("broker", "send", map("queue", "REQUEST.Q", "payload", text(payload)),
                 context(caseDir), null, "send-1").success());
-        assertTrue(executor.execute("broker", "send", map("queue", "REQUEST.Q", "file", payload.toString()),
+        assertTrue(executor.execute("broker", "send", map("queue", "REQUEST.Q", "payload", text(payload)),
                 context(caseDir), null, "send-2").success());
         assertEquals(1, delegate.connections.get());
         assertEquals(2, delegate.queueCloses.get());
@@ -63,7 +63,7 @@ class PooledMqHelperExecutorTest {
         MqTransport.Connection held = factory.connect(helper);
         try {
             Map<String, Object> result = executor.execute("broker", "send",
-                    map("queue", "REQUEST.Q", "file", payload.toString()), context(caseDir), null, "timeout-1").result();
+                    map("queue", "REQUEST.Q", "payload", text(payload)), context(caseDir), null, "timeout-1").result();
             assertFalse(Boolean.TRUE.equals(result.get("sent")));
             assertEquals("MQ_POOL_TIMEOUT", ((Map<?, ?>) result.get("error")).get("type"));
             assertEquals(1, ((Number) factory.pool("broker").metrics().get("timeoutCount")).intValue());
@@ -181,6 +181,11 @@ class PooledMqHelperExecutorTest {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         for (int index = 0; index < values.length; index += 2) result.put(String.valueOf(values[index]), values[index + 1]);
         return result;
+    }
+
+    private static String text(Path path) {
+        try { return new String(Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8); }
+        catch (java.io.IOException error) { throw new AssertionError(error); }
     }
 
     private static final class FakeFactory implements MqTransport.Factory {

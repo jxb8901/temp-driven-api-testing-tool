@@ -81,6 +81,48 @@ class CaseExecutionLogTest {
         assertFalse(text.contains("\\n"));
     }
 
+    @Test void presentsProjectPathsPortablyAndBoundsExternalPathFields() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("ATT home space"));
+        Path file = tempDir.resolve("paths.log");
+        CaseExecutionLog log = new CaseExecutionLog(file);
+        log.setProjectRoot(root);
+        Map<String, Object> values = new LinkedHashMap<String, Object>();
+        values.put("templatePath", root.resolve("templates/付款.xml"));
+        values.put("outputDirectory", root.resolve("output/run 1" ).toString());
+        values.put("identityFile", tempDir.resolve("private/token.pem").toString());
+        log.append("PATHS", values);
+        log.appendRaw("ERROR", "failed at " + root.resolve("templates/付款.xml"));
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("$ATT_HOME/templates/付款.xml"));
+        assertTrue(text.contains("$ATT_HOME/output/run 1"));
+        assertTrue(text.contains("$EXTERNAL/token.pem"));
+        assertFalse(text.contains(root.toString()));
+        assertFalse(text.contains("private/token.pem"));
+    }
+
+    @Test void runDebugAndLoadUseTheSameLogicalPathPresentation() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("project"));
+        Path output = root.resolve("output/run-123/case");
+        TestCase testCase = new TestCase(1, "S", "G", "C", java.util.Collections.<String>emptyList(),
+                java.util.Collections.<String, Object>emptyMap(), java.util.Collections.<String, StageCaseData>emptyMap(), "");
+        String[] modes = {"testcase", "debug", "load"};
+        Integer expectedOccurrences = null;
+        for (String mode : modes) {
+            Path logPath = output.resolve("case.log");
+            CaseRuntimeContext context = new CaseRuntimeContext(testCase, output, "run-123", root, logPath, mode);
+            context.setProject(root);
+            CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve(mode + ".log"));
+            log.setProjectRoot(context.projectRoot());
+            log.append("CASE", context.caseTree());
+            String rendered = new String(Files.readAllBytes(tempDir.resolve(mode + ".log")), "UTF-8");
+            assertTrue(rendered.contains("$ATT_HOME/output/run-123/case"), mode);
+            assertFalse(rendered.contains(root.toString()), mode);
+            int occurrences = occurrences(rendered, "$ATT_HOME/output/run-123/case");
+            if (expectedOccurrences == null) expectedOccurrences = occurrences;
+            else assertEquals(expectedOccurrences.intValue(), occurrences, mode);
+        }
+    }
+
     @Test void compactToolInvocationKeepsCaptureAndCleanupFailuresVisible() throws Exception {
         Map<String,Object> attempt = new LinkedHashMap<String,Object>();
         attempt.put("id", "invoke");
@@ -148,6 +190,27 @@ class CaseExecutionLogTest {
         assertFalse(live.contains("secret-value"));
         assertFalse(persisted.contains("secret-value"));
         assertTrue(output.flushes > 0);
+    }
+
+    @Test void redactsProjectRootSecretsBeforePathPresentation() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("secret project"));
+        String secret = root.resolve("private-token").toString();
+        Path file = tempDir.resolve("secret-path.log");
+        CaseExecutionLog log = new CaseExecutionLog(file);
+        log.setProjectRoot(root);
+        log.registerSecretRedactions(java.util.Collections.singletonList(secret));
+
+        log.appendRaw("ERROR", "credential=" + secret);
+        Map<String, Object> values = new LinkedHashMap<String, Object>();
+        values.put("identityFile", secret);
+        log.append("SSH", values);
+
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("credential=[REDACTED_SECRET]"));
+        assertTrue(text.contains("identityFile:"));
+        assertTrue(occurrences(text, "[REDACTED_SECRET]") >= 2);
+        assertFalse(text.contains(secret));
+        assertFalse(text.contains("private-token"));
     }
 
     @Test void concurrentMirrorsKeepEachAppendedChunkAtomicAndIdentifiable() throws Exception {

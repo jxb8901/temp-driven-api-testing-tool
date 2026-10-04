@@ -62,7 +62,7 @@ sendRequest:
 
 HTTP/MQ 請將 String 直接傳給 body/payload。Resource 使用其配置的 charset/CCSID 編碼原文；Content-Type 與 MQ transport metadata 仍由 resource 管理。`&{...}` 可用於 Tool/Helper call argument、Assign expression、Log value 和其他 typed value 位置。
 
-requestFormat 僅供 Map 或 List 等抽象結構化值使用。此類 body 必須明確指定格式，例如 requestFormat=json。String 與 requestFormat 同時出現會失敗，確保 project-file result 不會被靜默 parse/serialize。只有 resource 呼叫明確定義 file 參數時，raw file input 才仍可使用。
+requestFormat 僅供 Map 或 List 等抽象結構化值使用。此類 body 必須明確指定格式，例如 requestFormat=json。String 與 requestFormat 同時出現會失敗，確保 project-file result 不會被靜默 parse/serialize。HTTP、MQ、SSH Resource call 會將 project-file content 作為 String value 消費，不會解析 local file-path argument。
 
 ### Tool、DB 與 Flow 結果
 

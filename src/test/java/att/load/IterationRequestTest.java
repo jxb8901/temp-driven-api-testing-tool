@@ -4,11 +4,12 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.*;
 
 class IterationRequestTest {
     @Test void withCopyMethodsReuseTheFrozenTreeToAvoidRepeatedNestedAllocations() {
@@ -29,6 +30,48 @@ class IterationRequestTest {
         assertTreeReused(request, request.withWorkloadId("payments"));
         assertTreeReused(request, request.withTestdataWaitAllowed(() -> false));
         assertTreeReused(request, request.withTestdataOrdinal(3L));
+    }
+
+    @Test void mixIdentityAndTargetInputsAreImmutableAndAppearInEvents() {
+        IterationRequest base = IterationRequest.closed("run", "iteration", 2, "STEADY", Instant.now(), "VU-2",
+                Collections.singletonMap("common", "value"));
+        Map<String, Object> selected = new LinkedHashMap<String, Object>();
+        selected.put("common", "overridden"); selected.put("targetOnly", Integer.valueOf(7));
+        IterationRequest selectedRequest = base.withWorkloadId("checkout")
+                .withMixIdentity("purchase", "flow", "PURCHASE", selected);
+        assertEquals("purchase", selectedRequest.mixId());
+        assertEquals("flow", selectedRequest.targetType());
+        assertEquals("PURCHASE", selectedRequest.targetId());
+        assertEquals("overridden", selectedRequest.inputs().get("common"));
+        assertThrows(UnsupportedOperationException.class, () -> selectedRequest.inputs().put("x", "y"));
+        LoadEvent event = LoadEvent.started("run", "closed", "STEADY", "iteration", "VU-2", 2,
+                System.currentTimeMillis(), System.currentTimeMillis())
+                .withWorkloadIdentity("checkout", "flow", "PURCHASE")
+                .withMixIdentity("purchase", "flow", "PURCHASE");
+        Map<String, Object> item = event.toMap();
+        assertEquals("purchase", item.get("mixId"));
+        assertEquals("PURCHASE", item.get("targetId"));
+    }
+
+    @Test void mixedMetadataCopiesReuseTheAlreadyFrozenInputTree() {
+        Map<String, Object> nested = new LinkedHashMap<String, Object>();
+        nested.put("value", "frozen");
+        List<Object> entries = new ArrayList<Object>();
+        entries.add(nested);
+        Map<String, Object> input = new LinkedHashMap<String, Object>();
+        input.put("nested", nested);
+        input.put("entries", entries);
+        IterationRequest mixed = IterationRequest.closed("mixed-run", "mixed-iteration", 1, "STEADY",
+                Instant.now(), "VU-1", input).withWorkloadId("checkout")
+                .withMixIdentity("purchase", "flow", "PURCHASE");
+
+        assertTreeReused(mixed, mixed.withOutputDirectory(java.nio.file.Paths.get("output")));
+        assertTreeReused(mixed, mixed.withFailureEvidence(false));
+        assertTreeReused(mixed, mixed.withEvidenceRetention(false, true));
+        assertTreeReused(mixed, mixed.withFailureLogCapture(false));
+        assertTreeReused(mixed, mixed.withWorkloadId("checkout-again"));
+        assertTreeReused(mixed, mixed.withTestdataWaitAllowed(() -> false));
+        assertTreeReused(mixed, mixed.withTestdataOrdinal(3L));
     }
 
     private static void assertTreeReused(IterationRequest source, IterationRequest copy) {

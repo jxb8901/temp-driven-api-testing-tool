@@ -207,6 +207,7 @@ public class FrameworkEngine {
                 options.verbose() && !options.quiet()
                         ? new CaseLogConsoleMirror(testCase.caseId(), console)
                         : null);
+        caseLog.setProjectRoot(projectRoot);
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, validatedCaseId, runId,
                 runDirectory, caseLogPath, "testcase", started.toString(), runStartedAt.toString());
         context.setProject(projectRoot);
@@ -563,11 +564,11 @@ public class FrameworkEngine {
     private String sha256Bytes(byte[] bytes) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); byte[] hash = digest.digest(bytes); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }
 
     private void writeCaseTree(Path caseDirectory, CaseRuntimeContext context) throws Exception {
-        Files.write(caseDirectory.resolve("case.yaml"), new Yaml().dump(context.caseTree()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(caseDirectory.resolve("case.yaml"), new Yaml().dump(PathPresentation.displayStructure(context.caseTree(), projectRoot)).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private void appendEvent(Path runDirectory, String runId, TestResult result) throws Exception {
-        Map<String,Object> event = new LinkedHashMap<String,Object>(); event.put("runId", runId); event.put("caseId", result.caseId()); event.put("status", result.status().name()); event.put("durationMs", result.duration().toMillis()); event.put("caseLog", result.caseLogPath() == null ? "" : result.caseLogPath().toString());
+        Map<String,Object> event = new LinkedHashMap<String,Object>(); event.put("runId", runId); event.put("caseId", result.caseId()); event.put("status", result.status().name()); event.put("durationMs", result.duration().toMillis()); event.put("caseLog", result.caseLogPath() == null ? "" : PathPresentation.displayPath(result.caseLogPath(), projectRoot));
         String json = att.validation.JsonSupport.write(event) + "\n";
         Files.write(runDirectory.resolve("events.jsonl"), json.getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);

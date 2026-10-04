@@ -79,7 +79,7 @@ class LoadScenarioTest {
         Path prior = write(project, "prior-v12.yaml", "schemaVersion: att-load/v1.2\nworkloads:\n"
                 + "  - id: default\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 1, duration: 1s}\n");
         DiagnosticException oldCurrent = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(prior));
-        assertTrue(oldCurrent.getMessage().contains("att-load/v1.5"), oldCurrent.getMessage());
+        assertTrue(oldCurrent.getMessage().contains("att-load/v1.6"), oldCurrent.getMessage());
     }
 
     @Test void currentWorkloadVarsRemainDefinitionsAndCliOverridesAreAppliedBeforeEvaluation() throws Exception {
@@ -184,7 +184,7 @@ class LoadScenarioTest {
 
         Map<String, Object> policy = new LoadScenarioLoader(project).loadDefaultPolicy();
 
-        assertEquals("att-load/v1.5", policy.get("schemaVersion"));
+        assertEquals("att-load/v1.6", policy.get("schemaVersion"));
         assertFalse(policy.containsKey("workloads"));
         assertEquals(2, ((Number) ((Map<?, ?>) policy.get("load")).get("users")).intValue());
     }
@@ -415,7 +415,7 @@ class LoadScenarioTest {
             assertTrue(Files.isRegularFile(expectedWorkspace.resolve("case.yaml")));
             @SuppressWarnings("unchecked") Map<String, Object> caseYaml = new org.yaml.snakeyaml.Yaml().load(
                     new String(Files.readAllBytes(expectedWorkspace.resolve("case.yaml")), "UTF-8"));
-            assertEquals(expectedWorkspace.toString(), caseYaml.get("outputDirectory"));
+            assertEquals(att.core.PathPresentation.displayPath(expectedWorkspace, project), caseYaml.get("outputDirectory"));
             assertNotNull(result.evidenceRef());
 
             LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(

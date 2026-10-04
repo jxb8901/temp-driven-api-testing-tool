@@ -78,7 +78,7 @@ public final class CaseRuntimeContext {
     private final Map<String, Object> loadNode = new LinkedHashMap<String, Object>();
     private static final java.util.Set<String> LOAD_CONTEXT_FIELD_NAMES =
             java.util.Collections.unmodifiableSet(new java.util.LinkedHashSet<String>(java.util.Arrays.asList(
-                    "RUN_ID", "ITERATION_ID", "MODEL", "USER_ID", "ITERATION", "PHASE", "WORKLOAD_ID")));
+                    "RUN_ID", "ITERATION_ID", "MODEL", "USER_ID", "ITERATION", "PHASE", "WORKLOAD_ID", "MIX_ID", "TARGET_TYPE", "TARGET_ID")));
     /** ATT-owned load diagnostics, kept separate from the expression Context. */
     private final Map<String, Object> loadDiagnosticsNode = new LinkedHashMap<String, Object>();
     private final Map<String, Object> stagesNode = new LinkedHashMap<String, Object>();
@@ -102,6 +102,7 @@ public final class CaseRuntimeContext {
     private Path caseOutputDir;
     private Path caseLogPath;
     private Path commandWorkingDirectory;
+    private Path projectRoot;
     private final String mode;
     private String currentStage;
     private Map<String, Object> currentActions;
@@ -700,8 +701,11 @@ public final class CaseRuntimeContext {
 
     /** Adds only curated component metadata; credentials/config objects never enter META. */
     public void setProject(Path projectRoot) {
-        setComponentMetadata("PROJECT", mapOf("root", projectRoot.toAbsolutePath().normalize().toString(), "id", projectRoot.getFileName() == null ? "" : projectRoot.getFileName().toString()));
+        this.projectRoot = projectRoot.toAbsolutePath().normalize();
+        setComponentMetadata("PROJECT", mapOf("root", this.projectRoot.toString(), "id", projectRoot.getFileName() == null ? "" : projectRoot.getFileName().toString()));
     }
+
+    public Path projectRoot() { return projectRoot; }
 
     public void setTargetMetadata(String type, String id) {
         setComponentMetadata("TARGET", mapOf("type", type, "id", id));
@@ -798,9 +802,16 @@ public final class CaseRuntimeContext {
 
     /** Adds the configured workload identity to the public EXEC.LOAD node. */
     public void setLoadWorkload(String workloadId, String targetType, String targetId) {
+        setLoadWorkload(workloadId, null, targetType, targetId);
+    }
+    public void setLoadWorkload(String workloadId, String mixId, String targetType, String targetId) {
         if (!"load".equals(mode)) throw new IllegalStateException("Load diagnostics require load execution mode");
         if (workloadId != null) loadNode.put("WORKLOAD_ID", workloadId);
+        if (mixId != null) loadNode.put("MIX_ID", mixId);
+        if (targetType != null) loadNode.put("TARGET_TYPE", targetType);
+        if (targetId != null) loadNode.put("TARGET_ID", targetId);
         if (workloadId != null) loadDiagnosticsNode.put("workloadId", workloadId);
+        if (mixId != null) loadDiagnosticsNode.put("mixId", mixId);
         if (targetType != null) loadDiagnosticsNode.put("targetType", targetType);
         if (targetId != null) loadDiagnosticsNode.put("targetId", targetId);
         diagnosticsNode.put("load", loadDiagnosticsNode);

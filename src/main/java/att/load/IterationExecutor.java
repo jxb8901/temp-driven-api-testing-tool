@@ -218,7 +218,7 @@ public final class IterationExecutor implements LoadIterationRunner {
                 context.materializeResourceOutputs(executionWorkspace);
                 Path resourceOutput = executionWorkspace.resolve("resource-output.yaml");
                 if (Files.isRegularFile(resourceOutput)) linkOrCopy(resourceOutput, evidenceDirectory.resolve("resource-output.yaml"));
-                byte[] caseYaml = new org.yaml.snakeyaml.Yaml().dump(context.caseTree()).getBytes(StandardCharsets.UTF_8);
+                byte[] caseYaml = new org.yaml.snakeyaml.Yaml().dump(att.core.PathPresentation.displayStructure(context.caseTree(), projectRoot)).getBytes(StandardCharsets.UTF_8);
                 Path evidenceCase = evidenceDirectory.resolve("case.yaml");
                 Files.write(evidenceCase, caseYaml);
                 linkOrCopy(evidenceCase, executionWorkspace.resolve("case.yaml"));
@@ -241,11 +241,12 @@ public final class IterationExecutor implements LoadIterationRunner {
     }
 
     private CaseExecutionLog executionLog(Path logicalPath, IterationRequest request) throws IOException {
-        if (request.retainSuccessEvidence())
-            return CaseExecutionLog.lightweight(logicalPath, config.caseLogYamlAnchors());
-        if (request.captureFailureLog())
-            return CaseExecutionLog.bounded(logicalPath, config.caseLogYamlAnchors(), FAILURE_LOG_BUFFER_CHARACTERS);
-        return CaseExecutionLog.discarding(logicalPath);
+        CaseExecutionLog log;
+        if (request.retainSuccessEvidence()) log = CaseExecutionLog.lightweight(logicalPath, config.caseLogYamlAnchors());
+        else if (request.captureFailureLog()) log = CaseExecutionLog.bounded(logicalPath, config.caseLogYamlAnchors(), FAILURE_LOG_BUFFER_CHARACTERS);
+        else log = CaseExecutionLog.discarding(logicalPath);
+        log.setProjectRoot(projectRoot);
+        return log;
     }
 
     private void deleteEmptyWorkspace(Path directory) {

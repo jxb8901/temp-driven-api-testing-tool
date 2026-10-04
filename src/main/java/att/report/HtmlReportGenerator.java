@@ -89,7 +89,7 @@ public final class HtmlReportGenerator {
     }
 
     private void appendCase(StringBuilder html, Path runDirectory, TestResult result, int caseLogInlineLimitBytes) throws Exception {
-        String log = result.caseLogPath() == null ? "" : result.caseLogPath().toString();
+        String log = result.caseLogPath() == null ? "" : runDirectory.relativize(result.caseLogPath()).toString().replace('\\', '/');
         TextPreview.Preview logPreview = result.caseLogPath() != null && Files.exists(result.caseLogPath()) ? TextPreview.read(result.caseLogPath(), caseLogInlineLimitBytes) : new TextPreview.Preview("", false);
         html.append("<details id=\"").append(anchor(result.caseId())).append("\"><summary><span class=\"badge ").append(result.status()).append("\">").append(result.status()).append("</span> ").append(escape(result.caseId())).append(" — ").append(escape(result.caseName())).append(" <span class=\"muted\">(").append(result.duration().toMillis()).append(" ms)</span></summary><div class=\"detail\"><dl><dt>EXEC.ID</dt><dd>").append(escape(result.executionId())).append("</dd><dt>Expected</dt><dd><pre>").append(escape(result.expected())).append("</pre></dd><dt>Actual</dt><dd><pre>").append(escape(result.actual())).append("</pre></dd><dt>Case log</dt><dd>").append(escape(log)).append("</dd>");
         Path tree = result.caseLogPath() == null ? null : result.caseLogPath().getParent().resolve("case.yaml");

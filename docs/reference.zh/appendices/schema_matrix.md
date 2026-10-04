@@ -16,8 +16,8 @@
 | Template | att-template/v3.6 |
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.1 |
-| Load scenario | att-load/v1.5 |
-| Load summary | att-load-summary/v1.0 |
+| Load scenario | att-load/v1.6 |
+| Load summary | att-load-summary/v1.1 |
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |
 | CI summary | att-ci-summary/v2.1 |

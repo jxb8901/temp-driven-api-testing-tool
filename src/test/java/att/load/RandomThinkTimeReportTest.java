@@ -31,7 +31,7 @@ class RandomThinkTimeReportTest {
         assertEquals("uniform: 500ms..2s", execution.get("thinkTimePolicy"));
         assertTrue(execution.get("thinkTime") instanceof Map);
         assertFalse(JsonSupport.write(summary).contains("sampledThinkTime"));
-        JsonSchemaVerifier.verifyJson(Paths.get("schemas/att-load-summary-v1.0.schema.json"), JsonSupport.write(summary));
+        JsonSchemaVerifier.verifyJson(Paths.get("schemas/att-load-summary-v1.1.schema.json"), JsonSupport.write(summary));
 
         LoadRunResult replay = new LoadRunResult("derived-seed-run", scenario, started, started.plusSeconds(1), metrics.snapshot());
         LoadRunResult different = new LoadRunResult("different-run", scenario, started, started.plusSeconds(1), metrics.snapshot());

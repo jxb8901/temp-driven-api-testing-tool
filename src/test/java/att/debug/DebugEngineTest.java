@@ -35,7 +35,8 @@ class DebugEngineTest {
         assertEquals(0, template.exitCode());
         String templateCase = new String(Files.readAllBytes(template.outputDirectory().resolve("artifacts/case.yaml")), StandardCharsets.UTF_8);
         assertTrue(templateCase.contains("caseId: DEBUG.template.SIMPLE"));
-        assertTrue(templateCase.contains("outputDirectory: " + template.outputDirectory().resolve("artifacts")));
+        assertTrue(templateCase.contains("outputDirectory: " + att.core.PathPresentation.displayPath(
+                template.outputDirectory().resolve("artifacts"), project)));
         assertFalse(templateCase.contains("caseId: EVIL"));
         assertFalse(templateCase.contains("outputDirectory: EVIL"));
 
@@ -57,7 +58,8 @@ class DebugEngineTest {
         DebugEngine.Result result = run(project, config, "template", "SIMPLE", "--input", explicit.toString());
         assertEquals(ResultStatus.PASS, result.status());
         assertTrue(new String(Files.readAllBytes(result.logPath()), StandardCharsets.UTF_8).contains("explicit"));
-        assertTrue(new String(Files.readAllBytes(result.resultPath()), StandardCharsets.UTF_8).contains("input: " + explicit));
+        assertTrue(new String(Files.readAllBytes(result.resultPath()), StandardCharsets.UTF_8)
+                .contains("input: $EXTERNAL/override.yaml"));
     }
 
     @Test void namespacedSetOverridesTypedDebugInputAndToolArguments() throws Exception {

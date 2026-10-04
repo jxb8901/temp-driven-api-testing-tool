@@ -49,6 +49,45 @@ class LoadAcceptanceTest {
         assertCliLoad(root, arrivalScenario, temp.resolve("arrival-output"), "issue25-arrival", "arrivalRate");
     }
 
+    @Test void mixedWorkloadRunsThroughCliAndPresentsLoadReportAndDiagnostics() throws Exception {
+        Path root = projectRoot();
+        String suffix = Long.toString(System.nanoTime());
+        Path scenario = writeScenario("mixed-cli-" + suffix + ".yaml",
+                "schemaVersion: att-load/v1.6\nseed: 73\nworkloads:\n"
+                        + "- id: checkout\n  mix:\n"
+                        + "  - id: date\n    weight: 60\n    target: {type: tool, id: sample.getAcDate}\n"
+                        + "  - id: sequence\n    weight: 40\n    target: {type: tool, id: sample.getSeq, arguments: {seqLen: 8}}\n"
+                        + "  load: {users: 1, duration: 30ms}\n");
+
+        String jsonRun = "review-mix-json-" + suffix;
+        Path jsonOutput = root.resolve("target").resolve("review-mix-json-" + suffix);
+        CliOutput jsonCli = executeCli(root, scenario, jsonOutput, jsonRun, "json");
+        assertEquals(0, jsonCli.exitCode, jsonCli.stderr + "\n" + jsonCli.stdout);
+        @SuppressWarnings("unchecked") Map<String, Object> json = JsonSupport.mapper().readValue(jsonCli.stdout, Map.class);
+        assertEquals("PASS", json.get("status"));
+        assertEquals("$ATT_HOME/target/review-mix-json-" + suffix + "/load/" + jsonRun + "/report/index.html", json.get("report"));
+        assertFalse(jsonCli.stdout.contains(root.toString()));
+        @SuppressWarnings("unchecked") Map<String, Object> workloads = (Map<String, Object>) json.get("workloads");
+        assertTrue(workloads.containsKey("checkout"));
+
+        String humanRun = "review-mix-human-" + suffix;
+        Path humanOutput = root.resolve("target").resolve("review-mix-human-" + suffix);
+        CliOutput humanCli = executeCli(root, scenario, humanOutput, humanRun, "human", "--quiet");
+        assertEquals(0, humanCli.exitCode, humanCli.stderr + "\n" + humanCli.stdout);
+        assertTrue(humanCli.stdout.contains("Report: $ATT_HOME/target/review-mix-human-" + suffix
+                + "/load/" + humanRun + "/report/index.html"), humanCli.stdout);
+        assertFalse(humanCli.stdout.contains(root.toString()));
+
+        String duplicateRun = "review-mix-diagnostic-" + suffix;
+        Path diagnosticOutput = root.resolve("target").resolve("review-mix-diagnostic-" + suffix);
+        Files.createDirectories(diagnosticOutput.resolve("load").resolve(duplicateRun));
+        CliOutput diagnosticCli = executeCli(root, scenario, diagnosticOutput, duplicateRun, "json");
+        assertEquals(2, diagnosticCli.exitCode, diagnosticCli.stderr + "\n" + diagnosticCli.stdout);
+        assertFalse(diagnosticCli.stderr.contains(root.toString()), diagnosticCli.stderr);
+        assertTrue(diagnosticCli.stderr.contains("$ATT_HOME/target/review-mix-diagnostic-" + suffix
+                + "/load/" + duplicateRun), diagnosticCli.stderr);
+    }
+
     @Test void arrivalRateCliPersistsCapDropAndRateDimensionsThroughReport() throws Exception {
         Path root = projectRoot();
         Path scenario = writeScenario("arrival-saturation-cli.yaml",
@@ -101,20 +140,8 @@ class LoadAcceptanceTest {
     }
 
     private Map<String, Object> runCli(Path root, Path scenario, Path output, String runId, String... extra) throws Exception {
-        Path stdout = temp.resolve(runId + ".stdout");
-        Path stderr = temp.resolve(runId + ".stderr");
-        List<String> arguments = new java.util.ArrayList<String>(Arrays.asList(javaExecutable(), "-cp", System.getProperty("java.class.path"),
-                "att.FrameworkRunner", "load", scenario.toString(), "--output-dir", output.toString(),
-                "--run-id", runId, "--format", "json"));
-        arguments.addAll(Arrays.asList(extra));
-        ProcessBuilder command = new ProcessBuilder(arguments);
-        command.directory(root.toFile());
-        command.redirectOutput(stdout.toFile());
-        command.redirectError(stderr.toFile());
-        Process process = command.start();
-        assertTrue(process.waitFor(30, TimeUnit.SECONDS), "load CLI did not finish: " + runId);
-        assertEquals(0, process.exitValue(), "load CLI failed: " + read(stderr) + "\n" + read(stdout));
-
+        CliOutput cli = executeCli(root, scenario, output, runId, "json", extra);
+        assertEquals(0, cli.exitCode, "load CLI failed: " + cli.stderr + "\n" + cli.stdout);
         Path runDirectory = output.resolve("load").resolve(runId);
         Path summaryFile = runDirectory.resolve("load-summary.json");
         assertTrue(Files.isRegularFile(summaryFile), "missing load summary for " + runId);
@@ -124,6 +151,23 @@ class LoadAcceptanceTest {
         assertEquals("report/index.html", summary.get("report"));
         assertTrue(read(runDirectory.resolve("report/index.html")).contains("ATT Load " + runId));
         return summary;
+    }
+
+    private CliOutput executeCli(Path root, Path scenario, Path output, String runId,
+                                 String format, String... extra) throws Exception {
+        Path stdout = temp.resolve(runId + ".stdout");
+        Path stderr = temp.resolve(runId + ".stderr");
+        List<String> arguments = new java.util.ArrayList<String>(Arrays.asList(javaExecutable(), "-cp", System.getProperty("java.class.path"),
+                "att.FrameworkRunner", "load", scenario.toString(), "--output-dir", output.toString(),
+                "--run-id", runId, "--format", format));
+        arguments.addAll(Arrays.asList(extra));
+        ProcessBuilder command = new ProcessBuilder(arguments);
+        command.directory(root.toFile());
+        command.redirectOutput(stdout.toFile());
+        command.redirectError(stderr.toFile());
+        Process process = command.start();
+        assertTrue(process.waitFor(30, TimeUnit.SECONDS), "load CLI did not finish: " + runId);
+        return new CliOutput(process.exitValue(), read(stdout), read(stderr));
     }
 
     private Path writeScenario(String name, String content) throws Exception {
@@ -141,5 +185,14 @@ class LoadAcceptanceTest {
 
     private static String read(Path file) throws IOException {
         return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+    }
+
+    private static final class CliOutput {
+        final int exitCode;
+        final String stdout;
+        final String stderr;
+        CliOutput(int exitCode, String stdout, String stderr) {
+            this.exitCode = exitCode; this.stdout = stdout; this.stderr = stderr;
+        }
     }
 }

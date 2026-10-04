@@ -4,6 +4,8 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
 
 /** Immutable normalized workload used by active workloads-based load scenarios. */
 public final class LoadWorkload {
@@ -27,6 +29,7 @@ public final class LoadWorkload {
     private final Map<String, Object> thresholds;
     private final Map<String, Object> testdata;
     private final int sourceIndex;
+    private final List<LoadMixEntry> mix;
 
     public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
                         Map<String, Object> inputs, LoadScenario.Model model, int users,
@@ -64,6 +67,17 @@ public final class LoadWorkload {
                         Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
                         int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds,
                         Map<String, Object> testdata, int sourceIndex) {
+        this(id, targetType, targetId, targetArguments, inputs, vars, model, users, arrivalRatePerSecond,
+                arrivalRate, warmup, rampUp, duration, rampDown, thinkTimePolicy, maxConcurrent, overloadPolicy,
+                thresholds, testdata, sourceIndex, Collections.<LoadMixEntry>emptyList());
+    }
+
+    public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
+                        Map<String, Object> inputs, Map<String, Object> vars, LoadScenario.Model model, int users,
+                        double arrivalRatePerSecond, String arrivalRate, Duration warmup, Duration rampUp,
+                        Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
+                        int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds,
+                        Map<String, Object> testdata, int sourceIndex, List<LoadMixEntry> mix) {
         this.id = id;
         this.targetType = targetType;
         this.targetId = targetId;
@@ -84,6 +98,8 @@ public final class LoadWorkload {
         this.thresholds = immutable(thresholds);
         this.testdata = immutable(testdata);
         this.sourceIndex = sourceIndex;
+        this.mix = mix == null ? Collections.<LoadMixEntry>emptyList()
+                : Collections.unmodifiableList(new ArrayList<LoadMixEntry>(mix));
     }
 
     public String id() { return id; }
@@ -107,15 +123,30 @@ public final class LoadWorkload {
     public Map<String, Object> testdata() { return testdata; }
     /** Zero-based index in the source scenario, or -1 for in-memory promoted workloads. */
     public int sourceIndex() { return sourceIndex; }
+    public List<LoadMixEntry> mix() { return mix; }
+    public boolean mixed() { return !mix.isEmpty(); }
+    LoadWorkload forMixEntry(LoadMixEntry entry) {
+        Map<String, Object> mergedInputs = new LinkedHashMap<String, Object>(inputs); mergedInputs.putAll(entry.inputs());
+        Map<String, Object> mergedVars = new LinkedHashMap<String, Object>(vars); mergedVars.putAll(entry.vars());
+        return new LoadWorkload(id, entry.targetType(), entry.targetId(), entry.targetArguments(), mergedInputs,
+                mergedVars, model, users, arrivalRatePerSecond, arrivalRate, warmup, rampUp, duration, rampDown,
+                thinkTimePolicy, maxConcurrent, overloadPolicy, thresholds, testdata, sourceIndex);
+    }
 
     Map<String, Object> toMap(boolean includeExecutionData, boolean summary) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("id", id);
-        Map<String, Object> target = new LinkedHashMap<String, Object>();
-        target.put("type", targetType);
-        target.put("id", targetId);
-        if (includeExecutionData && !targetArguments.isEmpty()) target.put("arguments", targetArguments);
-        result.put("target", target);
+        if (mixed()) {
+            List<Map<String, Object>> entries = new ArrayList<Map<String, Object>>();
+            for (LoadMixEntry entry : mix) entries.add(entry.toMap(includeExecutionData));
+            result.put("mix", entries);
+        } else {
+            Map<String, Object> target = new LinkedHashMap<String, Object>();
+            target.put("type", targetType);
+            target.put("id", targetId);
+            if (includeExecutionData && !targetArguments.isEmpty()) target.put("arguments", targetArguments);
+            result.put("target", target);
+        }
         if (includeExecutionData && !inputs.isEmpty()) result.put("inputs", inputs);
         if (includeExecutionData && !vars.isEmpty()) result.put("vars", vars);
         if (!testdata.isEmpty()) result.put("testdata", testdata);

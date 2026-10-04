@@ -18,10 +18,8 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -102,11 +100,10 @@ public final class SshResourceExecutor {
             lease = new PermitLease(permit);
             Map<String, Object> result;
             if ("execute".equals(operation)) result = executeCommand(name, helper, target, supplied, timeoutMs, deadlineNanos, context, log);
-            else if ("upload".equals(operation)) result = upload(name, helper, target, supplied, timeoutMs, deadlineNanos, context, lease);
-            else if ("download".equals(operation)) result = download(name, helper, target, supplied, timeoutMs, deadlineNanos, context, lease);
+            else if ("upload".equals(operation)) result = upload(name, helper, target, supplied, timeoutMs, deadlineNanos, lease);
             else if (java.util.Arrays.asList("stat", "mkdirs", "move", "delete").contains(operation))
                 result = filesystem(helper, target, operation, supplied, timeoutMs, deadlineNanos, lease);
-            else throw argument("Unknown SSH operation '" + operation + "'; use execute, upload, download, stat, mkdirs, move, or delete", "SSH_ARGUMENT");
+            else throw argument("Unknown SSH operation '" + operation + "'; use execute, upload, stat, mkdirs, move, or delete", "SSH_ARGUMENT");
             return success(name, id, result.get("result"), result, safeInput, started);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -114,7 +111,6 @@ public final class SshResourceExecutor {
         } catch (Exception error) {
             String category = error instanceof SshOperationException ? ((SshOperationException) error).category
                     : ("upload".equals(operation) ? "SSH_UPLOAD_ERROR"
-                    : "download".equals(operation) ? "SSH_DOWNLOAD_ERROR"
                     : java.util.Arrays.asList("stat", "mkdirs", "move", "delete").contains(operation)
                         ? "SSH_" + operation.toUpperCase(Locale.ROOT) + "_ERROR" : "SSH_CONNECTION_ERROR");
             String message = safeError(error, target);
@@ -196,21 +192,13 @@ public final class SshResourceExecutor {
                     throw argument("stdoutFormat must be text, json, yaml, or xml", "SSH_ARGUMENT");
             }
         } else if ("upload".equals(operation)) {
-            allowed.add("remotePath"); allowed.add("localPath"); allowed.add("payload");
+            allowed.add("remotePath"); allowed.add("payload");
             allowed.add("overwrite"); allowed.add("timeoutMs");
             requiredRemotePath(input.get("remotePath"));
-            boolean hasLocal = input.containsKey("localPath");
-            boolean hasPayload = input.containsKey("payload");
-            if (hasLocal == hasPayload) throw argument("SSH upload requires exactly one of localPath or payload", "SSH_ARGUMENT");
-            if (hasLocal) requiredString(input.get("localPath"), "localPath");
-            if (hasPayload && !(input.get("payload") instanceof byte[]) && !(input.get("payload") instanceof CharSequence))
+            if (!input.containsKey("payload")) throw argument("SSH upload requires payload content", "SSH_ARGUMENT");
+            if (!(input.get("payload") instanceof byte[]) && !(input.get("payload") instanceof CharSequence))
                 throw argument("SSH upload payload must be a String or byte[]; Map/List requires an explicit representation", "SSH_ARGUMENT");
             bool(input.get("overwrite"), true, "overwrite");
-        } else if ("download".equals(operation)) {
-            allowed.add("remotePath"); allowed.add("localPath"); allowed.add("overwrite"); allowed.add("timeoutMs");
-            requiredRemotePath(input.get("remotePath"));
-            requiredString(input.get("localPath"), "localPath");
-            bool(input.get("overwrite"), false, "overwrite");
         } else if ("move".equals(operation)) {
             allowed.addAll(java.util.Arrays.asList("sourcePath", "targetPath", "overwrite", "timeoutMs"));
             filesystemPath(input.get("sourcePath")); filesystemPath(input.get("targetPath"));
@@ -222,7 +210,7 @@ public final class SshResourceExecutor {
                 allowed.add("missingOk"); bool(input.get("missingOk"), false, "missingOk");
             }
         } else {
-            throw argument("Unknown SSH operation '" + operation + "'; use execute, upload, download, stat, mkdirs, move, or delete", "SSH_ARGUMENT");
+            throw argument("Unknown SSH operation '" + operation + "'; use execute, upload, stat, mkdirs, move, or delete", "SSH_ARGUMENT");
         }
         if (input.containsKey("timeoutMs")) operationTimeout(input, null, 60000);
         for (String key : input.keySet()) if (!allowed.contains(key))
@@ -254,80 +242,30 @@ public final class SshResourceExecutor {
 
     private Map<String, Object> upload(String name, SshHelperConfig helper, SshConfig target,
                                        Map<String, Object> input, long timeoutMs, long deadlineNanos,
-                                       CaseRuntimeContext context, PermitLease lease) throws Exception {
+                                       PermitLease lease) throws Exception {
         String remotePath = requiredRemotePath(input.get("remotePath"));
-        boolean hasLocal = input.containsKey("localPath");
-        boolean hasPayload = input.containsKey("payload");
-        if (hasLocal == hasPayload) throw argument("SSH upload requires exactly one of localPath or payload", "SSH_ARGUMENT");
+        Object payload = input.get("payload");
+        byte[] content;
+        if (payload instanceof byte[]) content = ((byte[]) payload).clone();
+        else if (payload instanceof CharSequence) content = String.valueOf(payload).getBytes(StandardCharsets.UTF_8);
+        else throw argument("SSH upload payload must be a String or byte[]; Map/List requires an explicit representation", "SSH_ARGUMENT");
         boolean overwrite = bool(input.get("overwrite"), true, "overwrite");
         Instant started = Instant.now();
-        long bytes;
-        String mode;
-        if (hasLocal) {
-            Path local = resolveExistingLocal(requiredString(input.get("localPath"), "localPath"), context);
-            bytes = transferWithDeadline(new TransferOperation<Long>() {
-                @Override public Long call(SshTransferCancellation cancellation) throws Exception {
-                    return transferClient.upload(target, local, null, remotePath, overwrite,
-                            connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot, cancellation);
-                }
-            }, deadlineNanos, lease).longValue();
-            mode = "local-file";
-        } else {
-            Object payload = input.get("payload");
-            byte[] content;
-            if (payload instanceof byte[]) content = ((byte[]) payload).clone();
-            else if (payload instanceof CharSequence) content = String.valueOf(payload).getBytes(StandardCharsets.UTF_8);
-            else throw argument("SSH upload payload must be a String or byte[]; Map/List requires an explicit representation", "SSH_ARGUMENT");
-            final byte[] represented = content;
-            bytes = transferWithDeadline(new TransferOperation<Long>() {
-                @Override public Long call(SshTransferCancellation cancellation) throws Exception {
-                    return transferClient.upload(target, null, represented, remotePath, overwrite,
-                            connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot, cancellation);
-                }
-            }, deadlineNanos, lease).longValue();
-            mode = "represented-payload";
-        }
-        Map<String, Object> evidence = commonEvidence(helper, target, "upload", "sftp", started);
-        evidence.put("remotePath", remotePath);
-        evidence.put("transferMode", mode);
-        evidence.put("bytesTransferred", bytes);
-        evidence.put("timeoutMs", timeoutMs);
-        evidence.put("connectTimeoutMs", helper.connectTimeoutMs());
-        evidence.put("durationMs", Duration.between(started, Instant.now()).toMillis());
-        Map<String, Object> summary = new LinkedHashMap<String, Object>();
-        summary.put("remotePath", remotePath);
-        summary.put("bytesTransferred", bytes);
-        summary.put("transferMode", mode);
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("result", summary);
-        result.put("evidence", evidence);
-        return result;
-    }
-
-    private Map<String, Object> download(String name, SshHelperConfig helper, SshConfig target,
-                                         Map<String, Object> input, long timeoutMs, long deadlineNanos,
-                                         CaseRuntimeContext context, PermitLease lease) throws Exception {
-        String remotePath = requiredRemotePath(input.get("remotePath"));
-        String localText = requiredString(input.get("localPath"), "localPath");
-        boolean overwrite = bool(input.get("overwrite"), false, "overwrite");
-        Path local = resolveDestination(localText, context, overwrite);
-        Instant started = Instant.now();
+        final byte[] represented = content;
         long bytes = transferWithDeadline(new TransferOperation<Long>() {
             @Override public Long call(SshTransferCancellation cancellation) throws Exception {
-                return transferClient.download(target, remotePath, local, overwrite,
+                return transferClient.upload(target, represented, remotePath, overwrite,
                         connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot, cancellation);
             }
         }, deadlineNanos, lease).longValue();
-        Map<String, Object> evidence = commonEvidence(helper, target, "download", "sftp", started);
+        Map<String, Object> evidence = commonEvidence(helper, target, "upload", "sftp", started);
         evidence.put("remotePath", remotePath);
-        evidence.put("localPath", portable(local));
         evidence.put("bytesTransferred", bytes);
         evidence.put("timeoutMs", timeoutMs);
         evidence.put("connectTimeoutMs", helper.connectTimeoutMs());
         evidence.put("durationMs", Duration.between(started, Instant.now()).toMillis());
         Map<String, Object> summary = new LinkedHashMap<String, Object>();
         summary.put("remotePath", remotePath);
-        summary.put("localPath", portable(local));
         summary.put("bytesTransferred", bytes);
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("result", summary);
@@ -478,59 +416,6 @@ public final class SshResourceExecutor {
         if (interrupted) Thread.currentThread().interrupt();
     }
 
-    private Path resolveExistingLocal(String value, CaseRuntimeContext context) throws IOException {
-        List<Path> roots = allowedRoots(context);
-        Path configured = Paths.get(value);
-        List<Path> candidates = new ArrayList<Path>();
-        if (configured.isAbsolute()) candidates.add(configured.normalize());
-        else {
-            candidates.add(projectRoot.resolve(configured).normalize());
-            candidates.add(context.caseOutputDirectory().resolve(configured).normalize());
-        }
-        for (Path candidate : candidates) {
-            if (!Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(candidate)) continue;
-            Path real = candidate.toRealPath();
-            for (Path root : roots) if (contained(real, root)) return real;
-        }
-        throw argument("SSH localPath is missing or outside the ATT-controlled package/case output", "SSH_PATH");
-    }
-
-    private Path resolveDestination(String value, CaseRuntimeContext context, boolean overwrite) throws IOException {
-        allowedRoots(context);
-        Path configured = Paths.get(value);
-        Path root = context.caseOutputDirectory().toAbsolutePath().normalize();
-        Path candidate = configured.isAbsolute() ? configured.normalize() : root.resolve(configured).normalize();
-        if (!candidate.startsWith(root)) throw argument("SSH download localPath must stay under the ATT-controlled case output", "SSH_PATH");
-        if (Files.exists(candidate, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(candidate))
-            throw argument("SSH download localPath must not be a symbolic link", "SSH_PATH");
-        if (Files.exists(candidate, LinkOption.NOFOLLOW_LINKS) && !overwrite)
-            throw argument("SSH download localPath exists; set overwrite=true to replace it", "SSH_PATH");
-        Path parent = candidate.getParent();
-        Path realRoot = root.toRealPath();
-        Path existing = parent;
-        while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) existing = existing.getParent();
-        if (existing == null || !existing.toRealPath().startsWith(realRoot))
-            throw argument("SSH download localPath parent escapes the ATT-controlled root", "SSH_PATH");
-        if (parent != null) {
-            Files.createDirectories(parent);
-            Path realParent = parent.toRealPath();
-            if (!realParent.startsWith(realRoot))
-                throw argument("SSH download localPath parent escapes the ATT-controlled root", "SSH_PATH");
-        }
-        return candidate;
-    }
-
-    private List<Path> allowedRoots(CaseRuntimeContext context) throws IOException {
-        List<Path> roots = new ArrayList<Path>();
-        roots.add(projectRoot.toRealPath());
-        Path caseRoot = context.caseOutputDirectory().toAbsolutePath().normalize();
-        Files.createDirectories(caseRoot);
-        Path realCase = caseRoot.toRealPath();
-        if (!roots.contains(realCase)) roots.add(realCase);
-        return roots;
-    }
-
-    private boolean contained(Path value, Path root) { return value.toAbsolutePath().normalize().startsWith(root.toAbsolutePath().normalize()); }
     private String portable(Path path) {
         Path absolute = path.toAbsolutePath().normalize();
         return absolute.startsWith(projectRoot) ? projectRoot.relativize(absolute).toString().replace('\\', '/') : absolute.toString();
@@ -687,27 +572,16 @@ interface SshTransferClient {
         throw new IOException("SFTP filesystem operations are unavailable in this transport");
     }
 
-    long upload(SshConfig target, Path source, byte[] payload, String remotePath, boolean overwrite,
+    long upload(SshConfig target, byte[] payload, String remotePath, boolean overwrite,
                 Duration timeout, Path projectRoot) throws Exception;
-    default long upload(SshConfig target, Path source, byte[] payload, String remotePath, boolean overwrite,
+    default long upload(SshConfig target, byte[] payload, String remotePath, boolean overwrite,
                         Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
-        return upload(target, source, payload, remotePath, overwrite, timeout, projectRoot);
+        return upload(target, payload, remotePath, overwrite, timeout, projectRoot);
     }
-    default long upload(SshConfig target, Path source, byte[] payload, String remotePath, boolean overwrite,
+    default long upload(SshConfig target, byte[] payload, String remotePath, boolean overwrite,
                         Duration connectTimeout, Duration timeout, Path projectRoot,
                         SshTransferCancellation cancellation) throws Exception {
-        return upload(target, source, payload, remotePath, overwrite, connectTimeout, timeout, projectRoot);
-    }
-    long download(SshConfig target, String remotePath, Path localPath, boolean overwrite,
-                  Duration timeout, Path projectRoot) throws Exception;
-    default long download(SshConfig target, String remotePath, Path localPath, boolean overwrite,
-                          Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
-        return download(target, remotePath, localPath, overwrite, timeout, projectRoot);
-    }
-    default long download(SshConfig target, String remotePath, Path localPath, boolean overwrite,
-                          Duration connectTimeout, Duration timeout, Path projectRoot,
-                          SshTransferCancellation cancellation) throws Exception {
-        return download(target, remotePath, localPath, overwrite, connectTimeout, timeout, projectRoot);
+        return upload(target, payload, remotePath, overwrite, connectTimeout, timeout, projectRoot);
     }
 }
 
@@ -718,7 +592,7 @@ interface SshTransferCancellation {
     default boolean isCancelled() { return false; }
 }
 
-/** SFTP transfer implementation used for represented payloads and file transfers. */
+/** SFTP transfer implementation used for represented payload uploads. */
 final class JschSshTransferClient implements SshTransferClient {
     private static final class Connection {
         private final Session session;
@@ -736,17 +610,17 @@ final class JschSshTransferClient implements SshTransferClient {
     JschSshTransferClient() { this(Paths.get(System.getProperty("user.home", ""), ".ssh", "known_hosts")); }
     JschSshTransferClient(Path knownHosts) { this.knownHosts = knownHosts; }
 
-    @Override public long upload(SshConfig ssh, Path source, byte[] payload, String remotePath, boolean overwrite,
+    @Override public long upload(SshConfig ssh, byte[] payload, String remotePath, boolean overwrite,
                                  Duration timeout, Path projectRoot) throws Exception {
-        return upload(ssh, source, payload, remotePath, overwrite, timeout, timeout, projectRoot);
+        return upload(ssh, payload, remotePath, overwrite, timeout, timeout, projectRoot);
     }
 
-    @Override public long upload(SshConfig ssh, Path source, byte[] payload, String remotePath, boolean overwrite,
+    @Override public long upload(SshConfig ssh, byte[] payload, String remotePath, boolean overwrite,
                                  Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
-        return upload(ssh, source, payload, remotePath, overwrite, connectTimeout, timeout, projectRoot, null);
+        return upload(ssh, payload, remotePath, overwrite, connectTimeout, timeout, projectRoot, null);
     }
 
-    @Override public long upload(SshConfig ssh, Path source, byte[] payload, String remotePath, boolean overwrite,
+    @Override public long upload(SshConfig ssh, byte[] payload, String remotePath, boolean overwrite,
                                  Duration connectTimeout, Duration timeout, Path projectRoot,
                                  SshTransferCancellation cancellation) throws Exception {
         SshTransferCancellation token = cancellation == null ? new SshTransferCancellation() { } : cancellation;
@@ -756,10 +630,6 @@ final class JschSshTransferClient implements SshTransferClient {
             ChannelSftp channel = connection.channel;
             if (token.isCancelled()) throw new IOException("Java SSH transfer cancelled");
             if (!overwrite && exists(channel, remotePath)) throw new IOException("Remote destination exists: " + remotePath);
-            if (source != null) {
-                channel.put(source.toString(), remotePath, ChannelSftp.OVERWRITE);
-                return Files.size(source);
-            }
             byte[] bytes = payload == null ? new byte[0] : payload;
             channel.put(new ByteArrayInputStream(bytes), remotePath, ChannelSftp.OVERWRITE);
             return bytes.length;
@@ -768,47 +638,6 @@ final class JschSshTransferClient implements SshTransferClient {
                 token.unregister(connection.closer);
                 close(connection.channel, connection.session);
             }
-        }
-    }
-
-    @Override public long download(SshConfig ssh, String remotePath, Path localPath, boolean overwrite,
-                                   Duration timeout, Path projectRoot) throws Exception {
-        return download(ssh, remotePath, localPath, overwrite, timeout, timeout, projectRoot);
-    }
-
-    @Override public long download(SshConfig ssh, String remotePath, Path localPath, boolean overwrite,
-                                   Duration connectTimeout, Duration timeout, Path projectRoot) throws Exception {
-        return download(ssh, remotePath, localPath, overwrite, connectTimeout, timeout, projectRoot, null);
-    }
-
-    @Override public long download(SshConfig ssh, String remotePath, Path localPath, boolean overwrite,
-                                   Duration connectTimeout, Duration timeout, Path projectRoot,
-                                   SshTransferCancellation cancellation) throws Exception {
-        SshTransferCancellation token = cancellation == null ? new SshTransferCancellation() { } : cancellation;
-        if (Files.exists(localPath) && !overwrite) throw new IOException("Local destination exists: " + localPath);
-        Path parent = localPath.getParent();
-        Path temporary = Files.createTempFile(parent == null ? Paths.get(".") : parent, ".att-ssh-", ".part");
-        Connection connection = null;
-        try {
-            connection = open(ssh, projectRoot, connectTimeout, timeout, token);
-            ChannelSftp channel = connection.channel;
-            if (token.isCancelled()) throw new IOException("Java SSH transfer cancelled");
-            channel.get(remotePath, temporary.toString());
-            long size = Files.size(temporary);
-            try {
-                if (overwrite) Files.move(temporary, localPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-                else Files.move(temporary, localPath, StandardCopyOption.ATOMIC_MOVE);
-            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
-                if (overwrite) Files.move(temporary, localPath, StandardCopyOption.REPLACE_EXISTING);
-                else Files.move(temporary, localPath);
-            }
-            return size;
-        } finally {
-            if (connection != null) {
-                token.unregister(connection.closer);
-                close(connection.channel, connection.session);
-            }
-            Files.deleteIfExists(temporary);
         }
     }
 

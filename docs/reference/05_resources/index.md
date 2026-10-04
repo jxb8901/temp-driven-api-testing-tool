@@ -1,6 +1,6 @@
 ## 07 Resources and Integrations
 
-Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper are peer integration/resource types. SSHHelper routes command-backed Tools and exposes `ssh.<helperId>.execute|upload|download` Resource Helper operations. They converge on the common operation-result/evidence contract.
+Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper are peer integration/resource types. SSHHelper routes command-backed Tools and exposes `ssh.<helperId>.execute|upload` plus remote filesystem operations. It converges on the common operation-result/evidence contract.
 
 ```text
 Tool      -> process/call operation --\

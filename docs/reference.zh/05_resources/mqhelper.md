@@ -49,7 +49,7 @@ send:
 
 ATT 使用配置的 MQ charset/CCSID 編碼完全相同的 file text，不會 parse/serialize。String 不應提供 requestFormat。Project-file expression 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。
 
-Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。String + requestFormat 會被拒絕。payload 與 file 互斥。file 可用於明確的 raw file input；project-file expression 不建立檔案或 targetFiles。
+Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。String + requestFormat 會被拒絕。MQ send/request call 不接受 local file path；`file` 是 unknown argument。Project-file expression 不建立檔案或 targetFiles。
 
 #### Evidence、response parsing 與 Load
 

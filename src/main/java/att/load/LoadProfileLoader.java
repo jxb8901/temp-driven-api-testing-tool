@@ -42,7 +42,7 @@ public final class LoadProfileLoader {
     private DiagnosticException invalid(Path path, String detail, Throwable cause) {
         return new DiagnosticException(DiagnosticCodes.LOAD_INVALID, "Invalid quick-load profile", detail,
                 path.toString(), "profile", null, null, null, null, null,
-                "Migrate load/load.yaml to the current policy-only att-load/v1.5 descriptor with load intensity, evidence, thresholds, and optional testdata imports.", cause);
+                "Migrate load/load.yaml to the current policy-only att-load/v1.6 descriptor with load intensity, evidence, thresholds, and optional testdata imports.", cause);
     }
 
     private static Map<String, Object> objectMap(Map<?, ?> map) {

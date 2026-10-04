@@ -155,7 +155,7 @@ class SshResourceHelperTest {
         final CountDownLatch entered = new CountDownLatch(1);
         final CountDownLatch release = new CountDownLatch(1);
         SshTransferClient blocked = new FakeTransfer() {
-            @Override public long upload(SshConfig target, Path source, byte[] payload, String remotePath,
+            @Override public long upload(SshConfig target, byte[] payload, String remotePath,
                                           boolean overwrite, Duration timeout, Path projectRoot) throws Exception {
                 entered.countDown();
                 release.await();
@@ -163,12 +163,9 @@ class SshResourceHelperTest {
             }
         };
         SshResourceExecutor executor = executor(new CommandResult(0, "ok", "", false), blocked);
-        Path source = root.resolve("blocked.txt");
-        Files.write(source, "blocked".getBytes(StandardCharsets.UTF_8));
-
         long started = System.nanoTime();
         ToolInvocationResult result = executor.execute("application", "upload",
-                map("remotePath", "/srv/blocked", "localPath", source.toString()), context(), 60L,
+                map("remotePath", "/srv/blocked", "payload", "blocked"), context(), 60L,
                 "ssh-transfer-timeout", new CaseExecutionLog(root.resolve("transfer-timeout.log")));
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
 
@@ -186,7 +183,7 @@ class SshResourceHelperTest {
         final CountDownLatch release = new CountDownLatch(1);
         final AtomicBoolean postTimeoutSideEffect = new AtomicBoolean();
         SshTransferClient stubborn = new FakeTransfer() {
-            @Override public long upload(SshConfig target, Path source, byte[] payload, String remotePath,
+            @Override public long upload(SshConfig target, byte[] payload, String remotePath,
                                           boolean overwrite, Duration timeout, Path projectRoot) throws Exception {
                 entered.countDown();
                 while (true) {
@@ -204,10 +201,8 @@ class SshResourceHelperTest {
         SshResourceExecutor executor = executor(new CommandResult(0, "ok", "", false), stubborn,
                 "single", Collections.singletonMap("one", new SshConfig("one.example", "deploy", 22, "")),
                 1, 10000, null);
-        Path source = root.resolve("stubborn.txt");
-        Files.write(source, "stubborn".getBytes(StandardCharsets.UTF_8));
         FutureTask<ToolInvocationResult> first = new FutureTask<ToolInvocationResult>(() -> executor.execute(
-                "application", "upload", map("remotePath", "/srv/stubborn", "localPath", source.toString()),
+                "application", "upload", map("remotePath", "/srv/stubborn", "payload", "stubborn"),
                 context(), 60L, "ssh-stubborn-1", new CaseExecutionLog(root.resolve("stubborn-1.log"))));
         Thread firstThread = new Thread(first, "ssh-stubborn-first");
         firstThread.start();
@@ -336,26 +331,24 @@ class SshResourceHelperTest {
         }
     }
 
-    @Test void uploadsAndDownloadsOnlyThroughControlledCaseOutput() throws Exception {
+    @Test void uploadConsumesContentAndDownloadIsUnsupported() throws Exception {
         FakeTransfer transfer = new FakeTransfer();
         SshResourceExecutor executor = executor(new CommandResult(0, "ok", "", false), transfer);
-        Path source = root.resolve("source.txt");
-        Files.write(source, "upload".getBytes(StandardCharsets.UTF_8));
         CaseRuntimeContext context = context();
         ToolInvocationResult uploaded = executor.execute("application", "upload",
-                map("remotePath", "/srv/value", "localPath", source.toString()), context, 1000L, "ssh-4",
+                map("remotePath", "/srv/value", "payload", "upload"), context, 1000L, "ssh-4",
                 new CaseExecutionLog(root.resolve("upload.log")));
         assertTrue(uploaded.executionSuccess());
         assertEquals(6L, ((Number) ((Map<?, ?>) uploaded.output()).get("bytesTransferred")).longValue());
-
-        ToolInvocationResult downloaded = executor.execute("application", "download",
-                map("remotePath", "/srv/value", "localPath", "nested/result.txt"), context, 1000L, "ssh-5",
+        ToolInvocationResult localPath = executor.execute("application", "upload",
+                map("remotePath", "/srv/value", "localPath", "source.txt"), context, 1000L, "ssh-5",
+                new CaseExecutionLog(root.resolve("local-path.log")));
+        assertFalse(localPath.executionSuccess());
+        ToolInvocationResult download = executor.execute("application", "download",
+                map("remotePath", "/srv/value", "localPath", "nested/result.txt"), context, 1000L, "ssh-6",
                 new CaseExecutionLog(root.resolve("download.log")));
-        assertTrue(downloaded.executionSuccess());
-        assertEquals("upload", new String(Files.readAllBytes(context.caseOutputDirectory().resolve("nested/result.txt")), StandardCharsets.UTF_8));
-        assertFalse(executor.execute("application", "download",
-                map("remotePath", "/srv/value", "localPath", "../escape.txt"), context, 1000L, "ssh-6",
-                new CaseExecutionLog(root.resolve("escape.log"))).executionSuccess());
+        assertFalse(download.executionSuccess());
+        assertEquals("SSH_ARGUMENT", ((Map<?, ?>) download.invocation().get("error")).get("category"));
     }
 
     @Test void unifiedTemplateEngineDispatchesNativeSshCalls() throws Exception {
@@ -373,7 +366,7 @@ class SshResourceHelperTest {
         Files.write(knownHosts, new byte[0]);
         // Accept the TCP connection and close it before the SSH handshake so the failure
         // is a deterministic connection error rather than a platform-dependent refusal timeout.
-        for (String operation : new String[]{"upload", "download"}) {
+        for (String operation : new String[]{"upload"}) {
             try (java.net.ServerSocket server = new java.net.ServerSocket(0, 1,
                     java.net.InetAddress.getByName("127.0.0.1"))) {
                 FutureTask<Void> peer = new FutureTask<Void>(() -> {
@@ -388,9 +381,7 @@ class SshResourceHelperTest {
                         new JschSshTransferClient(knownHosts), "single",
                         Collections.singletonMap("one", new SshConfig("127.0.0.1", "deploy", server.getLocalPort(), "")),
                         1, 1000, null);
-                Map<String, Object> input = "upload".equals(operation)
-                        ? map("remotePath", "/srv/value", "payload", "value")
-                        : map("remotePath", "/srv/value", "localPath", "refused.txt");
+                Map<String, Object> input = map("remotePath", "/srv/value", "payload", "value");
                 ToolInvocationResult result = executor.execute("application", operation, input,
                         context(), 5000L, "ssh-refused-" + operation,
                         new CaseExecutionLog(root.resolve("refused-" + operation + ".log")));
@@ -436,21 +427,15 @@ class SshResourceHelperTest {
 
     @Test void sftpTransferFailuresHaveOperationSpecificCategories() throws Exception {
         SshTransferClient failed = new FakeTransfer() {
-            @Override public long upload(SshConfig target, Path source, byte[] payload, String remotePath,
+            @Override public long upload(SshConfig target, byte[] payload, String remotePath,
                     boolean overwrite, Duration timeout, Path projectRoot) throws Exception {
                 throw new com.jcraft.jsch.SftpException(com.jcraft.jsch.ChannelSftp.SSH_FX_PERMISSION_DENIED, "permission denied");
             }
-            @Override public long download(SshConfig target, String remotePath, Path localPath,
-                    boolean overwrite, Duration timeout, Path projectRoot) throws Exception {
-                throw new com.jcraft.jsch.SftpException(com.jcraft.jsch.ChannelSftp.SSH_FX_NO_SUCH_FILE, "remote missing");
-            }
         };
         SshResourceExecutor executor = executor(new CommandResult(0, "unused", "", false), failed);
-        for (String operation : new String[]{"upload", "download"}) {
-            Map<String, Object> input = "upload".equals(operation)
-                    ? map("remotePath", "/srv/value", "payload", "value")
-                    : map("remotePath", "/srv/value", "localPath", "failed.txt");
-            String category = "upload".equals(operation) ? "SSH_UPLOAD_ERROR" : "SSH_DOWNLOAD_ERROR";
+        for (String operation : new String[]{"upload"}) {
+            Map<String, Object> input = map("remotePath", "/srv/value", "payload", "value");
+            String category = "SSH_UPLOAD_ERROR";
             ToolInvocationResult result = executor.execute("application", operation, input,
                     context(), 1000L, "ssh-failed-" + operation,
                     new CaseExecutionLog(root.resolve("failed-" + operation + ".log")));
@@ -581,7 +566,7 @@ class SshResourceHelperTest {
         FrameworkConfig config = (FrameworkConfig) configured.get(executor);
         java.lang.reflect.Method contract = att.validation.PackageValidator.class.getDeclaredMethod("validateSshRetryContract",
                 TemplateAction.class, FrameworkConfig.class); contract.setAccessible(true);
-        for (String operation : new String[]{"execute", "stat", "mkdirs", "move", "delete", "upload", "download"}) {
+        for (String operation : new String[]{"execute", "stat", "mkdirs", "move", "delete", "upload"}) {
             String call = "#{ssh.application." + operation + "()}";
             att.config.ToolConfig wrapper = new att.config.ToolConfig("wrapped", "wrapped", "", "Wrapper", "",
                     Collections.<String>emptyList(), call, Collections.<String>emptyList(), "",
@@ -689,20 +674,11 @@ class SshResourceHelperTest {
     private static class FakeTransfer implements SshTransferClient {
         private final Map<String, byte[]> remote = new LinkedHashMap<String, byte[]>();
 
-        @Override public long upload(SshConfig target, Path source, byte[] payload, String remotePath, boolean overwrite,
+        @Override public long upload(SshConfig target, byte[] payload, String remotePath, boolean overwrite,
                                      Duration timeout, Path projectRoot) throws Exception {
             if (!overwrite && remote.containsKey(remotePath)) throw new IOException("remote exists");
-            byte[] bytes = source == null ? payload.clone() : Files.readAllBytes(source);
+            byte[] bytes = payload.clone();
             remote.put(remotePath, bytes);
-            return bytes.length;
-        }
-
-        @Override public long download(SshConfig target, String remotePath, Path localPath, boolean overwrite,
-                                       Duration timeout, Path projectRoot) throws Exception {
-            if (!overwrite && Files.exists(localPath)) throw new IOException("local exists");
-            byte[] bytes = remote.get(remotePath);
-            if (bytes == null) throw new IOException("remote missing");
-            Files.write(localPath, bytes);
             return bytes.length;
         }
     }

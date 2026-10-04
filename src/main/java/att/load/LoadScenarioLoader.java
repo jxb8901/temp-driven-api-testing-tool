@@ -21,7 +21,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Loads and semantically validates current att-load/v1.5 descriptors and compatible historical scenarios. */
+/** Loads and semantically validates current att-load/v1.6 descriptors and compatible historical scenarios. */
 public final class LoadScenarioLoader {
     private static final Pattern DURATION = Pattern.compile("^([0-9]+)(ms|s|m|h)$");
     private static final Pattern RATE = Pattern.compile("^([1-9][0-9]*(?:\\.[0-9]+)?)/(s|m)$");
@@ -44,9 +44,14 @@ public final class LoadScenarioLoader {
             Path schema;
             boolean normalizeHistoricalV13 = false;
             boolean normalizePreviousV14 = false;
+            boolean normalizePreviousV15 = false;
             if (Version.LOAD_SCHEMA_CURRENT.equals(version)) {
                 applyCurrentOverrides(map, effectiveOverrides);
-                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json");
+                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.6.schema.json");
+            } else if (Version.LOAD_SCHEMA_V1_5.equals(version)) {
+                applyCurrentOverrides(map, effectiveOverrides);
+                schema = att.validation.SchemaFiles.resolveVersion(projectRoot, Version.LOAD_SCHEMA_V1_5);
+                normalizePreviousV15 = true;
             } else if (Version.LOAD_SCHEMA_V1_4.equals(version)) {
                 applyCurrentOverrides(map, effectiveOverrides);
                 schema = att.validation.SchemaFiles.resolveVersion(projectRoot, Version.LOAD_SCHEMA_V1_4);
@@ -61,8 +66,8 @@ public final class LoadScenarioLoader {
                 throw failure("schemaVersion", "Unsupported load scenario schemaVersion '" + version + "'; current schema is "
                         + Version.LOAD_SCHEMA_CURRENT + " (historical workloads schema " + Version.LOAD_SCHEMA_V1_3 + "). Update to workloads-based syntax and use execution.execIdFormat; see docs/reference/appendices/migrations.md.");
             }
-            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json");
-            if (normalizeHistoricalV13 || normalizePreviousV14) {
+            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.6.schema.json");
+            if (normalizeHistoricalV13 || normalizePreviousV14 || normalizePreviousV15) {
                 SchemaSupport.requireVersion(map, version, "historical load scenario");
                 JsonSchemaVerifier.verify(schema, map);
                 map.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
@@ -106,22 +111,22 @@ public final class LoadScenarioLoader {
         Path source = projectRoot.resolve("load/load.yaml").normalize();
         if (!Files.exists(source)) return null;
         if (!Files.isRegularFile(source) || Files.isSymbolicLink(source))
-            throw invalid(source, "Load policy must be a regular non-symlink file", "policy", "Create a regular att-load/v1.5 YAML policy descriptor.", null);
+            throw invalid(source, "Load policy must be a regular non-symlink file", "policy", "Create a regular att-load/v1.6 YAML policy descriptor.", null);
         Object loaded = YamlSupport.load(source);
-        if (!(loaded instanceof Map)) throw invalid(source, "Load policy must be a YAML map", "policy", "Create a valid att-load/v1.5 YAML policy descriptor.", null);
+        if (!(loaded instanceof Map)) throw invalid(source, "Load policy must be a YAML map", "policy", "Create a valid att-load/v1.6 YAML policy descriptor.", null);
         Map<String, Object> map = objectMap((Map<?, ?>) loaded);
         String version = string(map.get("schemaVersion"), "schemaVersion");
         if (Version.LOAD_SCHEMA_CURRENT.equals(version)) {
-            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json"), map);
+            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.6.schema.json"), map);
             LoadScenario scenario = semanticCurrent(source, map, false);
             if (!scenario.policyOnly()) throw quickLoadFailure(source, "workloads", "load/load.yaml is a policy-only descriptor and must not declare workloads");
             return map;
         }
-        if (Version.LOAD_SCHEMA_V1_4.equals(version)) {
-            Path previous = att.validation.SchemaFiles.resolveVersion(projectRoot, Version.LOAD_SCHEMA_V1_4);
+        if (Version.LOAD_SCHEMA_V1_5.equals(version) || Version.LOAD_SCHEMA_V1_4.equals(version)) {
+            Path previous = att.validation.SchemaFiles.resolveVersion(projectRoot, version);
             JsonSchemaVerifier.verify(previous, map);
             map.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
-            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json"), map);
+            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.6.schema.json"), map);
             LoadScenario scenario = semanticCurrent(source, map, false);
             if (!scenario.policyOnly()) throw quickLoadFailure(source, "workloads", "load/load.yaml is a policy-only descriptor and must not declare workloads");
             return map;
@@ -134,7 +139,7 @@ public final class LoadScenarioLoader {
         migrated.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
         for (String field : new String[]{"load", "execution", "thresholds", "evidence", "seed"})
             if (map.containsKey(field)) migrated.put(field, map.get(field));
-        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json"), migrated);
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.6.schema.json"), migrated);
         semanticCurrent(source, migrated, false);
         return migrated;
     }
@@ -177,7 +182,7 @@ public final class LoadScenarioLoader {
         if (!load.isEmpty()) root.put("load", load);
         if (!execution.isEmpty()) root.put("execution", execution);
         root.put("workloads", java.util.Collections.<Object>singletonList(workload));
-        try { JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.5.schema.json"), root); }
+        try { JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.6.schema.json"), root); }
         catch (Exception error) { throw quickLoadFailure(source, "load", "Invalid composed Quick Load policy: " + error.getMessage()); }
         return semanticCurrent(source, root, false);
     }
@@ -304,12 +309,47 @@ public final class LoadScenarioLoader {
 
     private LoadWorkload parseWorkload(String id, Map<String, Object> root, String prefix,
                                        Map<String, Object> thresholds, int sourceIndex, boolean validateThresholds) {
-        Map<String, Object> target = configMap(root.get("target"), prefix + "target");
-        String type = string(target.get("type"), prefix + "target.type");
-        String targetId = string(target.get("id"), prefix + "target.id");
-        Map<String, Object> arguments = mapOptional(target.get("arguments"), prefix + "target.arguments");
+        List<LoadMixEntry> mix = new ArrayList<LoadMixEntry>();
+        String type = null, targetId = null;
+        Map<String, Object> arguments = Collections.emptyMap();
+        if (root.containsKey("mix")) {
+            if (root.containsKey("target")) throw failure(prefix + "mix", "workload must declare exactly one of target or mix");
+            if (root.get("mix") instanceof List) {
+                Set<String> mixIds = new HashSet<String>();
+                List<?> rawMix = (List<?>) root.get("mix");
+                if (rawMix.isEmpty()) throw failure(prefix + "mix", "mix must contain at least one target entry");
+                for (int i = 0; i < rawMix.size(); i++) {
+                    String entryPrefix = prefix + "mix[" + i + "].";
+                    Map<String, Object> entry = map(rawMix.get(i), entryPrefix.substring(0, entryPrefix.length() - 1));
+                    String mixId = string(entry.get("id"), entryPrefix + "id");
+                    if (!WORKLOAD_ID.matcher(mixId).matches() || !mixIds.add(mixId))
+                        throw failure(entryPrefix + "id", "mix entry id must be unique and match [A-Za-z0-9][A-Za-z0-9._-]*");
+                    int weight = integer(entry.get("weight"), entryPrefix + "weight", 1);
+                    Map<String, Object> mixTarget = configMap(entry.get("target"), entryPrefix + "target");
+                    String mixType = string(mixTarget.get("type"), entryPrefix + "target.type");
+                    String mixTargetId = string(mixTarget.get("id"), entryPrefix + "target.id");
+                    Map<String, Object> mixArguments = mapOptional(mixTarget.get("arguments"), entryPrefix + "target.arguments");
+                    Map<String, Object> mixInputs = mapOptional(entry.get("inputs"), entryPrefix + "inputs");
+                    Map<String, Object> mixVars = mapOptional(entry.get("vars"), entryPrefix + "vars");
+                    if (("template".equals(mixType) || "flow".equals(mixType)) && !mixArguments.isEmpty())
+                        throw failure(entryPrefix + "target.arguments", "target.arguments is supported only for Tool targets");
+                    if ("tool".equals(mixType) && !mixVars.isEmpty())
+                        throw failure(entryPrefix + "vars", "mix entry vars are supported only for Template and Flow targets");
+                    if ("tool".equals(mixType)) att.testdata.TestdataSyntax.rejectDirectReferences(mixArguments, entryPrefix + "target.arguments");
+                    mix.add(new LoadMixEntry(mixId, mixType, mixTargetId, weight, mixArguments, mixInputs, mixVars));
+                }
+            } else throw failure(prefix + "mix", "mix must be a list of target entries");
+        } else {
+            Map<String, Object> target = configMap(root.get("target"), prefix + "target");
+            type = string(target.get("type"), prefix + "target.type");
+            targetId = string(target.get("id"), prefix + "target.id");
+            arguments = mapOptional(target.get("arguments"), prefix + "target.arguments");
+        }
         Map<String, Object> inputs = mapOptional(root.get("inputs"), prefix + "inputs");
         Map<String, Object> vars = mapOptional(root.get("vars"), prefix + "vars");
+        for (LoadMixEntry entry : mix) if ("tool".equals(entry.targetType())
+                && (!vars.isEmpty() || !entry.vars().isEmpty()))
+            throw failure(prefix + "mix", "Tool mix entries do not support workload or entry vars; use inputs or target.arguments");
         Map<String, Object> testdata = configMapOptional(root.get("testdata"), prefix + "testdata");
         Map<String, Object> load = configMap(root.get("load"), prefix + "load");
         Map<String, Object> execution = configMapOptional(root.get("execution"), prefix + "execution");
@@ -346,6 +386,7 @@ public final class LoadScenarioLoader {
             if (rateValue != null || load.get("maxConcurrent") != null || load.get("overloadPolicy") != null)
                 throw failure(prefix + "load", "closed workload must not configure arrivalRate/maxConcurrent/overloadPolicy");
         } else {
+            if (!mix.isEmpty()) throw failure(prefix + "load", "target mixes are supported only for closed workloads");
             model = LoadScenario.Model.ARRIVAL_RATE;
             rateText = string(rateValue, prefix + "load.arrivalRate");
             rate = parseRate(rateText, prefix + "load.arrivalRate");
@@ -368,7 +409,7 @@ public final class LoadScenarioLoader {
         ThinkTimePolicy thinkTime = thinkTime(execution.get("thinkTime"), prefix + "execution.thinkTime");
         if (validateThresholds) validateThresholds(model, thresholds, prefix + "thresholds");
         return new LoadWorkload(id, type, targetId, arguments, inputs, vars, model, users, rate, rateText,
-                warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds, testdata, sourceIndex);
+                warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds, testdata, sourceIndex, mix);
     }
 
     private ThinkTimePolicy thinkTime(Object value, String field) {
@@ -393,6 +434,8 @@ public final class LoadScenarioLoader {
         List<Object> values = list(root.get("workloads"), "workloads");
         if (values.size() != 1) throw failure("workloads", "load-model CLI overrides are ambiguous for multi-workload scenarios; configure each workload in YAML");
         Map<String, Object> workload = map(values.get(0), "workloads[0]");
+        if (workload.containsKey("mix") && (!overrides.setOverrides().isEmpty()))
+            throw failure("workloads[0].mix", "--set overrides are ambiguous for a mixed workload; configure inputs, vars, and Tool arguments in the mix entries");
         Map<String, Object> load = mergeMaps(copyMap(root.get("load")), copyMap(workload.get("load")));
         Map<String, Object> execution = mergeMaps(copyMap(root.get("execution")), copyMap(workload.get("execution")));
         execution.remove("execIdFormat");

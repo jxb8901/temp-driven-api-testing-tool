@@ -24,6 +24,7 @@ public final class FrameworkRunner {
 
     public static void main(String[] args) throws Exception {
         ExecutionOptions options = null;
+        Path root = Paths.get("").toAbsolutePath();
         try {
             try { options = ExecutionOptions.parse(args); }
             catch (IllegalArgumentException e) {
@@ -33,7 +34,6 @@ public final class FrameworkRunner {
             }
             if ("help".equals(options.command())) { help(); return; }
             if ("version".equals(options.command())) { System.out.println(Version.DISPLAY); return; }
-            Path root = Paths.get("").toAbsolutePath();
             PerformanceProfile profile = new PerformanceProfile(options.profile());
             long profilePhase = profile.begin();
             FrameworkConfig config;
@@ -54,15 +54,15 @@ public final class FrameworkRunner {
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
                     output.put("status", debug.status().name()); output.put("exitCode", debug.exitCode());
-                    output.put("durationMs", debug.durationMs()); output.put("log", debug.logPath().toString());
-                    output.put("result", debug.resultPath().toString()); System.out.println(att.validation.JsonSupport.write(output));
+                    output.put("durationMs", debug.durationMs()); output.put("log", att.core.PathPresentation.displayPath(debug.logPath(), root));
+                    output.put("result", att.core.PathPresentation.displayPath(debug.resultPath(), root)); System.out.println(att.validation.JsonSupport.write(output));
                 } else {
                     String consoleStatus = debug.status() == att.core.ResultStatus.INVALID ? "ERROR" : debug.status().name();
                     System.out.println("DEBUG " + consoleStatus + " | Target: " + options.debugTargetType() + " " + options.debugTargetId()
                             + " | Duration: " + debug.durationMs() + "ms");
                     if (!options.quiet()) {
-                        System.out.println("Log: " + debug.logPath());
-                        System.out.println("Result: " + debug.resultPath());
+                        System.out.println("Log: " + att.core.PathPresentation.displayPath(debug.logPath(), root));
+                        System.out.println("Result: " + att.core.PathPresentation.displayPath(debug.resultPath(), root));
                     }
                     if (debug.diagnostic() != null) System.err.println(debug.diagnostic().format());
                 }
@@ -92,8 +92,11 @@ public final class FrameworkRunner {
                             scenario.source() == null ? null : scenario.source().toString(), "workloads", null, null, null,
                             null, null, "Use load --debug with a Template, Flow, or Tool target, or add a workloads list.", null);
                 }
-                att.load.LoadTarget target = new att.load.LoadTargetResolver(root, config).resolve(scenario);
-                new att.load.LoadTargetValidator(root, config).validate(scenario, target);
+                att.load.LoadTarget target = null;
+                if (!scenario.coordinatorRequired()) {
+                    target = new att.load.LoadTargetResolver(root, config).resolve(scenario);
+                    new att.load.LoadTargetValidator(root, config).validate(scenario, target);
+                }
                 runLoad(root, config, options, scenario, target, profile);
                 return;
             }
@@ -162,19 +165,19 @@ public final class FrameworkRunner {
             }
             RunSummary summary = new FrameworkEngine(root, config).run(options, validation.diagnostics, profile);
             if ("json".equals(options.format())) {
-                java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>(); output.put("total", summary.total()); output.put("passed", summary.passed()); output.put("failed", summary.failed()); output.put("error", summary.error()); output.put("skipped", summary.skipped()); output.put("invalid", summary.invalid()); output.put("report", summary.reportPath().toString()); System.out.println(att.validation.JsonSupport.write(output));
+                java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>(); output.put("total", summary.total()); output.put("passed", summary.passed()); output.put("failed", summary.failed()); output.put("error", summary.error()); output.put("skipped", summary.skipped()); output.put("invalid", summary.invalid()); output.put("report", att.core.PathPresentation.displayPath(summary.reportPath(), root)); System.out.println(att.validation.JsonSupport.write(output));
             } else if (!options.quiet()) {
                 System.out.printf(options.verbose() ? "[4/4] Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n" : "Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n",
                         summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid());
-                System.out.println("Report: " + summary.reportPath());
+                System.out.println("Report: " + att.core.PathPresentation.displayPath(summary.reportPath(), root));
             } else {
                 System.out.printf("Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n",
                         summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid());
-                System.out.println("Report: " + summary.reportPath());
+                System.out.println("Report: " + att.core.PathPresentation.displayPath(summary.reportPath(), root));
                 for (att.core.TestResult result : summary.results()) {
                     if (result.status() == att.core.ResultStatus.PASS || result.status() == att.core.ResultStatus.SKIPPED) continue;
                     System.err.println("[RUN] " + result.status() + " case=" + result.caseId()
-                            + " caseLog=" + result.caseLogPath());
+                            + " caseLog=" + att.core.PathPresentation.displayPath(result.caseLogPath(), root));
                 }
             }
             if (summary.exitCode() != 0) System.exit(summary.exitCode());
@@ -185,18 +188,28 @@ public final class FrameworkRunner {
             if (options != null && "json".equals(options.format()) && "validate".equals(options.command())) {
                 java.util.List<att.validation.Diagnostic> diagnostics = java.util.Collections.singletonList(typed.toDiagnostic()); System.out.println(new PackageValidator.ValidationSummary(options.validationScope(), 0, 0, 0, 0, diagnostics).toJson());
             } else if (options != null && "json".equals(options.format())) {
-                System.err.println(att.validation.DiagnosticRenderer.jsonError(typed.toDiagnostic()));
-            } else System.err.println(typed.format());
+                System.err.println(presentedDiagnosticJson(typed, root));
+            } else System.err.println(att.core.PathPresentation.displayText(typed.format(), root));
             System.exit(2);
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.wrap(DiagnosticCodes.RUN_FAILED,
                     "Unexpected ATT runtime failure", e, null, null,
                     "Inspect the cause, Case log, and run evidence; use --quiet to suppress live progress.");
             if (options != null && "json".equals(options.format()))
-                System.err.println(att.validation.DiagnosticRenderer.jsonError(typed.toDiagnostic()));
-            else System.err.println(typed.format());
+                System.err.println(presentedDiagnosticJson(typed, root));
+            else System.err.println(att.core.PathPresentation.displayText(typed.format(), root));
             System.exit(3);
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String presentedDiagnosticJson(att.validation.DiagnosticException diagnostic, Path root) {
+        java.util.Map<String, Object> displayed = (java.util.Map<String, Object>) att.core.PathPresentation.displayStructure(
+                diagnostic.toDiagnostic().toMap(), root);
+        java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
+        output.put("valid", false);
+        output.putAll(displayed);
+        return att.validation.JsonSupport.write(output);
     }
 
     @SuppressWarnings("unchecked")
@@ -223,11 +236,15 @@ public final class FrameworkRunner {
             java.util.Map<String, Object> resourceMetrics;
             long loadExecutionPhase = profile.begin();
             try (att.load.LoadRunResources resources = new att.load.LoadRunResources(root, config)) {
-                att.load.IterationExecutor iterations = new att.load.IterationExecutor(root, config, target, resources, outputRoot);
-                att.load.LoadScheduler scheduler = scenario.model() == att.load.LoadScenario.Model.CLOSED
-                        ? new att.load.ClosedVuScheduler(scenario, iterations, runId, evidence, outputRoot)
-                        : new att.load.FixedArrivalRateScheduler(scenario, iterations, runId, evidence, outputRoot);
-                try { result = scheduler.run(); } finally { scheduler.close(); }
+                if (scenario.coordinatorRequired()) {
+                    result = att.load.LoadRunCoordinator.runFrom(root, config, scenario, resources, runId, evidence, outputRoot);
+                } else {
+                    att.load.IterationExecutor iterations = new att.load.IterationExecutor(root, config, target, resources, outputRoot);
+                    att.load.LoadScheduler scheduler = scenario.model() == att.load.LoadScenario.Model.CLOSED
+                            ? new att.load.ClosedVuScheduler(scenario, iterations, runId, evidence, outputRoot)
+                            : new att.load.FixedArrivalRateScheduler(scenario, iterations, runId, evidence, outputRoot);
+                    try { result = scheduler.run(); } finally { scheduler.close(); }
+                }
                 resourceMetrics = resources.metrics();
             }
             profile.end("loadExecutionMs", loadExecutionPhase);
@@ -252,11 +269,11 @@ public final class FrameworkRunner {
             progress.finish(result.status().name());
             if ("json".equals(options.format())) {
                 java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>(result.toMap());
-                output.put("report", report.toString()); output.put("exitCode", exitCode); System.out.println(att.validation.JsonSupport.write(output));
+                output.put("report", att.core.PathPresentation.displayPath(report, root)); output.put("exitCode", exitCode); System.out.println(att.validation.JsonSupport.write(output));
             } else if (options.quiet()) {
-                System.out.println("Report: " + report);
+                System.out.println("Report: " + att.core.PathPresentation.displayPath(report, root));
             } else {
-                System.out.println("Report: " + report);
+                System.out.println("Report: " + att.core.PathPresentation.displayPath(report, root));
                 System.out.println("Metrics: " + result.metrics().values());
             }
             if (exitCode != 0) System.exit(exitCode);

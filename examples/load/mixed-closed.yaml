@@ -1,0 +1,17 @@
+schemaVersion: att-load/v1.6
+seed: 73
+workloads:
+  - id: sample-mix
+    inputs: {region: HK}
+    mix:
+      - id: account-date
+        weight: 60
+        target: {type: tool, id: sample.getAcDate}
+      - id: sequence
+        weight: 40
+        target:
+          type: tool
+          id: sample.getSeq
+          arguments: {caseId: mix-load}
+    load: {users: 4, duration: 10s}
+    execution: {thinkTime: 100ms}
