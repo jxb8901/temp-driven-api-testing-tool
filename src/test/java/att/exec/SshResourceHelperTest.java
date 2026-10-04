@@ -448,6 +448,26 @@ class SshResourceHelperTest {
         }
     }
 
+    @Test void failedSftpUploadDiagnosticKeepsKnownRemotePath() throws Exception {
+        SshTransferClient failed = new FakeTransfer() {
+            @Override public long upload(SshConfig target, byte[] payload, String remotePath,
+                    boolean overwrite, Duration timeout, Path projectRoot) throws Exception {
+                throw new IOException("Remote destination is not writable: " + remotePath);
+            }
+        };
+        ToolInvocationResult result = executor(new CommandResult(0, "unused", "", false), failed)
+                .execute("application", "upload", map("remotePath", "/srv/app/request.xml", "payload", "value"),
+                        context(), 1000L, "ssh-failed-path", new CaseExecutionLog(root.resolve("failed-path.log")));
+        assertFalse(result.executionSuccess());
+        CaseExecutionLog caseLog = new CaseExecutionLog(root.resolve("failed-path-presentation.log"));
+        caseLog.setProjectRoot(root);
+        caseLog.append("SSH failed upload", result.invocation());
+        String rendered = new String(Files.readAllBytes(root.resolve("failed-path-presentation.log")), StandardCharsets.UTF_8);
+        String renderedLine = rendered.replaceAll("\\s+", " ");
+        assertTrue(renderedLine.contains("Remote destination is not writable: /srv/app/request.xml"), rendered);
+        assertFalse(renderedLine.contains("Remote destination is not writable: $EXTERNAL/request.xml"), rendered);
+    }
+
     @Test void openSshExit255HasDocumentedAmbiguousTransportCategory() throws Exception {
         CommandRunner commandRunner = new CommandRunner() {
             @Override public CommandResult run(List<String> argv, Duration timeout, Path project) {

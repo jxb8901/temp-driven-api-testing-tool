@@ -5660,14 +5660,15 @@ arguments 與 Case log paths</h3>
 path。若工作必須從主機取回檔案，請明確配置 command-backed
 Tool。這些變更移除 Resource API 原生的任意 binary local-file
 input；<code>&amp;{...}</code> 提供 UTF-8 text。</p>
-<p>Case log 會將 canonical project root 下的 path 顯示為
-<code>$ATT_HOME</code> 或
+<p>Case log、CLI output 和輸出的 case evidence 會將 canonical project
+root 下的 path 顯示為 <code>$ATT_HOME</code> 或
 <code>$ATT_HOME/&lt;relative-path&gt;</code>，並統一使用
-<code>/</code>。<code>$ATT_HOME</code> 只是在 log 中的 presentation
+<code>/</code>。<code>$ATT_HOME</code> 只是在 presentation 中使用的
 token，不是 environment variable、Context root 或 file-expression
 locator。Runtime resolution 和 filesystem access 仍使用 canonical
-absolute Path。記錄成 Path value 的 project 外路徑會以受限的
-<code>$EXTERNAL/&lt;basename&gt;</code> 顯示。</p>
+absolute Path。project root 以外的 absolute path，不論是 Path value
+或診斷訊息內的路徑，都會以受限的 <code>$EXTERNAL/&lt;basename&gt;</code>
+顯示。明確的 remote-path 欄位及 URL 會保留原值。</p>
 <h3 id="previous-release-testdata-migration">Previous release Testdata
 Migration</h3>
 <p>將 global configuration 從 <code>att-config/v2.10</code> 升至

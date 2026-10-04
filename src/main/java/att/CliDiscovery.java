@@ -96,7 +96,7 @@ public final class CliDiscovery {
             result.put("quickLoadCommands", quickCommands);
         } catch (Exception error) {
             profile.put("available", false);
-            profile.put("error", diagnosticText(error));
+            profile.put("error", diagnosticText(error, canonicalRoot));
             result.put("profile", profile);
             result.put("quickLoadCommands", Collections.emptyList());
         }
@@ -110,18 +110,18 @@ public final class CliDiscovery {
 
         List<String> toolIds = new ArrayList<String>(config.tools().keySet());
         Collections.sort(toolIds);
-        for (String id : toolIds) addDebugTarget(targets, engine, "tool", id);
+        for (String id : toolIds) addDebugTarget(targets, engine, canonicalRoot, "tool", id);
 
         StageTemplateLoader templates = new StageTemplateLoader(canonicalRoot, config.templatesRoot(), false);
         for (String path : templates.paths()) {
             try {
                 StageTemplate template = templates.load(path);
-                addDebugTarget(targets, engine, "template", path, template.name());
+                addDebugTarget(targets, engine, canonicalRoot, "template", path, template.name());
             } catch (Exception ignored) { }
         }
 
         FlowRegistry flows = new FlowRegistry(canonicalRoot, config.templatesRoot(), false);
-        for (String id : flows.ids()) addDebugTarget(targets, engine, "flow", id);
+        for (String id : flows.ids()) addDebugTarget(targets, engine, canonicalRoot, "flow", id);
         sortTargets(targets);
         return targets;
     }
@@ -134,18 +134,18 @@ public final class CliDiscovery {
 
         List<String> toolIds = new ArrayList<String>(config.tools().keySet());
         Collections.sort(toolIds);
-        for (String id : toolIds) addQuickLoadTarget(targets, engine, "tool", id, id, quickLoadPolicy);
+        for (String id : toolIds) addQuickLoadTarget(targets, engine, canonicalRoot, "tool", id, id, quickLoadPolicy);
 
         StageTemplateLoader templates = new StageTemplateLoader(canonicalRoot, config.templatesRoot(), false);
         for (String path : templates.paths()) {
             try {
                 StageTemplate template = templates.load(path);
-                addQuickLoadTarget(targets, engine, "template", path, template.name(), quickLoadPolicy);
+                addQuickLoadTarget(targets, engine, canonicalRoot, "template", path, template.name(), quickLoadPolicy);
             } catch (Exception ignored) { }
         }
 
         FlowRegistry flows = new FlowRegistry(canonicalRoot, config.templatesRoot(), false);
-        for (String id : flows.ids()) addQuickLoadTarget(targets, engine, "flow", id, id, quickLoadPolicy);
+        for (String id : flows.ids()) addQuickLoadTarget(targets, engine, canonicalRoot, "flow", id, id, quickLoadPolicy);
         sortTargets(targets);
         return targets;
     }
@@ -204,31 +204,32 @@ public final class CliDiscovery {
         }
     }
 
-    private static void addDebugTarget(List<Map<String, Object>> targets, DebugEngine engine, String type, String id) {
-        addDebugTarget(targets, engine, type, id, id);
+    private static void addDebugTarget(List<Map<String, Object>> targets, DebugEngine engine, Path root,
+                                       String type, String id) {
+        addDebugTarget(targets, engine, root, type, id, id);
     }
 
-    private static void addDebugTarget(List<Map<String, Object>> targets, DebugEngine engine, String type,
-                                       String id, String displayName) {
+    private static void addDebugTarget(List<Map<String, Object>> targets, DebugEngine engine, Path root,
+                                       String type, String id, String displayName) {
         try {
             Path sidecar = engine.validateDiscoverableTarget(type, id);
             if (sidecar == null) return;
             Map<String, Object> entry = new LinkedHashMap<String, Object>();
             entry.put("type", type); entry.put("id", id); entry.put("name", displayName);
             entry.put("command", "./att.sh debug " + type + " " + shellQuote(id));
-            entry.put("sidecar", sidecar.toAbsolutePath().normalize().toString());
+            entry.put("sidecar", att.core.PathPresentation.displayPath(sidecar, root));
             targets.add(entry);
         } catch (Exception ignored) { }
     }
 
-    private static void addQuickLoadTarget(List<Map<String, Object>> targets, DebugEngine engine, String type,
+    private static void addQuickLoadTarget(List<Map<String, Object>> targets, DebugEngine engine, Path root, String type,
                                            String id, String displayName, Map<String, Object> quickLoadPolicy) {
         try {
             Path sidecar = engine.validateDiscoverableTargetForLoad(type, id, quickLoadPolicy);
             if (sidecar == null) return;
             Map<String, Object> entry = new LinkedHashMap<String, Object>();
             entry.put("type", type); entry.put("id", id); entry.put("name", displayName);
-            entry.put("sidecar", sidecar.toAbsolutePath().normalize().toString());
+            entry.put("sidecar", att.core.PathPresentation.displayPath(sidecar, root));
             targets.add(entry);
         } catch (Exception ignored) { }
     }
@@ -250,17 +251,19 @@ public final class CliDiscovery {
     private static Map<String, Object> invalidScenario(Path root, Path path, Exception error) {
         Map<String, Object> item = new LinkedHashMap<String, Object>();
         item.put("path", relative(root, path));
-        item.put("diagnostic", diagnosticText(error));
+        item.put("diagnostic", diagnosticText(error, root));
         return item;
     }
 
-    private static String diagnosticText(Exception error) {
+    private static String diagnosticText(Exception error, Path root) {
         DiagnosticException diagnostic = DiagnosticException.find(error);
         if (diagnostic != null) {
             String detail = diagnostic.detail();
-            return diagnostic.summary() + (detail == null || detail.trim().isEmpty() ? "" : ": " + detail.replace('\n', ' '));
+            return att.core.PathPresentation.displayDiagnosticText(
+                    diagnostic.summary() + (detail == null || detail.trim().isEmpty() ? "" : ": " + detail.replace('\n', ' ')), root);
         }
-        return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+        return att.core.PathPresentation.displayDiagnosticText(
+                error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(), root);
     }
 
     private static boolean declaresLoadScenario(Path path) {
@@ -284,7 +287,8 @@ public final class CliDiscovery {
 
     private static String relative(Path root, Path path) {
         Path normalized = path.toAbsolutePath().normalize();
-        return normalized.startsWith(root) ? root.relativize(normalized).toString().replace('\\', '/') : normalized.toString();
+        return normalized.startsWith(root) ? root.relativize(normalized).toString().replace('\\', '/')
+                : att.core.PathPresentation.displayPath(normalized, root);
     }
 
     private static String shellQuote(String value) {

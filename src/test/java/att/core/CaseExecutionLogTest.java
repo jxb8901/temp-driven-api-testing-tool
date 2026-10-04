@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.file.*;
 import java.util.AbstractMap;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -90,12 +91,20 @@ class CaseExecutionLogTest {
         values.put("templatePath", root.resolve("templates/付款.xml"));
         values.put("outputDirectory", root.resolve("output/run 1" ).toString());
         values.put("identityFile", tempDir.resolve("private/token.pem").toString());
+        values.put("remotePath", "/srv/app/request.xml");
+        values.put("diagnostic", "Unable to read " + tempDir.resolve("private/token.pem"));
         log.append("PATHS", values);
         log.appendRaw("ERROR", "failed at " + root.resolve("templates/付款.xml"));
+        log.appendRaw("ERROR", "Unable to read " + tempDir.resolve("private/token.pem"));
+        log.appendRaw("SSH application STDOUT", "remote=/srv/app/request.xml");
         String text = new String(Files.readAllBytes(file), "UTF-8");
         assertTrue(text.contains("$ATT_HOME/templates/付款.xml"));
         assertTrue(text.contains("$ATT_HOME/output/run 1"));
         assertTrue(text.contains("$EXTERNAL/token.pem"));
+        assertTrue(text.contains("remotePath: /srv/app/request.xml"));
+        assertTrue(text.contains("diagnostic: Unable"));
+        assertTrue(text.contains("Unable to read $EXTERNAL/token.pem"));
+        assertTrue(text.contains("remote=/srv/app/request.xml"));
         assertFalse(text.contains(root.toString()));
         assertFalse(text.contains("private/token.pem"));
     }
@@ -211,6 +220,41 @@ class CaseExecutionLogTest {
         assertTrue(occurrences(text, "[REDACTED_SECRET]") >= 2);
         assertFalse(text.contains(secret));
         assertFalse(text.contains("private-token"));
+    }
+
+    @Test void sanitizesKnownDiagnosticFieldsAndCleanupWarningsButKeepsSshErrorPaths() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("diagnostic-project"));
+        Path external = Files.createDirectories(tempDir.resolve("John Doe/private"))
+                .resolve("token (final).pem");
+        Files.write(external, new byte[]{1});
+        Path file = tempDir.resolve("diagnostic-fields.log");
+        CaseExecutionLog log = new CaseExecutionLog(file);
+        log.setProjectRoot(root);
+
+        Map<String, Object> fields = new LinkedHashMap<String, Object>();
+        fields.put("parserDiagnostic", "parse failed at " + external);
+        fields.put("stdoutCaptureError", "capture failed at " + external);
+        fields.put("stderrCaptureError", "capture failed at " + external);
+        fields.put("cleanupWarning", "cleanup failed at " + external);
+        fields.put("evidenceError", "evidence failed at " + external);
+        fields.put("retryDecision", Collections.<String, Object>singletonMap("reason", "retry failed at " + external));
+        log.append("ACTION collector", fields);
+        log.appendRaw("ACTION collector cleanup warning", "cleanup failed at " + external);
+
+        Map<String, Object> ssh = new LinkedHashMap<String, Object>();
+        ssh.put("type", "ssh");
+        ssh.put("input", Collections.<String, Object>singletonMap("remotePath", "/srv/app/request.xml"));
+        Map<String, Object> error = new LinkedHashMap<String, Object>();
+        error.put("category", "SSH_UPLOAD_ERROR");
+        error.put("message", "Remote destination exists: /srv/app/request.xml");
+        ssh.put("error", error);
+        log.append("SSH failed upload", ssh);
+
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(occurrences(text, "$EXTERNAL/token (final).pem") >= 6, text);
+        assertFalse(text.contains(external.toString()), text);
+        assertTrue(text.contains("Remote destination exists: /srv/app/request.xml"), text);
+        assertFalse(text.contains("Remote destination exists: $EXTERNAL/request.xml"), text);
     }
 
     @Test void concurrentMirrorsKeepEachAppendedChunkAtomicAndIdentifiable() throws Exception {
