@@ -27,10 +27,12 @@ class CliDiscoveryTest {
         Map<String, Object> withSidecar = find(targets, "template", "TARGET");
         assertTrue(withSidecar.containsKey("sidecar"));
         assertTrue(String.valueOf(withSidecar.get("command")).contains("debug template"));
+        assertEquals("$ATT_HOME/templates/TARGET/debug.yaml", withSidecar.get("sidecar"));
+        assertFalse(String.valueOf(withSidecar.get("sidecar")).contains(root.toString()));
         assertFalse(targets.stream().anyMatch(target -> "NO_SIDECAR".equals(target.get("id"))));
         assertFalse(targets.stream().anyMatch(target -> "LOAD_ONLY".equals(target.get("id"))),
                 "Debug discovery must not advertise a sidecar that depends on Load-only roots");
-        assertTrue(targets.stream().allMatch(target -> Files.isRegularFile(Paths.get(String.valueOf(target.get("sidecar"))))));
+        assertTrue(Files.isRegularFile(root.resolve("templates/TARGET/debug.yaml")));
         assertFalse(Files.exists(root.resolve("output")), "discovery must not create Debug output");
     }
 
@@ -51,6 +53,7 @@ class CliDiscoveryTest {
         assertEquals(1, invalid.size());
         assertEquals("load/scenarios/invalid.yaml", invalid.get(0).get("path"));
         assertTrue(String.valueOf(invalid.get(0).get("diagnostic")).contains("Invalid load scenario"));
+        assertFalse(String.valueOf(invalid.get(0).get("diagnostic")).contains(root.toString()));
         assertEquals(2, quick.size());
         assertTrue(quick.stream().anyMatch(command -> command.contains("load --debug template 'TARGET'")), quick.toString());
         assertTrue(quick.stream().anyMatch(command -> command.contains("load --debug template 'LOAD_ONLY'")),

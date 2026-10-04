@@ -6279,14 +6279,16 @@ a deliberately configured command-backed Tool for workflows that must
 retrieve files from a host. These changes remove native arbitrary-binary
 local-file input from these Resource APIs; <code>&amp;{...}</code>
 supplies UTF-8 text.</p>
-<p>Case logs display paths under the canonical project root as
-<code>$ATT_HOME</code> or <code>$ATT_HOME/&lt;relative-path&gt;</code>,
-with <code>/</code> separators. <code>$ATT_HOME</code> is a presentation
-token in logs, not an environment variable, Context root, or
-file-expression locator. Runtime resolution and filesystem access
-continue to use canonical absolute Paths. Paths outside the project root
-use a bounded <code>$EXTERNAL/&lt;basename&gt;</code> presentation when
-logged as Path values.</p>
+<p>Case logs, CLI output, and emitted case evidence display paths under
+the canonical project root as <code>$ATT_HOME</code> or
+<code>$ATT_HOME/&lt;relative-path&gt;</code>, with <code>/</code>
+separators. <code>$ATT_HOME</code> is a presentation token, not an
+environment variable, Context root, or file-expression locator. Runtime
+resolution and filesystem access continue to use canonical absolute
+Paths. Absolute paths outside the project root use a bounded
+<code>$EXTERNAL/&lt;basename&gt;</code> presentation when logged as Path
+values or embedded in diagnostic messages. Explicit remote-path fields
+and URLs retain their values.</p>
 <h3 id="previous-release-testdata-migration">Previous release testdata
 migration</h3>
 <p>Change global configuration from <code>att-config/v2.10</code> to

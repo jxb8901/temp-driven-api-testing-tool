@@ -5,15 +5,24 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.Map;
 
 /** Formats local paths at human-readable diagnostic boundaries. */
 public final class PathPresentation {
+    private static final Pattern QUOTED_ABSOLUTE_PATH = Pattern.compile("(['\"])((?:/[^\\r\\n'\"]+)|(?:[A-Za-z]:[\\\\/][^\\r\\n'\"]+)|(?:\\\\\\\\[^\\r\\n'\"]+))\\1");
+    private static final Pattern ABSOLUTE_PATH_TOKEN = Pattern.compile("(?<![A-Za-z0-9_/:])(?:[A-Za-z]:[\\\\/]|//|\\\\\\\\|/)[^\\r\\n'\"<>]+");
+
     private PathPresentation() { }
 
     public static String displayPath(Path value, Path projectRoot) {
         if (value == null) return "";
+        String portable = displayPortableAbsolute(value.toString(), projectRoot);
+        if (portable != null) return portable;
         Path path = value.toAbsolutePath().normalize();
         Path root = projectRoot == null ? null : projectRoot.toAbsolutePath().normalize();
         if (root != null) {
@@ -33,66 +42,196 @@ public final class PathPresentation {
         return name == null ? "$EXTERNAL" : "$EXTERNAL/" + name.toString();
     }
 
-    /** Replaces the project root when it appears inside an exception or process line. */
+    /** Replaces the project root in free-form text without interpreting arbitrary values as local paths. */
     public static String displayText(String text, Path projectRoot) {
-        if (text == null || projectRoot == null) return text;
-        Path root = projectRoot.toAbsolutePath().normalize();
+        return displayText(text, projectRoot, false);
+    }
+
+    /** Keeps explicitly remote values intact while formatting ordinary diagnostic text. */
+    static String displayText(String text, Path projectRoot, boolean preserveText) {
+        if (text == null || preserveText) return text;
         String value = text;
-        Path canonicalRoot = canonicalIfPresent(root);
-        String[] spellings = new String[]{root.toString(), root.toString().replace('\\', '/'), root.toString().replace('/', '\\'),
-                canonicalRoot.toString(), canonicalRoot.toString().replace('\\', '/'), canonicalRoot.toString().replace('/', '\\')};
-        for (String spelling : spellings) {
-            if (spelling == null || spelling.isEmpty()) continue;
-            value = replaceRoot(value, spelling);
+        if (projectRoot != null) {
+            Path root = projectRoot.toAbsolutePath().normalize();
+            Path canonicalRoot = canonicalIfPresent(root);
+            String[] spellings = new String[]{root.toString(), root.toString().replace('\\', '/'), root.toString().replace('/', '\\'),
+                    canonicalRoot.toString(), canonicalRoot.toString().replace('\\', '/'), canonicalRoot.toString().replace('/', '\\')};
+            for (String spelling : spellings) {
+                if (spelling == null || spelling.isEmpty()) continue;
+                value = replaceRoot(value, spelling);
+            }
         }
         return value.replace("$ATT_HOME\\", "$ATT_HOME/");
     }
 
-    /** Returns a detached, presentation-safe copy for structured evidence. */
-    public static Object displayStructure(Object value, Path projectRoot) {
-        return displayStructure(value, projectRoot, null);
+    /** Redacts external absolute paths when formatting diagnostic text, where they are not needed verbatim. */
+    public static String displayDiagnosticText(String text, Path projectRoot) {
+        return displayDiagnosticText(text, projectRoot, java.util.Collections.<String>emptySet());
     }
 
-    private static Object displayStructure(Object value, Path projectRoot, String field) {
-        if (value instanceof Path) return displayPath((Path) value, projectRoot);
+    /** Preserves explicit remote paths while redacting other absolute paths in diagnostics. */
+    static String displayDiagnosticText(String text, Path projectRoot, Set<String> preservedPaths) {
+        if (text == null) return null;
+        List<String> tokens = new ArrayList<String>();
+        String masked = text;
+        if (preservedPaths != null && !preservedPaths.isEmpty()) {
+            List<String> ordered = new ArrayList<String>(preservedPaths);
+            ordered.sort((left, right) -> Integer.compare(right == null ? 0 : right.length(), left == null ? 0 : left.length()));
+            for (String path : ordered) {
+                if (path == null || path.isEmpty() || !masked.contains(path)) continue;
+                String token = "\u0001ATT_REMOTE_PATH_" + tokens.size() + "\u0002";
+                masked = masked.replace(path, token);
+                tokens.add(path);
+            }
+        }
+        String value = displayText(masked, projectRoot);
+        value = redactQuotedAbsolutePaths(value, projectRoot);
+        value = redactAbsolutePathTokens(value, projectRoot);
+        for (int index = 0; index < tokens.size(); index++)
+            value = value.replace("\u0001ATT_REMOTE_PATH_" + index + "\u0002", tokens.get(index));
+        return value;
+    }
+
+    /** Returns a detached, presentation-safe copy for structured evidence. */
+    public static Object displayStructure(Object value, Path projectRoot) {
+        Set<String> remotePaths = new LinkedHashSet<String>();
+        collectRemotePaths(value, remotePaths, new java.util.IdentityHashMap<Object, Boolean>());
+        return displayStructure(value, projectRoot, null, remotePaths);
+    }
+
+    private static Object displayStructure(Object value, Path projectRoot, String field, Set<String> remotePaths) {
+        if (value instanceof Path) return isRemoteField(field) ? value.toString() : displayPath((Path) value, projectRoot);
         if (value instanceof Map) {
             Map<Object, Object> copy = new LinkedHashMap<Object, Object>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
                 String key = entry.getKey() == null ? null : String.valueOf(entry.getKey());
-                copy.put(entry.getKey(), displayStructure(entry.getValue(), projectRoot, key));
+                copy.put(entry.getKey(), displayStructure(entry.getValue(), projectRoot, key, remotePaths));
             }
             return copy;
         }
         if (value instanceof Iterable) {
             List<Object> copy = new ArrayList<Object>();
-            for (Object item : (Iterable<?>) value) copy.add(displayStructure(item, projectRoot, field));
+            for (Object item : (Iterable<?>) value) copy.add(displayStructure(item, projectRoot, field, remotePaths));
             return copy;
         }
         if (value != null && value.getClass().isArray()) {
             List<Object> copy = new ArrayList<Object>();
             for (int i = 0; i < java.lang.reflect.Array.getLength(value); i++)
-                copy.add(displayStructure(java.lang.reflect.Array.get(value, i), projectRoot, field));
+                copy.add(displayStructure(java.lang.reflect.Array.get(value, i), projectRoot, field, remotePaths));
             return copy;
         }
         if (!(value instanceof String)) return value;
-        String text = displayText((String) value, projectRoot);
-        if (isLocalPathField(field) && looksAbsolutePath((String) value)) {
-            try { return displayPath(java.nio.file.Paths.get((String) value), projectRoot); }
-            catch (RuntimeException ignored) { return text; }
-        }
+        String text = isDiagnosticField(field)
+                ? displayDiagnosticText((String) value, projectRoot, remotePaths)
+                : displayText((String) value, projectRoot, isRemoteField(field));
+        if (isLocalPathField(field) && isAbsolutePathText((String) value)) return displayPathText((String) value, projectRoot);
         return text;
     }
 
-    private static boolean isLocalPathField(String field) {
+    static boolean isRemoteField(String field) {
+        if (field == null) return false;
+        String key = field.toLowerCase(java.util.Locale.ROOT);
+        return key.contains("remote") || key.contains("url") || key.contains("uri");
+    }
+
+    static boolean isDiagnosticField(String field) {
+        if (field == null) return false;
+        String key = field.toLowerCase(java.util.Locale.ROOT);
+        return key.equals("diagnostic") || key.equals("message") || key.equals("detail")
+                || key.equals("summary") || key.equals("suggestion") || key.equals("cause")
+                || key.equals("error") || key.equals("exception") || key.equals("reason")
+                || key.equals("retrydecision") || key.endsWith("error") || key.endsWith("warning")
+                || key.endsWith("diagnostic");
+    }
+
+    static boolean isLocalPathField(String field) {
         if (field == null || field.toLowerCase(java.util.Locale.ROOT).contains("remote")) return false;
         String key = field.toLowerCase(java.util.Locale.ROOT);
+        if (key.contains("url") || key.contains("uri")) return false;
         return key.equals("path") || key.equals("file") || key.equals("directory") || key.equals("dir")
                 || key.equals("cwd") || key.equals("root") || key.endsWith("path") || key.endsWith("file")
                 || key.endsWith("directory") || key.endsWith("dir");
     }
 
-    private static boolean looksAbsolutePath(String value) {
-        return value.startsWith("/") || value.matches("^[A-Za-z]:[\\\\/].*");
+    static boolean isAbsolutePathText(String value) {
+        return isUncPath(value) || isDriveAbsolute(value)
+                || (value != null && value.startsWith("/"));
+    }
+
+    static String displayPathText(String value, Path projectRoot) {
+        if (!isAbsolutePathText(value)) return value;
+        String portable = displayPortableAbsolute(value, projectRoot);
+        if (portable != null) return portable;
+        try {
+            Path path = java.nio.file.Paths.get(value);
+            return path.isAbsolute() ? displayPath(path, projectRoot) : externalBasename(value);
+        } catch (RuntimeException ignored) {
+            return externalBasename(value);
+        }
+    }
+
+    private static String displayPortableAbsolute(String value, Path projectRoot) {
+        if (isUncPath(value)) {
+            if (projectRoot != null && isUncPath(projectRoot.toString())) {
+                String path = slashForm(value);
+                String root = slashForm(projectRoot.toString());
+                while (root.length() > 2 && root.endsWith("/")) root = root.substring(0, root.length() - 1);
+                if (path.equals(root)) return "$ATT_HOME";
+                if (path.startsWith(root + "/")) return "$ATT_HOME/" + path.substring(root.length() + 1);
+            }
+            return externalBasename(value);
+        }
+        if (isDriveAbsolute(value)) {
+            try { if (java.nio.file.Paths.get(value).isAbsolute()) return null; }
+            catch (RuntimeException ignored) { }
+            return externalBasename(value);
+        }
+        return null;
+    }
+
+    private static boolean isDriveAbsolute(String value) {
+        return value != null && value.matches("^[A-Za-z]:[\\\\/].*");
+    }
+
+    private static boolean isUncPath(String value) {
+        return value != null && (value.startsWith("\\\\") || value.startsWith("//"));
+    }
+
+    private static String slashForm(String value) {
+        String result = value.replace('\\', '/');
+        while (result.contains("//")) result = result.replace("//", "/");
+        return result;
+    }
+
+    private static String externalBasename(String value) {
+        if (value == null || value.isEmpty()) return "$EXTERNAL";
+        int end = value.length();
+        while (end > 0 && (value.charAt(end - 1) == '/' || value.charAt(end - 1) == '\\')) end--;
+        if (end == 0) return "$EXTERNAL";
+        int slash = Math.max(value.lastIndexOf('/', end - 1), value.lastIndexOf('\\', end - 1));
+        String name = value.substring(slash + 1, end);
+        return name.isEmpty() ? "$EXTERNAL" : "$EXTERNAL/" + name;
+    }
+
+    private static void collectRemotePaths(Object value, Set<String> paths, java.util.IdentityHashMap<Object, Boolean> visited) {
+        if (value instanceof Path) return;
+        if (!(value instanceof Map) && !(value instanceof Iterable)
+                && (value == null || !value.getClass().isArray())) return;
+        if (value == null || visited.put(value, Boolean.TRUE) != null) return;
+        if (value instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                String key = entry.getKey() == null ? "" : String.valueOf(entry.getKey()).toLowerCase(java.util.Locale.ROOT);
+                Object item = entry.getValue();
+                if (key.contains("remote") && (key.endsWith("path") || key.endsWith("file")) && item != null)
+                    paths.add(String.valueOf(item));
+                collectRemotePaths(item, paths, visited);
+            }
+        } else if (value instanceof Iterable) {
+            for (Object item : (Iterable<?>) value) collectRemotePaths(item, paths, visited);
+        } else if (value.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(value);
+            for (int index = 0; index < length; index++) collectRemotePaths(java.lang.reflect.Array.get(value, index), paths, visited);
+        }
     }
 
     private static String replaceRoot(String value, String root) {
@@ -113,6 +252,53 @@ public final class PathPresentation {
         }
         result.append(value, cursor, value.length());
         return result.toString();
+    }
+
+    private static String redactQuotedAbsolutePaths(String text, Path projectRoot) {
+        Matcher matcher = QUOTED_ABSOLUTE_PATH.matcher(text);
+        StringBuffer result = new StringBuffer(text.length());
+        while (matcher.find()) {
+            String path = trimTrailingPunctuation(matcher.group(2));
+            String suffix = matcher.group(2).substring(path.length());
+            String replacement = matcher.group(1) + embeddedPath(path, projectRoot) + suffix + matcher.group(1);
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    private static String redactAbsolutePathTokens(String text, Path projectRoot) {
+        Matcher matcher = ABSOLUTE_PATH_TOKEN.matcher(text);
+        StringBuffer result = new StringBuffer(text.length());
+        while (matcher.find()) {
+            String path = trimTrailingPunctuation(trimDiagnosticSuffix(matcher.group()));
+            String suffix = matcher.group().substring(path.length());
+            matcher.appendReplacement(result, Matcher.quoteReplacement(embeddedPath(path, projectRoot) + suffix));
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    private static String trimTrailingPunctuation(String path) {
+        int end = path.length();
+        while (end > 1 && ".!?".indexOf(path.charAt(end - 1)) >= 0) end--;
+        return path.substring(0, end);
+    }
+
+    private static String trimDiagnosticSuffix(String path) {
+        int end = path.length();
+        int colon = path.indexOf(": ");
+        if (colon >= 0) end = Math.min(end, colon);
+        for (String suffix : new String[]{" (Permission denied)", " (Access is denied)",
+                " (No such file or directory)", " (File exists)", " (The system cannot find the file specified)"}) {
+            int index = path.indexOf(suffix);
+            if (index >= 0) end = Math.min(end, index);
+        }
+        return path.substring(0, end);
+    }
+
+    private static String embeddedPath(String value, Path projectRoot) {
+        return displayPathText(value, projectRoot);
     }
 
     private static boolean containedForDisplay(Path lexical, Path canonical, Path root) {
