@@ -1,12 +1,12 @@
-## Appendix C — Migration Notes
+# Appendix C — migration notes
 
-### ATT 3.7.2 file arguments 與 Case log paths
+## File arguments 與 case log paths
 
 HTTPHelper call 不再接受 `file`；請直接將 `&{project-relative-file}` 傳入 `body`。MQHelper `send` 和 `request` 不再接受 `file`；請將 expression 傳入 `payload`。SSHHelper `upload` 現在要求 `payload` content，並拒絕 `localPath`；請直接傳入 `&{...}`。SSHHelper 不再支援 `download`，因為它需要 local destination path。若工作必須從主機取回檔案，請明確配置 command-backed Tool。這些變更移除 Resource API 原生的任意 binary local-file input；`&{...}` 提供 UTF-8 text。
 
 Case log、CLI output 和輸出的 case evidence 會將 canonical project root 下的 path 顯示為 `$ATT_HOME` 或 `$ATT_HOME/<relative-path>`，並統一使用 `/`。`$ATT_HOME` 只是在 presentation 中使用的 token，不是 environment variable、Context root 或 file-expression locator。Runtime resolution 和 filesystem access 仍使用 canonical absolute Path。project root 以外的 absolute path，不論是 Path value 或診斷訊息內的路徑，都會以受限的 `$EXTERNAL/<basename>` 顯示。明確的 remote-path 欄位及 URL 會保留原值。
 
-### Previous release Testdata Migration
+## Previous release Testdata migration
 
 將 global configuration 從 `att-config/v2.10` 升至 `att-config/v2.11`，並將 Load scenario 從 `att-load/v1.4` 升至 `att-load/v1.5`。舊 schema 仍登錄於 `schemas/history/`，供 migration diagnostics 使用。`att-testdata/v1.0` 是新增契約：在選定的 environment profile `testdata` list 加入 descriptor path，再於 Case/Stage、Debug 或 Load workload input map 使用 `@{id}`。Load scenario 可在頂層加入 package-relative `testdata` paths，形成僅適用於該次 Load 的 overlay。不同 layer 的同名 ID 會完整取代 descriptor；同一 layer 內的重複 ID 無效。多筆 records 的 descriptor 必須有明確 selection policy。沒有 testdata reference 的既有 package 不需要新增 descriptor。
 
@@ -27,7 +27,7 @@ ATT 3.6.2 將型別化 operation result、外部 parsing、project-file String�
 | Log file | 直接將 value 傳入 Log.value。 |
 | Log fields | 將 typed map/list 放在 Log.value，並選擇 Log.format。 |
 | HTTP/MQ 共用 result 格式設定 | 使用 responseFormat 做 ingress parsing；可選 evidence.output.format 只控制人類可讀表示。 |
-| 舊 active resource/config schema | 使用 [Appendix A](schema_matrix.md) 的 active schema，並遷移上述欄位。Historical schemas 不是 active contracts。 |
+| 舊 active resource/config schema | 使用 [Appendix A](schema-matrix.md) 的 active schema，並遷移上述欄位。Historical schemas 不是 active contracts。 |
 
 Project-file String 傳入 HTTP 的例子：
 
@@ -55,13 +55,13 @@ Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader �
 
 歷史的 `att-load-profile/v1.0` policy file 僅供 migration 使用：使用前請改寫為現行 policy-only `att-load/v1.6` descriptor；它不是現行 `load/load.yaml` 範例。
 
-Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[Action 與型別化值](../14_actions.md)、[Runtime 與 Context 模型](../03_runtime_context.md)、[Load 模式](../04_execution_modes/load.md)與[Schema 矩陣](schema_matrix.md)。
+Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[Action 與型別化值](../actions.md)、[Runtime 與 Context 模型](../runtime-context.md)、[Load 模式](../execution-modes/load.md)與[Schema 矩陣](schema-matrix.md)。
 
-### ATT 3.7.2 Load mix migration
+## Load mix migration
 
 現有 `att-load/v1.5` 檔案仍相容。升級至 `att-load/v1.6` 後，可將 workload 的 `target` 改為 `mix`，設定 closed-user weighted target mix。每個 entry 需要唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool target。現行 summary contract 為 `att-load-summary/v1.1`；v1.0 保留作歷史格式。
 
-### Historical schema migration
+## Historical schema migration
 
 ATT 3.6.2 使用 `att-template/v3.6` 與 `att-flow/v3.6` 作為 active schemas。已發布的 `att-template/v3.5`、`att-flow/v3.5` 及更舊定義保留於 `schemas/history/`；其中 historical DB 與 Render Action 只供 compatibility 使用，不是 active contract。遷移這些 descriptor 時，先將 schema version 改為 v3.6，再套用以下欄位變更。
 
@@ -82,12 +82,12 @@ Project-file path 相對於 canonical project root。`./` 與 `../` 只有在 ca
 
 Unsupported schemaVersion 會在 execution 前由 validation 拒絕並提供 migration guidance。ATT 不會靜默轉換舊欄位，也不會為產生 guidance 而呼叫 Tools/resources。
 
-[META Runtime and Context Model](../03_runtime_context.md) 說明 META lifecycle；[Load Mode](../04_execution_modes/load.md) 說明 execution identity 和 retained evidence 路徑。
+[META Runtime and Context Model](../runtime-context.md) 說明 META lifecycle；[Load Mode](../execution-modes/load.md) 說明 execution identity 和 retained evidence 路徑。
 
-### Debug schema migration
+## Debug schema migration
 
-`att-debug/v1.0` 為 historical schema；請升級至 `att-debug/v1.1`。Template/Flow 可配置 `vars` 以 seed `EXEC.VARS`；Tool 不支援 `vars`。Input 與 arguments 的現行規則見 [Debug](../04_execution_modes/debug.md)。
+`att-debug/v1.0` 為 historical schema；請升級至 `att-debug/v1.1`。Template/Flow 可配置 `vars` 以 seed `EXEC.VARS`；Tool 不支援 `vars`。Input 與 arguments 的現行規則見 [Debug](../execution-modes/debug.md)。
 
-### Environment profile migration
+## Environment profile migration
 
-從舊的 complete-config pattern 遷移時，保留 descriptor 與 Action，將 common settings 移至 `config/config.yaml`、各環境 descriptor lists 移至 `environments.<NAME>`，並以 `--config config/config.yaml --env <NAME>` 選擇環境。現行 contract 見 [Configuration](../09_configuration.md)。
+從舊的 complete-config pattern 遷移時，保留 descriptor 與 Action，將 common settings 移至 `config/config.yaml`、各環境 descriptor lists 移至 `environments.<NAME>`，並以 `--config config/config.yaml --env <NAME>` 選擇環境。現行 contract 見 [Configuration](../configuration.md)。

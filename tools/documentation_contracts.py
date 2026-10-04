@@ -126,27 +126,21 @@ def manifest_errors(items):
 
 
 def chapter_shape(text):
-    shape = []
-    for line in without_code(text).splitlines():
-        match = re.match(r"^##\s+([0-9]+|Appendix\s+[A-D])\b", line)
-        if match:
-            shape.append(match.group(1))
-    return shape
+    return [2 for line in without_code(text).splitlines()
+            if re.match(r"^##\s+", line)]
 
 
 def structure_errors(text):
-    expected = ["%02d" % n for n in range(1, 14)] + ["Appendix " + c for c in "ABCD"]
+    expected_count = 17
     errors = []
     shape = chapter_shape(text)
-    if shape != expected:
-        errors.append("chapter/appendix order must be %s; found %s" % (expected, shape))
+    if len(shape) != expected_count:
+        errors.append("expected %d top-level chapter/appendix headings; found %d" %
+                      (expected_count, len(shape)))
     headings = re.findall(r"^##\s+(.+)$", without_code(text), re.M)
-    folded = [re.sub(r"^(?:[0-9]+|Appendix\s+[A-D])(?:\s+[—–-])?\s*", "", s).casefold()
-              for s in headings]
+    folded = [s.casefold() for s in headings]
     if len(folded) != len(set(folded)):
         errors.append("duplicate top-level chapter title")
-    if len(headings) != len(expected):
-        errors.append("unexpected or missing top-level chapter heading")
     return errors
 
 
@@ -162,7 +156,7 @@ def overview_resource_errors(text):
     """Check each place that teaches the inventory, not merely global presence."""
     errors = []
     definition = re.search(r"\*\*Resource\*\*([^\n]*)", text)
-    peers = re.search(r"^### [^\n]*Resource[^\n]*\n(.*?)(?=^### |\Z)",
+    peers = re.search(r"^## [^\n]*Resource[^\n]*\n(.*?)(?=^## |\Z)",
                       text, re.M | re.S)
     sections = {
         "Resource definition": definition.group(1) if definition else "",
@@ -178,7 +172,7 @@ def overview_resource_errors(text):
     for resource in PEER_RESOURCES:
         if not re.search(r"^\s*" + resource + r"\b", diagram, re.M):
             errors.append("peer Resource diagram omits " + resource)
-    if re.search(r"^###\s+(?:三種|3\s+)[^\n]*Resource", text, re.M):
+    if re.search(r"^##\s+(?:三種|3\s+)[^\n]*Resource", text, re.M):
         errors.append("obsolete three-resource heading")
     return errors
 
@@ -190,6 +184,147 @@ def chapter_label_errors(text):
             expected = RETIRED_CHAPTER_LABELS.get(label.strip().casefold())
             if expected:
                 errors.append("retired chapter link label %r; use %r" % (label, expected))
+    return errors
+
+
+NUMBERED_CHAPTER_REFERENCE = re.compile(
+    r"\bchapters?\s+\d+(?:\s*[–-]\s*\d+)?\b", re.I
+)
+
+
+def chapter_reference_errors(text):
+    """Reject references to manual positions that change when modules move."""
+    errors = []
+    prose = re.sub(r"`[^`]*`", "", without_code(text))
+    for lineno, line in enumerate(prose.splitlines(), 1):
+        line = re.sub(r"\]\([^)]*\)", "]", line)
+        if NUMBERED_CHAPTER_REFERENCE.search(line):
+            errors.append("line %d: replace the numbered chapter reference with a descriptive link" % lineno)
+    return errors
+
+
+POSITIONAL_REFERENCE = re.compile(
+    r"\b(?:see|refer to|use|compare\s+(?:with|to)|consult|read|review)\b"
+    r"[^.!?;]{0,100}\b(?:above|below|following section|preceding section|"
+    r"chapters?\s+\d+(?:\s*[–-]\s*\d+)?)\b|"
+    r"\bchapters?\s+\d+(?:\s*[–-]\s*\d+)?\b|"
+    r"\b(?:described|explained|listed|defined|discussed|covered|shown)"
+    r"\s+(?:the\s+)?(?:above|below)\b|"
+    r"\b(?:commands?|options?|sections?|tables?|examples?|procedures?|steps?|items?)"
+    r"\s+(?:above|below|following|preceding)\b|"
+    r"\b(?:above|below|following|preceding)\s+(?:section|table|example|procedure|step)\b",
+    re.I,
+)
+NUMBERED_HEADING = re.compile(
+    r"^#{1,6}\s+(?:\d+\.(?=\s)|\d+(?:\.\d+)+(?:\s|$)|(?:0[1-9]|1[0-4])\s+)"
+)
+
+
+def _markdown_headings(text):
+    headings = []
+    fence_char = None
+    fence_length = 0
+    for lineno, line in enumerate(text.splitlines(), 1):
+        fence = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence:
+            marker = fence.group(1)
+            if fence_char is None:
+                fence_char, fence_length = marker[0], len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_length:
+                fence_char, fence_length = None, 0
+            continue
+        if fence_char is not None:
+            continue
+        heading = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", line)
+        if heading:
+            headings.append((lineno, len(heading.group(1)), heading.group(2)))
+    return headings
+
+
+def standalone_page_errors(text):
+    """Check that a Markdown page has one H1 and a continuous heading hierarchy."""
+    headings = _markdown_headings(text)
+    errors = ["line %d: remove a numeric sequence prefix from the heading" % lineno
+              for lineno, _, title in headings
+              if NUMBERED_HEADING.match("#" * _ + " " + title)]
+
+    h1s = [lineno for lineno, level, _ in headings if level == 1]
+    if len(h1s) != 1:
+        errors.append("expected exactly one H1, found %d" % len(h1s))
+    previous = 0
+    for lineno, level, _ in headings:
+        if level > previous + 1:
+            errors.append("line %d: heading level skips from H%d to H%d" %
+                          (lineno, previous, level))
+        previous = level
+    return errors
+
+
+def editorial_source_files(root):
+    """Return editable current English Markdown, excluding generated manuals and history."""
+    candidates = {root / "README.md"}
+    for directory in (root / "docs", root / "examples"):
+        if directory.is_dir():
+            candidates.update(directory.rglob("*.md"))
+    generated = {root / "docs" / name for name in
+                 ("reference.md", "reference.zh.md")}
+    return sorted(path for path in candidates
+                  if path.is_file()
+                  and path not in generated
+                  and "history" not in path.relative_to(root).parts
+                  and not path.name.lower().endswith(".zh.md")
+                  and "reference.zh" not in path.relative_to(root).parts)
+
+
+def standalone_markdown(path, root):
+    """Whether an editable Markdown file is presented as a standalone page."""
+    rel = path.relative_to(root).as_posix()
+    if rel.startswith("docs/reference/"):
+        return path.name == "README.md"
+    return (rel == "README.md" or rel.startswith(("docs/", "examples/")))
+
+
+def editorial_errors(text, standalone=False, allow_reference_structure=False):
+    """Check low-noise Google-style rules on authored prose, not code samples."""
+    errors = []
+    prose = []
+    headings = []
+    fence_char = None
+    fence_length = 0
+    for lineno, line in enumerate(text.splitlines(), 1):
+        fence = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence:
+            marker = fence.group(1)
+            if fence_char is None:
+                fence_char, fence_length = marker[0], len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_length:
+                fence_char, fence_length = None, 0
+            continue
+        if fence_char is not None:
+            continue
+        heading = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", line)
+        if heading:
+            headings.append((lineno, len(heading.group(1)), heading.group(2)))
+            if NUMBERED_HEADING.match(line) and not allow_reference_structure:
+                errors.append("line %d: remove a numeric sequence prefix from the heading" % lineno)
+        # Inline code and Markdown link destinations contain identifiers or
+        # examples, so they are not treated as editorial prose.
+        plain = re.sub(r"`[^`]*`", "", line)
+        plain = re.sub(r"\]\([^)]*\)", "]", plain)
+        prose.append((lineno, plain))
+
+    if standalone:
+        h1s = [lineno for lineno, level, _ in headings if level == 1]
+        if len(h1s) != 1:
+            errors.append("expected exactly one H1, found %d" % len(h1s))
+
+    for lineno, line in prose:
+        if re.search(r"\be\.g\.", line, re.I):
+            errors.append("line %d: use 'for example' or 'such as' instead of 'e.g.'" % lineno)
+        if re.search(r"\band/or\b", line, re.I):
+            errors.append("line %d: replace 'and/or' with an unambiguous alternative" % lineno)
+        if POSITIONAL_REFERENCE.search(line):
+            errors.append("line %d: replace a positional cross-reference with descriptive link text" % lineno)
     return errors
 
 
@@ -213,8 +348,16 @@ def validate(root=ROOT):
              if s.strip() and not s.lstrip().startswith("#")]
     errors += manifest_errors(items)
     assembled = {}
+    source_shapes = {}
     for lang in ("reference", "reference.zh"):
         module_root = root / "docs" / lang
+        source_files = sorted(module_root.rglob("*.md"))
+        source_shapes[lang] = {}
+        for path in source_files:
+            rel = path.relative_to(module_root).as_posix()
+            text = path.read_text(encoding="utf-8")
+            errors += [lang + "/" + rel + ": " + e for e in standalone_page_errors(text)]
+            source_shapes[lang][rel] = [level for _, level, _ in _markdown_headings(text)]
         chunks = []
         for item in items:
             path = module_root / item
@@ -223,11 +366,12 @@ def validate(root=ROOT):
                 continue
             chunks.append(path.read_text(encoding="utf-8"))
         text = "\n".join(chunks)
-        assembled[lang] = text
-        overview = (module_root / "01_overview.md").read_text(encoding="utf-8")
-        errors += [lang + "/01_overview.md: " + e for e in overview_resource_errors(overview)]
-        errors += [lang + ": " + e for e in structure_errors(text)]
-        matrix = (module_root / "appendices/schema_matrix.md").read_text(encoding="utf-8")
+        generated = root / "docs" / (lang + ".md")
+        assembled[lang] = generated.read_text(encoding="utf-8") if generated.is_file() else text
+        overview = (module_root / "overview.md").read_text(encoding="utf-8")
+        errors += [lang + "/overview.md: " + e for e in overview_resource_errors(overview)]
+        errors += [lang + ": " + e for e in structure_errors(assembled[lang])]
+        matrix = (module_root / "appendices/schema-matrix.md").read_text(encoding="utf-8")
         found = {(m.group(1).lower(), m.group(2)) for m in SCHEMA_TOKEN.finditer(matrix)}
         expected = set(active.items())
         if found != expected:
@@ -235,11 +379,18 @@ def validate(root=ROOT):
                           (lang, sorted(expected - found), sorted(found - expected)))
     if chapter_shape(assembled["reference"]) != chapter_shape(assembled["reference.zh"]):
         errors.append("EN/ZH top-level chapter/appendix structure differs")
+    if set(source_shapes["reference"]) != set(source_shapes["reference.zh"]):
+        errors.append("EN/ZH Reference source file sets differ")
+    for rel in sorted(set(source_shapes["reference"]) & set(source_shapes["reference.zh"])):
+        if source_shapes["reference"][rel] != source_shapes["reference.zh"][rel]:
+            errors.append("EN/ZH Reference heading structure differs: " + rel)
     for path in current_files(root):
         rel = path.relative_to(root).as_posix()
         if re.search(r"/appendices/(?:migrations|compatibility)\.md$", rel):
             continue
         text = path.read_text(encoding="utf-8")
+        if path.suffix == ".md":
+            errors += [rel + ": " + e for e in chapter_reference_errors(text)]
         if path.suffix == ".md" and (
                 rel in ("README.md", "docs/README.md", "docs/quick-start.md", "docs/quick-start.zh.md")
                 or rel.startswith("examples/")):
@@ -259,6 +410,17 @@ def validate(root=ROOT):
                 errors.append(rel + ": use canonical English ATT terms in ZH prose")
         if re.search(r"\$\{output\.replyReceived\}", text):
             errors.append(rel + ": use output.result.replyReceived")
+    for path in editorial_source_files(root):
+        rel = path.relative_to(root).as_posix()
+        try:
+            errors += [rel + ": " + error for error in
+                       editorial_errors(
+                           path.read_text(encoding="utf-8"),
+                           standalone_markdown(path, root),
+                           allow_reference_structure=rel.startswith("docs/reference/")
+                           and path.name != "README.md")]
+        except ValueError as exc:
+            errors.append(rel + ": " + str(exc))
     return errors
 
 

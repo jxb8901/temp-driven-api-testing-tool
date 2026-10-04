@@ -1,4 +1,4 @@
-# ATT 3.7.2 - Automated Testing Tool
+# ATT 3.7.3 - Automated Testing Tool
 
 ATT is an offline, template-driven API and integration test runner for SIT/UAT. Excel rows define Testcases; Stages select Templates; Templates execute ordered Actions; reusable Flows and configured Resources keep implementation logic out of test data.
 
@@ -54,7 +54,7 @@ Windows uses the same commands through `att.bat`.
 
 The current Reference Manual is organized by product concepts rather than release history: authoring, Context, Run/Debug/Load, Tool/DBHelper/MQHelper/SSHHelper, environments, expressions, reliability, configuration, CLI, results, validation and operations.
 
-DB operations run under ordinary `type: tool` Actions through `db.<helper>.<query|scalar|update>(...)` calls. Action-level `timeoutMs` overrides the DBHelper statement timeout. Read-only query/scalar calls may use bounded retry for `ASSERTION` and `TIMEOUT`; mutating update calls deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/05_resources/dbhelper.md).
+DB operations run under ordinary `type: tool` Actions through `db.<helper>.<query|scalar|update>(...)` calls. Action-level `timeoutMs` overrides the DBHelper statement timeout. Read-only query/scalar calls may use bounded retry for `ASSERTION` and `TIMEOUT`; mutating update calls deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/resources/dbhelper.md).
 
 ## Core package layout
 
@@ -67,7 +67,7 @@ schemas/      published ATT schemas
 output/       run/debug/load evidence and reports
 ```
 
-ATT 3.7.2 uses `att-config/v2.11`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.6`. Current schemas live under `schemas/`; previous and older definitions are historical references under `schemas/history/`, not current runtime contracts.
+ATT 3.7.3 uses `att-config/v2.11`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.6`. Current schemas live under `schemas/`; previous and older definitions are historical references under `schemas/history/`, not current runtime contracts.
 
 ## Build and validation
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT V3.7.2 Reference Manual</title>
+  <title>ATT v3.7.3 reference manual</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,15 +233,15 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT V3.7.2 Reference Manual</h1>
+<h1 class="title">ATT v3.7.3 reference manual</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
-<li><a href="#att-v372-reference-manual"
-id="toc-att-v372-reference-manual">ATT V3.7.2 Reference Manual</a>
+<li><a href="#att-v373-reference-manual"
+id="toc-att-v373-reference-manual">ATT v3.7.3 reference manual</a>
 <ul>
-<li><a href="#01-overview-and-product-model"
-id="toc-01-overview-and-product-model">01 Overview and Product Model</a>
+<li><a href="#overview-and-product-model"
+id="toc-overview-and-product-model">Overview and product model</a>
 <ul>
 <li><a href="#product-model" id="toc-product-model">Product
 model</a></li>
@@ -254,25 +254,24 @@ boundaries</a></li>
 <li><a href="#how-to-use-this-manual"
 id="toc-how-to-use-this-manual">How to use this manual</a></li>
 </ul></li>
-<li><a href="#02-test-authoring" id="toc-02-test-authoring">02 Test
-Authoring</a>
+<li><a href="#test-authoring" id="toc-test-authoring">Test authoring</a>
 <ul>
 <li><a href="#authoring-contracts"
 id="toc-authoring-contracts">Authoring contracts</a></li>
-<li><a href="#21-workbook" id="toc-21-workbook">2.1 Workbook</a></li>
-<li><a href="#22-stage" id="toc-22-stage">2.2 Stage</a></li>
-<li><a href="#23-template" id="toc-23-template">2.3 Template</a></li>
-<li><a href="#24-flow" id="toc-24-flow">2.4 Flow</a></li>
-<li><a href="#25-authoring-lifecycle"
-id="toc-25-authoring-lifecycle">2.5 Authoring lifecycle</a></li>
+<li><a href="#workbook" id="toc-workbook">Workbook</a></li>
+<li><a href="#stage" id="toc-stage">Stage</a></li>
+<li><a href="#template" id="toc-template">Template</a></li>
+<li><a href="#flow" id="toc-flow">Flow</a></li>
+<li><a href="#authoring-lifecycle"
+id="toc-authoring-lifecycle">Authoring lifecycle</a></li>
 <li><a href="#test-data-ownership" id="toc-test-data-ownership">Test
 data ownership</a></li>
 <li><a href="#testdata-registry-and-input-mapping"
 id="toc-testdata-registry-and-input-mapping">Testdata registry and input
 mapping</a></li>
 </ul></li>
-<li><a href="#03-actions-and-typed-values"
-id="toc-03-actions-and-typed-values">03 Actions and Typed Values</a>
+<li><a href="#actions-and-typed-values"
+id="toc-actions-and-typed-values">Actions and typed values</a>
 <ul>
 <li><a href="#action-types" id="toc-action-types">Action types</a></li>
 <li><a href="#separate-logical-values-from-representations"
@@ -280,28 +279,28 @@ id="toc-separate-logical-values-from-representations">Separate logical
 values from representations</a></li>
 <li><a href="#project-file-expressions-return-string"
 id="toc-project-file-expressions-return-string">Project-file expressions
-return String</a></li>
+return string</a></li>
 <li><a href="#tool-db-and-flow-results"
 id="toc-tool-db-and-flow-results">Tool, DB and Flow results</a></li>
 <li><a href="#tool-evidence-collectors"
-id="toc-tool-evidence-collectors">Tool evidence collectors</a></li>
+id="toc-tool-evidence-collectors">Tool Evidence collectors</a></li>
 <li><a href="#log-typed-value-to-case-log"
-id="toc-log-typed-value-to-case-log">Log: typed value to Case
+id="toc-log-typed-value-to-case-log">Log: typed value to case
 log</a></li>
 <li><a href="#expressions-and-variable-scope"
 id="toc-expressions-and-variable-scope">Expressions and variable
 scope</a></li>
 <li><a href="#resource-output-evidence"
-id="toc-resource-output-evidence">Resource output evidence</a></li>
+id="toc-resource-output-evidence">Resource output Evidence</a></li>
 <li><a href="#action-output-and-evidence-paths"
-id="toc-action-output-and-evidence-paths">Action output and evidence
+id="toc-action-output-and-evidence-paths">Action output and Evidence
 paths</a></li>
 <li><a href="#common-retry-and-boolean-conditions"
-id="toc-common-retry-and-boolean-conditions">Common retry and Boolean
+id="toc-common-retry-and-boolean-conditions">Common Retry and boolean
 conditions</a></li>
 </ul></li>
-<li><a href="#04-runtime-and-context-model"
-id="toc-04-runtime-and-context-model">04 Runtime and Context Model</a>
+<li><a href="#runtime-and-context-model"
+id="toc-runtime-and-context-model">Runtime and Context model</a>
 <ul>
 <li><a href="#identity-roots" id="toc-identity-roots">Identity
 roots</a></li>
@@ -316,13 +315,13 @@ compatibility</a></li>
 <li><a href="#lifecycle-navigation"
 id="toc-lifecycle-navigation">Lifecycle navigation</a></li>
 </ul></li>
-<li><a href="#05-expressions-and-built-ins"
-id="toc-05-expressions-and-built-ins">05 Expressions and Built-ins</a>
+<li><a href="#expressions-and-built-ins"
+id="toc-expressions-and-built-ins">Expressions and built-ins</a>
 <ul>
 <li><a href="#unified-expression-engine"
 id="toc-unified-expression-engine">Unified expression engine</a></li>
 <li><a href="#project-file-string-expressions"
-id="toc-project-file-string-expressions">Project-file String
+id="toc-project-file-string-expressions">Project-file string
 expressions</a></li>
 <li><a href="#testdata-input-mapping-syntax"
 id="toc-testdata-input-mapping-syntax">Testdata input mapping
@@ -336,48 +335,31 @@ errors</a></li>
 <li><a href="#retry-condition-lifecycle"
 id="toc-retry-condition-lifecycle">Retry-condition lifecycle</a></li>
 </ul></li>
-<li><a href="#06-execution-modes" id="toc-06-execution-modes">06
-Execution Modes</a>
+<li><a href="#execution-modes" id="toc-execution-modes">Execution
+modes</a>
 <ul>
-<li><a href="#61-run-mode" id="toc-61-run-mode">6.1 Run Mode</a></li>
-<li><a href="#62-standalone-debug" id="toc-62-standalone-debug">6.2
-Standalone Debug</a></li>
-<li><a href="#debug-troubleshooting-and-mq-payload-paths"
-id="toc-debug-troubleshooting-and-mq-payload-paths">Debug
-troubleshooting and MQ payload paths</a></li>
-<li><a href="#63-load-mode" id="toc-63-load-mode">6.3 Load Mode</a></li>
-<li><a href="#load-execution-id-initialization"
-id="toc-load-execution-id-initialization">Load execution ID
-initialization</a></li>
+<li><a href="#run-mode" id="toc-run-mode">Run mode</a></li>
+<li><a href="#standalone-debug" id="toc-standalone-debug">Standalone
+Debug</a></li>
+<li><a href="#load-mode" id="toc-load-mode">Load mode</a></li>
 </ul></li>
-<li><a href="#07-resources-and-integrations"
-id="toc-07-resources-and-integrations">07 Resources and Integrations</a>
+<li><a href="#resources-and-integrations"
+id="toc-resources-and-integrations">Resources and integrations</a>
 <ul>
-<li><a href="#71-operation-result-and-evidence"
-id="toc-71-operation-result-and-evidence">7.1 Operation Result and
+<li><a href="#operation-result-and-evidence"
+id="toc-operation-result-and-evidence">Operation result and
 Evidence</a></li>
-<li><a href="#72-tool" id="toc-72-tool">7.2 Tool</a></li>
-<li><a href="#tool-definition-command-expressions"
-id="toc-tool-definition-command-expressions">Tool-definition
-<code>command</code> expressions</a></li>
-<li><a href="#inline-tool-descriptor-fields"
-id="toc-inline-tool-descriptor-fields">Inline Tool descriptor
-fields</a></li>
-<li><a href="#73-dbhelper" id="toc-73-dbhelper">7.3 DBHelper</a></li>
-<li><a href="#dbhelper-configuration"
-id="toc-dbhelper-configuration">Dbhelper configuration</a></li>
-<li><a href="#74-mqhelper" id="toc-74-mqhelper">7.4 MQHelper</a></li>
-<li><a href="#descriptor-configuration"
-id="toc-descriptor-configuration">Descriptor configuration</a></li>
-<li><a href="#75-httphelper" id="toc-75-httphelper">7.5
-HTTPHelper</a></li>
-<li><a href="#76-sshhelper-logical-ssh-targets"
-id="toc-76-sshhelper-logical-ssh-targets">7.6 SSHHelper: logical SSH
+<li><a href="#tool" id="toc-tool">Tool</a></li>
+<li><a href="#dbhelper" id="toc-dbhelper">DBHelper</a></li>
+<li><a href="#mqhelper" id="toc-mqhelper">MQHelper</a></li>
+<li><a href="#httphelper" id="toc-httphelper">HTTPHelper</a></li>
+<li><a href="#sshhelper-logical-ssh-targets"
+id="toc-sshhelper-logical-ssh-targets">SSHHelper: logical SSH
 targets</a></li>
 </ul></li>
-<li><a href="#08-reliability-and-execution-control"
-id="toc-08-reliability-and-execution-control">08 Reliability and
-Execution Control</a>
+<li><a href="#reliability-and-execution-control"
+id="toc-reliability-and-execution-control">Reliability and execution
+control</a>
 <ul>
 <li><a href="#assertion-and-status"
 id="toc-assertion-and-status">Assertion and status</a></li>
@@ -390,20 +372,20 @@ attempts</a></li>
 <li><a href="#evidence-collectors" id="toc-evidence-collectors">Evidence
 collectors</a></li>
 <li><a href="#transactionresource-lifecycle"
-id="toc-transactionresource-lifecycle">Transaction/resource
+id="toc-transactionresource-lifecycle">Transaction/Resource
 lifecycle</a></li>
 <li><a href="#aggregation" id="toc-aggregation">Aggregation</a></li>
 <li><a href="#stage-execution-controls"
 id="toc-stage-execution-controls">Stage execution controls</a></li>
 <li><a href="#tool-timeout-precedence"
-id="toc-tool-timeout-precedence">Tool timeout precedence</a></li>
+id="toc-tool-timeout-precedence">Tool Timeout precedence</a></li>
 <li><a href="#direct-db-timeout-and-retry-eligibility"
 id="toc-direct-db-timeout-and-retry-eligibility">Direct DB timeout and
 retry eligibility</a></li>
 </ul></li>
-<li><a href="#09-configuration-and-environments"
-id="toc-09-configuration-and-environments">09 Configuration and
-Environments</a>
+<li><a href="#configuration-and-environments"
+id="toc-configuration-and-environments">Configuration and
+environments</a>
 <ul>
 <li><a href="#configuration-layers-and-precedence"
 id="toc-configuration-layers-and-precedence">Configuration layers and
@@ -434,14 +416,13 @@ id="toc-configreportfilenamepattern"><code>config.report.fileNamePattern</code><
 id="toc-feature-configuration-owners">Feature configuration
 owners</a></li>
 </ul></li>
-<li><a href="#10-cli-reference" id="toc-10-cli-reference">10 CLI
-Reference</a>
+<li><a href="#cli-reference" id="toc-cli-reference">CLI reference</a>
 <ul>
 <li><a href="#commands" id="toc-commands">Commands</a></li>
 <li><a href="#command-syntax" id="toc-command-syntax">Command
 syntax</a></li>
 <li><a href="#typed-overrides-and-quick-load"
-id="toc-typed-overrides-and-quick-load">Typed overrides and Quick
+id="toc-typed-overrides-and-quick-load">Typed overrides and quick
 Load</a></li>
 <li><a href="#debug-inputs-and-outputs"
 id="toc-debug-inputs-and-outputs">Debug inputs and outputs</a></li>
@@ -449,19 +430,18 @@ id="toc-debug-inputs-and-outputs">Debug inputs and outputs</a></li>
 <li><a href="#complete-option-matrix"
 id="toc-complete-option-matrix">Complete option matrix</a></li>
 </ul></li>
-<li><a href="#11-results-reports-and-evidence"
-id="toc-11-results-reports-and-evidence">11 Results, Reports, and
-Evidence</a>
+<li><a href="#results-reports-and-evidence"
+id="toc-results-reports-and-evidence">Results, reports, and Evidence</a>
 <ul>
 <li><a href="#run-directory" id="toc-run-directory">Run
 directory</a></li>
-<li><a href="#human-html-report" id="toc-human-html-report">Human HTML
-report</a></li>
+<li><a href="#human-readable-html-report"
+id="toc-human-readable-html-report">Human-readable HTML report</a></li>
 <li><a href="#tool-evidence-collector-failures"
-id="toc-tool-evidence-collector-failures">Tool evidence collector
+id="toc-tool-evidence-collector-failures">Tool Evidence collector
 failures</a></li>
 <li><a href="#result-workbook" id="toc-result-workbook">Result
-workbook</a></li>
+Workbook</a></li>
 <li><a href="#junit-xml" id="toc-junit-xml">JUnit XML</a></li>
 <li><a href="#ci-json-summary" id="toc-ci-json-summary">CI JSON
 summary</a></li>
@@ -473,17 +453,17 @@ id="toc-documentation-archive-and-clean">Documentation, archive, and
 clean</a></li>
 <li><a href="#run-execution-and-evidence-navigation"
 id="toc-run-execution-and-evidence-navigation">Run, execution and
-evidence navigation</a></li>
+Evidence navigation</a></li>
 <li><a href="#generated-output-schema-summary"
 id="toc-generated-output-schema-summary">Generated-output schema
 summary</a></li>
 <li><a href="#reading-caselog-and-caseyaml"
-id="toc-reading-caselog-and-caseyaml">Reading case.log and
-case.yaml</a></li>
+id="toc-reading-caselog-and-caseyaml">Reading <code>case.log</code> and
+<code>case.yaml</code></a></li>
 </ul></li>
-<li><a href="#12-validation-and-troubleshooting"
-id="toc-12-validation-and-troubleshooting">12 Validation and
-Troubleshooting</a>
+<li><a href="#validation-and-troubleshooting"
+id="toc-validation-and-troubleshooting">Validation and
+troubleshooting</a>
 <ul>
 <li><a href="#where-to-look-first" id="toc-where-to-look-first">Where to
 look first</a></li>
@@ -496,9 +476,8 @@ reminders</a></li>
 <li><a href="#validation-json-contract"
 id="toc-validation-json-contract">Validation JSON contract</a></li>
 </ul></li>
-<li><a href="#13-ci-packaging-and-operations"
-id="toc-13-ci-packaging-and-operations">13 CI, Packaging, and
-Operations</a>
+<li><a href="#ci-packaging-and-operations"
+id="toc-ci-packaging-and-operations">CI, packaging, and operations</a>
 <ul>
 <li><a href="#developmentrelease-gates"
 id="toc-developmentrelease-gates">Development/release gates</a></li>
@@ -511,19 +490,19 @@ id="toc-ci-and-environment-promotion">CI and environment
 promotion</a></li>
 </ul></li>
 <li><a href="#appendix-a--schema-and-version-matrix"
-id="toc-appendix-a--schema-and-version-matrix">Appendix A — Schema and
-Version Matrix</a></li>
+id="toc-appendix-a--schema-and-version-matrix">Appendix A — schema and
+version matrix</a></li>
 <li><a href="#appendix-b--compatibility-and-deprecated-aliases"
 id="toc-appendix-b--compatibility-and-deprecated-aliases">Appendix B —
-Compatibility and Deprecated Aliases</a></li>
+compatibility and deprecated aliases</a></li>
 <li><a href="#appendix-c--migration-notes"
-id="toc-appendix-c--migration-notes">Appendix C — Migration Notes</a>
+id="toc-appendix-c--migration-notes">Appendix C — migration notes</a>
 <ul>
-<li><a href="#att-372-file-arguments-and-case-log-paths"
-id="toc-att-372-file-arguments-and-case-log-paths">ATT 3.7.2 file
-arguments and case-log paths</a></li>
+<li><a href="#file-arguments-and-case-log-paths"
+id="toc-file-arguments-and-case-log-paths">File arguments and case-log
+paths</a></li>
 <li><a href="#previous-release-testdata-migration"
-id="toc-previous-release-testdata-migration">Previous release testdata
+id="toc-previous-release-testdata-migration">Previous release Testdata
 migration</a></li>
 <li><a href="#historical-schema-migration"
 id="toc-historical-schema-migration">Historical schema
@@ -540,7 +519,7 @@ migration</a></li>
 <li><a
 href="#appendix-d--limits-security-guarantees-and-advanced-diagnostics"
 id="toc-appendix-d--limits-security-guarantees-and-advanced-diagnostics">Appendix
-D — Limits, Security Guarantees and Advanced Diagnostics</a>
+D — limits, security guarantees and advanced diagnostics</a>
 <ul>
 <li><a href="#limits-and-defaults" id="toc-limits-and-defaults">Limits
 and defaults</a></li>
@@ -553,13 +532,12 @@ id="toc-advanced-diagnostics">Advanced diagnostics</a></li>
 </ul></li>
 </ul>
 </nav>
-<h1 id="att-v372-reference-manual">ATT V3.7.2 Reference Manual</h1>
-<p>Author: Jeffrey + ChatGPT Version: 3.7.2 Status: Normative end-user
+<h1 id="att-v373-reference-manual">ATT v3.7.3 reference manual</h1>
+<p>Author: Jeffrey + ChatGPT Version: 3.7.3 Status: Normative end-user
 documentation; generated from modular sources</p>
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
 
-<h2 id="01-overview-and-product-model">01 Overview and Product
-Model</h2>
+<h2 id="overview-and-product-model">Overview and product model</h2>
 <p>ATT separates test intent from integration mechanics. Test data is
 versioned in workbook/sidecar/snapshot form; Templates and Flows define
 reusable behavior; Resources connect that behavior to external
@@ -654,19 +632,19 @@ documentation.</p>
 </tr>
 <tr class="even">
 <td>Understand the core ATT model</td>
-<td>Chapters 1–5</td>
+<td><a href="reference/overview.md#product-model">Product model</a></td>
 </tr>
 <tr class="odd">
 <td>Configure DB/MQ/HTTP/SSH</td>
-<td><a href="reference/05_resources/index.md">Resources</a></td>
+<td><a href="reference/resources/overview.md">Resources</a></td>
 </tr>
 <tr class="even">
 <td>Find a CLI option</td>
-<td><a href="reference/10_cli.md">CLI Reference</a></td>
+<td><a href="reference/cli.md">CLI Reference</a></td>
 </tr>
 <tr class="odd">
 <td>Diagnose a failure</td>
-<td><a href="reference/12_validation_diagnostics.md">Validation and
+<td><a href="reference/validation-diagnostics.md">Validation and
 Troubleshooting</a></td>
 </tr>
 <tr class="even">
@@ -678,7 +656,7 @@ Troubleshooting</a></td>
 <p>Reference defines the public contract; README, Quick Start and
 examples explain that contract for narrower tasks. Each contract has one
 semantic owner; other chapters summarize and link to that owner.</p>
-<h2 id="02-test-authoring">02 Test Authoring</h2>
+<h2 id="test-authoring">Test authoring</h2>
 <h3 id="authoring-contracts">Authoring contracts</h3>
 <p>This chapter explains the normal day-to-day workflow in the same
 order that data moves through ATT.</p>
@@ -716,9 +694,9 @@ order that data moves through ATT.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="21-workbook">2.1 Workbook</h3>
-<h4 id="workbook-sidecar-and-snapshot-relationship">Workbook, sidecar,
-and snapshot relationship</h4>
+<h3 id="workbook">Workbook</h3>
+<h4 id="workbook-sidecar-and-snapshot-relationship">Workbook, Sidecar,
+and Snapshot relationship</h4>
 <p>Every <code>.xlsx</code> workbook requires a YAML sidecar and
 generated XML snapshot with the same basename in the same directory:</p>
 <pre class="text"><code>testcase/payment_regression.xlsx
@@ -854,7 +832,7 @@ headers that differ only by whitespace are a duplicate-header error.
 Testcase loading and result-workbook writing use this same projection;
 result columns that do not already exist are written to the final header
 row.</p>
-<h4 id="workbook-sidecar">Workbook sidecar</h4>
+<h4 id="workbook-sidecar">Workbook Sidecar</h4>
 <table>
 <thead>
 <tr class="header">
@@ -894,7 +872,7 @@ required</td>
 stages, and sidecar <code>report</code> reject extensions and other
 unknown fields. The sidecar cannot override timeout, retry, tools,
 dbhelpers, template root, environment, or output root.</p>
-<h3 id="22-stage">2.2 Stage</h3>
+<h3 id="stage">Stage</h3>
 <p>Each sidecar stage has a dot-free <code>key</code> and a
 <code>template</code> field naming the physical Excel selector column.
 The selector cell may contain a symbolic template name, full relative
@@ -935,8 +913,8 @@ stage-private values. A duplicate key between the selector map and stage
 data columns is an error.</p>
 <p>Stage <code>required</code>, <code>runWhen</code> and
 <code>onFailure</code> behavior is defined in <a
-href="reference/08_reliability_execution_control.md">Reliability</a>.</p>
-<h3 id="23-template">2.3 Template</h3>
+href="reference/reliability-execution-control.md">Reliability</a>.</p>
+<h3 id="template">Template</h3>
 <p>A directory is a callable Template only when it directly contains
 template.yaml. ATT uses att-template/v3.6. Each Template has a non-empty
 ordered actions map and a required description.</p>
@@ -946,14 +924,14 @@ exact UTF-8 file content as a String without creating a file.
 Tool/DB/HTTP/MQ/SSH actions publish the native typed operation result.
 Log formats typed values for human observation. Assign publishes values
 to EXEC.VARS, and Flow runs in a nested Action scope.</p>
-<p>See <a href="reference/14_actions.md">Actions and Typed Values</a>
-for the complete field list, examples, typed result/evidence model,
+<p>See <a href="reference/actions.md">Actions and Typed Values</a> for
+the complete field list, examples, typed result/evidence model,
 HTTP/MQ/SSH boundaries and migration guidance. <a
-href="reference/07_expressions.md">Expressions and Built-ins</a> covers
-the shared expression language; <a
-href="reference/04_execution_modes/load.md">Load</a> owns ID
+href="reference/expressions.md">Expressions and Built-ins</a> covers the
+shared expression language; <a
+href="reference/execution-modes/load.md">Load</a> owns ID
 initialization.</p>
-<h3 id="24-flow">2.4 Flow</h3>
+<h3 id="flow">Flow</h3>
 <p>A Flow is reusable Template logic, declared in <code>flow.yaml</code>
 using <code>att-flow/v3.6</code>. Required fields are
 <code>schemaVersion</code>, a versioned canonical <code>id</code> such
@@ -963,24 +941,23 @@ map. A Template invokes it through a Flow Action with
 <code>use: common.payment.v1</code>. Each invocation creates a fresh
 <code>EXEC.ACTIONS</code> scope and restores the caller's scope on
 return. <code>META.FLOW</code> exists during the invocation only. <a
-href="reference/14_actions.md">Actions</a> owns Flow results and Assign
-behavior; <a href="reference/03_runtime_context.md">Context</a> owns
-scope lifetime.</p>
-<h3 id="25-authoring-lifecycle">2.5 Authoring lifecycle</h3>
+href="reference/actions.md">Actions</a> owns Flow results and Assign
+behavior; <a href="reference/runtime-context.md">Context</a> owns scope
+lifetime.</p>
+<h3 id="authoring-lifecycle">Authoring lifecycle</h3>
 <p>After changing a Workbook, generate its Snapshot, review and commit
 the diff. After changing a Sidecar, Template, Flow or Resource, run
 <code>./att.sh validate --package</code>. Use <a
-href="reference/04_execution_modes/debug.md">Debug</a> to isolate an
-authoring check and <a
-href="reference/04_execution_modes/run.md">Run</a> to execute Testcases.
-Follow <a href="quick-start.md">Quick Start</a> to build the first
-package.</p>
+href="reference/execution-modes/debug.md">Debug</a> to isolate an
+authoring check and <a href="reference/execution-modes/run.md">Run</a>
+to execute Testcases. Follow <a href="quick-start.md">Quick Start</a> to
+build the first package.</p>
 <h3 id="test-data-ownership">Test data ownership</h3>
 <p>Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage
 business inputs enter <code>EXEC.INPUT</code>; <a
-href="reference/03_runtime_context.md">Context</a> defines their scope
-and lifetime. Environment selection belongs to <a
-href="reference/09_configuration.md">Configuration</a>.</p>
+href="reference/runtime-context.md">Context</a> defines their scope and
+lifetime. Environment selection belongs to <a
+href="reference/configuration.md">Configuration</a>.</p>
 <h3 id="testdata-registry-and-input-mapping">Testdata registry and input
 mapping</h3>
 <p>Use <code>att-testdata/v1.0</code> descriptors for reusable records,
@@ -1048,10 +1025,10 @@ layer fail. Ordinary Run/Debug activate referenced IDs lazily, while
 Templates, Flows, and Tool definitions receive resolved values through
 <code>EXEC.INPUT</code>; they cannot contain direct <code>@{...}</code>
 or <code>%{...}</code> references. See <a
-href="reference/09_configuration.md">Environment and Test Data</a>, <a
-href="reference/04_execution_modes/load.md">Load</a>, and the maintainer
-<a href="system-design/testdata.md">testdata design</a>.</p>
-<h2 id="03-actions-and-typed-values">03 Actions and Typed Values</h2>
+href="reference/configuration.md">Environment and Test Data</a>, <a
+href="reference/execution-modes/load.md">Load</a>, and the maintainer <a
+href="system-design/testdata.md">testdata design</a>.</p>
+<h2 id="actions-and-typed-values">Actions and typed values</h2>
 <p>This chapter defines the active ATT action contract. Templates use
 att-template/v3.6. Each completed action publishes its logical typed
 value at output.result. Actions do not use a shared
@@ -1107,7 +1084,7 @@ contract.</p>
 <p>For the lowercase <code>x-</code> convention that disables ATT-owned
 Action fields and keyed entries before validation or execution—and how
 it differs from <code>runWhen: false</code>—see <a
-href="reference/09_configuration.md#ignore-or-disable-att-owned-configuration-with-x">Configuration</a>.</p>
+href="reference/configuration.md#ignore-or-disable-att-owned-configuration-with-x">Configuration</a>.</p>
 <h3 id="separate-logical-values-from-representations">Separate logical
 values from representations</h3>
 <p>ATT keeps the logical operation result separate from human or wire
@@ -1162,7 +1139,7 @@ named <code>parameters</code>;
 content. The historical <code>type: db</code> Action is retained only by
 archived schema versions.</p>
 <h3 id="project-file-expressions-return-string">Project-file expressions
-return String</h3>
+return string</h3>
 <p>The current replacement for the historical Render Action is the typed
 project-file value expression <code>&amp;{path}</code>. It always
 returns one <code>String</code>; it never infers a document format,
@@ -1225,7 +1202,7 @@ and DBHelper contracts.</p>
 <p>A Flow action uses use with a canonical Flow ID. It runs in a fresh
 EXEC.ACTIONS scope and publishes its result/evidence to the caller when
 it returns. META.FLOW exists only while that invocation is active.</p>
-<h3 id="tool-evidence-collectors">Tool evidence collectors</h3>
+<h3 id="tool-evidence-collectors">Tool Evidence collectors</h3>
 <p>A Tool Action may define first-class <code>evidence</code> collectors
 for diagnostics that must be gathered before the Action assertion. The
 lifecycle is:</p>
@@ -1306,7 +1283,7 @@ from helper <code>evidence.output</code> serialization. Resource-output
 formatting remains controlled by the Load evidence policy and is not
 silently substituted for or dropped in place of an author-requested
 collector.</p>
-<h3 id="log-typed-value-to-case-log">Log: typed value to Case log</h3>
+<h3 id="log-typed-value-to-case-log">Log: typed value to case log</h3>
 <p>Log is a presentation action and therefore has its own format
 field:</p>
 <div class="sourceCode" id="cb18"><pre
@@ -1337,7 +1314,7 @@ scope</h3>
 <p>Action expressions use the regular ATT expression engine. A complete
 ${...} or #{...} expression keeps its result type; embedding an
 expression in surrounding text produces a String. See <a
-href="reference/07_expressions.md">Expressions and Built-ins</a>.</p>
+href="reference/expressions.md">Expressions and Built-ins</a>.</p>
 <p>assign publishes its typed value once below EXEC.VARS.<name>. The
 name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case.
 Values assigned in one Stage are available to later Stages. Action-local
@@ -1345,7 +1322,7 @@ output is available at output.* while an Action runs and at
 EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a
 temporary Action namespace; publish values to EXEC.VARS when the caller
 needs them after the Flow returns.</p>
-<h3 id="resource-output-evidence">Resource output evidence</h3>
+<h3 id="resource-output-evidence">Resource output Evidence</h3>
 <p>Resource evidence is separate from the logical result. A helper may
 configure an optional evidence.output presentation policy:</p>
 <div class="sourceCode" id="cb19"><pre
@@ -1360,7 +1337,7 @@ resource-output formatting and file materialization. Metrics-only
 iterations create no execution directory. When iteration evidence is
 retained, eligible resource output is formatted lazily into that
 workspace.</p>
-<h3 id="action-output-and-evidence-paths">Action output and evidence
+<h3 id="action-output-and-evidence-paths">Action output and Evidence
 paths</h3>
 <table>
 <thead>
@@ -1426,7 +1403,7 @@ attempt.</td>
 </table>
 <p>Strings, numbers, booleans, null, maps and lists remain typed across
 Action/Template/Flow boundaries.</p>
-<h3 id="common-retry-and-boolean-conditions">Common retry and Boolean
+<h3 id="common-retry-and-boolean-conditions">Common Retry and boolean
 conditions</h3>
 <p>Tool Actions, including retry-capable DB query/scalar calls, share
 the <code>retry</code> contract. <code>maxAttempts</code> (2–10),
@@ -1471,8 +1448,8 @@ operational failure remains ERROR. Authors must decide whether
 side-effecting operations such as MQ request or HTTP POST are safe to
 replay. Unconditional TIMEOUT retry can duplicate a business
 transaction; ATT does not silently suppress MQ retry. See the <a
-href="reference/05_resources/mqhelper.md">MQHelper example</a>.</p>
-<h2 id="04-runtime-and-context-model">04 Runtime and Context Model</h2>
+href="reference/resources/mqhelper.md">MQHelper example</a>.</p>
+<h2 id="runtime-and-context-model">Runtime and Context model</h2>
 <p>Run, Debug and Load share one canonical EXEC/META expression model.
 EXEC changes through framework lifecycle and explicit
 input/variable/action publication. META is curated, immutable and
@@ -1481,9 +1458,8 @@ secret-safe.</p>
 roots: <code>inputs</code> populates <code>EXEC.INPUT</code>, while
 Template/Flow <code>vars</code> seeds <code>EXEC.VARS</code> before the
 target starts. See <a
-href="reference/04_execution_modes/debug.md">Standalone Debug</a> for
-the current schema, typed literal rules and protected framework
-roots.</p>
+href="reference/execution-modes/debug.md">Standalone Debug</a> for the
+current schema, typed literal rules and protected framework roots.</p>
 <h3 id="identity-roots">Identity roots</h3>
 <table>
 <thead>
@@ -1572,8 +1548,8 @@ lifecycle</h3>
 <code>SOURCE</code>, <code>TARGET</code>, <code>TEMPLATE</code>,
 <code>FLOW</code>, <code>TOOL</code>, <code>DBHELPER</code>,
 <code>MQHELPER</code>, <code>HTTPHELPER</code>, and
-<code>SSHHELPER</code> as listed below. META contains descriptive fields
-only. A path may be absent when its component is not active.</p>
+<code>SSHHELPER</code>. META contains descriptive fields only. A path
+may be absent when its component is not active.</p>
 <table>
 <thead>
 <tr class="header">
@@ -1586,13 +1562,14 @@ only. A path may be absent when its component is not active.</p>
 <tbody>
 <tr class="odd">
 <td>META.PROJECT.id</td>
-<td>Project directory name; String, e.g. <code>payment-att</code>.</td>
+<td>Project directory name; String, for example,
+<code>payment-att</code>.</td>
 <td>Run, Debug, Load; after project binding.</td>
 <td>Execution-wide.</td>
 </tr>
 <tr class="even">
 <td>META.PROJECT.root</td>
-<td>Normalized project-root path; String, e.g.
+<td>Normalized project-root path; String, for example,
 <code>/srv/att/payment</code>.</td>
 <td>Run, Debug, Load; after project binding.</td>
 <td>Execution-wide.</td>
@@ -1606,7 +1583,7 @@ only. A path may be absent when its component is not active.</p>
 </tr>
 <tr class="even">
 <td>META.SOURCE.path</td>
-<td>Normalized absolute source path; String, e.g.
+<td>Normalized absolute source path; String, for example,
 <code>/srv/att/payment/testcase/payment.xlsx</code>,
 <code>/srv/att/payment/debug.yaml</code> or
 <code>/srv/att/payment/load/payment.yaml</code>.</td>
@@ -1615,51 +1592,54 @@ only. A path may be absent when its component is not active.</p>
 </tr>
 <tr class="odd">
 <td>META.SOURCE.caseId</td>
-<td>Canonical TestCase or synthetic Debug Case ID; String, e.g.
+<td>Canonical TestCase or synthetic Debug Case ID; String, for example,
 <code>payment.default.P001</code>.</td>
 <td>Run, Debug.</td>
 <td>Execution-wide; absent in Load.</td>
 </tr>
 <tr class="even">
 <td>META.SOURCE.workbookId</td>
-<td>Workbook identifier; String, e.g. <code>payment</code>.</td>
+<td>Workbook identifier; String, for example, <code>payment</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
 <tr class="odd">
 <td>META.SOURCE.groupId</td>
-<td>Workbook group identifier; String, e.g. <code>default</code>.</td>
+<td>Workbook group identifier; String, for example,
+<code>default</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
 <tr class="even">
 <td>META.SOURCE.rowCaseId</td>
-<td>Case ID from the workbook row; String, e.g. <code>P001</code>.</td>
+<td>Case ID from the workbook row; String, for example,
+<code>P001</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
 <tr class="odd">
 <td>META.SOURCE.sheet</td>
-<td>Workbook sheet name; String, e.g. <code>Payment</code>.</td>
+<td>Workbook sheet name; String, for example, <code>Payment</code>.</td>
 <td>Run when supplied by the workbook adapter.</td>
 <td>Execution-wide; absent for Debug/Load or when unavailable.</td>
 </tr>
 <tr class="even">
 <td>META.SOURCE.row</td>
-<td>One-based workbook row number; Number, e.g. <code>12</code>.</td>
+<td>One-based workbook row number; Number, for example,
+<code>12</code>.</td>
 <td>Run when supplied by the workbook adapter.</td>
 <td>Execution-wide; absent for Debug/Load or when unavailable.</td>
 </tr>
 <tr class="odd">
 <td>META.SOURCE.workbook</td>
-<td>Optional workbook label; String when present, e.g.
+<td>Optional workbook label; String when present, for example,
 <code>payment_regression.xlsx</code>.</td>
 <td>Run when supplied by the adapter.</td>
 <td>Execution-wide; optional and otherwise absent.</td>
 </tr>
 <tr class="even">
 <td>META.SOURCE.scenario</td>
-<td>Load scenario basename without its suffix; String, e.g.
+<td>Load scenario basename without its suffix; String, for example,
 <code>payment-smoke</code>.</td>
 <td>Load.</td>
 <td>Execution-wide; absent outside Load.</td>
@@ -1673,15 +1653,15 @@ only. A path may be absent when its component is not active.</p>
 </tr>
 <tr class="even">
 <td>META.TARGET.id</td>
-<td>Resolved target identifier; String, e.g. <code>PAYMENT_INVOKE</code>
-or <code>payment.flow.v1</code>.</td>
+<td>Resolved target identifier; String, for example,
+<code>PAYMENT_INVOKE</code> or <code>payment.flow.v1</code>.</td>
 <td>Run, Debug, Load; after target selection.</td>
 <td>Execution-wide.</td>
 </tr>
 <tr class="odd">
 <td>META.TEMPLATE.id</td>
-<td>Active Template or resolved Load execution-wrapper ID; String, e.g.
-<code>PAYMENT_INVOKE</code>.</td>
+<td>Active Template or resolved Load execution-wrapper ID; String, for
+example, <code>PAYMENT_INVOKE</code>.</td>
 <td>Run/Debug while a Stage runs; Load after target resolution and while
 its wrapper runs.</td>
 <td>Component scope; absent before target/template resolution, restored
@@ -1690,34 +1670,37 @@ resolved synthetic wrapper.</td>
 </tr>
 <tr class="even">
 <td>META.TEMPLATE.path</td>
-<td>Normalized Template or execution-wrapper directory; String, e.g.
-<code>/srv/att/templates/PAYMENT_INVOKE</code>.</td>
+<td>Normalized Template or execution-wrapper directory; String, for
+example, <code>/srv/att/templates/PAYMENT_INVOKE</code>.</td>
 <td>Same availability as META.TEMPLATE.id.</td>
 <td>Component scope; absent before resolution, restored or removed after
 the scope.</td>
 </tr>
 <tr class="odd">
 <td>META.FLOW.id</td>
-<td>Active Flow ID; String, e.g. <code>payment.request.v1</code>.</td>
+<td>Active Flow ID; String, for example,
+<code>payment.request.v1</code>.</td>
 <td>Run, Debug, Load while that Flow invocation runs.</td>
 <td>Invocation scope; push on entry, restore on return, absent when
 inactive.</td>
 </tr>
 <tr class="even">
 <td>META.FLOW.invocationId</td>
-<td>Caller Action ID; String, e.g. <code>sendRequest</code>.</td>
+<td>Caller Action ID; String, for example,
+<code>sendRequest</code>.</td>
 <td>Same availability as META.FLOW.id.</td>
 <td>Invocation scope; absent when no Flow is active.</td>
 </tr>
 <tr class="odd">
 <td>META.FLOW.depth</td>
-<td>One-based nested Flow depth; Number, e.g. <code>1</code>.</td>
+<td>One-based nested Flow depth; Number, for example,
+<code>1</code>.</td>
 <td>Same availability as META.FLOW.id.</td>
 <td>Invocation scope; absent when no Flow is active.</td>
 </tr>
 <tr class="even">
 <td>META.TOOL.id</td>
-<td>Active configured Tool or built-in name; String, e.g.
+<td>Active configured Tool or built-in name; String, for example,
 <code>payment.queryOrder</code> or <code>upper</code>.</td>
 <td>Run, Debug, Load during the invocation.</td>
 <td>Invocation scope; never retained as the “last Tool” after
@@ -1725,7 +1708,7 @@ return.</td>
 </tr>
 <tr class="odd">
 <td>META.TOOL.type</td>
-<td>Invocation kind; String, e.g. <code>tool</code> or
+<td>Invocation kind; String, for example, <code>tool</code> or
 <code>builtin</code>.</td>
 <td>Same availability as META.TOOL.id.</td>
 <td>Invocation scope; absent after return unless an outer invocation
@@ -1733,7 +1716,7 @@ remains.</td>
 </tr>
 <tr class="even">
 <td>META.DBHELPER.id</td>
-<td>Logical DBHelper ID; String, e.g. <code>orders</code>.</td>
+<td>Logical DBHelper ID; String, for example, <code>orders</code>.</td>
 <td>Run, Debug, Load during a DBHelper operation/DB Action.</td>
 <td>Invocation scope; absent after return unless an outer scope
 remains.</td>
@@ -1747,7 +1730,7 @@ remains.</td>
 </tr>
 <tr class="even">
 <td>META.MQHELPER.id</td>
-<td>Logical MQHelper ID; String, e.g. <code>payment</code>.</td>
+<td>Logical MQHelper ID; String, for example, <code>payment</code>.</td>
 <td>Run, Debug, Load during an MQHelper operation.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
@@ -1761,7 +1744,8 @@ remains.</td>
 </tr>
 <tr class="even">
 <td>META.HTTPHELPER.id</td>
-<td>Logical HTTPHelper ID; String, e.g. <code>payment</code>.</td>
+<td>Logical HTTPHelper ID; String, for example,
+<code>payment</code>.</td>
 <td>Run, Debug, Load during an HTTPHelper operation.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
@@ -1775,7 +1759,8 @@ remains.</td>
 </tr>
 <tr class="even">
 <td>META.SSHHELPER.id</td>
-<td>Logical SSHHelper ID; String, e.g. <code>application</code>.</td>
+<td>Logical SSHHelper ID; String, for example,
+<code>application</code>.</td>
 <td>Run, Debug, Load during an SSH Resource Helper operation.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
@@ -1813,15 +1798,15 @@ valid. Legacy CASE, RUN and ACTIONS aliases remain only where they map
 one-to-one to canonical data. New Templates should use EXEC and
 META.</p>
 <h3 id="lifecycle-navigation">Lifecycle navigation</h3>
-<p><a href="reference/14_actions.md">Actions</a> owns Action-local
+<p><a href="reference/actions.md">Actions</a> owns Action-local
 <code>output</code> and publication at
 <code>EXEC.ACTIONS.&lt;id&gt;.output</code>. <a
-href="reference/04_execution_modes/debug.md">Debug</a> and <a
-href="reference/04_execution_modes/load.md">Load</a> own bootstrap
+href="reference/execution-modes/debug.md">Debug</a> and <a
+href="reference/execution-modes/load.md">Load</a> own bootstrap
 variables, identity initialization and available scope. <a
-href="reference/11_results_reports_evidence.md">Results</a> owns
-artifact navigation.</p>
-<h2 id="05-expressions-and-built-ins">05 Expressions and Built-ins</h2>
+href="reference/results-reports-evidence.md">Results</a> owns artifact
+navigation.</p>
+<h2 id="expressions-and-built-ins">Expressions and built-ins</h2>
 <h3 id="unified-expression-engine">Unified expression engine</h3>
 <p>ATT uses one expression engine for runtime Templates, Flows, Actions
 and Tool calls:</p>
@@ -1843,8 +1828,8 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb21-1"><a href=
 content, Action descriptions/assertions, Log message/value, assign
 expressions and Tool calls use the ordinary runtime model. A Log value
 can recursively contain typed expressions; see <a
-href="reference/14_actions.md">Actions and Typed Values</a>.</p>
-<h3 id="project-file-string-expressions">Project-file String
+href="reference/actions.md">Actions and Typed Values</a>.</p>
+<h3 id="project-file-string-expressions">Project-file string
 expressions</h3>
 <p><code>&amp;{path}</code> is a typed project-file expression. It
 resolves exactly one regular UTF-8 file and always returns a
@@ -1886,8 +1871,8 @@ values except <code>EXEC.INPUT</code>; input construction cannot depend
 on itself. Direct testdata markers are rejected in reusable Template,
 Flow, and Tool definitions so those components consume resolved
 <code>EXEC.INPUT</code> values only.</p>
-<p>See <a href="reference/02_test_authoring.md">Testdata Registry and
-Input Mapping</a> for descriptor and generation syntax.</p>
+<p>See <a href="reference/test-authoring.md">Testdata Registry and Input
+Mapping</a> for descriptor and generation syntax.</p>
 <h3 id="operators">Operators</h3>
 <p>Supported assertion operators are <code>==</code>, <code>!=</code>,
 <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>,
@@ -2076,7 +2061,7 @@ text</td>
 </tr>
 </tbody>
 </table>
-<h4 id="seqnext-run-scoped-sequences"><code>seq.next</code> run-scoped
+<h4 id="seqnext-run-scoped-sequences"><code>Seq.next</code> Run-scoped
 sequences</h4>
 <p><code>seq.next</code> supports these four positional overloads (the
 same arguments may be supplied by the names <code>name</code> and
@@ -2220,15 +2205,15 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb23-1"><a href=
 <h3 id="expression-scope-and-errors">Expression scope and errors</h3>
 <p>This chapter defines the language. Each field's owner defines
 available roots and evaluation timing: <a
-href="reference/05_resources/tools.md">Tool command/call</a>, <a
-href="reference/04_execution_modes/load.md">Load execIdFormat and
-vars</a>, <a href="reference/04_execution_modes/debug.md">Debug
-vars</a>, and <a href="reference/09_configuration.md">report
-filenames</a>. <code>${path?}</code> permits an absent allowed map/list
-path to return null; malformed syntax and illegal scope access still
-fail. Expression syntax and missing required Context paths produce
-structured diagnostics; see <a
-href="reference/12_validation_diagnostics.md">Validation</a>.</p>
+href="reference/resources/tools.md">Tool command/call</a>, <a
+href="reference/execution-modes/load.md">Load execIdFormat and vars</a>,
+<a href="reference/execution-modes/debug.md">Debug vars</a>, and <a
+href="reference/configuration.md">report filenames</a>.
+<code>${path?}</code> permits an absent allowed map/list path to return
+null; malformed syntax and illegal scope access still fail. Expression
+syntax and missing required Context paths produce structured
+diagnostics; see <a
+href="reference/validation-diagnostics.md">Validation</a>.</p>
 <p>Removed APIs: <code>dbText</code>/<code>misc.dbText</code>,
 <code>prettyPrint</code>/<code>misc.prettyPrint</code>/<code>format.pretty</code>,
 all local <code>file.*</code> built-ins and their legacy aliases. Keep
@@ -2247,8 +2232,8 @@ only after retryOn matches and while another attempt is available.
 <code>output.attempt</code>. Normal Boolean typing and strict/optional
 Context paths apply. Only deterministic pure built-ins are permitted;
 external, file, sequence, random and current-time operations are
-rejected. See <a href="reference/14_actions.md">Action retry</a>.</p>
-<h2 id="06-execution-modes">06 Execution Modes</h2>
+rejected. See <a href="reference/actions.md">Action retry</a>.</p>
+<h2 id="execution-modes">Execution modes</h2>
 <p>Run, Debug and Load are peer adapters over the same reusable
 Template/Flow/Tool/DB/MQ/HTTP/SSH execution semantics.</p>
 <table>
@@ -2315,7 +2300,7 @@ semantics.</p>
 </table>
 <p>All three share the execution model. Each mode owns its inputs,
 identity/bootstrap lifecycle, CLI behavior and output layout.</p>
-<h3 id="61-run-mode">6.1 Run Mode</h3>
+<h3 id="run-mode">Run mode</h3>
 <p>Run is workbook-driven Testcase execution.</p>
 <div class="sourceCode" id="cb24"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--all</span></span>
@@ -2338,9 +2323,13 @@ opt-in snapshot refresh path before validation/execution.</p>
 completes without failing status, <code>1</code> for test/assertion
 failure, <code>2</code> for invalid command/configuration/validation,
 and <code>3</code> for runtime/infrastructure error.</p>
-<p>Use Chapter 10 for exact selectors/options, Chapter 8 for execution
-control, and Chapter 11 for artifact contracts.</p>
-<h3 id="62-standalone-debug">6.2 Standalone Debug</h3>
+<p>Use the <a href="reference/cli.md">CLI Reference</a> for exact
+selectors and options, <a
+href="reference/reliability-execution-control.md">Reliability</a> for
+execution control, and <a
+href="reference/results-reports-evidence.md">Results, Reports, and
+Evidence</a> for artifact contracts.</p>
+<h3 id="standalone-debug">Standalone Debug</h3>
 <p>Debug executes one Template, Flow or Tool without requiring a
 workbook Testcase.</p>
 <div class="sourceCode" id="cb25"><pre
@@ -2406,7 +2395,7 @@ exact <code>@{id}</code> / <code>@{id.path}</code> references or scalar
 interpolation. ATT resolves these before publishing
 <code>EXEC.INPUT</code>; direct Testdata markers remain invalid inside
 the reusable Template, Flow or Tool definition. See <a
-href="reference/02_test_authoring.md">Testdata Registry and Input
+href="reference/test-authoring.md">Testdata Registry and Input
 Mapping</a>.</p>
 <div class="sourceCode" id="cb26"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-debug/v1.1</span></span>
@@ -2471,8 +2460,8 @@ It is execution-equivalent at the selected reusable-component boundary,
 but it is <strong>not</strong> a workbook Case: there is no workbook
 selection, Stage history or result-workbook lifecycle unless explicitly
 represented by debug inputs/artifacts.</p>
-<h3 id="debug-troubleshooting-and-mq-payload-paths">Debug
-troubleshooting and MQ payload paths</h3>
+<h4 id="debug-troubleshooting-and-mq-payload-paths">Debug
+troubleshooting and MQ payload paths</h4>
 <p>When a debug target cannot be resolved, check the target kind and
 identifier first, then use <code>--input &lt;path&gt;</code> to remove
 sidecar discovery from the diagnosis. Template and Flow debug discover
@@ -2529,10 +2518,11 @@ rendered inputs with the selected environment.</td>
 <p>Load-specific evidence retention (<code>metrics</code>,
 <code>failures</code>, <code>samples</code>, <code>all</code>) does not
 apply to a standalone Debug invocation. Debug always keeps its
-invocation result and artifacts under its own debug directory; see the
-Load evidence retention section in Chapter 4 when the same target is
-exercised by a load run.</p>
-<h4 id="configuration-examples">Configuration examples</h4>
+invocation result and artifacts under its own debug directory. For the
+same target in a load run, see <a
+href="reference/execution-modes/load.md#evidence-and-resource-output">Load
+evidence and resource output</a>.</p>
+<h5 id="configuration-examples">Configuration examples</h5>
 <p>The following examples show the supported placement of debug values.
 Every file is a complete <code>att-debug/v1.1</code> document.</p>
 <p>Template sidecar
@@ -2638,7 +2628,7 @@ evidence view, <code>CASE.DB</code>, <code>CASE.VARS</code>,
 <code>output/latest-run.yaml</code> and report lifecycle.</p>
 <p>For <code>validate --format json</code>, stdout contains exactly one
 JSON document; progress and human diagnostics go to stderr.</p>
-<h3 id="63-load-mode">6.3 Load Mode</h3>
+<h3 id="load-mode">Load mode</h3>
 <p>ATT accepts att-load/v1.6 scenarios. A scenario has one or more
 workloads; each workload uses either one fixed Template, Flow or Tool
 target, or a closed-user weighted mix of targets. Workloads own their
@@ -2843,7 +2833,7 @@ absolute due times. Arrivals beyond maxConcurrent are recorded as
 generator drops; they are not queued or counted as SUT errors.
 Arrival-rate workloads have no persistent USER_ID and cannot configure
 thinkTime.</p>
-<h4 id="pacing-and-resource-pool-sizing">Pacing and resource-pool
+<h4 id="pacing-and-resource-pool-sizing">Pacing and Resource-pool
 sizing</h4>
 <p>For a steady arrival rate, estimate average in-flight requests with
 Little's law:</p>
@@ -2886,8 +2876,9 @@ default run-scoped ID. Otherwise, ATT evaluates it once during
 initialization with the ordinary ${...} / #{...} engine. Bootstrap vars
 are evaluated after that identity is published, so they can use EXEC.ID
 and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID;
-arrival-rate cannot. See the execution ID initialization section below
-for field availability and function restrictions.</p>
+arrival-rate cannot. See <a
+href="#load-execution-id-initialization">Load execution ID
+initialization</a> for field availability and function restrictions.</p>
 <p>Generated IDs must be non-empty, path-safe segments. Duplicate IDs
 fail before the target starts; ATT does not silently append a
 suffix.</p>
@@ -2912,7 +2903,7 @@ samples/&lt;EXEC.ID&gt;/. The report and evidence summary show EXEC.ID
 and link to case.log when it exists. Helper resource-output formatting
 is deferred until retention; explicit Tool evidence collectors still
 execute because they are author-requested diagnostic operations.</p>
-<h4 id="evidence-and-resource-output">Evidence and resource output</h4>
+<h4 id="evidence-and-resource-output">Evidence and Resource output</h4>
 <p><code>evidence.mode</code> accepts <code>metrics</code>,
 <code>failures</code>, <code>samples</code> or <code>all</code>; the
 default is <code>failures</code>. These modes set the default effective
@@ -3080,8 +3071,8 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb40-1"><a href="#
 href="../examples/load/README.md">examples/load/README.md</a>. Schema
 migration is documented in <a
 href="reference/appendices/migrations.md">Appendix C</a>.</p>
-<h3 id="load-execution-id-initialization">Load execution ID
-initialization</h3>
+<h4 id="load-execution-id-initialization">Load execution ID
+initialization</h4>
 <p>Load uses schema att-load/v1.6. If execution.execIdFormat is present,
 ATT evaluates it once per started iteration with the normal ${...} /
 #{...} engine during initialization; otherwise the default run-scoped ID
@@ -3112,8 +3103,7 @@ ATT does not append a hidden suffix.</p>
 external calls, seq.next(), random, clock and filesystem functions are
 rejected. See <a href="reference/appendices/migrations.md">Appendix
 C</a> for schema migration.</p>
-<h2 id="07-resources-and-integrations">07 Resources and
-Integrations</h2>
+<h2 id="resources-and-integrations">Resources and integrations</h2>
 <p>Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper are peer
 integration/resource types. SSHHelper routes command-backed Tools and
 exposes <code>ssh.&lt;helperId&gt;.execute|upload</code> plus remote
@@ -3131,8 +3121,8 @@ Action YAML.</p>
 <p>The lowercase <code>x-</code> prefix can disable fields and keyed
 entries in ATT-owned resource configuration. It does not strip user data
 such as HTTP header names or DB parameters; see <a
-href="reference/09_configuration.md#ignore-or-disable-att-owned-configuration-with-x">Configuration</a>.</p>
-<h3 id="71-operation-result-and-evidence">7.1 Operation Result and
+href="reference/configuration.md#ignore-or-disable-att-owned-configuration-with-x">Configuration</a>.</p>
+<h3 id="operation-result-and-evidence">Operation result and
 Evidence</h3>
 <p>ATT keeps an operation's logical result separate from execution
 evidence:</p>
@@ -3145,7 +3135,7 @@ execution; they do not replace the business result. Command stdout is
 parsed through stdoutFormat. HTTP/MQ responses use responseFormat. DB
 operations return native typed values. A project-file expression returns
 exact file text as a String, as described in <a
-href="reference/14_actions.md">Actions and Typed Values</a>.</p>
+href="reference/actions.md">Actions and Typed Values</a>.</p>
 <p>Resource evidence can include low-cost metadata. A helper may also
 configure an optional human-readable snapshot:</p>
 <div class="sourceCode" id="cb45"><pre
@@ -3162,7 +3152,7 @@ inherit defers formatting until a success sample or failure receives a
 retention slot. Metrics-only iterations do not serialize resource output
 or create an evidence workspace. Transport parsing and project-file
 String representation are unchanged.</p>
-<h3 id="72-tool">7.2 Tool</h3>
+<h3 id="tool">Tool</h3>
 <p>A Tool is a named external or framework-native capability. A
 descriptor selects exactly one backend: command or call.</p>
 <h4 id="command-backed-tool">Command-backed Tool</h4>
@@ -3196,13 +3186,13 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb47-1"><a href=
 persistence is explicit to an API that defines it; human-readable
 presentation belongs to Log or configured evidence output. HTTP/MQ
 parsing is owned by those transport boundaries.</p>
-<p>See <a href="reference/14_actions.md">Actions and Typed Values</a>
-for Action result handling and <a
-href="reference/05_resources/operation_result.md">Operation Result and
+<p>See <a href="reference/actions.md">Actions and Typed Values</a> for
+Action result handling and <a
+href="reference/resources/operation-result.md">Operation Result and
 Evidence</a> for typed results versus evidence.</p>
-<h3 id="tool-definition-command-expressions">Tool-definition
-<code>command</code> expressions</h3>
-<h4 id="context-and-legal-forms">Context and legal forms</h4>
+<h4 id="tool-definition-command-expressions">Tool-definition
+<code>command</code> expressions</h4>
+<h5 id="context-and-legal-forms">Context and legal forms</h5>
 <p>A configured Tool <code>command</code> also has its own restricted
 Context. It may reference only keys declared by that Tool's
 <code>arguments</code> map. The canonical placeholder is
@@ -3272,7 +3262,9 @@ remain compatible only when each name is declared and emit
 <code>CONTEXT_TOOL_INPUT_SHORTHAND</code>.</p>
 <p>Each command token also accepts built-in calls through the same
 expression engine. Built-ins see only the declared Tool-input aliases
-shown above, and calls may be nested:</p>
+introduced in <a
+href="#tool-definition-command-expressions">Tool-definition
+<code>command</code> expressions</a>, and calls may be nested:</p>
 <div class="sourceCode" id="cb50"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a><span class="fu">command</span><span class="kw">:</span></span>
 <span id="cb50-2"><a href="#cb50-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
@@ -3296,8 +3288,8 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb51-1"><a href=
 <p>Because this is a YAML argv list, each list item remains one atomic
 process argument even when its resolved value contains spaces or
 shell-like characters. ATT does not invoke a local shell.</p>
-<h4 id="quotes-context-values-and-atomic-argv">Quotes, Context values,
-and atomic argv</h4>
+<h5 id="quotes-context-values-and-atomic-argv">Quotes, Context values,
+and atomic argv</h5>
 <p>Quotes inside a Tool call belong to the ATT expression grammar; they
 are not shell quotes. The outer <code>'...'</code> or <code>"..."</code>
 delimiters are removed before invocation, the opposite quote is literal,
@@ -3370,8 +3362,8 @@ carried by a Context value is passed literally. Use an explicitly
 reviewed wrapper when shell-like behavior is required; the shipped
 <code>fpp.exehelper</code> and <code>fpp.loghelper</code> provide only
 the narrowly documented pathname expansion above.</p>
-<h4 id="illegal-forms-and-token-restrictions">Illegal forms and token
-restrictions</h4>
+<h5 id="illegal-forms-and-token-restrictions">Illegal forms and token
+restrictions</h5>
 <p>Tool commands cannot directly read the general Runtime Context, use
 unique-suffix navigation, or navigate argument fields with bracket
 syntax. These <code>${...}</code> forms are rejected during
@@ -3413,8 +3405,18 @@ argv values. For an optional argument, a blank complete-token
 placeholder emits neither its <code>argName</code> nor a value; an
 embedded scalar placeholder instead leaves its surrounding fixed token
 in argv.</p>
-<h3 id="inline-tool-descriptor-fields">Inline Tool descriptor
-fields</h3>
+<h4 id="tool-definition-call-expressions">Tool-definition
+<code>call</code> expressions</h4>
+<p>Call-backed expressions use the declared <code>arguments</code> map
+and preserve typed values. They allow pure built-ins and one primary DB
+query, scalar, or update. <code>${input.customerId}</code> comes from
+the outer Tool call, not a Case global; roots such as <code>CASE</code>
+and <code>ACTIONS</code> are unavailable in the definition. Inline SQL
+and package-contained SQL file content render in this scope. Pass test
+data through <code>params</code> and use JDBC <code>?</code>
+placeholders.</p>
+<h4 id="inline-tool-descriptor-fields">Inline Tool descriptor
+fields</h4>
 <p>Global <code>tools</code> and Tool-group <code>tools</code> entries
 use the same Tool contract:</p>
 <table>
@@ -3444,7 +3446,7 @@ optional <code>argName</code>, <code>argNameMode</code>,
 </tr>
 </tbody>
 </table>
-<h3 id="73-dbhelper">7.3 DBHelper</h3>
+<h3 id="dbhelper">DBHelper</h3>
 <p>DBHelper is a first-class JDBC resource, configured independently
 from Tools. Each descriptor uses
 <code>schemaVersion: att-dbhelper/v2.6</code> and a stable logical
@@ -3477,8 +3479,7 @@ exclusive and use the same JDBC binding rules.</p>
 update result. Operation and SQL/parameter evidence enters the common
 Action envelope. Secret credentials are never evidence. Parameter
 evidence follows descriptor/Action masking/type policy.</p>
-<p><a
-href="reference/08_reliability_execution_control.md">Reliability</a>
+<p><a href="reference/reliability-execution-control.md">Reliability</a>
 owns Action timeout precedence, retry eligibility, attempt limits and
 replay cautions. DBHelper owns the descriptor's statement timeout and
 transaction lifecycle. Example of an eligible query:</p>
@@ -3513,7 +3514,7 @@ is tied to the Case/iteration lifecycle; commit/rollback/reconnect are
 resource operations, not public Context roots. Action-level
 timeout/retry extends the shared Action lifecycle without changing the
 DBHelper identity or Context model.</p>
-<h3 id="dbhelper-configuration">Dbhelper configuration</h3>
+<h4 id="dbhelper-configuration">DBHelper configuration</h4>
 <p>Each path in global <code>dbhelpers</code> resolves from the package
 root and contains one <code>att-dbhelper/v2.6</code> object:</p>
 <table>
@@ -3585,7 +3586,7 @@ case. <code>connection.isolation</code> is <code>driverDefault</code>,
 <code>properties</code> is a string-to-string map. Complete
 <code>${ENV:NAME}</code> values resolve while loading configuration;
 missing variables are errors. See <a
-href="reference/05_resources/dbhelper.md">DBHelper</a> for Action,
+href="reference/resources/dbhelper.md">DBHelper</a> for Action,
 expression, result, security, and lifecycle behaviour.</p>
 <p>DB/MQ/HTTP share the optional
 <code>evidence.output: {format: json, maxChars: 10000}</code>
@@ -3614,7 +3615,7 @@ representation, and <code>output</code> controls human-readable
 presentation only. Assertions and later Actions still read typed rows;
 <code>db.&lt;id&gt;.query</code>/<code>scalar</code> use the same
 policy.</p>
-<h3 id="74-mqhelper">7.4 MQHelper</h3>
+<h3 id="mqhelper">MQHelper</h3>
 <p>MQHelper is a logical IBM MQ resource with one or more physical
 instances. Current descriptors use att-mqhelper/v1.2. Connection
 settings, credentials, queue defaults and pool limits belong to the
@@ -3653,7 +3654,7 @@ CCSID metadata when available, then parsed by responseFormat
 responseFormat owns ingress parsing; Log.format and
 evidence.output.format only control presentation.</p>
 <h4 id="sending-project-file-strings-and-abstract-values">Sending
-project-file Strings and abstract values</h4>
+project-file strings and abstract values</h4>
 <p>A project-file expression produces a String and can be passed
 directly as payload:</p>
 <div class="sourceCode" id="cb62"><pre
@@ -3695,9 +3696,9 @@ message receive limit before reading and reports
 <code>MQ_RESPONSE_TOO_LARGE</code> when a reply exceeds it. This is a
 transport-success size rejection and remains distinct from a missing
 reply or connection failure.</p>
-<p>See <a href="reference/14_actions.md">Actions and Typed Values</a>
-for the shared typed-result contract.</p>
-<h3 id="descriptor-configuration">Descriptor configuration</h3>
+<p>See <a href="reference/actions.md">Actions and Typed Values</a> for
+the shared typed-result contract.</p>
+<h4 id="descriptor-configuration">Descriptor configuration</h4>
 <table>
 <thead>
 <tr class="header">
@@ -3788,8 +3789,8 @@ Load defers formatting until an iteration is retained, then materializes
 <code>resource-output.yaml</code>;
 <code>evidence.resources.output: none</code> skips it entirely.
 Presentation never introduces credential values into evidence.</p>
-<h4 id="requestreply-timeout-and-replay-policy">Request/reply timeout
-and replay policy</h4>
+<h5 id="requestreply-timeout-and-replay-policy">Request/reply Timeout
+and replay policy</h5>
 <p>A correlated reply completes <code>mq.&lt;id&gt;.request(...)</code>
 with PASS. A successful PUT followed by correlated GET MQRC 2033
 (<code>MQRC_NO_MSG_AVAILABLE</code>) is a standard TIMEOUT with
@@ -3832,8 +3833,8 @@ polling contract: MQRC 2033 returns PASS with
 including a bounded wait that finds no message. An expired outer
 deadline is TIMEOUT. This operation-aware contract supersedes the
 earlier guidance that avoided request/2033 TIMEOUT to prevent replay.
-See <a href="reference/14_actions.md">common retry semantics</a>.</p>
-<h3 id="75-httphelper">7.5 HTTPHelper</h3>
+See <a href="reference/actions.md">common retry semantics</a>.</p>
+<h3 id="httphelper">HTTPHelper</h3>
 <p>HTTPHelper is an environment-bound HTTP resource. The selected config
 profile binds a stable logical helper ID to its base URL. Descriptors
 use att-httphelper/v1.1.</p>
@@ -3912,7 +3913,7 @@ selected. Supported response formats are auto, text, json, yaml and xml.
 The parsed native value is output.result. Optional evidence.output is a
 bounded human-readable snapshot and never changes that value.</p>
 <h4 id="request-bodies-and-project-file-strings">Request bodies and
-project-file Strings</h4>
+project-file strings</h4>
 <p>A project-file expression returns the exact UTF-8 file content as a
 String. Assign it once and pass it directly as the body:</p>
 <div class="sourceCode" id="cb66"><pre
@@ -3937,7 +3938,7 @@ targetFiles.</p>
 Content-Type. Configure contentType/header when a specific media type is
 required. Request charset/headers and response parsing remain HTTPHelper
 concerns, separate from Action result or Log formatting.</p>
-<h4 id="failure-and-evidence">Failure and evidence</h4>
+<h4 id="failure-and-evidence">Failure and Evidence</h4>
 <p>Transport/protocol and response-parse failures are operational
 errors. A received 4xx/5xx is a completed response and can be asserted
 through statusCode. HTTP evidence may include helper ID, method, safe
@@ -3954,8 +3955,8 @@ diagnostics, HTTP connection pools report active, idle, waiting, and
 peak counts by helper.</p>
 <p>Set <code>defaults.maxResponseBytes</code> from 1 through 1073741824
 in the HTTP helper descriptor; it defaults to 10485760 (10 MiB).</p>
-<p>See <a href="reference/14_actions.md">Actions and Typed Values</a>
-for the shared project-file String and typed-result contract.</p>
+<p>See <a href="reference/actions.md">Actions and Typed Values</a> for
+the shared project-file String and typed-result contract.</p>
 <p>DB/MQ/HTTP share the optional
 <code>evidence.output: {format: json, maxChars: 10000}</code>
 presentation policy. Supported formats are <code>text</code>,
@@ -3974,9 +3975,9 @@ Load defers formatting until an iteration is retained, then materializes
 <code>resource-output.yaml</code>;
 <code>evidence.resources.output: none</code> skips it entirely.
 Presentation never introduces credential values into evidence.</p>
-<h3 id="76-sshhelper-logical-ssh-targets">7.6 SSHHelper: logical SSH
+<h3 id="sshhelper-logical-ssh-targets">SSHHelper: logical SSH
 targets</h3>
-<h4 id="ssh-resource-helper-operations">SSH Resource Helper
+<h4 id="ssh-resource-helper-operations">SSH Resource helper
 operations</h4>
 <p>SSHHelper also exposes the common Resource Helper form inside a
 normal <code>type: tool</code> Action:
@@ -4017,8 +4018,8 @@ structured formats parse stdout into the native Map/List/scalar result.
 A timeout, non-zero remote exit, or parse failure returns an operation
 error with a distinct category and retains bounded stderr, exit code,
 byte counts and transport evidence. SSH resource execution treats a
-non-zero exit as an operation failure; this is separate from the legacy
-command-backed Tool fan-out contract described below.</p>
+non-zero exit as an operation failure. The command-backed Tool fan-out
+contract has different failure semantics.</p>
 <p><code>upload</code> requires <code>remotePath</code> and a String or
 byte-array <code>payload</code>. To upload a project file, pass the
 UTF-8 String returned by <code>&amp;{...}</code> directly; SSHHelper
@@ -4289,8 +4290,8 @@ Filesystem errors use <code>SSH_STAT_ERROR</code>,
 <code>SSH_DELETE_ERROR</code>. There is no remote copy API; use explicit
 <code>execute(command='cp /srv/app/a /srv/app/b')</code> when needed.
 Project files use <code>&amp;{...}</code>; ATT manages local output.</p>
-<h2 id="08-reliability-and-execution-control">08 Reliability and
-Execution Control</h2>
+<h2 id="reliability-and-execution-control">Reliability and execution
+control</h2>
 <p>This chapter owns cross-cutting public execution behavior.</p>
 <h3 id="assertion-and-status">Assertion and status</h3>
 <p>An assertion evaluates a boolean condition after the Action's primary
@@ -4341,7 +4342,7 @@ visible when diagnostic collection fails; <code>stop</code> makes the
 collector failure an Action error. Use an ordinary Tool/Log/Assign
 Action when the collected value is business/test data rather than
 pre-assertion diagnostics.</p>
-<h3 id="transactionresource-lifecycle">Transaction/resource
+<h3 id="transactionresource-lifecycle">Transaction/Resource
 lifecycle</h3>
 <p>DB transaction finalization and DB/MQ/HTTP/SSH resource cleanup occur
 at the appropriate execution lifecycle boundary. These mechanisms can
@@ -4417,7 +4418,7 @@ permits later eligible work to run.</p>
 </table>
 <p>Use <code>onFailure</code> for rollback/diagnostics and
 <code>always</code> for cleanup or final evidence collection.</p>
-<h3 id="tool-timeout-precedence">Tool timeout precedence</h3>
+<h3 id="tool-timeout-precedence">Tool Timeout precedence</h3>
 <p>Tool Action timeout overrides Tool descriptor timeout, which
 overrides global timeout. Sidecars, Stages and Templates do not own
 timeout/retry defaults. For call-backed DB Tools, the DBHelper statement
@@ -4434,29 +4435,28 @@ retry interval is outside that timeout.</p>
 <p>A direct <code>query</code> Action may also use the standard retry
 block with <code>maxAttempts</code> 2–10, <code>intervalMs</code>
 0–3,600,000, and a non-empty unique <code>retryOn</code> list containing
-<code>ASSERTION</code> and/or <code>TIMEOUT</code>. An explicit Action
-<code>timeoutMs</code> overrides the helper's statement-timeout default;
-without it, the helper default applies. JDBC query timeout is rounded up
-to whole seconds while ATT retains millisecond deadline cancellation.
-<code>ASSERTION</code> requires an Action <code>assert</code>. Ordinary
-SQL errors are terminal. Retry-enabled query attempts are retained in
-<code>output.attempts[n]</code>; the top-level
-<code>output.result</code> / <code>output.evidence</code> represent the
-final or winning attempt, with <code>winningAttempt</code> or
-<code>finalAttempt</code> recording the terminal attempt number.</p>
+<code>ASSERTION</code>, <code>TIMEOUT</code>, or both. An explicit
+Action <code>timeoutMs</code> overrides the helper's statement-timeout
+default; without it, the helper default applies. JDBC query timeout is
+rounded up to whole seconds while ATT retains millisecond deadline
+cancellation. <code>ASSERTION</code> requires an Action
+<code>assert</code>. Ordinary SQL errors are terminal. Retry-enabled
+query attempts are retained in <code>output.attempts[n]</code>; the
+top-level <code>output.result</code> / <code>output.evidence</code>
+represent the final or winning attempt, with <code>winningAttempt</code>
+or <code>finalAttempt</code> recording the terminal attempt number.</p>
 <p>Direct <code>update</code> Actions support <code>timeoutMs</code> but
 deliberately reject <code>retry</code>. A timeout or database/transport
 failure cannot generally prove whether a mutation reached or committed
 at the server, so generic automatic replay could duplicate business
 state. Application-specific idempotent retry must be modeled explicitly
 instead.</p>
-<h2 id="09-configuration-and-environments">09 Configuration and
-Environments</h2>
-<p>This chapter is the authoritative reading reference for
-author-authored configuration. The files below <a
-href="../schemas"><code>schemas/</code></a> remain the machine-readable
-contract. Schema validation runs before cross-field and filesystem
-validation.</p>
+<h2 id="configuration-and-environments">Configuration and
+environments</h2>
+<p>This page is the authoritative reading reference for author-authored
+configuration. Files in <a href="../schemas"><code>schemas/</code></a>
+remain the machine-readable contract. Schema validation runs before
+cross-field and filesystem validation.</p>
 <h3 id="configuration-layers-and-precedence">Configuration layers and
 precedence</h3>
 <table>
@@ -4514,8 +4514,7 @@ cap</td>
 </tr>
 </tbody>
 </table>
-<p><a
-href="reference/08_reliability_execution_control.md">Reliability</a>
+<p><a href="reference/reliability-execution-control.md">Reliability</a>
 defines timeout/retry precedence and eligibility. CLI
 <code>--output-dir</code> and <code>--run-id</code> override their
 applicable defaults for one command. A field valid in one layer is still
@@ -4578,8 +4577,8 @@ profiles in current ATT</h3>
 <p><code>att-config/v2.11</code> is the active profile contract.
 Profiles can replace configured DBHelper, MQHelper, SSHHelper,
 HTTPHelper and testdata descriptor lists as a whole. See the resource
-chapters and <a href="reference/02_test_authoring.md">Testdata Registry
-and Input Mapping</a> for each binding.</p>
+chapters and <a href="reference/test-authoring.md">Testdata Registry and
+Input Mapping</a> for each binding.</p>
 <p>ATT selects an environment through one common
 <code>att-config/v2.11</code> file. It does not select an environment by
 changing an Action or by adding an environment-specific Tool ID. Actions
@@ -4594,7 +4593,7 @@ environments:</p>
 <p>The common config keeps the existing templates, testcase roots,
 run/execution/report settings, <code>toolGroups</code>, and global
 <code>tools</code> registry. The profile layer contains typed
-DB/MQ/SSH/HTTP descriptor lists; the example below shows DB/MQ
+DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ
 bindings:</p>
 <div class="sourceCode" id="cb77"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="co"># config/config.yaml</span></span>
@@ -4711,7 +4710,7 @@ href="../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a> is
 authoritative for active schema registrations. Package validation checks
 registrations; archived schemas do not become active runtime contracts.
 See the complete matrix in <a
-href="reference/appendices/schema_matrix.md">Appendix A</a>.</p>
+href="reference/appendices/schema-matrix.md">Appendix A</a>.</p>
 <h3 id="global-configuration">Global configuration</h3>
 <div class="sourceCode" id="cb81"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb81-1"><a href="#cb81-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.11</span></span>
@@ -5007,9 +5006,9 @@ sidecar <code>id</code> supplies <code>workbookId</code>, the left side
 of <code>excel.sheet</code> supplies <code>groupId</code>, and the
 configured Case ID cell supplies <code>rowCaseId</code>. Template paths
 are relative to <code>templates.root</code>; project-file expressions
-use one canonical, regular UTF-8 file below the project root and reject
+use one canonical, regular UTF-8 file within the project root and reject
 absolute paths, globs, dynamic locators and symlink escapes. Resource
-file inputs and outputs must remain below their documented safe roots.
+file inputs and outputs must remain within their documented safe roots.
 ATT normalizes and checks root containment before reads and writes.</p>
 <h3 id="topology-and-secrets">Topology and secrets</h3>
 <p>Topology may vary by descriptor and environment. Inject secrets
@@ -5107,41 +5106,41 @@ built-ins, random values, path separators, absolute paths,
 <tbody>
 <tr class="odd">
 <td>Workbook / Sidecar / Snapshot</td>
-<td><a href="reference/02_test_authoring.md">Test Authoring</a></td>
+<td><a href="reference/test-authoring.md">Test Authoring</a></td>
 </tr>
 <tr class="even">
 <td>Template / Flow / Action</td>
-<td><a href="reference/02_test_authoring.md">Test Authoring</a> / <a
-href="reference/14_actions.md">Actions</a></td>
+<td><a href="reference/test-authoring.md">Test Authoring</a> / <a
+href="reference/actions.md">Actions</a></td>
 </tr>
 <tr class="odd">
 <td>Tool command, call, arguments</td>
-<td><a href="reference/05_resources/tools.md">Tool</a></td>
+<td><a href="reference/resources/tools.md">Tool</a></td>
 </tr>
 <tr class="even">
 <td>DB descriptor</td>
-<td><a href="reference/05_resources/dbhelper.md">DBHelper</a></td>
+<td><a href="reference/resources/dbhelper.md">DBHelper</a></td>
 </tr>
 <tr class="odd">
 <td>MQ descriptor</td>
-<td><a href="reference/05_resources/mqhelper.md">MQHelper</a></td>
+<td><a href="reference/resources/mqhelper.md">MQHelper</a></td>
 </tr>
 <tr class="even">
 <td>HTTP descriptor</td>
-<td><a href="reference/05_resources/httphelper.md">HTTPHelper</a></td>
+<td><a href="reference/resources/httphelper.md">HTTPHelper</a></td>
 </tr>
 <tr class="odd">
 <td>SSH descriptor</td>
-<td><a href="reference/05_resources/sshhelper.md">SSHHelper</a></td>
+<td><a href="reference/resources/sshhelper.md">SSHHelper</a></td>
 </tr>
 <tr class="even">
 <td>Timeout / Retry</td>
 <td><a
-href="reference/08_reliability_execution_control.md">Reliability</a></td>
+href="reference/reliability-execution-control.md">Reliability</a></td>
 </tr>
 </tbody>
 </table>
-<h2 id="10-cli-reference">10 CLI Reference</h2>
+<h2 id="cli-reference">CLI reference</h2>
 <h3 id="commands">Commands</h3>
 <table>
 <thead>
@@ -5464,7 +5463,7 @@ scenario, reports invalid declared descriptors, and ignores unrelated
 YAML. Both accept <code>--config</code>, <code>--env</code>,
 <code>--format</code>, <code>--quiet</code>, and <code>--verbose</code>
 in discovery mode.</p>
-<h3 id="typed-overrides-and-quick-load">Typed overrides and Quick
+<h3 id="typed-overrides-and-quick-load">Typed overrides and quick
 Load</h3>
 <p><code>--set</code> is repeatable and accepts exactly one namespace:
 <code>input</code>, <code>arg</code>, or <code>vars</code>. Values use
@@ -5513,7 +5512,7 @@ throttled errors, never one console block per successful iteration.</p>
 <h3 id="debug-inputs-and-outputs">Debug inputs and outputs</h3>
 <p>This chapter defines target, <code>--input</code>, <code>--set</code>
 and <code>--env</code> syntax in the option matrix. <a
-href="reference/04_execution_modes/debug.md">Debug</a> owns input
+href="reference/execution-modes/debug.md">Debug</a> owns input
 discovery, bootstrap variables, protected roots and output
 lifecycle.</p>
 <h3 id="exit-codes">Exit codes</h3>
@@ -5592,7 +5591,7 @@ options remain command-specific: <code>--suite</code>,
 <code>--allow-parallel-runs</code>, <code>--profile</code>,
 <code>--config</code>, <code>--env</code>, and <code>--help</code> are
 accepted only where the command contract permits them.</p>
-<h2 id="11-results-reports-and-evidence">11 Results, Reports, and
+<h2 id="results-reports-and-evidence">Results, reports, and
 Evidence</h2>
 <h3 id="run-directory">Run directory</h3>
 <pre class="text"><code>&lt;outputDirectory&gt;/&lt;RunID&gt;/
@@ -5608,7 +5607,7 @@ Evidence</h2>
 completed only when its <code>run.yaml</code> state is
 <code>COMPLETE</code>; interrupted work remains directly below its
 reserved Run ID for debugging.</p>
-<h3 id="human-html-report">Human HTML report</h3>
+<h3 id="human-readable-html-report">Human-readable HTML report</h3>
 <p><code>report/index.html</code> is the primary end-user report. It can
 be opened without a web server. Groups are summarized by
 <code>workbookId.groupId</code>; the interface labels
@@ -5640,7 +5639,7 @@ grouping.</p>
 <p><code>report/junit.html</code> is a human-readable JUnit projection.
 It displays counts and one row per testcase with status, duration, and
 embedded case-log content or a relative artifact link.</p>
-<h3 id="tool-evidence-collector-failures">Tool evidence collector
+<h3 id="tool-evidence-collector-failures">Tool Evidence collector
 failures</h3>
 <p>An evidence collector is post-operation observability, not the
 primary Tool result. With <code>onFailure: continue</code>, the primary
@@ -5670,7 +5669,7 @@ status, and timeout details remain under <code>evidence</code> when
 provided by the executor. Failed collector evidence is bounded/redacted;
 raw input, payload, argv, output, resolved command text and the failed
 <code>result</code> are not published. See <a
-href="reference/appendices/limits_defaults.md">Appendix D</a> for the
+href="reference/appendices/limits-defaults.md">Appendix D</a> for the
 exact projection, numeric budgets and security guarantees.</p>
 <p>For retries, inspect
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>.
@@ -5686,7 +5685,7 @@ message, exit code, and bounded stderr can be diagnosed without opening
 internal exception traces. Existing capture limits and secret redaction
 continue to apply; collector wrapping does not enable unbounded raw
 output.</p>
-<h3 id="result-workbook">Result workbook</h3>
+<h3 id="result-workbook">Result Workbook</h3>
 <p>ATT copies the source workbook and appends configured result columns
 using <code>report.mode: append-to-copy</code>. Set
 <code>report.mode: none</code> for CI or large runs that do not need a
@@ -5799,7 +5798,7 @@ documentation, schema, or other source files. It canonicalizes paths,
 rejects source/package roots and external symlink targets, is
 idempotent, and reports what it removed.</p>
 <h3 id="run-execution-and-evidence-navigation">Run, execution and
-evidence navigation</h3>
+Evidence navigation</h3>
 <table>
 <thead>
 <tr class="header">
@@ -5884,8 +5883,8 @@ testcase per ATT case</td>
 <p>Generated envelopes reject additional top-level fields according to
 their schemas. JUnit HTML is a human-readable output and not an XML/JSON
 schema artifact.</p>
-<h3 id="reading-caselog-and-caseyaml">Reading case.log and
-case.yaml</h3>
+<h3 id="reading-caselog-and-caseyaml">Reading <code>case.log</code> and
+<code>case.yaml</code></h3>
 <p>Case log structured entries use YAML. The human log records each
 normal Action and each Tool/DB invocation once; duplicated attempt
 fields and persisted TOOL/DB subtrees are omitted from this projection.
@@ -5897,18 +5896,18 @@ markers, which carry no ATT identifier semantics.</p>
 FAIL or INVALID with <code>【!!!!!】</code>. Search for that marker to
 find abnormal blocks; PASS, SKIPPED and informational blocks remain
 unmarked.</p>
-<h2 id="12-validation-and-troubleshooting">12 Validation and
-Troubleshooting</h2>
+<h2 id="validation-and-troubleshooting">Validation and
+troubleshooting</h2>
 <h3 id="where-to-look-first">Where to look first</h3>
 <p>Run <code>validate --package</code> and fix the diagnostic's
 file/field first. For runtime failures, inspect the report
 status/message, then the execution's <code>case.log</code>,
 <code>case.yaml</code> and Action evidence. <a
-href="reference/08_reliability_execution_control.md">Reliability</a>
+href="reference/reliability-execution-control.md">Reliability</a>
 defines FAIL versus ERROR, continuation and retries; <a
-href="reference/11_results_reports_evidence.md">Results</a> identifies
+href="reference/results-reports-evidence.md">Results</a> identifies
 collector failure paths. See <a
-href="reference/appendices/limits_defaults.md">Appendix D</a> for
+href="reference/appendices/limits-defaults.md">Appendix D</a> for
 Windows launchers, Java SSH negotiation and stack-trace policy.</p>
 <h3 id="start-with-validation">Start with validation</h3>
 <p>Run this after every workbook, sidecar, template, helper, or tool
@@ -5918,7 +5917,7 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb92-1"><a href="#
 <p>For one environment, use
 <code>./att.sh validate --config config/config.yaml --env SIT --package</code>.
 ATT validates descriptors against the active schemas in <a
-href="reference/appendices/schema_matrix.md">Appendix A</a>. Superseded
+href="reference/appendices/schema-matrix.md">Appendix A</a>. Superseded
 schema files under <code>schemas/history/</code> are historical
 references, not runtime compatibility contracts. Update the declared
 <code>schemaVersion</code> and migrate fields to the active contract
@@ -5926,7 +5925,7 @@ before validation. Diagnostics retain the original violation, file and
 YAML field location and provide migration guidance; they never rewrite
 descriptors. For example, replace a historical Render action with an
 Assign using <code>&amp;{path}</code> and pass the resulting String as
-described in <a href="reference/14_actions.md">Actions and Typed
+described in <a href="reference/actions.md">Actions and Typed
 Values</a>. Unsupported versions fail before execution.</p>
 <p>Current schemas are in <a
 href="../schemas"><code>schemas/</code></a>; older definitions are under
@@ -5977,7 +5976,8 @@ files</td>
 <tr class="odd">
 <td><code>ATT-CFG</code></td>
 <td>Unknown field, duplicate key, wrong schema/type/enum</td>
-<td>Compare with Chapter 6 and remove unsupported fields</td>
+<td>Compare with <a href="reference/configuration.md">Configuration</a>
+and remove unsupported fields</td>
 </tr>
 <tr class="even">
 <td><code>ATT-TOOL</code></td>
@@ -6001,7 +6001,7 @@ roots</td>
 <h3 id="common-questions">Common questions</h3>
 <h4
 id="why-is-the-case-id-rejected-although-excel-displays-it-correctly">Why
-is the Case ID rejected although Excel displays it correctly?</h4>
+is the case ID rejected although excel displays it correctly?</h4>
 <p>ATT imports displayed cell text, then applies strict ID safety
 checks. Check hidden leading/trailing whitespace, trailing
 <code>.</code>, path characters, controls, and Windows device names.
@@ -6028,16 +6028,16 @@ readable logical path; <code>ATT-CTX-002</code> lists every conflicting
 candidate so you can lengthen it. The diagnostic intentionally omits the
 full Context tree. A declared optional field with a blank value is still
 valid and renders as the empty string.</p>
-<h4 id="why-did-a-fail-become-error">Why did a FAIL become ERROR?</h4>
+<h4 id="why-did-a-fail-become-error">Why did a fail become error?</h4>
 <p>A false assertion is FAIL. Invalid expression syntax/navigation, tool
 failure, timeout, parse failure, I/O failure, or runtime exception is
 ERROR. Inspect the action evidence rather than only the final aggregate
 status.</p>
-<h4 id="why-did-a-tool-run-more-than-once">Why did a tool run more than
+<h4 id="why-did-a-tool-run-more-than-once">Why did a Tool Run more than
 once?</h4>
 <p>Its action used retry and received an eligible non-zero exit code.
 Inspect the attempt list and final action record in the case log.</p>
-<h4 id="can-i-use-a-shell-pipeline-in-command">Can I use a shell
+<h4 id="can-i-use-a-shell-pipeline-in-command">Can i use a shell
 pipeline in <code>command</code>?</h4>
 <p>No. ATT passes <code>|</code>, <code>&gt;</code>, and
 <code>&lt;</code> literally. Put shell behavior inside a reviewed tool
@@ -6047,7 +6047,7 @@ array argument reject <code>[]</code>?</h4>
 <p>Required validation happens before argv expansion. An empty typed
 List is missing input; pass at least one scalar item or make the
 argument optional.</p>
-<h4 id="should-i-use-package-or-selected-validation">Should I use
+<h4 id="should-i-use-package-or-selected-validation">Should i use
 package or selected validation?</h4>
 <p>Use selected mode for fast local feedback. Use package mode before
 release, CI promotion, or sharing a package.</p>
@@ -6067,7 +6067,7 @@ reports and archives before sharing.</p>
 <div class="sourceCode" id="cb93"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb93-1"><a href="#cb93-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
 <span id="cb93-2"><a href="#cb93-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb93-3"><a href="#cb93-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.7.2&quot;</span><span class="fu">,</span></span>
+<span id="cb93-3"><a href="#cb93-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.7.3&quot;</span><span class="fu">,</span></span>
 <span id="cb93-4"><a href="#cb93-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
 <span id="cb93-5"><a href="#cb93-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
 <span id="cb93-6"><a href="#cb93-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
@@ -6119,8 +6119,7 @@ the Template reached it. Tool and DB evidence adds attempts, timeout,
 parse/capture, parameter binding, and cancellation details where
 available. File save failures include the configured path and allowed
 artifact root.</p>
-<h2 id="13-ci-packaging-and-operations">13 CI, Packaging, and
-Operations</h2>
+<h2 id="ci-packaging-and-operations">CI, packaging, and operations</h2>
 <p>ATT supports source-tree development and offline release
 packages.</p>
 <h3 id="developmentrelease-gates">Development/release gates</h3>
@@ -6160,8 +6159,8 @@ output root must be serialized.</p>
 <p>Maintainer implementation sequencing, scheduler internals and
 resource-owner details live in <code>docs/system-design/</code>, not in
 this end-user Reference.</p>
-<h2 id="appendix-a--schema-and-version-matrix">Appendix A — Schema and
-Version Matrix</h2>
+<h2 id="appendix-a--schema-and-version-matrix">Appendix A — schema and
+version matrix</h2>
 <p>Active schemas (source of truth:
 <code>schemas/catalog.yaml</code>):</p>
 <table>
@@ -6254,7 +6253,7 @@ authoritative. Package validation checks the registered schema resources
 themselves; it does not enable runtime compatibility for archived
 versions.</p>
 <h2 id="appendix-b--compatibility-and-deprecated-aliases">Appendix B —
-Compatibility and Deprecated Aliases</h2>
+compatibility and deprecated aliases</h2>
 <p>Compatibility exists to read established packages without creating a
 second current model. New authoring uses canonical <code>EXEC</code>,
 <code>META</code>, Action-local <code>output</code>, current schema
@@ -6264,9 +6263,9 @@ warnings. Aliases are not created where old semantics conflict with
 scope isolation or the common result/evidence contract. Deprecated
 CLI/authoring forms remain documented in their owning chapter or
 CHANGELOG only when users still need a migration path.</p>
-<h2 id="appendix-c--migration-notes">Appendix C — Migration Notes</h2>
-<h3 id="att-372-file-arguments-and-case-log-paths">ATT 3.7.2 file
-arguments and case-log paths</h3>
+<h2 id="appendix-c--migration-notes">Appendix C — migration notes</h2>
+<h3 id="file-arguments-and-case-log-paths">File arguments and case-log
+paths</h3>
 <p>HTTPHelper calls no longer accept <code>file</code>; pass
 <code>&amp;{project-relative-file}</code> directly as <code>body</code>.
 MQHelper <code>send</code> and <code>request</code> no longer accept
@@ -6289,7 +6288,7 @@ Paths. Absolute paths outside the project root use a bounded
 <code>$EXTERNAL/&lt;basename&gt;</code> presentation when logged as Path
 values or embedded in diagnostic messages. Explicit remote-path fields
 and URLs retain their values.</p>
-<h3 id="previous-release-testdata-migration">Previous release testdata
+<h3 id="previous-release-testdata-migration">Previous release Testdata
 migration</h3>
 <p>Change global configuration from <code>att-config/v2.10</code> to
 <code>att-config/v2.11</code> and Load scenarios from
@@ -6394,8 +6393,8 @@ evidence.output.format is human presentation only.</td>
 <tr class="even">
 <td>Older active resource/config schema versions</td>
 <td>Use the active schema from <a
-href="reference/appendices/schema_matrix.md">Appendix A</a> and migrate
-the fields above. Historical schemas are not active contracts.</td>
+href="reference/appendices/schema-matrix.md">Appendix A</a> and migrate
+the listed fields. Historical schemas are not active contracts.</td>
 </tr>
 </tbody>
 </table>
@@ -6442,10 +6441,10 @@ migration-only: rewrite it as the current policy-only
 <p>Unsupported schema versions fail before execution and include
 migration guidance. ATT does not auto-upgrade package files or invoke
 external resources to build the diagnostic. See <a
-href="reference/14_actions.md">Actions and Typed Values</a>, <a
-href="reference/03_runtime_context.md">Runtime and Context Model</a>, <a
-href="reference/04_execution_modes/load.md">Load Mode</a> and <a
-href="reference/appendices/schema_matrix.md">Schema Matrix</a>.</p>
+href="reference/actions.md">Actions and Typed Values</a>, <a
+href="reference/runtime-context.md">Runtime and Context Model</a>, <a
+href="reference/execution-modes/load.md">Load Mode</a> and <a
+href="reference/appendices/schema-matrix.md">Schema Matrix</a>.</p>
 <h3 id="historical-schema-migration">Historical schema migration</h3>
 <p>ATT 3.6.2 uses <code>att-template/v3.6</code> and
 <code>att-flow/v3.6</code> as the active schemas. The published
@@ -6522,35 +6521,35 @@ locators; the target must be a regular strict-UTF-8 file.</p>
 <p>Unsupported schema versions fail validation before execution with
 migration guidance. ATT does not silently convert old fields or run
 Tools/resources while producing that guidance.</p>
-<p>See <a href="reference/03_runtime_context.md">Runtime and Context
+<p>See <a href="reference/runtime-context.md">Runtime and Context
 Model</a> for META lifecycle and <a
-href="reference/04_execution_modes/load.md">Load Mode</a> for execution
+href="reference/execution-modes/load.md">Load Mode</a> for execution
 identity and retained evidence paths.</p>
 <h3 id="debug-schema-migration">Debug schema migration</h3>
 <p><code>att-debug/v1.0</code> is historical; upgrade to
 <code>att-debug/v1.1</code>. Template/Flow may define <code>vars</code>
 to seed <code>EXEC.VARS</code>; Tool targets do not support
 <code>vars</code>. See <a
-href="reference/04_execution_modes/debug.md">Debug</a> for current input
+href="reference/execution-modes/debug.md">Debug</a> for current input
 and argument rules.</p>
 <h3 id="global-configuration-migration">Global configuration
 migration</h3>
 <p>Old <code>timeoutSeconds</code>, <code>reportDirectory</code>,
 <code>logDirectory</code>, <code>validation</code>, and
 <code>environmentPolicy</code> fields are not part of the active global
-contract. See <a href="reference/09_configuration.md">Configuration</a>
-for current fields.</p>
+contract. See <a href="reference/configuration.md">Configuration</a> for
+current fields.</p>
 <h3 id="environment-profile-migration">Environment profile
 migration</h3>
 <p>When migrating complete-config packages, preserve descriptors and
 Actions, move common settings to <code>config/config.yaml</code>, move
 descriptor lists to <code>environments.&lt;NAME&gt;</code>, and select
 with <code>--config config/config.yaml --env &lt;NAME&gt;</code>. See <a
-href="reference/09_configuration.md">Configuration</a> for the current
+href="reference/configuration.md">Configuration</a> for the current
 contract.</p>
 <h2
 id="appendix-d--limits-security-guarantees-and-advanced-diagnostics">Appendix
-D — Limits, Security Guarantees and Advanced Diagnostics</h2>
+D — limits, security guarantees and advanced diagnostics</h2>
 <h3 id="limits-and-defaults">Limits and defaults</h3>
 <p>Use the owning schema/configuration chapter for normative field
 defaults. Important architectural limits include:</p>
@@ -6647,7 +6646,7 @@ execution.</p>
 <h4
 id="why-does-attbat-ask-for-maven-or-why-does-a-sh-tool-fail-on-windows">Why
 does <code>att.bat</code> ask for Maven, or why does a <code>.sh</code>
-tool fail on Windows?</h4>
+Tool fail on windows?</h4>
 <p>In a binary release, <code>att.bat</code> finds
 <code>lib\att-*.jar</code> and only requires Java 8+. In a source tree
 it compiles with Maven when Maven is on <code>PATH</code>; without

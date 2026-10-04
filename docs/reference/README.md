@@ -1,4 +1,4 @@
-# Reference Manual source modules
+# Reference manual source modules
 
 These modules are the authoritative editable sources for the current ATT Reference Manual.
 

@@ -8,17 +8,17 @@ DOCS = ROOT / "docs"
 MANIFEST = DOCS / "reference-manifest.txt"
 
 REQUIRED = {
-    "03_runtime_context.md": ["EXEC.INPUT", "EXEC.VARS", "EXEC.ACTIONS", "EXEC.LOAD", "META", "EXEC.ACTIONS.<id>.output", "META.HTTPHELPER"],
-    "04_execution_modes/run.md": ["run", "Testcase", "Stage", "latest-run.yaml", "exit"],
-    "04_execution_modes/debug.md": ["att-debug/v1.1", "vars", "EXEC.VARS", "template", "flow", "tool", "debug.yaml", "--input", "--env", "output/debug", "exit"],
-    "04_execution_modes/load.md": ["att-load/v1.6", "testdata", "scope", "selection", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
-    "05_resources/tools.md": ["command-backed", "call-backed", "output.result", "stdoutFormat", "evidence"],
-    "05_resources/dbhelper.md": ["att-dbhelper/v2.6", "query", "update", "transaction", "JDBC", "evidence"],
-    "05_resources/mqhelper.md": ["att-mqhelper/v1.2", "send", "receive", "request", "IBM MQ", "String", "evidence"],
-    "05_resources/operation_result.md": ["output.result", "evidence", "diagnostic", "attempts", "String", "responseFormat"],
-    "14_actions.md": ["output.result", "String", "stdoutFormat", "responseFormat", "evidence.output"],
-    "09_configuration.md": ["--env", "dbhelpers", "mqhelpers", "ENV", "logical", "run", "validate", "debug", "load"],
-    "08_reliability_execution_control.md": ["assert", "runWhen", "onFailure", "timeout", "retry", "attempts", "PASS", "FAIL", "ERROR", "INVALID", "SKIPPED"],
+    "runtime-context.md": ["EXEC.INPUT", "EXEC.VARS", "EXEC.ACTIONS", "EXEC.LOAD", "META", "EXEC.ACTIONS.<id>.output", "META.HTTPHELPER"],
+    "execution-modes/run.md": ["run", "Testcase", "Stage", "latest-run.yaml", "exit"],
+    "execution-modes/debug.md": ["att-debug/v1.1", "vars", "EXEC.VARS", "template", "flow", "tool", "debug.yaml", "--input", "--env", "output/debug", "exit"],
+    "execution-modes/load.md": ["att-load/v1.6", "testdata", "scope", "selection", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
+    "resources/tools.md": ["command-backed", "call-backed", "output.result", "stdoutFormat", "evidence"],
+    "resources/dbhelper.md": ["att-dbhelper/v2.6", "query", "update", "transaction", "JDBC", "evidence"],
+    "resources/mqhelper.md": ["att-mqhelper/v1.2", "send", "receive", "request", "IBM MQ", "String", "evidence"],
+    "resources/operation-result.md": ["output.result", "evidence", "diagnostic", "attempts", "String", "responseFormat"],
+    "actions.md": ["output.result", "String", "stdoutFormat", "responseFormat", "evidence.output"],
+    "configuration.md": ["--env", "dbhelpers", "mqhelpers", "ENV", "logical", "run", "validate", "debug", "load"],
+    "reliability-execution-control.md": ["assert", "runWhen", "onFailure", "timeout", "retry", "attempts", "PASS", "FAIL", "ERROR", "INVALID", "SKIPPED"],
 }
 
 FORBIDDEN = [
@@ -42,8 +42,11 @@ def main():
         items = [x.strip() for x in MANIFEST.read_text(encoding="utf-8").splitlines()
                  if x.strip() and not x.lstrip().startswith("#")]
 
-    if "05_resources/operation_result.md" not in items:
-        fail(errors, "manifest must include 05_resources/operation_result.md")
+    if "resources/operation-result.md" not in items:
+        fail(errors, "manifest must include resources/operation-result.md")
+    for item in items:
+        if any(re.match(r"^\d+[_-]", part) for part in item.split("/")):
+            fail(errors, "manifest path encodes order in a numeric prefix: " + item)
 
     for rel in items:
         for lang_root in (DOCS / "reference", DOCS / "reference.zh"):
@@ -119,21 +122,20 @@ def main():
 
     # Reference must no longer contain the old tutorial/cookbook or maintainer chapter.
     for lang_root in (DOCS / "reference", DOCS / "reference.zh"):
-        authoring = lang_root / "02_test_authoring.md"
+        authoring = lang_root / "test-authoring.md"
         if authoring.is_file():
             text = authoring.read_text(encoding="utf-8")
-            for old in ("### 02 Quick Start", "### 04 Cookbook", "#### 3.3 Tool", "#### 3.4 Running Tests", "#### 3.5 Reports"):
+            for old in ("## Quick Start", "## Cookbook", "### Tool", "### Running Tests", "### Reports"):
                 if old in text:
                     fail(errors, "%s still contains migrated material: %s" %
                          (authoring.relative_to(ROOT), old))
-            if re.search(r"(?m)^#{3,5}\s+3\.[12]\b", text):
-                fail(errors, "%s still uses legacy User Guide section numbering" %
-                     authoring.relative_to(ROOT))
-            if any(not re.search(r"(?m)^###\s+2\.%s\s+" % n, text) for n in range(1, 6)):
+            required_sections = ("Workbook", "Stage", "Template", "Flow", "Authoring lifecycle")
+            if any(not re.search(r"(?m)^##\s+" + re.escape(section) + r"\s*$", text)
+                   for section in required_sections):
                 fail(errors, "%s must expose Workbook, Stage, Template, Flow and authoring lifecycle peer sections" %
                      authoring.relative_to(ROOT))
 
-    en_ops = DOCS / "reference" / "13_ci_packaging_operations.md"
+    en_ops = DOCS / "reference" / "ci-packaging-operations.md"
     if en_ops.is_file() and "Architecture for Maintainers" in en_ops.read_text(encoding="utf-8"):
         fail(errors, "Reference 13 still contains Architecture for Maintainers")
 

@@ -116,4 +116,4 @@ Closed workload 使用 load.users 及必填 duration，可配置 execution.think
 ./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
 ~~~
 
-同一 scenario 的 workloads 必須使用相同 model 與 phase timing envelope。Multi-workload 是多個固定 target 各自 pacing，不會在 target 間隨機切換。CLI load-model overrides 僅適用單一 workload；多 workload 時請修改 YAML。完整欄位、threshold、CLI option 與報告契約見[Load Mode](../../docs/reference/04_execution_modes/load.md)。
+同一 scenario 的 workloads 必須使用相同 model 與 phase timing envelope。Multi-workload 是多個固定 target 各自 pacing，不會在 target 間隨機切換。CLI load-model overrides 僅適用單一 workload；多 workload 時請修改 YAML。完整欄位、threshold、CLI option 與報告契約見[Load Mode](../../docs/reference/execution-modes/load.md)。

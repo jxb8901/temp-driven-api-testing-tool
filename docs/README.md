@@ -24,18 +24,18 @@ Minimal offline workflow:
 | I want to... | Go to |
 |---|---|
 | Create my first test | [Quick Start](quick-start.md) |
-| Understand workbook, sidecar, or snapshot | [Test Authoring](reference/02_test_authoring.md) |
-| Write a Template or Flow | [Test Authoring](reference/02_test_authoring.md) |
-| Call an external script or program | [Tool](reference/05_resources/tools.md) |
-| Query or update a database | [DBHelper](reference/05_resources/dbhelper.md) |
-| Send, receive, or request MQ messages | [MQHelper](reference/05_resources/mqhelper.md) |
-| Route SSH Tools across SIT/UAT or clustered hosts | [SSHHelper](reference/05_resources/sshhelper.md) · [中文](reference.zh/05_resources/sshhelper.md) |
-| Debug one Template, Flow, or Tool | [Debug](reference/04_execution_modes/debug.md) |
-| Run a load test | [Load](reference/04_execution_modes/load.md) |
-| Switch SIT/UAT resources | [Configuration and Environments](reference/09_configuration.md) |
-| Understand `${...}` and `#{...}` | [Expressions](reference/07_expressions.md) |
-| Diagnose FAIL, ERROR, or INVALID | [Validation and Troubleshooting](reference/12_validation_diagnostics.md) |
-| Integrate ATT with CI or package a release | [CI, Packaging, and Operations](reference/13_ci_packaging_operations.md) |
+| Understand workbook, sidecar, or snapshot | [Test Authoring](reference/test-authoring.md) |
+| Write a Template or Flow | [Test Authoring](reference/test-authoring.md) |
+| Call an external script or program | [Tool](reference/resources/tools.md) |
+| Query or update a database | [DBHelper](reference/resources/dbhelper.md) |
+| Send, receive, or request MQ messages | [MQHelper](reference/resources/mqhelper.md) |
+| Route SSH Tools across SIT/UAT or clustered hosts | [SSHHelper](reference/resources/sshhelper.md) · [中文](reference.zh/resources/sshhelper.md) |
+| Debug one Template, Flow, or Tool | [Debug](reference/execution-modes/debug.md) |
+| Run a load test | [Load](reference/execution-modes/load.md) |
+| Switch SIT/UAT resources | [Configuration and Environments](reference/configuration.md) |
+| Understand `${...}` and `#{...}` | [Expressions](reference/expressions.md) |
+| Diagnose FAIL, ERROR, or INVALID | [Validation and Troubleshooting](reference/validation-diagnostics.md) |
+| Integrate ATT with CI or package a release | [CI, Packaging, and Operations](reference/ci-packaging-operations.md) |
 
 ## Documentation types and language
 
