@@ -61,7 +61,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [SSHHelper: logical SSH targets](#sshhelper-logical-ssh-targets)
 - [Reliability and execution control](#reliability-and-execution-control)
   - [Assertion and status](#assertion-and-status)
-  - [`RunWhen` and `onFailure`](#runwhen-and-onfailure)
+  - [`runWhen` and `onFailure`](#runwhen-and-onfailure)
   - [Timeout](#timeout)
   - [Retry and attempts](#retry-and-attempts)
   - [Evidence collectors](#evidence-collectors)
@@ -69,7 +69,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Aggregation](#aggregation)
   - [Stage execution controls](#stage-execution-controls)
   - [Tool Timeout precedence](#tool-timeout-precedence)
-  - [Direct db Timeout and Retry eligibility](#direct-db-timeout-and-retry-eligibility)
+  - [Direct DB timeout and retry eligibility](#direct-db-timeout-and-retry-eligibility)
 - [Configuration and environments](#configuration-and-environments)
   - [Configuration layers and precedence](#configuration-layers-and-precedence)
   - [Ignore or disable ATT-owned configuration with `x-`](#ignore-or-disable-att-owned-configuration-with-x)
@@ -80,7 +80,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Topology and secrets](#topology-and-secrets)
   - [Cross-mode consistency](#cross-mode-consistency)
   - [Separate configuration files](#separate-configuration-files)
-  - [`Config.report.fileNamePattern`](#configreportfilenamepattern)
+  - [`config.report.fileNamePattern`](#configreportfilenamepattern)
   - [Feature configuration owners](#feature-configuration-owners)
 - [CLI reference](#cli-reference)
   - [Commands](#commands)
@@ -91,16 +91,16 @@ Status: Normative end-user documentation; generated from modular sources
   - [Complete option matrix](#complete-option-matrix)
 - [Results, reports, and Evidence](#results-reports-and-evidence)
   - [Run directory](#run-directory)
-  - [Human html report](#human-html-report)
+  - [Human-readable HTML report](#human-readable-html-report)
   - [Tool Evidence collector failures](#tool-evidence-collector-failures)
   - [Result Workbook](#result-workbook)
-  - [Junit XML](#junit-xml)
+  - [JUnit XML](#junit-xml)
   - [CI JSON summary](#ci-json-summary)
   - [Run manifest and reproducibility](#run-manifest-and-reproducibility)
   - [Documentation, archive, and clean](#documentation-archive-and-clean)
   - [Run, execution and Evidence navigation](#run-execution-and-evidence-navigation)
   - [Generated-output schema summary](#generated-output-schema-summary)
-  - [Reading case.log and case.YAML](#reading-caselog-and-caseyaml)
+  - [Reading `case.log` and `case.yaml`](#reading-caselog-and-caseyaml)
 - [Validation and troubleshooting](#validation-and-troubleshooting)
   - [Where to look first](#where-to-look-first)
   - [Start with validation](#start-with-validation)
@@ -179,7 +179,7 @@ For a guided package build, use [Quick Start](quick-start.md). The rest of this 
 | Goal | Go to |
 |---|---|
 | Build the first ATT package | [Quick Start](quick-start.md) |
-| Understand the core ATT model | Chapters 1–5 |
+| Understand the core ATT model | [Product model](reference/overview.md#product-model) |
 | Configure DB/MQ/HTTP/SSH | [Resources](reference/resources/overview.md) |
 | Find a CLI option | [CLI Reference](reference/cli.md) |
 | Diagnose a failure | [Validation and Troubleshooting](reference/validation-diagnostics.md) |
@@ -871,7 +871,7 @@ Run evidence is written directly below `output/<RunID>/`. The completed run publ
 
 Status aggregation preserves severity: ERROR > INVALID > FAIL > PASS > SKIPPED. Process exit code is `0` when the run completes without failing status, `1` for test/assertion failure, `2` for invalid command/configuration/validation, and `3` for runtime/infrastructure error.
 
-Use Chapter 10 for exact selectors/options, Chapter 8 for execution control, and Chapter 11 for artifact contracts.
+Use the [CLI Reference](reference/cli.md) for exact selectors and options, [Reliability](reference/reliability-execution-control.md) for execution control, and [Results, Reports, and Evidence](reference/results-reports-evidence.md) for artifact contracts.
 
 ### Standalone Debug
 
@@ -1931,7 +1931,7 @@ This chapter owns cross-cutting public execution behavior.
 
 An assertion evaluates a boolean condition after the Action's primary work at the documented assertion point. A false assertion is `FAIL`; an exception/infrastructure problem is `ERROR`; invalid authoring/configuration is `INVALID`; a non-selected condition is `SKIPPED`; successful work is `PASS`. Operation failure and assertion failure are therefore distinct.
 
-### `RunWhen` and `onFailure`
+### `runWhen` and `onFailure`
 
 `runWhen` controls whether a statically known Action/Stage is eligible to execute. `onFailure: stop|continue` controls continuation after failure; `continue` never changes the failed status into PASS. Cleanup/diagnostic work should use the documented conditional execution semantics rather than hiding failures.
 
@@ -1984,7 +1984,7 @@ Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evide
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, Stages and Templates do not own timeout/retry defaults. For call-backed DB Tools, the DBHelper statement timeout remains a backend ceiling. Each supported primary retry attempt runs its collectors before assertion; collector continuation behavior does not turn a failed primary operation into PASS.
 
-### Direct db Timeout and Retry eligibility
+### Direct DB timeout and retry eligibility
 
 Direct DB Actions may declare `timeoutMs` from 1 to 3,600,000 ms. When present, `Action.timeoutMs` overrides `DBHelper.statement.timeoutSeconds`; otherwise the helper timeout is used. Each retry attempt gets a fresh Action timeout, and the retry interval is outside that timeout.
 
@@ -1994,7 +1994,7 @@ Direct `update` Actions support `timeoutMs` but deliberately reject `retry`. A t
 
 ## Configuration and environments
 
-This chapter is the authoritative reading reference for author-authored configuration. The files below [`schemas/`](../schemas) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
+This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../schemas) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
 
 ### Configuration layers and precedence
 
@@ -2246,7 +2246,7 @@ Run ID and full Case ID are used directly as directory names; ATT does not slugi
 
 Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not have leading/trailing whitespace or trailing `.`, and not contain `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, or control characters. Windows device names such as `CON`, `NUL`, `COM1`, and `LPT1` are rejected case-insensitively.
 
-`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; project-file expressions use one canonical, regular UTF-8 file below the project root and reject absolute paths, globs, dynamic locators and symlink escapes. Resource file inputs and outputs must remain below their documented safe roots. ATT normalizes and checks root containment before reads and writes.
+`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; project-file expressions use one canonical, regular UTF-8 file within the project root and reject absolute paths, globs, dynamic locators and symlink escapes. Resource file inputs and outputs must remain within their documented safe roots. ATT normalizes and checks root containment before reads and writes.
 
 ### Topology and secrets
 
@@ -2261,7 +2261,7 @@ Run, Validate, Debug, and Load resolve the selected environment through the same
 Separate `--config config/environments/sit.yaml` and `uat.yaml` files remain useful when package roots, report policy, Tool topology, or other configuration intentionally differ. Use profiles when the package contract is shared and only resource bindings change.
 
 
-### `Config.report.fileNamePattern`
+### `config.report.fileNamePattern`
 
 #### Context and legal forms
 
@@ -2481,7 +2481,7 @@ The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `
 
 Run and Case IDs appear unchanged after validation. A run is completed only when its `run.yaml` state is `COMPLETE`; interrupted work remains directly below its reserved Run ID for debugging.
 
-### Human html report
+### Human-readable HTML report
 
 `report/index.html` is the primary end-user report. It can be opened without a web server. Groups are summarized by `workbookId.groupId`; the interface labels `groupId` as Sheet because it maps to one physical sheet. Cases supports Workbook/Sheet/Status dropdowns, case-insensitive search over workbook/group/full Case ID/tags, and ascending/descending sorting from every column heading. Duration sorting is numeric.
 
@@ -2510,7 +2510,7 @@ For retries, inspect `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collec
 
 ATT copies the source workbook and appends configured result columns using `report.mode: append-to-copy`. Set `report.mode: none` for CI or large runs that do not need a copied workbook. Global `report.fileNamePattern` controls the copy filename. Sidecar `report.columns` changes workbook labels only. Supported mappings include `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, and `runTime`; Expected/Actual cells retain LF characters and use wrapped text. Row matching reads the Case ID with the same Excel `DataFormatter` and whitespace normalization as testcase loading, so displayed formats such as numeric leading zeroes identify the same Case during execution and report writing.
 
-### Junit XML
+### JUnit XML
 
 Each ATT case maps to one `<testcase>`:
 
@@ -2571,7 +2571,7 @@ DIAG is evidence-only. Do not reference DIAG, EXEC.MODE or arbitrary scheduler c
 
 Generated envelopes reject additional top-level fields according to their schemas. JUnit HTML is a human-readable output and not an XML/JSON schema artifact.
 
-### Reading case.log and case.YAML
+### Reading `case.log` and `case.yaml`
 
 Case log structured entries use YAML. The human log records each normal Action and each Tool/DB invocation once; duplicated attempt fields and persisted TOOL/DB subtrees are omitted from this projection. Complete final Stage/Template/Action/Tool/DB state remains in `case.yaml`. `caseLog.yamlAnchors: false` fully expands shared Map/List objects; `true` permits YAML anchor markers, which carry no ATT identifier semantics.
 
@@ -2603,7 +2603,7 @@ Then use the diagnostic code and structured location. Do not automate against me
 | `ATT-CTX` | Unknown or ambiguous Context path | Inspect requested/current/missing fields, nearest suggestion, or canonical candidates |
 | `ATT-STG` | Blank required selector, invalid selector YAML, duplicate stage key | Check selector form, `name`, aliases, and required flag |
 | `ATT-TPL` | Unknown/duplicate template, invalid action or payload | Check symbolic name/full path, descriptor, action type, and local files |
-| `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with Chapter 6 and remove unsupported fields |
+| `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with [Configuration](reference/configuration.md) and remove unsupported fields |
 | `ATT-TOOL` | Unknown/missing argument, process or parse failure | Compare call contract; inspect exit code and bounded stdout/stderr capture evidence |
 | `ATT-PATH` | Illegal ID or escaping path | Remove illegal characters and keep content below configured roots |
 | `ATT-RUN` | Timeout, non-zero exit, render/runtime failure | Inspect case log and action/tool evidence |
@@ -2784,7 +2784,7 @@ ATT 3.6.2 separates typed operation results, external parsing, project-file Stri
 | Log file | Pass the value directly to Log.value. |
 | Log fields | Put the typed map/list in Log.value and select Log.format. |
 | HTTP/MQ common result formatting | Use responseFormat for ingress parsing; optional evidence.output.format is human presentation only. |
-| Older active resource/config schema versions | Use the active schema from [Appendix A](reference/appendices/schema-matrix.md) and migrate the fields above. Historical schemas are not active contracts. |
+| Older active resource/config schema versions | Use the active schema from [Appendix A](reference/appendices/schema-matrix.md) and migrate the listed fields. Historical schemas are not active contracts. |
 
 A project-file String passed to HTTP:
 

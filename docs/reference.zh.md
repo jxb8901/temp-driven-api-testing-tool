@@ -61,7 +61,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [SSHHelper：邏輯 SSH 目標](#sshhelper邏輯-ssh-目標)
 - [可靠性與執行控制](#可靠性與執行控制)
   - [Assertion 與 status](#assertion-與-status)
-  - [`RunWhen` 與 `onFailure`](#runwhen-與-onfailure)
+  - [`runWhen` 與 `onFailure`](#runwhen-與-onfailure)
   - [Timeout](#timeout)
   - [Retry 與 attempts](#retry-與-attempts)
   - [Evidence collectors](#evidence-collectors)
@@ -69,7 +69,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Aggregation](#aggregation)
   - [Stage execution controls](#stage-execution-controls)
   - [Tool Timeout precedence](#tool-timeout-precedence)
-  - [Direct db Timeout 與 Retry eligibility](#direct-db-timeout-與-retry-eligibility)
+  - [Direct DB timeout 與 retry eligibility](#direct-db-timeout-與-retry-eligibility)
 - [Configuration 與 environments](#configuration-與-environments)
   - [配置層與優先級](#配置層與優先級)
   - [使用 `X-` 忽略或停用 ATT 配置項](#使用-x-忽略或停用-att-配置項)
@@ -80,7 +80,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Topology 與 secrets](#topology-與-secrets)
   - [Cross-mode consistency](#cross-mode-consistency)
   - [分開的 Configuration files](#分開的-configuration-files)
-  - [`Config.report.fileNamePattern`](#configreportfilenamepattern)
+  - [`config.report.fileNamePattern`](#configreportfilenamepattern)
   - [Feature configuration owners](#feature-configuration-owners)
 - [CLI 參考](#cli-參考)
   - [命令](#命令)
@@ -91,16 +91,16 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [完整 CLI option matrix](#完整-cli-option-matrix)
 - [結果、報告與 Evidence](#結果報告與-evidence)
   - [運行目錄](#運行目錄)
-  - [人類可讀 Html 報告](#人類可讀-html-報告)
+  - [人類可讀 HTML 報告](#人類可讀-html-報告)
   - [Tool Evidence collector 失敗](#tool-evidence-collector-失敗)
   - [結果 Workbook](#結果-workbook)
-  - [Junit XML](#junit-xml)
+  - [JUnit XML](#junit-xml)
   - [CI JSON 彙總](#ci-json-彙總)
   - [運行清單與可復現性](#運行清單與可復現性)
   - [文檔、歸檔和清理](#文檔歸檔和清理)
   - [Run、execution 與 Evidence 導覽](#runexecution-與-evidence-導覽)
   - [生成輸出模式摘要](#生成輸出模式摘要)
-  - [Reading case.log and case.YAML](#reading-caselog-and-caseyaml)
+  - [Reading `case.log` and `case.yaml`](#reading-caselog-and-caseyaml)
 - [Validation 與 troubleshooting](#validation-與-troubleshooting)
   - [診斷順序](#診斷順序)
   - [先從 Validation 開始](#先從-validation-開始)
@@ -179,7 +179,7 @@ SSHHelper --/
 | 目標 | 文件 |
 |---|---|
 | 建立第一個 ATT package | [Quick Start](quick-start.zh.md) |
-| 理解核心 ATT model | Chapters 1–5 |
+| 理解核心 ATT model | [Product model](reference.zh/overview.md) |
 | 配置 DB/MQ/HTTP/SSH | [Resources](reference.zh/resources/overview.md) |
 | 查閱 CLI option | [CLI Reference](reference.zh/cli.md) |
 | 診斷失敗 | [Validation and Troubleshooting](reference.zh/validation-diagnostics.md) |
@@ -935,7 +935,7 @@ Debug、Run、Load 都使用相同的 `&{project-relative-file}` expression，�
 | MQ 回報 payload 遺失或不安全 | 核對 package 內的絕對路徑或 Case-output 內的相對路徑，移除 traversal 及 symlink。 |
 | action 已執行但輸出不符預期 | 查看 `output/debug/<debugId>/` 下的 `case.log`、`result.yaml` 及 action artifacts，並對照 rendered inputs 與 selected environment。 |
 
-Load 專用的 evidence retention（`metrics`、`failures`、`samples`、`all`）不適用於 standalone Debug invocation。Debug 會在自己的 debug directory 保留 invocation result 與 artifacts；同一 target 若由 load run 執行，請參考 Chapter 4 的 Load evidence retention 章節。
+Load 專用的 evidence retention（`metrics`、`failures`、`samples`、`all`）不適用於 standalone Debug invocation。Debug 會在自己的 debug directory 保留 invocation result 與 artifacts；同一 target 若由 load run 執行，請參考 [Load](reference.zh/execution-modes/load.md)。
 
 ##### CLI configuration examples
 
@@ -1887,7 +1887,7 @@ Strategy 優先序：group override，再到 helper 預設。Native Resource Hel
 
 Assertion 在文件規定的 assertion point、primary work 之後評估 boolean condition。False assertion 是 `FAIL`；exception/infrastructure problem 是 `ERROR`；authoring/configuration 無效是 `INVALID`；條件未選中是 `SKIPPED`；成功工作是 `PASS`。因此 operation failure 與 assertion failure 是不同概念。
 
-### `RunWhen` 與 `onFailure`
+### `runWhen` 與 `onFailure`
 
 `runWhen` 決定 statically known Action/Stage 是否 eligible；`onFailure: stop|continue` 決定 failure 後是否繼續。`continue` 不會把 failed status 改成 PASS。Cleanup/diagnostic 應使用規範的 conditional execution semantics，而不是隱藏 failure。
 
@@ -1939,7 +1939,7 @@ Rollback/diagnostics 使用 `onFailure`；cleanup 或 final Evidence 使用 `alw
 
 Tool Action timeout 優先於 Tool descriptor timeout，再優先於 global timeout。Sidecar、Stage 與 Template 不定義 timeout/retry defaults。Call-backed DB Tool 的 DBHelper statement timeout 仍是 backend ceiling。每次 supported primary retry attempt 都會在 assertion 前執行 collectors。
 
-### Direct db Timeout 與 Retry eligibility
+### Direct DB timeout 與 retry eligibility
 
 Direct DB Action 可設定 `timeoutMs`，範圍為 1 至 3,600,000 ms。明確的 Action timeout 會覆蓋 DBHelper `statement.timeoutSeconds` 預設值；未設定時才使用 helper timeout。JDBC statement timeout 以秒向上取整，ATT 仍保留毫秒級 deadline cancellation；每次 retry attempt 都重新取得完整 Action timeout，`retry.intervalMs` 的等待時間不計入該 attempt timeout。
 
@@ -2218,7 +2218,7 @@ Run、Validate、Debug、Load 透過同一 effective configuration 解析所選 
 若 package roots、report policy、Tool topology 或其他 config 刻意不同，可繼續使用 `--config config/environments/sit.yaml` 與 `uat.yaml`。若 package contract 相同而只改 resource binding，使用 profiles。
 
 
-### `Config.report.fileNamePattern`
+### `config.report.fileNamePattern`
 
 #### Context and legal forms
 
@@ -2415,7 +2415,7 @@ evidence: {mode: failures}
 
 Run ID 和 Case ID 在校驗後保持原樣。只有 `run.yaml` 狀態為 `COMPLETE` 才表示運行完成；中斷工作會直接保留在已保留的 Run ID 目錄中供調試。
 
-### 人類可讀 Html 報告
+### 人類可讀 HTML 報告
 
 `report/index.html` 是主要終端用戶報表。可以直接從磁盤打開。組按 `workbookId.groupId` 彙總；界面把 `groupId` 標記為 Sheet。Case 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full Case ID/tag 的大小寫不敏感搜索，以及每列標題的升序/降序排序。Duration 按數值排序。
 
@@ -2442,7 +2442,7 @@ evidence:
 
 ATT 會復制源 Workbook，並使用 `report.mode: append-to-copy` 追加配置的結果列。`report.mode: none` 跳過 result Workbook，適合不需要 copy 的 CI 或大型 run。Global `report.fileNamePattern` 控制檔名。Sidecar `report.columns` 只修改 Workbook 標簽。支持的映射包括 `result`、`durationMs`、`expectedResult`、`actualResult`、`caseLog`、`reportLink`、`runTime`；Expected/Actual 單元格保留 LF 字符並以換行文本顯示。結果回填使用與 testcase loader 相同的 Excel 顯示格式和空白規範化規則讀取 Case ID，因此帶前導零等數字格式的 ID 在執行與報表寫入時會匹配同一 Case。
 
-### Junit XML
+### JUnit XML
 
 每個 ATT Case 對應一個 `<testcase>`：
 
@@ -2495,7 +2495,7 @@ DIAG 是 evidence-only。Expression 不可讀取 DIAG、EXEC.MODE 或任意 sche
 | CI summary JSON | `schemaVersion`、`attVersion`、`runId`、`environment`、`startedAt`、`endedAt`、`status`、`summary`、`durationStatistics`、`cases`、`diagnosticCounts`、`report`、`inputManifestHash` |
 | JUnit XML | 一個 testsuite，含 test/failure/error/skipped 計數，以及每個 ATT Testcase 的 testcase |
 
-### Reading case.log and case.YAML
+### Reading `case.log` and `case.yaml`
 
 Case log structured entries use YAML. The human log records each normal Action and each Tool/DB invocation once; duplicated attempt fields and persisted TOOL/DB subtrees are omitted from this projection. Complete final Stage/Template/Action/Tool/DB state remains in `case.yaml`. `caseLog.yamlAnchors: false` fully expands shared Map/List objects; `true` permits YAML anchor markers, which carry no ATT identifier semantics.
 
@@ -2527,7 +2527,7 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 | `ATT-CTX` | 未知或歧義 Context 路徑 | 檢查請求/當前/缺失字段、最近建議或規範候選 |
 | `ATT-STG` | 必需選擇器為空白、選擇器 YAML 無效、Stage 鍵重復 | 檢查選擇器形式、`name`、別名和 required 標志 |
 | `ATT-TPL` | 未知/重復 Template、Action 或負載無效 | 檢查符號名/完整路徑、描述符、Action 類型和本地文件 |
-| `ATT-CFG` | 未知字段、重復鍵、schema 類型/枚舉錯誤 | 與第 6 章對照並移除不支持字段 |
+| `ATT-CFG` | 未知字段、重復鍵、schema 類型/枚舉錯誤 | 對照[Configuration](reference.zh/configuration.md)並移除不支持字段 |
 | `ATT-TOOL` | 未知/缺失參數、進程或解析失敗 | 對比調用契約，檢查退出碼和有界 stdout/stderr capture evidence |
 | `ATT-PATH` | 非法 ID 或路徑逃逸 | 移除非法字符，並保持內容在配置根目錄下 |
 | `ATT-RUN` | 超時、非零退出、渲染/運行時失敗 | 檢查 Case 日誌和 Action/Tool 證據 |

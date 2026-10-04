@@ -4,6 +4,7 @@ from pathlib import Path
 from documentation_contracts import (active_schemas, stale_claims, current_html,
                                      manifest_errors, structure_errors, overview_resource_errors,
                                      chapter_label_errors, editorial_errors,
+                                     chapter_reference_errors,
                                      editorial_source_files, standalone_markdown,
                                      standalone_page_errors)
 from build_reference_manual import rebase_headings, assembly_heading_offset
@@ -191,6 +192,42 @@ class DocumentationContractsTest(unittest.TestCase):
         self.assertTrue(any("positional cross-reference" in error for error in errors))
         self.assertTrue(any("e.g." in error for error in errors))
         self.assertTrue(any("and/or" in error for error in errors))
+
+    def test_numbered_chapter_references_are_rejected(self):
+        for text in ("Use Chapter 10 for options.",
+                     "Compare with Chapter 6.",
+                     "Chapters 1–5 cover the core model.",
+                     "Refer to Chapters 6-13."):
+            with self.subTest(text=text):
+                self.assertTrue(chapter_reference_errors(text))
+                self.assertTrue(any("positional cross-reference" in error
+                                    for error in editorial_errors(text)))
+        self.assertEqual([], chapter_reference_errors(
+            "Use [Configuration](configuration.md) for options.\n"
+            "Inline `Chapter 6` and `chapters 1-5` are identifiers.\n"
+            "```text\nChapter 3\n```"))
+
+    def test_canonical_identifiers_and_filenames_keep_heading_case(self):
+        root = Path(__file__).resolve().parents[1]
+        headings = {
+            "docs/reference/reliability-execution-control.md":
+                "## `runWhen` and `onFailure`",
+            "docs/reference/configuration.md":
+                "## `config.report.fileNamePattern`",
+            "docs/reference/results-reports-evidence.md":
+                "## Reading `case.log` and `case.yaml`",
+            "docs/reference.zh/reliability-execution-control.md":
+                "## `runWhen` 與 `onFailure`",
+            "docs/reference.zh/configuration.md":
+                "## `config.report.fileNamePattern`",
+            "docs/reference.zh/results-reports-evidence.md":
+                "## Reading `case.log` and `case.yaml`",
+        }
+        for rel, expected in headings.items():
+            with self.subTest(path=rel):
+                actual = [line for line in (root / rel).read_text(encoding="utf-8").splitlines()
+                          if line.startswith("## ") and "`" in line]
+                self.assertIn(expected, actual)
 
     def test_numbered_heading_rule_ignores_numeric_noun_phrases(self):
         for heading in ("## 2-factor authentication", "## 2026 roadmap",

@@ -187,9 +187,27 @@ def chapter_label_errors(text):
     return errors
 
 
+NUMBERED_CHAPTER_REFERENCE = re.compile(
+    r"\bchapters?\s+\d+(?:\s*[–-]\s*\d+)?\b", re.I
+)
+
+
+def chapter_reference_errors(text):
+    """Reject references to manual positions that change when modules move."""
+    errors = []
+    prose = re.sub(r"`[^`]*`", "", without_code(text))
+    for lineno, line in enumerate(prose.splitlines(), 1):
+        line = re.sub(r"\]\([^)]*\)", "]", line)
+        if NUMBERED_CHAPTER_REFERENCE.search(line):
+            errors.append("line %d: replace the numbered chapter reference with a descriptive link" % lineno)
+    return errors
+
+
 POSITIONAL_REFERENCE = re.compile(
-    r"\b(?:see|refer to)\b[^.!?;]{0,100}\b(?:above|below|following section|"
-    r"preceding section|chapter\s+\d+)\b|"
+    r"\b(?:see|refer to|use|compare\s+(?:with|to)|consult|read|review)\b"
+    r"[^.!?;]{0,100}\b(?:above|below|following section|preceding section|"
+    r"chapters?\s+\d+(?:\s*[–-]\s*\d+)?)\b|"
+    r"\bchapters?\s+\d+(?:\s*[–-]\s*\d+)?\b|"
     r"\b(?:described|explained|listed|defined|discussed|covered|shown)"
     r"\s+(?:the\s+)?(?:above|below)\b|"
     r"\b(?:commands?|options?|sections?|tables?|examples?|procedures?|steps?|items?)"
@@ -371,6 +389,8 @@ def validate(root=ROOT):
         if re.search(r"/appendices/(?:migrations|compatibility)\.md$", rel):
             continue
         text = path.read_text(encoding="utf-8")
+        if path.suffix == ".md":
+            errors += [rel + ": " + e for e in chapter_reference_errors(text)]
         if path.suffix == ".md" and (
                 rel in ("README.md", "docs/README.md", "docs/quick-start.md", "docs/quick-start.zh.md")
                 or rel.startswith("examples/")):

@@ -29,7 +29,7 @@ ATT 3.6.2 separates typed operation results, external parsing, project-file Stri
 | Log file | Pass the value directly to Log.value. |
 | Log fields | Put the typed map/list in Log.value and select Log.format. |
 | HTTP/MQ common result formatting | Use responseFormat for ingress parsing; optional evidence.output.format is human presentation only. |
-| Older active resource/config schema versions | Use the active schema from [Appendix A](schema-matrix.md) and migrate the fields above. Historical schemas are not active contracts. |
+| Older active resource/config schema versions | Use the active schema from [Appendix A](schema-matrix.md) and migrate the listed fields. Historical schemas are not active contracts. |
 
 A project-file String passed to HTTP:
 

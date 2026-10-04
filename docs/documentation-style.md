@@ -4,7 +4,7 @@
 
 Current ATT documentation follows the [Google Developer Documentation Style Guide](https://developers.google.com/style) unless an ATT-specific rule below overrides it. Write for a global developer audience in clear, direct English. Use sentence case for page titles and headings. Standalone Markdown pages have exactly one H1. Do not number headings to show sequence; use numbered lists for procedures. Use imperative headings for tasks and descriptive noun phrases for concepts and reference sections.
 
-Prefer descriptive link text over positional references such as “above,” “below,” or “Chapter 6.” Write “for example” or “such as” instead of the abbreviation `e.g.` Replace `and/or` with clear alternatives such as “either,” “both,” or “one or both.” Avoid subjective difficulty words such as “easy,” “simple,” and “simply” unless a measurable qualification makes the claim objective.
+Prefer descriptive link text over positional references such as “above” and “below.” Avoid numbered chapter references; name and link to the destination section. Write “for example” or “such as” instead of the abbreviation `e.g.` Replace `and/or` with clear alternatives such as “either,” “both,” or “one or both.” Avoid subjective difficulty words such as “easy,” “simple,” and “simply” unless a measurable qualification makes the claim objective.
 
 ATT-specific rules take precedence where the external guide conflicts with product contracts:
 
@@ -32,7 +32,7 @@ Each contract has one semantic owner:
 | Artifact navigation and interpreting failed evidence | Results |
 | Exact limits, collector projection guarantees and platform diagnostics | Appendix D |
 
-Keep core concepts in chapters 1–5, working reference in chapters 6–13, and version matrices, compatibility, migration and advanced lookup in lettered appendices. Move existing technical content to its owner and replace duplicate normative tables with a summary and link.
+Organize the Reference around core concepts, working lookup guidance, and appendices for version matrices, compatibility, migration, and advanced lookup. Move existing technical content to its owner and replace duplicate normative tables with a summary and link.
 
 Use the project version from `pom.xml` and active schemas from `schemas/catalog.yaml`. Current examples must use active contracts. Old versions are permitted only under `docs/history/`, migration/compatibility appendices, or explicitly bounded historical comparisons:
 

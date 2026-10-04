@@ -14,4 +14,4 @@ Run evidence is written directly below `output/<RunID>/`. The completed run publ
 
 Status aggregation preserves severity: ERROR > INVALID > FAIL > PASS > SKIPPED. Process exit code is `0` when the run completes without failing status, `1` for test/assertion failure, `2` for invalid command/configuration/validation, and `3` for runtime/infrastructure error.
 
-Use Chapter 10 for exact selectors/options, Chapter 8 for execution control, and Chapter 11 for artifact contracts.
+Use the [CLI Reference](../cli.md) for exact selectors and options, [Reliability](../reliability-execution-control.md) for execution control, and [Results, Reports, and Evidence](../results-reports-evidence.md) for artifact contracts.

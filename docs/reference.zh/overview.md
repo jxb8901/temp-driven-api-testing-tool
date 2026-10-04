@@ -52,7 +52,7 @@ SSHHelper --/
 | 目標 | 文件 |
 |---|---|
 | 建立第一個 ATT package | [Quick Start](../quick-start.zh.md) |
-| 理解核心 ATT model | Chapters 1–5 |
+| 理解核心 ATT model | [Product model](overview.md) |
 | 配置 DB/MQ/HTTP/SSH | [Resources](resources/overview.md) |
 | 查閱 CLI option | [CLI Reference](cli.md) |
 | 診斷失敗 | [Validation and Troubleshooting](validation-diagnostics.md) |

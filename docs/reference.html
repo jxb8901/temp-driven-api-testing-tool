@@ -364,7 +364,7 @@ control</a>
 <li><a href="#assertion-and-status"
 id="toc-assertion-and-status">Assertion and status</a></li>
 <li><a href="#runwhen-and-onfailure"
-id="toc-runwhen-and-onfailure"><code>RunWhen</code> and
+id="toc-runwhen-and-onfailure"><code>runWhen</code> and
 <code>onFailure</code></a></li>
 <li><a href="#timeout" id="toc-timeout">Timeout</a></li>
 <li><a href="#retry-and-attempts" id="toc-retry-and-attempts">Retry and
@@ -380,8 +380,8 @@ id="toc-stage-execution-controls">Stage execution controls</a></li>
 <li><a href="#tool-timeout-precedence"
 id="toc-tool-timeout-precedence">Tool Timeout precedence</a></li>
 <li><a href="#direct-db-timeout-and-retry-eligibility"
-id="toc-direct-db-timeout-and-retry-eligibility">Direct db Timeout and
-Retry eligibility</a></li>
+id="toc-direct-db-timeout-and-retry-eligibility">Direct DB timeout and
+retry eligibility</a></li>
 </ul></li>
 <li><a href="#configuration-and-environments"
 id="toc-configuration-and-environments">Configuration and
@@ -411,7 +411,7 @@ id="toc-cross-mode-consistency">Cross-mode consistency</a></li>
 id="toc-separate-configuration-files">Separate configuration
 files</a></li>
 <li><a href="#configreportfilenamepattern"
-id="toc-configreportfilenamepattern"><code>Config.report.fileNamePattern</code></a></li>
+id="toc-configreportfilenamepattern"><code>config.report.fileNamePattern</code></a></li>
 <li><a href="#feature-configuration-owners"
 id="toc-feature-configuration-owners">Feature configuration
 owners</a></li>
@@ -435,14 +435,14 @@ id="toc-results-reports-and-evidence">Results, reports, and Evidence</a>
 <ul>
 <li><a href="#run-directory" id="toc-run-directory">Run
 directory</a></li>
-<li><a href="#human-html-report" id="toc-human-html-report">Human html
-report</a></li>
+<li><a href="#human-readable-html-report"
+id="toc-human-readable-html-report">Human-readable HTML report</a></li>
 <li><a href="#tool-evidence-collector-failures"
 id="toc-tool-evidence-collector-failures">Tool Evidence collector
 failures</a></li>
 <li><a href="#result-workbook" id="toc-result-workbook">Result
 Workbook</a></li>
-<li><a href="#junit-xml" id="toc-junit-xml">Junit XML</a></li>
+<li><a href="#junit-xml" id="toc-junit-xml">JUnit XML</a></li>
 <li><a href="#ci-json-summary" id="toc-ci-json-summary">CI JSON
 summary</a></li>
 <li><a href="#run-manifest-and-reproducibility"
@@ -458,8 +458,8 @@ Evidence navigation</a></li>
 id="toc-generated-output-schema-summary">Generated-output schema
 summary</a></li>
 <li><a href="#reading-caselog-and-caseyaml"
-id="toc-reading-caselog-and-caseyaml">Reading case.log and
-case.YAML</a></li>
+id="toc-reading-caselog-and-caseyaml">Reading <code>case.log</code> and
+<code>case.yaml</code></a></li>
 </ul></li>
 <li><a href="#validation-and-troubleshooting"
 id="toc-validation-and-troubleshooting">Validation and
@@ -632,7 +632,7 @@ documentation.</p>
 </tr>
 <tr class="even">
 <td>Understand the core ATT model</td>
-<td>Chapters 1–5</td>
+<td><a href="reference/overview.md#product-model">Product model</a></td>
 </tr>
 <tr class="odd">
 <td>Configure DB/MQ/HTTP/SSH</td>
@@ -2323,8 +2323,12 @@ opt-in snapshot refresh path before validation/execution.</p>
 completes without failing status, <code>1</code> for test/assertion
 failure, <code>2</code> for invalid command/configuration/validation,
 and <code>3</code> for runtime/infrastructure error.</p>
-<p>Use Chapter 10 for exact selectors/options, Chapter 8 for execution
-control, and Chapter 11 for artifact contracts.</p>
+<p>Use the <a href="reference/cli.md">CLI Reference</a> for exact
+selectors and options, <a
+href="reference/reliability-execution-control.md">Reliability</a> for
+execution control, and <a
+href="reference/results-reports-evidence.md">Results, Reports, and
+Evidence</a> for artifact contracts.</p>
 <h3 id="standalone-debug">Standalone Debug</h3>
 <p>Debug executes one Template, Flow or Tool without requiring a
 workbook Testcase.</p>
@@ -4297,7 +4301,7 @@ work at the documented assertion point. A false assertion is
 <code>INVALID</code>; a non-selected condition is <code>SKIPPED</code>;
 successful work is <code>PASS</code>. Operation failure and assertion
 failure are therefore distinct.</p>
-<h3 id="runwhen-and-onfailure"><code>RunWhen</code> and
+<h3 id="runwhen-and-onfailure"><code>runWhen</code> and
 <code>onFailure</code></h3>
 <p><code>runWhen</code> controls whether a statically known Action/Stage
 is eligible to execute. <code>onFailure: stop|continue</code> controls
@@ -4421,8 +4425,8 @@ timeout/retry defaults. For call-backed DB Tools, the DBHelper statement
 timeout remains a backend ceiling. Each supported primary retry attempt
 runs its collectors before assertion; collector continuation behavior
 does not turn a failed primary operation into PASS.</p>
-<h3 id="direct-db-timeout-and-retry-eligibility">Direct db Timeout and
-Retry eligibility</h3>
+<h3 id="direct-db-timeout-and-retry-eligibility">Direct DB timeout and
+retry eligibility</h3>
 <p>Direct DB Actions may declare <code>timeoutMs</code> from 1 to
 3,600,000 ms. When present, <code>Action.timeoutMs</code> overrides
 <code>DBHelper.statement.timeoutSeconds</code>; otherwise the helper
@@ -4449,11 +4453,10 @@ state. Application-specific idempotent retry must be modeled explicitly
 instead.</p>
 <h2 id="configuration-and-environments">Configuration and
 environments</h2>
-<p>This chapter is the authoritative reading reference for
-author-authored configuration. The files below <a
-href="../schemas"><code>schemas/</code></a> remain the machine-readable
-contract. Schema validation runs before cross-field and filesystem
-validation.</p>
+<p>This page is the authoritative reading reference for author-authored
+configuration. Files in <a href="../schemas"><code>schemas/</code></a>
+remain the machine-readable contract. Schema validation runs before
+cross-field and filesystem validation.</p>
 <h3 id="configuration-layers-and-precedence">Configuration layers and
 precedence</h3>
 <table>
@@ -5003,9 +5006,9 @@ sidecar <code>id</code> supplies <code>workbookId</code>, the left side
 of <code>excel.sheet</code> supplies <code>groupId</code>, and the
 configured Case ID cell supplies <code>rowCaseId</code>. Template paths
 are relative to <code>templates.root</code>; project-file expressions
-use one canonical, regular UTF-8 file below the project root and reject
+use one canonical, regular UTF-8 file within the project root and reject
 absolute paths, globs, dynamic locators and symlink escapes. Resource
-file inputs and outputs must remain below their documented safe roots.
+file inputs and outputs must remain within their documented safe roots.
 ATT normalizes and checks root containment before reads and writes.</p>
 <h3 id="topology-and-secrets">Topology and secrets</h3>
 <p>Topology may vary by descriptor and environment. Inject secrets
@@ -5023,7 +5026,7 @@ policy, Tool topology, or other configuration intentionally differ. Use
 profiles when the package contract is shared and only resource bindings
 change.</p>
 <h3
-id="configreportfilenamepattern"><code>Config.report.fileNamePattern</code></h3>
+id="configreportfilenamepattern"><code>config.report.fileNamePattern</code></h3>
 <h4 id="context-and-legal-forms-1">Context and legal forms</h4>
 <p><code>report.fileNamePattern</code> uses the unified expression
 engine with a dedicated non-Case scope. It has a dedicated
@@ -5604,7 +5607,7 @@ Evidence</h2>
 completed only when its <code>run.yaml</code> state is
 <code>COMPLETE</code>; interrupted work remains directly below its
 reserved Run ID for debugging.</p>
-<h3 id="human-html-report">Human html report</h3>
+<h3 id="human-readable-html-report">Human-readable HTML report</h3>
 <p><code>report/index.html</code> is the primary end-user report. It can
 be opened without a web server. Groups are summarized by
 <code>workbookId.groupId</code>; the interface labels
@@ -5697,7 +5700,7 @@ ID with the same Excel <code>DataFormatter</code> and whitespace
 normalization as testcase loading, so displayed formats such as numeric
 leading zeroes identify the same Case during execution and report
 writing.</p>
-<h3 id="junit-xml">Junit XML</h3>
+<h3 id="junit-xml">JUnit XML</h3>
 <p>Each ATT case maps to one <code>&lt;testcase&gt;</code>:</p>
 <table>
 <thead>
@@ -5880,8 +5883,8 @@ testcase per ATT case</td>
 <p>Generated envelopes reject additional top-level fields according to
 their schemas. JUnit HTML is a human-readable output and not an XML/JSON
 schema artifact.</p>
-<h3 id="reading-caselog-and-caseyaml">Reading case.log and
-case.YAML</h3>
+<h3 id="reading-caselog-and-caseyaml">Reading <code>case.log</code> and
+<code>case.yaml</code></h3>
 <p>Case log structured entries use YAML. The human log records each
 normal Action and each Tool/DB invocation once; duplicated attempt
 fields and persisted TOOL/DB subtrees are omitted from this projection.
@@ -5973,7 +5976,8 @@ files</td>
 <tr class="odd">
 <td><code>ATT-CFG</code></td>
 <td>Unknown field, duplicate key, wrong schema/type/enum</td>
-<td>Compare with Chapter 6 and remove unsupported fields</td>
+<td>Compare with <a href="reference/configuration.md">Configuration</a>
+and remove unsupported fields</td>
 </tr>
 <tr class="even">
 <td><code>ATT-TOOL</code></td>
@@ -6390,7 +6394,7 @@ evidence.output.format is human presentation only.</td>
 <td>Older active resource/config schema versions</td>
 <td>Use the active schema from <a
 href="reference/appendices/schema-matrix.md">Appendix A</a> and migrate
-the fields above. Historical schemas are not active contracts.</td>
+the listed fields. Historical schemas are not active contracts.</td>
 </tr>
 </tbody>
 </table>

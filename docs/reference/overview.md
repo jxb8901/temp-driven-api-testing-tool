@@ -52,7 +52,7 @@ For a guided package build, use [Quick Start](../quick-start.md). The rest of th
 | Goal | Go to |
 |---|---|
 | Build the first ATT package | [Quick Start](../quick-start.md) |
-| Understand the core ATT model | Chapters 1–5 |
+| Understand the core ATT model | [Product model](overview.md#product-model) |
 | Configure DB/MQ/HTTP/SSH | [Resources](resources/overview.md) |
 | Find a CLI option | [CLI Reference](cli.md) |
 | Diagnose a failure | [Validation and Troubleshooting](validation-diagnostics.md) |

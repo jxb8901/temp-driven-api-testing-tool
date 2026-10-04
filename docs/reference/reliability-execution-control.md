@@ -6,7 +6,7 @@ This chapter owns cross-cutting public execution behavior.
 
 An assertion evaluates a boolean condition after the Action's primary work at the documented assertion point. A false assertion is `FAIL`; an exception/infrastructure problem is `ERROR`; invalid authoring/configuration is `INVALID`; a non-selected condition is `SKIPPED`; successful work is `PASS`. Operation failure and assertion failure are therefore distinct.
 
-## `RunWhen` and `onFailure`
+## `runWhen` and `onFailure`
 
 `runWhen` controls whether a statically known Action/Stage is eligible to execute. `onFailure: stop|continue` controls continuation after failure; `continue` never changes the failed status into PASS. Cleanup/diagnostic work should use the documented conditional execution semantics rather than hiding failures.
 
@@ -59,7 +59,7 @@ Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evide
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, Stages and Templates do not own timeout/retry defaults. For call-backed DB Tools, the DBHelper statement timeout remains a backend ceiling. Each supported primary retry attempt runs its collectors before assertion; collector continuation behavior does not turn a failed primary operation into PASS.
 
-## Direct db Timeout and Retry eligibility
+## Direct DB timeout and retry eligibility
 
 Direct DB Actions may declare `timeoutMs` from 1 to 3,600,000 ms. When present, `Action.timeoutMs` overrides `DBHelper.statement.timeoutSeconds`; otherwise the helper timeout is used. Each retry attempt gets a fresh Action timeout, and the retry interval is outside that timeout.
 

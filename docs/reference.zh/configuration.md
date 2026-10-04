@@ -269,7 +269,7 @@ Run、Validate、Debug、Load 透過同一 effective configuration 解析所選 
 若 package roots、report policy、Tool topology 或其他 config 刻意不同，可繼續使用 `--config config/environments/sit.yaml` 與 `uat.yaml`。若 package contract 相同而只改 resource binding，使用 profiles。
 
 
-## `Config.report.fileNamePattern`
+## `config.report.fileNamePattern`
 
 ### Context and legal forms
 

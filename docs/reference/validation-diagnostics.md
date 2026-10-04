@@ -24,7 +24,7 @@ Then use the diagnostic code and structured location. Do not automate against me
 | `ATT-CTX` | Unknown or ambiguous Context path | Inspect requested/current/missing fields, nearest suggestion, or canonical candidates |
 | `ATT-STG` | Blank required selector, invalid selector YAML, duplicate stage key | Check selector form, `name`, aliases, and required flag |
 | `ATT-TPL` | Unknown/duplicate template, invalid action or payload | Check symbolic name/full path, descriptor, action type, and local files |
-| `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with Chapter 6 and remove unsupported fields |
+| `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with [Configuration](configuration.md) and remove unsupported fields |
 | `ATT-TOOL` | Unknown/missing argument, process or parse failure | Compare call contract; inspect exit code and bounded stdout/stderr capture evidence |
 | `ATT-PATH` | Illegal ID or escaping path | Remove illegal characters and keep content below configured roots |
 | `ATT-RUN` | Timeout, non-zero exit, render/runtime failure | Inspect case log and action/tool evidence |

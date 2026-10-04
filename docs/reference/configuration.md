@@ -1,6 +1,6 @@
 # Configuration and environments
 
-This chapter is the authoritative reading reference for author-authored configuration. The files below [`schemas/`](../../schemas/) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
+This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../../schemas/) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
 
 ## Configuration layers and precedence
 
@@ -252,7 +252,7 @@ Run ID and full Case ID are used directly as directory names; ATT does not slugi
 
 Run ID must be non-blank, at most 128 Unicode code points, not `.` or `..`, not have leading/trailing whitespace or trailing `.`, and not contain `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL, or control characters. Windows device names such as `CON`, `NUL`, `COM1`, and `LPT1` are rejected case-insensitively.
 
-`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; project-file expressions use one canonical, regular UTF-8 file below the project root and reject absolute paths, globs, dynamic locators and symlink escapes. Resource file inputs and outputs must remain below their documented safe roots. ATT normalizes and checks root containment before reads and writes.
+`workbookId`, `groupId`, and `rowCaseId` follow the same character rules. `workbookId` and `groupId` must not contain `.`, because dots separate the three components; `rowCaseId` may contain dots and is treated as the remaining suffix. Each component is at most 128 Unicode code points and the complete `workbookId.groupId.rowCaseId` is at most 255. The sidecar `id` supplies `workbookId`, the left side of `excel.sheet` supplies `groupId`, and the configured Case ID cell supplies `rowCaseId`. Template paths are relative to `templates.root`; project-file expressions use one canonical, regular UTF-8 file within the project root and reject absolute paths, globs, dynamic locators and symlink escapes. Resource file inputs and outputs must remain within their documented safe roots. ATT normalizes and checks root containment before reads and writes.
 
 ## Topology and secrets
 
@@ -267,7 +267,7 @@ Run, Validate, Debug, and Load resolve the selected environment through the same
 Separate `--config config/environments/sit.yaml` and `uat.yaml` files remain useful when package roots, report policy, Tool topology, or other configuration intentionally differ. Use profiles when the package contract is shared and only resource bindings change.
 
 
-## `Config.report.fileNamePattern`
+## `config.report.fileNamePattern`
 
 ### Context and legal forms
 

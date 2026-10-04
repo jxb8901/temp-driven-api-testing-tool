@@ -24,7 +24,7 @@
 | `ATT-CTX` | 未知或歧義 Context 路徑 | 檢查請求/當前/缺失字段、最近建議或規範候選 |
 | `ATT-STG` | 必需選擇器為空白、選擇器 YAML 無效、Stage 鍵重復 | 檢查選擇器形式、`name`、別名和 required 標志 |
 | `ATT-TPL` | 未知/重復 Template、Action 或負載無效 | 檢查符號名/完整路徑、描述符、Action 類型和本地文件 |
-| `ATT-CFG` | 未知字段、重復鍵、schema 類型/枚舉錯誤 | 與第 6 章對照並移除不支持字段 |
+| `ATT-CFG` | 未知字段、重復鍵、schema 類型/枚舉錯誤 | 對照[Configuration](configuration.md)並移除不支持字段 |
 | `ATT-TOOL` | 未知/缺失參數、進程或解析失敗 | 對比調用契約，檢查退出碼和有界 stdout/stderr capture evidence |
 | `ATT-PATH` | 非法 ID 或路徑逃逸 | 移除非法字符，並保持內容在配置根目錄下 |
 | `ATT-RUN` | 超時、非零退出、渲染/運行時失敗 | 檢查 Case 日誌和 Action/Tool 證據 |
