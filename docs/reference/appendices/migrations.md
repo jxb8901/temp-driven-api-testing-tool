@@ -1,12 +1,12 @@
-## Appendix C — Migration Notes
+# Appendix C — migration notes
 
-### File arguments and case-log paths
+## File arguments and case-log paths
 
 HTTPHelper calls no longer accept `file`; pass `&{project-relative-file}` directly as `body`. MQHelper `send` and `request` no longer accept `file`; pass the expression as `payload`. SSHHelper `upload` now requires content in `payload` and rejects `localPath`; pass `&{...}` directly. SSHHelper no longer supports `download`, because it requires a local destination path. Use a deliberately configured command-backed Tool for workflows that must retrieve files from a host. These changes remove native arbitrary-binary local-file input from these Resource APIs; `&{...}` supplies UTF-8 text.
 
 Case logs, CLI output, and emitted case evidence display paths under the canonical project root as `$ATT_HOME` or `$ATT_HOME/<relative-path>`, with `/` separators. `$ATT_HOME` is a presentation token, not an environment variable, Context root, or file-expression locator. Runtime resolution and filesystem access continue to use canonical absolute Paths. Absolute paths outside the project root use a bounded `$EXTERNAL/<basename>` presentation when logged as Path values or embedded in diagnostic messages. Explicit remote-path fields and URLs retain their values.
 
-### Previous release testdata migration
+## Previous release Testdata migration
 
 Change global configuration from `att-config/v2.10` to `att-config/v2.11` and Load scenarios from `att-load/v1.4` to `att-load/v1.5`. The previous schemas remain catalogued under `schemas/history/` for migration diagnostics. `att-testdata/v1.0` is new: add descriptor paths to the selected environment profile's `testdata` list, then use `@{id}` references in Case/Stage, Debug, or Load workload input maps. Load scenarios can add package-relative top-level `testdata` paths as a Load-only overlay. Repeated logical IDs across layers mean a whole descriptor replacement; duplicate IDs inside one layer are invalid. Add an explicit selection policy for every descriptor containing multiple records. Existing packages without testdata references need no new descriptor files.
 
@@ -29,7 +29,7 @@ ATT 3.6.2 separates typed operation results, external parsing, project-file Stri
 | Log file | Pass the value directly to Log.value. |
 | Log fields | Put the typed map/list in Log.value and select Log.format. |
 | HTTP/MQ common result formatting | Use responseFormat for ingress parsing; optional evidence.output.format is human presentation only. |
-| Older active resource/config schema versions | Use the active schema from [Appendix A](schema_matrix.md) and migrate the fields above. Historical schemas are not active contracts. |
+| Older active resource/config schema versions | Use the active schema from [Appendix A](schema-matrix.md) and migrate the fields above. Historical schemas are not active contracts. |
 
 A project-file String passed to HTTP:
 
@@ -57,9 +57,9 @@ For Load, migrate old single-target or v1.1 scenarios through the historical v1.
 
 The historical `att-load-profile/v1.0` policy file is migration-only: rewrite it as the current policy-only `att-load/v1.6` descriptor before use. It is not a current `load/load.yaml` example.
 
-Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](../14_actions.md), [Runtime and Context Model](../03_runtime_context.md), [Load Mode](../04_execution_modes/load.md) and [Schema Matrix](schema_matrix.md).
+Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](../actions.md), [Runtime and Context Model](../runtime-context.md), [Load Mode](../execution-modes/load.md) and [Schema Matrix](schema-matrix.md).
 
-### Historical schema migration
+## Historical schema migration
 
 ATT 3.6.2 uses `att-template/v3.6` and `att-flow/v3.6` as the active schemas. The published `att-template/v3.5`, `att-flow/v3.5`, and older definitions remain under `schemas/history/`; their historical DB and Render Actions are compatibility-only and are not part of the active contract. When migrating those descriptors, change their schema versions to v3.6 and apply the field changes below.
 
@@ -80,16 +80,16 @@ Project-file paths are relative to the canonical project root. `./` and `../` ar
 
 Unsupported schema versions fail validation before execution with migration guidance. ATT does not silently convert old fields or run Tools/resources while producing that guidance.
 
-See [Runtime and Context Model](../03_runtime_context.md) for META lifecycle and [Load Mode](../04_execution_modes/load.md) for execution identity and retained evidence paths.
+See [Runtime and Context Model](../runtime-context.md) for META lifecycle and [Load Mode](../execution-modes/load.md) for execution identity and retained evidence paths.
 
-### Debug schema migration
+## Debug schema migration
 
-`att-debug/v1.0` is historical; upgrade to `att-debug/v1.1`. Template/Flow may define `vars` to seed `EXEC.VARS`; Tool targets do not support `vars`. See [Debug](../04_execution_modes/debug.md) for current input and argument rules.
+`att-debug/v1.0` is historical; upgrade to `att-debug/v1.1`. Template/Flow may define `vars` to seed `EXEC.VARS`; Tool targets do not support `vars`. See [Debug](../execution-modes/debug.md) for current input and argument rules.
 
-### Global configuration migration
+## Global configuration migration
 
-Old `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` fields are not part of the active global contract. See [Configuration](../09_configuration.md) for current fields.
+Old `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `environmentPolicy` fields are not part of the active global contract. See [Configuration](../configuration.md) for current fields.
 
-### Environment profile migration
+## Environment profile migration
 
-When migrating complete-config packages, preserve descriptors and Actions, move common settings to `config/config.yaml`, move descriptor lists to `environments.<NAME>`, and select with `--config config/config.yaml --env <NAME>`. See [Configuration](../09_configuration.md) for the current contract.
+When migrating complete-config packages, preserve descriptors and Actions, move common settings to `config/config.yaml`, move descriptor lists to `environments.<NAME>`, and select with `--config config/config.yaml --env <NAME>`. See [Configuration](../configuration.md) for the current contract.

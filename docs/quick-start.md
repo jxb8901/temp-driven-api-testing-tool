@@ -1,4 +1,4 @@
-# ATT V3.7.3 Quick Start
+# ATT v3.7.3 quick start
 
 [中文快速入门](quick-start.zh.md) · [Reference Manual](reference.html)
 
@@ -115,7 +115,7 @@ For this tutorial:
 - `${...}` reads/interpolates Context values;
 - `#{...}` evaluates a typed expression.
 
-That is enough Context knowledge for a first run. The complete model is in [Runtime and Context](reference/03_runtime_context.md) and [Expressions](reference/07_expressions.md).
+That is enough Context knowledge for a first run. The complete model is in [Runtime and Context](reference/runtime-context.md) and [Expressions](reference/expressions.md).
 
 ## Regenerate the snapshot
 
@@ -159,7 +159,7 @@ The high-level status model is:
 | `INVALID` | validation prevented execution |
 | `SKIPPED` | execution was intentionally skipped |
 
-You do not need the detailed aggregation rules yet; see [Validation and Troubleshooting](reference/12_validation_diagnostics.md) when troubleshooting real suites.
+You do not need the detailed aggregation rules yet; see [Validation and Troubleshooting](reference/validation-diagnostics.md) when troubleshooting real suites.
 
 ## Inspect the result
 
@@ -174,7 +174,7 @@ output/<runId>/
   ... case.log ...
 ```
 
-Then generate or inspect the HTML report using the normal report workflow documented in [Results, Reports, and Evidence](reference/11_results_reports_evidence.md).
+Then generate or inspect the HTML report using the normal report workflow documented in [Results, Reports, and Evidence](reference/results-reports-evidence.md).
 
 For the Quick Start case, `case.log` should include the line written by `showInput`, and the final assertion should compare the workbook's `Amount` with `Expected`.
 
@@ -220,7 +220,7 @@ The important mental model is:
 Testcase input -> Template Action -> Tool -> Action output/evidence
 ```
 
-For complete Tool configuration, command-backed vs call-backed behavior, arguments, outputs, and evidence, use [Resources - Tool](reference/05_resources/tools.md).
+For complete Tool configuration, command-backed vs call-backed behavior, arguments, outputs, and evidence, use [Resources - Tool](reference/resources/tools.md).
 
 ## Run the whole Quick Start workbook
 
@@ -256,20 +256,20 @@ Do not try to learn every ATT feature from this tutorial. Follow the Reference c
 
 | I want to... | Read next |
 |---|---|
-| understand workbook, sidecar, snapshot, Template, Flow | [Test Authoring](reference/02_test_authoring.md) |
-| understand `EXEC`, `META`, `EXEC.VARS`, `EXEC.ACTIONS`, `output` | [Runtime and Context](reference/03_runtime_context.md) |
-| debug one Template/Flow/Tool without Excel | [Standalone Debug](reference/04_execution_modes/debug.md) |
-| run load tests | [Load](reference/04_execution_modes/load.md) |
-| call scripts/programs or framework-native Tools | [Tool](reference/05_resources/tools.md) |
-| query/update a database, including query timeout/retry | [DBHelper](reference/05_resources/dbhelper.md) |
-| send/receive/request MQ messages | [MQHelper](reference/05_resources/mqhelper.md) |
-| switch SIT/UAT resource bindings | [Configuration and Environments](reference/09_configuration.md) |
-| use `${...}` and `#{...}` correctly | [Expressions](reference/07_expressions.md) |
-| add assertion, timeout, retry, `runWhen`, `onFailure` | [Reliability and Execution Control](reference/08_reliability_execution_control.md) |
-| look up commands and options | [CLI Reference](reference/10_cli.md) |
-| troubleshoot `FAIL`, `ERROR`, `INVALID` | [Validation and Troubleshooting](reference/12_validation_diagnostics.md) |
-| integrate ATT into CI or package it | [CI, Packaging, and Operations](reference/13_ci_packaging_operations.md) |
+| understand workbook, sidecar, snapshot, Template, Flow | [Test Authoring](reference/test-authoring.md) |
+| understand `EXEC`, `META`, `EXEC.VARS`, `EXEC.ACTIONS`, `output` | [Runtime and Context](reference/runtime-context.md) |
+| debug one Template/Flow/Tool without Excel | [Standalone Debug](reference/execution-modes/debug.md) |
+| run load tests | [Load](reference/execution-modes/load.md) |
+| call scripts/programs or framework-native Tools | [Tool](reference/resources/tools.md) |
+| query/update a database, including query timeout/retry | [DBHelper](reference/resources/dbhelper.md) |
+| send/receive/request MQ messages | [MQHelper](reference/resources/mqhelper.md) |
+| switch SIT/UAT resource bindings | [Configuration and Environments](reference/configuration.md) |
+| use `${...}` and `#{...}` correctly | [Expressions](reference/expressions.md) |
+| add assertion, timeout, retry, `runWhen`, `onFailure` | [Reliability and Execution Control](reference/reliability-execution-control.md) |
+| look up commands and options | [CLI Reference](reference/cli.md) |
+| troubleshoot `FAIL`, `ERROR`, `INVALID` | [Validation and Troubleshooting](reference/validation-diagnostics.md) |
+| integrate ATT into CI or package it | [CI, Packaging, and Operations](reference/ci-packaging-operations.md) |
 
-For direct DB Actions specifically, remember the safety boundary: `query` may retry `ASSERTION`/`TIMEOUT`, while `update` supports `timeoutMs` but rejects automatic retry. See the [DBHelper Reference](reference/05_resources/dbhelper.md) for the full contract.
+For direct DB Actions specifically, remember the safety boundary: `query` may retry `ASSERTION`/`TIMEOUT`, while `update` supports `timeoutMs` but rejects automatic retry. See the [DBHelper Reference](reference/resources/dbhelper.md) for the full contract.
 
 For field-by-field supported behavior, use the generated [ATT V3.7.3 Reference Manual](reference.html) rather than extending this tutorial into a second manual.

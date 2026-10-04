@@ -1,4 +1,4 @@
-# ATT V3.7.3 快速入門
+# ATT v3.7.3 快速入門
 
 [English Quick Start](quick-start.md) · [Reference Manual](reference.zh.html)
 
@@ -115,7 +115,7 @@ actions:
 - `${...}` 用來讀取或插入 Context 值；
 - `#{...}` 用來執行 typed expression。
 
-第一次執行知道這些已經足夠。完整定義見 [Runtime and Context](reference.zh/03_runtime_context.md) 及 [Expressions](reference.zh/07_expressions.md)。
+第一次執行知道這些已經足夠。完整定義見 [Runtime and Context](reference.zh/runtime-context.md) 及 [Expressions](reference.zh/expressions.md)。
 
 ## 重新產生 Snapshot
 
@@ -159,7 +159,7 @@ Validation 會檢查 schema、workbook/snapshot 一致性、Template reference�
 | `INVALID` | validation 失敗，因此沒有開始執行 |
 | `SKIPPED` | 被規則刻意跳過 |
 
-遇到真實案例問題時再看 [Validation and Troubleshooting](reference.zh/12_validation_diagnostics.md)。
+遇到真實案例問題時再看 [Validation and Troubleshooting](reference.zh/validation-diagnostics.md)。
 
 ## 查看結果
 
@@ -176,7 +176,7 @@ output/<runId>/
 
 Quick Start 的 `case.log` 應包含 `showInput` 寫出的訊息，而最後的 assertion 會比較 Excel 的 `Amount` 與 `Expected`。
 
-完整 report、Action evidence、attempt history 及輸出格式請看 [Results, Reports, and Evidence](reference.zh/11_results_reports_evidence.md)。第一次使用毋須先理解整個 evidence tree。
+完整 report、Action evidence、attempt history 及輸出格式請看 [Results, Reports, and Evidence](reference.zh/results-reports-evidence.md)。第一次使用毋須先理解整個 evidence tree。
 
 ## 刻意製造一次 FAIL
 
@@ -220,7 +220,7 @@ readDate:
 Testcase input -> Template Action -> Tool -> Action output/evidence
 ```
 
-完整的 Tool descriptor、command-backed/call-backed 差異、arguments、output 及 evidence 契約請看 [Resources - Tool](reference.zh/05_resources/tools.md)。
+完整的 Tool descriptor、command-backed/call-backed 差異、arguments、output 及 evidence 契約請看 [Resources - Tool](reference.zh/resources/tools.md)。
 
 ## 執行整個 Quick Start Workbook
 
@@ -256,20 +256,20 @@ Quick Start 不應變成第二本 Reference Manual。按你真正要做的工作
 
 | 我想要…… | 下一步 |
 |---|---|
-| 理解 Workbook、Sidecar、Snapshot、Template、Flow | [Test Authoring](reference.zh/02_test_authoring.md) |
-| 理解 `EXEC`、`META`、`EXEC.VARS`、`EXEC.ACTIONS`、`output` | [Runtime and Context](reference.zh/03_runtime_context.md) |
-| 不經 Excel 單獨測試 Template/Flow/Tool | [Standalone Debug](reference.zh/04_execution_modes/debug.md) |
-| 做 load test | [Load](reference.zh/04_execution_modes/load.md) |
-| 調用 script/program 或 framework-native Tool | [Tool](reference.zh/05_resources/tools.md) |
-| 查詢／更新資料庫，包括 query timeout/retry | [DBHelper](reference.zh/05_resources/dbhelper.md) |
-| 發送／接收／request MQ message | [MQHelper](reference.zh/05_resources/mqhelper.md) |
-| 在 SIT/UAT 間切換 resource binding | [Configuration and Environments](reference.zh/09_configuration.md) |
-| 正確使用 `${...}` / `#{...}` | [Expressions](reference.zh/07_expressions.md) |
-| 使用 assertion、timeout、retry、`runWhen`、`onFailure` | [Reliability and Execution Control](reference.zh/08_reliability_execution_control.md) |
-| 查 CLI command / option | [CLI Reference](reference.zh/10_cli.md) |
-| 排查 `FAIL`、`ERROR`、`INVALID` | [Validation and Troubleshooting](reference.zh/12_validation_diagnostics.md) |
-| 接入 CI 或打包部署 | [CI, Packaging, and Operations](reference.zh/13_ci_packaging_operations.md) |
+| 理解 Workbook、Sidecar、Snapshot、Template、Flow | [Test Authoring](reference.zh/test-authoring.md) |
+| 理解 `EXEC`、`META`、`EXEC.VARS`、`EXEC.ACTIONS`、`output` | [Runtime and Context](reference.zh/runtime-context.md) |
+| 不經 Excel 單獨測試 Template/Flow/Tool | [Standalone Debug](reference.zh/execution-modes/debug.md) |
+| 做 load test | [Load](reference.zh/execution-modes/load.md) |
+| 調用 script/program 或 framework-native Tool | [Tool](reference.zh/resources/tools.md) |
+| 查詢／更新資料庫，包括 query timeout/retry | [DBHelper](reference.zh/resources/dbhelper.md) |
+| 發送／接收／request MQ message | [MQHelper](reference.zh/resources/mqhelper.md) |
+| 在 SIT/UAT 間切換 resource binding | [Configuration and Environments](reference.zh/configuration.md) |
+| 正確使用 `${...}` / `#{...}` | [Expressions](reference.zh/expressions.md) |
+| 使用 assertion、timeout、retry、`runWhen`、`onFailure` | [Reliability and Execution Control](reference.zh/reliability-execution-control.md) |
+| 查 CLI command / option | [CLI Reference](reference.zh/cli.md) |
+| 排查 `FAIL`、`ERROR`、`INVALID` | [Validation and Troubleshooting](reference.zh/validation-diagnostics.md) |
+| 接入 CI 或打包部署 | [CI, Packaging, and Operations](reference.zh/ci-packaging-operations.md) |
 
-Direct DB Action 的安全邊界是：`query` 可以針對 `ASSERTION` / `TIMEOUT` retry；`update` 可設定 `timeoutMs`，但會拒絕自動 retry。完整契約見 [DBHelper](reference.zh/05_resources/dbhelper.md)。
+Direct DB Action 的安全邊界是：`query` 可以針對 `ASSERTION` / `TIMEOUT` retry；`update` 可設定 `timeoutMs`，但會拒絕自動 retry。完整契約見 [DBHelper](reference.zh/resources/dbhelper.md)。
 
 需要查完整欄位與 public contract 時，直接使用生成的 [ATT V3.7.3 中文 Reference Manual](reference.zh.html)。

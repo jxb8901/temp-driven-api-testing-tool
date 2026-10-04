@@ -1,6 +1,6 @@
 # SSHHelper 系統設計
 
-狀態：維護者文件。公開契約以[使用手冊](../reference.zh/05_resources/sshhelper.md)為準。
+狀態：維護者文件。公開契約以[使用手冊](../reference.zh/resources/sshhelper.md)為準。
 
 ## 解析與驗證
 

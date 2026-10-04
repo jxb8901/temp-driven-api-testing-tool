@@ -1,6 +1,6 @@
 # ATT environment profile examples
 
-ATT uses `att-config/v2.11` profiles to select resource and testdata descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. The active DBHelper, MQHelper, HTTPHelper, SSHHelper, Tool Group and Testdata schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema_matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
+ATT uses `att-config/v2.11` profiles to select resource and testdata descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. The active DBHelper, MQHelper, HTTPHelper, SSHHelper, Tool Group and Testdata schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema-matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
 
 ## Shared configuration and profile bindings
 
@@ -94,7 +94,7 @@ actions:
       )}
 ```
 
-For an abstract Map/List request, supply `requestFormat` explicitly. Do not combine `requestFormat` with a String. HTTP/MQ `responseFormat` parses received bytes; `evidence.output.format` controls only an optional human-readable snapshot. See [Actions and Typed Values](../../docs/reference/14_actions.md), [DBHelper](../../docs/reference/05_resources/dbhelper.md), [MQHelper](../../docs/reference/05_resources/mqhelper.md), and [HTTPHelper](../../docs/reference/05_resources/httphelper.md).
+For an abstract Map/List request, supply `requestFormat` explicitly. Do not combine `requestFormat` with a String. HTTP/MQ `responseFormat` parses received bytes; `evidence.output.format` controls only an optional human-readable snapshot. See [Actions and Typed Values](../../docs/reference/actions.md), [DBHelper](../../docs/reference/resources/dbhelper.md), [MQHelper](../../docs/reference/resources/mqhelper.md), and [HTTPHelper](../../docs/reference/resources/httphelper.md).
 
 ## Validate each profile
 

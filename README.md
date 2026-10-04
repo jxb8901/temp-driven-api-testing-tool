@@ -54,7 +54,7 @@ Windows uses the same commands through `att.bat`.
 
 The current Reference Manual is organized by product concepts rather than release history: authoring, Context, Run/Debug/Load, Tool/DBHelper/MQHelper/SSHHelper, environments, expressions, reliability, configuration, CLI, results, validation and operations.
 
-DB operations run under ordinary `type: tool` Actions through `db.<helper>.<query|scalar|update>(...)` calls. Action-level `timeoutMs` overrides the DBHelper statement timeout. Read-only query/scalar calls may use bounded retry for `ASSERTION` and `TIMEOUT`; mutating update calls deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/05_resources/dbhelper.md).
+DB operations run under ordinary `type: tool` Actions through `db.<helper>.<query|scalar|update>(...)` calls. Action-level `timeoutMs` overrides the DBHelper statement timeout. Read-only query/scalar calls may use bounded retry for `ASSERTION` and `TIMEOUT`; mutating update calls deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/resources/dbhelper.md).
 
 ## Core package layout
 

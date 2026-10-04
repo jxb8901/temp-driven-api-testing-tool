@@ -1,6 +1,6 @@
 # SSHHelper system design
 
-Status: Maintainer documentation. The [Reference Manual](../reference/05_resources/sshhelper.md) defines the public contract.
+Status: Maintainer documentation. The [Reference Manual](../reference/resources/sshhelper.md) defines the public contract.
 
 ## Resolution and validation
 

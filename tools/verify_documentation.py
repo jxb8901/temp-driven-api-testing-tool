@@ -188,9 +188,10 @@ def check_html_links(path):
 def check_version_consistency(version):
     exact_prefixes = {
         ROOT / "README.md": "# ATT %s - Automated Testing Tool" % version,
-        DOCS / "quick-start.md": "# ATT V%s " % version,
-        DOCS / "reference.md": "# ATT V%s Reference Manual" % version,
-        DOCS / "reference.zh.md": "# ATT V%s 使用手冊與參考" % version,
+        DOCS / "quick-start.md": "# ATT v%s quick start" % version,
+        DOCS / "quick-start.zh.md": "# ATT v%s 快速入門" % version,
+        DOCS / "reference.md": "# ATT v%s reference manual" % version,
+        DOCS / "reference.zh.md": "# ATT v%s 使用手冊與參考" % version,
     }
     for path, expected in exact_prefixes.items():
         if not path.is_file():
@@ -208,8 +209,8 @@ def check_version_consistency(version):
                  (path.relative_to(ROOT), version))
 
     html_titles = {
-        DOCS / "reference.html": "<title>ATT V%s Reference Manual</title>" % version,
-        DOCS / "reference.zh.html": "<title>ATT V%s 使用手冊與參考</title>" % version,
+        DOCS / "reference.html": "<title>ATT v%s reference manual</title>" % version,
+        DOCS / "reference.zh.html": "<title>ATT v%s 使用手冊與參考</title>" % version,
     }
     for path, expected in html_titles.items():
         if not path.is_file():
@@ -284,7 +285,7 @@ def check_cli_documentation():
     public_commands = set(("run", "validate", "snapshot", "docs", "report",
                            "build", "clean", "version", "debug", "load", "help"))
 
-    for rel in ("reference/10_cli.md", "reference.zh/10_cli.md"):
+    for rel in ("reference/cli.md", "reference.zh/cli.md"):
         path = DOCS / rel
         if not path.is_file():
             fail("missing CLI Reference: docs/%s" % rel)
@@ -423,11 +424,11 @@ def check_ownership_links():
     landing = read(LANDING)
     for canonical in (
             "quick-start.md", "quick-start.zh.md", "reference.html", "reference.zh.html",
-            "reference/02_test_authoring.md", "reference/04_execution_modes/debug.md",
-            "reference/04_execution_modes/load.md", "reference/05_resources/dbhelper.md",
-            "reference/05_resources/mqhelper.md", "reference/09_configuration.md",
-            "reference/07_expressions.md", "reference/12_validation_diagnostics.md",
-            "reference/13_ci_packaging_operations.md", "system-design/runtime-execution.md",
+            "reference/test-authoring.md", "reference/execution-modes/debug.md",
+            "reference/execution-modes/load.md", "reference/resources/dbhelper.md",
+            "reference/resources/mqhelper.md", "reference/configuration.md",
+            "reference/expressions.md", "reference/validation-diagnostics.md",
+            "reference/ci-packaging-operations.md", "system-design/runtime-execution.md",
             "history/README.md"):
         if "(" + canonical + ")" not in landing and "(`" + canonical + "`)" not in landing:
             fail("docs/README.md missing canonical task link: %s" % canonical)

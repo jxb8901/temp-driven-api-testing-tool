@@ -4,7 +4,9 @@ from pathlib import Path
 from documentation_contracts import (active_schemas, stale_claims, current_html,
                                      manifest_errors, structure_errors, overview_resource_errors,
                                      chapter_label_errors, editorial_errors,
-                                     editorial_source_files, standalone_markdown)
+                                     editorial_source_files, standalone_markdown,
+                                     standalone_page_errors)
+from build_reference_manual import rebase_headings, assembly_heading_offset
 
 VERSION = "3.7.3"
 CATALOG = """schemaVersion: att-schema-catalog/v3.0
@@ -37,8 +39,8 @@ class DocumentationContractsTest(unittest.TestCase):
     def test_testdata_mapping_example_is_bootstrap_safe_and_uses_selected_record_paths(self):
         root = Path(__file__).resolve().parents[1]
         paths = (
-            root / "docs/reference/02_test_authoring.md",
-            root / "docs/reference.zh/02_test_authoring.md",
+            root / "docs/reference/test-authoring.md",
+            root / "docs/reference.zh/test-authoring.md",
             root / "docs/reference.html",
             root / "docs/reference.zh.html",
         )
@@ -52,11 +54,11 @@ class DocumentationContractsTest(unittest.TestCase):
     def test_input_mapping_pre_input_context_contract_is_published(self):
         root = Path(__file__).resolve().parents[1]
         english = (
-            root / "docs/reference/02_test_authoring.md",
+            root / "docs/reference/test-authoring.md",
             root / "docs/reference.md",
         )
         chinese = (
-            root / "docs/reference.zh/02_test_authoring.md",
+            root / "docs/reference.zh/test-authoring.md",
             root / "docs/reference.zh.md",
         )
         for path in english:
@@ -77,8 +79,8 @@ class DocumentationContractsTest(unittest.TestCase):
     def test_input_mapping_contract_does_not_claim_builtin_calls(self):
         root = Path(__file__).resolve().parents[1]
         paths = (
-            root / "docs/reference/02_test_authoring.md",
-            root / "docs/reference.zh/02_test_authoring.md",
+            root / "docs/reference/test-authoring.md",
+            root / "docs/reference.zh/test-authoring.md",
             root / "docs/reference.md",
             root / "docs/reference.zh.md",
             root / "docs/reference.html",
@@ -90,9 +92,9 @@ class DocumentationContractsTest(unittest.TestCase):
                 self.assertNotIn("bootstrap-safe built-ins", text)
                 self.assertNotIn("Calls are limited to pure bootstrap-safe", text)
                 self.assertNotIn("Calls 只允許 pure bootstrap-safe", text)
-        for path in (root / "docs/reference/02_test_authoring.md", root / "docs/reference.md"):
+        for path in (root / "docs/reference/test-authoring.md", root / "docs/reference.md"):
             self.assertIn("built-in calls are not evaluated", path.read_text(encoding="utf-8"))
-        for path in (root / "docs/reference.zh/02_test_authoring.md", root / "docs/reference.zh.md"):
+        for path in (root / "docs/reference.zh/test-authoring.md", root / "docs/reference.zh.md"):
             self.assertIn("不會評估 built-in call", path.read_text(encoding="utf-8"))
 
     def test_explicit_historical_block_is_scoped_and_balanced(self):
@@ -132,12 +134,12 @@ class DocumentationContractsTest(unittest.TestCase):
     def test_overview_requires_five_peers_in_definition_text_and_diagram(self):
         names = "Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper"
         good = ("A **Resource** is " + names + ".\n"
-                "### Resources are peers\n" + names + " are peers.\n"
+                "## Resources are peers\n" + names + " are peers.\n"
                 "\x60\x60\x60text\nTool --\\\nDBHelper --+\nMQHelper --+\n"
                 "HTTPHelper --+\nSSHHelper --/\n\x60\x60\x60\n")
         self.assertEqual([], overview_resource_errors(good))
         zh = good.replace("A **Resource** is", "**Resource** 是")
-        zh = zh.replace("### Resources are peers", "### 五種 Resource 是同級概念")
+        zh = zh.replace("## Resources are peers", "## 五種 Resource 是同級概念")
         self.assertEqual([], overview_resource_errors(zh))
         variants = (
             good.replace("A **Resource** is " + names,
@@ -153,14 +155,14 @@ class DocumentationContractsTest(unittest.TestCase):
 
     def test_secondary_link_labels_use_current_taxonomy(self):
         for label, target in (
-                ("Environment and Test Data", "09_configuration.md"),
-                ("Validation and Diagnostics", "12_validation_diagnostics.md")):
+                ("Environment and Test Data", "configuration.md"),
+                ("Validation and Diagnostics", "validation-diagnostics.md")):
             for root in ("reference/", "reference.zh/"):
                 with self.subTest(label=label, root=root):
                     self.assertTrue(chapter_label_errors("[%s](%s%s)" % (label, root, target)))
         self.assertEqual([], chapter_label_errors(
-            "[Configuration and Environments](reference/09_configuration.md)\n"
-            "[Validation and Troubleshooting](reference.zh/12_validation_diagnostics.md)"))
+            "[Configuration and Environments](reference/configuration.md)\n"
+            "[Validation and Troubleshooting](reference.zh/validation-diagnostics.md)"))
         self.assertEqual([], chapter_label_errors(
             "<!-- att-docs:historical -->\n"
             "[Environment and Test Data](old.md)\n"
@@ -173,14 +175,11 @@ class DocumentationContractsTest(unittest.TestCase):
         self.assertEqual([], manifest_errors(["a.md", "x/b.md"]))
 
     def test_duplicate_number_missing_appendix_and_order_drift_fail(self):
-        good = "\n".join(["## %02d Chapter %s" % (n, n) for n in range(1, 14)] +
+        good = "\n".join(["## Chapter %s" % n for n in range(1, 14)] +
                          ["## Appendix " + c + " — Lookup " + c for c in "ABCD"])
         self.assertEqual([], structure_errors(good))
-        self.assertTrue(structure_errors(good.replace("## 03", "## 02")))
         self.assertTrue(structure_errors(good.replace("Chapter 3", "Chapter 2")))
         self.assertTrue(structure_errors(good.replace("## Appendix D — Lookup D", "")))
-        self.assertTrue(structure_errors(good.replace("## 03", "## 04")
-                                             .replace("## 05", "## 03")))
 
     def test_editorial_lint_catches_requested_patterns(self):
         text = ("# Page title\n\n## 1. Setup\n\n"
@@ -193,6 +192,35 @@ class DocumentationContractsTest(unittest.TestCase):
         self.assertTrue(any("e.g." in error for error in errors))
         self.assertTrue(any("and/or" in error for error in errors))
 
+    def test_numbered_heading_rule_ignores_numeric_noun_phrases(self):
+        for heading in ("## 2-factor authentication", "## 2026 roadmap",
+                        "## 3-tier architecture"):
+            with self.subTest(heading=heading):
+                self.assertEqual([], editorial_errors(heading + "\n"))
+        for heading in ("## 1. Setup", "## 1.2 Setup", "## 01 Overview"):
+            with self.subTest(heading=heading):
+                self.assertTrue(any("numeric sequence prefix" in error
+                                    for error in editorial_errors(heading + "\n")))
+
+    def test_reference_pages_require_standalone_heading_structure(self):
+        self.assertEqual([], standalone_page_errors("# Page\n\n## Section\n### Detail\n"))
+        self.assertTrue(standalone_page_errors("## Page\n#### Skipped\n"))
+        root = Path(__file__).resolve().parents[1]
+        for directory in (root / "docs/reference", root / "docs/reference.zh"):
+            for path in directory.rglob("*.md"):
+                with self.subTest(path=path.relative_to(root)):
+                    self.assertEqual([], standalone_page_errors(path.read_text(encoding="utf-8")))
+
+    def test_combined_manual_rebases_standalone_heading_levels(self):
+        items = ["overview.md", "execution-modes/overview.md",
+                 "execution-modes/run.md", "appendices/schema-matrix.md"]
+        self.assertEqual(1, assembly_heading_offset("overview.md", items))
+        self.assertEqual(1, assembly_heading_offset("execution-modes/overview.md", items))
+        self.assertEqual(1, assembly_heading_offset("appendices/schema-matrix.md", items))
+        self.assertEqual(2, assembly_heading_offset("execution-modes/run.md", items))
+        self.assertEqual("## Page\n### Section\n", rebase_headings("# Page\n## Section\n", 1))
+        self.assertEqual("### Page\n#### Section\n", rebase_headings("# Page\n## Section\n", 2))
+
     def test_editorial_lint_ignores_code_and_generated_reference_artifacts(self):
         text = ("# Page title\n\nInline `e.g.` and `and/or` identifiers.\n"
                 "```markdown\n## 2. Example\ne.g. this and/or that\n````\n")
@@ -200,11 +228,11 @@ class DocumentationContractsTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         files = editorial_source_files(root)
         rels = {path.relative_to(root).as_posix() for path in files}
-        self.assertIn("docs/reference/03_runtime_context.md", rels)
+        self.assertIn("docs/reference/runtime-context.md", rels)
         self.assertNotIn("docs/reference.md", rels)
         self.assertNotIn("docs/reference.html", rels)
         self.assertNotIn("docs/history/09_Reference_Manual_V3.md", rels)
-        self.assertFalse(standalone_markdown(root / "docs/reference/03_runtime_context.md", root))
+        self.assertFalse(standalone_markdown(root / "docs/reference/runtime-context.md", root))
         self.assertEqual([], editorial_errors("## 04 Runtime and Context Model\n",
                                               allow_reference_structure=True))
 

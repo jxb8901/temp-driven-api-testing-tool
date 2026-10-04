@@ -18,14 +18,14 @@ LANGS = {
         "root": DOCS / "reference",
         "md": DOCS / "reference.md",
         "html": DOCS / "reference.html",
-        "title": "ATT V{version} Reference Manual",
+        "title": "ATT v{version} reference manual",
         "status": "Normative end-user documentation; generated from modular sources",
     },
     "zh": {
         "root": DOCS / "reference.zh",
         "md": DOCS / "reference.zh.md",
         "html": DOCS / "reference.zh.html",
-        "title": "ATT V{version} 使用手冊與參考",
+        "title": "ATT v{version} 使用手冊與參考",
         "status": "規範性使用者文件；由模組化來源自動生成",
     },
 }
@@ -128,6 +128,40 @@ def table_of_contents(chunks, lang, title):
     return "\n".join(lines)
 
 
+def assembly_heading_offset(module_rel, items):
+    """Keep subpages under their manifest-listed directory overview in the book."""
+    parent = Path(module_rel).parent.as_posix()
+    if (parent != "." and module_rel != parent + "/overview.md"
+            and parent + "/overview.md" in items):
+        return 2
+    return 1
+
+
+def rebase_headings(text, offset):
+    """Demote standalone source headings when assembling the combined manual."""
+    lines = []
+    fence_char = None
+    fence_length = 0
+    for line in text.splitlines():
+        fence = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence:
+            marker = fence.group(1)
+            if fence_char is None:
+                fence_char, fence_length = marker[0], len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_length:
+                fence_char, fence_length = None, 0
+            lines.append(line)
+            continue
+        if fence_char is None:
+            heading = re.match(r"^(#{1,6})(\s+.+)$", line)
+            if heading:
+                level = min(6, len(heading.group(1)) + offset)
+                line = "#" * level + heading.group(2)
+        lines.append(line)
+    result = "\n".join(lines)
+    return result + ("\n" if text.endswith("\n") else "")
+
+
 def markdown(lang, items, ver, include_toc=True):
     cfg = LANGS[lang]
     chunks = []
@@ -136,7 +170,8 @@ def markdown(lang, items, ver, include_toc=True):
         if not path.is_file():
             raise SystemExit("Missing %s Reference module: %s" %
                              (lang.upper(), path.relative_to(ROOT)))
-        chunks.append(rebase_for_docs_root(path.read_text(encoding="utf-8").rstrip(), lang, rel))
+        source = rebase_for_docs_root(path.read_text(encoding="utf-8").rstrip(), lang, rel)
+        chunks.append(rebase_headings(source, assembly_heading_offset(rel, items)))
 
     title = cfg["title"].format(version=ver)
     header = [
