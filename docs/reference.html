@@ -256,6 +256,11 @@ id="toc-how-to-use-this-manual">How to use this manual</a></li>
 </ul></li>
 <li><a href="#test-authoring" id="toc-test-authoring">Test authoring</a>
 <ul>
+<li><a href="#author-and-run-a-testcase"
+id="toc-author-and-run-a-testcase">Author and run a Testcase</a></li>
+<li><a href="#distinguish-testcases-from-case-executions"
+id="toc-distinguish-testcases-from-case-executions">Distinguish
+Testcases from Case executions</a></li>
 <li><a href="#authoring-contracts"
 id="toc-authoring-contracts">Authoring contracts</a></li>
 <li><a href="#workbook" id="toc-workbook">Workbook</a></li>
@@ -269,6 +274,9 @@ data ownership</a></li>
 <li><a href="#testdata-registry-and-input-mapping"
 id="toc-testdata-registry-and-input-mapping">Testdata registry and input
 mapping</a></li>
+<li><a href="#advanced-workbook-and-snapshot-details"
+id="toc-advanced-workbook-and-snapshot-details">Advanced workbook and
+Snapshot details</a></li>
 </ul></li>
 <li><a href="#actions-and-typed-values"
 id="toc-actions-and-typed-values">Actions and typed values</a>
@@ -387,19 +395,21 @@ retry eligibility</a></li>
 id="toc-configuration-and-environments">Configuration and
 environments</a>
 <ul>
+<li><a href="#find-a-configuration-task"
+id="toc-find-a-configuration-task">Find a configuration task</a></li>
 <li><a href="#configuration-layers-and-precedence"
 id="toc-configuration-layers-and-precedence">Configuration layers and
 precedence</a></li>
 <li><a href="#ignore-or-disable-att-owned-configuration-with-x-"
 id="toc-ignore-or-disable-att-owned-configuration-with-x-">Ignore or
 disable ATT-owned configuration with <code>x-</code></a></li>
-<li><a href="#multi-environment-profiles-in-current-att"
-id="toc-multi-environment-profiles-in-current-att">Multi-environment
-profiles in current ATT</a></li>
+<li><a href="#select-an-environment-profile"
+id="toc-select-an-environment-profile">Select an environment
+profile</a></li>
 <li><a href="#schema-catalog" id="toc-schema-catalog">Schema
 catalog</a></li>
-<li><a href="#global-configuration" id="toc-global-configuration">Global
-configuration</a></li>
+<li><a href="#set-package-wide-options"
+id="toc-set-package-wide-options">Set package-wide options</a></li>
 <li><a href="#identifier-and-path-constraints"
 id="toc-identifier-and-path-constraints">Identifier and path
 constraints</a></li>
@@ -412,15 +422,16 @@ id="toc-separate-configuration-files">Separate configuration
 files</a></li>
 <li><a href="#configreportfilenamepattern"
 id="toc-configreportfilenamepattern"><code>config.report.fileNamePattern</code></a></li>
-<li><a href="#feature-configuration-owners"
-id="toc-feature-configuration-owners">Feature configuration
-owners</a></li>
+<li><a href="#configuration-owners"
+id="toc-configuration-owners">Configuration owners</a></li>
 </ul></li>
 <li><a href="#cli-reference" id="toc-cli-reference">CLI reference</a>
 <ul>
-<li><a href="#commands" id="toc-commands">Commands</a></li>
-<li><a href="#command-syntax" id="toc-command-syntax">Command
-syntax</a></li>
+<li><a href="#choose-a-command" id="toc-choose-a-command">Choose a
+command</a></li>
+<li><a href="#find-syntax-options-and-examples-by-task"
+id="toc-find-syntax-options-and-examples-by-task">Find syntax, options,
+and examples by task</a></li>
 <li><a href="#typed-overrides-and-quick-load"
 id="toc-typed-overrides-and-quick-load">Typed overrides and quick
 Load</a></li>
@@ -431,32 +442,34 @@ id="toc-debug-inputs-and-outputs">Debug inputs and outputs</a></li>
 id="toc-complete-option-matrix">Complete option matrix</a></li>
 </ul></li>
 <li><a href="#results-reports-and-evidence"
-id="toc-results-reports-and-evidence">Results, reports, and Evidence</a>
+id="toc-results-reports-and-evidence">Results, reports, and evidence</a>
 <ul>
-<li><a href="#run-directory" id="toc-run-directory">Run
-directory</a></li>
-<li><a href="#human-readable-html-report"
-id="toc-human-readable-html-report">Human-readable HTML report</a></li>
-<li><a href="#tool-evidence-collector-failures"
-id="toc-tool-evidence-collector-failures">Tool Evidence collector
-failures</a></li>
-<li><a href="#result-workbook" id="toc-result-workbook">Result
+<li><a href="#find-artifacts-for-a-run"
+id="toc-find-artifacts-for-a-run">Find artifacts for a Run</a></li>
+<li><a href="#find-case-execution-results-in-the-html-report"
+id="toc-find-case-execution-results-in-the-html-report">Find Case
+execution results in the HTML report</a></li>
+<li><a href="#diagnose-tool-evidence-collector-failures"
+id="toc-diagnose-tool-evidence-collector-failures">Diagnose Tool
+evidence collector failures</a></li>
+<li><a href="#add-execution-results-to-a-workbook"
+id="toc-add-execution-results-to-a-workbook">Add execution results to a
 Workbook</a></li>
-<li><a href="#junit-xml" id="toc-junit-xml">JUnit XML</a></li>
-<li><a href="#ci-json-summary" id="toc-ci-json-summary">CI JSON
-summary</a></li>
-<li><a href="#run-manifest-and-reproducibility"
-id="toc-run-manifest-and-reproducibility">Run manifest and
-reproducibility</a></li>
-<li><a href="#documentation-archive-and-clean"
-id="toc-documentation-archive-and-clean">Documentation, archive, and
-clean</a></li>
-<li><a href="#run-execution-and-evidence-navigation"
-id="toc-run-execution-and-evidence-navigation">Run, execution and
-Evidence navigation</a></li>
-<li><a href="#generated-output-schema-summary"
-id="toc-generated-output-schema-summary">Generated-output schema
-summary</a></li>
+<li><a href="#export-junit-results" id="toc-export-junit-results">Export
+JUnit results</a></li>
+<li><a href="#read-the-ci-json-summary"
+id="toc-read-the-ci-json-summary">Read the CI JSON summary</a></li>
+<li><a href="#reproduce-a-run" id="toc-reproduce-a-run">Reproduce a
+Run</a></li>
+<li><a href="#generate-docs-and-manage-package-output"
+id="toc-generate-docs-and-manage-package-output">Generate docs and
+manage package output</a></li>
+<li><a href="#trace-execution-identity-to-an-artifact"
+id="toc-trace-execution-identity-to-an-artifact">Trace execution
+identity to an artifact</a></li>
+<li><a href="#inspect-generated-output-schemas"
+id="toc-inspect-generated-output-schemas">Inspect generated-output
+schemas</a></li>
 <li><a href="#reading-caselog-and-caseyaml"
 id="toc-reading-caselog-and-caseyaml">Reading <code>case.log</code> and
 <code>case.yaml</code></a></li>
@@ -465,8 +478,9 @@ id="toc-reading-caselog-and-caseyaml">Reading <code>case.log</code> and
 id="toc-validation-and-troubleshooting">Validation and
 troubleshooting</a>
 <ul>
-<li><a href="#where-to-look-first" id="toc-where-to-look-first">Where to
-look first</a></li>
+<li><a href="#choose-your-first-diagnostic-step"
+id="toc-choose-your-first-diagnostic-step">Choose your first diagnostic
+step</a></li>
 <li><a href="#start-with-validation"
 id="toc-start-with-validation">Start with validation</a></li>
 <li><a href="#common-questions" id="toc-common-questions">Common
@@ -551,14 +565,18 @@ systems.</p>
               |     |-- Tool
               |     `-- DB
               `-- Flow -&gt; ordered Actions</code></pre>
-<p>A <strong>Testcase</strong> is one normalized workbook row. A
-<strong>Stage</strong> selects a Template and contributes stage-private
-data. A <strong>Template</strong> is the executable scenario boundary. A
-<strong>Flow</strong> is reusable Template logic with an isolated Action
-scope. An <strong>Action</strong> is one ordered unit of work. A
-<strong>Resource</strong> is a configured Tool, DBHelper, MQHelper,
-HTTPHelper or SSHHelper used by Actions or permitted expression
-calls.</p>
+<p>A <strong>Testcase</strong> is one authored, normalized workbook row.
+A <strong>Case execution</strong> is one Run execution of that Testcase;
+its full Case ID identifies the Testcase and is reused in execution
+results and evidence. Use <em>Testcase</em> when discussing workbook
+data and authoring, and <em>Case execution</em> when discussing runtime
+status, logs, reports, and artifacts. A <strong>Stage</strong> selects a
+Template and contributes stage-private data. A <strong>Template</strong>
+is the executable scenario boundary. A <strong>Flow</strong> is reusable
+Template logic with an isolated Action scope. An <strong>Action</strong>
+is one ordered unit of work. A <strong>Resource</strong> is a configured
+Tool, DBHelper, MQHelper, HTTPHelper or SSHHelper used by Actions or
+permitted expression calls.</p>
 <h3 id="execution-modes-are-peers">Execution modes are peers</h3>
 <p>Run, Debug and Load adapt different inputs into the same
 execution-neutral Context and reusable components:</p>
@@ -632,7 +650,11 @@ documentation.</p>
 </tr>
 <tr class="even">
 <td>Understand the core ATT model</td>
-<td><a href="reference/overview.md#product-model">Product model</a></td>
+<td><a href="reference/overview.md">Product model</a>, <a
+href="reference/test-authoring.md">Test Authoring</a>, <a
+href="reference/actions.md">Actions</a>, <a
+href="reference/runtime-context.md">Runtime and Context</a>, and <a
+href="reference/execution-modes/run.md">Run mode</a></td>
 </tr>
 <tr class="odd">
 <td>Configure DB/MQ/HTTP/SSH</td>
@@ -649,7 +671,8 @@ Troubleshooting</a></td>
 </tr>
 <tr class="even">
 <td>Upgrade an older package</td>
-<td><a href="reference/appendices/migrations.md">Appendix C</a></td>
+<td><a href="reference/appendices/migrations.md">Migration
+Notes</a></td>
 </tr>
 </tbody>
 </table>
@@ -657,6 +680,32 @@ Troubleshooting</a></td>
 examples explain that contract for narrower tasks. Each contract has one
 semantic owner; other chapters summarize and link to that owner.</p>
 <h2 id="test-authoring">Test authoring</h2>
+<h3 id="author-and-run-a-testcase">Author and run a Testcase</h3>
+<p>A Testcase is one normalized workbook row; Run creates one Case
+execution from each selected row. Use this workflow to author, validate,
+and execute a change.</p>
+<ol type="1">
+<li>Edit the workbook and map its columns in the Sidecar.</li>
+<li>Generate the Snapshot and review its diff.</li>
+<li>Validate the package with ./att.sh validate --package.</li>
+<li>Use <a href="reference/execution-modes/debug.md">Debug</a> to
+isolate a Template, Flow, or Tool, then use <a
+href="reference/execution-modes/run.md">Run</a> to create Case
+executions.</li>
+</ol>
+<p>The following sections define each authoring contract. See <a
+href="#advanced-workbook-and-snapshot-details">Advanced workbook and
+Snapshot details</a> for formula cells, multi-row headers, and XML
+serialization.</p>
+<h3 id="distinguish-testcases-from-case-executions">Distinguish
+Testcases from Case executions</h3>
+<p>A <strong>Testcase</strong> is the authored workbook row after
+sidecar mapping and snapshot normalization. Its full Case ID is
+<code>workbookId.groupId.rowCaseId</code>. A <strong>Case
+execution</strong> is one runtime execution of that Testcase by Run,
+with its own status and evidence. The identifier is shared; the concepts
+are not synonyms. This page uses <em>Testcase</em> for workbook content
+and <em>Case execution</em> for runtime work.</p>
 <h3 id="authoring-contracts">Authoring contracts</h3>
 <p>This chapter explains the normal day-to-day workflow in the same
 order that data moves through ATT.</p>
@@ -685,7 +734,7 @@ order that data moves through ATT.</p>
 <td>Resource</td>
 </tr>
 <tr class="odd">
-<td>Case/stage business input</td>
+<td>Testcase/Stage business input</td>
 <td>EXEC.INPUT</td>
 </tr>
 <tr class="even">
@@ -733,14 +782,8 @@ The generated <code>payment_regression.xml</code> uses schema
 <code>att-testcases/v2.4</code> and stores only normalized
 sidecar-mapped semantics. It preserves group, Case, tag, map/list, and
 stage order, uses explicit value types, and excludes styles and
-unrelated workbook content. String values containing LF or XML-special
-<code>&amp;</code>, <code>&lt;</code>, or <code>&gt;</code> characters
-use CDATA; literal <code>]]&gt;</code> content is split across adjacent
-CDATA sections and reconstructs exactly when parsed. Spaces/tabs
-immediately before LF use <code>&amp;#32;</code>/<code>&amp;#9;</code>
-between CDATA sections, preserving the value without Git
-trailing-whitespace warnings. Review and commit the XML with the xlsx;
-do not edit it manually.</p>
+unrelated workbook content. Review and commit the XML with the xlsx; do
+not edit it manually.</p>
 <p>Ordinary <code>run</code> and every <code>validate</code> mode remain
 read-only and fail before output creation if the XML is missing,
 invalid, non-canonical, or stale. <code>run --update-snapshot</code>
@@ -771,67 +814,6 @@ blank. An ordinary blank data value becomes the empty string. A blank
 <code>(yaml)</code> cell remains blank rather than being parsed.</p>
 <p>A required stage selector rejects a blank value. An optional stage
 with a blank selector is skipped.</p>
-<h4 id="formula-date-percentage-and-scientific-notation-cells">Formula,
-date, percentage, and scientific notation cells</h4>
-<p>V2.4 rejects formula cells in configured Case ID, tags, case-data,
-stage-selector, and stage-data columns. Formula definitions and
-cached/displayed results can diverge and therefore cannot produce a
-trustworthy semantic snapshot. Recalculate in Excel and paste the result
-as a literal value, or calculate it in a dedicated ATT step.</p>
-<p>Merged regions intersecting configured testcase columns below
-<code>excel.headerRows</code> are likewise rejected. Merged presentation
-cells wholly inside the configured header area remain allowed.</p>
-<p>For non-formula cells, ATT imports the displayed text. The exact
-representation follows the workbook's cell format and the runtime
-locale:</p>
-<table>
-<thead>
-<tr class="header">
-<th>Excel value and format</th>
-<th>Context value</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>45292</code> formatted <code>yyyy-mm-dd</code></td>
-<td><code>2024-01-01</code></td>
-</tr>
-<tr class="even">
-<td><code>0.125</code> formatted <code>0.0%</code></td>
-<td><code>12.5%</code></td>
-</tr>
-<tr class="odd">
-<td><code>123000</code> formatted <code>0.00E+00</code></td>
-<td><code>1.23E+05</code></td>
-</tr>
-<tr class="even">
-<td><code>000123</code> stored/formatted as text</td>
-<td><code>000123</code></td>
-</tr>
-</tbody>
-</table>
-<p>An ordinary column remains a string. A <code>(yaml)</code> column may
-convert displayed text into another YAML type. Quote a YAML scalar when
-text such as a date, percentage, scientific number, account number, or
-code must stay a string.</p>
-<h4 id="multi-row-headers">Multi-row headers</h4>
-<p><code>headerRows: 2</code> means rows 1–2 are headers and data begins
-at row 3. ATT scans each physical column top-to-bottom and uses its last
-non-empty trimmed header cell:</p>
-<pre class="text"><code>Row 1: Basic data |           | Execution |
-Row 2: Case ID    | Case name | Template  | Parameters
-Effective: Case ID, Case name, Template, Parameters</code></pre>
-<p>ATT does not concatenate parent and child labels. Header matching
-removes spaces, tabs, line breaks, non-breaking spaces, and other
-Unicode whitespace from both the effective Excel header and configured
-sidecar/report label; matching otherwise remains case-sensitive. For
-example, <code>案例 編號</code>, <code>案例\n編號</code>, and
-<code>案例編號</code> identify the same column. Every effective header
-must exist exactly once after this normalization, so two physical
-headers that differ only by whitespace are a duplicate-header error.
-Testcase loading and result-workbook writing use this same projection;
-result columns that do not already exist are written to the final header
-row.</p>
 <h4 id="workbook-sidecar">Workbook Sidecar</h4>
 <table>
 <thead>
@@ -950,13 +932,14 @@ the diff. After changing a Sidecar, Template, Flow or Resource, run
 <code>./att.sh validate --package</code>. Use <a
 href="reference/execution-modes/debug.md">Debug</a> to isolate an
 authoring check and <a href="reference/execution-modes/run.md">Run</a>
-to execute Testcases. Follow <a href="quick-start.md">Quick Start</a> to
-build the first package.</p>
+to create Case executions from Testcases. Follow <a
+href="quick-start.md">Quick Start</a> to build the first package.</p>
 <h3 id="test-data-ownership">Test data ownership</h3>
-<p>Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage
+<p>Workbook/Sidecar/Snapshot defines Testcase data. Testcase and Stage
 business inputs enter <code>EXEC.INPUT</code>; <a
 href="reference/runtime-context.md">Context</a> defines their scope and
-lifetime. Environment selection belongs to <a
+lifetime. Run turns each selected Testcase into a Case execution.
+Environment selection belongs to <a
 href="reference/configuration.md">Configuration</a>.</p>
 <h3 id="testdata-registry-and-input-mapping">Testdata registry and input
 mapping</h3>
@@ -997,25 +980,25 @@ mapping grammar evaluates literals, selected-record <code>@{...}</code>
 references, and <code>${...}</code> Context references; built-in calls
 are not evaluated. <code>#{...}</code>, <code>&amp;{...}</code>, and
 <code>%{...}</code> are not input-mapping expressions.</p>
-<div class="sourceCode" id="cb8"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-testdata/v1.0</span></span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> accounts</span></span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="fu">records</span><span class="kw">:</span></span>
-<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-100&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">tier</span><span class="kw">:</span><span class="at"> gold</span><span class="kw">}</span></span>
-<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-200&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">tier</span><span class="kw">:</span><span class="at"> silver</span><span class="kw">}</span></span>
-<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> sequential</span><span class="kw">,</span><span class="at"> </span><span class="fu">exhaustion</span><span class="kw">:</span><span class="at"> recycle</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-testdata/v1.0</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> accounts</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="fu">records</span><span class="kw">:</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-100&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">tier</span><span class="kw">:</span><span class="at"> gold</span><span class="kw">}</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-200&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">tier</span><span class="kw">:</span><span class="at"> silver</span><span class="kw">}</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> sequential</span><span class="kw">,</span><span class="at"> </span><span class="fu">exhaustion</span><span class="kw">:</span><span class="at"> recycle</span><span class="kw">}</span></span></code></pre></div>
 <p>Generated records are virtual and indexed; ATT materializes only the
 selected record. The inclusive integer range is capped at 1,000,000
 records, and <code>%{seq}</code> is the only supported generated-record
 substitution:</p>
-<div class="sourceCode" id="cb9"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-testdata/v1.0</span></span>
-<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> generatedAccounts</span></span>
-<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="fu">records</span><span class="kw">:</span></span>
-<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">generate</span><span class="kw">:</span></span>
-<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">seq</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">from</span><span class="kw">:</span><span class="at"> </span><span class="dv">100</span><span class="kw">,</span><span class="at"> </span><span class="fu">to</span><span class="kw">:</span><span class="at"> </span><span class="dv">999999</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;%06d&quot;</span><span class="kw">}</span></span>
-<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">record</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-%{seq}&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">amount</span><span class="kw">:</span><span class="at"> </span><span class="dv">42</span><span class="kw">}</span></span>
-<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> roundRobin</span><span class="kw">,</span><span class="at"> </span><span class="fu">exhaustion</span><span class="kw">:</span><span class="at"> stop</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-testdata/v1.0</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">id</span><span class="kw">:</span><span class="at"> generatedAccounts</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="fu">records</span><span class="kw">:</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">generate</span><span class="kw">:</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">seq</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">from</span><span class="kw">:</span><span class="at"> </span><span class="dv">100</span><span class="kw">,</span><span class="at"> </span><span class="fu">to</span><span class="kw">:</span><span class="at"> </span><span class="dv">999999</span><span class="kw">,</span><span class="at"> </span><span class="fu">format</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;%06d&quot;</span><span class="kw">}</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">record</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">id</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;A-%{seq}&quot;</span><span class="kw">,</span><span class="at"> </span><span class="fu">amount</span><span class="kw">:</span><span class="at"> </span><span class="dv">42</span><span class="kw">}</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a><span class="fu">selection</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">strategy</span><span class="kw">:</span><span class="at"> roundRobin</span><span class="kw">,</span><span class="at"> </span><span class="fu">exhaustion</span><span class="kw">:</span><span class="at"> stop</span><span class="kw">}</span></span></code></pre></div>
 <p>An environment profile's <code>testdata</code> list declares the
 shared registry. A Load scenario may declare its own top-level
 <code>testdata</code> imports; matching IDs replace the whole
@@ -1028,6 +1011,77 @@ or <code>%{...}</code> references. See <a
 href="reference/configuration.md">Environment and Test Data</a>, <a
 href="reference/execution-modes/load.md">Load</a>, and the maintainer <a
 href="system-design/testdata.md">testdata design</a>.</p>
+<h3 id="advanced-workbook-and-snapshot-details">Advanced workbook and
+Snapshot details</h3>
+<h4 id="normalize-xml-text-safely">Normalize XML text safely</h4>
+<p>String values containing LF or XML-special <code>&amp;</code>,
+<code>&lt;</code>, or <code>&gt;</code> characters use CDATA; literal
+<code>]]&gt;</code> content is split across adjacent CDATA sections and
+reconstructs exactly when parsed. Spaces/tabs immediately before LF use
+<code>&amp;#32;</code>/<code>&amp;#9;</code> between CDATA sections,
+preserving the value without Git trailing-whitespace warnings. Review
+and commit the XML with the xlsx; do not edit it manually.</p>
+<h4 id="formula-date-percentage-and-scientific-notation-cells">Formula,
+date, percentage, and scientific notation cells</h4>
+<p>V2.4 rejects formula cells in configured Case ID, tags, case-data,
+stage-selector, and stage-data columns. Formula definitions and
+cached/displayed results can diverge and therefore cannot produce a
+trustworthy semantic snapshot. Recalculate in Excel and paste the result
+as a literal value, or calculate it in a dedicated ATT step.</p>
+<p>Merged regions intersecting configured testcase columns below
+<code>excel.headerRows</code> are likewise rejected. Merged presentation
+cells wholly inside the configured header area remain allowed.</p>
+<p>For non-formula cells, ATT imports the displayed text. The exact
+representation follows the workbook's cell format and the runtime
+locale:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Excel value and format</th>
+<th>Context value</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>45292</code> formatted <code>yyyy-mm-dd</code></td>
+<td><code>2024-01-01</code></td>
+</tr>
+<tr class="even">
+<td><code>0.125</code> formatted <code>0.0%</code></td>
+<td><code>12.5%</code></td>
+</tr>
+<tr class="odd">
+<td><code>123000</code> formatted <code>0.00E+00</code></td>
+<td><code>1.23E+05</code></td>
+</tr>
+<tr class="even">
+<td><code>000123</code> stored/formatted as text</td>
+<td><code>000123</code></td>
+</tr>
+</tbody>
+</table>
+<p>An ordinary column remains a string. A <code>(yaml)</code> column may
+convert displayed text into another YAML type. Quote a YAML scalar when
+text such as a date, percentage, scientific number, account number, or
+code must stay a string.</p>
+<h4 id="multi-row-headers">Multi-row headers</h4>
+<p><code>headerRows: 2</code> means rows 1–2 are headers and data begins
+at row 3. ATT scans each physical column top-to-bottom and uses its last
+non-empty trimmed header cell:</p>
+<pre class="text"><code>Row 1: Basic data |           | Execution |
+Row 2: Case ID    | Case name | Template  | Parameters
+Effective: Case ID, Case name, Template, Parameters</code></pre>
+<p>ATT does not concatenate parent and child labels. Header matching
+removes spaces, tabs, line breaks, non-breaking spaces, and other
+Unicode whitespace from both the effective Excel header and configured
+sidecar/report label; matching otherwise remains case-sensitive. For
+example, <code>案例 編號</code>, <code>案例\n編號</code>, and
+<code>案例編號</code> identify the same column. Every effective header
+must exist exactly once after this normalization, so two physical
+headers that differ only by whitespace are a duplicate-header error.
+Testcase loading and result-workbook writing use this same projection;
+result columns that do not already exist are written to the final header
+row.</p>
 <h2 id="actions-and-typed-values">Actions and typed values</h2>
 <p>This chapter defines the active ATT action contract. Templates use
 att-template/v3.6. Each completed action publishes its logical typed
@@ -2301,16 +2355,21 @@ semantics.</p>
 <p>All three share the execution model. Each mode owns its inputs,
 identity/bootstrap lifecycle, CLI behavior and output layout.</p>
 <h3 id="run-mode">Run mode</h3>
-<p>Run is workbook-driven Testcase execution.</p>
+<p>Run executes selected authored Testcases from a workbook. Each
+selected Testcase produces one Case execution with a status and evidence
+record. Use <em>Testcase</em> for the normalized workbook row and
+<em>Case execution</em> for that runtime result; the Case ID is the
+shared identifier.</p>
 <div class="sourceCode" id="cb24"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--all</span></span>
 <span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--suite</span> testcase/payment.xlsx <span class="at">--case</span> payment.payment.TC001</span>
 <span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> run <span class="at">--all</span> <span class="at">--tag</span> smoke <span class="at">--exclude-tag</span> slow</span></code></pre></div>
 <p>ATT loads the effective configuration/environment, verifies canonical
 workbook snapshots, validates the selected dependency closure, reserves
-a unique Run ID, then executes selected Cases in Stage order. A Stage
-resolves its selector to a Template; Actions execute in YAML order
-subject to <code>runWhen</code> and <code>onFailure</code>.</p>
+a unique Run ID, then starts a Case execution for each selected
+Testcase. Stages run in order. Each Stage resolves its selector to a
+Template; Actions execute in YAML order subject to <code>runWhen</code>
+and <code>onFailure</code>.</p>
 <p>Run evidence is written directly below
 <code>output/&lt;RunID&gt;/</code>. The completed run publishes
 <code>run.yaml</code>, Case directories/logs, result workbooks, HTML/CI
@@ -2323,10 +2382,10 @@ opt-in snapshot refresh path before validation/execution.</p>
 completes without failing status, <code>1</code> for test/assertion
 failure, <code>2</code> for invalid command/configuration/validation,
 and <code>3</code> for runtime/infrastructure error.</p>
-<p>Use the <a href="reference/cli.md">CLI Reference</a> for exact
-selectors and options, <a
-href="reference/reliability-execution-control.md">Reliability</a> for
-execution control, and <a
+<p>See the <a href="reference/cli.md">CLI Reference</a> for selectors
+and options, <a
+href="reference/reliability-execution-control.md">Reliability and
+Execution Control</a> for Stage and Action control, and <a
 href="reference/results-reports-evidence.md">Results, Reports, and
 Evidence</a> for artifact contracts.</p>
 <h3 id="standalone-debug">Standalone Debug</h3>
@@ -2354,7 +2413,7 @@ canonical <code>EXEC.VARS</code> before a target starts. Tool Debug uses
 Framework-owned identity, output, Actions, resource metadata and
 compatibility views cannot be overwritten by user input. Schema
 migration is documented in <a
-href="reference/appendices/migrations.md">Appendix C</a>.</p>
+href="reference/appendices/migrations.md">Migration Notes</a>.</p>
 <h4 id="standalone-debug-bootstrap-data">Standalone Debug bootstrap
 data</h4>
 <p>The three input contracts are intentionally separate:</p>
@@ -2493,7 +2552,7 @@ and SSH <code>download</code> calls are rejected.</p>
 <tr class="even">
 <td><code>Debug input uses a historical schemaVersion</code></td>
 <td>Use the active Debug schema; see <a
-href="reference/appendices/migrations.md">Appendix C</a>; add
+href="reference/appendices/migrations.md">Migration Notes</a>; add
 <code>vars</code> only when a Flow/Template needs caller-prepared
 <code>EXEC.VARS</code>.</td>
 </tr>
@@ -2520,7 +2579,7 @@ rendered inputs with the selected environment.</td>
 apply to a standalone Debug invocation. Debug always keeps its
 invocation result and artifacts under its own debug directory. For the
 same target in a load run, see <a
-href="reference/execution-modes/load.md#evidence-and-resource-output">Load
+href="reference/execution-modes/load.md#choose-which-iteration-evidence-to-retain">Load
 evidence and resource output</a>.</p>
 <h5 id="configuration-examples">Configuration examples</h5>
 <p>The following examples show the supported placement of debug values.
@@ -2644,7 +2703,7 @@ full Load descriptors under <code>load/</code>. Only YAML declaring
 ignored, while invalid declared descriptors are shown with their
 diagnostics. Discovery resolves and validates targets without starting a
 scheduler or making resource calls.</p>
-<h4 id="scenario-shape">Scenario shape</h4>
+<h4 id="define-a-load-scenario">Define a Load scenario</h4>
 <div class="sourceCode" id="cb35"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.6</span></span>
 <span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a><span class="fu">testdata</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">examples/testdata/generated-account.yaml</span><span class="kw">]</span></span>
@@ -2679,7 +2738,8 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb35-1"><a href=
 <span id="cb35-31"><a href="#cb35-31" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">output</span><span class="kw">:</span><span class="at"> none</span></span>
 <span id="cb35-32"><a href="#cb35-32" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span></span>
 <span id="cb35-33"><a href="#cb35-33" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">execIdFormat</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}&quot;</span></span></code></pre></div>
-<h4 id="closed-workload-target-mix">Closed workload target mix</h4>
+<h4 id="distribute-closed-user-work-across-targets">Distribute
+closed-user work across targets</h4>
 <p>A workload can declare <code>mix</code> instead of
 <code>target</code> to distribute each closed user's next iteration
 across pre-resolved targets. Every entry has a unique <code>id</code>, a
@@ -2764,8 +2824,8 @@ passes its nested values through into the per-iteration
 <code>EXEC.INPUT</code> map without copying them again. A later change
 to the caller's source map cannot affect a started iteration, and
 separate iterations do not share their input snapshots.</p>
-<h4 id="testdata-imports-and-workload-scopes">Testdata imports and
-workload scopes</h4>
+<h4 id="map-inputs-and-choose-testdata">Map inputs and choose
+testdata</h4>
 <p>The environment profile contributes the shared <code>testdata</code>
 descriptor list. A scenario's optional top-level <code>testdata</code>
 list imports package-relative YAML files as a Load-only overlay. A
@@ -2789,10 +2849,11 @@ ends that workload cleanly after its records are consumed. A one-record
 descriptor needs no selection policy.</p>
 <p>Selection evidence records only the testdata ID, source layer, record
 index, generated sequence where applicable, scope, strategy, and random
-seed. It never includes the record contents. Run and Debug load only IDs
+seed. It never includes record contents. Run and Debug load only IDs
 used in mappings; Load validates referenced IDs and explicit workload
-policies before starting the scheduler.</p>
-<h4 id="per-execution-bootstrap-vars">Per-execution bootstrap vars</h4>
+policies before starting.</p>
+<h4 id="initialize-template-and-flow-variables">Initialize Template and
+Flow variables</h4>
 <p>After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are
 ready, ATT evaluates each workload's <code>vars</code> tree before
 starting its Template or Flow. Exact <code>${...}</code> references
@@ -2812,29 +2873,24 @@ action-local <code>output</code>, invocation-scoped metadata, and
 Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are
 unavailable. Only safe pure built-ins are permitted. Tool arguments
 remain separate from <code>vars</code>.</p>
-<h4 id="workload-models">Workload models</h4>
+<h4 id="choose-a-closed-user-or-arrival-rate-workload">Choose a
+closed-user or arrival-rate workload</h4>
 <p>Closed workloads use positive load.users. Each stable virtual user
 repeatedly executes its target and observes execution.thinkTime before
 starting the next iteration. thinkTime may be a duration or a {min, max}
 range.</p>
-<p>Coordinated workloads share a lazy, bounded worker executor whose
-maximum is the aggregate configured concurrency slots. It creates
-platform threads as blocking iterations need them, up to each workload's
-configured limit. Closed virtual users remain scheduler state rather
-than eagerly owning control threads. The scheduler blocks until the next
-VU or phase deadline or an iteration completion. Arrival-rate scheduling
-computes phase deadlines directly and waits for the next due arrival
-instead of polling every millisecond. Cancellation stops new admissions,
-interrupts that workload's admitted iterations, and drains their
-completion events before finalizing its result snapshot.</p>
 <p>Arrival-rate workloads use load.arrivalRate, positive
 load.maxConcurrent and overloadPolicy: drop. They schedule against
 absolute due times. Arrivals beyond maxConcurrent are recorded as
 generator drops; they are not queued or counted as SUT errors.
 Arrival-rate workloads have no persistent USER_ID and cannot configure
 thinkTime.</p>
-<h4 id="pacing-and-resource-pool-sizing">Pacing and Resource-pool
-sizing</h4>
+<p>Closed workloads preserve the configured number of virtual users
+while iterations run synchronously. For scheduler and worker-pool
+implementation details, see <a
+href="system-design/load-scheduler.md">Load scheduler design</a>.</p>
+<h4 id="set-pacing-and-size-resource-pools">Set pacing and size Resource
+pools</h4>
 <p>For a steady arrival rate, estimate average in-flight requests with
 Little's law:</p>
 <pre class="text"><code>average concurrency ≈ arrival rate (requests/second) × mean response time (seconds)</code></pre>
@@ -2868,17 +2924,19 @@ mean used by the estimate.</p>
 Warm-up sends real traffic but is excluded from measured threshold
 aggregates. Optional seed makes closed-VU think-time randomization
 deterministic.</p>
-<h4 id="load-identity-and-output-layout">Load identity and output
-layout</h4>
-<p>Each started iteration has a unique EXEC.ID across the Load run and
-shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its
-default run-scoped ID. Otherwise, ATT evaluates it once during
-initialization with the ordinary ${...} / #{...} engine. Bootstrap vars
-are evaluated after that identity is published, so they can use EXEC.ID
-and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID;
-arrival-rate cannot. See <a
-href="#load-execution-id-initialization">Load execution ID
-initialization</a> for field availability and function restrictions.</p>
+<h4 id="identify-iterations-and-find-their-artifacts">Identify
+iterations and find their artifacts</h4>
+<p>Each started iteration has a unique <code>EXEC.ID</code> across the
+Load run and shares <code>EXEC.RUN_ID</code>. If
+<code>execution.execIdFormat</code> is omitted, ATT uses its default
+run-scoped ID. Otherwise, ATT evaluates the configured format once
+during initialization with the ordinary <code>${...}</code> /
+<code>#{...}</code> engine. Bootstrap vars are evaluated after that
+identity is published, so they can use <code>EXEC.ID</code> and
+<code>EXEC.OUTPUT_DIR</code>. Closed workloads can use
+<code>EXEC.LOAD.USER_ID</code>; arrival-rate cannot. See <a
+href="#check-execution-id-fields-before-use">Check execution ID fields
+before use</a> for field availability and function restrictions.</p>
 <p>Generated IDs must be non-empty, path-safe segments. Duplicate IDs
 fail before the target starts; ATT does not silently append a
 suffix.</p>
@@ -2893,17 +2951,20 @@ suffix.</p>
 ├── failures/&lt;EXEC.ID&gt;/case.yaml
 ├── samples/&lt;EXEC.ID&gt;/case.log
 └── samples/&lt;EXEC.ID&gt;/case.yaml</code></pre>
-<p>A metrics-only iteration still has EXEC.ID but does not create a
-per-iteration execution directory unless an operation writes an artifact
-or a retention decision materializes evidence. EXEC.OUTPUT_DIR remains
-the logical planned path at executions/&lt;EXEC.ID&gt; while the
-iteration runs. Retained failures and sampled successes receive an
-evidence copy under failures/&lt;EXEC.ID&gt;/ or
-samples/&lt;EXEC.ID&gt;/. The report and evidence summary show EXEC.ID
-and link to case.log when it exists. Helper resource-output formatting
-is deferred until retention; explicit Tool evidence collectors still
-execute because they are author-requested diagnostic operations.</p>
-<h4 id="evidence-and-resource-output">Evidence and Resource output</h4>
+<p>A metrics-only iteration still has <code>EXEC.ID</code> but does not
+create a per-iteration execution directory unless an operation writes an
+artifact or retention materializes evidence.
+<code>EXEC.OUTPUT_DIR</code> remains the logical planned path at
+<code>executions/&lt;EXEC.ID&gt;</code> while the iteration runs.
+Retained failures and sampled successes receive an evidence copy under
+<code>failures/&lt;EXEC.ID&gt;/</code> or
+<code>samples/&lt;EXEC.ID&gt;/</code>. The report and evidence summary
+show <code>EXEC.ID</code> and link to <code>case.log</code> when it
+exists. Optional Resource output formatting is deferred until an
+iteration is retained; explicit Tool evidence collectors still run
+because they are part of the requested scenario.</p>
+<h4 id="choose-which-iteration-evidence-to-retain">Choose which
+iteration evidence to retain</h4>
 <p><code>evidence.mode</code> accepts <code>metrics</code>,
 <code>failures</code>, <code>samples</code> or <code>all</code>; the
 default is <code>failures</code>. These modes set the default effective
@@ -2915,23 +2976,20 @@ override those defaults independently. <code>sampleRate</code> and
 <code>maxSamples</code> bound retained evidence. Dropped arrivals do not
 create iteration evidence.</p>
 <p>Case-log capture follows the effective success/failure policies and
-remaining retention capacity before each iteration starts. If the
-effective failure policy is <code>full</code> and a
-<code>maxSamples</code> slot remains available, failures (including
-unselected successes under <code>samples</code>) keep a redacted rolling
-in-memory tail of at most 65,536 characters; ATT materializes it only
-when a failure claims a retention slot. Once no failure can be retained
-because <code>maxSamples</code> is zero or exhausted, per-action
-serialization and buffering are skipped. A slot reserved by an in-flight
-iteration may conservatively make the scheduler skip capture for other
-iterations. The latest action and runtime failure details remain at the
-end of a retained log, after a truncation marker. Selected sampled
-successes and retained full-success evidence use full deferred case
-logs; if a success-reserved iteration fails, its full deferred log
-remains available for failure evidence using that same reserved slot.
-For example, <code>mode: metrics, failure: full</code> enables bounded
-failure capture when capacity remains, while
-<code>mode: failures, failure: none</code> skips failure capture.</p>
+remaining retention capacity. With failure policy <code>full</code> and
+a <code>maxSamples</code> slot available, eligible failures—including
+unselected successes under <code>samples</code>—retain a redacted
+rolling log tail of at most 65,536 characters. ATT materializes the
+failure log only when the failure claims a retention slot. If the tail
+is truncated, a marker identifies the omitted earlier events, and the
+latest action and runtime failure details remain at the end. Failure
+logs are not retained after capacity is exhausted. Sampled successes and
+full-success policies retain full deferred logs. For example,
+<code>mode: metrics, failure: full</code> enables bounded failure
+capture while capacity remains, while
+<code>mode: failures, failure: none</code> disables it. See <a
+href="system-design/load-scheduler.md">Load scheduler design</a> for
+implementation and storage details.</p>
 <p>evidence.resources.output accepts inherit (default) or none. none
 disables optional human-readable resource-output formatting and
 materialization while preserving typed results,
@@ -2939,8 +2997,8 @@ stdoutFormat/responseFormat parsing, exact project-file String output
 and requestFormat behavior. In Load, resource output is deferred until
 the iteration is retained. Metrics-only iterations do no business-output
 formatting or evidence file I/O.</p>
-<h4 id="reports-metrics-and-thresholds">Reports, metrics and
-thresholds</h4>
+<h4 id="read-load-results-and-apply-thresholds">Read Load results and
+apply thresholds</h4>
 <p>ATT writes bounded load-summary.json/yaml and a self-contained
 report/index.html below the run root. The report shows EXEC.ID for
 retained executions, workload/target identity, status, timing and
@@ -2950,59 +3008,54 @@ percentiles.</p>
 <p>The summary separates generator observations from SUT outcomes.
 <code>metrics.generator</code> includes sampled heap
 used/committed/maximum, observed peak live threads, GC count/time, and
-process CPU when the JVM exposes it. Sampling is event-triggered and
-rate-limited to one sample per 100 ms, so peaks shorter than the
-sampling interval may be missed. <code>schedulerWakeups</code>,
-<code>submitLag*</code>, and <code>workerQueueDepth*</code> describe
-scheduler pressure; arrival drops remain separate from SUT errors.
-<code>resources.http</code> reports active/idle/waiting and observed
-peak connections per HTTP helper alongside DB, MQ, and Render pool/plan
-diagnostics; <code>resources.resourceMetricSamples</code> reports the
-count of rate-limited resource observations. Testdata mapping and
-selection counters/cache sizes are under
-<code>resources.generator.testdata</code>; iteration-scoped selections
-are local to one mapping, while user/workload scopes retain only their
-scoped choices. Custom execution-ID reservations use disk markers, and
-<code>resources.executionIds</code> reports their count; default
-monotonic IDs do not use a collision map.</p>
-<p>Latency percentiles use bounded primitive reservoirs.
-<code>latencySampleCapacity</code>, <code>latencySampleCount</code>,
+process CPU when the JVM exposes it. Sampling is limited to one
+observation per 100 ms, so brief peaks may be missed.
+<code>schedulerWakeups</code>, <code>submitLag*</code>, and
+<code>workerQueueDepth*</code> describe scheduler pressure; arrival
+drops remain separate from SUT errors. <code>resources.http</code>
+reports active/idle/waiting and observed peak connections per HTTP
+helper alongside DB, MQ, and Render pool/plan diagnostics;
+<code>resources.resourceMetricSamples</code> reports the number of
+rate-limited resource observations. <code>resources.executionIds</code>
+reports custom execution-ID reservation counts. Testdata mapping and
+selection counts are under <code>resources.generator.testdata</code>;
+interpretation and implementation limits are documented in <a
+href="system-design/load-telemetry.md">Load Generator Telemetry</a>.</p>
+<p><code>latencySampleCapacity</code>, <code>latencySampleCount</code>,
 <code>latencyObservationCount</code>, and <code>latencySampleRate</code>
-describe the run-level estimate; exact latency aggregates remain exact.
-The time series keep the newest 4,096 one-second buckets in a circular
-ring.</p>
+describe the run-level percentile estimate; exact latency aggregates
+remain exact. Time-series output retains the newest 4,096 one-second
+buckets. ATT does not average per-workload percentiles to calculate the
+overall percentile.</p>
 <p>The new Load summary telemetry fields are optional under
 <code>att-load-summary/v1.1</code>; current writers emit them, and
 summaries produced before this telemetry was added remain valid.</p>
-<p>Run the opt-in 30–60 minute synthetic selection soak with
-<code>mvn -Datt.load.soak=true -Datt.load.soak.durationMinutes=30 -Dtest=LoadTelemetrySoakTest test</code>.
-It checks that post-warm-up retained heap stays within
-<code>max(16 MiB, 25%)</code> of the warm-up checkpoint and iteration
-selection state remains empty.</p>
-<p>See <a href="system-design/load-telemetry.md">Load Generator
-Telemetry</a> for sampling limits and metric interpretation.</p>
+<p>For sampling limits and maintainer verification, see <a
+href="system-design/load-telemetry.md">Load Generator Telemetry</a>.</p>
 <p>Top-level thresholds apply only to the aggregate run; workload
 thresholds apply only to their individual workload. Root thresholds are
 not inherited into workload thresholds. Threshold failure returns
 FAIL/exit 1. Invalid config/target returns exit 2;
 runtime/infrastructure errors return ERROR/exit 3. Generator drops are
 not SUT errors.</p>
-<h4 id="render-plans-and-payload-snapshots">Render plans and payload
-snapshots</h4>
-<p>Before a Load workload scheduler starts, ATT resolves each reachable
-Render payload glob once and freezes the matched UTF-8 source content
-and compiled reference/expression structure for that run. A payload
-edit, replacement, or new glob match made while the run is active does
-not affect its iterations; the next Load run resolves the package again.
-Normal Run and Debug use a fresh plan for each execution, so edits are
-picked up by the next execution.</p>
+<h4 id="cancel-a-load-run">Cancel a Load run</h4>
+<p>Cancellation stops new admissions and interrupts admitted iterations.
+ATT drains completion events for admitted work and accounts for those
+outcomes before finalizing workload results and metrics.</p>
+<h4 id="understand-payload-changes-during-a-load-run">Understand payload
+changes during a Load run</h4>
+<p>Before a Load workload starts, ATT resolves each reachable Render
+payload glob once and freezes the matched UTF-8 source content for that
+run. A payload edit, replacement, or new glob match made while the run
+is active does not affect its iterations; the next Load run resolves the
+package again. Normal Run and Debug use a fresh plan for each execution,
+so edits are picked up by the next execution.</p>
 <p>Each iteration evaluates Context references, built-in calls, and
-external calls against its own Context. ATT reuses the parsed structure
-and source text, never a dynamic rendered result; stateful calls such as
-<code>seq.next()</code>, clock/random functions, and external calls
-still execute for each iteration. Render returns its String in memory,
-so passing <code>ACTIONS.&lt;id&gt;.output.result</code> to a downstream
-action does not create an intermediate Render file. Use
+external calls against its own Context. Stateful calls such as
+<code>seq.next()</code>, clock/random functions, and external calls run
+for each iteration. Render returns its String in memory, so passing
+<code>ACTIONS.&lt;id&gt;.output.result</code> to a downstream action
+does not create an intermediate Render file. Use
 <code>EXEC.OUTPUT_DIR</code> only when an operation explicitly needs a
 file.</p>
 <p>With <code>--profile</code>, <code>performance.json</code> records
@@ -3010,10 +3063,10 @@ file.</p>
 <code>renderPayloadResolutions</code>,
 <code>renderPayloadResolutionCacheHits</code>,
 <code>renderEvaluations</code>, <code>renderArtifactWrites</code>, and
-<code>renderSourceBytes</code>. These bounded run totals show
-source-plan reuse separately from per-iteration evaluation;
-<code>renderArtifactWrites</code> is zero because Render itself returns
-a String without writing an artifact.</p>
+<code>renderSourceBytes</code>. See <a
+href="system-design/load-scheduler.md">Load scheduler design</a> for how
+Load prepares plans and reuses immutable source data across
+iterations.</p>
 <p>Load startup also compiles the selected Template/Flow action
 sequence, primary Tool calls and argument expressions,
 <code>runWhen</code>, assertions, and <code>retry.when</code>. Each
@@ -3024,7 +3077,8 @@ record selection and Context values remain iteration-specific. The run
 summary's <code>resources.execution</code> contains
 <code>executionPlansCompiled</code>, <code>actionPlansCompiled</code>,
 and <code>actionEvaluations</code>.</p>
-<h4 id="cli-and-examples">CLI and examples</h4>
+<h4 id="override-workload-settings-from-the-cli">Override workload
+settings from the CLI</h4>
 <p>For one workload, options such as --users, --arrival-rate, --warmup,
 --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent
 can override matching YAML values. Unscoped load-model overrides fail
@@ -3070,9 +3124,9 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb40-1"><a href="#
 <p>Copyable examples and field descriptions are maintained in <a
 href="../examples/load/README.md">examples/load/README.md</a>. Schema
 migration is documented in <a
-href="reference/appendices/migrations.md">Appendix C</a>.</p>
-<h4 id="load-execution-id-initialization">Load execution ID
-initialization</h4>
+href="reference/appendices/migrations.md">Migration Notes</a>.</p>
+<h4 id="check-execution-id-fields-before-use">Check execution ID fields
+before use</h4>
 <p>Load uses schema att-load/v1.6. If execution.execIdFormat is present,
 ATT evaluates it once per started iteration with the normal ${...} /
 #{...} engine during initialization; otherwise the default run-scoped ID
@@ -3101,8 +3155,8 @@ the Load run. Duplicate or unsafe values fail before the target starts;
 ATT does not append a hidden suffix.</p>
 <p>execIdFormat permits deterministic, side-effect-free built-ins only;
 external calls, seq.next(), random, clock and filesystem functions are
-rejected. See <a href="reference/appendices/migrations.md">Appendix
-C</a> for schema migration.</p>
+rejected. See <a href="reference/appendices/migrations.md">Migration
+Notes</a> for schema migration.</p>
 <h2 id="resources-and-integrations">Resources and integrations</h2>
 <p>Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper are peer
 integration/resource types. SSHHelper routes command-backed Tools and
@@ -3689,7 +3743,7 @@ change.</p>
 <p>Call-level responseFormat may override requestReply.responseFormat
 for receive/request; send does not parse a reply. Instance selection and
 pool limits belong to the descriptor. See <a
-href="reference/appendices/migrations.md">Appendix C</a> for schema
+href="reference/appendices/migrations.md">Migration Notes</a> for schema
 migration.</p>
 <p>MQ replies are capped at 10 MiB. The IBM MQ adapter configures the
 message receive limit before reading and reports
@@ -4457,6 +4511,36 @@ environments</h2>
 configuration. Files in <a href="../schemas"><code>schemas/</code></a>
 remain the machine-readable contract. Schema validation runs before
 cross-field and filesystem validation.</p>
+<h3 id="find-a-configuration-task">Find a configuration task</h3>
+<table>
+<thead>
+<tr class="header">
+<th>Task</th>
+<th>Start here</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Choose SIT, UAT, or another resource profile</td>
+<td><a href="#select-an-environment-profile">Select an environment
+profile</a></td>
+</tr>
+<tr class="even">
+<td>Set output, Run IDs, or report defaults</td>
+<td><a href="#set-package-wide-options">Set package-wide
+options</a></td>
+</tr>
+<tr class="odd">
+<td>Find the owner of a Tool or helper contract</td>
+<td><a href="#configuration-owners">Configuration owners</a></td>
+</tr>
+<tr class="even">
+<td>Migrate or validate a schema</td>
+<td><a href="#schema-catalog">Schema catalog</a> and <a
+href="reference/appendices/migrations.md">Migration notes</a></td>
+</tr>
+</tbody>
+</table>
 <h3 id="configuration-layers-and-precedence">Configuration layers and
 precedence</h3>
 <table>
@@ -4572,8 +4656,8 @@ invocation argument values remain data and retain their names. For
 example, <code>x-correlation-id</code> is still an HTTP header or input
 key unless it is itself the key of an ATT-owned configuration
 collection.</p>
-<h3 id="multi-environment-profiles-in-current-att">Multi-environment
-profiles in current ATT</h3>
+<h3 id="select-an-environment-profile">Select an environment
+profile</h3>
 <p><code>att-config/v2.11</code> is the active profile contract.
 Profiles can replace configured DBHelper, MQHelper, SSHHelper,
 HTTPHelper and testdata descriptor lists as a whole. See the resource
@@ -4702,7 +4786,7 @@ metadata, diagnostics, reports, and generated documentation.</p>
 environments and only infrastructure bindings change. Use separate
 top-level configs when testcase/template roots, report policy, or
 package structure intentionally differ. See <a
-href="reference/appendices/migrations.md">Appendix C</a> for
+href="reference/appendices/migrations.md">Migration Notes</a> for
 complete-config migration.</p>
 <h3 id="schema-catalog">Schema catalog</h3>
 <p><a
@@ -4710,8 +4794,9 @@ href="../schemas/catalog.yaml"><code>schemas/catalog.yaml</code></a> is
 authoritative for active schema registrations. Package validation checks
 registrations; archived schemas do not become active runtime contracts.
 See the complete matrix in <a
-href="reference/appendices/schema-matrix.md">Appendix A</a>.</p>
-<h3 id="global-configuration">Global configuration</h3>
+href="reference/appendices/schema-matrix.md">Schema and Version
+Matrix</a>.</p>
+<h3 id="set-package-wide-options">Set package-wide options</h3>
 <div class="sourceCode" id="cb81"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb81-1"><a href="#cb81-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-config/v2.11</span></span>
 <span id="cb81-2"><a href="#cb81-2" aria-hidden="true" tabindex="-1"></a><span class="fu">outputDirectory</span><span class="kw">:</span><span class="at"> output</span></span>
@@ -4743,6 +4828,8 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb81-1"><a href=
 <span id="cb81-28"><a href="#cb81-28" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">dbhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/dbhelpers/uat/orders.yaml</span><span class="kw">]</span></span>
 <span id="cb81-29"><a href="#cb81-29" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">mqhelpers</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/mqhelpers/uat/payment.yaml</span><span class="kw">]</span></span>
 <span id="cb81-30"><a href="#cb81-30" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">testdata</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">config/testdata/accounts.yaml</span><span class="kw">]</span></span></code></pre></div>
+<h4 id="set-runtime-and-package-paths">Set runtime and package
+paths</h4>
 <table>
 <thead>
 <tr class="header">
@@ -4814,17 +4901,34 @@ stream</td>
 maximum bytes streamed to each process artifact</td>
 </tr>
 <tr class="even">
+<td><code>xml.namespaceMode</code></td>
+<td><code>ignore</code></td>
+<td><code>ignore</code> or <code>preserve</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="configure-report-output">Configure report output</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Path</th>
+<th>Required/default</th>
+<th>Constraints</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
 <td><code>report.mode</code></td>
 <td><code>append-to-copy</code></td>
 <td><code>append-to-copy</code> or <code>none</code>; <code>none</code>
 skips result-workbook creation</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>report.fileNamePattern</code></td>
 <td><code>${suiteName}.result.xlsx</code></td>
 <td>Result workbook filename pattern</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>report.columns</code></td>
 <td><code>{}</code></td>
 <td>Supported keys: <code>result</code>, <code>durationMs</code>,
@@ -4832,69 +4936,77 @@ skips result-workbook creation</td>
 <code>caseLog</code>, <code>reportLink</code>, <code>runTime</code>,
 <code>execId</code>; each value is a string column label</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>report.html.caseLogInlineLimitBytes</code></td>
 <td><code>32768</code></td>
 <td>Integer 0–1048576 UTF-8 bytes; larger logs use a bounded head/tail
 preview plus artifact link</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>report.junit.caseLogEmbedThresholdBytes</code></td>
 <td><code>10240</code></td>
 <td>Integer 0–1048576 UTF-8 bytes; 0 always links</td>
 </tr>
-<tr class="odd">
-<td><code>xml.namespaceMode</code></td>
-<td><code>ignore</code></td>
-<td><code>ignore</code> or <code>preserve</code></td>
+</tbody>
+</table>
+<h4 id="configure-resource-and-environment-registries">Configure
+Resource and environment registries</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Path</th>
+<th>Required/default</th>
+<th>Constraints</th>
 </tr>
-<tr class="even">
+</thead>
+<tbody>
+<tr class="odd">
 <td><code>toolGroups</code></td>
 <td><code>[]</code></td>
 <td>Unique safe package-relative tool-group YAML paths</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>dbhelpers</code></td>
 <td><code>[]</code></td>
 <td>Unique package-contained <code>att-dbhelper/v2.6</code> YAML paths;
 normalized duplicates are rejected</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>mqhelpers</code></td>
 <td><code>[]</code></td>
 <td>Unique package-contained <code>att-mqhelper/v1.2</code> YAML paths;
 normalized duplicates are rejected</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>sshhelpers</code></td>
 <td><code>[]</code></td>
 <td>Unique package-contained <code>att-sshhelper/v1.0</code> YAML
 paths</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>httphelpers</code></td>
 <td><code>[]</code></td>
 <td>Unique package-contained <code>att-httphelper/v1.1</code> YAML
 paths</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>environments</code></td>
 <td>absent</td>
 <td>Non-empty map of profile names; profiles may contain configured
 resource and testdata descriptor lists</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>environments.&lt;profile&gt;.testdata</code></td>
 <td><code>[]</code></td>
 <td>Unique package-relative YAML paths available to that selected
 environment</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>ssh</code></td>
 <td>absent</td>
 <td>Optional SSH target for inline global tools</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>tools</code></td>
 <td><code>{}</code></td>
 <td>Map of reusable tool contracts</td>
@@ -4981,8 +5093,8 @@ environment</td>
 </tr>
 </tbody>
 </table>
-<p>See <a href="reference/appendices/migrations.md">Appendix C</a> for
-removed configuration fields.</p>
+<p>See <a href="reference/appendices/migrations.md">Migration Notes</a>
+for removed configuration fields.</p>
 <h3 id="identifier-and-path-constraints">Identifier and path
 constraints</h3>
 <p>Run ID and full Case ID are used directly as directory names; ATT
@@ -5095,7 +5207,7 @@ calls. Because the resulting text becomes a filename, prefer
 deterministic string transformations and avoid side-effecting filesystem
 built-ins, random values, path separators, absolute paths,
 <code>..</code>, and platform-reserved names.</p>
-<h3 id="feature-configuration-owners">Feature configuration owners</h3>
+<h3 id="configuration-owners">Configuration owners</h3>
 <table>
 <thead>
 <tr class="header">
@@ -5141,7 +5253,7 @@ href="reference/reliability-execution-control.md">Reliability</a></td>
 </tbody>
 </table>
 <h2 id="cli-reference">CLI reference</h2>
-<h3 id="commands">Commands</h3>
+<h3 id="choose-a-command">Choose a command</h3>
 <table>
 <thead>
 <tr class="header">
@@ -5209,18 +5321,9 @@ Load</td>
 </tr>
 </tbody>
 </table>
-<h3 id="command-syntax">Command syntax</h3>
-<p>The tables use the Linux/macOS launcher <code>./att.sh</code>. On
-Windows, use <code>att.bat</code> with the same command and options.
-<code>att.bat snapshot</code>, <code>att.bat validate</code>, and
-<code>att.bat docs</code> do not invoke configured testcase tools.
-Windows validation checks <code>.sh</code> file existence and path
-safety, skips POSIX launch/executable compatibility, and emits one
-warning listing affected tools; a validation PASS does not prove those
-scripts can run on Windows. Provide and test Windows-native equivalents
-before <code>run</code>. Binary releases require Java 8+. Source-tree
-<code>att.bat</code> compiles with Maven when available and otherwise
-requires existing <code>target\classes</code>.</p>
+<h3 id="find-syntax-options-and-examples-by-task">Find syntax, options,
+and examples by task</h3>
+<h4 id="check-help-and-version">Check help and version</h4>
 <table>
 <thead>
 <tr class="header">
@@ -5237,6 +5340,17 @@ requires existing <code>target\classes</code>.</p>
 <td><code>./att.sh version</code></td>
 <td>Print version</td>
 </tr>
+</tbody>
+</table>
+<h4 id="generate-workbook-snapshots">Generate workbook snapshots</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Syntax</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
 <tr class="odd">
 <td><code>./att.sh snapshot</code></td>
 <td>Generate snapshots recursively below <code>testcase.root</code>;
@@ -5254,6 +5368,17 @@ equivalent to <code>--all</code> when no selector is supplied</td>
 <td><code>./att.sh snapshot --suite-dir &lt;dir&gt;</code></td>
 <td>Generate snapshots recursively below a directory</td>
 </tr>
+</tbody>
+</table>
+<h4 id="validate-a-package">Validate a package</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Syntax</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
 <tr class="odd">
 <td><code>./att.sh validate --package</code></td>
 <td>Validate complete package; default scope</td>
@@ -5266,87 +5391,119 @@ equivalent to <code>--all</code> when no selector is supplied</td>
 <td><code>./att.sh validate --package --format json</code></td>
 <td>Emit one validation JSON document to stdout</td>
 </tr>
-<tr class="even">
+</tbody>
+</table>
+<p>On Windows, <code>att.bat snapshot</code>,
+<code>att.bat validate</code>, and <code>att.bat docs</code> do not
+invoke configured Testcase Tools. Validation checks <code>.sh</code>
+paths and file existence but skips POSIX launch and executable
+compatibility; it warns with the affected Tools. A validation PASS
+confirms configuration for those scripts, not that they can run on
+Windows. Provide and test Windows-native equivalents before
+<code>run</code>. See <a
+href="reference/appendices/limits-defaults.md">Windows launcher and Tool
+compatibility</a>.</p>
+<h4 id="run-testcases">Run Testcases</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Syntax</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
 <td><code>./att.sh run --all</code></td>
 <td>Run all discovered cases</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run --suite &lt;xlsx&gt;</code></td>
 <td>Run one workbook; repeatable</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run --suite-dir &lt;dir&gt;</code></td>
 <td>Discover workbooks below a directory</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --case &lt;workbookId.groupId.rowCaseId&gt;</code></td>
 <td>Include one full Case ID</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --tag &lt;tag&gt;</code></td>
 <td>Include a tag</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --exclude-tag &lt;tag&gt;</code></td>
 <td>Exclude a tag</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --dry-run</code></td>
 <td>Validate/plan without tool execution</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --update-snapshot</code></td>
 <td>Explicitly refresh changed complete-workbook snapshots before
 validation</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --fail-fast</code></td>
 <td>Stop scheduling after first FAIL/ERROR</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --rerun-failed</code></td>
 <td>Select prior FAIL/ERROR cases</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --run-id &lt;id&gt;</code></td>
 <td>Set final run directory name</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --output-dir &lt;dir&gt;</code></td>
 <td>Override output root</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --ci-output junit,json</code></td>
 <td>Write CI XML/JSON plus JUnit HTML</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --profile</code></td>
 <td>Write per-run <code>performance.json</code> timings and
 counters</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --queue</code></td>
 <td>Wait for another ATT process using the same output root</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --allow-parallel-runs</code></td>
 <td>Allow concurrent ATT processes; does not parallelize Cases in this
 run</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --format json</code></td>
 <td>Emit machine-readable summary</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh run &lt;selection&gt; --quiet</code></td>
 <td>Suppress detailed live progress; keep the final summary and
 errors</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh run &lt;selection&gt; --verbose</code></td>
 <td>Accepted for compatibility; detailed live progress is already the
 default</td>
 </tr>
+</tbody>
+</table>
+<h4 id="debug-a-component">Debug a component</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Syntax</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
 <tr class="odd">
 <td><code>./att.sh debug</code></td>
 <td>Discover runnable Tools, Templates, and Flows; show only existing
@@ -5399,39 +5556,62 @@ remains in <code>result.yaml</code></td>
 <td>Suppress detailed live progress; keep the final summary and
 errors</td>
 </tr>
-<tr class="even">
+</tbody>
+</table>
+<h4 id="run-a-load-scenario">Run a Load scenario</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Syntax</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
 <td><code>./att.sh load</code></td>
 <td>Discover valid <code>att-load/*</code> scenarios under
 <code>load/</code>; report invalid declared scenarios</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh load &lt;scenario.yaml&gt; --quiet</code></td>
 <td>Suppress periodic live progress; keep the final summary and
 errors</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh load &lt;scenario.yaml&gt; --verbose</code></td>
 <td>Accepted for compatibility; bounded live progress is already the
 default</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh load --debug &lt;type&gt; &lt;id&gt;</code></td>
 <td>Promote a Debug sidecar into a normal single-workload Load run using
 <code>load/load.yaml</code> policy</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh load &lt;scenario.yaml&gt; --set input.path=&lt;yaml-value&gt;</code></td>
 <td>Override one-workload <code>EXEC.INPUT</code>; repeatable, not valid
 for multi-workload scenarios</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh load &lt;scenario.yaml&gt; --set arg.name=&lt;yaml-value&gt;</code></td>
 <td>Override a Tool argument in a one-workload Tool scenario</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>./att.sh load &lt;scenario.yaml&gt; --set vars.path=&lt;yaml-value&gt;</code></td>
 <td>Override one-workload Template/Flow bootstrap vars</td>
 </tr>
+</tbody>
+</table>
+<h4 id="manage-reports-and-package-output">Manage reports and package
+output</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Syntax</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
 <tr class="odd">
 <td><code>./att.sh report --run-id &lt;id&gt;</code></td>
 <td>Regenerate <code>report/index.html</code> and
@@ -5592,8 +5772,41 @@ options remain command-specific: <code>--suite</code>,
 <code>--config</code>, <code>--env</code>, and <code>--help</code> are
 accepted only where the command contract permits them.</p>
 <h2 id="results-reports-and-evidence">Results, reports, and
-Evidence</h2>
-<h3 id="run-directory">Run directory</h3>
+evidence</h2>
+<p>Run executes authored Testcases and records one Case execution for
+each selected row. A Testcase is workbook data; a Case execution is the
+runtime result identified by the same full Case ID. Use the runtime term
+when reading statuses, logs, reports, and evidence.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Task</th>
+<th>Go to</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Find run files and execution artifacts</td>
+<td><a href="#find-artifacts-for-a-run">Find artifacts for a
+Run</a></td>
+</tr>
+<tr class="even">
+<td>Read a status or inspect a failed Action</td>
+<td><a href="#find-case-execution-results-in-the-html-report">Find Case
+execution results</a></td>
+</tr>
+<tr class="odd">
+<td>Export JUnit or CI results</td>
+<td><a href="#export-junit-results">Export JUnit results</a> or <a
+href="#read-the-ci-json-summary">Read the CI JSON summary</a></td>
+</tr>
+<tr class="even">
+<td>Reproduce a completed run</td>
+<td><a href="#reproduce-a-run">Reproduce a Run</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="find-artifacts-for-a-run">Find artifacts for a Run</h3>
 <pre class="text"><code>&lt;outputDirectory&gt;/&lt;RunID&gt;/
 ├── run.yaml
 ├── events.jsonl
@@ -5607,14 +5820,15 @@ Evidence</h2>
 completed only when its <code>run.yaml</code> state is
 <code>COMPLETE</code>; interrupted work remains directly below its
 reserved Run ID for debugging.</p>
-<h3 id="human-readable-html-report">Human-readable HTML report</h3>
+<h3 id="find-case-execution-results-in-the-html-report">Find Case
+execution results in the HTML report</h3>
 <p><code>report/index.html</code> is the primary end-user report. It can
 be opened without a web server. Groups are summarized by
 <code>workbookId.groupId</code>; the interface labels
-<code>groupId</code> as Sheet because it maps to one physical sheet.
-Cases supports Workbook/Sheet/Status dropdowns, case-insensitive search
-over workbook/group/full Case ID/tags, and ascending/descending sorting
-from every column heading. Duration sorting is numeric.</p>
+<code>groupId</code> as Sheet because it maps to one physical sheet. The
+Cases view supports Workbook/Sheet/Status dropdowns, case-insensitive
+search over workbook/group/full Case ID/tags, and ascending/descending
+sorting from every column heading. Duration sorting is numeric.</p>
 <p>An expanded case contains the full Case ID and name, status and
 duration, Expected and Actual results, one row per recorded action
 result, a bounded detailed execution-log preview, and explicit
@@ -5639,8 +5853,8 @@ grouping.</p>
 <p><code>report/junit.html</code> is a human-readable JUnit projection.
 It displays counts and one row per testcase with status, duration, and
 embedded case-log content or a relative artifact link.</p>
-<h3 id="tool-evidence-collector-failures">Tool Evidence collector
-failures</h3>
+<h3 id="diagnose-tool-evidence-collector-failures">Diagnose Tool
+evidence collector failures</h3>
 <p>An evidence collector is post-operation observability, not the
 primary Tool result. With <code>onFailure: continue</code>, the primary
 Action may remain <code>PASS</code> while the collector is independently
@@ -5669,8 +5883,9 @@ status, and timeout details remain under <code>evidence</code> when
 provided by the executor. Failed collector evidence is bounded/redacted;
 raw input, payload, argv, output, resolved command text and the failed
 <code>result</code> are not published. See <a
-href="reference/appendices/limits-defaults.md">Appendix D</a> for the
-exact projection, numeric budgets and security guarantees.</p>
+href="reference/appendices/limits-defaults.md">Limits, Security
+Guarantees, and Advanced Diagnostics</a> for the exact projection,
+numeric budgets and security guarantees.</p>
 <p>For retries, inspect
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.attempts[n].evidence.collectors.&lt;collectorId&gt;</code>.
 Earlier failed collector records remain available after a later
@@ -5685,7 +5900,8 @@ message, exit code, and bounded stderr can be diagnosed without opening
 internal exception traces. Existing capture limits and secret redaction
 continue to apply; collector wrapping does not enable unbounded raw
 output.</p>
-<h3 id="result-workbook">Result Workbook</h3>
+<h3 id="add-execution-results-to-a-workbook">Add execution results to a
+Workbook</h3>
 <p>ATT copies the source workbook and appends configured result columns
 using <code>report.mode: append-to-copy</code>. Set
 <code>report.mode: none</code> for CI or large runs that do not need a
@@ -5695,13 +5911,14 @@ labels only. Supported mappings include <code>result</code>,
 <code>durationMs</code>, <code>expectedResult</code>,
 <code>actualResult</code>, <code>caseLog</code>,
 <code>reportLink</code>, and <code>runTime</code>; Expected/Actual cells
-retain LF characters and use wrapped text. Row matching reads the Case
-ID with the same Excel <code>DataFormatter</code> and whitespace
-normalization as testcase loading, so displayed formats such as numeric
-leading zeroes identify the same Case during execution and report
-writing.</p>
-<h3 id="junit-xml">JUnit XML</h3>
-<p>Each ATT case maps to one <code>&lt;testcase&gt;</code>:</p>
+retain LF characters and use wrapped text. Row matching reads the
+Testcase's Case ID with the same Excel <code>DataFormatter</code> and
+whitespace normalization as Testcase loading, so displayed formats such
+as numeric leading zeroes identify the same Testcase in execution
+results.</p>
+<h3 id="export-junit-results">Export JUnit results</h3>
+<p>Each Case execution maps to one JUnit
+<code>&lt;testcase&gt;</code>:</p>
 <table>
 <thead>
 <tr class="header">
@@ -5736,14 +5953,13 @@ writing.</p>
 <code>report.junit.caseLogEmbedThresholdBytes</code>. Logs at or below
 the threshold are embedded; larger logs use a relative link.
 <code>0</code> always links.</p>
-<h3 id="ci-json-summary">CI JSON summary</h3>
+<h3 id="read-the-ci-json-summary">Read the CI JSON summary</h3>
 <p><code>ci/summary.json</code> uses
 <code>schemaVersion: att-ci-summary/v2.1</code> and contains ATT/run
 IDs, environment, timing, aggregate status/counts, duration statistics,
 per-case records, diagnostic counts, report/artifact paths, and the
 input-manifest hash.</p>
-<h3 id="run-manifest-and-reproducibility">Run manifest and
-reproducibility</h3>
+<h3 id="reproduce-a-run">Reproduce a Run</h3>
 <p><code>run.yaml</code> uses <code>schemaVersion: att-run/v2.1</code>
 and records ATT/build identity, Java/OS/locale/timezone, validation
 mode, environment, timestamps, status/summary, output paths, and SHA-256
@@ -5751,8 +5967,8 @@ inputs for effective configuration, tool-group files, call-backed Tool
 SQL files (<code>tool-sql</code>), workbook, sidecar, resolved
 templates/payloads, package-local tool files, and schema/catalog
 version.</p>
-<h3 id="documentation-archive-and-clean">Documentation, archive, and
-clean</h3>
+<h3 id="generate-docs-and-manage-package-output">Generate docs and
+manage package output</h3>
 <table>
 <thead>
 <tr class="header">
@@ -5797,8 +6013,8 @@ placeholders remain visible and line endings are normalized to LF.</p>
 documentation, schema, or other source files. It canonicalizes paths,
 rejects source/package roots and external symlink targets, is
 idempotent, and reports what it removed.</p>
-<h3 id="run-execution-and-evidence-navigation">Run, execution and
-Evidence navigation</h3>
+<h3 id="trace-execution-identity-to-an-artifact">Trace execution
+identity to an artifact</h3>
 <table>
 <thead>
 <tr class="header">
@@ -5842,8 +6058,8 @@ both EXEC.RUN_ID and EXEC.ID.</p>
 <p>DIAG is evidence-only. Do not reference DIAG, EXEC.MODE or arbitrary
 scheduler counters in expressions; pass business variation through
 EXEC.INPUT.</p>
-<h3 id="generated-output-schema-summary">Generated-output schema
-summary</h3>
+<h3 id="inspect-generated-output-schemas">Inspect generated-output
+schemas</h3>
 <table>
 <thead>
 <tr class="header">
@@ -5898,17 +6114,21 @@ find abnormal blocks; PASS, SKIPPED and informational blocks remain
 unmarked.</p>
 <h2 id="validation-and-troubleshooting">Validation and
 troubleshooting</h2>
-<h3 id="where-to-look-first">Where to look first</h3>
+<h3 id="choose-your-first-diagnostic-step">Choose your first diagnostic
+step</h3>
 <p>Run <code>validate --package</code> and fix the diagnostic's
-file/field first. For runtime failures, inspect the report
-status/message, then the execution's <code>case.log</code>,
-<code>case.yaml</code> and Action evidence. <a
-href="reference/reliability-execution-control.md">Reliability</a>
-defines FAIL versus ERROR, continuation and retries; <a
-href="reference/results-reports-evidence.md">Results</a> identifies
-collector failure paths. See <a
-href="reference/appendices/limits-defaults.md">Appendix D</a> for
-Windows launchers, Java SSH negotiation and stack-trace policy.</p>
+file/field first. A <strong>Testcase</strong> is an authored normalized
+workbook row; a <strong>Case execution</strong> is one Run of that row,
+identified by the same Case ID. For runtime failures, inspect the Case
+execution's report status/message, then its <code>case.log</code>,
+<code>case.yaml</code>, and Action evidence. <a
+href="reference/reliability-execution-control.md">Reliability and
+Execution Control</a> defines FAIL versus ERROR, continuation, and
+retries; <a href="reference/results-reports-evidence.md">Results,
+Reports, and Evidence</a> identifies collector failure paths. <a
+href="reference/appendices/limits-defaults.md">Limits, Security
+Guarantees, and Advanced Diagnostics</a> covers Windows launchers, Java
+SSH negotiation, and stack-trace policy.</p>
 <h3 id="start-with-validation">Start with validation</h3>
 <p>Run this after every workbook, sidecar, template, helper, or tool
 change:</p>
@@ -5916,16 +6136,16 @@ change:</p>
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb92-1"><a href="#cb92-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>For one environment, use
 <code>./att.sh validate --config config/config.yaml --env SIT --package</code>.
-ATT validates descriptors against the active schemas in <a
-href="reference/appendices/schema-matrix.md">Appendix A</a>. Superseded
-schema files under <code>schemas/history/</code> are historical
-references, not runtime compatibility contracts. Update the declared
-<code>schemaVersion</code> and migrate fields to the active contract
-before validation. Diagnostics retain the original violation, file and
-YAML field location and provide migration guidance; they never rewrite
-descriptors. For example, replace a historical Render action with an
-Assign using <code>&amp;{path}</code> and pass the resulting String as
-described in <a href="reference/actions.md">Actions and Typed
+ATT validates descriptors against the active schemas in the <a
+href="reference/appendices/schema-matrix.md">Schema and Version
+Matrix</a>. Superseded schema files under <code>schemas/history/</code>
+are historical references, not runtime compatibility contracts. Update
+the declared <code>schemaVersion</code> and migrate fields to the active
+contract before validation. Diagnostics retain the original violation,
+file, and YAML field location and provide migration guidance; they never
+rewrite descriptors. For example, replace a historical Render Action
+with an Assign using <code>&amp;{path}</code> and pass the resulting
+String as described in <a href="reference/actions.md">Actions and Typed
 Values</a>. Unsupported versions fail before execution.</p>
 <p>Current schemas are in <a
 href="../schemas"><code>schemas/</code></a>; older definitions are under
@@ -5976,8 +6196,8 @@ files</td>
 <tr class="odd">
 <td><code>ATT-CFG</code></td>
 <td>Unknown field, duplicate key, wrong schema/type/enum</td>
-<td>Compare with <a href="reference/configuration.md">Configuration</a>
-and remove unsupported fields</td>
+<td>Compare with <a href="reference/configuration.md">Configuration and
+Environments</a> and remove unsupported fields</td>
 </tr>
 <tr class="even">
 <td><code>ATT-TOOL</code></td>
@@ -6000,17 +6220,18 @@ roots</td>
 </table>
 <h3 id="common-questions">Common questions</h3>
 <h4
-id="why-is-the-case-id-rejected-although-excel-displays-it-correctly">Why
-is the case ID rejected although excel displays it correctly?</h4>
+id="why-is-the-testcase-id-rejected-although-excel-displays-it-correctly">Why
+is the Testcase ID rejected although Excel displays it correctly?</h4>
 <p>ATT imports displayed cell text, then applies strict ID safety
 checks. Check hidden leading/trailing whitespace, trailing
 <code>.</code>, path characters, controls, and Windows device names.
 Store identifiers as text to preserve leading zeroes.</p>
-<h4 id="can-two-sheets-both-contain-tc001">Can two sheets both contain
-<code>TC001</code>?</h4>
-<p>Yes. Give sheets different group IDs, producing IDs such as
-<code>payment.payment.TC001</code> and
-<code>payment.batch.TC001</code>.</p>
+<h4 id="can-two-sheets-contain-the-same-row-id">Can two sheets contain
+the same row ID?</h4>
+<p>Yes. Give the sheets different group IDs. The rows then define
+different Testcases, such as <code>payment.payment.TC001</code> and
+<code>payment.batch.TC001</code>, and Run can create a separate Case
+execution for each.</p>
 <h4 id="why-did-na-become-empty">Why did <code>N/A</code> become
 empty?</h4>
 <p>ATT normalizes <code>N/A</code>, <code>NA</code>, <code>NULL</code>,
@@ -6029,10 +6250,10 @@ candidate so you can lengthen it. The diagnostic intentionally omits the
 full Context tree. A declared optional field with a blank value is still
 valid and renders as the empty string.</p>
 <h4 id="why-did-a-fail-become-error">Why did a fail become error?</h4>
-<p>A false assertion is FAIL. Invalid expression syntax/navigation, tool
-failure, timeout, parse failure, I/O failure, or runtime exception is
-ERROR. Inspect the action evidence rather than only the final aggregate
-status.</p>
+<p>A false assertion makes the Case execution FAIL. Invalid expression
+syntax/navigation, Tool failure, timeout, parse failure, I/O failure, or
+runtime exception makes it ERROR. Inspect the Action evidence rather
+than only the final Run status.</p>
 <h4 id="why-did-a-tool-run-more-than-once">Why did a Tool Run more than
 once?</h4>
 <p>Its action used retry and received an eligible non-zero exit code.
@@ -6393,8 +6614,9 @@ evidence.output.format is human presentation only.</td>
 <tr class="even">
 <td>Older active resource/config schema versions</td>
 <td>Use the active schema from <a
-href="reference/appendices/schema-matrix.md">Appendix A</a> and migrate
-the listed fields. Historical schemas are not active contracts.</td>
+href="reference/appendices/schema-matrix.md">Schema and Version
+Matrix</a> and migrate the listed fields. Historical schemas are not
+active contracts.</td>
 </tr>
 </tbody>
 </table>
@@ -6452,7 +6674,7 @@ href="reference/appendices/schema-matrix.md">Schema Matrix</a>.</p>
 definitions remain under <code>schemas/history/</code>; their historical
 DB and Render Actions are compatibility-only and are not part of the
 active contract. When migrating those descriptors, change their schema
-versions to v3.6 and apply the field changes below.</p>
+versions to v3.6 and apply the migration table's field changes.</p>
 <table>
 <thead>
 <tr class="header">

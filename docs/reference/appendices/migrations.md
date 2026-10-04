@@ -29,7 +29,7 @@ ATT 3.6.2 separates typed operation results, external parsing, project-file Stri
 | Log file | Pass the value directly to Log.value. |
 | Log fields | Put the typed map/list in Log.value and select Log.format. |
 | HTTP/MQ common result formatting | Use responseFormat for ingress parsing; optional evidence.output.format is human presentation only. |
-| Older active resource/config schema versions | Use the active schema from [Appendix A](schema-matrix.md) and migrate the listed fields. Historical schemas are not active contracts. |
+| Older active resource/config schema versions | Use the active schema from [Schema and Version Matrix](schema-matrix.md) and migrate the listed fields. Historical schemas are not active contracts. |
 
 A project-file String passed to HTTP:
 
@@ -61,7 +61,7 @@ Unsupported schema versions fail before execution and include migration guidance
 
 ## Historical schema migration
 
-ATT 3.6.2 uses `att-template/v3.6` and `att-flow/v3.6` as the active schemas. The published `att-template/v3.5`, `att-flow/v3.5`, and older definitions remain under `schemas/history/`; their historical DB and Render Actions are compatibility-only and are not part of the active contract. When migrating those descriptors, change their schema versions to v3.6 and apply the field changes below.
+ATT 3.6.2 uses `att-template/v3.6` and `att-flow/v3.6` as the active schemas. The published `att-template/v3.5`, `att-flow/v3.5`, and older definitions remain under `schemas/history/`; their historical DB and Render Actions are compatibility-only and are not part of the active contract. When migrating those descriptors, change their schema versions to v3.6 and apply the migration table's field changes.
 
 | Historical configuration | 3.6.2 form |
 |---|---|

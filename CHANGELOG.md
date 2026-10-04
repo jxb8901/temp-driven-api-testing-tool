@@ -5,6 +5,9 @@
 - Adopt the Google Developer Documentation Style Guide as the editorial baseline for current ATT documentation, with ATT-specific terminology and identifier exceptions (#144).
 - Add deterministic editorial checks for standalone-page H1 counts, numbered headings, ambiguous abbreviations, and selected positional references; exclude generated Reference outputs from editorial lint while preserving freshness and EN/ZH structure checks.
 - Remove sequence numbers from Quick Start headings and clarify current documentation wording covered by the new checks.
+- Refactor the bilingual Quick Start into task procedures and define Testcase versus Case execution terminology (#147).
+- Separate public Load contracts from scheduler, telemetry-storage, and soak-verification implementation details (#148).
+- Organize CLI and major Reference pages around user tasks, with descriptive navigation and advanced authoring details grouped separately (#149).
 - Upgrade ATT product version to 3.7.3.
 
 ## 3.7.2 - 2026-10-04

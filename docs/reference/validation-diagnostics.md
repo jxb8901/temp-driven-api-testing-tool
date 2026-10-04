@@ -1,8 +1,8 @@
 # Validation and troubleshooting
 
-## Where to look first
+## Choose your first diagnostic step
 
-Run `validate --package` and fix the diagnostic's file/field first. For runtime failures, inspect the report status/message, then the execution's `case.log`, `case.yaml` and Action evidence. [Reliability](reliability-execution-control.md) defines FAIL versus ERROR, continuation and retries; [Results](results-reports-evidence.md) identifies collector failure paths. See [Appendix D](appendices/limits-defaults.md) for Windows launchers, Java SSH negotiation and stack-trace policy.
+Run `validate --package` and fix the diagnostic's file/field first. A **Testcase** is an authored normalized workbook row; a **Case execution** is one Run of that row, identified by the same Case ID. For runtime failures, inspect the Case execution's report status/message, then its `case.log`, `case.yaml`, and Action evidence. [Reliability and Execution Control](reliability-execution-control.md) defines FAIL versus ERROR, continuation, and retries; [Results, Reports, and Evidence](results-reports-evidence.md) identifies collector failure paths. [Limits, Security Guarantees, and Advanced Diagnostics](appendices/limits-defaults.md) covers Windows launchers, Java SSH negotiation, and stack-trace policy.
 
 ## Start with validation
 
@@ -12,7 +12,7 @@ Run this after every workbook, sidecar, template, helper, or tool change:
 ./att.sh validate --package
 ```
 
-For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. ATT validates descriptors against the active schemas in [Appendix A](appendices/schema-matrix.md). Superseded schema files under `schemas/history/` are historical references, not runtime compatibility contracts. Update the declared `schemaVersion` and migrate fields to the active contract before validation. Diagnostics retain the original violation, file and YAML field location and provide migration guidance; they never rewrite descriptors. For example, replace a historical Render action with an Assign using `&{path}` and pass the resulting String as described in [Actions and Typed Values](actions.md). Unsupported versions fail before execution.
+For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. ATT validates descriptors against the active schemas in the [Schema and Version Matrix](appendices/schema-matrix.md). Superseded schema files under `schemas/history/` are historical references, not runtime compatibility contracts. Update the declared `schemaVersion` and migrate fields to the active contract before validation. Diagnostics retain the original violation, file, and YAML field location and provide migration guidance; they never rewrite descriptors. For example, replace a historical Render Action with an Assign using `&{path}` and pass the resulting String as described in [Actions and Typed Values](actions.md). Unsupported versions fail before execution.
 
 Current schemas are in [`schemas/`](../../schemas/); older definitions are under [`schemas/history/`](../../schemas/history/). `validate --package` checks every catalog-registered schema resource, even when the package does not use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. Validation never rewrites YAML. Review the migration guidance, update the file, then rerun package validation for each selected `--env`.
 
@@ -24,20 +24,20 @@ Then use the diagnostic code and structured location. Do not automate against me
 | `ATT-CTX` | Unknown or ambiguous Context path | Inspect requested/current/missing fields, nearest suggestion, or canonical candidates |
 | `ATT-STG` | Blank required selector, invalid selector YAML, duplicate stage key | Check selector form, `name`, aliases, and required flag |
 | `ATT-TPL` | Unknown/duplicate template, invalid action or payload | Check symbolic name/full path, descriptor, action type, and local files |
-| `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with [Configuration](configuration.md) and remove unsupported fields |
+| `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with [Configuration and Environments](configuration.md) and remove unsupported fields |
 | `ATT-TOOL` | Unknown/missing argument, process or parse failure | Compare call contract; inspect exit code and bounded stdout/stderr capture evidence |
 | `ATT-PATH` | Illegal ID or escaping path | Remove illegal characters and keep content below configured roots |
 | `ATT-RUN` | Timeout, non-zero exit, render/runtime failure | Inspect case log and action/tool evidence |
 
 ## Common questions
 
-### Why is the case ID rejected although excel displays it correctly?
+### Why is the Testcase ID rejected although Excel displays it correctly?
 
 ATT imports displayed cell text, then applies strict ID safety checks. Check hidden leading/trailing whitespace, trailing `.`, path characters, controls, and Windows device names. Store identifiers as text to preserve leading zeroes.
 
-### Can two sheets both contain `TC001`?
+### Can two sheets contain the same row ID?
 
-Yes. Give sheets different group IDs, producing IDs such as `payment.payment.TC001` and `payment.batch.TC001`.
+Yes. Give the sheets different group IDs. The rows then define different Testcases, such as `payment.payment.TC001` and `payment.batch.TC001`, and Run can create a separate Case execution for each.
 
 ### Why did `N/A` become empty?
 
@@ -49,7 +49,7 @@ ATT treats an absent path as an authoring/runtime error instead of silently rend
 
 ### Why did a fail become error?
 
-A false assertion is FAIL. Invalid expression syntax/navigation, tool failure, timeout, parse failure, I/O failure, or runtime exception is ERROR. Inspect the action evidence rather than only the final aggregate status.
+A false assertion makes the Case execution FAIL. Invalid expression syntax/navigation, Tool failure, timeout, parse failure, I/O failure, or runtime exception makes it ERROR. Inspect the Action evidence rather than only the final Run status.
 
 ### Why did a Tool Run more than once?
 

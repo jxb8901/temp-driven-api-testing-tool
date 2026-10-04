@@ -1,10 +1,12 @@
 # ATT v3.7.3 quick start
 
-[中文快速入门](quick-start.zh.md) · [Reference Manual](reference.html)
+[中文快速入門](quick-start.zh.md) · [Reference Manual](reference.html)
 
 This guide gets you from a clean checkout to a successful ATT run with the smallest useful example. It deliberately teaches the normal Run workflow first. Debug, Load, DB/MQ, environments, retry, and the full Context model come later as next steps.
 
-The checked-in Quick Start example is intentionally offline: the first case uses only `assign`, `log`, and `assert`. The second case adds ATT's local sample Tool without requiring a database, MQ server, API endpoint, credentials, or network access.
+Here, **Testcase** means an authored normalized workbook row. A **Case execution** is one Run of that row. They share a Case ID but describe different things; this guide uses Testcase for workbook data and Case execution for runtime results.
+
+The checked-in Quick Start example is intentionally offline: the first Testcase uses only `assign`, `log`, and `assert`. The second Testcase adds ATT's local sample Tool without requiring a database, MQ server, API endpoint, credentials, or network access.
 
 ## What you will run
 
@@ -27,30 +29,31 @@ templates/QUICK_START/template.yaml
 config/config.yaml
 ```
 
-The workbook contains two cases:
+The workbook contains two Testcases:
 
-| Case | Purpose | External dependency |
+| Testcase ID | Purpose | External dependency |
 |---|---|---|
 | `quickStart.default.QS001` | first successful ATT run | none |
 | `quickStart.default.QS002` | same flow plus a local sample Tool | none |
 
 You do not need to understand every ATT schema before running them.
 
-## Prerequisites
+## Check prerequisites
 
-ATT requires Java 8 or later. From the repository root, make the launcher executable on macOS/Linux if necessary:
+ATT requires Java 8 or later. From the repository root:
 
-```sh
-chmod +x att.sh
-```
+1. On macOS/Linux, make the launcher executable if necessary:
+   ```sh
+   chmod +x att.sh
+   ```
 
-Check the CLI:
+2. Check the CLI:
 
-```sh
-./att.sh version
-```
+   ```sh
+   ./att.sh version
+   ```
 
-On Windows, replace `./att.sh` with `att.bat` in each command.
+   On Windows, use `att.bat` instead of `./att.sh`.
 
 ## Inspect the workbook and sidecar
 
@@ -117,37 +120,36 @@ For this tutorial:
 
 That is enough Context knowledge for a first run. The complete model is in [Runtime and Context](reference/runtime-context.md) and [Expressions](reference/expressions.md).
 
-## Regenerate the snapshot
+## Prepare the package
 
-ATT keeps the Excel workbook and its normalized XML snapshot in sync. Run:
+ATT keeps the Excel workbook and normalized XML snapshot in sync:
 
-```sh
-./att.sh snapshot --suite testcase/quick_start.xlsx
-```
+1. Generate the snapshot:
+   ```sh
+   ./att.sh snapshot --suite testcase/quick_start.xlsx
+   ```
 
-If you edit the workbook later, run the same command again and review the resulting XML diff before committing it.
+   If you edit the workbook later, regenerate the snapshot and review its XML diff before committing it.
 
-## Validate before execution
+2. Validate the package before executing it:
 
-First validate the whole package:
+   ```sh
+   ./att.sh validate --package
+   ```
 
-```sh
-./att.sh validate --package
-```
+   Validation checks schemas, workbook/snapshot consistency, Template references, expressions, Tool/resource references, and other package contracts without executing a Testcase. Resolve validation errors before the first Case execution.
 
-Validation checks schemas, workbook/snapshot consistency, Template references, expressions, Tool/resource references, and other package contracts without executing the test.
+## Run the offline Testcase
 
-For a normal package you should fix validation errors before running anything.
+1. Start a Case execution for the offline Testcase:
 
-## Run your first case
+   ```sh
+   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
+   ```
 
-Run only the completely offline case:
+### Expected result
 
-```sh
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-```
-
-The expected result is `PASS`.
+The Case execution should be `PASS`.
 
 The high-level status model is:
 
@@ -161,11 +163,11 @@ The high-level status model is:
 
 You do not need the detailed aggregation rules yet; see [Validation and Troubleshooting](reference/validation-diagnostics.md) when troubleshooting real suites.
 
-## Inspect the result
+## Inspect the Case execution
 
 ATT writes each normal run below `output/<runId>/` and updates `output/latest-run.yaml` only for a completed run.
 
-Start with these artifacts:
+1. Open the run directory and inspect its summary and execution artifacts:
 
 ```text
 output/<runId>/
@@ -174,24 +176,31 @@ output/<runId>/
   ... case.log ...
 ```
 
-Then generate or inspect the HTML report using the normal report workflow documented in [Results, Reports, and Evidence](reference/results-reports-evidence.md).
+2. Open or regenerate the HTML report using [Results, Reports, and Evidence](reference/results-reports-evidence.md).
 
-For the Quick Start case, `case.log` should include the line written by `showInput`, and the final assertion should compare the workbook's `Amount` with `Expected`.
+For the `QS001` Case execution, `case.log` should include the line written by `showInput`, and the final assertion should compare the workbook's `Amount` with `Expected`.
 
-## See a controlled failure
+## Create and restore a controlled failure
 
 A useful way to learn ATT is to make one business assertion fail without breaking the framework.
 
-In `testcase/quick_start.xlsx`, change `QS001` `Expected` from `100` to `999`, then regenerate the snapshot:
+1. In `testcase/quick_start.xlsx`, change `QS001` `Expected` from `100` to `999` and regenerate the snapshot:
 
-```sh
-./att.sh snapshot --suite testcase/quick_start.xlsx
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-```
+   ```sh
+   ./att.sh snapshot --suite testcase/quick_start.xlsx
+   ```
 
-The case should now be `FAIL`, not `ERROR`: ATT executed successfully, but the assertion was false.
+2. Run that Testcase again:
 
-Change the value back to `100` and regenerate the snapshot when finished.
+   ```sh
+   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
+   ```
+
+### Expected result
+
+The Case execution should be `FAIL`, not `ERROR`: ATT completed the execution, but the business assertion was false.
+
+3. Restore `Expected` to `100` and regenerate the snapshot.
 
 ## Add a real Tool call
 
@@ -206,13 +215,17 @@ readDate:
 
 `QS001` has `Use Tool = false`, so this Action is skipped. `QS002` has `Use Tool = true`.
 
-Run the second case:
+1. Start a Case execution for `QS002`:
 
-```sh
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
-```
+   ```sh
+   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
+   ```
 
 This calls the checked-in `sample.getAcDate` Tool from `config/tools/sample.yaml`. It is a local command-backed example, so the tutorial remains offline.
+
+### Expected result
+
+The `QS002` Case execution should be `PASS`, with the Tool result in the execution evidence.
 
 The important mental model is:
 
@@ -224,11 +237,17 @@ For complete Tool configuration, command-backed vs call-backed behavior, argumen
 
 ## Run the whole Quick Start workbook
 
-Once both individual cases make sense, run them together:
+Once both Testcases make sense, run them together:
 
-```sh
-./att.sh run --suite testcase/quick_start.xlsx
-```
+1. Start a Case execution for every Testcase in the workbook:
+
+   ```sh
+   ./att.sh run --suite testcase/quick_start.xlsx
+   ```
+
+### Expected result
+
+The Case executions for both Testcases should have `PASS` status after you restore `QS001`'s `Expected` value.
 
 You now have the basic ATT authoring loop:
 

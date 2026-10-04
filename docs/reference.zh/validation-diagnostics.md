@@ -1,8 +1,8 @@
 # Validation 與 troubleshooting
 
-## 診斷順序
+## 選擇第一個診斷步驟
 
-先執行 `validate --package` 並修正 diagnostic 的 file/field。Runtime 失敗先看 report status/message，再看該 execution 的 `case.log`、`case.yaml` 與 Action evidence。`FAIL` 與 `ERROR` 的區分、continuation 與 Retry 見 [Reliability](reliability-execution-control.md)；collector failure path 見 [Results](results-reports-evidence.md)。Windows launcher、Java SSH negotiation 與 stack-trace policy 見 [Appendix D](appendices/limits-defaults.md)。
+先執行 `validate --package` 並修正 diagnostic 的 file/field。**Testcase** 是作者編寫並正規化的 Workbook row；**Case execution** 是 Run 對該 row 的一次執行，兩者使用相同 Case ID。Runtime 失敗先看 Case execution 的 report status/message，再看其 `case.log`、`case.yaml` 與 Action evidence。`FAIL` 與 `ERROR` 的區分、continuation 與 Retry 見 [Reliability and Execution Control](reliability-execution-control.md)；collector failure path 見 [Results, Reports, and Evidence](results-reports-evidence.md)。[Limits, Security Guarantees, and Advanced Diagnostics](appendices/limits-defaults.md) 說明 Windows launcher、Java SSH negotiation 與 stack-trace policy。
 
 ## 先從 Validation 開始
 
@@ -12,7 +12,7 @@
 ./att.sh validate --package
 ```
 
-針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 僅接受 [Appendix A](appendices/schema-matrix.md) 列出的 active schemas。`schemas/history/` 中的舊 schema 僅供歷史參考，不是 runtime compatibility contract。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，將 historical Render action 改為使用 `&{path}` 的 Assign，再依[Action 與型別化值](actions.md)傳遞 resulting String。Unsupported version 會在執行前失敗。
+針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 僅接受 [Schema and Version Matrix](appendices/schema-matrix.md) 列出的 active schemas。`schemas/history/` 中的舊 schema 僅供歷史參考，不是 runtime compatibility contract。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，將 historical Render Action 改為使用 `&{path}` 的 Assign，再依[Actions and Typed Values](actions.md)傳遞 resulting String。Unsupported version 會在執行前失敗。
 
 現行 schema 位於 [`schemas/`](../../schemas/)，較舊定義位於 [`schemas/history/`](../../schemas/history/)。`validate --package` 會檢查 catalog 登錄的每一份 schema，即使 package 沒有使用。缺少、無法讀取、不安全或重複的註冊 schema 會硬性回報 `PACKAGE_INVALID`。Validation 不會改寫 YAML。請檢視 migration guidance、更新檔案，再針對每個選定的 `--env` 重跑 package validation。
 
@@ -24,20 +24,20 @@
 | `ATT-CTX` | 未知或歧義 Context 路徑 | 檢查請求/當前/缺失字段、最近建議或規範候選 |
 | `ATT-STG` | 必需選擇器為空白、選擇器 YAML 無效、Stage 鍵重復 | 檢查選擇器形式、`name`、別名和 required 標志 |
 | `ATT-TPL` | 未知/重復 Template、Action 或負載無效 | 檢查符號名/完整路徑、描述符、Action 類型和本地文件 |
-| `ATT-CFG` | 未知字段、重復鍵、schema 類型/枚舉錯誤 | 對照[Configuration](configuration.md)並移除不支持字段 |
+| `ATT-CFG` | 未知字段、重復鍵、schema 類型/枚舉錯誤 | 對照 [Configuration and Environments](configuration.md) 並移除不支持字段 |
 | `ATT-TOOL` | 未知/缺失參數、進程或解析失敗 | 對比調用契約，檢查退出碼和有界 stdout/stderr capture evidence |
 | `ATT-PATH` | 非法 ID 或路徑逃逸 | 移除非法字符，並保持內容在配置根目錄下 |
 | `ATT-RUN` | 超時、非零退出、渲染/運行時失敗 | 檢查 Case 日誌和 Action/Tool 證據 |
 
 ## 常見問題
 
-### 為什麼 Excel 看起來沒問題，但 case ID 被拒絕？
+### 為什麼 Testcase ID 被拒絕，Excel 卻顯示正確？
 
 ATT 導入的是顯示單元格文本，然後應用嚴格的 ID 安全檢查。檢查隱藏的首尾空白、尾隨 `.`、路徑字符、控制字符以及 Windows 設備名。以文本形式保存標識符，以保留前導零。
 
-### 兩張 Sheet 能同時包含 `TC001` 嗎？
+### 兩張 Sheet 可以使用相同的 row ID 嗎？
 
-可以。給 sheet 不同的 group ID，即可生成例如 `payment.payment.TC001` 和 `payment.batch.TC001` 這樣的 ID。
+可以。給兩張 sheet 不同的 group ID，讓兩行形成不同 Testcase，例如 `payment.payment.TC001` 和 `payment.batch.TC001`；Run 會為它們各自建立 Case execution。
 
 ### 為什麼 `N/A` 變成空了？
 
@@ -49,7 +49,7 @@ ATT 會把缺失路徑視作作者/運行時錯誤，而不是靜默渲染成空
 
 ### 為什麼 Fail 變成 error？
 
-假斷言是 FAIL。無效表達式語法/導航、Tool 失敗、超時、解析失敗、I/O 失敗或運行時異常，都是 ERROR。應查看 Action 證據，而不只看最終聚合狀態。
+Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/導航、Tool 失敗、超時、解析失敗、I/O 失敗或運行時異常會令它變成 ERROR。應查看 Action 證據，而不只看最終 Run 狀態。
 
 ### 為什麼 Tool 跑了不止一次？
 

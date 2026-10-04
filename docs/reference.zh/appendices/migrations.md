@@ -27,7 +27,7 @@ ATT 3.6.2 將型別化 operation result、外部 parsing、project-file String�
 | Log file | 直接將 value 傳入 Log.value。 |
 | Log fields | 將 typed map/list 放在 Log.value，並選擇 Log.format。 |
 | HTTP/MQ 共用 result 格式設定 | 使用 responseFormat 做 ingress parsing；可選 evidence.output.format 只控制人類可讀表示。 |
-| 舊 active resource/config schema | 使用 [Appendix A](schema-matrix.md) 的 active schema，並遷移上述欄位。Historical schemas 不是 active contracts。 |
+| 舊 active resource/config schema | 使用 [Schema and Version Matrix](schema-matrix.md) 的 active schema，並遷移上述欄位。Historical schemas 不是 active contracts。 |
 
 Project-file String 傳入 HTTP 的例子：
 

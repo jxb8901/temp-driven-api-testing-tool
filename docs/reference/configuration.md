@@ -2,6 +2,15 @@
 
 This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../../schemas/) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
 
+## Find a configuration task
+
+| Task | Start here |
+|---|---|
+| Choose SIT, UAT, or another resource profile | [Select an environment profile](#select-an-environment-profile) |
+| Set output, Run IDs, or report defaults | [Set package-wide options](#set-package-wide-options) |
+| Find the owner of a Tool or helper contract | [Configuration owners](#configuration-owners) |
+| Migrate or validate a schema | [Schema catalog](#schema-catalog) and [Migration notes](appendices/migrations.md) |
+
 ## Configuration layers and precedence
 
 | Layer | Source | Owns |
@@ -52,7 +61,7 @@ Disabled entries do not supply required fields: `x-schemaVersion` cannot replace
 
 Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXEC.INPUT`, `EXEC.VARS`, arbitrary maps, DB `params`/`parameters`, and Tool invocation argument values remain data and retain their names. For example, `x-correlation-id` is still an HTTP header or input key unless it is itself the key of an ATT-owned configuration collection.
 
-## Multi-environment profiles in current ATT
+## Select an environment profile
 
 `att-config/v2.11` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper, HTTPHelper and testdata descriptor lists as a whole. See the resource chapters and [Testdata Registry and Input Mapping](test-authoring.md) for each binding.
 
@@ -155,13 +164,13 @@ This design keeps Testcases, Templates, Flows, and Actions reusable and makes va
 
 Keep non-secret topology in YAML: JDBC URL, MQ host/port, queue manager, channel, pool sizes, and timeouts. Keep DB/MQ usernames and passwords in `${ENV:NAME}` references backed by the local environment or CI secret store. DBHelper resolves complete `${ENV:NAME}` values for the URL, username, password, and string-valued connection properties. MQHelper resolves `${ENV:NAME}` only for username/password; host, queue manager, channel, and numeric port are normally literal values in the selected descriptor. Resolved secrets remain absent from profile metadata, diagnostics, reports, and generated documentation.
 
-Use profiles when the same test package is promoted across environments and only infrastructure bindings change. Use separate top-level configs when testcase/template roots, report policy, or package structure intentionally differ. See [Appendix C](appendices/migrations.md) for complete-config migration.
+Use profiles when the same test package is promoted across environments and only infrastructure bindings change. Use separate top-level configs when testcase/template roots, report policy, or package structure intentionally differ. See [Migration Notes](appendices/migrations.md) for complete-config migration.
 
 ## Schema catalog
 
-[`schemas/catalog.yaml`](../../schemas/catalog.yaml) is authoritative for active schema registrations. Package validation checks registrations; archived schemas do not become active runtime contracts. See the complete matrix in [Appendix A](appendices/schema-matrix.md).
+[`schemas/catalog.yaml`](../../schemas/catalog.yaml) is authoritative for active schema registrations. Package validation checks registrations; archived schemas do not become active runtime contracts. See the complete matrix in [Schema and Version Matrix](appendices/schema-matrix.md).
 
-## Global configuration
+## Set package-wide options
 
 ```yaml
 schemaVersion: att-config/v2.11
@@ -196,6 +205,8 @@ environments:
     testdata: [config/testdata/accounts.yaml]
 ```
 
+### Set runtime and package paths
+
 | Path | Required/default | Constraints |
 |---|---|---|
 | `schemaVersion` | required | Current: `att-config/v2.11`; the previous schema remains compatible. The example uses the active schema. |
@@ -209,12 +220,22 @@ environments:
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
 | `execution.processOutput.memoryLimitBytes` | `65536` | Integer 1024–1048576; in-memory head/tail preview per stdout/stderr stream |
 | `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
+| `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
+
+### Configure report output
+
+| Path | Required/default | Constraints |
+|---|---|---|
 | `report.mode` | `append-to-copy` | `append-to-copy` or `none`; `none` skips result-workbook creation |
 | `report.fileNamePattern` | `${suiteName}.result.xlsx` | Result workbook filename pattern |
 | `report.columns` | `{}` | Supported keys: `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, `runTime`, `execId`; each value is a string column label |
 | `report.html.caseLogInlineLimitBytes` | `32768` | Integer 0–1048576 UTF-8 bytes; larger logs use a bounded head/tail preview plus artifact link |
 | `report.junit.caseLogEmbedThresholdBytes` | `10240` | Integer 0–1048576 UTF-8 bytes; 0 always links |
-| `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
+
+### Configure Resource and environment registries
+
+| Path | Required/default | Constraints |
+|---|---|---|
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.6` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.2` YAML paths; normalized duplicates are rejected |
@@ -224,6 +245,7 @@ environments:
 | `environments.<profile>.testdata` | `[]` | Unique package-relative YAML paths available to that selected environment |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
+
 
 Allowed global object properties are:
 
@@ -244,7 +266,7 @@ Allowed global object properties are:
 | `xml` | `namespaceMode`, `x-*` |
 | `ssh` | `host`, `user`, `port`, `identityFile` |
 
-See [Appendix C](appendices/migrations.md) for removed configuration fields.
+See [Migration Notes](appendices/migrations.md) for removed configuration fields.
 
 ## Identifier and path constraints
 
@@ -319,7 +341,7 @@ ${EXEC.ID}
 A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references are never retained as literal output text. All documented built-ins are parsed by the same engine, including nested calls. Because the resulting text becomes a filename, prefer deterministic string transformations and avoid side-effecting filesystem built-ins, random values, path separators, absolute paths, `..`, and platform-reserved names.
 
 
-## Feature configuration owners
+## Configuration owners
 
 | Contract | Semantic owner |
 |---|---|

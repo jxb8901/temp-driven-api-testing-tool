@@ -6,7 +6,7 @@ Descriptors using the previous workload schema remain compatible and are normali
 
 Run `./att.sh load` with no scenario to discover valid full Load descriptors under `load/`. Only YAML declaring `schemaVersion: att-load/*` is considered; unrelated YAML is ignored, while invalid declared descriptors are shown with their diagnostics. Discovery resolves and validates targets without starting a scheduler or making resource calls.
 
-## Scenario shape
+## Define a Load scenario
 
 ~~~yaml
 schemaVersion: att-load/v1.6
@@ -44,7 +44,7 @@ execution:
   execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
 ~~~
 
-## Closed workload target mix
+## Distribute closed-user work across targets
 
 A workload can declare `mix` instead of `target` to distribute each closed user's next iteration across pre-resolved targets. Every entry has a unique `id`, a positive integer `weight`, and a Template, Flow or Tool `target`. The selector uses the run seed, workload ID, stable VU ID and that VU's iteration number; changing targets does not reset the VU or its think-time stream. Weights express selection probability, not a promise that a short run will match the exact ratio.
 
@@ -83,29 +83,29 @@ A target accepts template, flow or tool; Tool targets may provide named argument
 
 ATT snapshots each iteration's input map once as a deeply immutable tree. Request metadata copies reuse that snapshot, and the Load adapter passes its nested values through into the per-iteration `EXEC.INPUT` map without copying them again. A later change to the caller's source map cannot affect a started iteration, and separate iterations do not share their input snapshots.
 
-## Testdata imports and workload scopes
+## Map inputs and choose testdata
 
 The environment profile contributes the shared `testdata` descriptor list. A scenario's optional top-level `testdata` list imports package-relative YAML files as a Load-only overlay. A matching local ID replaces the whole environment descriptor for that scenario; records and selection settings are not merged. Duplicate IDs within either layer fail validation.
 
 Use `inputs` to map `@{id}`, `@{id.path}`, or scalar interpolation into `EXEC.INPUT`. Each ID is selected once for a mapping, and the configured `scope` controls how long that choice is reused: `workload`, `user`, or `iteration`. If omitted, Load uses `iteration`. `user` requires a closed-VU workload and is invalid for `arrivalRate`. The workload `testdata` map is policy only; it does not import descriptors. Its optional `selection` object replaces the descriptor's entire selection policy. Policies support `sequential`, `roundRobin`, or seeded `random`, with exhaustion behavior `error` (default), `recycle`, or `stop`. `stop` ends that workload cleanly after its records are consumed. A one-record descriptor needs no selection policy.
 
-Selection evidence records only the testdata ID, source layer, record index, generated sequence where applicable, scope, strategy, and random seed. It never includes the record contents. Run and Debug load only IDs used in mappings; Load validates referenced IDs and explicit workload policies before starting the scheduler.
+Selection evidence records only the testdata ID, source layer, record index, generated sequence where applicable, scope, strategy, and random seed. It never includes record contents. Run and Debug load only IDs used in mappings; Load validates referenced IDs and explicit workload policies before starting.
 
-## Per-execution bootstrap vars
+## Initialize Template and Flow variables
 
 After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are ready, ATT evaluates each workload's `vars` tree before starting its Template or Flow. Exact `${...}` references preserve native types, mixed text becomes a string, `#{...}` uses the ordinary typed expression parser, and nested maps/lists are evaluated recursively. References between vars are declaration-order independent; missing vars and dependency cycles fail before the target starts. Each iteration owns its evaluated maps/lists, so concurrent users and workloads cannot share mutations. The first normal `assign` may replace a bootstrapped variable.
 
 Bootstrap expressions may use initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.LOAD`, other `EXEC.VARS.<name>` values, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, invocation-scoped metadata, and Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are unavailable. Only safe pure built-ins are permitted. Tool arguments remain separate from `vars`.
 
-## Workload models
+## Choose a closed-user or arrival-rate workload
 
 Closed workloads use positive load.users. Each stable virtual user repeatedly executes its target and observes execution.thinkTime before starting the next iteration. thinkTime may be a duration or a {min, max} range.
 
-Coordinated workloads share a lazy, bounded worker executor whose maximum is the aggregate configured concurrency slots. It creates platform threads as blocking iterations need them, up to each workload's configured limit. Closed virtual users remain scheduler state rather than eagerly owning control threads. The scheduler blocks until the next VU or phase deadline or an iteration completion. Arrival-rate scheduling computes phase deadlines directly and waits for the next due arrival instead of polling every millisecond. Cancellation stops new admissions, interrupts that workload's admitted iterations, and drains their completion events before finalizing its result snapshot.
-
 Arrival-rate workloads use load.arrivalRate, positive load.maxConcurrent and overloadPolicy: drop. They schedule against absolute due times. Arrivals beyond maxConcurrent are recorded as generator drops; they are not queued or counted as SUT errors. Arrival-rate workloads have no persistent USER_ID and cannot configure thinkTime.
 
-## Pacing and Resource-pool sizing
+Closed workloads preserve the configured number of virtual users while iterations run synchronously. For scheduler and worker-pool implementation details, see [Load scheduler design](../../system-design/load-scheduler.md).
+
+## Set pacing and size Resource pools
 
 For a steady arrival rate, estimate average in-flight requests with Little's law:
 
@@ -119,9 +119,9 @@ For MQ request/reply, 10 requests/second with a mean 3-second reply time likewis
 
 duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends real traffic but is excluded from measured threshold aggregates. Optional seed makes closed-VU think-time randomization deterministic.
 
-## Load identity and output layout
+## Identify iterations and find their artifacts
 
-Each started iteration has a unique EXEC.ID across the Load run and shares EXEC.RUN_ID. If execution.execIdFormat is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates it once during initialization with the ordinary ${...} / #{...} engine. Bootstrap vars are evaluated after that identity is published, so they can use EXEC.ID and EXEC.OUTPUT_DIR. Closed workloads can use EXEC.LOAD.USER_ID; arrival-rate cannot. See [Load execution ID initialization](#load-execution-id-initialization) for field availability and function restrictions.
+Each started iteration has a unique `EXEC.ID` across the Load run and shares `EXEC.RUN_ID`. If `execution.execIdFormat` is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates the configured format once during initialization with the ordinary `${...}` / `#{...}` engine. Bootstrap vars are evaluated after that identity is published, so they can use `EXEC.ID` and `EXEC.OUTPUT_DIR`. Closed workloads can use `EXEC.LOAD.USER_ID`; arrival-rate cannot. See [Check execution ID fields before use](#check-execution-id-fields-before-use) for field availability and function restrictions.
 
 Generated IDs must be non-empty, path-safe segments. Duplicate IDs fail before the target starts; ATT does not silently append a suffix.
 
@@ -139,43 +139,45 @@ output/load/<RUN_ID>/
 └── samples/<EXEC.ID>/case.yaml
 ~~~
 
-A metrics-only iteration still has EXEC.ID but does not create a per-iteration execution directory unless an operation writes an artifact or a retention decision materializes evidence. EXEC.OUTPUT_DIR remains the logical planned path at executions/<EXEC.ID> while the iteration runs. Retained failures and sampled successes receive an evidence copy under failures/<EXEC.ID>/ or samples/<EXEC.ID>/. The report and evidence summary show EXEC.ID and link to case.log when it exists. Helper resource-output formatting is deferred until retention; explicit Tool evidence collectors still execute because they are author-requested diagnostic operations.
+A metrics-only iteration still has `EXEC.ID` but does not create a per-iteration execution directory unless an operation writes an artifact or retention materializes evidence. `EXEC.OUTPUT_DIR` remains the logical planned path at `executions/<EXEC.ID>` while the iteration runs. Retained failures and sampled successes receive an evidence copy under `failures/<EXEC.ID>/` or `samples/<EXEC.ID>/`. The report and evidence summary show `EXEC.ID` and link to `case.log` when it exists. Optional Resource output formatting is deferred until an iteration is retained; explicit Tool evidence collectors still run because they are part of the requested scenario.
 
-## Evidence and Resource output
+## Choose which iteration evidence to retain
 
 `evidence.mode` accepts `metrics`, `failures`, `samples` or `all`; the default is `failures`. These modes set the default effective success/failure policies to `none/none`, `none/full`, `sample/full` and `full/full`, respectively. Explicit `evidence.success` and `evidence.failure` values override those defaults independently. `sampleRate` and `maxSamples` bound retained evidence. Dropped arrivals do not create iteration evidence.
 
-Case-log capture follows the effective success/failure policies and remaining retention capacity before each iteration starts. If the effective failure policy is `full` and a `maxSamples` slot remains available, failures (including unselected successes under `samples`) keep a redacted rolling in-memory tail of at most 65,536 characters; ATT materializes it only when a failure claims a retention slot. Once no failure can be retained because `maxSamples` is zero or exhausted, per-action serialization and buffering are skipped. A slot reserved by an in-flight iteration may conservatively make the scheduler skip capture for other iterations. The latest action and runtime failure details remain at the end of a retained log, after a truncation marker. Selected sampled successes and retained full-success evidence use full deferred case logs; if a success-reserved iteration fails, its full deferred log remains available for failure evidence using that same reserved slot. For example, `mode: metrics, failure: full` enables bounded failure capture when capacity remains, while `mode: failures, failure: none` skips failure capture.
+Case-log capture follows the effective success/failure policies and remaining retention capacity. With failure policy `full` and a `maxSamples` slot available, eligible failures—including unselected successes under `samples`—retain a redacted rolling log tail of at most 65,536 characters. ATT materializes the failure log only when the failure claims a retention slot. If the tail is truncated, a marker identifies the omitted earlier events, and the latest action and runtime failure details remain at the end. Failure logs are not retained after capacity is exhausted. Sampled successes and full-success policies retain full deferred logs. For example, `mode: metrics, failure: full` enables bounded failure capture while capacity remains, while `mode: failures, failure: none` disables it. See [Load scheduler design](../../system-design/load-scheduler.md) for implementation and storage details.
 
 evidence.resources.output accepts inherit (default) or none. none disables optional human-readable resource-output formatting and materialization while preserving typed results, stdoutFormat/responseFormat parsing, exact project-file String output and requestFormat behavior. In Load, resource output is deferred until the iteration is retained. Metrics-only iterations do no business-output formatting or evidence file I/O.
 
-## Reports, metrics and thresholds
+## Read Load results and apply thresholds
 
 ATT writes bounded load-summary.json/yaml and a self-contained report/index.html below the run root. The report shows EXEC.ID for retained executions, workload/target identity, status, timing and case.log links when available. Aggregate latency percentiles use the aggregate latency collector; ATT does not average workload percentiles.
 
-The summary separates generator observations from SUT outcomes. `metrics.generator` includes sampled heap used/committed/maximum, observed peak live threads, GC count/time, and process CPU when the JVM exposes it. Sampling is event-triggered and rate-limited to one sample per 100 ms, so peaks shorter than the sampling interval may be missed. `schedulerWakeups`, `submitLag*`, and `workerQueueDepth*` describe scheduler pressure; arrival drops remain separate from SUT errors. `resources.http` reports active/idle/waiting and observed peak connections per HTTP helper alongside DB, MQ, and Render pool/plan diagnostics; `resources.resourceMetricSamples` reports the count of rate-limited resource observations. Testdata mapping and selection counters/cache sizes are under `resources.generator.testdata`; iteration-scoped selections are local to one mapping, while user/workload scopes retain only their scoped choices. Custom execution-ID reservations use disk markers, and `resources.executionIds` reports their count; default monotonic IDs do not use a collision map.
+The summary separates generator observations from SUT outcomes. `metrics.generator` includes sampled heap used/committed/maximum, observed peak live threads, GC count/time, and process CPU when the JVM exposes it. Sampling is limited to one observation per 100 ms, so brief peaks may be missed. `schedulerWakeups`, `submitLag*`, and `workerQueueDepth*` describe scheduler pressure; arrival drops remain separate from SUT errors. `resources.http` reports active/idle/waiting and observed peak connections per HTTP helper alongside DB, MQ, and Render pool/plan diagnostics; `resources.resourceMetricSamples` reports the number of rate-limited resource observations. `resources.executionIds` reports custom execution-ID reservation counts. Testdata mapping and selection counts are under `resources.generator.testdata`; interpretation and implementation limits are documented in [Load Generator Telemetry](../../system-design/load-telemetry.md).
 
-Latency percentiles use bounded primitive reservoirs. `latencySampleCapacity`, `latencySampleCount`, `latencyObservationCount`, and `latencySampleRate` describe the run-level estimate; exact latency aggregates remain exact. The time series keep the newest 4,096 one-second buckets in a circular ring.
+`latencySampleCapacity`, `latencySampleCount`, `latencyObservationCount`, and `latencySampleRate` describe the run-level percentile estimate; exact latency aggregates remain exact. Time-series output retains the newest 4,096 one-second buckets. ATT does not average per-workload percentiles to calculate the overall percentile.
 
 The new Load summary telemetry fields are optional under `att-load-summary/v1.1`; current writers emit them, and summaries produced before this telemetry was added remain valid.
 
-Run the opt-in 30–60 minute synthetic selection soak with `mvn -Datt.load.soak=true -Datt.load.soak.durationMinutes=30 -Dtest=LoadTelemetrySoakTest test`. It checks that post-warm-up retained heap stays within `max(16 MiB, 25%)` of the warm-up checkpoint and iteration selection state remains empty.
-
-See [Load Generator Telemetry](../../system-design/load-telemetry.md) for sampling limits and metric interpretation.
+For sampling limits and maintainer verification, see [Load Generator Telemetry](../../system-design/load-telemetry.md).
 
 Top-level thresholds apply only to the aggregate run; workload thresholds apply only to their individual workload. Root thresholds are not inherited into workload thresholds. Threshold failure returns FAIL/exit 1. Invalid config/target returns exit 2; runtime/infrastructure errors return ERROR/exit 3. Generator drops are not SUT errors.
 
-## Render plans and payload snapshots
+## Cancel a Load run
 
-Before a Load workload scheduler starts, ATT resolves each reachable Render payload glob once and freezes the matched UTF-8 source content and compiled reference/expression structure for that run. A payload edit, replacement, or new glob match made while the run is active does not affect its iterations; the next Load run resolves the package again. Normal Run and Debug use a fresh plan for each execution, so edits are picked up by the next execution.
+Cancellation stops new admissions and interrupts admitted iterations. ATT drains completion events for admitted work and accounts for those outcomes before finalizing workload results and metrics.
 
-Each iteration evaluates Context references, built-in calls, and external calls against its own Context. ATT reuses the parsed structure and source text, never a dynamic rendered result; stateful calls such as `seq.next()`, clock/random functions, and external calls still execute for each iteration. Render returns its String in memory, so passing `ACTIONS.<id>.output.result` to a downstream action does not create an intermediate Render file. Use `EXEC.OUTPUT_DIR` only when an operation explicitly needs a file.
+## Understand payload changes during a Load run
 
-With `--profile`, `performance.json` records `renderPlansCompiled`, `renderPlanCacheHits`, `renderPayloadResolutions`, `renderPayloadResolutionCacheHits`, `renderEvaluations`, `renderArtifactWrites`, and `renderSourceBytes`. These bounded run totals show source-plan reuse separately from per-iteration evaluation; `renderArtifactWrites` is zero because Render itself returns a String without writing an artifact.
+Before a Load workload starts, ATT resolves each reachable Render payload glob once and freezes the matched UTF-8 source content for that run. A payload edit, replacement, or new glob match made while the run is active does not affect its iterations; the next Load run resolves the package again. Normal Run and Debug use a fresh plan for each execution, so edits are picked up by the next execution.
+
+Each iteration evaluates Context references, built-in calls, and external calls against its own Context. Stateful calls such as `seq.next()`, clock/random functions, and external calls run for each iteration. Render returns its String in memory, so passing `ACTIONS.<id>.output.result` to a downstream action does not create an intermediate Render file. Use `EXEC.OUTPUT_DIR` only when an operation explicitly needs a file.
+
+With `--profile`, `performance.json` records `renderPlansCompiled`, `renderPlanCacheHits`, `renderPayloadResolutions`, `renderPayloadResolutionCacheHits`, `renderEvaluations`, `renderArtifactWrites`, and `renderSourceBytes`. See [Load scheduler design](../../system-design/load-scheduler.md) for how Load prepares plans and reuses immutable source data across iterations.
 
 Load startup also compiles the selected Template/Flow action sequence, primary Tool calls and argument expressions, `runWhen`, assertions, and `retry.when`. Each iteration evaluates that immutable plan against its own Context. Testdata input mappings are likewise compiled during target validation; descriptors and effective workload policies are prepared once, while record selection and Context values remain iteration-specific. The run summary's `resources.execution` contains `executionPlansCompiled`, `actionPlansCompiled`, and `actionEvaluations`.
 
-## CLI and examples
+## Override workload settings from the CLI
 
 For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent can override matching YAML values. Unscoped load-model overrides fail for multi-workload scenarios.
 
@@ -204,9 +206,9 @@ evidence: {mode: failures}
 ./att.sh load --debug tool fpp.invokeApi --set arg.requestId=42
 ~~~
 
-Copyable examples and field descriptions are maintained in [examples/load/README.md](../../../examples/load/README.md). Schema migration is documented in [Appendix C](../appendices/migrations.md).
+Copyable examples and field descriptions are maintained in [examples/load/README.md](../../../examples/load/README.md). Schema migration is documented in [Migration Notes](../appendices/migrations.md).
 
-## Load execution ID initialization
+## Check execution ID fields before use
 
 Load uses schema att-load/v1.6. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
 
@@ -229,4 +231,4 @@ execution:
 IDs must be non-empty, path-safe single segments and unique within the Load run. Duplicate or unsafe values fail before the target starts; ATT does not append a hidden suffix.
 
 
-execIdFormat permits deterministic, side-effect-free built-ins only; external calls, seq.next(), random, clock and filesystem functions are rejected. See [Appendix C](../appendices/migrations.md) for schema migration.
+execIdFormat permits deterministic, side-effect-free built-ins only; external calls, seq.next(), random, clock and filesystem functions are rejected. See [Migration Notes](../appendices/migrations.md) for schema migration.

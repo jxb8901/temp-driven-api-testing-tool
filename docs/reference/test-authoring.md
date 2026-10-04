@@ -1,5 +1,20 @@
 # Test authoring
 
+## Author and run a Testcase
+
+A Testcase is one normalized workbook row; Run creates one Case execution from each selected row. Use this workflow to author, validate, and execute a change.
+
+1. Edit the workbook and map its columns in the Sidecar.
+2. Generate the Snapshot and review its diff.
+3. Validate the package with ./att.sh validate --package.
+4. Use [Debug](execution-modes/debug.md) to isolate a Template, Flow, or Tool, then use [Run](execution-modes/run.md) to create Case executions.
+
+The following sections define each authoring contract. See [Advanced workbook and Snapshot details](#advanced-workbook-and-snapshot-details) for formula cells, multi-row headers, and XML serialization.
+
+## Distinguish Testcases from Case executions
+
+A **Testcase** is the authored workbook row after sidecar mapping and snapshot normalization. Its full Case ID is `workbookId.groupId.rowCaseId`. A **Case execution** is one runtime execution of that Testcase by Run, with its own status and evidence. The identifier is shared; the concepts are not synonyms. This page uses *Testcase* for workbook content and *Case execution* for runtime work.
+
 ## Authoring contracts
 
 This chapter explains the normal day-to-day workflow in the same order that data moves through ATT.
@@ -10,7 +25,7 @@ This chapter explains the normal day-to-day workflow in the same order that data
 | Reusable Template logic | Flow |
 | One ordered operation | Action |
 | External capability | Resource |
-| Case/stage business input | EXEC.INPUT |
+| Testcase/Stage business input | EXEC.INPUT |
 | Cross-Action mutable state | EXEC.VARS |
 
 ## Workbook
@@ -47,7 +62,7 @@ stages:
 
 The root `id` is mandatory and must be unique across the package. `excel.sheet` accepts one sheet name or comma-separated `groupId=sheetName` entries. If one sheet is given without a group ID, ATT uses `default`. Full Case IDs always have the form `workbookId.groupId.rowCaseId` and must be unique across the package.
 
-After editing Excel, run `./att.sh snapshot --suite testcase/payment_regression.xlsx`. The generated `payment_regression.xml` uses schema `att-testcases/v2.4` and stores only normalized sidecar-mapped semantics. It preserves group, Case, tag, map/list, and stage order, uses explicit value types, and excludes styles and unrelated workbook content. String values containing LF or XML-special `&`, `<`, or `>` characters use CDATA; literal `]]>` content is split across adjacent CDATA sections and reconstructs exactly when parsed. Spaces/tabs immediately before LF use `&#32;`/`&#9;` between CDATA sections, preserving the value without Git trailing-whitespace warnings. Review and commit the XML with the xlsx; do not edit it manually.
+After editing Excel, run `./att.sh snapshot --suite testcase/payment_regression.xlsx`. The generated `payment_regression.xml` uses schema `att-testcases/v2.4` and stores only normalized sidecar-mapped semantics. It preserves group, Case, tag, map/list, and stage order, uses explicit value types, and excludes styles and unrelated workbook content. Review and commit the XML with the xlsx; do not edit it manually.
 
 Ordinary `run` and every `validate` mode remain read-only and fail before output creation if the XML is missing, invalid, non-canonical, or stale. `run --update-snapshot` explicitly permits ATT to refresh only changed snapshots for the selected complete workbooks before applying the same verification and validation gates. It never writes partial Case/tag snapshots, does not invoke tools during update, rejects snapshot symlinks, and also performs the authorized update when combined with `--dry-run`. Byte-identical snapshots are not rewritten.
 
@@ -77,35 +92,6 @@ The final `(yaml)` is the ATT parsing marker. In the last example, the physical 
 `N/A`, `NA`, `NULL`, `NONE`, empty cells, and whitespace-only values normalize to blank. An ordinary blank data value becomes the empty string. A blank `(yaml)` cell remains blank rather than being parsed.
 
 A required stage selector rejects a blank value. An optional stage with a blank selector is skipped.
-
-### Formula, date, percentage, and scientific notation cells
-
-V2.4 rejects formula cells in configured Case ID, tags, case-data, stage-selector, and stage-data columns. Formula definitions and cached/displayed results can diverge and therefore cannot produce a trustworthy semantic snapshot. Recalculate in Excel and paste the result as a literal value, or calculate it in a dedicated ATT step.
-
-Merged regions intersecting configured testcase columns below `excel.headerRows` are likewise rejected. Merged presentation cells wholly inside the configured header area remain allowed.
-
-For non-formula cells, ATT imports the displayed text. The exact representation follows the workbook's cell format and the runtime locale:
-
-| Excel value and format | Context value |
-|---|---|
-| `45292` formatted `yyyy-mm-dd` | `2024-01-01` |
-| `0.125` formatted `0.0%` | `12.5%` |
-| `123000` formatted `0.00E+00` | `1.23E+05` |
-| `000123` stored/formatted as text | `000123` |
-
-An ordinary column remains a string. A `(yaml)` column may convert displayed text into another YAML type. Quote a YAML scalar when text such as a date, percentage, scientific number, account number, or code must stay a string.
-
-### Multi-row headers
-
-`headerRows: 2` means rows 1–2 are headers and data begins at row 3. ATT scans each physical column top-to-bottom and uses its last non-empty trimmed header cell:
-
-```text
-Row 1: Basic data |           | Execution |
-Row 2: Case ID    | Case name | Template  | Parameters
-Effective: Case ID, Case name, Template, Parameters
-```
-
-ATT does not concatenate parent and child labels. Header matching removes spaces, tabs, line breaks, non-breaking spaces, and other Unicode whitespace from both the effective Excel header and configured sidecar/report label; matching otherwise remains case-sensitive. For example, `案例 編號`, `案例\n編號`, and `案例編號` identify the same column. Every effective header must exist exactly once after this normalization, so two physical headers that differ only by whitespace are a duplicate-header error. Testcase loading and result-workbook writing use this same projection; result columns that do not already exist are written to the final header row.
 
 ### Workbook Sidecar
 
@@ -150,11 +136,11 @@ A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.6`
 
 ## Authoring lifecycle
 
-After changing a Workbook, generate its Snapshot, review and commit the diff. After changing a Sidecar, Template, Flow or Resource, run `./att.sh validate --package`. Use [Debug](execution-modes/debug.md) to isolate an authoring check and [Run](execution-modes/run.md) to execute Testcases. Follow [Quick Start](../quick-start.md) to build the first package.
+After changing a Workbook, generate its Snapshot, review and commit the diff. After changing a Sidecar, Template, Flow or Resource, run `./att.sh validate --package`. Use [Debug](execution-modes/debug.md) to isolate an authoring check and [Run](execution-modes/run.md) to create Case executions from Testcases. Follow [Quick Start](../quick-start.md) to build the first package.
 
 ## Test data ownership
 
-Workbook/Sidecar/Snapshot defines Testcase data. Case and Stage business inputs enter `EXEC.INPUT`; [Context](runtime-context.md) defines their scope and lifetime. Environment selection belongs to [Configuration](configuration.md).
+Workbook/Sidecar/Snapshot defines Testcase data. Testcase and Stage business inputs enter `EXEC.INPUT`; [Context](runtime-context.md) defines their scope and lifetime. Run turns each selected Testcase into a Case execution. Environment selection belongs to [Configuration](configuration.md).
 
 ## Testdata registry and input mapping
 
@@ -188,3 +174,38 @@ selection: {strategy: roundRobin, exhaustion: stop}
 ~~~
 
 An environment profile's `testdata` list declares the shared registry. A Load scenario may declare its own top-level `testdata` imports; matching IDs replace the whole environment descriptor for that Load only. Duplicate IDs within one layer fail. Ordinary Run/Debug activate referenced IDs lazily, while `validate --package` checks every configured descriptor. Templates, Flows, and Tool definitions receive resolved values through `EXEC.INPUT`; they cannot contain direct `@{...}` or `%{...}` references. See [Environment and Test Data](configuration.md), [Load](execution-modes/load.md), and the maintainer [testdata design](../system-design/testdata.md).
+
+## Advanced workbook and Snapshot details
+
+### Normalize XML text safely
+
+String values containing LF or XML-special `&`, `<`, or `>` characters use CDATA; literal `]]>` content is split across adjacent CDATA sections and reconstructs exactly when parsed. Spaces/tabs immediately before LF use `&#32;`/`&#9;` between CDATA sections, preserving the value without Git trailing-whitespace warnings. Review and commit the XML with the xlsx; do not edit it manually.
+
+### Formula, date, percentage, and scientific notation cells
+
+V2.4 rejects formula cells in configured Case ID, tags, case-data, stage-selector, and stage-data columns. Formula definitions and cached/displayed results can diverge and therefore cannot produce a trustworthy semantic snapshot. Recalculate in Excel and paste the result as a literal value, or calculate it in a dedicated ATT step.
+
+Merged regions intersecting configured testcase columns below `excel.headerRows` are likewise rejected. Merged presentation cells wholly inside the configured header area remain allowed.
+
+For non-formula cells, ATT imports the displayed text. The exact representation follows the workbook's cell format and the runtime locale:
+
+| Excel value and format | Context value |
+|---|---|
+| `45292` formatted `yyyy-mm-dd` | `2024-01-01` |
+| `0.125` formatted `0.0%` | `12.5%` |
+| `123000` formatted `0.00E+00` | `1.23E+05` |
+| `000123` stored/formatted as text | `000123` |
+
+An ordinary column remains a string. A `(yaml)` column may convert displayed text into another YAML type. Quote a YAML scalar when text such as a date, percentage, scientific number, account number, or code must stay a string.
+
+### Multi-row headers
+
+`headerRows: 2` means rows 1–2 are headers and data begins at row 3. ATT scans each physical column top-to-bottom and uses its last non-empty trimmed header cell:
+
+```text
+Row 1: Basic data |           | Execution |
+Row 2: Case ID    | Case name | Template  | Parameters
+Effective: Case ID, Case name, Template, Parameters
+```
+
+ATT does not concatenate parent and child labels. Header matching removes spaces, tabs, line breaks, non-breaking spaces, and other Unicode whitespace from both the effective Excel header and configured sidecar/report label; matching otherwise remains case-sensitive. For example, `案例 編號`, `案例\n編號`, and `案例編號` identify the same column. Every effective header must exist exactly once after this normalization, so two physical headers that differ only by whitespace are a duplicate-header error. Testcase loading and result-workbook writing use this same projection; result columns that do not already exist are written to the final header row.

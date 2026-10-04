@@ -4,7 +4,9 @@
 
 本指南的目標很單純：從乾淨的 repository checkout 開始，用最小但完整的例子跑通第一次 ATT 測試。內容刻意先教正常的 Run 流程；Debug、Load、DB/MQ、environment、retry 及完整 Context 模型都放到最後的「下一步」。
 
-已提交的 Quick Start 例子刻意保持離線可執行：第一個 Case 只使用 `assign`、`log`、`assert`；第二個 Case 再加入 ATT 內置的本地 sample Tool，不需要資料庫、MQ、API endpoint、credential 或網絡連線。
+本指南中，**Testcase** 指作者編寫並正規化的 Workbook row；**Case execution** 指 Run 對該 row 的一次執行。兩者共用 Case ID，但概念不同；本文使用 Testcase 表示 Workbook data，使用 Case execution 表示 runtime 結果。
+
+已提交的 Quick Start 例子刻意保持離線可執行：第一個 Testcase 只使用 `assign`、`log`、`assert`；第二個 Testcase 再加入 ATT 內置的本地 sample Tool，不需要資料庫、MQ、API endpoint、credential 或網絡連線。
 
 ## 你將會執行甚麼
 
@@ -27,30 +29,31 @@ templates/QUICK_START/template.yaml
 config/config.yaml
 ```
 
-Workbook 內有兩個 Case：
+Workbook 內有兩個 Testcase：
 
-| Case | 用途 | 外部依賴 |
+| Testcase ID | 用途 | 外部依賴 |
 |---|---|---|
 | `quickStart.default.QS001` | 第一次成功執行 ATT | 無 |
 | `quickStart.default.QS002` | 同一流程再加入本地 sample Tool | 無 |
 
 第一次使用時不需要先理解 ATT 全部 schema。
 
-## 前置條件
+## 確認前置條件
 
-ATT 需要 Java 8 或以上版本。macOS/Linux 在 repository root 執行；如有需要，先令 launcher 可執行：
+ATT 需要 Java 8 或以上版本。在 repository root：
 
-```sh
-chmod +x att.sh
-```
+1. 在 macOS/Linux 上，如有需要先令 launcher 可執行：
+   ```sh
+   chmod +x att.sh
+   ```
 
-確認 CLI 可以啟動：
+2. 確認 CLI 可以啟動：
 
-```sh
-./att.sh version
-```
+   ```sh
+   ./att.sh version
+   ```
 
-Windows 使用者把下文的 `./att.sh` 換成 `att.bat` 即可。
+   Windows 使用者請把 `./att.sh` 換成 `att.bat`。
 
 ## 看懂 Workbook 與 Sidecar
 
@@ -86,7 +89,7 @@ stages:
 
 ## 看懂最小 Template
 
-兩行案例都選擇 `QUICK_START`，實作位於 `templates/QUICK_START/template.yaml`。
+兩個 Testcase 都選擇 `QUICK_START`，實作位於 `templates/QUICK_START/template.yaml`。
 
 第一次只需要掌握三個概念：
 
@@ -117,37 +120,36 @@ actions:
 
 第一次執行知道這些已經足夠。完整定義見 [Runtime and Context](reference.zh/runtime-context.md) 及 [Expressions](reference.zh/expressions.md)。
 
-## 重新產生 Snapshot
+## 準備 package
 
-ATT 會檢查 Excel workbook 與 XML snapshot 是否一致。執行：
+ATT 會檢查 Excel workbook 與 XML snapshot 是否一致：
 
-```sh
-./att.sh snapshot --suite testcase/quick_start.xlsx
-```
+1. 產生 snapshot：
+   ```sh
+   ./att.sh snapshot --suite testcase/quick_start.xlsx
+   ```
 
-日後修改 Excel 後，也應再次執行同一指令，並在 commit 前 review XML diff。
+   日後修改 Workbook 後，請重新產生 snapshot，並在 commit 前 review XML diff。
 
-## 執行前先 Validate
+2. 執行 Testcase 前先驗證整個 package：
 
-先驗證整個 package：
+   ```sh
+   ./att.sh validate --package
+   ```
 
-```sh
-./att.sh validate --package
-```
+   Validation 會檢查 schema、Workbook/snapshot 一致性、Template reference、expression、Tool/resource reference 等契約，但不會執行 Testcase。首次 Case execution 前，請先解決 validation error。
 
-Validation 會檢查 schema、workbook/snapshot 一致性、Template reference、expression、Tool/resource reference 等契約，但不會真正執行測試。
+## 執行離線 Testcase
 
-正式 SIT/UAT package 應先解決 validation error，再開始執行。
+1. 為離線 Testcase 啟動 Case execution：
 
-## 第一次真正 Run
+   ```sh
+   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
+   ```
 
-先只執行完全離線的 Case：
+### 預期結果
 
-```sh
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-```
-
-預期結果是 `PASS`。
+Case execution 應為 `PASS`。
 
 先記住這個簡化版 status 模型即可：
 
@@ -161,9 +163,9 @@ Validation 會檢查 schema、workbook/snapshot 一致性、Template reference�
 
 遇到真實案例問題時再看 [Validation and Troubleshooting](reference.zh/validation-diagnostics.md)。
 
-## 查看結果
+## 檢查 Case execution
 
-正常 Run 會寫入：
+1. 打開 Run 目錄，檢查摘要和 execution artifacts：
 
 ```text
 output/<runId>/
@@ -174,24 +176,31 @@ output/<runId>/
 
 只有完整完成的 Run 才會更新 `output/latest-run.yaml`。
 
-Quick Start 的 `case.log` 應包含 `showInput` 寫出的訊息，而最後的 assertion 會比較 Excel 的 `Amount` 與 `Expected`。
+`QS001` 的 Case execution `case.log` 應包含 `showInput` 寫出的訊息，而最後的 assertion 會比較 Excel 的 `Amount` 與 `Expected`。
 
-完整 report、Action evidence、attempt history 及輸出格式請看 [Results, Reports, and Evidence](reference.zh/results-reports-evidence.md)。第一次使用毋須先理解整個 evidence tree。
+2. 開啟或重新產生 HTML 報表，請看 [Results, Reports, and Evidence](reference.zh/results-reports-evidence.md)。完整 report、Action evidence、attempt history 及輸出格式都在該頁說明。
 
-## 刻意製造一次 FAIL
+## 製造並還原一次受控失敗
 
 理解 `FAIL` 和 `ERROR` 的最好方法，是刻意讓業務 assertion 失敗一次。
 
-在 `testcase/quick_start.xlsx` 把 `QS001` 的 `Expected` 從 `100` 改成 `999`，然後：
+1. 在 `testcase/quick_start.xlsx` 把 `QS001` 的 `Expected` 從 `100` 改成 `999`，再產生 snapshot：
 
-```sh
-./att.sh snapshot --suite testcase/quick_start.xlsx
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-```
+   ```sh
+   ./att.sh snapshot --suite testcase/quick_start.xlsx
+   ```
 
-這次應得到 `FAIL`，而不是 `ERROR`：ATT 本身正常完成，只是 assertion 為 false。
+2. 再次執行該 Testcase：
 
-練習後把 `Expected` 改回 `100`，再重新產生 snapshot。
+   ```sh
+   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
+   ```
+
+### 預期結果
+
+Case execution 應為 `FAIL`，而不是 `ERROR`：ATT 已完成 execution，但 business assertion 為 false。
+
+3. 完成後把 `Expected` 改回 `100`，並重新產生 snapshot。
 
 ## 加入真正的 Tool Action
 
@@ -206,13 +215,17 @@ readDate:
 
 `QS001` 的 `Use Tool = false`，所以這個 Action 會被跳過；`QS002` 則為 `true`。
 
-執行第二個 Case：
+1. 為 `QS002` 啟動 Case execution：
 
-```sh
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
-```
+   ```sh
+   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
+   ```
 
 這會調用 `config/tools/sample.yaml` 中已提交的 `sample.getAcDate`。它是本地 command-backed Tool，因此仍然不需要外部服務。
+
+### 預期結果
+
+`QS002` 的 Case execution 應為 `PASS`，Tool result 會記錄在 execution evidence 中。
 
 此時先建立這個 mental model：
 
@@ -224,11 +237,17 @@ Testcase input -> Template Action -> Tool -> Action output/evidence
 
 ## 執行整個 Quick Start Workbook
 
-兩個 Case 都看懂後，可一起執行：
+理解兩個 Testcase 後，可一起執行：
 
-```sh
-./att.sh run --suite testcase/quick_start.xlsx
-```
+1. 為 Workbook 中的每個 Testcase 啟動 Case execution：
+
+   ```sh
+   ./att.sh run --suite testcase/quick_start.xlsx
+   ```
+
+### 預期結果
+
+還原 `QS001` 的 `Expected` 值後，兩個 Testcase 對應的 Case execution 都應為 `PASS`。
 
 到這裡你已經完成 ATT 最重要的日常循環：
 

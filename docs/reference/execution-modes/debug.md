@@ -10,7 +10,7 @@ Debug executes one Template, Flow or Tool without requiring a workbook Testcase.
 
 Run `./att.sh debug` with no target to list statically valid runnable Tools, Templates and Flows with copyable commands. A default sidecar path is displayed only when that regular non-symlink file exists. Discovery validates selected target dependencies but does not create Debug output or invoke Tools. Use `--format json` for machine-readable discovery output.
 
-Debug input uses the current `schemaVersion: att-debug/v1.1`. Supported top-level data is `case`, optional `stage`, `inputs`, `vars`, `arguments`, and grouped `tools.<localKey>.arguments`. `inputs` is adapted into canonical `EXEC.INPUT`; Template/Flow `vars` is evaluated as a typed bootstrap tree and seeds canonical `EXEC.VARS` before a target starts. Tool Debug uses `arguments` and does not support `vars`. Framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input. Schema migration is documented in [Appendix C](../appendices/migrations.md).
+Debug input uses the current `schemaVersion: att-debug/v1.1`. Supported top-level data is `case`, optional `stage`, `inputs`, `vars`, `arguments`, and grouped `tools.<localKey>.arguments`. `inputs` is adapted into canonical `EXEC.INPUT`; Template/Flow `vars` is evaluated as a typed bootstrap tree and seeds canonical `EXEC.VARS` before a target starts. Tool Debug uses `arguments` and does not support `vars`. Framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input. Schema migration is documented in [Migration Notes](../appendices/migrations.md).
 
 ## Standalone Debug bootstrap data
 
@@ -73,12 +73,12 @@ Use the output directory to separate diagnosis stages:
 | Symptom | Check |
 |---|---|
 | `Debug input file does not exist` | Add the sidecar beside the selected target or pass `--input` explicitly. |
-| `Debug input uses a historical schemaVersion` | Use the active Debug schema; see [Appendix C](../appendices/migrations.md); add `vars` only when a Flow/Template needs caller-prepared `EXEC.VARS`. |
+| `Debug input uses a historical schemaVersion` | Use the active Debug schema; see [Migration Notes](../appendices/migrations.md); add `vars` only when a Flow/Template needs caller-prepared `EXEC.VARS`. |
 | `target` or dependency validation fails | Confirm the target type/id and inspect the reported dependency field; unrelated workbook files are not required. |
 | MQ reports a missing/unsafe payload | Verify the absolute package path or the relative Case-output path; remove traversal and symlinks. |
 | The action runs but output is unexpected | Read `case.log`, `result.yaml` and the action artifacts under `output/debug/<debugId>/`; compare rendered inputs with the selected environment. |
 
-Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does not apply to a standalone Debug invocation. Debug always keeps its invocation result and artifacts under its own debug directory. For the same target in a load run, see [Load evidence and resource output](load.md#evidence-and-resource-output).
+Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does not apply to a standalone Debug invocation. Debug always keeps its invocation result and artifacts under its own debug directory. For the same target in a load run, see [Load evidence and resource output](load.md#choose-which-iteration-evidence-to-retain).
 
 ### Configuration examples
 
