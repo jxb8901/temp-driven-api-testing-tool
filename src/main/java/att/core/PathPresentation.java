@@ -15,7 +15,13 @@ import java.util.Map;
 /** Formats local paths at human-readable diagnostic boundaries. */
 public final class PathPresentation {
     private static final Pattern QUOTED_ABSOLUTE_PATH = Pattern.compile("(['\"])((?:/[^\\r\\n'\"]+)|(?:[A-Za-z]:[\\\\/][^\\r\\n'\"]+)|(?:\\\\\\\\[^\\r\\n'\"]+))\\1");
-    private static final Pattern ABSOLUTE_PATH_TOKEN = Pattern.compile("(?<![A-Za-z0-9_/:])(?:[A-Za-z]:[\\\\/]|//|\\\\\\\\|/)[^\\r\\n'\"<>]+");
+    private static final Pattern ABSOLUTE_PATH_TOKEN = Pattern.compile("(?<![A-Za-z0-9_/:])(?:[A-Za-z]:[\\\\/]|//|\\\\\\\\|/)");
+    private static final String[] DIAGNOSTIC_PROSE_BOUNDARIES = {
+            " to ", " from ", " because ", " while ", " when ", " after ", " before ",
+            " during ", " and then ", " then ", " but ", " (Permission denied)",
+            " (Access is denied)", " (No such file or directory)", " (File exists)",
+            " (The system cannot find the file specified)"
+    };
 
     private PathPresentation() { }
 
@@ -80,7 +86,7 @@ public final class PathPresentation {
             for (String path : ordered) {
                 if (path == null || path.isEmpty() || !masked.contains(path)) continue;
                 String token = "\u0001ATT_REMOTE_PATH_" + tokens.size() + "\u0002";
-                masked = masked.replace(path, token);
+                masked = replaceBoundedPath(masked, path, token);
                 tokens.add(path);
             }
         }
@@ -269,31 +275,99 @@ public final class PathPresentation {
 
     private static String redactAbsolutePathTokens(String text, Path projectRoot) {
         Matcher matcher = ABSOLUTE_PATH_TOKEN.matcher(text);
-        StringBuffer result = new StringBuffer(text.length());
-        while (matcher.find()) {
-            String path = trimTrailingPunctuation(trimDiagnosticSuffix(matcher.group()));
-            String suffix = matcher.group().substring(path.length());
-            matcher.appendReplacement(result, Matcher.quoteReplacement(embeddedPath(path, projectRoot) + suffix));
+        StringBuilder result = new StringBuilder(text.length());
+        int cursor = 0;
+        while (matcher.find(cursor)) {
+            int start = matcher.start();
+            if (start < cursor) continue;
+            int end = scanDiagnosticPathEnd(text, start);
+            String candidate = text.substring(start, end);
+            String path = trimTrailingPunctuation(candidate);
+            if (path.isEmpty()) path = candidate;
+            result.append(text, cursor, start).append(embeddedPath(path, projectRoot));
+            result.append(text, start + path.length(), end);
+            cursor = end;
         }
-        matcher.appendTail(result);
+        result.append(text, cursor, text.length());
         return result.toString();
+    }
+
+    /**
+     * Bounds an unquoted path at common diagnostic prose and separators while allowing spaces
+     * inside filenames (for example, "token (final).pem").
+     */
+    private static int scanDiagnosticPathEnd(String text, int start) {
+        int end = start;
+        while (end < text.length() && text.charAt(end) != '\r' && text.charAt(end) != '\n'
+                && text.charAt(end) != '\'' && text.charAt(end) != '"'
+                && text.charAt(end) != '<' && text.charAt(end) != '>') {
+            char current = text.charAt(end);
+            if (current == ',' || current == ';') break;
+            if (current == ':' && end + 1 < text.length() && text.charAt(end + 1) == ' ') break;
+            if (current == ' ' && startsDiagnosticProse(text, end)) break;
+            if (end > start && (current == '/' || current == '\\')
+                    && end > 0 && Character.isWhitespace(text.charAt(end - 1))
+                    && isAbsolutePathRootAt(text, end)) {
+                end--;
+                while (end > start && Character.isWhitespace(text.charAt(end - 1))) end--;
+                break;
+            }
+            end++;
+        }
+        return end;
+    }
+
+    private static boolean startsDiagnosticProse(String text, int offset) {
+        for (String boundary : DIAGNOSTIC_PROSE_BOUNDARIES) {
+            if (offset + boundary.length() <= text.length()
+                    && text.regionMatches(true, offset, boundary, 0, boundary.length())) return true;
+        }
+        return false;
+    }
+
+    private static boolean isAbsolutePathRootAt(String text, int offset) {
+        Matcher matcher = ABSOLUTE_PATH_TOKEN.matcher(text);
+        matcher.region(offset, text.length());
+        return matcher.lookingAt();
+    }
+
+    private static String replaceBoundedPath(String text, String path, String replacement) {
+        StringBuilder result = new StringBuilder(text.length());
+        int cursor = 0;
+        int match;
+        while ((match = text.indexOf(path, cursor)) >= 0) {
+            int end = match + path.length();
+            if (isPathBoundaryBefore(text, match) && isPathBoundaryAfter(text, end)) {
+                result.append(text, cursor, match).append(replacement);
+                cursor = end;
+            } else {
+                result.append(text, cursor, match + 1);
+                cursor = match + 1;
+            }
+        }
+        result.append(text, cursor, text.length());
+        return result.toString();
+    }
+
+    private static boolean isPathBoundaryBefore(String text, int offset) {
+        if (offset == 0) return true;
+        char previous = text.charAt(offset - 1);
+        return !isPathCharacter(previous);
+    }
+
+    private static boolean isPathBoundaryAfter(String text, int offset) {
+        if (offset == text.length()) return true;
+        return !isPathCharacter(text.charAt(offset));
+    }
+
+    private static boolean isPathCharacter(char value) {
+        return Character.isLetterOrDigit(value) || value == '_' || value == '-' || value == '.'
+                || value == '+' || value == '%' || value == '/' || value == '\\';
     }
 
     private static String trimTrailingPunctuation(String path) {
         int end = path.length();
         while (end > 1 && ".!?".indexOf(path.charAt(end - 1)) >= 0) end--;
-        return path.substring(0, end);
-    }
-
-    private static String trimDiagnosticSuffix(String path) {
-        int end = path.length();
-        int colon = path.indexOf(": ");
-        if (colon >= 0) end = Math.min(end, colon);
-        for (String suffix : new String[]{" (Permission denied)", " (Access is denied)",
-                " (No such file or directory)", " (File exists)", " (The system cannot find the file specified)"}) {
-            int index = path.indexOf(suffix);
-            if (index >= 0) end = Math.min(end, index);
-        }
         return path.substring(0, end);
     }
 

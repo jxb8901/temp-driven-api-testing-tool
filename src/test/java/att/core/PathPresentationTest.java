@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -85,5 +86,29 @@ class PathPresentationTest {
         Map<?, ?> displayed = (Map<?, ?>) PathPresentation.displayStructure(evidence, root);
         assertEquals("Unable to read $EXTERNAL/token.pem", displayed.get("detail"));
         assertEquals("/srv/app/request.xml", displayed.get("remotePath"));
+    }
+
+    @Test void preservesOnlyWholeRemotePathTokens() throws Exception {
+        Path root = Files.createDirectories(temp.resolve("project"));
+        assertEquals("Local path $EXTERNAL/secret.txt; remote root /", PathPresentation.displayDiagnosticText(
+                "Local path /tmp/secret.txt; remote root /", root, Collections.singleton("/")));
+        assertEquals("Local path $EXTERNAL/secret.txt; remote /tmp", PathPresentation.displayDiagnosticText(
+                "Local path /tmp/secret.txt; remote /tmp", root, Collections.singleton("/tmp")));
+    }
+
+    @Test void boundsMultipleUnquotedPathsAndFollowingDiagnosticProse() throws Exception {
+        Path root = Files.createDirectories(temp.resolve("project"));
+        assertEquals("Failed copying $EXTERNAL/source.txt to $EXTERNAL/target.txt", PathPresentation.displayDiagnosticText(
+                "Failed copying /tmp/source.txt to /var/private/target.txt", root));
+        assertEquals("Could not read $EXTERNAL/source.txt because access was denied", PathPresentation.displayDiagnosticText(
+                "Could not read /tmp/source.txt because access was denied", root));
+        assertEquals("Could not read $EXTERNAL/source.txt while preparing $EXTERNAL/target.txt.", PathPresentation.displayDiagnosticText(
+                "Could not read /tmp/source.txt while preparing /var/private/target.txt.", root));
+    }
+
+    @Test void retainsPunctuationBetweenUnquotedPaths() throws Exception {
+        Path root = Files.createDirectories(temp.resolve("project"));
+        assertEquals("Failed copying $EXTERNAL/source.txt, then $EXTERNAL/target.txt!", PathPresentation.displayDiagnosticText(
+                "Failed copying /tmp/source.txt, then /var/private/target.txt!", root));
     }
 }
