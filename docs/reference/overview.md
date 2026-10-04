@@ -58,4 +58,4 @@ For a guided package build, use [Quick Start](../quick-start.md). The rest of th
 | Diagnose a failure | [Validation and Troubleshooting](validation-diagnostics.md) |
 | Upgrade an older package | [Migration Notes](appendices/migrations.md) |
 
-Reference defines the public contract; README, Quick Start and examples explain that contract for narrower tasks. Each contract has one semantic owner; other chapters summarize and link to that owner.
+Reference defines the public contract; README, Quick Start and examples explain that contract for narrower tasks. Each contract has one semantic owner; other Reference pages summarize and link to that owner.

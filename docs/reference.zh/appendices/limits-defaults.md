@@ -2,7 +2,7 @@
 
 ## Limits 與預設值
 
-Normative field default 以其 owner schema/configuration chapter 為準。重要 architecture limit 包括：
+Normative field default 以其 owner schema 或 configuration page 為準。重要 architecture limit 包括：
 
 - Load 必須二選一 workload model；
 - arrival-rate overload policy 為 `drop`；

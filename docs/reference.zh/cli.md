@@ -111,7 +111,7 @@
 
 ## Debug input 與 output
 
-CLI 的 target、`--input`、`--set` 與 `--env` 語法見本章 option matrix。Input discovery、bootstrap vars、保護 roots 與 output lifecycle 見 [Debug](execution-modes/debug.md)。
+CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix。Input discovery、bootstrap vars、保護 roots 與 output lifecycle 見 [Debug](execution-modes/debug.md)。
 
 ## 退出碼
 

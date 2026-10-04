@@ -29,13 +29,13 @@ Status: Normative end-user documentation; generated from modular sources
 - [Actions and typed values](#actions-and-typed-values)
   - [Action types](#action-types)
   - [Separate logical values from representations](#separate-logical-values-from-representations)
-  - [Project-file expressions return string](#project-file-expressions-return-string)
+  - [Project-file expressions return a `String`](#project-file-expressions-return-a-string)
   - [Tool, DB and Flow results](#tool-db-and-flow-results)
-  - [Tool Evidence collectors](#tool-evidence-collectors)
+  - [Tool evidence collectors](#tool-evidence-collectors)
   - [Log: typed value to case log](#log-typed-value-to-case-log)
   - [Expressions and variable scope](#expressions-and-variable-scope)
-  - [Resource output Evidence](#resource-output-evidence)
-  - [Action output and Evidence paths](#action-output-and-evidence-paths)
+  - [Resource output evidence](#resource-output-evidence)
+  - [Action output and evidence paths](#action-output-and-evidence-paths)
   - [Common Retry and boolean conditions](#common-retry-and-boolean-conditions)
 - [Runtime and Context model](#runtime-and-context-model)
   - [Identity roots](#identity-roots)
@@ -49,6 +49,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Testdata input mapping syntax](#testdata-input-mapping-syntax)
   - [Operators](#operators)
   - [Built-in functions](#built-in-functions)
+  - [Resource helper methods](#resource-helper-methods)
   - [Expression scope and errors](#expression-scope-and-errors)
   - [Retry-condition lifecycle](#retry-condition-lifecycle)
 - [Execution modes](#execution-modes)
@@ -58,9 +59,9 @@ Status: Normative end-user documentation; generated from modular sources
 - [Resources and integrations](#resources-and-integrations)
   - [Operation result and Evidence](#operation-result-and-evidence)
   - [Tool](#tool)
-  - [DBHelper](#dbhelper)
-  - [MQHelper](#mqhelper)
-  - [HTTPHelper](#httphelper)
+  - [DBHelper](#dbhelper-1)
+  - [MQHelper](#mqhelper-1)
+  - [HTTPHelper](#httphelper-1)
   - [SSHHelper: logical SSH targets](#sshhelper-logical-ssh-targets)
 - [Reliability and execution control](#reliability-and-execution-control)
   - [Assertion and status](#assertion-and-status)
@@ -71,7 +72,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Transaction/Resource lifecycle](#transactionresource-lifecycle)
   - [Aggregation](#aggregation)
   - [Stage execution controls](#stage-execution-controls)
-  - [Tool Timeout precedence](#tool-timeout-precedence)
+  - [Tool timeout precedence](#tool-timeout-precedence)
   - [Direct DB timeout and retry eligibility](#direct-db-timeout-and-retry-eligibility)
 - [Configuration and environments](#configuration-and-environments)
   - [Find a configuration task](#find-a-configuration-task)
@@ -189,7 +190,7 @@ For a guided package build, use [Quick Start](quick-start.md). The rest of this 
 | Diagnose a failure | [Validation and Troubleshooting](reference/validation-diagnostics.md) |
 | Upgrade an older package | [Migration Notes](reference/appendices/migrations.md) |
 
-Reference defines the public contract; README, Quick Start and examples explain that contract for narrower tasks. Each contract has one semantic owner; other chapters summarize and link to that owner.
+Reference defines the public contract; README, Quick Start and examples explain that contract for narrower tasks. Each contract has one semantic owner; other Reference pages summarize and link to that owner.
 
 ## Test authoring
 
@@ -210,7 +211,7 @@ A **Testcase** is the authored workbook row after sidecar mapping and snapshot n
 
 ### Authoring contracts
 
-This chapter explains the normal day-to-day workflow in the same order that data moves through ATT.
+This page explains the normal day-to-day workflow in the same order that data moves through ATT.
 
 | Need | Use |
 |---|---|
@@ -405,7 +406,7 @@ ATT does not concatenate parent and child labels. Header matching removes spaces
 
 ## Actions and typed values
 
-This chapter defines the active ATT action contract. Templates use att-template/v3.6. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper chapters for resource configuration.
+This page defines the active ATT action contract. Templates use att-template/v3.6. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. For resource configuration, start with [Resources](reference/resources/overview.md).
 
 ### Action types
 
@@ -437,7 +438,7 @@ DB results are already typed values. Tool, Action, Template, Flow and expression
 
 DB query, scalar, and update operations use the first-class DBHelper call forms `db.<helper>.query(...)`, `db.<helper>.scalar(...)`, and `db.<helper>.update(...)` inside a normal `type: tool` Action. A DB call accepts one String `sql` argument plus either positional `params` or named `parameters`; `sql=&{project-relative-file.sql}` supplies package SQL content. The historical `type: db` Action is retained only by archived schema versions.
 
-### Project-file expressions return string
+### Project-file expressions return a `String`
 
 The current replacement for the historical Render Action is the typed project-file value expression `&{path}`. It always returns one `String`; it never infers a document format, parses an extension, expands a glob, or creates an output file:
 
@@ -485,7 +486,7 @@ A DB action uses db and exactly one query or update block. SQL, bind parameters,
 
 A Flow action uses use with a canonical Flow ID. It runs in a fresh EXEC.ACTIONS scope and publishes its result/evidence to the caller when it returns. META.FLOW exists only while that invocation is active.
 
-### Tool Evidence collectors
+### Tool evidence collectors
 
 A Tool Action may define first-class `evidence` collectors for diagnostics that must be gathered before the Action assertion. The lifecycle is:
 
@@ -581,7 +582,7 @@ Action expressions use the regular ATT expression engine. A complete ${...} or #
 
 assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Values assigned in one Stage are available to later Stages. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; publish values to EXEC.VARS when the caller needs them after the Flow returns.
 
-### Resource output Evidence
+### Resource output evidence
 
 Resource evidence is separate from the logical result. A helper may configure an optional evidence.output presentation policy:
 
@@ -594,7 +595,7 @@ evidence:
 
 This adds a bounded human-readable snapshot beside operation metadata; it does not change output.result or response parsing. In Load, evidence.resources.output accepts inherit (default) or none. none skips resource-output formatting and file materialization. Metrics-only iterations create no execution directory. When iteration evidence is retained, eligible resource output is formatted lazily into that workspace.
 
-### Action output and Evidence paths
+### Action output and evidence paths
 
 | Path | Meaning and availability |
 |---|---|
@@ -848,9 +849,61 @@ assert: "${EXEC.ACTIONS.callApi.output.result.message} like 'PAYMENT%SUCCESS'"
 assert: "(${EXEC.INPUT.channel} == 'MOBILE') and (${EXEC.INPUT.amount} <= 1000)"
 ```
 
+### Resource helper methods
+
+Configured `db.*`, `mq.*`, `ssh.*`, and `http.*` calls use the same `#{...}` syntax, but they are resource operations rather than pure built-ins: they access external systems and return typed results. MQ, SSH, and HTTP calls must be the primary `call` of a `type: tool` Action. DB `query` and `scalar` calls are also available to supported expression fields; `db.update` must be the primary call of a `type: tool` Action. They are not permitted in `retry.when`, which accepts only deterministic pure built-ins. All arguments below are named; omit optional arguments to use the configured helper default. See each linked helper page for its full resource and result contract.
+
+#### DBHelper
+
+| Method | Arguments (required unless marked optional) | Example |
+|---|---|---|
+| `db.<id>.query` / `db.<id>.scalar` | `sql: String`; optional `params: List` **or** `parameters: Map<String, value>` (mutually exclusive; default: no bind values). `sql` may be an inline SQL string or a project-file expression returning a String. | `#{db.orders.query(sql='select status from orders where id = :id', parameters={id: ${EXEC.INPUT.orderId}})}` |
+| `db.<id>.update` | Same arguments and types as `query`; primary Tool Action only. | `#{db.orders.update(sql='update orders set status = ? where id = ?', params=['DONE', ${EXEC.INPUT.orderId}])}` |
+
+`query` returns typed rows, `scalar` returns a scalar result, and `update` returns the update result. See [DBHelper](reference/resources/dbhelper.md) for SQL binding, transaction, and result details.
+
+#### MQHelper
+
+| Method | Arguments (required unless marked optional) | Example |
+|---|---|---|
+| `mq.<id>.send` | `payload: String, byte[] or structured Map/List` (required); `queue: String` is required unless a request queue is configured. Optional `requestFormat: text\|json\|yaml\|xml` (required for Map/List only), `instance: String` (selects a configured physical instance). | `#{mq.payment.send(queue='PAYMENT.REQUEST', payload=${EXEC.VARS.requestText})}` |
+| `mq.<id>.receive` | `queue: String` is required unless a reply queue is configured. Optional `waitMs: Integer` (default 10,000 ms or helper setting), `correlationId: String`, `responseFormat: text\|json\|yaml\|xml` (default `text` or helper setting), `instance: String`. | `#{mq.payment.receive(queue='PAYMENT.REPLY', waitMs=5000, responseFormat='json')}` |
+| `mq.<id>.request` | `payload` as above; effective `requestQueue` and `replyQueue` are required (each may come from the helper defaults). Optional `requestFormat` as above, `waitMs: Integer` (default 10,000 ms or helper setting), `responseFormat` (default `text` or helper setting), `instance: String`. | `#{mq.payment.request(requestQueue='PAYMENT.REQUEST', replyQueue='PAYMENT.REPLY', payload=${EXEC.VARS.requestText}, waitMs=5000, responseFormat='xml')}` |
+
+`requestFormat` applies only to structured payloads; a String is sent as-is and must not be paired with it. `waitMs` is 0–3,600,000. See [MQHelper](reference/resources/mqhelper.md) for configured queue defaults and typed reply behavior.
+
+#### SSHHelper
+
+| Method | Arguments (required unless marked optional) | Example |
+|---|---|---|
+| `ssh.<id>.execute` | `command: String`; optional `stdoutFormat: text\|json\|yaml\|xml` (default `text`), `timeoutMs: Integer` (default 60,000 ms, capped by the Action deadline). | `#{ssh.application.execute(command='systemctl is-active example.service', stdoutFormat='text', timeoutMs=5000)}` |
+| `ssh.<id>.upload` | `remotePath: String`, `payload: String or byte[]`; optional `overwrite: Boolean` (default `true`), `timeoutMs: Integer` (default 60,000 ms). | `#{ssh.application.upload(remotePath='/srv/app/request.json', payload=${EXEC.VARS.requestText}, overwrite=true)}` |
+| `ssh.<id>.stat` / `ssh.<id>.mkdirs` / `ssh.<id>.delete` | `remotePath: String`; optional `timeoutMs: Integer` (default 60,000 ms); `delete` additionally accepts `missingOk: Boolean` (default `false`). | `#{ssh.application.stat(remotePath='/srv/app/result.json')}` |
+| `ssh.<id>.move` | `sourcePath: String`, `targetPath: String`; optional `overwrite: Boolean` (default `false`), `timeoutMs: Integer` (default 60,000 ms). | `#{ssh.application.move(sourcePath='/srv/app/out.json', targetPath='/srv/app/archive/out.json', overwrite=false)}` |
+
+SSH operations accept named arguments only; paths are remote paths, and upload takes content rather than a local file path. See [SSHHelper](reference/resources/sshhelper.md) for path restrictions, return values, and timeout/retry behavior.
+
+#### HTTPHelper
+
+`http.<id>.get(...)` and `http.<id>.post(...)` select the method by name; `http.<id>.request(...)` additionally requires `method: String` (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, or `OPTIONS`). All three accept these optional named arguments:
+
+| Argument | Type and default | Notes |
+|---|---|---|
+| `path` | `String`, default `''` | Relative to the configured base URL; no absolute URL, query string, or fragment. |
+| `query` | `Map<String, value>`, optional | Iterable values become repeated query parameters. |
+| `headers` | `Map<String, value>`, optional | Merged with configured headers; values are rendered as strings. |
+| `body` | `String`, `byte[]`, or structured Map/List, optional | GET and HEAD do not accept a body. Map/List requires `requestFormat`. |
+| `requestFormat` | `text\|json\|yaml\|xml`, optional | Required for Map/List body only; String/byte[] content is passed through. |
+| `contentType` | `String`, optional | Overrides the request Content-Type header. |
+| `responseFormat` | `auto\|text\|json\|yaml\|xml`, default helper setting (`auto` by default) | `auto` resolves from response Content-Type. |
+| `connectTimeoutMs`, `readTimeoutMs`, `connectionRequestTimeoutMs` | Integer 1–3,600,000 ms, optional | Override corresponding helper timeout; descriptor defaults are 5,000 ms, 30,000 ms, and 5,000 ms respectively. |
+| `followRedirects` | `Boolean`, default helper setting (`false` by default) | Redirects are followed up to the runtime limit. |
+
+Example: `#{http.payment.post(path='/v1/payments', query={dryRun: true}, headers={Accept: 'application/json'}, body=${EXEC.INPUT.request}, requestFormat='json', responseFormat='json')}`. See [HTTPHelper](reference/resources/httphelper.md) for timeout ranges, body encoding, and response parsing.
+
 ### Expression scope and errors
 
-This chapter defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](reference/resources/tools.md), [Load execIdFormat and vars](reference/execution-modes/load.md), [Debug vars](reference/execution-modes/debug.md), and [report filenames](reference/configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](reference/validation-diagnostics.md).
+This page defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](reference/resources/tools.md), [Load execIdFormat and vars](reference/execution-modes/load.md), [Debug vars](reference/execution-modes/debug.md), and [report filenames](reference/configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](reference/validation-diagnostics.md).
 
 Removed APIs: `dbText`/`misc.dbText`, `prettyPrint`/`misc.prettyPrint`/`format.pretty`, all local `file.*` built-ins and their legacy aliases. Keep DB results typed and migrate display calls to Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` with `format: sqlplus`; use `format: json` or `yaml` for Maps/Lists. Read project content with `&{...}` and pass its String to HTTP body, MQ payload, or SSH upload payload. SSHHelper upload accepts content only; native SSH download was removed. ATT local output remains framework-owned. Removed calls fail with migration guidance.
 
@@ -1725,7 +1778,7 @@ The machine-readable field constraints remain in [the active MQ schema](../schem
 
 DB/MQ/HTTP share the optional `evidence.output: {format: json, maxChars: 10000}` presentation policy. Supported formats are `text`, `json`, `yaml`, `xml`, and `sqlplus`; `sqlplus` requires a DB query/update result. `maxChars` defaults to 10000 and accepts 1–1000000. Credentials are redacted before deterministic character truncation; snapshots contain `format`, `text`, and `truncated`. Formatting failure adds only a bounded `outputError` and changes neither typed `output.result` nor operation status. Normal Run/Debug invocations automatically include the snapshot in Action evidence and the Case log, without an extra Log Action; SQL, parameters, MQ payload metadata, and HTTP status/header diagnostics keep their own contracts. Load defers formatting until an iteration is retained, then materializes `resource-output.yaml`; `evidence.resources.output: none` skips it entirely. Presentation never introduces credential values into evidence.
 
-##### Request/reply Timeout and replay policy
+##### Request/reply timeout and replay policy
 
 A correlated reply completes `mq.<id>.request(...)` with PASS. A successful PUT followed by correlated GET MQRC 2033 (`MQRC_NO_MSG_AVAILABLE`) is a standard TIMEOUT with `MQ_TIMEOUT` diagnostic, even if the outer Action deadline has time remaining. Native evidence retains `sent: true`, `replyReceived: false`, `completionCode: 2`, `reasonCode: 2033`, the reason name and effective `waitMs`. Other transport failures retain the stable MQ ERROR taxonomy; outer deadline and pool borrow timeout also follow the normal TIMEOUT path.
 
@@ -1940,7 +1993,7 @@ tools:
 
 The unchanged Action calls `app.status`. Set `APP_SSH_KEY` to a readable private-key **path** in the local/CI secret environment, then validate both profiles: `./att.sh validate --config config/config.yaml --env SIT --package` and the equivalent UAT command. An exact `${ENV:NAME}` identity-file reference is resolved at load time; a missing/empty variable is rejected without revealing its value. A Tool group uses either direct SSH (`host`, `user`, optional `port`/`identityFile`) or logical SSH (`helper`, optional `selection`), never both. Call-backed Tools may target the native SSH Resource Helper call when it is the primary `type: tool` operation. The active Tool Group schema is v2.9. Command-backed Tools declare stdout parsing with `stdoutFormat` (`text|json|yaml|xml`); call-backed Tools preserve their native result type. Superseded config and group schemas are migration references only. SSH Resource Helper calls publish only `META.SSHHELPER.id` and `.type`; endpoint, user, identity file and credentials remain private. Resource calls have no Action- or per-call strategy override; selection remains helper configuration.
 
-Strategy precedence is group override then helper default. For native Resource Helper calls, one instance works without a strategy (`single`), multiple instances require `random` or `roundRobin`, and `all` is rejected rather than silently selecting one host. For command-backed Tool routing, `random` selects one uniformly, `roundRobin` selects one via a thread-safe cyclic counter, and explicit `all` executes every listed instance once with bounded parallelism. **Command-backed `all` has side effects on every host**: use only commands safe across the entire group. There is no implicit fan-out, cross-host retry, or failover. If an author configures an Action timeout retry, the whole `all` invocation is repeated, not just one host. Each host gets the Action/Tool/global timeout; interruption cancels active OpenSSH processes or Java SSH sessions. Both transports receive the same normalized host/user/port/key. OpenSSH is preferred; mwiede/jsch fallback retains strict host-key verification and the limitations in the SSH diagnostics chapter.
+Strategy precedence is group override then helper default. For native Resource Helper calls, one instance works without a strategy (`single`), multiple instances require `random` or `roundRobin`, and `all` is rejected rather than silently selecting one host. For command-backed Tool routing, `random` selects one uniformly, `roundRobin` selects one via a thread-safe cyclic counter, and explicit `all` executes every listed instance once with bounded parallelism. **Command-backed `all` has side effects on every host**: use only commands safe across the entire group. There is no implicit fan-out, cross-host retry, or failover. If an author configures an Action timeout retry, the whole `all` invocation is repeated, not just one host. Each host gets the Action/Tool/global timeout; interruption cancels active OpenSSH processes or Java SSH sessions. Both transports receive the same normalized host/user/port/key. OpenSSH is preferred; mwiede/jsch fallback retains strict host-key verification and the limitations in [SSH diagnostics](reference/appendices/limits-defaults.md).
 
 For a single selected host, parsed `output.result` remains the legacy scalar/object value. Evidence adds `sshHelper`, `instance`, `host`, `selectionStrategy`, `selectionSource` (`helper` or `toolGroup`), transport, start/end/duration, exit code, output and errors. Only command-backed Tool fan-out uses `all`; its `output.result` contains `sshHelper`, effective `selectionStrategy`, `selectionSource`, and `instances` keyed in descriptor order. Every entry has `instance`, `host`, `port`, `transport`, `startedAt`, `endedAt`, `durationMs`, `status`, and when available `exitCode`, `stdout`, `stderr`, `rawOutput`, parsed `output`, or `error`. A completed command has `status: PASS` even with a non-zero `exitCode`; that code is evidence for the Action assertion, not an operational failure. The operation fails only on an execution, output-parse, cancellation, or timeout error; other hosts' evidence is retained. Assertions may inspect `${output.result.instances.app1.exitCode}`, `${output.result.instances.app1.status}`, or `${output.result.instances.app1.output}`. Credential contents and environment-supplied key paths are not recorded; keep private keys outside the package and do not put secrets in commands.
 
@@ -1952,7 +2005,7 @@ Migration: leave direct SSH unchanged if one physical target suffices. To migrat
 
 ## Reliability and execution control
 
-This chapter owns cross-cutting public execution behavior.
+This page owns cross-cutting public execution behavior.
 
 ### Assertion and status
 
@@ -2007,7 +2060,7 @@ ERROR > INVALID > FAIL > PASS > SKIPPED
 Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evidence collection.
 
 
-### Tool Timeout precedence
+### Tool timeout precedence
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, Stages and Templates do not own timeout/retry defaults. For call-backed DB Tools, the DBHelper statement timeout remains a backend ceiling. Each supported primary retry attempt runs its collectors before assertion; collector continuation behavior does not turn a failed primary operation into PASS.
 
@@ -2084,7 +2137,7 @@ Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXE
 
 ### Select an environment profile
 
-`att-config/v2.11` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper, HTTPHelper and testdata descriptor lists as a whole. See the resource chapters and [Testdata Registry and Input Mapping](reference/test-authoring.md) for each binding.
+`att-config/v2.11` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper, HTTPHelper and testdata descriptor lists as a whole. See the resource pages and [Testdata registry and input mapping](reference/test-authoring.md) for each binding.
 
 ATT selects an environment through one common `att-config/v2.11` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
@@ -2512,7 +2565,7 @@ evidence: {mode: failures}
 
 ### Debug inputs and outputs
 
-This chapter defines target, `--input`, `--set` and `--env` syntax in the option matrix. [Debug](reference/execution-modes/debug.md) owns input discovery, bootstrap variables, protected roots and output lifecycle.
+This page defines target, `--input`, `--set` and `--env` syntax in the option matrix. [Debug](reference/execution-modes/debug.md) owns input discovery, bootstrap variables, protected roots and output lifecycle.
 
 ### Exit codes
 
@@ -2721,11 +2774,11 @@ ATT treats an absent path as an authoring/runtime error instead of silently rend
 
 A false assertion makes the Case execution FAIL. Invalid expression syntax/navigation, Tool failure, timeout, parse failure, I/O failure, or runtime exception makes it ERROR. Inspect the Action evidence rather than only the final Run status.
 
-#### Why did a Tool Run more than once?
+#### Why did a Tool run more than once?
 
 Its action used retry and received an eligible non-zero exit code. Inspect the attempt list and final action record in the case log.
 
-#### Can i use a shell pipeline in `command`?
+#### Can I use a shell pipeline in `command`?
 
 No. ATT passes `|`, `>`, and `<` literally. Put shell behavior inside a reviewed tool script.
 
@@ -2733,7 +2786,7 @@ No. ATT passes `|`, `>`, and `<` literally. Put shell behavior inside a reviewed
 
 Required validation happens before argv expansion. An empty typed List is missing input; pass at least one scalar item or make the argument optional.
 
-#### Should i use package or selected validation?
+#### Should I use package or selected validation?
 
 Use selected mode for fast local feedback. Use package mode before release, CI promotion, or sharing a package.
 
@@ -2842,7 +2895,7 @@ For the changed resource/configuration schemas, older versions are historical de
 
 Compatibility exists to read established packages without creating a second current model. New authoring uses canonical `EXEC`, `META`, Action-local `output`, current schema versions, `--env`, and current Tool/DB/MQ contracts.
 
-Deterministic legacy aliases may remain readable with migration warnings. Aliases are not created where old semantics conflict with scope isolation or the common result/evidence contract. Deprecated CLI/authoring forms remain documented in their owning chapter or CHANGELOG only when users still need a migration path.
+Deterministic legacy aliases may remain readable with migration warnings. Aliases are not created where old semantics conflict with scope isolation or the common result/evidence contract. Deprecated CLI/authoring forms remain documented on their owning page or in CHANGELOG only when users still need a migration path.
 
 ## Appendix C — migration notes
 
@@ -2944,7 +2997,7 @@ When migrating complete-config packages, preserve descriptors and Actions, move 
 
 ### Limits and defaults
 
-Use the owning schema/configuration chapter for normative field defaults. Important architectural limits include:
+Use the owning schema or configuration page for normative field defaults. Important architectural limits include:
 
 - Load chooses exactly one workload model;
 - arrival-rate overload policy is `drop`;

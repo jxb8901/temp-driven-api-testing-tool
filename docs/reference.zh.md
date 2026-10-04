@@ -49,6 +49,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Testdata input mapping 語法](#testdata-input-mapping-語法)
   - [操作符](#操作符)
   - [內建函數](#內建函數)
+  - [Resource helper methods](#resource-helper-methods)
   - [Expression scope 與錯誤](#expression-scope-與錯誤)
   - [Retry condition 的生命週期](#retry-condition-的生命週期)
 - [Execution modes](#execution-modes)
@@ -58,9 +59,9 @@ Status: 規範性使用者文件；由模組化來源自動生成
 - [Resources 與 integrations](#resources-與-integrations)
   - [Operation result 與 Evidence](#operation-result-與-evidence)
   - [Tool](#tool)
-  - [DBHelper](#dbhelper)
-  - [MQHelper](#mqhelper)
-  - [HTTPHelper](#httphelper)
+  - [DBHelper](#dbhelper-1)
+  - [MQHelper](#mqhelper-1)
+  - [HTTPHelper](#httphelper-1)
   - [SSHHelper：邏輯 SSH 目標](#sshhelper邏輯-ssh-目標)
 - [可靠性與執行控制](#可靠性與執行控制)
   - [Assertion 與 status](#assertion-與-status)
@@ -189,7 +190,7 @@ SSHHelper --/
 | 診斷失敗 | [Validation and Troubleshooting](reference.zh/validation-diagnostics.md) |
 | 升級舊 package | [Migration Notes](reference.zh/appendices/migrations.md) |
 
-Reference 定義 public contract；README、Quick Start 與 examples 按特定任務說明這份 contract。每項 contract 由一個 semantic owner 定義，其他章節提供摘要並連結至 owner。
+Reference 定義 public contract；README、Quick Start 與 examples 按特定任務說明這份 contract。每項 contract 由一個 semantic owner 定義，其他 Reference 頁面提供摘要並連結至 owner。
 
 ## Test authoring
 
@@ -210,7 +211,7 @@ Testcase 是一個正規化 Workbook row；Run 會為每個選中的 row 建立�
 
 ### 編寫契約
 
-本章說明正常日常工作流中的數據流轉順序。
+本頁說明正常日常工作流中的數據流轉順序。
 
 | 需求 | 使用 |
 |---|---|
@@ -405,7 +406,7 @@ ATT 不會拼接父子標簽。表頭匹配會移除空格、製表符、換行�
 
 ## Actions 與 typed values
 
-本章定義 ATT 現行 Action 契約。Template 使用 att-template/v3.6。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請參閱 Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 章節。
+本頁定義 ATT 現行 Action 契約。Template 使用 att-template/v3.6。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請從[Resources](reference.zh/resources/overview.md)開始查閱。
 
 ### Action 類型
 
@@ -419,7 +420,7 @@ ATT 不會拼接父子標簽。表頭匹配會移除空格、製表符、換行�
 
 Actions 按 YAML 順序執行。依類型允許時，也可定義 id、description、onFailure、runWhen。Action ID 在 scope 內必須唯一。類型不支援的欄位會在 validation 失敗。共用 Action result、Log file 與 Log fields 不屬於現行契約。
 
-關於以小寫 `x-` 在 validation 或 execution 前停用 ATT 擁有的 Action 字段/keyed entries，以及它與 `runWhen: false` 的差別，請見[配置章節](reference.zh/configuration.md#使用-x-忽略或停用-att-配置項)。
+關於以小寫 `x-` 在 validation 或 execution 前停用 ATT 擁有的 Action 字段/keyed entries，以及它與 `runWhen: false` 的差別，請見[Configuration](reference.zh/configuration.md#使用-x-忽略或停用-att-配置項)。
 
 ### 區分邏輯值與表示方式
 
@@ -830,9 +831,61 @@ Descriptor 和 generated record 語法見[Testdata Registry 與 Input Mapping](r
 
 
 
+### Resource helper methods
+
+已配置的 `db.*`、`mq.*`、`ssh.*` 和 `http.*` 使用相同的 `#{...}` 語法，但它們是會存取外部系統並返回 typed result 的 resource operation，並非 pure built-in。MQ、SSH 和 HTTP call 必須是 `type: tool` Action 的主要 `call`。DB `query` 和 `scalar` 亦可用於支援的 expression 欄位；`db.update` 必須是 `type: tool` Action 的主要 call。這些操作不可用於 `retry.when`；該欄位只接受 deterministic pure built-in。以下參數均使用具名形式；省略 optional 參數時會採用 helper 配置的預設值。完整 resource/result 契約見各 helper 頁面。
+
+#### DBHelper
+
+| Method | 參數（未標 optional 即必填） | 示例 |
+|---|---|---|
+| `db.<id>.query` / `db.<id>.scalar` | `sql: String`；optional `params: List` **或** `parameters: Map<String, value>`（兩者互斥；預設沒有 bind value）。`sql` 可為 inline SQL 或返回 String 的 project-file expression。 | `#{db.orders.query(sql='select status from orders where id = :id', parameters={id: ${EXEC.INPUT.orderId}})}` |
+| `db.<id>.update` | 與 `query` 相同的參數和型別；只可作為 Tool Action 的主要 call。 | `#{db.orders.update(sql='update orders set status = ? where id = ?', params=['DONE', ${EXEC.INPUT.orderId}])}` |
+
+`query` 返回 typed rows，`scalar` 返回 scalar result，`update` 返回更新結果。SQL binding、transaction 和 result 詳情見 [DBHelper](reference.zh/resources/dbhelper.md)。
+
+#### MQHelper
+
+| Method | 參數（未標 optional 即必填） | 示例 |
+|---|---|---|
+| `mq.<id>.send` | `payload: String、byte[] 或 structured Map/List`（必填）；`queue: String` 在未配置 request queue 時必填。Optional `requestFormat: text\|json\|yaml\|xml`（Map/List 必填）、`instance: String`（選擇已配置的 physical instance）。 | `#{mq.payment.send(queue='PAYMENT.REQUEST', payload=${EXEC.VARS.requestText})}` |
+| `mq.<id>.receive` | `queue: String` 在未配置 reply queue 時必填。Optional `waitMs: Integer`（預設 10,000 ms 或 helper setting）、`correlationId: String`、`responseFormat: text\|json\|yaml\|xml`（預設 `text` 或 helper setting）、`instance: String`。 | `#{mq.payment.receive(queue='PAYMENT.REPLY', waitMs=5000, responseFormat='json')}` |
+| `mq.<id>.request` | `payload` 同上；有效的 `requestQueue` 和 `replyQueue` 必須存在（可由 helper defaults 提供）。Optional `requestFormat` 同上、`waitMs: Integer`（預設 10,000 ms 或 helper setting）、`responseFormat`（預設 `text` 或 helper setting）、`instance: String`。 | `#{mq.payment.request(requestQueue='PAYMENT.REQUEST', replyQueue='PAYMENT.REPLY', payload=${EXEC.VARS.requestText}, waitMs=5000, responseFormat='xml')}` |
+
+`requestFormat` 只用於 structured payload；String 會原樣傳送，不可與它同時使用。`waitMs` 範圍為 0–3,600,000。已配置 queue defaults 和 typed reply 詳情見 [MQHelper](reference.zh/resources/mqhelper.md)。
+
+#### SSHHelper
+
+| Method | 參數（未標 optional 即必填） | 示例 |
+|---|---|---|
+| `ssh.<id>.execute` | `command: String`；optional `stdoutFormat: text\|json\|yaml\|xml`（預設 `text`）、`timeoutMs: Integer`（預設 60,000 ms，且受 Action deadline 限制）。 | `#{ssh.application.execute(command='systemctl is-active example.service', stdoutFormat='text', timeoutMs=5000)}` |
+| `ssh.<id>.upload` | `remotePath: String`、`payload: String 或 byte[]`；optional `overwrite: Boolean`（預設 `true`）、`timeoutMs: Integer`（預設 60,000 ms）。 | `#{ssh.application.upload(remotePath='/srv/app/request.json', payload=${EXEC.VARS.requestText}, overwrite=true)}` |
+| `ssh.<id>.stat` / `ssh.<id>.mkdirs` / `ssh.<id>.delete` | `remotePath: String`；optional `timeoutMs: Integer`（預設 60,000 ms）；`delete` 另外接受 `missingOk: Boolean`（預設 `false`）。 | `#{ssh.application.stat(remotePath='/srv/app/result.json')}` |
+| `ssh.<id>.move` | `sourcePath: String`、`targetPath: String`；optional `overwrite: Boolean`（預設 `false`）、`timeoutMs: Integer`（預設 60,000 ms）。 | `#{ssh.application.move(sourcePath='/srv/app/out.json', targetPath='/srv/app/archive/out.json', overwrite=false)}` |
+
+SSH operation 只接受具名參數；path 是 remote path，upload 接受內容而非 local file path。Path 限制、返回值及 timeout/retry 行為見 [SSHHelper](reference.zh/resources/sshhelper.md)。
+
+#### HTTPHelper
+
+`http.<id>.get(...)` 和 `http.<id>.post(...)` 由 method 名稱決定 HTTP method；`http.<id>.request(...)` 另需 `method: String`（`GET`、`POST`、`PUT`、`PATCH`、`DELETE`、`HEAD` 或 `OPTIONS`）。三種 method 都接受以下 optional 具名參數：
+
+| 參數 | 型別及預設值 | 說明 |
+|---|---|---|
+| `path` | `String`，預設 `''` | 相對於已配置的 base URL；不可提供 absolute URL、query string 或 fragment。 |
+| `query` | `Map<String, value>`，optional | Iterable value 會成為重複的 query parameter。 |
+| `headers` | `Map<String, value>`，optional | 與已配置 headers 合併；value 會轉成文字。 |
+| `body` | `String`、`byte[]` 或 structured Map/List，optional | GET 和 HEAD 不接受 body。Map/List 必須提供 `requestFormat`。 |
+| `requestFormat` | `text\|json\|yaml\|xml`，optional | 只在 Map/List body 時必填；String/byte[] 原樣傳送。 |
+| `contentType` | `String`，optional | 覆蓋 request Content-Type header。 |
+| `responseFormat` | `auto\|text\|json\|yaml\|xml`，預設 helper 設定（預設為 `auto`） | `auto` 會按 response Content-Type 決定格式。 |
+| `connectTimeoutMs`、`readTimeoutMs`、`connectionRequestTimeoutMs` | `Integer` 1–3,600,000 ms，optional | 覆蓋相應 helper timeout；三者 descriptor default 依次為 5,000 ms、30,000 ms、5,000 ms。 |
+| `followRedirects` | `Boolean`，預設 helper 設定（預設為 `false`） | 最多跟隨 runtime 限制數量的 redirect。 |
+
+示例：`#{http.payment.post(path='/v1/payments', query={dryRun: true}, headers={Accept: 'application/json'}, body=${EXEC.INPUT.request}, requestFormat='json', responseFormat='json')}`。Timeout 範圍、body encoding 及 response parsing 見 [HTTPHelper](reference.zh/resources/httphelper.md)。
+
 ### Expression scope 與錯誤
 
-Expression language 由本章定義；可用 roots 與求值時機由欄位的 semantic owner 定義：[Tool command/call](reference.zh/resources/tools.md)、[Load execIdFormat 與 vars](reference.zh/execution-modes/load.md)、[Debug vars](reference.zh/execution-modes/debug.md)、[report filename](reference.zh/configuration.md)。`${path?}` 只允許缺少的 map/list path 回傳 null；語法錯誤與非法 scope 仍會失敗。Expression syntax 或缺少的必需 Context path 會提供結構化 diagnostic；見[Validation](reference.zh/validation-diagnostics.md)。
+Expression language 由本頁定義；可用 roots 與求值時機由欄位的 semantic owner 定義：[Tool command/call](reference.zh/resources/tools.md)、[Load execIdFormat 與 vars](reference.zh/execution-modes/load.md)、[Debug vars](reference.zh/execution-modes/debug.md)、[report filename](reference.zh/configuration.md)。`${path?}` 只允許缺少的 map/list path 回傳 null；語法錯誤與非法 scope 仍會失敗。Expression syntax 或缺少的必需 Context path 會提供結構化 diagnostic；見[Validation](reference.zh/validation-diagnostics.md)。
 
 已移除 presentation-only `dbText`／`misc.dbText`、`prettyPrint`／`misc.prettyPrint`／`format.pretty` 和所有 local `file.*`／legacy file alias。DB result 保持 typed；顯示時改用 Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` 加 `format: sqlplus`，Map/List 則使用 `format: json` 或 `yaml`。Project content 使用 `&{...}`，並將 String 傳入 HTTP body、MQ payload 或 SSH upload payload。SSHHelper upload 只接受 content；native SSH download 已移除。ATT local output 由 framework 管理。移除的 API 會提供 migration diagnostic。
 
@@ -1327,7 +1380,7 @@ SSHHelper -> SSH routing 或 Resource Helper /
 
 Resource ID 是 Template/expression 或 Tool group 所引用的 logical contract。Environment profile 可把相同 DB/MQ/HTTP/SSH logical ID 綁定到不同 descriptor，無需修改 Action YAML。
 
-小寫 `x-` 可停用 ATT 擁有的 resource 配置字段及 keyed entries；但不會移除 HTTP header 名稱或 DB parameters 等 user data。詳情見[配置章節](reference.zh/configuration.md#使用-x-忽略或停用-att-配置項)。
+小寫 `x-` 可停用 ATT 擁有的 resource 配置字段及 keyed entries；但不會移除 HTTP header 名稱或 DB parameters 等 user data。詳情見[Configuration](reference.zh/configuration.md#使用-x-忽略或停用-att-配置項)。
 
 ### Operation result 與 Evidence
 
@@ -1908,7 +1961,7 @@ Strategy 優先序：group override，再到 helper 預設。Native Resource Hel
 
 ## 可靠性與執行控制
 
-本章集中定義 cross-cutting public execution behavior。
+本頁集中定義 cross-cutting public execution behavior。
 
 ### Assertion 與 status
 
@@ -1976,7 +2029,7 @@ Direct `update` Action 支援 `timeoutMs`，但明確拒絕 `retry`。發生 tim
 
 ## Configuration 與 environments
 
-本章是作者編寫配置時的權威閱讀參考。下面提到的 [`schemas/`](../schemas) 仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
+本頁是作者編寫配置時的權威閱讀參考。[`schemas/`](../schemas) 目錄中的文件仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
 
 ### 按任務查找配置
 
@@ -2040,7 +2093,7 @@ actions:
 
 ### 選擇 environment profile
 
-`att-config/v2.11` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper 與 testdata descriptor lists。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md) 見對應章節。
+`att-config/v2.11` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper 與 testdata descriptor lists。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md) 見對應頁面。
 
 ATT 使用一份 common `att-config/v2.11` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
 
@@ -2425,7 +2478,7 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 
 ### Debug input 與 output
 
-CLI 的 target、`--input`、`--set` 與 `--env` 語法見本章 option matrix。Input discovery、bootstrap vars、保護 roots 與 output lifecycle 見 [Debug](reference.zh/execution-modes/debug.md)。
+CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix。Input discovery、bootstrap vars、保護 roots 與 output lifecycle 見 [Debug](reference.zh/execution-modes/debug.md)。
 
 ### 退出碼
 
@@ -2766,7 +2819,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 
 Compatibility 的目的，是讓既有 package 可讀，而不是維持第二套 current model。新 authoring 使用 canonical `EXEC`、`META`、Action-local `output`、current schema、`--env` 與目前 Tool/DB/MQ contract。
 
-Deterministic legacy alias 在可一對一映射時可以保留並產生 migration warning；若舊語義與 scope isolation 或 common result/evidence contract 衝突，就不建立 alias。Deprecated CLI/authoring form 只有在使用者仍需要 migration path 時才保留在其 owner chapter 或 CHANGELOG。
+Deterministic legacy alias 在可一對一映射時可以保留並產生 migration warning；若舊語義與 scope isolation 或 common result/evidence contract 衝突，就不建立 alias。Deprecated CLI/authoring form 只有在使用者仍需要 migration path 時才保留在其 owner page 或 CHANGELOG。
 
 ## Appendix C — migration notes
 
@@ -2866,7 +2919,7 @@ Unsupported schemaVersion 會在 execution 前由 validation 拒絕並提供 mig
 
 ### Limits 與預設值
 
-Normative field default 以其 owner schema/configuration chapter 為準。重要 architecture limit 包括：
+Normative field default 以其 owner schema 或 configuration page 為準。重要 architecture limit 包括：
 
 - Load 必須二選一 workload model；
 - arrival-rate overload policy 為 `drop`；

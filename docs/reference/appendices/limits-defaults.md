@@ -2,7 +2,7 @@
 
 ## Limits and defaults
 
-Use the owning schema/configuration chapter for normative field defaults. Important architectural limits include:
+Use the owning schema or configuration page for normative field defaults. Important architectural limits include:
 
 - Load chooses exactly one workload model;
 - arrival-rate overload policy is `drop`;

@@ -1,6 +1,6 @@
 # Actions and typed values
 
-This chapter defines the active ATT action contract. Templates use att-template/v3.6. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. See the Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper chapters for resource configuration.
+This page defines the active ATT action contract. Templates use att-template/v3.6. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. For resource configuration, start with [Resources](resources/overview.md).
 
 ## Action types
 
@@ -32,7 +32,7 @@ DB results are already typed values. Tool, Action, Template, Flow and expression
 
 DB query, scalar, and update operations use the first-class DBHelper call forms `db.<helper>.query(...)`, `db.<helper>.scalar(...)`, and `db.<helper>.update(...)` inside a normal `type: tool` Action. A DB call accepts one String `sql` argument plus either positional `params` or named `parameters`; `sql=&{project-relative-file.sql}` supplies package SQL content. The historical `type: db` Action is retained only by archived schema versions.
 
-## Project-file expressions return string
+## Project-file expressions return a `String`
 
 The current replacement for the historical Render Action is the typed project-file value expression `&{path}`. It always returns one `String`; it never infers a document format, parses an extension, expands a glob, or creates an output file:
 
@@ -80,7 +80,7 @@ A DB action uses db and exactly one query or update block. SQL, bind parameters,
 
 A Flow action uses use with a canonical Flow ID. It runs in a fresh EXEC.ACTIONS scope and publishes its result/evidence to the caller when it returns. META.FLOW exists only while that invocation is active.
 
-## Tool Evidence collectors
+## Tool evidence collectors
 
 A Tool Action may define first-class `evidence` collectors for diagnostics that must be gathered before the Action assertion. The lifecycle is:
 
@@ -176,7 +176,7 @@ Action expressions use the regular ATT expression engine. A complete ${...} or #
 
 assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Values assigned in one Stage are available to later Stages. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; publish values to EXEC.VARS when the caller needs them after the Flow returns.
 
-## Resource output Evidence
+## Resource output evidence
 
 Resource evidence is separate from the logical result. A helper may configure an optional evidence.output presentation policy:
 
@@ -189,7 +189,7 @@ evidence:
 
 This adds a bounded human-readable snapshot beside operation metadata; it does not change output.result or response parsing. In Load, evidence.resources.output accepts inherit (default) or none. none skips resource-output formatting and file materialization. Metrics-only iterations create no execution directory. When iteration evidence is retained, eligible resource output is formatted lazily into that workspace.
 
-## Action output and Evidence paths
+## Action output and evidence paths
 
 | Path | Meaning and availability |
 |---|---|

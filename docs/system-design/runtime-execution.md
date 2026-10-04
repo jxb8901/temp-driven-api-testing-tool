@@ -1,4 +1,4 @@
-# Runtime and Execution Internals
+# Runtime and execution internals
 
 Status: Maintainer documentation
 

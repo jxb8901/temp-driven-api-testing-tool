@@ -271,7 +271,7 @@ That loop is the foundation for larger SIT/UAT packages.
 
 ## What to learn next
 
-Do not try to learn every ATT feature from this tutorial. Follow the Reference chapter that matches the task you are doing:
+Do not try to learn every ATT feature from this tutorial. Follow the Reference page that matches the task you are doing:
 
 | I want to... | Read next |
 |---|---|

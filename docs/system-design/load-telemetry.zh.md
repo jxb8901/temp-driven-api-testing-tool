@@ -1,4 +1,4 @@
-# Load Generator Telemetry
+# Load generator telemetry
 
 ATT 會將 generator observation 與 SUT outcome metrics 分開。Bounded `metrics.generator` snapshot 包含 heap used/committed/max、觀察到的 heap/thread peak、GC deltas、JVM 支援時的 process CPU，以及 warm-up heap checkpoint。Sampling 由 event 觸發，每 100 ms 至多一次；較短的 peak 可能落在兩次 sample 之間。CPU、heap、GC、scheduler 與 worker-queue 數值描述 ATT process，不代表 target 已飽和。
 

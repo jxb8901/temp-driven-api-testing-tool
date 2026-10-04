@@ -1,4 +1,4 @@
-# Load Generator Telemetry
+# Load generator telemetry
 
 ATT reports generator observations separately from SUT outcome metrics. The bounded `metrics.generator` snapshot contains heap used/committed/max values, observed peak heap/thread counts, GC deltas, process CPU when supported, and a warm-up heap checkpoint. Samples are event-triggered and limited to one per 100 ms; brief peaks between samples can be missed. CPU, heap, GC, scheduler, and worker-queue values describe the ATT process and must not be interpreted as target saturation.
 

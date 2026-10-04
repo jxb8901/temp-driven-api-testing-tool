@@ -135,7 +135,7 @@ evidence: {mode: failures}
 
 ## Debug inputs and outputs
 
-This chapter defines target, `--input`, `--set` and `--env` syntax in the option matrix. [Debug](execution-modes/debug.md) owns input discovery, bootstrap variables, protected roots and output lifecycle.
+This page defines target, `--input`, `--set` and `--env` syntax in the option matrix. [Debug](execution-modes/debug.md) owns input discovery, bootstrap variables, protected roots and output lifecycle.
 
 ## Exit codes
 

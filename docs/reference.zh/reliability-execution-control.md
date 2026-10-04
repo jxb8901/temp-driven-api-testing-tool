@@ -1,6 +1,6 @@
 # 可靠性與執行控制
 
-本章集中定義 cross-cutting public execution behavior。
+本頁集中定義 cross-cutting public execution behavior。
 
 ## Assertion 與 status
 

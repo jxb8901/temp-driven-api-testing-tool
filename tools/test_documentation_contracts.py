@@ -230,6 +230,11 @@ class DocumentationContractsTest(unittest.TestCase):
                 actual = [line for line in (root / rel).read_text(encoding="utf-8").splitlines()
                           if line.startswith("## ")]
                 self.assertIn(expected, actual)
+        for rel, expected in (
+                ("docs/reference/actions.md", "## Project-file expressions return a `String`"),
+                ("docs/reference/reliability-execution-control.md", "## Tool timeout precedence")):
+            with self.subTest(path=rel):
+                self.assertIn(expected, (root / rel).read_text(encoding="utf-8"))
 
     def test_numbered_heading_rule_ignores_numeric_noun_phrases(self):
         for heading in ("## 2-factor authentication", "## 2026 roadmap",

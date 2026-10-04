@@ -58,4 +58,4 @@ SSHHelper --/
 | 診斷失敗 | [Validation and Troubleshooting](validation-diagnostics.md) |
 | 升級舊 package | [Migration Notes](appendices/migrations.md) |
 
-Reference 定義 public contract；README、Quick Start 與 examples 按特定任務說明這份 contract。每項 contract 由一個 semantic owner 定義，其他章節提供摘要並連結至 owner。
+Reference 定義 public contract；README、Quick Start 與 examples 按特定任務說明這份 contract。每項 contract 由一個 semantic owner 定義，其他 Reference 頁面提供摘要並連結至 owner。

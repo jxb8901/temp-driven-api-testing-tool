@@ -285,13 +285,13 @@ id="toc-actions-and-typed-values">Actions and typed values</a>
 <li><a href="#separate-logical-values-from-representations"
 id="toc-separate-logical-values-from-representations">Separate logical
 values from representations</a></li>
-<li><a href="#project-file-expressions-return-string"
-id="toc-project-file-expressions-return-string">Project-file expressions
-return string</a></li>
+<li><a href="#project-file-expressions-return-a-string"
+id="toc-project-file-expressions-return-a-string">Project-file
+expressions return a <code>String</code></a></li>
 <li><a href="#tool-db-and-flow-results"
 id="toc-tool-db-and-flow-results">Tool, DB and Flow results</a></li>
 <li><a href="#tool-evidence-collectors"
-id="toc-tool-evidence-collectors">Tool Evidence collectors</a></li>
+id="toc-tool-evidence-collectors">Tool evidence collectors</a></li>
 <li><a href="#log-typed-value-to-case-log"
 id="toc-log-typed-value-to-case-log">Log: typed value to case
 log</a></li>
@@ -299,9 +299,9 @@ log</a></li>
 id="toc-expressions-and-variable-scope">Expressions and variable
 scope</a></li>
 <li><a href="#resource-output-evidence"
-id="toc-resource-output-evidence">Resource output Evidence</a></li>
+id="toc-resource-output-evidence">Resource output evidence</a></li>
 <li><a href="#action-output-and-evidence-paths"
-id="toc-action-output-and-evidence-paths">Action output and Evidence
+id="toc-action-output-and-evidence-paths">Action output and evidence
 paths</a></li>
 <li><a href="#common-retry-and-boolean-conditions"
 id="toc-common-retry-and-boolean-conditions">Common Retry and boolean
@@ -337,6 +337,8 @@ syntax</a></li>
 <li><a href="#operators" id="toc-operators">Operators</a></li>
 <li><a href="#built-in-functions" id="toc-built-in-functions">Built-in
 functions</a></li>
+<li><a href="#resource-helper-methods"
+id="toc-resource-helper-methods">Resource helper methods</a></li>
 <li><a href="#expression-scope-and-errors"
 id="toc-expression-scope-and-errors">Expression scope and
 errors</a></li>
@@ -358,9 +360,9 @@ id="toc-resources-and-integrations">Resources and integrations</a>
 id="toc-operation-result-and-evidence">Operation result and
 Evidence</a></li>
 <li><a href="#tool" id="toc-tool">Tool</a></li>
-<li><a href="#dbhelper" id="toc-dbhelper">DBHelper</a></li>
-<li><a href="#mqhelper" id="toc-mqhelper">MQHelper</a></li>
-<li><a href="#httphelper" id="toc-httphelper">HTTPHelper</a></li>
+<li><a href="#dbhelper-1" id="toc-dbhelper-1">DBHelper</a></li>
+<li><a href="#mqhelper-1" id="toc-mqhelper-1">MQHelper</a></li>
+<li><a href="#httphelper-1" id="toc-httphelper-1">HTTPHelper</a></li>
 <li><a href="#sshhelper-logical-ssh-targets"
 id="toc-sshhelper-logical-ssh-targets">SSHHelper: logical SSH
 targets</a></li>
@@ -386,7 +388,7 @@ lifecycle</a></li>
 <li><a href="#stage-execution-controls"
 id="toc-stage-execution-controls">Stage execution controls</a></li>
 <li><a href="#tool-timeout-precedence"
-id="toc-tool-timeout-precedence">Tool Timeout precedence</a></li>
+id="toc-tool-timeout-precedence">Tool timeout precedence</a></li>
 <li><a href="#direct-db-timeout-and-retry-eligibility"
 id="toc-direct-db-timeout-and-retry-eligibility">Direct DB timeout and
 retry eligibility</a></li>
@@ -678,7 +680,8 @@ Notes</a></td>
 </table>
 <p>Reference defines the public contract; README, Quick Start and
 examples explain that contract for narrower tasks. Each contract has one
-semantic owner; other chapters summarize and link to that owner.</p>
+semantic owner; other Reference pages summarize and link to that
+owner.</p>
 <h2 id="test-authoring">Test authoring</h2>
 <h3 id="author-and-run-a-testcase">Author and run a Testcase</h3>
 <p>A Testcase is one normalized workbook row; Run creates one Case
@@ -707,8 +710,8 @@ with its own status and evidence. The identifier is shared; the concepts
 are not synonyms. This page uses <em>Testcase</em> for workbook content
 and <em>Case execution</em> for runtime work.</p>
 <h3 id="authoring-contracts">Authoring contracts</h3>
-<p>This chapter explains the normal day-to-day workflow in the same
-order that data moves through ATT.</p>
+<p>This page explains the normal day-to-day workflow in the same order
+that data moves through ATT.</p>
 <table>
 <thead>
 <tr class="header">
@@ -1083,11 +1086,11 @@ Testcase loading and result-workbook writing use this same projection;
 result columns that do not already exist are written to the final header
 row.</p>
 <h2 id="actions-and-typed-values">Actions and typed values</h2>
-<p>This chapter defines the active ATT action contract. Templates use
+<p>This page defines the active ATT action contract. Templates use
 att-template/v3.6. Each completed action publishes its logical typed
 value at output.result. Actions do not use a shared
-result.format/path/overwrite object. See the Tool, DBHelper, MQHelper,
-HTTPHelper and SSHHelper chapters for resource configuration.</p>
+result.format/path/overwrite object. For resource configuration, start
+with <a href="reference/resources/overview.md">Resources</a>.</p>
 <h3 id="action-types">Action types</h3>
 <table>
 <thead>
@@ -1192,8 +1195,8 @@ named <code>parameters</code>;
 <code>sql=&amp;{project-relative-file.sql}</code> supplies package SQL
 content. The historical <code>type: db</code> Action is retained only by
 archived schema versions.</p>
-<h3 id="project-file-expressions-return-string">Project-file expressions
-return string</h3>
+<h3 id="project-file-expressions-return-a-string">Project-file
+expressions return a <code>String</code></h3>
 <p>The current replacement for the historical Render Action is the typed
 project-file value expression <code>&amp;{path}</code>. It always
 returns one <code>String</code>; it never infers a document format,
@@ -1256,7 +1259,7 @@ and DBHelper contracts.</p>
 <p>A Flow action uses use with a canonical Flow ID. It runs in a fresh
 EXEC.ACTIONS scope and publishes its result/evidence to the caller when
 it returns. META.FLOW exists only while that invocation is active.</p>
-<h3 id="tool-evidence-collectors">Tool Evidence collectors</h3>
+<h3 id="tool-evidence-collectors">Tool evidence collectors</h3>
 <p>A Tool Action may define first-class <code>evidence</code> collectors
 for diagnostics that must be gathered before the Action assertion. The
 lifecycle is:</p>
@@ -1376,7 +1379,7 @@ output is available at output.* while an Action runs and at
 EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a
 temporary Action namespace; publish values to EXEC.VARS when the caller
 needs them after the Flow returns.</p>
-<h3 id="resource-output-evidence">Resource output Evidence</h3>
+<h3 id="resource-output-evidence">Resource output evidence</h3>
 <p>Resource evidence is separate from the logical result. A helper may
 configure an optional evidence.output presentation policy:</p>
 <div class="sourceCode" id="cb19"><pre
@@ -1391,7 +1394,7 @@ resource-output formatting and file materialization. Metrics-only
 iterations create no execution directory. When iteration evidence is
 retained, eligible resource output is formatted lazily into that
 workspace.</p>
-<h3 id="action-output-and-evidence-paths">Action output and Evidence
+<h3 id="action-output-and-evidence-paths">Action output and evidence
 paths</h3>
 <table>
 <thead>
@@ -2256,12 +2259,229 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb23-1"><a href=
 <span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callApi.output.result.status} == ${EXEC.INPUT.expectedStatus}&quot;</span></span>
 <span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;${EXEC.ACTIONS.callApi.output.result.message} like &#39;PAYMENT%SUCCESS&#39;&quot;</span></span>
 <span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;(${EXEC.INPUT.channel} == &#39;MOBILE&#39;) and (${EXEC.INPUT.amount} &lt;= 1000)&quot;</span></span></code></pre></div>
+<h3 id="resource-helper-methods">Resource helper methods</h3>
+<p>Configured <code>db.*</code>, <code>mq.*</code>, <code>ssh.*</code>,
+and <code>http.*</code> calls use the same <code>#{...}</code> syntax,
+but they are resource operations rather than pure built-ins: they access
+external systems and return typed results. MQ, SSH, and HTTP calls must
+be the primary <code>call</code> of a <code>type: tool</code> Action. DB
+<code>query</code> and <code>scalar</code> calls are also available to
+supported expression fields; <code>db.update</code> must be the primary
+call of a <code>type: tool</code> Action. They are not permitted in
+<code>retry.when</code>, which accepts only deterministic pure
+built-ins. All arguments below are named; omit optional arguments to use
+the configured helper default. See each linked helper page for its full
+resource and result contract.</p>
+<h4 id="dbhelper">DBHelper</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Method</th>
+<th>Arguments (required unless marked optional)</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>db.&lt;id&gt;.query</code> /
+<code>db.&lt;id&gt;.scalar</code></td>
+<td><code>sql: String</code>; optional <code>params: List</code>
+<strong>or</strong> <code>parameters: Map&lt;String, value&gt;</code>
+(mutually exclusive; default: no bind values). <code>sql</code> may be
+an inline SQL string or a project-file expression returning a
+String.</td>
+<td><code>#{db.orders.query(sql='select status from orders where id = :id', parameters={id: ${EXEC.INPUT.orderId}})}</code></td>
+</tr>
+<tr class="even">
+<td><code>db.&lt;id&gt;.update</code></td>
+<td>Same arguments and types as <code>query</code>; primary Tool Action
+only.</td>
+<td><code>#{db.orders.update(sql='update orders set status = ? where id = ?', params=['DONE', ${EXEC.INPUT.orderId}])}</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>query</code> returns typed rows, <code>scalar</code> returns a
+scalar result, and <code>update</code> returns the update result. See <a
+href="reference/resources/dbhelper.md">DBHelper</a> for SQL binding,
+transaction, and result details.</p>
+<h4 id="mqhelper">MQHelper</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Method</th>
+<th>Arguments (required unless marked optional)</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>mq.&lt;id&gt;.send</code></td>
+<td><code>payload: String, byte[] or structured Map/List</code>
+(required); <code>queue: String</code> is required unless a request
+queue is configured. Optional
+<code>requestFormat: text|json|yaml|xml</code> (required for Map/List
+only), <code>instance: String</code> (selects a configured physical
+instance).</td>
+<td><code>#{mq.payment.send(queue='PAYMENT.REQUEST', payload=${EXEC.VARS.requestText})}</code></td>
+</tr>
+<tr class="even">
+<td><code>mq.&lt;id&gt;.receive</code></td>
+<td><code>queue: String</code> is required unless a reply queue is
+configured. Optional <code>waitMs: Integer</code> (default 10,000 ms or
+helper setting), <code>correlationId: String</code>,
+<code>responseFormat: text|json|yaml|xml</code> (default
+<code>text</code> or helper setting),
+<code>instance: String</code>.</td>
+<td><code>#{mq.payment.receive(queue='PAYMENT.REPLY', waitMs=5000, responseFormat='json')}</code></td>
+</tr>
+<tr class="odd">
+<td><code>mq.&lt;id&gt;.request</code></td>
+<td><code>payload</code> as above; effective <code>requestQueue</code>
+and <code>replyQueue</code> are required (each may come from the helper
+defaults). Optional <code>requestFormat</code> as above,
+<code>waitMs: Integer</code> (default 10,000 ms or helper setting),
+<code>responseFormat</code> (default <code>text</code> or helper
+setting), <code>instance: String</code>.</td>
+<td><code>#{mq.payment.request(requestQueue='PAYMENT.REQUEST', replyQueue='PAYMENT.REPLY', payload=${EXEC.VARS.requestText}, waitMs=5000, responseFormat='xml')}</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>requestFormat</code> applies only to structured payloads; a
+String is sent as-is and must not be paired with it. <code>waitMs</code>
+is 0–3,600,000. See <a
+href="reference/resources/mqhelper.md">MQHelper</a> for configured queue
+defaults and typed reply behavior.</p>
+<h4 id="sshhelper">SSHHelper</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Method</th>
+<th>Arguments (required unless marked optional)</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>ssh.&lt;id&gt;.execute</code></td>
+<td><code>command: String</code>; optional
+<code>stdoutFormat: text|json|yaml|xml</code> (default
+<code>text</code>), <code>timeoutMs: Integer</code> (default 60,000 ms,
+capped by the Action deadline).</td>
+<td><code>#{ssh.application.execute(command='systemctl is-active example.service', stdoutFormat='text', timeoutMs=5000)}</code></td>
+</tr>
+<tr class="even">
+<td><code>ssh.&lt;id&gt;.upload</code></td>
+<td><code>remotePath: String</code>,
+<code>payload: String or byte[]</code>; optional
+<code>overwrite: Boolean</code> (default <code>true</code>),
+<code>timeoutMs: Integer</code> (default 60,000 ms).</td>
+<td><code>#{ssh.application.upload(remotePath='/srv/app/request.json', payload=${EXEC.VARS.requestText}, overwrite=true)}</code></td>
+</tr>
+<tr class="odd">
+<td><code>ssh.&lt;id&gt;.stat</code> /
+<code>ssh.&lt;id&gt;.mkdirs</code> /
+<code>ssh.&lt;id&gt;.delete</code></td>
+<td><code>remotePath: String</code>; optional
+<code>timeoutMs: Integer</code> (default 60,000 ms); <code>delete</code>
+additionally accepts <code>missingOk: Boolean</code> (default
+<code>false</code>).</td>
+<td><code>#{ssh.application.stat(remotePath='/srv/app/result.json')}</code></td>
+</tr>
+<tr class="even">
+<td><code>ssh.&lt;id&gt;.move</code></td>
+<td><code>sourcePath: String</code>, <code>targetPath: String</code>;
+optional <code>overwrite: Boolean</code> (default <code>false</code>),
+<code>timeoutMs: Integer</code> (default 60,000 ms).</td>
+<td><code>#{ssh.application.move(sourcePath='/srv/app/out.json', targetPath='/srv/app/archive/out.json', overwrite=false)}</code></td>
+</tr>
+</tbody>
+</table>
+<p>SSH operations accept named arguments only; paths are remote paths,
+and upload takes content rather than a local file path. See <a
+href="reference/resources/sshhelper.md">SSHHelper</a> for path
+restrictions, return values, and timeout/retry behavior.</p>
+<h4 id="httphelper">HTTPHelper</h4>
+<p><code>http.&lt;id&gt;.get(...)</code> and
+<code>http.&lt;id&gt;.post(...)</code> select the method by name;
+<code>http.&lt;id&gt;.request(...)</code> additionally requires
+<code>method: String</code> (<code>GET</code>, <code>POST</code>,
+<code>PUT</code>, <code>PATCH</code>, <code>DELETE</code>,
+<code>HEAD</code>, or <code>OPTIONS</code>). All three accept these
+optional named arguments:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Argument</th>
+<th>Type and default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>path</code></td>
+<td><code>String</code>, default <code>''</code></td>
+<td>Relative to the configured base URL; no absolute URL, query string,
+or fragment.</td>
+</tr>
+<tr class="even">
+<td><code>query</code></td>
+<td><code>Map&lt;String, value&gt;</code>, optional</td>
+<td>Iterable values become repeated query parameters.</td>
+</tr>
+<tr class="odd">
+<td><code>headers</code></td>
+<td><code>Map&lt;String, value&gt;</code>, optional</td>
+<td>Merged with configured headers; values are rendered as strings.</td>
+</tr>
+<tr class="even">
+<td><code>body</code></td>
+<td><code>String</code>, <code>byte[]</code>, or structured Map/List,
+optional</td>
+<td>GET and HEAD do not accept a body. Map/List requires
+<code>requestFormat</code>.</td>
+</tr>
+<tr class="odd">
+<td><code>requestFormat</code></td>
+<td><code>text|json|yaml|xml</code>, optional</td>
+<td>Required for Map/List body only; String/byte[] content is passed
+through.</td>
+</tr>
+<tr class="even">
+<td><code>contentType</code></td>
+<td><code>String</code>, optional</td>
+<td>Overrides the request Content-Type header.</td>
+</tr>
+<tr class="odd">
+<td><code>responseFormat</code></td>
+<td><code>auto|text|json|yaml|xml</code>, default helper setting
+(<code>auto</code> by default)</td>
+<td><code>auto</code> resolves from response Content-Type.</td>
+</tr>
+<tr class="even">
+<td><code>connectTimeoutMs</code>, <code>readTimeoutMs</code>,
+<code>connectionRequestTimeoutMs</code></td>
+<td>Integer 1–3,600,000 ms, optional</td>
+<td>Override corresponding helper timeout; descriptor defaults are 5,000
+ms, 30,000 ms, and 5,000 ms respectively.</td>
+</tr>
+<tr class="odd">
+<td><code>followRedirects</code></td>
+<td><code>Boolean</code>, default helper setting (<code>false</code> by
+default)</td>
+<td>Redirects are followed up to the runtime limit.</td>
+</tr>
+</tbody>
+</table>
+<p>Example:
+<code>#{http.payment.post(path='/v1/payments', query={dryRun: true}, headers={Accept: 'application/json'}, body=${EXEC.INPUT.request}, requestFormat='json', responseFormat='json')}</code>.
+See <a href="reference/resources/httphelper.md">HTTPHelper</a> for
+timeout ranges, body encoding, and response parsing.</p>
 <h3 id="expression-scope-and-errors">Expression scope and errors</h3>
-<p>This chapter defines the language. Each field's owner defines
-available roots and evaluation timing: <a
-href="reference/resources/tools.md">Tool command/call</a>, <a
-href="reference/execution-modes/load.md">Load execIdFormat and vars</a>,
-<a href="reference/execution-modes/debug.md">Debug vars</a>, and <a
+<p>This page defines the language. Each field's owner defines available
+roots and evaluation timing: <a href="reference/resources/tools.md">Tool
+command/call</a>, <a href="reference/execution-modes/load.md">Load
+execIdFormat and vars</a>, <a
+href="reference/execution-modes/debug.md">Debug vars</a>, and <a
 href="reference/configuration.md">report filenames</a>.
 <code>${path?}</code> permits an absent allowed map/list path to return
 null; malformed syntax and illegal scope access still fail. Expression
@@ -3500,7 +3720,7 @@ optional <code>argName</code>, <code>argNameMode</code>,
 </tr>
 </tbody>
 </table>
-<h3 id="dbhelper">DBHelper</h3>
+<h3 id="dbhelper-1">DBHelper</h3>
 <p>DBHelper is a first-class JDBC resource, configured independently
 from Tools. Each descriptor uses
 <code>schemaVersion: att-dbhelper/v2.6</code> and a stable logical
@@ -3669,7 +3889,7 @@ representation, and <code>output</code> controls human-readable
 presentation only. Assertions and later Actions still read typed rows;
 <code>db.&lt;id&gt;.query</code>/<code>scalar</code> use the same
 policy.</p>
-<h3 id="mqhelper">MQHelper</h3>
+<h3 id="mqhelper-1">MQHelper</h3>
 <p>MQHelper is a logical IBM MQ resource with one or more physical
 instances. Current descriptors use att-mqhelper/v1.2. Connection
 settings, credentials, queue defaults and pool limits belong to the
@@ -3843,7 +4063,7 @@ Load defers formatting until an iteration is retained, then materializes
 <code>resource-output.yaml</code>;
 <code>evidence.resources.output: none</code> skips it entirely.
 Presentation never introduces credential values into evidence.</p>
-<h5 id="requestreply-timeout-and-replay-policy">Request/reply Timeout
+<h5 id="requestreply-timeout-and-replay-policy">Request/reply timeout
 and replay policy</h5>
 <p>A correlated reply completes <code>mq.&lt;id&gt;.request(...)</code>
 with PASS. A successful PUT followed by correlated GET MQRC 2033
@@ -3888,7 +4108,7 @@ including a bounded wait that finds no message. An expired outer
 deadline is TIMEOUT. This operation-aware contract supersedes the
 earlier guidance that avoided request/2033 TIMEOUT to prevent replay.
 See <a href="reference/actions.md">common retry semantics</a>.</p>
-<h3 id="httphelper">HTTPHelper</h3>
+<h3 id="httphelper-1">HTTPHelper</h3>
 <p>HTTPHelper is an environment-bound HTTP resource. The selected config
 profile binds a stable logical helper ID to its base URL. Descriptors
 use att-httphelper/v1.1.</p>
@@ -4276,8 +4496,8 @@ invocation is repeated, not just one host. Each host gets the
 Action/Tool/global timeout; interruption cancels active OpenSSH
 processes or Java SSH sessions. Both transports receive the same
 normalized host/user/port/key. OpenSSH is preferred; mwiede/jsch
-fallback retains strict host-key verification and the limitations in the
-SSH diagnostics chapter.</p>
+fallback retains strict host-key verification and the limitations in <a
+href="reference/appendices/limits-defaults.md">SSH diagnostics</a>.</p>
 <p>For a single selected host, parsed <code>output.result</code> remains
 the legacy scalar/object value. Evidence adds <code>sshHelper</code>,
 <code>instance</code>, <code>host</code>,
@@ -4346,7 +4566,7 @@ Filesystem errors use <code>SSH_STAT_ERROR</code>,
 Project files use <code>&amp;{...}</code>; ATT manages local output.</p>
 <h2 id="reliability-and-execution-control">Reliability and execution
 control</h2>
-<p>This chapter owns cross-cutting public execution behavior.</p>
+<p>This page owns cross-cutting public execution behavior.</p>
 <h3 id="assertion-and-status">Assertion and status</h3>
 <p>An assertion evaluates a boolean condition after the Action's primary
 work at the documented assertion point. A false assertion is
@@ -4472,7 +4692,7 @@ permits later eligible work to run.</p>
 </table>
 <p>Use <code>onFailure</code> for rollback/diagnostics and
 <code>always</code> for cleanup or final evidence collection.</p>
-<h3 id="tool-timeout-precedence">Tool Timeout precedence</h3>
+<h3 id="tool-timeout-precedence">Tool timeout precedence</h3>
 <p>Tool Action timeout overrides Tool descriptor timeout, which
 overrides global timeout. Sidecars, Stages and Templates do not own
 timeout/retry defaults. For call-backed DB Tools, the DBHelper statement
@@ -4661,8 +4881,8 @@ profile</h3>
 <p><code>att-config/v2.11</code> is the active profile contract.
 Profiles can replace configured DBHelper, MQHelper, SSHHelper,
 HTTPHelper and testdata descriptor lists as a whole. See the resource
-chapters and <a href="reference/test-authoring.md">Testdata Registry and
-Input Mapping</a> for each binding.</p>
+pages and <a href="reference/test-authoring.md">Testdata registry and
+input mapping</a> for each binding.</p>
 <p>ATT selects an environment through one common
 <code>att-config/v2.11</code> file. It does not select an environment by
 changing an Action or by adding an environment-specific Tool ID. Actions
@@ -5690,7 +5910,7 @@ machine-readable output remains on stdout and live progress is sent to
 stderr. Load progress prints bounded periodic counters/rates and
 throttled errors, never one console block per successful iteration.</p>
 <h3 id="debug-inputs-and-outputs">Debug inputs and outputs</h3>
-<p>This chapter defines target, <code>--input</code>, <code>--set</code>
+<p>This page defines target, <code>--input</code>, <code>--set</code>
 and <code>--env</code> syntax in the option matrix. <a
 href="reference/execution-modes/debug.md">Debug</a> owns input
 discovery, bootstrap variables, protected roots and output
@@ -6254,11 +6474,11 @@ valid and renders as the empty string.</p>
 syntax/navigation, Tool failure, timeout, parse failure, I/O failure, or
 runtime exception makes it ERROR. Inspect the Action evidence rather
 than only the final Run status.</p>
-<h4 id="why-did-a-tool-run-more-than-once">Why did a Tool Run more than
+<h4 id="why-did-a-tool-run-more-than-once">Why did a Tool run more than
 once?</h4>
 <p>Its action used retry and received an eligible non-zero exit code.
 Inspect the attempt list and final action record in the case log.</p>
-<h4 id="can-i-use-a-shell-pipeline-in-command">Can i use a shell
+<h4 id="can-i-use-a-shell-pipeline-in-command">Can I use a shell
 pipeline in <code>command</code>?</h4>
 <p>No. ATT passes <code>|</code>, <code>&gt;</code>, and
 <code>&lt;</code> literally. Put shell behavior inside a reviewed tool
@@ -6268,7 +6488,7 @@ array argument reject <code>[]</code>?</h4>
 <p>Required validation happens before argv expansion. An empty typed
 List is missing input; pass at least one scalar item or make the
 argument optional.</p>
-<h4 id="should-i-use-package-or-selected-validation">Should i use
+<h4 id="should-i-use-package-or-selected-validation">Should I use
 package or selected validation?</h4>
 <p>Use selected mode for fast local feedback. Use package mode before
 release, CI promotion, or sharing a package.</p>
@@ -6482,7 +6702,7 @@ versions, <code>--env</code>, and current Tool/DB/MQ contracts.</p>
 <p>Deterministic legacy aliases may remain readable with migration
 warnings. Aliases are not created where old semantics conflict with
 scope isolation or the common result/evidence contract. Deprecated
-CLI/authoring forms remain documented in their owning chapter or
+CLI/authoring forms remain documented on their owning page or in
 CHANGELOG only when users still need a migration path.</p>
 <h2 id="appendix-c--migration-notes">Appendix C — migration notes</h2>
 <h3 id="file-arguments-and-case-log-paths">File arguments and case-log
@@ -6773,7 +6993,7 @@ contract.</p>
 id="appendix-d--limits-security-guarantees-and-advanced-diagnostics">Appendix
 D — limits, security guarantees and advanced diagnostics</h2>
 <h3 id="limits-and-defaults">Limits and defaults</h3>
-<p>Use the owning schema/configuration chapter for normative field
+<p>Use the owning schema or configuration page for normative field
 defaults. Important architectural limits include:</p>
 <ul>
 <li>Load chooses exactly one workload model;</li>

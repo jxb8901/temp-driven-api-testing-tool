@@ -17,7 +17,7 @@ A **Testcase** is the authored workbook row after sidecar mapping and snapshot n
 
 ## Authoring contracts
 
-This chapter explains the normal day-to-day workflow in the same order that data moves through ATT.
+This page explains the normal day-to-day workflow in the same order that data moves through ATT.
 
 | Need | Use |
 |---|---|

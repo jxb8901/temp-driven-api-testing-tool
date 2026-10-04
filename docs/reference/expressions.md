@@ -134,9 +134,61 @@ assert: "${EXEC.ACTIONS.callApi.output.result.message} like 'PAYMENT%SUCCESS'"
 assert: "(${EXEC.INPUT.channel} == 'MOBILE') and (${EXEC.INPUT.amount} <= 1000)"
 ```
 
+## Resource helper methods
+
+Configured `db.*`, `mq.*`, `ssh.*`, and `http.*` calls use the same `#{...}` syntax, but they are resource operations rather than pure built-ins: they access external systems and return typed results. MQ, SSH, and HTTP calls must be the primary `call` of a `type: tool` Action. DB `query` and `scalar` calls are also available to supported expression fields; `db.update` must be the primary call of a `type: tool` Action. They are not permitted in `retry.when`, which accepts only deterministic pure built-ins. All arguments below are named; omit optional arguments to use the configured helper default. See each linked helper page for its full resource and result contract.
+
+### DBHelper
+
+| Method | Arguments (required unless marked optional) | Example |
+|---|---|---|
+| `db.<id>.query` / `db.<id>.scalar` | `sql: String`; optional `params: List` **or** `parameters: Map<String, value>` (mutually exclusive; default: no bind values). `sql` may be an inline SQL string or a project-file expression returning a String. | `#{db.orders.query(sql='select status from orders where id = :id', parameters={id: ${EXEC.INPUT.orderId}})}` |
+| `db.<id>.update` | Same arguments and types as `query`; primary Tool Action only. | `#{db.orders.update(sql='update orders set status = ? where id = ?', params=['DONE', ${EXEC.INPUT.orderId}])}` |
+
+`query` returns typed rows, `scalar` returns a scalar result, and `update` returns the update result. See [DBHelper](resources/dbhelper.md) for SQL binding, transaction, and result details.
+
+### MQHelper
+
+| Method | Arguments (required unless marked optional) | Example |
+|---|---|---|
+| `mq.<id>.send` | `payload: String, byte[] or structured Map/List` (required); `queue: String` is required unless a request queue is configured. Optional `requestFormat: text\|json\|yaml\|xml` (required for Map/List only), `instance: String` (selects a configured physical instance). | `#{mq.payment.send(queue='PAYMENT.REQUEST', payload=${EXEC.VARS.requestText})}` |
+| `mq.<id>.receive` | `queue: String` is required unless a reply queue is configured. Optional `waitMs: Integer` (default 10,000 ms or helper setting), `correlationId: String`, `responseFormat: text\|json\|yaml\|xml` (default `text` or helper setting), `instance: String`. | `#{mq.payment.receive(queue='PAYMENT.REPLY', waitMs=5000, responseFormat='json')}` |
+| `mq.<id>.request` | `payload` as above; effective `requestQueue` and `replyQueue` are required (each may come from the helper defaults). Optional `requestFormat` as above, `waitMs: Integer` (default 10,000 ms or helper setting), `responseFormat` (default `text` or helper setting), `instance: String`. | `#{mq.payment.request(requestQueue='PAYMENT.REQUEST', replyQueue='PAYMENT.REPLY', payload=${EXEC.VARS.requestText}, waitMs=5000, responseFormat='xml')}` |
+
+`requestFormat` applies only to structured payloads; a String is sent as-is and must not be paired with it. `waitMs` is 0–3,600,000. See [MQHelper](resources/mqhelper.md) for configured queue defaults and typed reply behavior.
+
+### SSHHelper
+
+| Method | Arguments (required unless marked optional) | Example |
+|---|---|---|
+| `ssh.<id>.execute` | `command: String`; optional `stdoutFormat: text\|json\|yaml\|xml` (default `text`), `timeoutMs: Integer` (default 60,000 ms, capped by the Action deadline). | `#{ssh.application.execute(command='systemctl is-active example.service', stdoutFormat='text', timeoutMs=5000)}` |
+| `ssh.<id>.upload` | `remotePath: String`, `payload: String or byte[]`; optional `overwrite: Boolean` (default `true`), `timeoutMs: Integer` (default 60,000 ms). | `#{ssh.application.upload(remotePath='/srv/app/request.json', payload=${EXEC.VARS.requestText}, overwrite=true)}` |
+| `ssh.<id>.stat` / `ssh.<id>.mkdirs` / `ssh.<id>.delete` | `remotePath: String`; optional `timeoutMs: Integer` (default 60,000 ms); `delete` additionally accepts `missingOk: Boolean` (default `false`). | `#{ssh.application.stat(remotePath='/srv/app/result.json')}` |
+| `ssh.<id>.move` | `sourcePath: String`, `targetPath: String`; optional `overwrite: Boolean` (default `false`), `timeoutMs: Integer` (default 60,000 ms). | `#{ssh.application.move(sourcePath='/srv/app/out.json', targetPath='/srv/app/archive/out.json', overwrite=false)}` |
+
+SSH operations accept named arguments only; paths are remote paths, and upload takes content rather than a local file path. See [SSHHelper](resources/sshhelper.md) for path restrictions, return values, and timeout/retry behavior.
+
+### HTTPHelper
+
+`http.<id>.get(...)` and `http.<id>.post(...)` select the method by name; `http.<id>.request(...)` additionally requires `method: String` (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, or `OPTIONS`). All three accept these optional named arguments:
+
+| Argument | Type and default | Notes |
+|---|---|---|
+| `path` | `String`, default `''` | Relative to the configured base URL; no absolute URL, query string, or fragment. |
+| `query` | `Map<String, value>`, optional | Iterable values become repeated query parameters. |
+| `headers` | `Map<String, value>`, optional | Merged with configured headers; values are rendered as strings. |
+| `body` | `String`, `byte[]`, or structured Map/List, optional | GET and HEAD do not accept a body. Map/List requires `requestFormat`. |
+| `requestFormat` | `text\|json\|yaml\|xml`, optional | Required for Map/List body only; String/byte[] content is passed through. |
+| `contentType` | `String`, optional | Overrides the request Content-Type header. |
+| `responseFormat` | `auto\|text\|json\|yaml\|xml`, default helper setting (`auto` by default) | `auto` resolves from response Content-Type. |
+| `connectTimeoutMs`, `readTimeoutMs`, `connectionRequestTimeoutMs` | Integer 1–3,600,000 ms, optional | Override corresponding helper timeout; descriptor defaults are 5,000 ms, 30,000 ms, and 5,000 ms respectively. |
+| `followRedirects` | `Boolean`, default helper setting (`false` by default) | Redirects are followed up to the runtime limit. |
+
+Example: `#{http.payment.post(path='/v1/payments', query={dryRun: true}, headers={Accept: 'application/json'}, body=${EXEC.INPUT.request}, requestFormat='json', responseFormat='json')}`. See [HTTPHelper](resources/httphelper.md) for timeout ranges, body encoding, and response parsing.
+
 ## Expression scope and errors
 
-This chapter defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](resources/tools.md), [Load execIdFormat and vars](execution-modes/load.md), [Debug vars](execution-modes/debug.md), and [report filenames](configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](validation-diagnostics.md).
+This page defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](resources/tools.md), [Load execIdFormat and vars](execution-modes/load.md), [Debug vars](execution-modes/debug.md), and [report filenames](configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](validation-diagnostics.md).
 
 Removed APIs: `dbText`/`misc.dbText`, `prettyPrint`/`misc.prettyPrint`/`format.pretty`, all local `file.*` built-ins and their legacy aliases. Keep DB results typed and migrate display calls to Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` with `format: sqlplus`; use `format: json` or `yaml` for Maps/Lists. Read project content with `&{...}` and pass its String to HTTP body, MQ payload, or SSH upload payload. SSHHelper upload accepts content only; native SSH download was removed. ATT local output remains framework-owned. Removed calls fail with migration guidance.
 

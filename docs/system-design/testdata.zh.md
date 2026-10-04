@@ -1,20 +1,20 @@
-# Testdata Registry 與 Input Mapping
+# Testdata registry 與 input mapping
 
 本頁說明 issue #63 的 runtime boundary。Public descriptor 契約為 `att-testdata/v1.0`；Environment selection 屬於 `att-config/v2.11`，Load policy 屬於 `att-load/v1.6`。
 
-## Registry Layers 與啟用時機
+## Registry layers 與啟用時機
 
 所選 environment profile 提供 package-relative testdata descriptor paths。每個 descriptor 有 logical ID，並宣告非空 literal `records` list 或 generated record。Load scenario 可在頂層 `testdata` 加入 package-relative paths，形成 scenario-local overlay。同名 Load-local ID 會在該 scenario 完整取代 environment descriptor；不合併 records 或 selection 欄位。同一 layer 內重複 ID 或重複 canonical path 都無效。
 
 Registry 會按需建立 descriptor ID 索引。Run 與 Debug 只載入 input mapping 引用的 descriptors。Load 在 scheduler 啟動前驗證 workload inputs 和明確 policy 引用的 IDs。明確執行 package validation 時，會載入並 schema-validate 所選 environment 的全部 descriptors，包括未使用項。Import 必須解析為 canonical package root 內的 regular YAML file，且不能是 symlink。
 
-## Literal 與 Generated Records
+## Literal 與 generated records
 
 Literal record 保留 YAML value 型別，因此完整 input reference 可回傳 scalar、map 或 list。Descriptor 驗證後會凍結其資料，避免共享 record 被呼叫端修改。
 
 Generated record 宣告一個 inclusive integer range（`from` 到 `to`）與一個 `record` template。Range 必須遞增，最多 1,000,000 筆。Integer format 僅支援 `%d` 或 `%0Nd`。`record` 可含巢狀 maps/lists；ATT 遞迴以格式化整數取代 `%{seq}`。Generated record 不允許其他 variable 或 expression 語法。只按需求物化所選 index，不會先建立整個 sequence list。
 
-## Mapping 與 Selection
+## Mapping 與 selection
 
 Input mapping 會在解析值發布至 `EXEC.INPUT` 前執行：
 
@@ -31,7 +31,7 @@ Load 中每個被引用 ID 可設定 `workload`、`user` 或 `iteration` scope�
 
 Resolver 的 run-level selection map 只保留 workload/user scope。Iteration 選擇只存在目前 input mapping 的 local memo table，因此同一 mapping 重複引用 ID 仍會得到相同 record，而已完成的 iteration 不會留下 cache entry。Resolver telemetry 會按 scope 報告 mapping evaluations、selection requests/evaluations/cache hits 及 cache sizes。
 
-## Direct Reference Boundary 與 Evidence
+## Direct reference boundary 與 evidence
 
 Testdata marker 只允許出現在 input mapping。Template、Flow、Tool definition 及 Tool invocation arguments 不可直接使用 `@{...}` 或 `%{...}`，也不可讀取 `TESTDATA.*`、`EXEC.TESTDATA`、`EXEC.DATA` 或 `EXEC.FIXTURE`；它們透過 `EXEC.INPUT` 接收已解析值。Selection policy 因此留在 execution boundary，可重用元件只需消費一般型別的 input。
 

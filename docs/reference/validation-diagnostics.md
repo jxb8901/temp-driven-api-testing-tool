@@ -51,11 +51,11 @@ ATT treats an absent path as an authoring/runtime error instead of silently rend
 
 A false assertion makes the Case execution FAIL. Invalid expression syntax/navigation, Tool failure, timeout, parse failure, I/O failure, or runtime exception makes it ERROR. Inspect the Action evidence rather than only the final Run status.
 
-### Why did a Tool Run more than once?
+### Why did a Tool run more than once?
 
 Its action used retry and received an eligible non-zero exit code. Inspect the attempt list and final action record in the case log.
 
-### Can i use a shell pipeline in `command`?
+### Can I use a shell pipeline in `command`?
 
 No. ATT passes `|`, `>`, and `<` literally. Put shell behavior inside a reviewed tool script.
 
@@ -63,7 +63,7 @@ No. ATT passes `|`, `>`, and `<` literally. Put shell behavior inside a reviewed
 
 Required validation happens before argv expansion. An empty typed List is missing input; pass at least one scalar item or make the argument optional.
 
-### Should i use package or selected validation?
+### Should I use package or selected validation?
 
 Use selected mode for fast local feedback. Use package mode before release, CI promotion, or sharing a package.
 

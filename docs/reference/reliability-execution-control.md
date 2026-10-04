@@ -1,6 +1,6 @@
 # Reliability and execution control
 
-This chapter owns cross-cutting public execution behavior.
+This page owns cross-cutting public execution behavior.
 
 ## Assertion and status
 
@@ -55,7 +55,7 @@ ERROR > INVALID > FAIL > PASS > SKIPPED
 Use `onFailure` for rollback/diagnostics and `always` for cleanup or final evidence collection.
 
 
-## Tool Timeout precedence
+## Tool timeout precedence
 
 Tool Action timeout overrides Tool descriptor timeout, which overrides global timeout. Sidecars, Stages and Templates do not own timeout/retry defaults. For call-backed DB Tools, the DBHelper statement timeout remains a backend ceiling. Each supported primary retry attempt runs its collectors before assertion; collector continuation behavior does not turn a failed primary operation into PASS.
 
