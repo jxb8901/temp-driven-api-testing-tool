@@ -676,7 +676,11 @@ public final class PackageValidator {
                     throw new NotStaticallyEvaluable();
                 return builtIns.invoke(name, arguments);
             }
-            @Override public String interpolate(String value) { throw new NotStaticallyEvaluable(); }
+            @Override public String interpolate(String value) {
+                if (value.contains("${") || value.contains("#{") || value.contains("&{"))
+                    throw new NotStaticallyEvaluable();
+                return value;
+            }
             @Override public String file(String path) throws Exception {
                 return fileExpressions.evaluate(path, validationSourceDirectories.get(), new att.template.FileExpressionResolver.Runtime() {
                     @Override public Object context(String contextPath, boolean optional) { throw new NotStaticallyEvaluable(); }
@@ -2070,6 +2074,7 @@ public final class PackageValidator {
     }
 
     private void validateHttpCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        validateStaticArgumentContracts(parsed, null);
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || parts[1].isEmpty() || !("request".equals(parts[2])
                 || "get".equals(parts[2]) || "post".equals(parts[2]) || "put".equals(parts[2])
@@ -2089,32 +2094,16 @@ public final class PackageValidator {
                 throw new IllegalArgumentException("Unknown HTTP argument: " + key);
             if (!supplied.add(key)) throw new IllegalArgumentException("Duplicate HTTP argument: " + key);
             String expression = argument.expression();
-            if (expression.contains("${") || expression.contains("#{")) continue;
+            if (expression.contains("${") || expression.contains("#{") || expression.contains("&{")) continue;
             Object value = callParser.literal(expression);
-            if ("method".equals(key)) {
-                if (!(value instanceof String) || !String.valueOf(value).toUpperCase(java.util.Locale.ROOT)
-                        .matches("GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS"))
-                    throw new IllegalArgumentException("Unsupported HTTP method");
-            } else if ("path".equals(key)) {
+            if ("path".equals(key)) {
                 if (!(value instanceof String)) throw new IllegalArgumentException("HTTP path must be a string");
                 String path = (String) value;
                 if (path.startsWith("//") || path.contains("?") || path.contains("#"))
                     throw new IllegalArgumentException("HTTP path must be relative and query/fragment-free");
                 try { if (new java.net.URI(path).isAbsolute()) throw new IllegalArgumentException("Absolute per-call HTTP URL is forbidden"); }
                 catch (java.net.URISyntaxException invalid) { throw new IllegalArgumentException("Invalid HTTP path"); }
-            } else if ("connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
-                    || "connectionRequestTimeoutMs".equals(key)) {
-                if (!(value instanceof Number) || ((Number) value).doubleValue() != ((Number) value).longValue()
-                        || ((Number) value).longValue() < 1 || ((Number) value).longValue() > 3600000)
-                    throw new IllegalArgumentException("HTTP timeout must be 1..3600000 ms: " + key);
-            } else if ("followRedirects".equals(key) && !(value instanceof Boolean))
-                throw new IllegalArgumentException("HTTP followRedirects must be boolean");
-            else if ("requestFormat".equals(key)
-                    && !java.util.Arrays.asList("text", "json", "yaml", "xml").contains(String.valueOf(value).toLowerCase(java.util.Locale.ROOT)))
-                throw new IllegalArgumentException("HTTP requestFormat must be text, json, yaml, or xml");
-            else if ("responseFormat".equals(key)
-                    && !java.util.Arrays.asList("auto", "text", "json", "yaml", "xml").contains(String.valueOf(value).toLowerCase(java.util.Locale.ROOT)))
-                throw new IllegalArgumentException("HTTP responseFormat must be auto, text, json, yaml, or xml");
+            }
         }
         if ("request".equals(parts[2]) && !supplied.contains("method"))
             throw new IllegalArgumentException("http.<helper>.request requires method");
@@ -2126,6 +2115,7 @@ public final class PackageValidator {
     }
 
     private void validateMqCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        validateStaticArgumentContracts(parsed, null);
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || !"mq".equals(parts[0]) || parts[1].isEmpty()) {
             throw new IllegalArgumentException("MQ call must be mq.<instance>.send|receive|request: " + parsed.name());
@@ -2157,22 +2147,11 @@ public final class PackageValidator {
             boolean dynamic = value.contains("${") || value.contains("#{") || value.contains("&{");
             if (dynamic) continue;
             Object literal = callParser.literal(value);
-            if ("waitMs".equals(argument.key())) {
-                if (!(literal instanceof Number)) throw new IllegalArgumentException(parsed.name() + ".waitMs must be an integer from 0 to 3600000");
-                Number number = (Number) literal;
-                if (number.doubleValue() != number.longValue() || number.longValue() < 0 || number.longValue() > 3600000) {
-                    throw new IllegalArgumentException(parsed.name() + ".waitMs must be an integer from 0 to 3600000");
-                }
-            } else if ("payload".equals(argument.key())) {
+            if ("payload".equals(argument.key())) {
                 if (!(literal instanceof String || literal instanceof Map || literal instanceof List))
                     throw new IllegalArgumentException("MQ payload must be a String, Map, or List");
-            } else if ("requestFormat".equals(argument.key()) || "responseFormat".equals(argument.key())) {
-                Set<String> formats = "responseFormat".equals(argument.key())
-                        ? new LinkedHashSet<String>(java.util.Arrays.asList("auto", "text", "json", "yaml", "xml"))
-                        : new LinkedHashSet<String>(java.util.Arrays.asList("text", "json", "yaml", "xml"));
-                if (!(literal instanceof String) || !formats.contains(String.valueOf(literal).toLowerCase(java.util.Locale.ROOT)))
-                    throw new IllegalArgumentException("MQ " + argument.key() + " must be text, json, yaml, or xml");
-            } else {
+            } else if (!("waitMs".equals(argument.key()) || "requestFormat".equals(argument.key())
+                    || "responseFormat".equals(argument.key()))) {
                 if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty()) {
                     throw new IllegalArgumentException(parsed.name() + "." + argument.key() + " must be a non-blank string");
                 }
@@ -2210,6 +2189,7 @@ public final class PackageValidator {
     }
 
     private void validateSshCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        validateStaticArgumentContracts(parsed, null);
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || !"ssh".equals(parts[0]) || parts[1].isEmpty())
             throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|stat|mkdirs|move|delete: " + parsed.name());
@@ -2241,20 +2221,13 @@ public final class PackageValidator {
             if (!allowed.contains(key)) throw new IllegalArgumentException("Unknown SSH argument '" + key + "' for " + parsed.name());
             if (!supplied.add(key)) throw new IllegalArgumentException("Duplicate SSH argument '" + key + "'");
             String expression = argument.expression().trim();
-            boolean dynamic = expression.contains("${") || expression.contains("#{")
+            boolean dynamic = expression.contains("${") || expression.contains("#{") || expression.contains("&{")
                     || expression.startsWith("input.") || expression.startsWith("TOOL.input.");
             if (dynamic) continue;
             Object literal = callParser.literal(expression);
-            if ("timeoutMs".equals(key)) {
-                if (!(literal instanceof Number) || ((Number) literal).doubleValue() != ((Number) literal).longValue()
-                        || ((Number) literal).longValue() < 1L || ((Number) literal).longValue() > 3600000L)
-                    throw new IllegalArgumentException("SSH timeoutMs must be an integer from 1 to 3600000");
-            } else if ("overwrite".equals(key) || "missingOk".equals(key)) {
-                if (!(literal instanceof Boolean)) throw new IllegalArgumentException("SSH " + key + " must be boolean");
-            } else if ("stdoutFormat".equals(key)) {
-                if (!(literal instanceof String) || !String.valueOf(literal).toLowerCase(java.util.Locale.ROOT)
-                        .matches("text|json|yaml|xml"))
-                    throw new IllegalArgumentException("SSH stdoutFormat must be text, json, yaml, or xml");
+            if ("timeoutMs".equals(key) || "overwrite".equals(key) || "missingOk".equals(key)
+                    || "stdoutFormat".equals(key)) {
+                continue;
             } else if ("command".equals(key) || "remotePath".equals(key) || "sourcePath".equals(key) || "targetPath".equals(key)) {
                 if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty())
                     throw new IllegalArgumentException("SSH " + key + " must be a non-blank string");

@@ -559,12 +559,13 @@ class SshResourceHelperTest {
                 "#{ssh.application.stat(remotePath='/missing')}",
                 "#{ssh.application.mkdirs(remotePath=${EXEC.INPUT.path}, timeoutMs=5000)}",
                 "#{ssh.application.move(sourcePath='/a', targetPath='/b', overwrite=false)}",
-                "#{ssh.application.delete(remotePath='/a', missingOk=true)}" })
+                "#{ssh.application.delete(remotePath='/a', missingOk=true)}",
+                "#{ssh.application.delete(remotePath='/a', missingOk='true')}" })
             assertDoesNotThrow(() -> validate.invoke(validator, parser.parse(call), config));
         for (String call : new String[] {
                 "#{ssh.application.stat('/x')}", "#{ssh.application.stat()}", "#{ssh.missing.stat(remotePath='/x')}",
                 "#{ssh.application.move(sourcePath='/a')}", "#{ssh.application.move(sourcePath='/a', targetPath='/b', overwrite='yes')}",
-                "#{ssh.application.delete(remotePath='/x', missingOk='true')}", "#{ssh.application.delete(remotePath='/x', recursive=true)}",
+                "#{ssh.application.delete(remotePath='/x', missingOk='yes')}", "#{ssh.application.delete(remotePath='/x', recursive=true)}",
                 "#{ssh.application.stat(remotePath='/*')}", "#{ssh.application.stat(remotePath='/x', timeoutMs=0)}",
                 "#{ssh.application.copy(sourcePath='/a', targetPath='/b')}" })
             assertThrows(java.lang.reflect.InvocationTargetException.class, () -> validate.invoke(validator, parser.parse(call), config));

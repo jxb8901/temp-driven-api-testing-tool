@@ -112,6 +112,52 @@ class PackageValidatorTest {
                 "#{typed(value=${EXEC.INPUT.data})}"), config));
     }
 
+    @Test void staticallyCoercesQuotedConfiguredToolValuesAndValidatesTheirContracts() throws Exception {
+        Map<String, ToolArgumentConfig> arguments = new LinkedHashMap<String, ToolArgumentConfig>();
+        arguments.put("count", new ToolArgumentConfig("count", "Count", "Count", true, "", "", "once", "integer", null));
+        arguments.put("enabled", new ToolArgumentConfig("enabled", "Enabled", "Enabled", true, "", "", "once", "boolean", null));
+        arguments.put("mode", new ToolArgumentConfig("mode", "Mode", "Mode", true, "", "", "once", "enum", Arrays.asList("FAST", "SAFE")));
+        ToolConfig tool = new ToolConfig("typed", "typed", "", "Typed", "Typed",
+                Arrays.asList("echo", "${input.count}"), Collections.<String>emptyList(), "text", arguments, null);
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.singletonMap("typed", tool), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateReferencedCall",
+                ToolCallParser.ParsedCall.class, FrameworkConfig.class);
+        method.setAccessible(true);
+
+        assertDoesNotThrow(() -> method.invoke(validator, new ToolCallParser().parse(
+                "#{typed(count=' 12 ', enabled='TrUe', mode='SAFE') }"), config));
+        for (String call : Arrays.asList("#{typed(count='abc', enabled='true', mode='SAFE')}",
+                "#{typed(count='2147483648', enabled='true', mode='SAFE')}",
+                "#{typed(count='12', enabled='true', mode='UNKNOWN')}")) {
+            java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> method.invoke(validator, new ToolCallParser().parse(call), config), call);
+            assertTrue(error.getCause().getMessage().contains("typed."), error.getCause().getMessage());
+        }
+    }
+
+    @Test void mqValidationUsesSharedScalarContractsAndRejectsRuntimeUnsupportedAutoFormat() throws Exception {
+        MqHelperConfig helper = new MqHelperConfig("broker", "Broker", "", "QM", "localhost", 1414,
+                "CHANNEL", "", "", 1208, "MQSTR", "asQueue", 1000, "", tempDir);
+        Map<String, MqHelperConfig> helpers = Collections.singletonMap("broker", helper);
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                tempDir, Collections.<String, ToolConfig>emptyMap(), Collections.<String, DbHelperConfig>emptyMap(), helpers,
+                Collections.<String, SshHelperConfig>emptyMap(), Collections.<String, HttpHelperConfig>emptyMap(),
+                null, null, Collections.<SheetGroupConfig>emptyList(), "", "", Collections.<DataColumnConfig>emptyList(),
+                Collections.<StageConfig>emptyList(), 1, "ignore", "", false, ProcessOutputConfig.defaults());
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateMqCall",
+                ToolCallParser.ParsedCall.class, FrameworkConfig.class);
+        method.setAccessible(true);
+        assertDoesNotThrow(() -> method.invoke(validator, new ToolCallParser().parse(
+                "#{mq.broker.receive(queue='REPLY.Q', waitMs=' 5000 ')}"), config));
+        java.lang.reflect.InvocationTargetException unsupported = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> method.invoke(validator, new ToolCallParser().parse(
+                        "#{mq.broker.receive(queue='REPLY.Q', responseFormat='auto')}"), config));
+        assertTrue(unsupported.getCause().getMessage().contains("responseFormat"));
+    }
+
     @Test void packageValidationFindsHistoricalTemplateDebugSidecarBeforeDebugRun() throws Exception {
         for (String directory : Arrays.asList("config", "testcase", "templates/T", "tools"))
             Files.createDirectories(tempDir.resolve(directory));
