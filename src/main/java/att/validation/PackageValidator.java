@@ -85,10 +85,12 @@ public final class PackageValidator {
         att.core.ExecutionBootstrapVariables.InputMappingMode mappingMode = "load".equalsIgnoreCase(executionMode)
                 ? att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD
                 : att.core.ExecutionBootstrapVariables.InputMappingMode.DEBUG;
+        String localLayerName = mappingMode == att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD
+                ? "load-local" : "debug-local";
         validateTestdataMapping(testCase.caseData(), global, loadTestdataDescriptors, debugInput,
-                "inputs", mappingMode, null);
+                "inputs", mappingMode, null, localLayerName);
         validateTestdataMapping(stage.values(), global, loadTestdataDescriptors, debugInput,
-                "inputs.stage", mappingMode, null);
+                "inputs.stage", mappingMode, null, localLayerName);
         this.flows = selectedFlows;
         validateTemplate(template, global);
         validateReferencedToolsClosure(template, global, new LinkedHashSet<String>());
@@ -238,8 +240,16 @@ public final class PackageValidator {
                                          List<Path> loadTestdataDescriptors, Path source, String field,
                                          att.core.ExecutionBootstrapVariables.InputMappingMode mode,
                                          Set<String> availableLoadFields) throws Exception {
+        validateTestdataMapping(mapping, config, loadTestdataDescriptors, source, field, mode,
+                availableLoadFields, "load-local");
+    }
+
+    private void validateTestdataMapping(Map<String, Object> mapping, FrameworkConfig config,
+                                         List<Path> loadTestdataDescriptors, Path source, String field,
+                                         att.core.ExecutionBootstrapVariables.InputMappingMode mode,
+                                         Set<String> availableLoadFields, String localLayerName) throws Exception {
         att.testdata.TestdataRegistry registry = new att.testdata.TestdataRegistry(projectRoot,
-                config.testdataDescriptors(), loadTestdataDescriptors);
+                config.testdataDescriptors(), loadTestdataDescriptors, localLayerName);
         att.testdata.TestdataMappingValidator.validate(mapping, registry);
         String diagnosticCode = mode == att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD
                 ? DiagnosticCodes.LOAD_INVALID

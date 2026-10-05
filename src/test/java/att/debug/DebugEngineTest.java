@@ -286,6 +286,8 @@ class DebugEngineTest {
 
         assertEquals(ResultStatus.PASS, result.status(), result.diagnostic() == null ? "" : result.diagnostic().format());
         assertTrue(new String(Files.readAllBytes(result.logPath()), StandardCharsets.UTF_8).contains("account=42"));
+        String caseYaml = new String(Files.readAllBytes(result.outputDirectory().resolve("artifacts/case.yaml")), StandardCharsets.UTF_8);
+        assertTrue(caseYaml.contains("debug-local"), caseYaml);
         assertEquals(1, config.testdataDescriptors().size(), "Debug-local imports must not mutate shared configuration");
         Object sharedValue = new att.testdata.TestdataInputResolver(
                 new att.testdata.TestdataRegistry(project, config.testdataDescriptors(), Collections.<Path>emptyList()))
@@ -315,6 +317,22 @@ class DebugEngineTest {
         assertEquals(ResultStatus.INVALID, result.status());
         assertNotNull(result.diagnostic());
         assertEquals("ATT-SCHEMA-001", result.diagnostic().code());
+        assertTrue(result.diagnostic().suggestion().contains("att-debug/v1.2"), result.diagnostic().format());
+    }
+
+    @Test void previousDebugSchemaReportsMigrationBeforeFurtherValidation() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        Path input = temp.resolve("previous-debug.yaml");
+        Files.write(input, "schemaVersion: att-debug/v1.1\ninputs: {value: old}\n".getBytes(StandardCharsets.UTF_8));
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+
+        DebugEngine.Result result = run(project, config, "template", "SIMPLE", "--input", input.toString());
+
+        assertEquals(ResultStatus.INVALID, result.status());
+        assertNotNull(result.diagnostic());
+        assertEquals("ATT-SCHEMA-001", result.diagnostic().code());
+        assertTrue(result.diagnostic().detail().contains("att-debug/v1.1"), result.diagnostic().format());
         assertTrue(result.diagnostic().suggestion().contains("att-debug/v1.2"), result.diagnostic().format());
     }
 

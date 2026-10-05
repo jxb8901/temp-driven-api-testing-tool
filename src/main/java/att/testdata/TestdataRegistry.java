@@ -11,11 +11,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Immutable environment base plus optional Load-local whole-descriptor overlay. */
+/** Immutable environment base plus an optional execution-local whole-descriptor overlay. */
 public final class TestdataRegistry {
     private final Path projectRoot;
     private final List<Path> environmentFiles;
     private final List<Path> loadFiles;
+    private final String localLayerName;
     private final TestdataDescriptorLoader loader;
     private final Map<Path, String> idsByPath = new ConcurrentHashMap<Path, String>();
     private final Map<Path, TestdataDescriptor> descriptorsByPath = new ConcurrentHashMap<Path, TestdataDescriptor>();
@@ -23,14 +24,24 @@ public final class TestdataRegistry {
     private volatile Map<String, List<Path>> loadIndex;
 
     public TestdataRegistry(Path projectRoot, List<Path> environmentFiles, List<Path> loadFiles) {
+        this(projectRoot, environmentFiles, loadFiles, "load-local");
+    }
+
+    public TestdataRegistry(Path projectRoot, List<Path> environmentFiles, List<Path> loadFiles,
+                            String localLayerName) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
         this.environmentFiles = immutablePaths(environmentFiles);
         this.loadFiles = immutablePaths(loadFiles);
+        if (!"load-local".equals(localLayerName) && !"debug-local".equals(localLayerName))
+            throw new IllegalArgumentException("Unsupported local testdata layer: " + localLayerName);
+        this.localLayerName = localLayerName;
         this.loader = new TestdataDescriptorLoader(this.projectRoot);
     }
 
+    public String localLayerName() { return localLayerName; }
+
     public TestdataDescriptor resolve(String id) throws Exception {
-        Path local = indexed(loadIndex(), id, "Load-local");
+        Path local = indexed(loadIndex(), id, displayLayerName());
         Path environment = indexed(environmentIndex(), id, "Environment");
         Path file = local == null ? environment : local;
         if (file == null) throw new IllegalArgumentException("Testdata id is not configured in the effective registry: " + id);
@@ -45,9 +56,9 @@ public final class TestdataRegistry {
     }
 
     public String layer(String id) throws Exception {
-        Path local = indexed(loadIndex(), id, "Load-local");
+        Path local = indexed(loadIndex(), id, displayLayerName());
         Path environment = indexed(environmentIndex(), id, "Environment");
-        if (local != null) return "load-local";
+        if (local != null) return localLayerName;
         if (environment != null) return "environment";
         throw new IllegalArgumentException("Testdata id is not configured in the effective registry: " + id);
     }
@@ -55,7 +66,7 @@ public final class TestdataRegistry {
     /** Full schema and duplicate-ID validation used by explicit package/Load validation. */
     public Map<String, TestdataDescriptor> validateAll() throws Exception {
         Map<String, TestdataDescriptor> environment = validateLayer(environmentFiles, "Environment");
-        Map<String, TestdataDescriptor> local = validateLayer(loadFiles, "Load-local");
+        Map<String, TestdataDescriptor> local = validateLayer(loadFiles, displayLayerName());
         Map<String, TestdataDescriptor> effective = new LinkedHashMap<String, TestdataDescriptor>(environment);
         effective.putAll(local);
         return Collections.unmodifiableMap(effective);
@@ -104,7 +115,7 @@ public final class TestdataRegistry {
         Map<String, List<Path>> result = loadIndex;
         if (result == null) synchronized (this) {
             result = loadIndex;
-            if (result == null) loadIndex = result = index(loadFiles, "Load-local");
+            if (result == null) loadIndex = result = index(loadFiles, displayLayerName());
         }
         return result;
     }
@@ -136,6 +147,10 @@ public final class TestdataRegistry {
         if (paths == null || paths.isEmpty()) return null;
         if (paths.size() > 1) throw new IllegalArgumentException("Duplicate testdata id in " + layer + " layer: " + id);
         return paths.get(0);
+    }
+
+    private String displayLayerName() {
+        return Character.toUpperCase(localLayerName.charAt(0)) + localLayerName.substring(1);
     }
 
     private void rejectSymlinkImport(Path path) throws Exception {

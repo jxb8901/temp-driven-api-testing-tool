@@ -209,7 +209,7 @@ class PackageValidatorTest {
                 Collections.<String, att.config.ToolArgumentConfig>emptyMap(), null));
         FrameworkConfig config = new FrameworkConfig(tempDir.resolve("output"), tempDir.resolve("report"),
                 tempDir.resolve("logs"), "SIT", 1000, tempDir.resolve("templates"), tools, null, null);
-        String historical = "schemaVersion: att-debug/v1.0\n";
+        String historical = "schemaVersion: att-debug/v1.1\n";
         Map<String, Path> sidecars = new LinkedHashMap<String, Path>();
         sidecars.put("template", tempDir.resolve("templates/T/debug.yaml"));
         sidecars.put("flow", tempDir.resolve("templates/flows/g/e/debug.yaml"));

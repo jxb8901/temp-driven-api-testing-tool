@@ -203,7 +203,8 @@ public final class DebugEngine {
             context.put("CASE.environment", config.environment());
             context.put("CASE.failureDetailMode", options.unsafeFailureDetails() ? "local-unsafe" : "safe-default");
             att.testdata.TestdataInputResolver testdata = new att.testdata.TestdataInputResolver(
-                    new att.testdata.TestdataRegistry(projectRoot, config.testdataDescriptors(), input.testdataDescriptors));
+                    new att.testdata.TestdataRegistry(projectRoot, config.testdataDescriptors(), input.testdataDescriptors,
+                            "debug-local"));
             context.replaceInputValues(testdata.resolve(testCase.caseData(), context, null, null));
             if ("template".equals(targetType) || "flow".equals(targetType))
                 att.core.ExecutionBootstrapVariables.evaluate(input.vars, context, bootstrapEngine,
@@ -351,10 +352,7 @@ public final class DebugEngine {
             Map<String, Object> map = objectMap((Map<?, ?>) loaded);
             Object declaredVersion = map.get("schemaVersion");
             String schemaVersion = declaredVersion == null ? "" : String.valueOf(declaredVersion);
-            String schemaName = Version.DEBUG_SCHEMA.equals(schemaVersion) ? "att-debug-v1.2.schema.json"
-                    : Version.PREVIOUS_DEBUG_SCHEMA.equals(schemaVersion) ? "history/att-debug-v1.1.schema.json"
-                    : "att-debug-v1.0.schema.json";
-            Path schema = att.validation.SchemaFiles.resolve(projectRoot, schemaName);
+            Path schema = att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion);
             JsonSchemaVerifier.verify(schema, map);
             if (Version.PREVIOUS_DEBUG_SCHEMA.equals(schemaVersion) || Version.OLDER_DEBUG_SCHEMA.equals(schemaVersion)) {
                 throw new DiagnosticException(DiagnosticCodes.SCHEMA_VERSION_OLD,
@@ -392,7 +390,8 @@ public final class DebugEngine {
             }
             List<Path> debugTestdata = projectRelativeDescriptors(map.get("testdata"));
             if (!debugTestdata.isEmpty())
-                new att.testdata.TestdataRegistry(projectRoot, Collections.<Path>emptyList(), debugTestdata).validateAll();
+                new att.testdata.TestdataRegistry(projectRoot, Collections.<Path>emptyList(), debugTestdata,
+                        "debug-local").validateAll();
             return new DebugInput(path, map, type, id, config, debugTestdata, effectiveToolArguments);
         } catch (DiagnosticException e) {
             throw e;
