@@ -65,6 +65,62 @@ class PackageValidatorTest {
         assertDoesNotThrow(() -> contract.invoke(new PackageValidator(tempDir, config), valid, config));
     }
 
+    @Test void staticallyValidatesFinalCoercedValueOfPureNestedFileExpressions() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String, ToolConfig>emptyMap(), null, null);
+        Path templateDirectory = tempDir.resolve("templates/T");
+        Files.createDirectories(templateDirectory.resolve("params"));
+        Files.write(templateDirectory.resolve("params/wait.txt"), "5000-ABC".getBytes("UTF-8"));
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateReferencedCall",
+                ToolCallParser.ParsedCall.class, FrameworkConfig.class);
+        method.setAccessible(true);
+        java.lang.reflect.Field field = PackageValidator.class.getDeclaredField("validationSourceDirectories");
+        field.setAccessible(true);
+        @SuppressWarnings("unchecked") ThreadLocal<Path> sourceDirectory = (ThreadLocal<Path>) field.get(validator);
+        sourceDirectory.set(templateDirectory);
+        try {
+            assertDoesNotThrow(() -> method.invoke(validator,
+                    new ToolCallParser().parse("#{mq.broker.receive(waitMs=str.substr(&{params/wait.txt}, 0, 4))}"), config));
+            assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,
+                    new ToolCallParser().parse("#{mq.broker.receive(waitMs=str.substr(&{params/wait.txt}, 5, 3))}"), config));
+            assertDoesNotThrow(() -> method.invoke(validator,
+                    new ToolCallParser().parse("#{mq.broker.receive(waitMs=${EXEC.INPUT.waitMs})}"), config));
+        } finally { sourceDirectory.remove(); }
+    }
+
+    @Test void packageValidationFindsHistoricalTemplateDebugSidecarBeforeDebugRun() throws Exception {
+        for (String directory : Arrays.asList("config", "testcase", "templates/T", "tools"))
+            Files.createDirectories(tempDir.resolve(directory));
+        Files.write(tempDir.resolve("config/config.yaml"), "{}\n".getBytes("UTF-8"));
+        Files.write(tempDir.resolve("att.sh"), new byte[0]);
+        Files.write(tempDir.resolve("att.bat"), new byte[0]);
+        Files.write(tempDir.resolve("templates/T/template.yaml"),
+                ("schemaVersion: att-template/v3.6\nname: T\ndescription: T\nactions:\n  show:\n    type: log\n    message: ok\n").getBytes("UTF-8"));
+        Path sidecar = tempDir.resolve("templates/T/debug.yaml");
+        Files.write(sidecar, "schemaVersion: att-debug/v1.0\ninputs: {}\n".getBytes("UTF-8"));
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir,
+                "SIT", 1000, tempDir.resolve("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+        assertEquals(Collections.singletonList("T"), new StageTemplateLoader(tempDir, config.templatesRoot()).paths());
+        att.debug.DebugEngine debug = new att.debug.DebugEngine(tempDir, config);
+        assertEquals(sidecar.toRealPath(), debug.discoverableInputPath("template", "T").toRealPath());
+        att.validation.DiagnosticException debugError = assertThrows(att.validation.DiagnosticException.class,
+                () -> debug.validateDiscoverableTarget("template", "T"));
+        assertEquals(DiagnosticCodes.SCHEMA_VERSION_OLD, debugError.code());
+
+        PackageValidator.ValidationSummary summary = new PackageValidator(tempDir, config)
+                .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
+        Diagnostic historical = summary.diagnostics.stream()
+                .filter(item -> DiagnosticCodes.SCHEMA_VERSION_OLD.equals(item.code())
+                        && item.file() != null && item.file().endsWith("templates/T/debug.yaml"))
+                .findFirst().orElse(null);
+        assertNotNull(historical, summary.diagnostics.stream().map(item -> item.code() + " " + item.file() + " " + item.message())
+                .collect(java.util.stream.Collectors.joining("\n")));
+        assertEquals("schemaVersion", historical.field());
+        assertTrue(historical.message().contains("att-debug/v1.0"));
+        assertTrue(historical.suggestion().contains("att-debug/v1.1"));
+    }
+
     @Test void projectFileCallsFollowNormalToolAndHelperValidation() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
                 Collections.<String, ToolConfig>emptyMap(), null, null);

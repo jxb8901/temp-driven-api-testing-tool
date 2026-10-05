@@ -75,7 +75,7 @@ The UAT descriptors keep the same IDs and replace only physical endpoint setting
 
 ## Typed Action flow
 
-Actions use the same logical IDs in every profile. A project-file expression returns an exact UTF-8 `String`; HTTP/MQ accepts it directly without a `requestFormat` or temporary result file:
+Actions use the same logical IDs in every profile. A file-content expression returns an exact UTF-8 `String`; HTTP/MQ accepts it directly without a `requestFormat` or temporary result file:
 
 ```yaml
 actions:

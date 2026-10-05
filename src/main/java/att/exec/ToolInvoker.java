@@ -156,7 +156,7 @@ public class ToolInvoker {
         if (tool.callBacked()) throw new IllegalStateException("call-backed Tool must be executed by the unified expression engine: " + toolName);
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(toolName) : invocationId;
         Instant started = Instant.now();
-        Map<String, Object> resolvedInput = prepareInput(tool, input);
+        Map<String, Object> resolvedInput = att.template.ArgumentContracts.coerce(toolName, prepareInput(tool, input), tool);
 
         List<String> logicalArgv = expandCommand(tool, resolvedInput);
         SshHelperConfig helper = tool.sshHelper().isEmpty() ? null
@@ -672,7 +672,7 @@ public class ToolInvoker {
         List<String> tokens = tool.commandArgv();
         List<String> argv = new ArrayList<String>();
         Map<String, Object> declaredValues = new LinkedHashMap<String, Object>();
-        for (String key : tool.arguments().keySet()) declaredValues.put(key, input.get(key));
+        for (String key : tool.arguments().keySet()) declaredValues.put(key, commandScalar(input.get(key)));
         Map<String, Object> scopedValues = new LinkedHashMap<String, Object>(declaredValues);
         scopedValues.put("input", new LinkedHashMap<String, Object>(declaredValues));
         Map<String, Object> toolScope = new LinkedHashMap<String, Object>();
@@ -693,11 +693,11 @@ public class ToolInvoker {
                             throw new IllegalArgumentException("Tool argv arrays must contain scalar values: " + tool.key() + "." + exact.key());
                         }
                         if (exact.namedArgv() && exact.repeatArgName()) argv.add(exact.argName());
-                        argv.add(item == null ? "" : String.valueOf(item));
+                        argv.add(item == null ? "" : commandScalar(item));
                     }
                 } else {
                     if (exact.namedArgv()) argv.add(exact.argName());
-                    argv.add(String.valueOf(value));
+                    argv.add(commandScalar(value));
                 }
                 continue;
             }
@@ -728,6 +728,11 @@ public class ToolInvoker {
             executed.set(0, projectRoot.resolve(executable).normalize().toString());
         }
         return executed;
+    }
+
+    private String commandScalar(Object value) {
+        if (value instanceof byte[]) return new String((byte[]) value, java.nio.charset.StandardCharsets.UTF_8);
+        return value == null ? "" : String.valueOf(value);
     }
 
     private Map<String, String> localToolEnvironment(CaseRuntimeContext context) {

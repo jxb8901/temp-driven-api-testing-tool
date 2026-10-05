@@ -24,7 +24,7 @@ ATT keeps the logical operation result separate from human or wire representatio
 |---|---|---|
 | Command Tool stdout | stdoutFormat | Parses external stdout into a typed result. |
 | HTTP/MQ response | responseFormat | Parses external response bytes into a typed result. |
-| Project-file expression | `String` | Reads one safe UTF-8 project file and preserves its exact characters after expression evaluation. |
+| File-content expression | `String` | Reads one safe UTF-8 package file and preserves its exact characters after expression evaluation. |
 | Abstract Map/List sent over HTTP/MQ | requestFormat | Serializes the value at the outbound boundary. |
 | Log or resource evidence | format / evidence.output.format | Produces a human-readable representation. |
 
@@ -32,9 +32,9 @@ DB results are already typed values. Tool, Action, Template, Flow and expression
 
 DB query, scalar, and update operations use the first-class DBHelper call forms `db.<helper>.query(...)`, `db.<helper>.scalar(...)`, and `db.<helper>.update(...)` inside a normal `type: tool` Action. A DB call accepts one String `sql` argument plus either positional `params` or named `parameters`; `sql=&{project-relative-file.sql}` supplies package SQL content. The historical `type: db` Action is retained only by archived schema versions.
 
-## Project-file expressions return a `String`
+## File-content expressions return a `String`
 
-The current replacement for the historical Render Action is the typed project-file value expression `&{path}`. It always returns one `String`; it never infers a document format, parses an extension, expands a glob, or creates an output file:
+The current replacement for the historical Render Action is the typed file-content value expression `&{path}`. It always returns one `String`; it never infers a document format, parses an extension, expands a glob, or creates an output file:
 
 ~~~yaml
 requestText:
@@ -43,7 +43,7 @@ requestText:
   expression: "&{templates/payment/payload/request.xml}"
 ~~~
 
-`${...}` remains a Context reference and `#{...}` remains an expression/call. `&{...}` is a static, one-file locator; v1 has no glob or dynamic locator form. The locator is relative to the canonical ATT project root. A descriptor-relative `./` or `../` path is allowed only when its canonical target remains inside that root. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace and glob syntax fail validation.
+`${...}` remains a Context reference and `#{...}` remains an expression/call. `&{...}` is a static, one-file locator; v1 has no glob or dynamic locator form. The locator is relative to the canonical ATT package root. A descriptor-relative `./` or `../` path is allowed only when its canonical target remains inside that root. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace and glob syntax fail validation.
 
 Ordinary UTF-8 files are returned unchanged. If the file contains `${...}` or `#{...}`, ATT compiles those nodes once and evaluates them for each execution; the compiled plan is immutable and dynamic values are not reparsed as a second template. Run and Debug reuse the plan until the file fingerprint changes. Load validates and captures the selected file identity, content and compiled dependency closure before scheduling, so active iterations see a stable snapshot.
 
@@ -61,7 +61,7 @@ sendRequest:
 
 For HTTP or MQ, pass the `String` as the body/payload. The resource encodes the exact text with its configured charset/CCSID. HTTP content type and MQ transport metadata remain resource-owned settings. `&{...}` is valid in Tool/Helper call arguments, Assign expressions, Log values and other typed value positions.
 
-requestFormat is for abstract structured values such as Map or List. Such a body requires an explicit format, for example requestFormat=json. Combining requestFormat with a `String` fails; a project-file result is never silently parsed and serialized. HTTP, MQ, and SSH Resource calls consume project-file content as String values and do not resolve local file-path arguments.
+requestFormat is for abstract structured values such as Map or List. Such a body requires an explicit format, for example requestFormat=json. Combining requestFormat with a `String` fails; a file-content result is never silently parsed and serialized. HTTP, MQ, and SSH Resource calls consume file content as String values and do not resolve local file-path arguments.
 
 ## Tool, DB and Flow results
 
@@ -152,7 +152,7 @@ When a Tool retries, collectors run for every primary attempt before that attemp
 
 `call` is required. `timeoutMs` is independent of the primary Tool timeout. `onFailure: continue` is the normal application-log pattern so a diagnostic collection failure does not hide the original business or assertion failure; `stop` makes the collector failure an Action error. Collector status and diagnostic remain observable, and collector failure never changes the primary logical result. Distinguish an evidence collector from an ordinary Tool/Log/Assign Action: use a collector for diagnostic data needed before the containing Tool assertion, and an ordinary Action when the collected value is normal business/test data for later assertions.
 
-Collector results follow the normal typed-result rules. Evidence placement does not stringify a map, list or project-file `String`; helper `evidence.output` is an explicit presentation boundary. In Load, explicit collector execution is separate from helper `evidence.output` serialization. Resource-output formatting remains controlled by the Load evidence policy and is not silently substituted for or dropped in place of an author-requested collector.
+Collector results follow the normal typed-result rules. Evidence placement does not stringify a map, list or file-content `String`; helper `evidence.output` is an explicit presentation boundary. In Load, explicit collector execution is separate from helper `evidence.output` serialization. Resource-output formatting remains controlled by the Load evidence policy and is not silently substituted for or dropped in place of an author-requested collector.
 
 ## Log: typed value to case log
 
@@ -168,7 +168,7 @@ logOrder:
 
 Log is a plain Case-log entry. The current v3.6 contract removes `level`; delete it when migrating. Historical v3.4/v3.5 Template and Flow descriptors still accept their schema-defined Log level for compatibility. Internal diagnostic severity remains separate. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
 
-When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A project-file String is emitted as-is when used as a value; Log does not infer or attach a document format. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
+When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A file-content String is emitted as-is when used as a value; Log does not infer or attach a document format. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
 
 ## Expressions and variable scope
 
@@ -223,6 +223,6 @@ Each attempt executes its operation, publishes current result/evidence/diagnosti
 
 The condition can inspect `output.status`, `output.result`, `output.evidence`, `output.diagnostic`, the one-based `output.attempt`, and EXEC/META paths valid in the current scope. Top-level output is cleared at the start of each attempt so it cannot expose stale result/evidence. History remains in `output.attempts[n]`. Each `retryDecision` records category, candidate, whenEvaluated, whenResult (if evaluated), allowed and a reason such as WHEN_FALSE or MAX_ATTEMPTS.
 
-Conditions use normal `${...}`/`#{...}` typing and must return Boolean; numbers and strings such as 'false' are not coerced. Use `when: "#{false}"` to stop retry. Strict missing paths and expression failures produce normal diagnostics at retry.when and terminate retry. Pure deterministic built-ins are allowed; Tool/DB/MQ/HTTP/SSH calls, file/project-file operations, sequences, randomness and current-time operations are forbidden. Deterministic syntax/type errors fail validation; runtime result types and unavailable paths are checked when the gate runs.
+Conditions use normal `${...}`/`#{...}` typing and must return Boolean; numbers and strings such as 'false' are not coerced. Use `when: "#{false}"` to stop retry. Strict missing paths and expression failures produce normal diagnostics at retry.when and terminate retry. Pure deterministic built-ins are allowed; Tool/DB/MQ/HTTP/SSH calls, file/file-content operations, sequences, randomness and current-time operations are forbidden. Deterministic syntax/type errors fail validation; runtime result types and unavailable paths are checked when the gate runs.
 
 TIMEOUT is the canonical Action outcome; suite/report aggregate operational failure remains ERROR. Authors must decide whether side-effecting operations such as MQ request or HTTP POST are safe to replay. Unconditional TIMEOUT retry can duplicate a business transaction; ATT does not silently suppress MQ retry. See the [MQHelper example](resources/mqhelper.md).

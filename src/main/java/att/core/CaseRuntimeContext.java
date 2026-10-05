@@ -702,7 +702,7 @@ public final class CaseRuntimeContext {
     /** Adds only curated component metadata; credentials/config objects never enter META. */
     public void setProject(Path projectRoot) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
-        setComponentMetadata("PROJECT", mapOf("root", this.projectRoot.toString(), "id", projectRoot.getFileName() == null ? "" : projectRoot.getFileName().toString()));
+        metaNode.put("PACKAGE_ROOT", this.projectRoot.toString());
     }
 
     public Path projectRoot() { return projectRoot; }

@@ -46,7 +46,7 @@ public final class ContextPathPolicy {
     }
     public static boolean isCanonicalExecField(String field) { return isFrameworkOwnedExecField(field); }
     public static boolean isCanonicalMetaField(String field) {
-        return "PROJECT".equals(field) || "SOURCE".equals(field) || "TARGET".equals(field)
+        return "PACKAGE_ROOT".equals(field) || "SOURCE".equals(field) || "TARGET".equals(field)
                 || "TEMPLATE".equals(field) || "FLOW".equals(field) || "TOOL".equals(field)
                 || "DBHELPER".equals(field) || "MQHELPER".equals(field)
                 || "HTTPHELPER".equals(field);
@@ -68,6 +68,7 @@ public final class ContextPathPolicy {
     public static boolean isValidationValueAvailable(String path) {
         Scope scope = classify(path);
         return scope == Scope.CANONICAL_INPUT
+                || "META.PACKAGE_ROOT".equals(path)
                 || (path != null && (path.startsWith("META.SOURCE.") || path.startsWith("META.SOURCE[")
                 || path.startsWith("META.TARGET.") || path.startsWith("META.TARGET[")))
                 || (path != null && path.startsWith("CASE.") && !isLegacyStageEvidence(path) && !"CASE.outputDirectory".equals(path));

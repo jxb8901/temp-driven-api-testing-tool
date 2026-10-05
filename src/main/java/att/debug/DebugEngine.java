@@ -96,6 +96,11 @@ public final class DebugEngine {
         return Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar) ? sidecar : null;
     }
 
+    /** Returns the exact optional sidecar path used by Debug auto-discovery. */
+    public Path discoverableInputPath(String type, String id) throws Exception {
+        return autoInput(type, id);
+    }
+
     /** Validates a sidecar using the exact Load promotion path, not standalone Debug root availability. */
     public Path validateDiscoverableTargetForLoad(String type, String id,
                                                   Map<String, Object> quickLoadPolicy) throws Exception {

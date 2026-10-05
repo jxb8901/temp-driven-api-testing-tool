@@ -405,7 +405,8 @@ class DebugEngineTest {
             execution.start();
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(4L);
             while (System.nanoTime() < deadline && execution.isAlive()) {
-                if (bytes.toString("UTF-8").contains("type: tool, status: START")) {
+                String console = bytes.toString("UTF-8");
+                if (console.contains("type: tool, status: START")) {
                     sawStart = true;
                     stillRunningAtStart = execution.isAlive();
                     break;

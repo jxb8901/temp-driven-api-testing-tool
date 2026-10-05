@@ -4,7 +4,7 @@
 
 HTTPHelper call 不再接受 `file`；請直接將 `&{project-relative-file}` 傳入 `body`。MQHelper `send` 和 `request` 不再接受 `file`；請將 expression 傳入 `payload`。SSHHelper `upload` 現在要求 `payload` content，並拒絕 `localPath`；請直接傳入 `&{...}`。SSHHelper 不再支援 `download`，因為它需要 local destination path。若工作必須從主機取回檔案，請明確配置 command-backed Tool。這些變更移除 Resource API 原生的任意 binary local-file input；`&{...}` 提供 UTF-8 text。
 
-Case log、CLI output 和輸出的 case evidence 會將 canonical project root 下的 path 顯示為 `$ATT_HOME` 或 `$ATT_HOME/<relative-path>`，並統一使用 `/`。`$ATT_HOME` 只是在 presentation 中使用的 token，不是 environment variable、Context root 或 file-expression locator。Runtime resolution 和 filesystem access 仍使用 canonical absolute Path。project root 以外的 absolute path，不論是 Path value 或診斷訊息內的路徑，都會以受限的 `$EXTERNAL/<basename>` 顯示。明確的 remote-path 欄位及 URL 會保留原值。
+Case log、CLI output 和輸出的 case evidence 會將 canonical package root 下的 path 顯示為 `$ATT_HOME` 或 `$ATT_HOME/<relative-path>`，並統一使用 `/`。`$ATT_HOME` 只是在 presentation 中使用的 token，不是 environment variable、Context root 或 file-expression locator。Runtime resolution 和 filesystem access 仍使用 canonical absolute Path。package root 以外的 absolute path，不論是 Path value 或診斷訊息內的路徑，都會以受限的 `$EXTERNAL/<basename>` 顯示。明確的 remote-path 欄位及 URL 會保留原值。
 
 ## Previous release Testdata migration
 
@@ -12,24 +12,24 @@ Case log、CLI output 和輸出的 case evidence 會將 canonical project root �
 
 Load workload `testdata.<id>` 設定控制 `scope`，並可選擇整份覆蓋 descriptor 的 `selection` policy。Scope 預設為 `iteration`；`user` 只適用 closed-VU workload。請明確選擇 `error`、`recycle` 或 `stop` exhaustion。Selection metadata 會記錄，但不包含 record value。
 
-ATT 3.6.2 將型別化 operation result、外部 parsing、project-file String、outbound transport 和人類可讀 evidence 分開。
+ATT 3.6.2 將型別化 operation result、外部 parsing、file-content String、outbound transport 和人類可讀 evidence 分開。
 
 | 舊欄位／模型 | 3.6.2 遷移方式 |
 |---|---|
-| `att-template/v3.4` 或 `att-flow/v3.4` 的 `type: render` | 將 descriptor 改為 active v3.5 schema，並以使用 project-file expression 的 Assign 取代每個 Render Action。Historical v3.4 descriptor 只可經由 historical schema path 載入。 |
+| `att-template/v3.4` 或 `att-flow/v3.4` 的 `type: render` | 將 descriptor 改為 active v3.5 schema，並以使用 file-content expression 的 Assign 取代每個 Render Action。Historical v3.4 descriptor 只可經由 historical schema path 載入。 |
 | `type: render` / `payload: path` | 使用 `type: assign`、variable `name` 及 `expression: "&{project-relative-file}"`；將 `${EXEC.VARS.<name>}` 傳給 consumer。 |
 | Command Tool result.format | 將 parsing 設定移至 Tool descriptor 的 stdoutFormat。 |
 | 共用 Action result.format/path/overwrite | 移除。output.result 是 native logical typed value；沒有隱式檔案替代方案。 |
-| Render result.format/path 或 renderAs/saveAs | 移除舊欄位。Project-file expression 回傳 exact UTF-8 String，不建立結果檔或 targetFiles。 |
-| 透過 targetFiles 傳遞 Render 檔案 | 直接將 project-file String 傳入 HTTP body、MQ payload 或 SSH upload payload。 |
-| 在 project-file String 使用 requestFormat | 移除。requestFormat 僅供抽象 Map/List；String + requestFormat 會失敗。 |
+| Render result.format/path 或 renderAs/saveAs | 移除舊欄位。File-content expression 回傳 exact UTF-8 String，不建立結果檔或 targetFiles。 |
+| 透過 targetFiles 傳遞 Render 檔案 | 直接將 file-content String 傳入 HTTP body、MQ payload 或 SSH upload payload。 |
+| 在 file-content String 使用 requestFormat | 移除。requestFormat 僅供抽象 Map/List；String + requestFormat 會失敗。 |
 | Dynamic 或不安全 file locator | 改為一個 static project-relative file。Absolute path、glob、dynamic locator、missing file、directory、非 UTF-8 bytes 及 symlink escape 都會被拒絕。 |
 | Log file | 直接將 value 傳入 Log.value。 |
 | Log fields | 將 typed map/list 放在 Log.value，並選擇 Log.format。 |
 | HTTP/MQ 共用 result 格式設定 | 使用 responseFormat 做 ingress parsing；可選 evidence.output.format 只控制人類可讀表示。 |
 | 舊 active resource/config schema | 使用 [Schema and Version Matrix](schema-matrix.md) 的 active schema，並遷移上述欄位。Historical schemas 不是 active contracts。 |
 
-Project-file String 傳入 HTTP 的例子：
+File-content String 傳入 HTTP 的例子：
 
 ~~~yaml
 prepareRequest:
@@ -72,13 +72,13 @@ ATT 3.6.2 使用 `att-template/v3.6` 與 `att-flow/v3.6` 作為 active schemas�
 | Historical `sqlFile` | 改用單一 String argument `sql=&{project-relative-sql-file}`；`params` 與 `parameters` 互斥。 |
 | Historical `type: render` | 改為使用 `"&{project-relative-file}"` expression 的 Assign；後續 Action 使用 `${EXEC.VARS.<name>}`。 |
 | Command Tool result.format | Tool descriptor stdoutFormat |
-| Render result.format/path/overwrite 或 renderAs/saveAs | 移除舊 persistence 欄位。Project-file expression 回傳 exact UTF-8 String，不會隱式建立結果檔。 |
+| Render result.format/path/overwrite 或 renderAs/saveAs | 移除舊 persistence 欄位。File-content expression 回傳 exact UTF-8 String，不會隱式建立結果檔。 |
 | Log file | 將 typed value 直接傳入 Log.value |
 | Log fields | 將 typed map/list 放入 Log.value，並指定 Log.format |
-| Render targetFiles handoff 至 HTTP/MQ/SSH | 將 project-file String 直接作為 HTTP body、MQ payload 或 SSH upload payload |
+| Render targetFiles handoff 至 HTTP/MQ/SSH | 將 file-content String 直接作為 HTTP body、MQ payload 或 SSH upload payload |
 | 在 Render result 使用 requestFormat | 移除；requestFormat 留給抽象 Map/List |
 
-Project-file path 相對於 canonical project root。`./` 與 `../` 只有在 canonical target 仍位於該 root 內時才允許。v1 沒有 glob 或 dynamic locator；target 必須是 regular strict-UTF-8 file。
+File-content path 相對於 canonical package root。`./` 與 `../` 只有在 canonical target 仍位於該 root 內時才允許。v1 沒有 glob 或 dynamic locator；target 必須是 regular strict-UTF-8 file。
 
 Unsupported schemaVersion 會在 execution 前由 validation 拒絕並提供 migration guidance。ATT 不會靜默轉換舊欄位，也不會為產生 guidance 而呼叫 Tools/resources。
 

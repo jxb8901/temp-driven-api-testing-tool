@@ -47,7 +47,7 @@ public final class FrameworkConfigLoader {
                 att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, rawMap,
                         schemaVersion, Version.CONFIG_SCHEMA);
                 throw new IllegalArgumentException("Unsupported config schemaVersion '" + schemaVersion
-                        + "'; ATT 3.7.3 supports " + Version.CONFIG_SCHEMA + " and " + Version.PREVIOUS_CONFIG_SCHEMA
+                        + "'; ATT 3.7.4 supports " + Version.CONFIG_SCHEMA + " and " + Version.PREVIOUS_CONFIG_SCHEMA
                         + ". Migrate command Tool result.format to stdoutFormat and update referenced descriptors. See docs/reference/appendices/migrations.md.");
             }
             boolean v29 = v210;
@@ -576,7 +576,7 @@ public final class FrameworkConfigLoader {
             boolean v27 = false;
             boolean v26 = false;
             if (!v29) throw new IllegalArgumentException("Unsupported tool group schemaVersion '" + version
-                    + "'; ATT 3.7.3 supports only " + Version.TOOL_GROUP_SCHEMA
+                    + "'; ATT 3.7.4 supports only " + Version.TOOL_GROUP_SCHEMA
                     + ". Migrate command Tool parsing to stdoutFormat and see docs/reference/appendices/migrations.md.");
             Path schema = schema(projectRoot, "att-tool-group-v2.9.schema.json");
             att.validation.SchemaMigrationGuidance.verify(schema, schema, group, version, Version.TOOL_GROUP_SCHEMA);
@@ -686,10 +686,10 @@ public final class FrameworkConfigLoader {
             Map<?, ?> descriptor = (Map<?, ?>) entry.getValue();
             if (allowLegacyDelimit) {
                 SchemaSupport.rejectUnknown(descriptor, "tools." + toolKey + ".arguments." + key,
-                        "name", "description", "required", "delimit", "argName", "argNameMode");
+                        "name", "description", "required", "delimit", "argName", "argNameMode", "type", "enumValues");
             } else {
                 SchemaSupport.rejectUnknown(descriptor, "tools." + toolKey + ".arguments." + key,
-                        "name", "description", "required", "argName", "argNameMode");
+                        "name", "description", "required", "argName", "argNameMode", "type", "enumValues");
             }
             if (!descriptor.containsKey("required")) throw new IllegalArgumentException("required is mandatory for argument: " + toolKey + "." + key);
             String delimit = descriptor.get("delimit") == null ? "" : SchemaSupport.string(descriptor.get("delimit"), "tools." + toolKey + ".arguments." + key + ".delimit", true);
@@ -699,9 +699,24 @@ public final class FrameworkConfigLoader {
             if (!argName.isEmpty() && argName.matches(".*[\\s\\p{Cntrl}].*")) throw new IllegalArgumentException("argName must be one non-blank argv token: " + toolKey + "." + key);
             String argNameMode = descriptor.get("argNameMode") == null ? "once" : SchemaSupport.string(descriptor.get("argNameMode"), "tools." + toolKey + ".arguments." + key + ".argNameMode", true);
             if (!("once".equals(argNameMode) || "repeat".equals(argNameMode))) throw new IllegalArgumentException("argNameMode must be once or repeat: " + toolKey + "." + key);
+            String type = descriptor.get("type") == null ? "any" : SchemaSupport.string(descriptor.get("type"), "tools." + toolKey + ".arguments." + key + ".type", true).toLowerCase(java.util.Locale.ROOT);
+            if (!java.util.Arrays.asList("any", "string", "integer", "long", "decimal", "boolean", "enum", "bytes", "map", "list").contains(type))
+                throw new IllegalArgumentException("Unsupported Tool argument type '" + type + "': " + toolKey + "." + key);
+            List<String> enumValues = new ArrayList<String>();
+            Object rawEnumValues = descriptor.get("enumValues");
+            if (rawEnumValues != null) {
+                if (!(rawEnumValues instanceof List)) throw new IllegalArgumentException("enumValues must be a list: " + toolKey + "." + key);
+                for (Object item : (List<?>) rawEnumValues) {
+                    if (!(item instanceof String) || ((String) item).isEmpty()) throw new IllegalArgumentException("enumValues must contain non-empty strings: " + toolKey + "." + key);
+                    if (enumValues.contains(item)) throw new IllegalArgumentException("enumValues must be unique: " + toolKey + "." + key);
+                    enumValues.add((String) item);
+                }
+            }
+            if ("enum".equals(type) != !enumValues.isEmpty())
+                throw new IllegalArgumentException("type: enum requires non-empty enumValues, and enumValues is valid only with type: enum: " + toolKey + "." + key);
             result.put(key, new ToolArgumentConfig(key, required(descriptor, "name", "argument " + key),
                     required(descriptor, "description", "argument " + key), booleanValue(descriptor.get("required"), false,
-                    "required for argument " + toolKey + "." + key), delimit, argName, argNameMode));
+                    "required for argument " + toolKey + "." + key), delimit, argName, argNameMode, type, enumValues));
         }
         return result;
     }

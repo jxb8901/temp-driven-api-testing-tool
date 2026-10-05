@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT v3.7.3 使用手冊與參考</title>
+  <title>ATT v3.7.4 使用手冊與參考</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,12 +233,12 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT v3.7.3 使用手冊與參考</h1>
+<h1 class="title">ATT v3.7.4 使用手冊與參考</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
-<li><a href="#att-v373-使用手冊與參考"
-id="toc-att-v373-使用手冊與參考">ATT v3.7.3 使用手冊與參考</a>
+<li><a href="#att-v374-使用手冊與參考"
+id="toc-att-v374-使用手冊與參考">ATT v3.7.4 使用手冊與參考</a>
 <ul>
 <li><a href="#概覽與-product-model" id="toc-概覽與-product-model">概覽與
 Product model</a>
@@ -281,8 +281,8 @@ id="toc-actions-與-typed-values">Actions 與 typed values</a>
 <li><a href="#action-類型" id="toc-action-類型">Action 類型</a></li>
 <li><a href="#區分邏輯值與表示方式"
 id="toc-區分邏輯值與表示方式">區分邏輯值與表示方式</a></li>
-<li><a href="#project-file-expression-回傳-string"
-id="toc-project-file-expression-回傳-string">Project-file expression
+<li><a href="#file-content-expression-回傳-string"
+id="toc-file-content-expression-回傳-string">File-content expression
 回傳 string</a></li>
 <li><a href="#tooldb-與-flow-結果" id="toc-tooldb-與-flow-結果">Tool、DB
 與 Flow 結果</a></li>
@@ -320,9 +320,10 @@ id="toc-expressions-與-built-ins">Expressions 與 built-ins</a>
 <ul>
 <li><a href="#統一-expression-engine"
 id="toc-統一-expression-engine">統一 Expression engine</a></li>
-<li><a href="#project-file-string-expression"
-id="toc-project-file-string-expression">Project-file string
-expression</a></li>
+<li><a href="#file-content-expression"
+id="toc-file-content-expression">File-content expression</a></li>
+<li><a href="#argument-結果型別" id="toc-argument-結果型別">Argument
+結果型別</a></li>
 <li><a href="#testdata-input-mapping-語法"
 id="toc-testdata-input-mapping-語法">Testdata input mapping
 語法</a></li>
@@ -523,8 +524,8 @@ id="toc-advanced-diagnostics">Advanced diagnostics</a></li>
 </ul></li>
 </ul>
 </nav>
-<h1 id="att-v373-使用手冊與參考">ATT v3.7.3 使用手冊與參考</h1>
-<p>Author: Jeffrey + ChatGPT Version: 3.7.3 Status:
+<h1 id="att-v374-使用手冊與參考">ATT v3.7.4 使用手冊與參考</h1>
+<p>Author: Jeffrey + ChatGPT Version: 3.7.4 Status:
 規範性使用者文件；由模組化來源自動生成</p>
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
 
@@ -537,7 +538,7 @@ id="toc-advanced-diagnostics">Advanced diagnostics</a></li>
   `-- ordered Stage
         `-- Template
               |-- Action
-              |     |-- project-file expression / assert / log / assign
+              |     |-- file-content expression / assert / log / assign
               |     |-- Tool
               |     `-- DB
               `-- Flow -&gt; ordered Actions</code></pre>
@@ -862,7 +863,7 @@ att-template/v3.6。每個 Template 都需要非空且有序的 actions map，�
 description。</p>
 <p>每個 Action
 依類型使用不同契約。<code>&amp;{templates/payment/request.xml}</code>
-這類 project-file expression 會將 exact UTF-8 檔案內容作為 String
+這類 file-content expression 會將 exact UTF-8 檔案內容作為 String
 回傳，不會建立檔案。Tool/DB/HTTP/MQ/SSH action 發布原生型別化 operation
 result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至
 EXEC.VARS；Flow 在巢狀 Action scope 執行。</p>
@@ -913,14 +914,14 @@ execution 開始前驗證（Load 則在 scheduler 啟動前驗證）：</p>
 <ul>
 <li>Run Case/Stage mapping 可讀取
 <code>EXEC.ID</code>、<code>EXEC.RUN_ID</code>、<code>EXEC.STARTED_AT</code>、<code>EXEC.RUN_STARTED_AT</code>、<code>EXEC.OUTPUT_DIR</code>，以及
-<code>META.PROJECT</code>、<code>META.SOURCE</code> 或
+<code>META.PACKAGE_ROOT</code>、<code>META.SOURCE</code> 或
 <code>META.TARGET</code>。</li>
 <li>Debug <code>inputs</code> 可讀取相同的 execution root 與
 metadata，另加 <code>META.TEMPLATE</code>。</li>
 <li>Load workload <code>inputs</code> 可讀取
 <code>EXEC.RUN_ID</code>、<code>EXEC.STARTED_AT</code>、<code>EXEC.RUN_STARTED_AT</code>、已初始化的
 <code>EXEC.LOAD</code> identity fields，以及
-<code>META.PROJECT</code>、<code>META.SOURCE</code>、<code>META.TARGET</code>
+<code>META.PACKAGE_ROOT</code>、<code>META.SOURCE</code>、<code>META.TARGET</code>
 或 <code>META.TEMPLATE</code>。<code>EXEC.ID</code> 與
 <code>EXEC.OUTPUT_DIR</code> 只會在 input 解析後初始化。Arrival-rate
 workload 不提供 <code>EXEC.LOAD.USER_ID</code>；若 mapping
@@ -1103,9 +1104,9 @@ href="reference.zh/configuration.md#使用-x-忽略或停用-att-配置項">Conf
 <td>將外部 response bytes 解析為型別化結果。</td>
 </tr>
 <tr class="odd">
-<td>Project-file expression</td>
+<td>File-content expression</td>
 <td><code>String</code></td>
-<td>讀取安全的 UTF-8 project file，並在 expression evaluation
+<td>讀取安全的 UTF-8 package file，並在 expression evaluation
 後保留其字元。</td>
 </tr>
 <tr class="even">
@@ -1130,9 +1131,9 @@ call 接受一個 String <code>sql</code>，以及 <code>params</code> 或
 其中一種；<code>sql=&amp;{project-relative-file.sql}</code> 可提供
 package SQL 內容。歷史 <code>type: db</code> Action 只由 archived schema
 保留。</p>
-<h3 id="project-file-expression-回傳-string">Project-file expression
+<h3 id="file-content-expression-回傳-string">File-content expression
 回傳 string</h3>
-<p>歷史 Render Action 的現行替代方式是 typed project-file value
+<p>歷史 Render Action 的現行替代方式是 typed file-content value
 expression <code>&amp;{path}</code>。它一定回傳一個
 <code>String</code>，不會推斷 document format、parse 副檔名、展開 glob
 或建立輸出檔：</p>
@@ -1144,7 +1145,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb10-1"><a href=
 <p><code>${...}</code> 仍然是 Context reference，<code>#{...}</code>
 仍然是 expression/call，<code>&amp;{...}</code> 是 static、one-file
 locator；v1 沒有 glob 或 dynamic locator。Locator 相對 canonical ATT
-project root。<code>./</code> 或 <code>../</code> descriptor-relative
+package root。<code>./</code> 或 <code>../</code> descriptor-relative
 path 只有在 canonical target 仍在該 root 內才允許。Absolute
 path、missing file、directory、symlink escape、非 UTF-8
 bytes、前後空白和 glob syntax 都會在 validation 失敗。</p>
@@ -1171,8 +1172,8 @@ resource 管理。<code>&amp;{...}</code> 可用於 Tool/Helper call
 argument、Assign expression、Log value 和其他 typed value 位置。</p>
 <p>requestFormat 僅供 Map 或 List 等抽象結構化值使用。此類 body
 必須明確指定格式，例如 requestFormat=json。String 與 requestFormat
-同時出現會失敗，確保 project-file result 不會被靜默
-parse/serialize。HTTP、MQ、SSH Resource call 會將 project-file content
+同時出現會失敗，確保 file-content result 不會被靜默
+parse/serialize。HTTP、MQ、SSH Resource call 會將 file-content content
 作為 String value 消費，不會解析 local file-path argument。</p>
 <h3 id="tooldb-與-flow-結果">Tool、DB 與 Flow 結果</h3>
 <p>Command-backed Tool 在 Tool descriptor 宣告 stdoutFormat：</p>
@@ -1257,7 +1258,7 @@ failure 不會改變 primary logical result。若資料是後續 assertion
 要使用的正常 business/test value，應使用普通 Tool/Log/Assign
 Action，而非 evidence collector。</p>
 <p>Collector result 遵守一般 typed-result 規則。放在 evidence
-下不代表會轉成 String；Map、List 和 project-file <code>String</code>
+下不代表會轉成 String；Map、List 和 file-content <code>String</code>
 均保留型別。在 Load 中，明確要求的 collector execution 與 helper
 <code>evidence.output</code> serialization 是兩件事；resource-output
 格式化仍由 Load evidence policy 控制，不會靜默取代或刪除
@@ -1281,7 +1282,7 @@ map/list。完整的 ${...} 和 #{...} expression 保留原始型別；map/list
 text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format
 時必須提供 value。</p>
 <p>同時提供 message 和 value 時，Log 輸出 message、換行，再輸出格式化
-value。output.result 是最終字串。Project-file String 會原樣輸出；Log
+value。output.result 是最終字串。File-content String 會原樣輸出；Log
 不會推斷或附加 document format，也不會讀取檔案或使用 fields
 map。需要結構化日誌時，將 typed map/list 放到 value。</p>
 <h3 id="expressions-與變數-scope">Expressions 與變數 scope</h3>
@@ -1404,7 +1405,7 @@ reason（例如 WHEN_FALSE、MAX_ATTEMPTS）。</p>
 Boolean。<code>when: "#{false}"</code> 可停止 retry。Strict missing path
 與 expression error 使用一般 diagnostic，定位至 retry.when
 並停止重試。Pure deterministic built-in
-可使用；Tool/DB/MQ/HTTP/SSH、file/project-file、sequence、random 與
+可使用；Tool/DB/MQ/HTTP/SSH、file/file-content、sequence、random 與
 current-time operation 均禁止。可確定的 syntax/type error 在 validation
 時拒絕；runtime result 的型別與 missing path 在 gate 評估時檢查。</p>
 <p>TIMEOUT 是 canonical Action outcome；suite/report aggregate 的
@@ -1502,10 +1503,16 @@ href="reference.zh/execution-modes/debug.md">Standalone Debug</a>。</p>
 timing diagnostics 留在 evidence-only DIAG.load，不能作為 expression
 root。</p>
 <h3 id="meta-欄位清單與生命週期">META 欄位清單與生命週期</h3>
-<p>公開 META root 只包含下表列出的
-<code>PROJECT</code>、<code>SOURCE</code>、<code>TARGET</code>、<code>TEMPLATE</code>、<code>FLOW</code>、<code>TOOL</code>、<code>DBHELPER</code>、<code>MQHELPER</code>、<code>HTTPHELPER</code>
-和 <code>SSHHELPER</code>。META 只包含描述欄位。元件在目前 mode/scope
-尚未 active 時，相應路徑可能不存在。</p>
+<p>公開 META root 包含
+<code>PACKAGE_ROOT</code>、<code>SOURCE</code>、<code>TARGET</code>、<code>TEMPLATE</code>、<code>FLOW</code>、<code>TOOL</code>、<code>DBHELPER</code>、<code>MQHELPER</code>、<code>HTTPHELPER</code>
+和 <code>SSHHELPER</code>。<code>META.PACKAGE_ROOT</code> 是 active ATT
+package root 的正規化絕對路徑，在 Run、Debug 和 Load package binding
+後全程可用。舊有 <code>META.PROJECT.id</code> 與
+<code>META.PROJECT.root</code> 已移除，不提供相容 alias。ATT
+installation scope (<code>ATT_HOME</code>)、package scope
+(<code>META.PACKAGE_ROOT</code>) 和 execution output scope
+(<code>EXEC.OUTPUT_DIR</code>) 各自獨立。META 只包含描述欄位；元件在目前
+mode/scope 尚未 active 時，相應路徑可能不存在。</p>
 <table>
 <thead>
 <tr class="header">
@@ -1517,26 +1524,20 @@ root。</p>
 </thead>
 <tbody>
 <tr class="odd">
-<td>META.PROJECT.id</td>
-<td>Project 目錄名稱；String，例如 <code>payment-att</code>。</td>
-<td>Run、Debug、Load；project 綁定後。</td>
+<td>META.PACKAGE_ROOT</td>
+<td>正規化絕對 package root 路徑；String，例如
+<code>/srv/att/payment</code>。</td>
+<td>Run、Debug、Load；package binding 後。</td>
 <td>Execution-wide。</td>
 </tr>
 <tr class="even">
-<td>META.PROJECT.root</td>
-<td>正規化 project root 路徑；String，例如
-<code>/srv/att/payment</code>。</td>
-<td>Run、Debug、Load；project 綁定後。</td>
-<td>Execution-wide。</td>
-</tr>
-<tr class="odd">
 <td>META.SOURCE.type</td>
 <td>Source 類型；String：<code>testcase</code>、<code>debug</code> 或
 <code>load</code>。</td>
 <td>Run、Debug、Load。</td>
 <td>Execution-wide。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.path</td>
 <td>正規化絕對 source path；String，例如
 <code>/srv/att/payment/testcase/payment.xlsx</code>、<code>/srv/att/payment/debug.yaml</code>
@@ -1544,58 +1545,58 @@ root。</p>
 <td>Run、Debug、Load，source file 存在時。</td>
 <td>Execution-wide；memory source 可缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.caseId</td>
 <td>Canonical TestCase 或 synthetic Debug Case ID；String，例如
 <code>payment.default.P001</code>。</td>
 <td>Run、Debug。</td>
 <td>Execution-wide；Load 缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.workbookId</td>
 <td>Workbook identifier；String，例如 <code>payment</code>。</td>
 <td>Run。</td>
 <td>Execution-wide；非 workbook Case 缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.groupId</td>
 <td>Workbook group identifier；String，例如 <code>default</code>。</td>
 <td>Run。</td>
 <td>Execution-wide；非 workbook Case 缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.rowCaseId</td>
 <td>Workbook row 的 Case ID；String，例如 <code>P001</code>。</td>
 <td>Run。</td>
 <td>Execution-wide；非 workbook Case 缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.sheet</td>
 <td>Workbook sheet 名稱；String，例如 <code>Payment</code>。</td>
 <td>Run，adapter 有提供時。</td>
 <td>Execution-wide；Debug/Load 或無值時缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.row</td>
 <td>Workbook 由 1 起始的 row number；Number，例如 <code>12</code>。</td>
 <td>Run，adapter 有提供時。</td>
 <td>Execution-wide；Debug/Load 或無值時缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.workbook</td>
 <td>可選 workbook label；有值時為 String，例如
 <code>payment_regression.xlsx</code>。</td>
 <td>Run，adapter 有提供時。</td>
 <td>Execution-wide；否則缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.scenario</td>
 <td>不含副檔名的 Load scenario 名稱；String，例如
 <code>payment-smoke</code>。</td>
 <td>Load。</td>
 <td>Execution-wide；非 Load 時缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TARGET.type</td>
 <td>已解析 target
 類型；String：<code>testcase</code>、<code>template</code>、<code>flow</code>
@@ -1603,14 +1604,14 @@ root。</p>
 <td>Run、Debug、Load；選定 target 後。</td>
 <td>Execution-wide。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TARGET.id</td>
 <td>已解析 target identifier；String，例如 <code>PAYMENT_INVOKE</code>
 或 <code>payment.flow.v1</code>。</td>
 <td>Run、Debug、Load；選定 target 後。</td>
 <td>Execution-wide。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TEMPLATE.id</td>
 <td>Active Template 或已解析 Load execution-wrapper ID；String，例如
 <code>PAYMENT_INVOKE</code>。</td>
@@ -1619,88 +1620,88 @@ root。</p>
 <td>Component scope；解析前缺席，scope 結束後 restore/remove。Load
 Flow/Tool target 使用已解析的 synthetic wrapper。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TEMPLATE.path</td>
 <td>正規化 Template 或 execution-wrapper 目錄；String，例如
 <code>/srv/att/templates/PAYMENT_INVOKE</code>。</td>
 <td>與 META.TEMPLATE.id 相同。</td>
 <td>Component scope；解析前缺席，scope 結束後 restore/remove。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.FLOW.id</td>
 <td>Active Flow ID；String，例如 <code>payment.request.v1</code>。</td>
 <td>Run、Debug、Load 的 Flow invocation 期間。</td>
 <td>Invocation scope；進入 push、返回 restore、inactive 時缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.FLOW.invocationId</td>
 <td>Caller Action ID；String，例如 <code>sendRequest</code>。</td>
 <td>與 META.FLOW.id 相同。</td>
 <td>沒有 active Flow 時缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.FLOW.depth</td>
 <td>由 1 開始的巢狀 Flow 深度；Number，例如 <code>1</code>。</td>
 <td>與 META.FLOW.id 相同。</td>
 <td>沒有 active Flow 時缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TOOL.id</td>
 <td>Active configured Tool 或 built-in 名稱；String，例如
 <code>payment.queryOrder</code> 或 <code>upper</code>。</td>
 <td>Run、Debug、Load invocation 期間。</td>
 <td>Invocation scope；返回後不保留最後一次 Tool。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TOOL.type</td>
 <td>Invocation 類型；String，例如 <code>tool</code> 或
 <code>builtin</code>。</td>
 <td>與 META.TOOL.id 相同。</td>
 <td>外層 invocation 不存在時，返回後缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.DBHELPER.id</td>
 <td>Logical DBHelper ID；String，例如 <code>orders</code>。</td>
 <td>Run、Debug、Load 的 DBHelper operation/DB Action 期間。</td>
 <td>Invocation scope；外層 scope 不存在時返回後缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.DBHELPER.type</td>
 <td>Resource 類型；String，<code>dbhelper</code>。</td>
 <td>與 META.DBHELPER.id 相同。</td>
 <td>外層 scope 不存在時返回後缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.MQHELPER.id</td>
 <td>Logical MQHelper ID；String，例如 <code>payment</code>。</td>
 <td>Run、Debug、Load 的 MQHelper operation 期間。</td>
 <td>Invocation scope；push/restore，返回後無外層 scope 時缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.MQHELPER.type</td>
 <td>Resource 類型；String，<code>mqhelper</code>。</td>
 <td>與 META.MQHELPER.id 相同。</td>
 <td>返回後無外層 scope 時缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.HTTPHELPER.id</td>
 <td>Logical HTTPHelper ID；String，例如 <code>payment</code>。</td>
 <td>Run、Debug、Load 的 HTTPHelper operation 期間。</td>
 <td>Invocation scope；push/restore，返回後無外層 scope 時缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.HTTPHELPER.type</td>
 <td>Resource 類型；String，<code>httphelper</code>。</td>
 <td>與 META.HTTPHELPER.id 相同。</td>
 <td>返回後無外層 scope 時缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SSHHELPER.id</td>
 <td>Logical SSHHelper ID；String，例如 <code>application</code>。</td>
 <td>Run、Debug、Load 的 SSH Resource Helper operation 期間。</td>
 <td>Invocation scope；push/restore，返回後無外層 scope 時缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SSHHELPER.type</td>
 <td>Resource 類型；String，<code>sshhelper</code>。</td>
 <td>與 META.SSHHELPER.id 相同。</td>
@@ -1753,20 +1754,34 @@ paths；optional lookup 在路徑尾端加問號。</p>
 <div class="sourceCode" id="cb21"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{${EXEC.INPUT.amount} &gt; 0}&quot;</span></span>
 <span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}&quot;</span></span></code></pre></div>
-<p>依各欄位支援的形式使用 expression。Project-file 內容、Action
+<p>依各欄位支援的形式使用 expression。File-content 內容、Action
 description/assert、Log message/value、assign expression 和 Tool call
 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見<a
 href="reference.zh/actions.md">Action 與型別化值</a>。</p>
-<h3 id="project-file-string-expression">Project-file string
-expression</h3>
-<p><code>&amp;{path}</code> 是 typed project-file
-expression。它只解析一個 regular UTF-8 檔案，並且一定回傳
-<code>String</code>；不會推斷 document format、解析副檔名、展開 glob
-或建立 output file。Path 相對於 canonical ATT project
-root。Descriptor-relative 的 <code>./</code> 與 <code>../</code> 只有在
-canonical target 仍位於該 root 內時才允許。Absolute path、missing
-file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax
-及 dynamic locator 都會在 validation 失敗。</p>
+<h3 id="file-content-expression">File-content expression</h3>
+<p><code>&amp;{path}</code> 是 file-content expression：它讀取 active
+ATT package root 內一個靜態指定的 regular UTF-8 檔案，並回傳原始 String
+content。它不會推斷或解析文件格式、展開 glob 或建立 output
+file。Descriptor-relative 的 <code>./</code> 與 <code>../</code> 只有在
+canonical target 仍位於 <code>META.PACKAGE_ROOT</code>
+內時才允許。Absolute path、missing file、directory、symlink escape、非
+UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation
+失敗。File content 不會自動解析為 JSON、YAML 或 XML。</p>
+<h3 id="argument-結果型別">Argument 結果型別</h3>
+<p>Argument expression 會先遞迴求值，再呼叫接收它的 function。Target
+argument contract 只套用在最終結果：例如 <code>str.substr</code> 先接收
+<code>&amp;{...}</code> 產生的 file String，再回傳 String，最後 outer
+target argument 才執行型別與 range 檢查。因此
+<code>waitMs=#{str.substr(&amp;{params/wait.txt}, 0, 4)}</code> 在結果為
+integral value 時可供 numeric helper 使用；String payload
+則保留所有原始字元。Scalar String 只會在數值或 Boolean parsing 時
+trim，不會全域修剪 String/payload。Map/List
+會保留型別；不會依副檔名或檔案內容推斷並解析結構。</p>
+<p>Package validation 會在 inputs 靜態可知時解析 literal、static file
+content 及明確 pure built-in，再套用與 runtime 相同的 target argument
+contract。Runtime-dependent expression
+會檢查結構及已宣告型別，並將最終值/range 檢查留待執行；validation
+絕不執行 Tool、resource 或 external call 來取得值。</p>
 <p>Standalone value 或嵌入較大 expression 時，請使用 YAML string：</p>
 <div class="sourceCode" id="cb22"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">prepareRequest</span><span class="kw">:</span></span>
@@ -1827,7 +1842,7 @@ SQL 風格通配符：</p>
 result 和 file output 即使包含 <code>&amp;{...}</code>，亦維持 literal
 String。檔案內的 Context path 和 call 依 enclosing Action 的一般
 ordering、scope 和 resource validation 規則驗證。V1 在
-Run、Debug、validation 和 Load snapshot discovery 都拒絕 project-file
+Run、Debug、validation 和 Load snapshot discovery 都拒絕 file-content
 內容中的巢狀 <code>&amp;{...}</code>，包括 <code>#{...}</code> argument
 內的 locator。</p>
 <p>內建函數通過 <code>#{...}</code> 調用。Canonical 名稱使用
@@ -2044,7 +2059,7 @@ deterministic pure built-in。以下參數均使用具名形式；省略 optiona
 <strong>或</strong>
 <code>parameters: Map&lt;String, value&gt;</code>（兩者互斥；預設沒有
 bind value）。<code>sql</code> 可為 inline SQL 或返回 String 的
-project-file expression。</td>
+file-content expression。</td>
 <td><code>#{db.orders.query(sql='select status from orders where id = :id', parameters={id: ${EXEC.INPUT.orderId}})}</code></td>
 </tr>
 <tr class="even">
@@ -2488,7 +2503,7 @@ selected target 的 dependency closure，因此不需要無關 workbook 或 Case
 <code>&amp;{project-relative-file}</code> expression，再將 UTF-8 String
 傳入 HTTP <code>body</code>、MQ <code>payload</code> 或 SSH upload
 <code>payload</code>。這些 Resource Helper 不會解析各自的 local
-path。Validation 會在外部 I/O 前解析 project file；舊 HTTP/MQ
+path。Validation 會在外部 I/O 前解析 package file；舊 HTTP/MQ
 <code>file</code>、SSH upload <code>localPath</code> 及 SSH
 <code>download</code> call 均會被拒絕。</p>
 <p>按 output directory 分辨排錯階段：</p>
@@ -2931,7 +2946,7 @@ href="system-design/load-scheduler.zh.md">Load scheduler
 design</a>。</p>
 <p>evidence.resources.output 支援 inherit（預設）或 none。none
 停用可選的人類可讀 resource-output 格式化與物化，但保留 typed
-result、stdoutFormat/responseFormat parsing、exact project-file String
+result、stdoutFormat/responseFormat parsing、exact file-content String
 與 requestFormat 行為。Load 將 resource output 延至 iteration
 被保留後才處理；metrics-only iteration 不做 business-output formatting
 或 evidence file I/O。</p>
@@ -3054,7 +3069,7 @@ output path 發布後評估。</p>
 <p>可用值有
 EXEC.RUN_ID、timestamps、EXEC.INPUT、EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE、closed-only
 EXEC.LOAD.USER_ID，以及已建立的
-META.PROJECT/SOURCE/TARGET/TEMPLATE。EXEC.ID 和 EXEC.OUTPUT_DIR
+META.PACKAGE_ROOT/SOURCE/TARGET/TEMPLATE。EXEC.ID 和 EXEC.OUTPUT_DIR
 尚未可用，因為生成的 ID 決定 workspace。還沒有 Action 執行，所以
 EXEC.ACTIONS 與 Flow/Tool/helper invocation META 缺席。</p>
 <p>只允許 deterministic、side-effect-free built-ins。External
@@ -3101,7 +3116,7 @@ href="reference.zh/configuration.md#使用-x-忽略或停用-att-配置項">Conf
 status、assertion detail、diagnostic、attempts 描述執行，不會取代
 business result。Command stdout 使用 stdoutFormat 解析；HTTP/MQ/SSH
 response 或 stdout 使用各自的 responseFormat；DB operation 回傳 native
-typed value。Project-file expression 回傳原樣 file text String，詳見<a
+typed value。File-content expression 回傳原樣 file text String，詳見<a
 href="reference.zh/actions.md">Action 與型別化值</a>。</p>
 <p>Resource evidence 可包含低成本 metadata。Helper 也可選擇配置人類可讀
 snapshot：</p>
@@ -3117,7 +3132,7 @@ presentation，不會修改或取代 output.result。含 secrets
 none。none 略過可選的 resource-output
 formatting/materialization；inherit 會等 success sample 或 failure 取得
 retention slot 後才格式化。Metrics-only iteration 不序列化 resource
-output，也不建立 evidence workspace。Transport parsing 與 project-file
+output，也不建立 evidence workspace。Transport parsing 與 file-content
 String representation 不變。</p>
 <h3 id="tool">Tool</h3>
 <p>Tool 是具名的 external 或 framework-native capability。Descriptor
@@ -3195,7 +3210,7 @@ shorthand 會報錯。command-backed 與 call-backed Tool 使用相同規則。<
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
 <span id="cb51-2"><a href="#cb51-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">invokePaymentApi</span><span class="kw">:</span></span>
 <span id="cb51-3"><a href="#cb51-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Invoke Payment API</span></span>
-<span id="cb51-4"><a href="#cb51-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Invoke a project-file payment request</span></span>
+<span id="cb51-4"><a href="#cb51-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Invoke a file-content payment request</span></span>
 <span id="cb51-5"><a href="#cb51-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span></span>
 <span id="cb51-6"><a href="#cb51-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
 <span id="cb51-7"><a href="#cb51-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${input.requestText}&quot;</span></span>
@@ -3321,11 +3336,22 @@ use <code>cache</code>; <code>x-*</code></td>
 <tr class="odd">
 <td><code>arguments.&lt;key&gt;</code></td>
 <td><code>name</code>, <code>description</code>, <code>required</code>,
-optional <code>argName</code>, <code>argNameMode</code>,
-<code>delimit</code>, <code>x-*</code></td>
+optional <code>type</code>, <code>enumValues</code>（僅
+<code>type: enum</code>
+時必須），<code>argName</code>、<code>argNameMode</code>、<code>delimit</code>、<code>x-*</code></td>
 </tr>
 </tbody>
 </table>
+<p><code>type</code> 宣告 configured Tool 完整解析後的值 contract，可用
+<code>any</code>、<code>string</code>、<code>integer</code>、<code>long</code>、<code>decimal</code>、<code>boolean</code>、<code>enum</code>、<code>bytes</code>、<code>map</code>
+或 <code>list</code>。未填 <code>type</code> 時仍按 <code>any</code>
+處理，維持舊 descriptor 行為。數值和 Boolean scalar
+接受原生值或去除前後空白的數字／<code>true</code>／<code>false</code>
+字串；enum 必須符合其中一個 <code>enumValues</code>；<code>bytes</code>
+接受 byte array 或 UTF-8 String。<code>string</code>、<code>map</code>
+和 <code>list</code> 要求原生值型別吻合。這些檢查在巢狀 expression
+完整解析後執行；靜態安全可求值的內容會在 validation 檢查，其餘在 runtime
+檢查。</p>
 <h3 id="dbhelper-1">DBHelper</h3>
 <p>DBHelper 是獨立於 Tool 的一級 JDBC resource。每個 descriptor 使用
 <code>schemaVersion: att-dbhelper/v2.6</code> 和穩定 logical
@@ -3570,9 +3596,9 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb58-1"><a href=
 時優先按該編碼解碼，再依 responseFormat（text/json/yaml/xml）解析。Typed
 value 發布於 output.result。responseFormat 負責 ingress
 parsing；Log.format 和 evidence.output.format 只控制 presentation。</p>
-<h4 id="傳送-project-file-string-或抽象值">傳送 Project-file string
+<h4 id="傳送-file-content-string-或抽象值">傳送 File-content string
 或抽象值</h4>
-<p>Project-file expression output 是 String，可直接傳入 payload：</p>
+<p>File-content expression output 是 String，可直接傳入 payload：</p>
 <div class="sourceCode" id="cb59"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a><span class="fu">prepareRequest</span><span class="kw">:</span></span>
 <span id="cb59-2"><a href="#cb59-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assign</span></span>
@@ -3582,13 +3608,13 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb59-1"><a href=
 <span id="cb59-6"><a href="#cb59-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb59-7"><a href="#cb59-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.payment.request(payload=${EXEC.VARS.requestText})}&quot;</span></span></code></pre></div>
 <p>ATT 使用配置的 MQ charset/CCSID 編碼完全相同的 file text，不會
-parse/serialize。String 不應提供 requestFormat。Project-file expression
+parse/serialize。String 不應提供 requestFormat。File-content expression
 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。</p>
 <p>Map/List 是抽象結構化值，需指定
 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request},
 requestFormat=json。String + requestFormat 會被拒絕。MQ send/request
 call 不接受 local file path；<code>file</code> 是 unknown
-argument。Project-file expression 不建立檔案或 targetFiles。</p>
+argument。File-content expression 不建立檔案或 targetFiles。</p>
 <h4 id="evidenceresponse-parsing-與-load">Evidence、response parsing 與
 Load</h4>
 <p>MQ evidence 可包含有界 transport metadata，例如 helper/instance
@@ -3813,9 +3839,9 @@ responseFormat、helper default，或 auto 時依 Content-Type 判斷。支援
 auto、text、json、yaml、xml。解析後的 native value 發布於
 output.result。可選 evidence.output 是有長度上限的人類可讀
 snapshot，不會改變該值。</p>
-<h4 id="request-body-與-project-file-string">Request body 與
-project-file string</h4>
-<p>Project-file expression 回傳 exact UTF-8 file content String，可先
+<h4 id="request-body-與-file-content-string">Request body 與
+file-content string</h4>
+<p>File-content expression 回傳 exact UTF-8 file content String，可先
 Assign，再直接傳入 body：</p>
 <div class="sourceCode" id="cb63"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a><span class="fu">prepareRequest</span><span class="kw">:</span></span>
@@ -3831,8 +3857,8 @@ parse/serialize。String 不可搭配 requestFormat。</p>
 body=${EXEC.INPUT.request}, requestFormat=json。requestFormat 支援
 text、json、yaml、xml，且只用於 Map/List。String + requestFormat
 會被拒絕。HTTP call 不接受 local file path；<code>file</code> 是 unknown
-argument。Project-file expression 不建立結果檔，也沒有 targetFiles。</p>
-<p>Project-file String 不會覆蓋由 resource 管理的 HTTP
+argument。File-content expression 不建立結果檔，也沒有 targetFiles。</p>
+<p>File-content String 不會覆蓋由 resource 管理的 HTTP
 Content-Type。需要特定 media type 時請配置 contentType/header。Request
 charset/header 與 response parsing 都由 HTTPHelper 管理，與 Action
 result/Log formatting 分開。</p>
@@ -3910,7 +3936,7 @@ category 的 operation error，並保留有界 stderr、exit code、byte count �
 transport evidence。Resource SSH 的 non-zero exit 會令 operation
 失敗，與下文 legacy command-backed Tool 的 fan-out 契約不同。</p>
 <p><code>upload</code> 需要 <code>remotePath</code> 及 String 或 byte
-array <code>payload</code>。上傳 project file 時，直接傳入
+array <code>payload</code>。上傳 package file 時，直接傳入
 <code>&amp;{...}</code> 回傳的 UTF-8 String；SSHHelper 不接受或解析
 local filesystem path。Map/List 會被拒絕，不會隱式序列化。Remote
 absolute path 可用；upload 的 <code>overwrite</code> 預設為
@@ -4152,8 +4178,8 @@ selection／concurrency／deadline／host verification／redacted
 identity／Run-Debug-Load execution。Filesystem operation error 使用
 <code>SSH_STAT_ERROR</code>／<code>SSH_MKDIRS_ERROR</code>／<code>SSH_MOVE_ERROR</code>／<code>SSH_DELETE_ERROR</code>。沒有
 remote copy API；需要 copy 時明確使用
-<code>execute(command='cp /srv/app/a /srv/app/b')</code>。Project file
-使用 <code>&amp;{...}</code>，local output 由 ATT 管理。</p>
+<code>execute(command='cp /srv/app/a /srv/app/b')</code>。File-content
+expression 使用 <code>&amp;{...}</code>，local output 由 ATT 管理。</p>
 <h2 id="可靠性與執行控制">可靠性與執行控制</h2>
 <p>本頁集中定義 cross-cutting public execution behavior。</p>
 <h3 id="assertion-與-status">Assertion 與 status</h3>
@@ -4894,8 +4920,8 @@ Notes</a> for removed configuration fields.</p>
 <p><code>workbookId</code>、<code>groupId</code>、<code>rowCaseId</code>
 同樣遵循相同字符規則。<code>workbookId</code> 與 <code>groupId</code>
 不能含點號，因為點號用於分隔三個組件；<code>rowCaseId</code>
-可含點號。Template 路徑相對 <code>templates.root</code>；project-file
-expression 只可讀取 project root 內一個 canonical、regular、UTF-8
+可含點號。Template 路徑相對 <code>templates.root</code>；file-content
+expression 只可讀取 package root 內一個 canonical、regular、UTF-8
 file，並拒絕 absolute path、glob、dynamic locator 及 symlink
 escape。明確聲明的 resource file input 和 evidence output
 路徑必須保持在各自配置根目錄內；ATT 會規範化並檢查包含性。</p>
@@ -5803,6 +5829,11 @@ href="../schemas/history"><code>schemas/history/</code></a>。<code>validate --p
 <code>PACKAGE_INVALID</code>。Validation 不會改寫 YAML。請檢視 migration
 guidance、更新檔案，再針對每個選定的 <code>--env</code> 重跑 package
 validation。</p>
+<p>Package validation 會依照 Debug execution 相同的 discovery 與
+schema/input validation，檢查現有 Template、Flow、分組及未分組 Tool 的
+<code>debug.yaml</code> sidecar。歷史 schema version 與不符合現行 schema
+的結構會在執行 <code>att debug</code> 前回報；可選 sidecar
+缺少時仍屬有效。</p>
 <p>然後根據診斷代碼和結構化位置排查。不要針對人類可讀消息做自動化判斷。</p>
 <table>
 <thead>
@@ -5915,7 +5946,7 @@ package 模式。</p>
 <div class="sourceCode" id="cb88"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb88-1"><a href="#cb88-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
 <span id="cb88-2"><a href="#cb88-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb88-3"><a href="#cb88-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.7.3&quot;</span><span class="fu">,</span></span>
+<span id="cb88-3"><a href="#cb88-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.7.4&quot;</span><span class="fu">,</span></span>
 <span id="cb88-4"><a href="#cb88-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
 <span id="cb88-5"><a href="#cb88-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
 <span id="cb88-6"><a href="#cb88-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
@@ -6109,13 +6140,13 @@ paths</h3>
 path。若工作必須從主機取回檔案，請明確配置 command-backed
 Tool。這些變更移除 Resource API 原生的任意 binary local-file
 input；<code>&amp;{...}</code> 提供 UTF-8 text。</p>
-<p>Case log、CLI output 和輸出的 case evidence 會將 canonical project
+<p>Case log、CLI output 和輸出的 case evidence 會將 canonical package
 root 下的 path 顯示為 <code>$ATT_HOME</code> 或
 <code>$ATT_HOME/&lt;relative-path&gt;</code>，並統一使用
 <code>/</code>。<code>$ATT_HOME</code> 只是在 presentation 中使用的
 token，不是 environment variable、Context root 或 file-expression
 locator。Runtime resolution 和 filesystem access 仍使用 canonical
-absolute Path。project root 以外的 absolute path，不論是 Path value
+absolute Path。package root 以外的 absolute path，不論是 Path value
 或診斷訊息內的路徑，都會以受限的 <code>$EXTERNAL/&lt;basename&gt;</code>
 顯示。明確的 remote-path 欄位及 URL 會保留原值。</p>
 <h3 id="previous-release-testdata-migration">Previous release Testdata
@@ -6139,7 +6170,7 @@ reference 的既有 package 不需要新增 descriptor。</p>
 workload。請明確選擇 <code>error</code>、<code>recycle</code> 或
 <code>stop</code> exhaustion。Selection metadata 會記錄，但不包含 record
 value。</p>
-<p>ATT 3.6.2 將型別化 operation result、外部 parsing、project-file
+<p>ATT 3.6.2 將型別化 operation result、外部 parsing、file-content
 String、outbound transport 和人類可讀 evidence 分開。</p>
 <table>
 <thead>
@@ -6152,7 +6183,7 @@ String、outbound transport 和人類可讀 evidence 分開。</p>
 <tr class="odd">
 <td><code>att-template/v3.4</code> 或 <code>att-flow/v3.4</code> 的
 <code>type: render</code></td>
-<td>將 descriptor 改為 active v3.5 schema，並以使用 project-file
+<td>將 descriptor 改為 active v3.5 schema，並以使用 file-content
 expression 的 Assign 取代每個 Render Action。Historical v3.4 descriptor
 只可經由 historical schema path 載入。</td>
 </tr>
@@ -6173,16 +6204,16 @@ value；沒有隱式檔案替代方案。</td>
 </tr>
 <tr class="odd">
 <td>Render result.format/path 或 renderAs/saveAs</td>
-<td>移除舊欄位。Project-file expression 回傳 exact UTF-8
+<td>移除舊欄位。File-content expression 回傳 exact UTF-8
 String，不建立結果檔或 targetFiles。</td>
 </tr>
 <tr class="even">
 <td>透過 targetFiles 傳遞 Render 檔案</td>
-<td>直接將 project-file String 傳入 HTTP body、MQ payload 或 SSH upload
+<td>直接將 file-content String 傳入 HTTP body、MQ payload 或 SSH upload
 payload。</td>
 </tr>
 <tr class="odd">
-<td>在 project-file String 使用 requestFormat</td>
+<td>在 file-content String 使用 requestFormat</td>
 <td>移除。requestFormat 僅供抽象 Map/List；String + requestFormat
 會失敗。</td>
 </tr>
@@ -6213,7 +6244,7 @@ Version Matrix</a> 的 active schema，並遷移上述欄位。Historical schema
 </tr>
 </tbody>
 </table>
-<p>Project-file String 傳入 HTTP 的例子：</p>
+<p>File-content String 傳入 HTTP 的例子：</p>
 <div class="sourceCode" id="cb90"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb90-1"><a href="#cb90-1" aria-hidden="true" tabindex="-1"></a><span class="fu">prepareRequest</span><span class="kw">:</span></span>
 <span id="cb90-2"><a href="#cb90-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assign</span></span>
@@ -6307,7 +6338,7 @@ Assign；後續 Action 使用 <code>${EXEC.VARS.&lt;name&gt;}</code>。</td>
 </tr>
 <tr class="even">
 <td>Render result.format/path/overwrite 或 renderAs/saveAs</td>
-<td>移除舊 persistence 欄位。Project-file expression 回傳 exact UTF-8
+<td>移除舊 persistence 欄位。File-content expression 回傳 exact UTF-8
 String，不會隱式建立結果檔。</td>
 </tr>
 <tr class="odd">
@@ -6320,7 +6351,7 @@ String，不會隱式建立結果檔。</td>
 </tr>
 <tr class="odd">
 <td>Render targetFiles handoff 至 HTTP/MQ/SSH</td>
-<td>將 project-file String 直接作為 HTTP body、MQ payload 或 SSH upload
+<td>將 file-content String 直接作為 HTTP body、MQ payload 或 SSH upload
 payload</td>
 </tr>
 <tr class="even">
@@ -6329,7 +6360,7 @@ payload</td>
 </tr>
 </tbody>
 </table>
-<p>Project-file path 相對於 canonical project root。<code>./</code> 與
+<p>File-content path 相對於 canonical package root。<code>./</code> 與
 <code>../</code> 只有在 canonical target 仍位於該 root 內時才允許。v1
 沒有 glob 或 dynamic locator；target 必須是 regular strict-UTF-8
 file。</p>

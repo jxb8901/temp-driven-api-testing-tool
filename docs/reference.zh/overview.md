@@ -9,7 +9,7 @@ Testcase
   `-- ordered Stage
         `-- Template
               |-- Action
-              |     |-- project-file expression / assert / log / assign
+              |     |-- file-content expression / assert / log / assign
               |     |-- Tool
               |     `-- DB
               `-- Flow -> ordered Actions

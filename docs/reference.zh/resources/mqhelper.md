@@ -33,9 +33,9 @@ evidence:
 
 Tool Action 以 primary operation 呼叫 mq.<id>.send、mq.<id>.receive 或 mq.<id>.request。MQ reply bytes 在收到 CCSID metadata 時優先按該編碼解碼，再依 responseFormat（text/json/yaml/xml）解析。Typed value 發布於 output.result。responseFormat 負責 ingress parsing；Log.format 和 evidence.output.format 只控制 presentation。
 
-## 傳送 Project-file string 或抽象值
+## 傳送 File-content string 或抽象值
 
-Project-file expression output 是 String，可直接傳入 payload：
+File-content expression output 是 String，可直接傳入 payload：
 
 ~~~yaml
 prepareRequest:
@@ -47,9 +47,9 @@ send:
   call: "#{mq.payment.request(payload=${EXEC.VARS.requestText})}"
 ~~~
 
-ATT 使用配置的 MQ charset/CCSID 編碼完全相同的 file text，不會 parse/serialize。String 不應提供 requestFormat。Project-file expression 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。
+ATT 使用配置的 MQ charset/CCSID 編碼完全相同的 file text，不會 parse/serialize。String 不應提供 requestFormat。File-content expression 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。
 
-Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。String + requestFormat 會被拒絕。MQ send/request call 不接受 local file path；`file` 是 unknown argument。Project-file expression 不建立檔案或 targetFiles。
+Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。String + requestFormat 會被拒絕。MQ send/request call 不接受 local file path；`file` 是 unknown argument。File-content expression 不建立檔案或 targetFiles。
 
 ## Evidence、response parsing 與 Load
 

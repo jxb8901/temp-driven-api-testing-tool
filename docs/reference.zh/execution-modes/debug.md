@@ -66,7 +66,7 @@ Debug 不建立或更新普通 `latest-run.yaml`。Exit code：`0` PASS、`1` FA
 
 當 debug target 無法解析時，先確認 target kind 及 identifier，再用 `--input <path>` 排除 sidecar discovery 因素。Template/Flow debug 會尋找 `<target directory>/debug.yaml`；grouped Tool debug 會尋找 `config/tools/<group>.debug.yaml`。只會驗證 selected target 的 dependency closure，因此不需要無關 workbook 或 Case 檔案。
 
-Debug、Run、Load 都使用相同的 `&{project-relative-file}` expression，再將 UTF-8 String 傳入 HTTP `body`、MQ `payload` 或 SSH upload `payload`。這些 Resource Helper 不會解析各自的 local path。Validation 會在外部 I/O 前解析 project file；舊 HTTP/MQ `file`、SSH upload `localPath` 及 SSH `download` call 均會被拒絕。
+Debug、Run、Load 都使用相同的 `&{project-relative-file}` expression，再將 UTF-8 String 傳入 HTTP `body`、MQ `payload` 或 SSH upload `payload`。這些 Resource Helper 不會解析各自的 local path。Validation 會在外部 I/O 前解析 package file；舊 HTTP/MQ `file`、SSH upload `localPath` 及 SSH `download` call 均會被拒絕。
 
 按 output directory 分辨排錯階段：
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT v3.7.3 reference manual</title>
+  <title>ATT v3.7.4 reference manual</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,12 +233,12 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT v3.7.3 reference manual</h1>
+<h1 class="title">ATT v3.7.4 reference manual</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
-<li><a href="#att-v373-reference-manual"
-id="toc-att-v373-reference-manual">ATT v3.7.3 reference manual</a>
+<li><a href="#att-v374-reference-manual"
+id="toc-att-v374-reference-manual">ATT v3.7.4 reference manual</a>
 <ul>
 <li><a href="#overview-and-product-model"
 id="toc-overview-and-product-model">Overview and product model</a>
@@ -285,8 +285,8 @@ id="toc-actions-and-typed-values">Actions and typed values</a>
 <li><a href="#separate-logical-values-from-representations"
 id="toc-separate-logical-values-from-representations">Separate logical
 values from representations</a></li>
-<li><a href="#project-file-expressions-return-a-string"
-id="toc-project-file-expressions-return-a-string">Project-file
+<li><a href="#file-content-expressions-return-a-string"
+id="toc-file-content-expressions-return-a-string">File-content
 expressions return a <code>String</code></a></li>
 <li><a href="#tool-db-and-flow-results"
 id="toc-tool-db-and-flow-results">Tool, DB and Flow results</a></li>
@@ -328,9 +328,10 @@ id="toc-expressions-and-built-ins">Expressions and built-ins</a>
 <ul>
 <li><a href="#unified-expression-engine"
 id="toc-unified-expression-engine">Unified expression engine</a></li>
-<li><a href="#project-file-string-expressions"
-id="toc-project-file-string-expressions">Project-file string
-expressions</a></li>
+<li><a href="#file-content-expressions"
+id="toc-file-content-expressions">File-content expressions</a></li>
+<li><a href="#argument-result-typing"
+id="toc-argument-result-typing">Argument result typing</a></li>
 <li><a href="#testdata-input-mapping-syntax"
 id="toc-testdata-input-mapping-syntax">Testdata input mapping
 syntax</a></li>
@@ -548,8 +549,8 @@ id="toc-advanced-diagnostics">Advanced diagnostics</a></li>
 </ul></li>
 </ul>
 </nav>
-<h1 id="att-v373-reference-manual">ATT v3.7.3 reference manual</h1>
-<p>Author: Jeffrey + ChatGPT Version: 3.7.3 Status: Normative end-user
+<h1 id="att-v374-reference-manual">ATT v3.7.4 reference manual</h1>
+<p>Author: Jeffrey + ChatGPT Version: 3.7.4 Status: Normative end-user
 documentation; generated from modular sources</p>
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
 
@@ -563,7 +564,7 @@ systems.</p>
   `-- ordered Stage
         `-- Template
               |-- Action
-              |     |-- project-file expression / assert / log / assign
+              |     |-- file-content expression / assert / log / assign
               |     |-- Tool
               |     `-- DB
               `-- Flow -&gt; ordered Actions</code></pre>
@@ -903,7 +904,7 @@ href="reference/reliability-execution-control.md">Reliability</a>.</p>
 <p>A directory is a callable Template only when it directly contains
 template.yaml. ATT uses att-template/v3.6. Each Template has a non-empty
 ordered actions map and a required description.</p>
-<p>Each Action has a type-specific contract. A project-file expression
+<p>Each Action has a type-specific contract. A file-content expression
 such as <code>&amp;{templates/payment/request.xml}</code> returns the
 exact UTF-8 file content as a String without creating a file.
 Tool/DB/HTTP/MQ/SSH actions publish the native typed operation result.
@@ -961,14 +962,14 @@ before execution starts (before the scheduler starts for Load):</p>
 <li>Run Case/Stage mappings may read <code>EXEC.ID</code>,
 <code>EXEC.RUN_ID</code>, <code>EXEC.STARTED_AT</code>,
 <code>EXEC.RUN_STARTED_AT</code>, <code>EXEC.OUTPUT_DIR</code>, and
-<code>META.PROJECT</code>, <code>META.SOURCE</code>, or
+<code>META.PACKAGE_ROOT</code>, <code>META.SOURCE</code>, or
 <code>META.TARGET</code>.</li>
 <li>Debug <code>inputs</code> may read the same execution roots and
 metadata, plus <code>META.TEMPLATE</code>.</li>
 <li>Load workload <code>inputs</code> may read <code>EXEC.RUN_ID</code>,
 <code>EXEC.STARTED_AT</code>, <code>EXEC.RUN_STARTED_AT</code>,
 initialized <code>EXEC.LOAD</code> identity fields, and
-<code>META.PROJECT</code>, <code>META.SOURCE</code>,
+<code>META.PACKAGE_ROOT</code>, <code>META.SOURCE</code>,
 <code>META.TARGET</code>, or <code>META.TEMPLATE</code>.
 <code>EXEC.ID</code> and <code>EXEC.OUTPUT_DIR</code> are initialized
 only after input resolution. <code>EXEC.LOAD.USER_ID</code> is absent
@@ -1166,9 +1167,9 @@ representations:</p>
 <td>Parses external response bytes into a typed result.</td>
 </tr>
 <tr class="odd">
-<td>Project-file expression</td>
+<td>File-content expression</td>
 <td><code>String</code></td>
-<td>Reads one safe UTF-8 project file and preserves its exact characters
+<td>Reads one safe UTF-8 package file and preserves its exact characters
 after expression evaluation.</td>
 </tr>
 <tr class="even">
@@ -1195,10 +1196,10 @@ named <code>parameters</code>;
 <code>sql=&amp;{project-relative-file.sql}</code> supplies package SQL
 content. The historical <code>type: db</code> Action is retained only by
 archived schema versions.</p>
-<h3 id="project-file-expressions-return-a-string">Project-file
+<h3 id="file-content-expressions-return-a-string">File-content
 expressions return a <code>String</code></h3>
 <p>The current replacement for the historical Render Action is the typed
-project-file value expression <code>&amp;{path}</code>. It always
+file-content value expression <code>&amp;{path}</code>. It always
 returns one <code>String</code>; it never infers a document format,
 parses an extension, expands a glob, or creates an output file:</p>
 <div class="sourceCode" id="cb10"><pre
@@ -1209,7 +1210,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb10-1"><a href=
 <p><code>${...}</code> remains a Context reference and
 <code>#{...}</code> remains an expression/call. <code>&amp;{...}</code>
 is a static, one-file locator; v1 has no glob or dynamic locator form.
-The locator is relative to the canonical ATT project root. A
+The locator is relative to the canonical ATT package root. A
 descriptor-relative <code>./</code> or <code>../</code> path is allowed
 only when its canonical target remains inside that root. Absolute paths,
 missing files, directories, symlink escapes, non-UTF-8 bytes,
@@ -1238,10 +1239,10 @@ content type and MQ transport metadata remain resource-owned settings.
 expressions, Log values and other typed value positions.</p>
 <p>requestFormat is for abstract structured values such as Map or List.
 Such a body requires an explicit format, for example requestFormat=json.
-Combining requestFormat with a <code>String</code> fails; a project-file
+Combining requestFormat with a <code>String</code> fails; a file-content
 result is never silently parsed and serialized. HTTP, MQ, and SSH
-Resource calls consume project-file content as String values and do not
-resolve local file-path arguments.</p>
+Resource calls consume file content as String values and do not resolve
+local file-path arguments.</p>
 <h3 id="tool-db-and-flow-results">Tool, DB and Flow results</h3>
 <p>A command-backed Tool declares stdoutFormat in its Tool
 descriptor:</p>
@@ -1333,7 +1334,7 @@ needed before the containing Tool assertion, and an ordinary Action when
 the collected value is normal business/test data for later
 assertions.</p>
 <p>Collector results follow the normal typed-result rules. Evidence
-placement does not stringify a map, list or project-file
+placement does not stringify a map, list or file-content
 <code>String</code>; helper <code>evidence.output</code> is an explicit
 presentation boundary. In Load, explicit collector execution is separate
 from helper <code>evidence.output</code> serialization. Resource-output
@@ -1362,7 +1363,7 @@ or sqlplus and controls only the emitted Case-log string. When format is
 present, value is required.</p>
 <p>When both message and value are supplied, Log emits the message, a
 newline, then the formatted value. output.result is that emitted string.
-A project-file String is emitted as-is when used as a value; Log does
+A file-content String is emitted as-is when used as a value; Log does
 not infer or attach a document format. Log does not read a file and has
 no fields map. Put a typed map/list in value for structured log
 content.</p>
@@ -1496,7 +1497,7 @@ and must return Boolean; numbers and strings such as 'false' are not
 coerced. Use <code>when: "#{false}"</code> to stop retry. Strict missing
 paths and expression failures produce normal diagnostics at retry.when
 and terminate retry. Pure deterministic built-ins are allowed;
-Tool/DB/MQ/HTTP/SSH calls, file/project-file operations, sequences,
+Tool/DB/MQ/HTTP/SSH calls, file/file-content operations, sequences,
 randomness and current-time operations are forbidden. Deterministic
 syntax/type errors fail validation; runtime result types and unavailable
 paths are checked when the gate runs.</p>
@@ -1601,12 +1602,19 @@ and timing diagnostics stay in evidence-only DIAG.load, which is not an
 expression root.</p>
 <h3 id="meta-field-inventory-and-lifecycle">META field inventory and
 lifecycle</h3>
-<p>The public META root contains only <code>PROJECT</code>,
+<p>The public META root contains <code>PACKAGE_ROOT</code>,
 <code>SOURCE</code>, <code>TARGET</code>, <code>TEMPLATE</code>,
 <code>FLOW</code>, <code>TOOL</code>, <code>DBHELPER</code>,
 <code>MQHELPER</code>, <code>HTTPHELPER</code>, and
-<code>SSHHELPER</code>. META contains descriptive fields only. A path
-may be absent when its component is not active.</p>
+<code>SSHHELPER</code>. <code>META.PACKAGE_ROOT</code> is the normalized
+absolute path of the active ATT package and is execution-wide in Run,
+Debug and Load after package binding. Legacy
+<code>META.PROJECT.id</code> and <code>META.PROJECT.root</code> are
+removed with no compatibility alias. ATT installation scope
+(<code>ATT_HOME</code>), package scope (<code>META.PACKAGE_ROOT</code>)
+and execution output scope (<code>EXEC.OUTPUT_DIR</code>) are distinct.
+META contains descriptive fields only. A path may be absent when its
+component is not active.</p>
 <table>
 <thead>
 <tr class="header">
@@ -1618,27 +1626,20 @@ may be absent when its component is not active.</p>
 </thead>
 <tbody>
 <tr class="odd">
-<td>META.PROJECT.id</td>
-<td>Project directory name; String, for example,
-<code>payment-att</code>.</td>
-<td>Run, Debug, Load; after project binding.</td>
+<td>META.PACKAGE_ROOT</td>
+<td>Normalized absolute package-root path; String, for example,
+<code>/srv/att/payment</code>.</td>
+<td>Run, Debug, Load; after package binding.</td>
 <td>Execution-wide.</td>
 </tr>
 <tr class="even">
-<td>META.PROJECT.root</td>
-<td>Normalized project-root path; String, for example,
-<code>/srv/att/payment</code>.</td>
-<td>Run, Debug, Load; after project binding.</td>
-<td>Execution-wide.</td>
-</tr>
-<tr class="odd">
 <td>META.SOURCE.type</td>
 <td>Source kind; String: <code>testcase</code>, <code>debug</code> or
 <code>load</code>.</td>
 <td>Run, Debug, Load.</td>
 <td>Execution-wide.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.path</td>
 <td>Normalized absolute source path; String, for example,
 <code>/srv/att/payment/testcase/payment.xlsx</code>,
@@ -1647,75 +1648,75 @@ may be absent when its component is not active.</p>
 <td>Run, Debug, Load when a source file exists.</td>
 <td>Execution-wide; absent for an in-memory source.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.caseId</td>
 <td>Canonical TestCase or synthetic Debug Case ID; String, for example,
 <code>payment.default.P001</code>.</td>
 <td>Run, Debug.</td>
 <td>Execution-wide; absent in Load.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.workbookId</td>
 <td>Workbook identifier; String, for example, <code>payment</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.groupId</td>
 <td>Workbook group identifier; String, for example,
 <code>default</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.rowCaseId</td>
 <td>Case ID from the workbook row; String, for example,
 <code>P001</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.sheet</td>
 <td>Workbook sheet name; String, for example, <code>Payment</code>.</td>
 <td>Run when supplied by the workbook adapter.</td>
 <td>Execution-wide; absent for Debug/Load or when unavailable.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.row</td>
 <td>One-based workbook row number; Number, for example,
 <code>12</code>.</td>
 <td>Run when supplied by the workbook adapter.</td>
 <td>Execution-wide; absent for Debug/Load or when unavailable.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.workbook</td>
 <td>Optional workbook label; String when present, for example,
 <code>payment_regression.xlsx</code>.</td>
 <td>Run when supplied by the adapter.</td>
 <td>Execution-wide; optional and otherwise absent.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.scenario</td>
 <td>Load scenario basename without its suffix; String, for example,
 <code>payment-smoke</code>.</td>
 <td>Load.</td>
 <td>Execution-wide; absent outside Load.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TARGET.type</td>
 <td>Resolved target kind; String: <code>testcase</code>,
 <code>template</code>, <code>flow</code> or <code>tool</code>.</td>
 <td>Run, Debug, Load; after target selection.</td>
 <td>Execution-wide.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TARGET.id</td>
 <td>Resolved target identifier; String, for example,
 <code>PAYMENT_INVOKE</code> or <code>payment.flow.v1</code>.</td>
 <td>Run, Debug, Load; after target selection.</td>
 <td>Execution-wide.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TEMPLATE.id</td>
 <td>Active Template or resolved Load execution-wrapper ID; String, for
 example, <code>PAYMENT_INVOKE</code>.</td>
@@ -1725,7 +1726,7 @@ its wrapper runs.</td>
 or removed after the scope. In Load Flow/Tool targets this is the
 resolved synthetic wrapper.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TEMPLATE.path</td>
 <td>Normalized Template or execution-wrapper directory; String, for
 example, <code>/srv/att/templates/PAYMENT_INVOKE</code>.</td>
@@ -1733,7 +1734,7 @@ example, <code>/srv/att/templates/PAYMENT_INVOKE</code>.</td>
 <td>Component scope; absent before resolution, restored or removed after
 the scope.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.FLOW.id</td>
 <td>Active Flow ID; String, for example,
 <code>payment.request.v1</code>.</td>
@@ -1741,21 +1742,21 @@ the scope.</td>
 <td>Invocation scope; push on entry, restore on return, absent when
 inactive.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.FLOW.invocationId</td>
 <td>Caller Action ID; String, for example,
 <code>sendRequest</code>.</td>
 <td>Same availability as META.FLOW.id.</td>
 <td>Invocation scope; absent when no Flow is active.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.FLOW.depth</td>
 <td>One-based nested Flow depth; Number, for example,
 <code>1</code>.</td>
 <td>Same availability as META.FLOW.id.</td>
 <td>Invocation scope; absent when no Flow is active.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TOOL.id</td>
 <td>Active configured Tool or built-in name; String, for example,
 <code>payment.queryOrder</code> or <code>upper</code>.</td>
@@ -1763,7 +1764,7 @@ inactive.</td>
 <td>Invocation scope; never retained as the “last Tool” after
 return.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TOOL.type</td>
 <td>Invocation kind; String, for example, <code>tool</code> or
 <code>builtin</code>.</td>
@@ -1771,35 +1772,35 @@ return.</td>
 <td>Invocation scope; absent after return unless an outer invocation
 remains.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.DBHELPER.id</td>
 <td>Logical DBHelper ID; String, for example, <code>orders</code>.</td>
 <td>Run, Debug, Load during a DBHelper operation/DB Action.</td>
 <td>Invocation scope; absent after return unless an outer scope
 remains.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.DBHELPER.type</td>
 <td>Resource kind; String, <code>dbhelper</code>.</td>
 <td>Same availability as META.DBHELPER.id.</td>
 <td>Invocation scope; absent after return unless an outer scope
 remains.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.MQHELPER.id</td>
 <td>Logical MQHelper ID; String, for example, <code>payment</code>.</td>
 <td>Run, Debug, Load during an MQHelper operation.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.MQHELPER.type</td>
 <td>Resource kind; String, <code>mqhelper</code>.</td>
 <td>Same availability as META.MQHELPER.id.</td>
 <td>Invocation scope; absent after return unless an outer scope
 remains.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.HTTPHELPER.id</td>
 <td>Logical HTTPHelper ID; String, for example,
 <code>payment</code>.</td>
@@ -1807,14 +1808,14 @@ remains.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.HTTPHELPER.type</td>
 <td>Resource kind; String, <code>httphelper</code>.</td>
 <td>Same availability as META.HTTPHELPER.id.</td>
 <td>Invocation scope; absent after return unless an outer scope
 remains.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SSHHELPER.id</td>
 <td>Logical SSHHelper ID; String, for example,
 <code>application</code>.</td>
@@ -1822,7 +1823,7 @@ remains.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SSHHELPER.type</td>
 <td>Resource kind; String, <code>sshhelper</code>.</td>
 <td>Same availability as META.SSHHELPER.id.</td>
@@ -1881,22 +1882,42 @@ EXEC and META paths; optional lookup uses a trailing question mark.</p>
 <div class="sourceCode" id="cb21"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="fu">assert</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{${EXEC.INPUT.amount} &gt; 0}&quot;</span></span>
 <span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="fu">description</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}&quot;</span></span></code></pre></div>
-<p>Use the expression form supported by each field. Project-file
+<p>Use the expression form supported by each field. File-content
 content, Action descriptions/assertions, Log message/value, assign
 expressions and Tool calls use the ordinary runtime model. A Log value
 can recursively contain typed expressions; see <a
 href="reference/actions.md">Actions and Typed Values</a>.</p>
-<h3 id="project-file-string-expressions">Project-file string
-expressions</h3>
-<p><code>&amp;{path}</code> is a typed project-file expression. It
-resolves exactly one regular UTF-8 file and always returns a
-<code>String</code>; it never infers a document format, parses an
-extension, expands a glob or creates an output file. The path is
-relative to the canonical ATT project root. Descriptor-relative
-<code>./</code> and <code>../</code> paths are allowed only when their
-canonical target remains inside that root. Absolute paths, missing
-files, directories, symlink escapes, non-UTF-8 bytes, surrounding
-whitespace, glob syntax and dynamic locators fail validation.</p>
+<h3 id="file-content-expressions">File-content expressions</h3>
+<p><code>&amp;{path}</code> is a file-content expression. It reads
+exactly one statically addressed regular UTF-8 file contained by the
+active ATT package root and returns its String content. It never infers
+or parses a document format, expands a glob or creates an output file.
+Descriptor-relative <code>./</code> and <code>../</code> paths are
+allowed only when their canonical target remains inside
+<code>META.PACKAGE_ROOT</code>. Absolute paths, missing files,
+directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace,
+glob syntax and dynamic locators fail validation. File content is not
+implicitly parsed as JSON, YAML or XML.</p>
+<h3 id="argument-result-typing">Argument result typing</h3>
+<p>An argument expression is evaluated recursively before its receiving
+call runs. The call's argument contract applies to the final resolved
+value only: an inner <code>&amp;{...}</code> passed to
+<code>str.substr</code> first produces file text,
+<code>str.substr</code> returns its String result, and only then does
+the outer target argument apply its type and range rules. Thus a numeric
+helper argument may accept
+<code>waitMs=#{str.substr(&amp;{params/wait.txt}, 0, 4)}</code> when
+that result is an integral value, while a String payload keeps every
+original character. Scalar String coercion trims only for numeric or
+Boolean parsing; it does not globally trim String/payload values.
+Map/List values remain typed and are never inferred from file extensions
+or parsed file content.</p>
+<p>Package validation resolves literal values, static file content and
+explicitly pure built-ins when their inputs are static, then applies the
+same target argument contract used at runtime. It checks the structure
+and declared types of runtime-dependent expressions and defers only
+their final value/range checks. Tool, resource and external calls are
+never run to discover values during validation.</p>
 <p>Use a YAML string when authoring a standalone value or embedding the
 locator in a larger expression:</p>
 <div class="sourceCode" id="cb22"><pre
@@ -1970,9 +1991,9 @@ string comparison.</p>
 Tool results and file output remain literal Strings even when they
 contain <code>&amp;{...}</code>. Embedded Context paths and calls follow
 the enclosing Action's normal ordering, scope and resource validation
-rules. Nested <code>&amp;{...}</code> inside project-file content,
-including inside <code>#{...}</code> arguments, is rejected in v1 in
-Run, Debug, validation and Load snapshot discovery.</p>
+rules. Nested <code>&amp;{...}</code> inside file content, including
+inside <code>#{...}</code> arguments, is rejected in v1 in Run, Debug,
+validation and Load snapshot discovery.</p>
 <p>Built-ins are called with <code>#{...}</code>. Canonical names use
 framework-owned <code>str.*</code>, <code>date.*</code>,
 <code>file.*</code>, <code>misc.*</code>, and <code>seq.*</code>
@@ -2288,7 +2309,7 @@ resource and result contract.</p>
 <td><code>sql: String</code>; optional <code>params: List</code>
 <strong>or</strong> <code>parameters: Map&lt;String, value&gt;</code>
 (mutually exclusive; default: no bind values). <code>sql</code> may be
-an inline SQL string or a project-file expression returning a
+an inline SQL string or a file-content expression returning a
 String.</td>
 <td><code>#{db.orders.query(sql='select status from orders where id = :id', parameters={id: ${EXEC.INPUT.orderId}})}</code></td>
 </tr>
@@ -2752,7 +2773,7 @@ workbook or Case file is not a prerequisite.</p>
 Debug, Run and Load, then pass its UTF-8 String as HTTP
 <code>body</code>, MQ <code>payload</code>, or SSH upload
 <code>payload</code>. These Resource Helpers do not resolve separate
-local paths. Validation resolves project files before external I/O;
+local paths. Validation resolves package files before external I/O;
 obsolete HTTP/MQ <code>file</code>, SSH upload <code>localPath</code>,
 and SSH <code>download</code> calls are rejected.</p>
 <p>Use the output directory to separate diagnosis stages:</p>
@@ -3213,7 +3234,7 @@ implementation and storage details.</p>
 <p>evidence.resources.output accepts inherit (default) or none. none
 disables optional human-readable resource-output formatting and
 materialization while preserving typed results,
-stdoutFormat/responseFormat parsing, exact project-file String output
+stdoutFormat/responseFormat parsing, exact file-content String output
 and requestFormat behavior. In Load, resource output is deferred until
 the iteration is retained. Metrics-only iterations do no business-output
 formatting or evidence file I/O.</p>
@@ -3355,10 +3376,10 @@ and output path are published.</p>
 <p>Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT,
 EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only
 EXEC.LOAD.USER_ID and the already curated
-META.PROJECT/SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are
-unavailable because the generated ID determines the workspace. No Action
-has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are
-absent.</p>
+META.PACKAGE_ROOT/SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR
+are unavailable because the generated ID determines the workspace. No
+Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper
+META are absent.</p>
 <p>Only deterministic, side-effect-free built-ins are allowed. External
 Tool/DB/MQ/HTTP/SSH calls and stateful, random, clock or filesystem
 functions are rejected. seq.next() is neither allowed nor required. Use
@@ -3407,7 +3428,7 @@ evidence:</p>
 Action status, assertion detail, diagnostic and attempts describe
 execution; they do not replace the business result. Command stdout is
 parsed through stdoutFormat. HTTP/MQ responses use responseFormat. DB
-operations return native typed values. A project-file expression returns
+operations return native typed values. A file-content expression returns
 exact file text as a String, as described in <a
 href="reference/actions.md">Actions and Typed Values</a>.</p>
 <p>Resource evidence can include low-cost metadata. A helper may also
@@ -3424,7 +3445,7 @@ Secret-bearing values are filtered or omitted.</p>
 or none. none skips optional resource-output formatting/materialization.
 inherit defers formatting until a success sample or failure receives a
 retention slot. Metrics-only iterations do not serialize resource output
-or create an evidence workspace. Transport parsing and project-file
+or create an evidence workspace. Transport parsing and file-content
 String representation are unchanged.</p>
 <h3 id="tool">Tool</h3>
 <p>A Tool is a named external or framework-native capability. A
@@ -3503,7 +3524,7 @@ they uniquely match a declared key:</p>
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb48-1"><a href="#cb48-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tools</span><span class="kw">:</span></span>
 <span id="cb48-2"><a href="#cb48-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">invokePaymentApi</span><span class="kw">:</span></span>
 <span id="cb48-3"><a href="#cb48-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Invoke Payment API</span></span>
-<span id="cb48-4"><a href="#cb48-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Invoke a project-file payment request</span></span>
+<span id="cb48-4"><a href="#cb48-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Invoke a file-content payment request</span></span>
 <span id="cb48-5"><a href="#cb48-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">command</span><span class="kw">:</span></span>
 <span id="cb48-6"><a href="#cb48-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./tools/invoke_payment_api.sh</span></span>
 <span id="cb48-7"><a href="#cb48-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&quot;${input.requestText}&quot;</span></span>
@@ -3666,7 +3687,7 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb57-1"><a href=
 <span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a><span class="fu">arguments</span><span class="kw">:</span></span>
 <span id="cb57-3"><a href="#cb57-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">requestText</span><span class="kw">:</span></span>
 <span id="cb57-4"><a href="#cb57-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Request Body</span></span>
-<span id="cb57-5"><a href="#cb57-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> Project-file request body String</span></span>
+<span id="cb57-5"><a href="#cb57-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">description</span><span class="kw">:</span><span class="at"> File-content request body String</span></span>
 <span id="cb57-6"><a href="#cb57-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
 <span id="cb57-7"><a href="#cb57-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">argName</span><span class="kw">:</span><span class="at"> --request</span></span></code></pre></div>
 <p>ATT expands that token to two argv values: <code>--request</code>,
@@ -3715,11 +3736,25 @@ use <code>cache</code>; <code>x-*</code></td>
 <tr class="odd">
 <td><code>arguments.&lt;key&gt;</code></td>
 <td><code>name</code>, <code>description</code>, <code>required</code>,
-optional <code>argName</code>, <code>argNameMode</code>,
-<code>delimit</code>, <code>x-*</code></td>
+optional <code>type</code>, <code>enumValues</code> (required only for
+<code>type: enum</code>), <code>argName</code>,
+<code>argNameMode</code>, <code>delimit</code>, <code>x-*</code></td>
 </tr>
 </tbody>
 </table>
+<p>An argument <code>type</code> declares the final resolved value
+contract for configured Tools: <code>string</code>,
+<code>integer</code>, <code>long</code>, <code>decimal</code>,
+<code>boolean</code>, <code>enum</code>, <code>bytes</code>,
+<code>map</code>, or <code>list</code>. Omitted <code>type</code>
+remains <code>any</code> for existing descriptors. Numeric and Boolean
+scalar types accept native values or trimmed
+numeric/<code>true</code>/<code>false</code> Strings; enum values must
+match one of <code>enumValues</code>; <code>bytes</code> accepts a byte
+array or converts a String to UTF-8. <code>string</code>,
+<code>map</code>, and <code>list</code> require that native value type.
+These checks run after the complete nested expression resolves, in
+validation when safely static and at runtime otherwise.</p>
 <h3 id="dbhelper-1">DBHelper</h3>
 <p>DBHelper is a first-class JDBC resource, configured independently
 from Tools. Each descriptor uses
@@ -3744,7 +3779,7 @@ driver.</p>
 run under ordinary <code>type: tool</code> Actions using
 <code>#{db.&lt;id&gt;.query(...)}</code>, <code>scalar(...)</code>, or
 <code>update(...)</code> calls. The call has exactly one String
-<code>sql</code> argument. Use a project-file expression such as
+<code>sql</code> argument. Use a file-content expression such as
 <code>sql=&amp;{sql/find-order.sql}</code> when the SQL is stored in the
 package; <code>sqlFile</code> is historical-only. Positional
 <code>params</code> and named <code>parameters</code> are mutually
@@ -3927,9 +3962,9 @@ CCSID metadata when available, then parsed by responseFormat
 (text/json/yaml/xml). The parsed typed value is output.result.
 responseFormat owns ingress parsing; Log.format and
 evidence.output.format only control presentation.</p>
-<h4 id="sending-project-file-strings-and-abstract-values">Sending
-project-file strings and abstract values</h4>
-<p>A project-file expression produces a String and can be passed
+<h4 id="sending-file-content-strings-and-abstract-values">Sending
+file-content strings and abstract values</h4>
+<p>A file-content expression produces a String and can be passed
 directly as payload:</p>
 <div class="sourceCode" id="cb62"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb62-1"><a href="#cb62-1" aria-hidden="true" tabindex="-1"></a><span class="fu">prepareRequest</span><span class="kw">:</span></span>
@@ -3941,13 +3976,13 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb62-1"><a href=
 <span id="cb62-7"><a href="#cb62-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{mq.payment.request(payload=${EXEC.VARS.requestText})}&quot;</span></span></code></pre></div>
 <p>ATT encodes the exact file text using the configured MQ
 charset/CCSID. It does not parse and reserialize the String. Do not
-supply requestFormat for a project-file String; MQ transport metadata
+supply requestFormat for a file-content String; MQ transport metadata
 remains resource-owned.</p>
 <p>A Map/List is an abstract structured value and requires requestFormat
 (text/json/yaml/xml), for example payload=${EXEC.INPUT.request},
 requestFormat=json. String + requestFormat is rejected. MQ send/request
 calls do not accept local file paths; <code>file</code> is an unknown
-argument. A project-file expression does not create a file or
+argument. A file-content expression does not create a file or
 targetFiles.</p>
 <h4 id="evidence-response-parsing-and-load">Evidence, response parsing
 and Load</h4>
@@ -4186,9 +4221,9 @@ responseFormat, the helper default, or Content-Type when auto is
 selected. Supported response formats are auto, text, json, yaml and xml.
 The parsed native value is output.result. Optional evidence.output is a
 bounded human-readable snapshot and never changes that value.</p>
-<h4 id="request-bodies-and-project-file-strings">Request bodies and
-project-file strings</h4>
-<p>A project-file expression returns the exact UTF-8 file content as a
+<h4 id="request-bodies-and-file-content-strings">Request bodies and
+file-content strings</h4>
+<p>A file-content expression returns the exact UTF-8 file content as a
 String. Assign it once and pass it directly as the body:</p>
 <div class="sourceCode" id="cb66"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb66-1"><a href="#cb66-1" aria-hidden="true" tabindex="-1"></a><span class="fu">prepareRequest</span><span class="kw">:</span></span>
@@ -4199,16 +4234,16 @@ class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb66-1"><a href=
 <span id="cb66-6"><a href="#cb66-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
 <span id="cb66-7"><a href="#cb66-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(path=&#39;/v1/payments&#39;, body=${EXEC.VARS.requestText})}&quot;</span></span></code></pre></div>
 <p>HTTP sends the exact String to its charset-encoding boundary. ATT
-does not parse and reserialize it. Do not combine a project-file String
+does not parse and reserialize it. Do not combine a file-content String
 with requestFormat.</p>
 <p>A Map/List is an abstract structured value and requires explicit
 requestFormat, such as body=${EXEC.INPUT.request}, requestFormat=json.
 requestFormat accepts text, json, yaml or xml and applies only to
 Map/List. String + requestFormat is rejected. HTTP calls do not accept
 local file paths; <code>file</code> is an unknown argument. A
-project-file expression creates no result file and has no
+file-content expression creates no result file and has no
 targetFiles.</p>
-<p>The project-file String has no format metadata and does not set HTTP
+<p>The file-content String has no format metadata and does not set HTTP
 Content-Type. Configure contentType/header when a specific media type is
 required. Request charset/headers and response parsing remain HTTPHelper
 concerns, separate from Action result or Log formatting.</p>
@@ -4230,7 +4265,7 @@ peak counts by helper.</p>
 <p>Set <code>defaults.maxResponseBytes</code> from 1 through 1073741824
 in the HTTP helper descriptor; it defaults to 10485760 (10 MiB).</p>
 <p>See <a href="reference/actions.md">Actions and Typed Values</a> for
-the shared project-file String and typed-result contract.</p>
+the shared file-content String and typed-result contract.</p>
 <p>DB/MQ/HTTP share the optional
 <code>evidence.output: {format: json, maxChars: 10000}</code>
 presentation policy. Supported formats are <code>text</code>,
@@ -4295,7 +4330,7 @@ byte counts and transport evidence. SSH resource execution treats a
 non-zero exit as an operation failure. The command-backed Tool fan-out
 contract has different failure semantics.</p>
 <p><code>upload</code> requires <code>remotePath</code> and a String or
-byte-array <code>payload</code>. To upload a project file, pass the
+byte-array <code>payload</code>. To upload a package file, pass the
 UTF-8 String returned by <code>&amp;{...}</code> directly; SSHHelper
 does not accept or resolve local filesystem paths. Map/List values are
 rejected rather than implicitly serialized. Absolute remote paths are
@@ -4563,7 +4598,8 @@ Filesystem errors use <code>SSH_STAT_ERROR</code>,
 <code>SSH_MKDIRS_ERROR</code>, <code>SSH_MOVE_ERROR</code>, or
 <code>SSH_DELETE_ERROR</code>. There is no remote copy API; use explicit
 <code>execute(command='cp /srv/app/a /srv/app/b')</code> when needed.
-Project files use <code>&amp;{...}</code>; ATT manages local output.</p>
+File-content expressions use <code>&amp;{...}</code>; ATT manages local
+output.</p>
 <h2 id="reliability-and-execution-control">Reliability and execution
 control</h2>
 <p>This page owns cross-cutting public execution behavior.</p>
@@ -5337,8 +5373,8 @@ complete <code>workbookId.groupId.rowCaseId</code> is at most 255. The
 sidecar <code>id</code> supplies <code>workbookId</code>, the left side
 of <code>excel.sheet</code> supplies <code>groupId</code>, and the
 configured Case ID cell supplies <code>rowCaseId</code>. Template paths
-are relative to <code>templates.root</code>; project-file expressions
-use one canonical, regular UTF-8 file within the project root and reject
+are relative to <code>templates.root</code>; file-content expressions
+use one canonical, regular UTF-8 file within the package root and reject
 absolute paths, globs, dynamic locators and symlink escapes. Resource
 file inputs and outputs must remain within their documented safe roots.
 ATT normalizes and checks root containment before reads and writes.</p>
@@ -6376,6 +6412,12 @@ unsafe, or duplicate registered schema is a hard
 <code>PACKAGE_INVALID</code> error. Validation never rewrites YAML.
 Review the migration guidance, update the file, then rerun package
 validation for each selected <code>--env</code>.</p>
+<p>Package validation also discovers existing Template, Flow and grouped
+or ungrouped Tool <code>debug.yaml</code> sidecars using the same
+discovery and schema/input validation as Debug execution. Historical
+schema versions and invalid current-schema structure are reported before
+invoking <code>att debug</code>; optional missing sidecars remain
+valid.</p>
 <p>Then use the diagnostic code and structured location. Do not automate
 against message text.</p>
 <table>
@@ -6508,7 +6550,7 @@ reports and archives before sharing.</p>
 <div class="sourceCode" id="cb93"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb93-1"><a href="#cb93-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
 <span id="cb93-2"><a href="#cb93-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb93-3"><a href="#cb93-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.7.3&quot;</span><span class="fu">,</span></span>
+<span id="cb93-3"><a href="#cb93-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;3.7.4&quot;</span><span class="fu">,</span></span>
 <span id="cb93-4"><a href="#cb93-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
 <span id="cb93-5"><a href="#cb93-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
 <span id="cb93-6"><a href="#cb93-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
@@ -6720,12 +6762,12 @@ retrieve files from a host. These changes remove native arbitrary-binary
 local-file input from these Resource APIs; <code>&amp;{...}</code>
 supplies UTF-8 text.</p>
 <p>Case logs, CLI output, and emitted case evidence display paths under
-the canonical project root as <code>$ATT_HOME</code> or
+the canonical package root as <code>$ATT_HOME</code> or
 <code>$ATT_HOME/&lt;relative-path&gt;</code>, with <code>/</code>
 separators. <code>$ATT_HOME</code> is a presentation token, not an
 environment variable, Context root, or file-expression locator. Runtime
 resolution and filesystem access continue to use canonical absolute
-Paths. Absolute paths outside the project root use a bounded
+Paths. Absolute paths outside the package root use a bounded
 <code>$EXTERNAL/&lt;basename&gt;</code> presentation when logged as Path
 values or embedded in diagnostic messages. Explicit remote-path fields
 and URLs retain their values.</p>
@@ -6763,7 +6805,7 @@ remain available as historical definitions.</p>
 exhaustion deliberately. Selection metadata is recorded without record
 values.</p>
 <p>ATT 3.6.2 separates typed operation results, external parsing,
-project-file Strings, outbound transport and human-readable
+file-content Strings, outbound transport and human-readable
 evidence.</p>
 <table>
 <thead>
@@ -6777,7 +6819,7 @@ evidence.</p>
 <td><code>att-template/v3.4</code> or <code>att-flow/v3.4</code> with
 <code>type: render</code></td>
 <td>Change the descriptor to the active v3.5 schema and replace each
-Render Action with an Assign that uses a project-file expression.
+Render Action with an Assign that uses a file-content expression.
 Historical v3.4 descriptors remain loadable only through the historical
 schema path.</td>
 </tr>
@@ -6798,17 +6840,17 @@ implicit file replacement exists.</td>
 </tr>
 <tr class="odd">
 <td>Render result.format/path or renderAs/saveAs</td>
-<td>Remove the old format/persistence fields. The project-file
+<td>Remove the old format/persistence fields. The file-content
 expression returns the exact UTF-8 String and creates no result file or
 targetFiles.</td>
 </tr>
 <tr class="even">
 <td>Render file handoff through targetFiles</td>
-<td>Pass the project-file String directly as HTTP body, MQ payload, or
+<td>Pass the file-content String directly as HTTP body, MQ payload, or
 SSH upload payload.</td>
 </tr>
 <tr class="odd">
-<td>requestFormat on a project-file String</td>
+<td>requestFormat on a file-content String</td>
 <td>Remove it. requestFormat is only for abstract Map/List values;
 String + requestFormat fails.</td>
 </tr>
@@ -6840,7 +6882,7 @@ active contracts.</td>
 </tr>
 </tbody>
 </table>
-<p>A project-file String passed to HTTP:</p>
+<p>A file-content String passed to HTTP:</p>
 <div class="sourceCode" id="cb95"><pre
 class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb95-1"><a href="#cb95-1" aria-hidden="true" tabindex="-1"></a><span class="fu">prepareRequest</span><span class="kw">:</span></span>
 <span id="cb95-2"><a href="#cb95-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assign</span></span>
@@ -6934,7 +6976,7 @@ and <code>parameters</code> remain mutually exclusive.</td>
 </tr>
 <tr class="even">
 <td>Render result.format/path/overwrite or renderAs/saveAs</td>
-<td>Remove the old persistence fields. The project-file expression
+<td>Remove the old persistence fields. The file-content expression
 returns the exact UTF-8 String and creates no implicit result file.</td>
 </tr>
 <tr class="odd">
@@ -6947,7 +6989,7 @@ returns the exact UTF-8 String and creates no implicit result file.</td>
 </tr>
 <tr class="odd">
 <td>Render targetFiles handoff to HTTP/MQ/SSH</td>
-<td>Pass the project-file String directly as HTTP body, MQ payload, or
+<td>Pass the file-content String directly as HTTP body, MQ payload, or
 SSH upload payload</td>
 </tr>
 <tr class="even">
@@ -6956,7 +6998,7 @@ SSH upload payload</td>
 </tr>
 </tbody>
 </table>
-<p>Project-file paths are relative to the canonical project root.
+<p>File-content paths are relative to the canonical package root.
 <code>./</code> and <code>../</code> are allowed only when the canonical
 target remains inside that root. The v1 contract has no globs or dynamic
 locators; the target must be a regular strict-UTF-8 file.</p>

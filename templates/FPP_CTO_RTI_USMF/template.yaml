@@ -20,7 +20,7 @@ actions:
   preparePrecheckRequest:
     type: assign
     name: precheckRequest
-    description: "0. Read the CT001 Precheck project file"
+    description: "0. Read the CT001 Precheck package file"
     expression: "&{templates/FPP_CTO_RTI_USMF/CT001_Precheck.xml}"
 
   log1:

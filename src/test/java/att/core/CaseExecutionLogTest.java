@@ -74,12 +74,40 @@ class CaseExecutionLogTest {
         assertFalse(text.contains("command:"));
     }
 
-    @Test void rawContentPreservesPhysicalLinesAndNormalizesLineEndings() throws Exception {
+    @Test void rawContentPreservesOriginalLineEndings() throws Exception {
         Path file = tempDir.resolve("raw.log");
         new CaseExecutionLog(file).appendRaw("LOG note INFO", "first\r\nsecond\rthird");
         String text = new String(Files.readAllBytes(file), "UTF-8");
-        assertTrue(text.contains("[LOG note INFO]\nfirst\nsecond\nthird\n\n"));
+        assertTrue(text.contains("[LOG note INFO]\nfirst\r\nsecond\rthird\n\n"));
         assertFalse(text.contains("\\n"));
+    }
+
+    @Test void structuredMultilineStringsRenderAsBlocksAndPreserveCrLf() throws Exception {
+        Path file = tempDir.resolve("structured-lines.log");
+        Map<String, Object> attempt = new LinkedHashMap<String, Object>();
+        attempt.put("payload", "<A>x</A>\r\n  <B> y </B>\r\n\r\n");
+        Map<String, Object> record = new LinkedHashMap<String, Object>();
+        record.put("output", Collections.singletonMap("attempts", Collections.singletonList(
+                Collections.singletonMap("input", attempt))));
+
+        new CaseExecutionLog(file).append("ACTION call", record);
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("payload: |+\n          <A>x</A>\r\n            <B> y </B>\r\n          \r\n"), text);
+        assertFalse(text.contains("\\\\"), text);
+        assertFalse(text.contains("\\r\\n"), text);
+    }
+
+    @Test void rawFileKeepsCrLfAndLoneCrAcrossReaderChunks() throws Exception {
+        Path source = tempDir.resolve("process-spool.txt");
+        StringBuilder content = new StringBuilder();
+        for (int index = 0; index < 9000; index++) content.append('x');
+        content.append("\r\nend\r");
+        Files.write(source, content.toString().getBytes("UTF-8"));
+        Path file = tempDir.resolve("raw-file-lines.log");
+
+        new CaseExecutionLog(file).appendRawFile("TOOL STDOUT", source, false, content.length());
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("x\r\nend\r\n"));
     }
 
     @Test void presentsProjectPathsPortablyAndBoundsExternalPathFields() throws Exception {

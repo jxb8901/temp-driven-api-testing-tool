@@ -269,8 +269,9 @@ public final class ExecutionBootstrapVariables {
                 if (inputMappingMode == InputMappingMode.LOAD
                         && isOneOf(child, "ID", "OUTPUT_DIR")) allowed = false;
             }
-        } else if ("META".equals(root) && isOneOf(child, "PROJECT", "SOURCE", "TARGET", "TEMPLATE")) {
-            allowed = inputMappingMode != InputMappingMode.TESTCASE || !"TEMPLATE".equals(child);
+        } else if ("META".equals(root) && isOneOf(child, "PACKAGE_ROOT", "SOURCE", "TARGET", "TEMPLATE")) {
+            allowed = "PACKAGE_ROOT".equals(child) ? segments.size() == 2
+                    : inputMappingMode != InputMappingMode.TESTCASE || !"TEMPLATE".equals(child);
         }
         if (!allowed) throw validation.invalid(inputMappingMode == null
                 ? "Context path '" + path + "' is not an initialized bootstrap root"

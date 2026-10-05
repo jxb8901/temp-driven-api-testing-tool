@@ -26,12 +26,11 @@ EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing di
 
 ## META field inventory and lifecycle
 
-The public META root contains only `PROJECT`, `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER`. META contains descriptive fields only. A path may be absent when its component is not active.
+The public META root contains `PACKAGE_ROOT`, `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER`. `META.PACKAGE_ROOT` is the normalized absolute path of the active ATT package and is execution-wide in Run, Debug and Load after package binding. Legacy `META.PROJECT.id` and `META.PROJECT.root` are removed with no compatibility alias. ATT installation scope (`ATT_HOME`), package scope (`META.PACKAGE_ROOT`) and execution output scope (`EXEC.OUTPUT_DIR`) are distinct. META contains descriptive fields only. A path may be absent when its component is not active.
 
 | Public path | Meaning, type and example | Modes and availability | Scope and when absent |
 |---|---|---|---|
-| META.PROJECT.id | Project directory name; String, for example, `payment-att`. | Run, Debug, Load; after project binding. | Execution-wide. |
-| META.PROJECT.root | Normalized project-root path; String, for example, `/srv/att/payment`. | Run, Debug, Load; after project binding. | Execution-wide. |
+| META.PACKAGE_ROOT | Normalized absolute package-root path; String, for example, `/srv/att/payment`. | Run, Debug, Load; after package binding. | Execution-wide. |
 | META.SOURCE.type | Source kind; String: `testcase`, `debug` or `load`. | Run, Debug, Load. | Execution-wide. |
 | META.SOURCE.path | Normalized absolute source path; String, for example, `/srv/att/payment/testcase/payment.xlsx`, `/srv/att/payment/debug.yaml` or `/srv/att/payment/load/payment.yaml`. | Run, Debug, Load when a source file exists. | Execution-wide; absent for an in-memory source. |
 | META.SOURCE.caseId | Canonical TestCase or synthetic Debug Case ID; String, for example, `payment.default.P001`. | Run, Debug. | Execution-wide; absent in Load. |

@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.7.4 - 2026-10-05
+
+- Unify final-value coercion for native helper and configured Tool arguments, including nested file-content and pure built-in results; add optional declared Tool argument types (#153).
+- Replace public project-file expression terminology with file-content expressions and publish the package boundary as `META.PACKAGE_ROOT` (#154).
+- Validate discovered Debug sidecars during package validation using Debug's schema/input validation path (#155).
+- Render multiline Case-log strings as readable blocks while preserving CRLF, LF and lone CR line endings (#156).
+- Upgrade ATT product version to 3.7.4.
+
 ## 3.7.3 - 2026-10-04
 
 - Adopt the Google Developer Documentation Style Guide as the editorial baseline for current ATT documentation, with ATT-specific terminology and identifier exceptions (#144).

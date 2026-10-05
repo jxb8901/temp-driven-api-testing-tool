@@ -43,9 +43,9 @@ pool:
 
 以 type: tool Action 的 primary call 呼叫 http.<id>.get/post/request。Response bytes 由此 boundary 解析：使用 call responseFormat、helper default，或 auto 時依 Content-Type 判斷。支援 auto、text、json、yaml、xml。解析後的 native value 發布於 output.result。可選 evidence.output 是有長度上限的人類可讀 snapshot，不會改變該值。
 
-## Request body 與 project-file string
+## Request body 與 file-content string
 
-Project-file expression 回傳 exact UTF-8 file content String，可先 Assign，再直接傳入 body：
+File-content expression 回傳 exact UTF-8 file content String，可先 Assign，再直接傳入 body：
 
 ~~~yaml
 prepareRequest:
@@ -59,9 +59,9 @@ sendRequest:
 
 HTTP 在 charset encoding boundary 傳送完全相同的 String，不會 parse/serialize。String 不可搭配 requestFormat。
 
-Map/List 是抽象結構化值，需明確指定 requestFormat，例如 body=${EXEC.INPUT.request}, requestFormat=json。requestFormat 支援 text、json、yaml、xml，且只用於 Map/List。String + requestFormat 會被拒絕。HTTP call 不接受 local file path；`file` 是 unknown argument。Project-file expression 不建立結果檔，也沒有 targetFiles。
+Map/List 是抽象結構化值，需明確指定 requestFormat，例如 body=${EXEC.INPUT.request}, requestFormat=json。requestFormat 支援 text、json、yaml、xml，且只用於 Map/List。String + requestFormat 會被拒絕。HTTP call 不接受 local file path；`file` 是 unknown argument。File-content expression 不建立結果檔，也沒有 targetFiles。
 
-Project-file String 不會覆蓋由 resource 管理的 HTTP Content-Type。需要特定 media type 時請配置 contentType/header。Request charset/header 與 response parsing 都由 HTTPHelper 管理，與 Action result/Log formatting 分開。
+File-content String 不會覆蓋由 resource 管理的 HTTP Content-Type。需要特定 media type 時請配置 contentType/header。Request charset/header 與 response parsing 都由 HTTPHelper 管理，與 Action result/Log formatting 分開。
 
 ## Failure 與 Evidence
 

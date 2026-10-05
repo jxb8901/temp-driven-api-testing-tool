@@ -43,9 +43,9 @@ pool:
 
 Call http.<id>.get/post/request as the primary call of a type: tool Action. Response bytes are parsed at this boundary using call responseFormat, the helper default, or Content-Type when auto is selected. Supported response formats are auto, text, json, yaml and xml. The parsed native value is output.result. Optional evidence.output is a bounded human-readable snapshot and never changes that value.
 
-## Request bodies and project-file strings
+## Request bodies and file-content strings
 
-A project-file expression returns the exact UTF-8 file content as a String. Assign it once and pass it directly as the body:
+A file-content expression returns the exact UTF-8 file content as a String. Assign it once and pass it directly as the body:
 
 ~~~yaml
 prepareRequest:
@@ -57,11 +57,11 @@ sendRequest:
   call: "#{http.payment.post(path='/v1/payments', body=${EXEC.VARS.requestText})}"
 ~~~
 
-HTTP sends the exact String to its charset-encoding boundary. ATT does not parse and reserialize it. Do not combine a project-file String with requestFormat.
+HTTP sends the exact String to its charset-encoding boundary. ATT does not parse and reserialize it. Do not combine a file-content String with requestFormat.
 
-A Map/List is an abstract structured value and requires explicit requestFormat, such as body=${EXEC.INPUT.request}, requestFormat=json. requestFormat accepts text, json, yaml or xml and applies only to Map/List. String + requestFormat is rejected. HTTP calls do not accept local file paths; `file` is an unknown argument. A project-file expression creates no result file and has no targetFiles.
+A Map/List is an abstract structured value and requires explicit requestFormat, such as body=${EXEC.INPUT.request}, requestFormat=json. requestFormat accepts text, json, yaml or xml and applies only to Map/List. String + requestFormat is rejected. HTTP calls do not accept local file paths; `file` is an unknown argument. A file-content expression creates no result file and has no targetFiles.
 
-The project-file String has no format metadata and does not set HTTP Content-Type. Configure contentType/header when a specific media type is required. Request charset/headers and response parsing remain HTTPHelper concerns, separate from Action result or Log formatting.
+The file-content String has no format metadata and does not set HTTP Content-Type. Configure contentType/header when a specific media type is required. Request charset/headers and response parsing remain HTTPHelper concerns, separate from Action result or Log formatting.
 
 ## Failure and Evidence
 
@@ -71,6 +71,6 @@ HTTP responses are capped at 10 MiB. A larger declared Content-Length is rejecte
 
 Set `defaults.maxResponseBytes` from 1 through 1073741824 in the HTTP helper descriptor; it defaults to 10485760 (10 MiB).
 
-See [Actions and Typed Values](../actions.md) for the shared project-file String and typed-result contract.
+See [Actions and Typed Values](../actions.md) for the shared file-content String and typed-result contract.
 
 DB/MQ/HTTP share the optional `evidence.output: {format: json, maxChars: 10000}` presentation policy. Supported formats are `text`, `json`, `yaml`, `xml`, and `sqlplus`; `sqlplus` requires a DB query/update result. `maxChars` defaults to 10000 and accepts 1–1000000. Credentials are redacted before deterministic character truncation; snapshots contain `format`, `text`, and `truncated`. Formatting failure adds only a bounded `outputError` and changes neither typed `output.result` nor operation status. Normal Run/Debug invocations automatically include the snapshot in Action evidence and the Case log, without an extra Log Action; SQL, parameters, MQ payload metadata, and HTTP status/header diagnostics keep their own contracts. Load defers formatting until an iteration is retained, then materializes `resource-output.yaml`; `evidence.resources.output: none` skips it entirely. Presentation never introduces credential values into evidence.

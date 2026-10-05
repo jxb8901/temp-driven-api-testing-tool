@@ -53,7 +53,7 @@ For example:
 tools:
   invokePaymentApi:
     name: Invoke Payment API
-    description: Invoke a project-file payment request
+    description: Invoke a file-content payment request
     command:
       - ./tools/invoke_payment_api.sh
       - "${input.requestText}"
@@ -196,7 +196,7 @@ command: [./tools/invoke_payment_api.sh, "${input.requestText}"]
 arguments:
   requestText:
     name: Request Body
-    description: Project-file request body String
+    description: File-content request body String
     required: true
     argName: --request
 ```
@@ -215,4 +215,6 @@ Global `tools` and Tool-group `tools` entries use the same Tool contract:
 |---|---|
 | `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
 | call-backed `tools.<key>.cache` | required `scope: case|db` |
-| `arguments.<key>` | `name`, `description`, `required`, optional `argName`, `argNameMode`, `delimit`, `x-*` |
+| `arguments.<key>` | `name`, `description`, `required`, optional `type`, `enumValues` (required only for `type: enum`), `argName`, `argNameMode`, `delimit`, `x-*` |
+
+An argument `type` declares the final resolved value contract for configured Tools: `string`, `integer`, `long`, `decimal`, `boolean`, `enum`, `bytes`, `map`, or `list`. Omitted `type` remains `any` for existing descriptors. Numeric and Boolean scalar types accept native values or trimmed numeric/`true`/`false` Strings; enum values must match one of `enumValues`; `bytes` accepts a byte array or converts a String to UTF-8. `string`, `map`, and `list` require that native value type. These checks run after the complete nested expression resolves, in validation when safely static and at runtime otherwise.

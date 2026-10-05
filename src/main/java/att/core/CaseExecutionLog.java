@@ -176,7 +176,8 @@ public class CaseExecutionLog implements AutoCloseable {
         } else {
             Object serializable = serializable(data, new IdentityHashMap<Object, Object>(), new IdentityHashMap<Object, Boolean>(),
                     false, false, knownRemotePaths);
-            text.append(yaml.dump(serializable)).append("\n");
+            text.append(containsMultilineString(serializable)
+                    ? renderHumanYaml(serializable, 0) : yaml.dump(serializable)).append("\n");
         }
         write(text.toString());
     }
@@ -184,13 +185,13 @@ public class CaseExecutionLog implements AutoCloseable {
     /** Writes resolved user/process content as text instead of YAML-escaping line breaks. */
     public synchronized void appendRaw(String section, String content) throws IOException {
         if (discarding) return;
-        String normalized = normalizeLines(content == null ? "" : content);
+        String value = content == null ? "" : content;
         StringBuilder text = new StringBuilder();
         text.append("[").append(section).append("]\n");
         text.append(diagnosticSection(section)
-                ? PathPresentation.displayDiagnosticText(redactSecrets(normalized), projectRoot,
-                        java.util.Collections.<String>emptySet()) : normalized);
-        if (!normalized.endsWith("\n")) text.append('\n');
+                ? PathPresentation.displayDiagnosticText(redactSecrets(value), projectRoot,
+                        java.util.Collections.<String>emptySet()) : value);
+        if (!endsInLineBreak(value)) text.append('\n');
         text.append('\n');
         write(text.toString());
     }
@@ -206,7 +207,6 @@ public class CaseExecutionLog implements AutoCloseable {
         if (discarding) return;
         if (source == null || !Files.isRegularFile(source)) return;
         write("[" + section + "]\n");
-        boolean previousCarriageReturn = false;
         boolean endedWithNewline = false;
         int longestRedaction = 0;
         if (redactions != null) for (String token : redactions)
@@ -220,22 +220,14 @@ public class CaseExecutionLog implements AutoCloseable {
                 StringBuilder chunk = new StringBuilder(count + 1);
                 for (int index = 0; index < count; index++) {
                     char value = buffer[index];
-                    if (previousCarriageReturn) {
-                        if (value != '\n') chunk.append('\n');
-                        previousCarriageReturn = false;
-                    }
-                    if (value == '\r') previousCarriageReturn = true;
-                    else chunk.append(value);
+                    chunk.append(value);
                 }
                 if (chunk.length() > 0) {
                     writeRedactedChunk(chunk.toString(), pending, redactions, longestRedaction);
-                    endedWithNewline = chunk.charAt(chunk.length() - 1) == '\n';
+                    char last = chunk.charAt(chunk.length() - 1);
+                    endedWithNewline = last == '\n' || last == '\r';
                 }
             }
-        }
-        if (previousCarriageReturn) {
-            writeRedactedChunk("\n", pending, redactions, longestRedaction);
-            endedWithNewline = true;
         }
         if (pending != null && pending.length() > 0) {
             String tail = pending.toString();
@@ -341,9 +333,105 @@ public class CaseExecutionLog implements AutoCloseable {
         return target;
     }
 
-    private String normalizeLines(String value) {
-        return value.replace("\r\n", "\n").replace('\r', '\n');
+    private static boolean endsInLineBreak(String value) {
+        return !value.isEmpty() && (value.charAt(value.length() - 1) == '\n' || value.charAt(value.length() - 1) == '\r');
     }
+
+    /** Renders nested values for people while leaving multiline String characters intact. */
+    private String renderHumanYaml(Object value, int indent) {
+        StringBuilder out = new StringBuilder();
+        if (value instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                indent(out, indent);
+                out.append(yamlScalar(String.valueOf(entry.getKey()))).append(':');
+                Object child = entry.getValue();
+                if (isEmptyContainer(child)) {
+                    out.append(' ').append(child instanceof Map ? "{}" : "[]").append('\n');
+                } else if (isContainer(child)) {
+                    out.append('\n').append(renderHumanYaml(child, indent + 2));
+                } else if (child instanceof String && hasLineBreak((String) child)) {
+                    out.append(' ').append(renderBlock((String) child, indent + 2));
+                } else {
+                    out.append(' ').append(yamlScalar(child)).append('\n');
+                }
+            }
+        } else if (value instanceof Iterable) {
+            for (Object child : (Iterable<?>) value) {
+                indent(out, indent);
+                out.append('-');
+                if (isEmptyContainer(child)) out.append(' ').append(child instanceof Map ? "{}" : "[]").append('\n');
+                else if (isContainer(child)) out.append('\n').append(renderHumanYaml(child, indent + 2));
+                else if (child instanceof String && hasLineBreak((String) child)) out.append(' ').append(renderBlock((String) child, indent + 2));
+                else out.append(' ').append(yamlScalar(child)).append('\n');
+            }
+        } else if (value != null && value.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(value);
+            List<Object> values = new ArrayList<Object>(length);
+            for (int index = 0; index < length; index++) values.add(java.lang.reflect.Array.get(value, index));
+            return renderHumanYaml(values, indent);
+        } else {
+            indent(out, indent);
+            out.append(yamlScalar(value)).append('\n');
+        }
+        return out.toString();
+    }
+
+    private String renderBlock(String value, int contentIndent) {
+        int trailingBreaks = 0;
+        for (int index = value.length() - 1; index >= 0; index--) {
+            char ch = value.charAt(index);
+            if (ch == '\r' || ch == '\n') trailingBreaks++;
+            else break;
+        }
+        String indicator = trailingBreaks == 0 ? "|-" : trailingBreaks == 1 ? "|" : "|+";
+        StringBuilder out = new StringBuilder(indicator).append('\n');
+        int lineStart = 0;
+        for (int index = 0; index < value.length(); index++) {
+            char ch = value.charAt(index);
+            if (ch != '\r' && ch != '\n') continue;
+            indent(out, contentIndent);
+            out.append(value, lineStart, index).append(ch);
+            if (ch == '\r' && index + 1 < value.length() && value.charAt(index + 1) == '\n') {
+                out.append('\n');
+                index++;
+            }
+            lineStart = index + 1;
+        }
+        if (lineStart < value.length()) {
+            indent(out, contentIndent);
+            out.append(value.substring(lineStart)).append('\n');
+        } else if (value.isEmpty()) {
+            indent(out, contentIndent);
+            out.append('\n');
+        }
+        return out.toString();
+    }
+
+    private String yamlScalar(Object value) {
+        String dumped = yaml.dump(value);
+        if (dumped.endsWith("\n...\n")) return dumped.substring(0, dumped.length() - 5).trim();
+        if (dumped.endsWith("\n")) dumped = dumped.substring(0, dumped.length() - 1);
+        return dumped;
+    }
+
+    private boolean isContainer(Object value) { return value instanceof Map || value instanceof Iterable || (value != null && value.getClass().isArray()); }
+    private boolean isEmptyContainer(Object value) {
+        if (value instanceof Map) return ((Map<?, ?>) value).isEmpty();
+        if (value instanceof java.util.Collection) return ((java.util.Collection<?>) value).isEmpty();
+        return value != null && value.getClass().isArray() && java.lang.reflect.Array.getLength(value) == 0;
+    }
+    private boolean hasLineBreak(String value) { return value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0; }
+    private boolean containsMultilineString(Object value) {
+        if (value instanceof String) return hasLineBreak((String) value);
+        if (value instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet())
+                if (containsMultilineString(entry.getValue())) return true;
+        } else if (value instanceof Iterable) {
+            for (Object item : (Iterable<?>) value) if (containsMultilineString(item)) return true;
+        }
+        return false;
+    }
+    private void indent(StringBuilder out, int count) { for (int index = 0; index < count; index++) out.append(' '); }
 
     @Override public synchronized void close() throws IOException { if (writer != null) writer.close(); }
 

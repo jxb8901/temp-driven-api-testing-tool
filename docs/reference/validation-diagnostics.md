@@ -16,6 +16,8 @@ For one environment, use `./att.sh validate --config config/config.yaml --env SI
 
 Current schemas are in [`schemas/`](../../schemas/); older definitions are under [`schemas/history/`](../../schemas/history/). `validate --package` checks every catalog-registered schema resource, even when the package does not use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. Validation never rewrites YAML. Review the migration guidance, update the file, then rerun package validation for each selected `--env`.
 
+Package validation also discovers existing Template, Flow and grouped or ungrouped Tool `debug.yaml` sidecars using the same discovery and schema/input validation as Debug execution. Historical schema versions and invalid current-schema structure are reported before invoking `att debug`; optional missing sidecars remain valid.
+
 Then use the diagnostic code and structured location. Do not automate against message text.
 
 | Category | Typical cause | Corrective action |
@@ -84,7 +86,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.7.3",
+  "attVersion": "3.7.4",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

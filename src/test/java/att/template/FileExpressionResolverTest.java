@@ -201,7 +201,7 @@ class FileExpressionResolverTest {
                 FileExpressionResolver resolver = new FileExpressionResolver(project);
                 IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                         () -> resolver.evaluate(file, directory, runtime(Collections.<String, Object>emptyMap())));
-                assertTrue(error.getMessage().contains("Nested project-file expressions"));
+                assertTrue(error.getMessage().contains("Nested file-content expressions"));
             }
             assertThrows(IllegalArgumentException.class, () -> new FileExpressionResolver(project).snapshotFor(template, null));
         }

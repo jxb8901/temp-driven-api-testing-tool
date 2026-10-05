@@ -16,9 +16,9 @@ public final class ExpressionBlockEvaluator {
         Object context(String path) throws Exception;
         Object call(String name, Map<String, Object> arguments) throws Exception;
         String interpolate(String value) throws Exception;
-        /** Resolves one statically addressed project-file value. */
+        /** Resolves one statically addressed file-content value. */
         default String file(String path) throws Exception {
-            throw new IllegalArgumentException("Project-file expressions are unavailable in this scope: &{" + path + "}");
+            throw new IllegalArgumentException("File-content expressions are unavailable in this scope: &{" + path + "}");
         }
         default boolean hasContext(String path) { return false; }
         default Object contextOptional(String path) throws Exception { return context(path); }
@@ -90,7 +90,7 @@ public final class ExpressionBlockEvaluator {
 
     private static final class Parsed { private final Node root; private Parsed(Node root) { this.root = root; } }
 
-    /** Immutable compiled expression used by cached project-file plans. */
+    /** Immutable compiled expression used by cached file-content plans. */
     public static final class CompiledExpression {
         private final Node root;
         private CompiledExpression(Node root) { this.root = root; }
@@ -391,11 +391,11 @@ public final class ExpressionBlockEvaluator {
             index += 2;
             int body = index;
             while (index < source.length() && source.charAt(index) != '}') index++;
-            if (index >= source.length()) throw new ExpressionSyntaxException(start, index, "'}' to close project-file expression", "end of expression");
+            if (index >= source.length()) throw new ExpressionSyntaxException(start, index, "'}' to close file-content expression", "end of expression");
             String path = source.substring(body, index);
             index++;
             if (path.trim().isEmpty() || !path.equals(path.trim()))
-                throw new ExpressionSyntaxException(start, index, "a non-blank project-file path", "invalid project-file path");
+                throw new ExpressionSyntaxException(start, index, "a non-blank file locator", "invalid file locator");
             return new Token(TokenType.FILE, path, start, index);
         }
         private Token embedded(int start) {
