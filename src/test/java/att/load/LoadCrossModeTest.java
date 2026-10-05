@@ -338,7 +338,7 @@ class LoadCrossModeTest {
         write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.4\n"
                 + "name: SHARED\ndescription: bootstrap fixture\nactions:\n"
                 + "  check:\n    type: log\n    message: 'value=${EXEC.VARS.refNo}|id=${EXEC.VARS.executionId}'\n");
-        write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.1\ninputs: {amount: 17}\n"
+        write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.2\ninputs: {amount: 17}\n"
                 + "vars: {refNo: sidecar, executionId: '${EXEC.ID}', loadUser: '${EXEC.LOAD.USER_ID}'}\n");
         ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "template", "SHARED",
                 "--input", "templates/SHARED/debug.yaml", "--users", "1", "--duration", "1s",
@@ -371,7 +371,7 @@ class LoadCrossModeTest {
     @Test void loadDebugPromotesTypedToolArgumentsIntoTheNormalLoadRuntime() throws Exception {
         Path project = fixture();
         FrameworkConfig config = config();
-        write(project, "config/tools/echo.debug.yaml", "schemaVersion: att-debug/v1.1\narguments: {value: sidecar}\n");
+        write(project, "config/tools/echo.debug.yaml", "schemaVersion: att-debug/v1.2\narguments: {value: sidecar}\n");
         ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "tool", "echo",
                 "--users", "1", "--duration", "1s", "--set", "arg.value=typed-load"});
         Map<String, Object> promoted = new DebugEngine(project, config).loadBootstrapInputForLoad(options);
@@ -390,7 +390,7 @@ class LoadCrossModeTest {
 
     @Test void groupedToolSidecarOverridesSurviveQuickLoadPromotion() throws Exception {
         Path project = fixture();
-        write(project, "config/tools/group.debug.yaml", "schemaVersion: att-debug/v1.1\narguments: {value: from-root}\n"
+        write(project, "config/tools/group.debug.yaml", "schemaVersion: att-debug/v1.2\narguments: {value: from-root}\n"
                 + "tools:\n  echo:\n    arguments: {value: from-sidecar}\n");
         Map<String, att.config.ToolArgumentConfig> arguments = Collections.singletonMap("value",
                 new att.config.ToolArgumentConfig("value", "Value", "Value", true, ""));
@@ -616,7 +616,7 @@ class LoadCrossModeTest {
         write(project, "templates/flows/shared/echo/flow.yaml", "schemaVersion: att-flow/v3.4\n"
                 + "id: shared.echo.v1\nname: Shared Echo\ndescription: cross-mode flow\nactions:\n"
                 + "  flowLog:\n    type: log\n    message: \"flow=${EXEC.INPUT.value}\"\n");
-        write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.1\ninputs:\n  value: shared-value\n");
+        write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.2\ninputs:\n  value: shared-value\n");
         return project;
     }
 

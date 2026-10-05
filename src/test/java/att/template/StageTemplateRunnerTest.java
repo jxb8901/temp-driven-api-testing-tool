@@ -1287,6 +1287,34 @@ class StageTemplateRunnerTest {
         assertEquals(projected.evidence(), CollectorExceptionEvidence.project(projected).evidence());
     }
 
+    @Test void explicitLocalFailureDetailsExpandTheProjectionButStillRedactInputs() {
+        String secret = "local-secret-value-821";
+        Map<String, Object> input = new LinkedHashMap<String, Object>();
+        for (int index = 0; index < 300; index++) input.put("field" + index, index == 299 ? secret : "value-" + index);
+        String detail = "diagnostic-" + new String(new char[1400]).replace('\0', 'x') + " " + secret + " tail-marker";
+        ToolExecutionException failure = new ToolExecutionException("TIMEOUT", detail,
+                map("input", input, "stderr", detail, "status", "TIMEOUT"), null, null);
+
+        ToolExecutionException safe = CollectorExceptionEvidence.project(failure);
+        ToolExecutionException local = CollectorExceptionEvidence.project(failure, true);
+
+        assertEquals(CollectorExceptionEvidence.OMITTED_TEXT, safe.getMessage());
+        assertTrue(local.getMessage().contains("tail-marker"));
+        assertTrue(local.getMessage().contains("[REDACTED_SECRET]"));
+        assertFalse(local.getMessage().contains(secret));
+        assertFalse(att.validation.JsonSupport.write(local.evidence()).contains(secret));
+        assertEquals(Boolean.TRUE, local.evidence().get("inputOmitted"));
+
+        ToolInvocationResult returned = new ToolInvocationResult("native", "native", secret,
+                map("status", "ERROR", "input", input), false,
+                new ActionExecutionResult(null, Collections.<String, Object>emptyMap(), false,
+                        map("code", "HTTP_FAILURE", "message", detail), 1L));
+        ToolInvocationResult returnedLocal = CollectorExceptionEvidence.project(returned, true);
+        assertTrue(String.valueOf(returnedLocal.operationResult().diagnostic().get("message")).contains("tail-marker"));
+        assertFalse(att.validation.JsonSupport.write(returnedLocal.operationResult().diagnostic()).contains(secret));
+        assertNull(returnedLocal.output());
+    }
+
     private void verifyPrivateCollectorFailure(String scenario, final ToolExecutionException failure,
             List<String> fragments, boolean omitted) throws Exception {
         for (String mode : Arrays.asList("continue", "stop")) {

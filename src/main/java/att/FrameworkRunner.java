@@ -54,6 +54,7 @@ public final class FrameworkRunner {
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
                     output.put("status", debug.status().name()); output.put("exitCode", debug.exitCode());
+                    output.put("failureDetailMode", options.unsafeFailureDetails() ? "local-unsafe" : "safe-default");
                     output.put("durationMs", debug.durationMs()); output.put("log", att.core.PathPresentation.displayPath(debug.logPath(), root));
                     output.put("result", att.core.PathPresentation.displayPath(debug.resultPath(), root)); System.out.println(att.validation.JsonSupport.write(output));
                 } else {
@@ -290,7 +291,7 @@ public final class FrameworkRunner {
     }
 
     private static void help() {
-        System.out.println("Debug: ./att.sh debug [template|flow|tool <id>] [--config <file>] [--env <name>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
+        System.out.println("Debug: ./att.sh debug [template|flow|tool <id>] [--config <file>] [--env <name>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--unsafe-failure-details] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
         System.out.println("Debug discovery: ./att.sh debug [--format human|json] lists runnable targets and existing sidecars; discovery does not execute targets.");
         System.out.println("Load: ./att.sh load [<scenario.yaml> | --debug template|flow|tool <id>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--config <file>] [--env <name>] [--run-id <id>] [--users <n>|--arrival-rate <n/s>] [--duration <duration>] [--max-concurrent <n>] [--format human|json]");
         System.out.println("Load discovery: ./att.sh load [--format human|json] lists valid scenarios; load/load.yaml supplies the optional Quick Load policy.");

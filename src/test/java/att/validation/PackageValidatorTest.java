@@ -187,7 +187,7 @@ class PackageValidatorTest {
                 .collect(java.util.stream.Collectors.joining("\n")));
         assertEquals("schemaVersion", historical.field());
         assertTrue(historical.message().contains("att-debug/v1.0"));
-        assertTrue(historical.suggestion().contains("att-debug/v1.1"));
+        assertTrue(historical.suggestion().contains("att-debug/v1.2"));
     }
 
     @Test void packageValidationFindsHistoricalDebugSidecarsForFlowsAndBothToolKinds() throws Exception {
@@ -229,11 +229,11 @@ class PackageValidatorTest {
                     .map(item -> item.code() + " " + item.file() + " " + item.message())
                     .collect(java.util.stream.Collectors.joining("\n")));
             assertEquals("schemaVersion", found.field(), sidecar.getKey());
-            assertTrue(found.suggestion().contains("att-debug/v1.1"), sidecar.getKey());
+            assertTrue(found.suggestion().contains("att-debug/v1.2"), sidecar.getKey());
         }
 
         for (Path sidecar : sidecars.values()) Files.write(sidecar,
-                "schemaVersion: att-debug/v1.1\n".getBytes("UTF-8"));
+                "schemaVersion: att-debug/v1.2\n".getBytes("UTF-8"));
         PackageValidator.ValidationSummary current = new PackageValidator(tempDir, config)
                 .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
         assertFalse(current.diagnostics.stream().anyMatch(item -> DiagnosticCodes.SCHEMA_VERSION_OLD.equals(item.code())

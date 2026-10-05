@@ -157,7 +157,7 @@ Run、Debug、Load 把不同輸入適配到同一 execution-neutral Context 和�
 | 模式 | 主要輸入 | 重用內容 |
 |---|---|---|
 | Run | workbook Testcase 與 Stage selector | Template、Flow、Tool、DB/MQ/HTTP/SSH |
-| Debug | `att-debug/v1.1` sidecar 或 `--input` | 單一 Template、Flow 或 Tool target |
+| Debug | `att-debug/v1.2` sidecar 或 `--input` | 單一 Template、Flow 或 Tool target |
 | Load | `att-load/v1.6` scenario | 重複執行一個或多個 Template、Flow 或 Tool workload |
 
 可重用 Template/Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
@@ -951,7 +951,7 @@ Debug 可在沒有 workbook Testcase 的情況下執行單一 Template、Flow �
 
 不帶 target 執行 `./att.sh debug`，會列出 statically valid、可執行的 Tool、Template 和 Flow，附 copyable command。只會顯示實際存在的 regular non-symlink default sidecar。Discovery 會檢查 selected target dependencies，但不建立 Debug output，也不呼叫 Tool。可用 `--format json` 取得 machine-readable 結果。
 
-Debug input 使用現行 `schemaVersion: att-debug/v1.1`。Top-level 支援 `case`、可選 `stage`、`inputs`、`vars`、`arguments`，以及 grouped `tools.<localKey>.arguments`。`inputs` 會適配到 canonical `EXEC.INPUT`；Template/Flow 的 `vars` 會以 typed bootstrap tree 評估，並在 target 開始前 seed canonical `EXEC.VARS`。Tool Debug 使用 `arguments`，不支援 `vars`。Framework-owned identity、output、Actions、resource metadata 與 compatibility view 不能被 user input 覆寫。Schema migration 見 [Migration Notes](reference.zh/appendices/migrations.md)。
+Debug input 使用現行 `schemaVersion: att-debug/v1.2`。Top-level 支援 `case`、可選 `stage`、`inputs`、`vars`、`arguments`、grouped `tools.<localKey>.arguments`，以及可選 `testdata`。`testdata` 列出 package-relative descriptor path，並作為此 Debug invocation 專用的 whole-descriptor overlay，疊加在所選 environment registry 上；local layer 內重複的 path 或 ID 會被拒絕。Overlay 不會供 Run 使用。若 sidecar 含 Debug-local imports，`load --debug` 會明確拒絕；請將 imports 放到 Load scenario。`inputs` 會適配到 canonical `EXEC.INPUT`；Template/Flow 的 `vars` 會以 typed bootstrap tree 評估，並在 target 開始前 seed canonical `EXEC.VARS`。Tool Debug 使用 `arguments`，不支援 `vars`。Framework-owned identity、output、Actions、resource metadata 與 compatibility view 不能被 user input 覆寫。Schema migration 見 [Migration Notes](reference.zh/appendices/migrations.md)。
 
 #### Standalone Debug bootstrap data
 
@@ -968,7 +968,7 @@ Debug input 使用現行 `schemaVersion: att-debug/v1.1`。Top-level 支援 `cas
 Debug `inputs` 與 Run 使用相同 Testdata mapping 語法：以 `--env` 選擇已配置的 environment，再使用完整 `@{id}`／`@{id.path}` reference 或 scalar interpolation。ATT 會先解析再發布到 `EXEC.INPUT`；Reusable Template、Flow 或 Tool definition 內仍不可直接使用 Testdata marker。詳見[Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md)。
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 inputs:
   amount: 100
 vars:
@@ -983,6 +983,25 @@ vars:
 ```sh
 ./att.sh debug flow common.payment --input common.payment.debug.yaml
 ```
+
+若 Debug 需要不應加入共用 environment config 的 descriptor，可在 sidecar 指定 `testdata`：
+
+```yaml
+schemaVersion: att-debug/v1.2
+testdata: [debug-data/accounts.yaml]
+inputs:
+  accountId: '@{accounts.id}'
+```
+
+Descriptor path 相對於 package root，並使用一般 `att-testdata/v1.0` 格式。
+
+若 collector failure 的安全投影隱藏了診斷細節，可在本機執行時明確選用 `--unsafe-failure-details`：
+
+```sh
+./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
+```
+
+此 flag 僅供 standalone `debug` 使用。ATT 會在執行前顯示警告，保留 configured-secret redaction，並在 result 寫入 `failureDetailMode: local-unsafe`。它不會 dump raw inputs、argv、request body 或 Context values。預設仍為 `safe-default`；Run、Validate、Snapshot 及 `load --debug` 不能啟用此 override。
 
 `vars` 使用共用 expression engine：完整 `${EXEC.INPUT.amount}` 保留原生型別；混合文字會成為字串；`#{...}` 保留 expression result 型別。Map/list 會遞迴處理，map key 維持字面值。Vars 可按任意順序相依；循環、缺少 var、不可用 root 及 side-effecting call 會在 target 開始前失敗。第一次正常 `assign` 可以取代 bootstrap variable，之後仍遵守一般 duplicate-assignment rules。Final values 會使用既有 canonical `EXEC.VARS`/`CASE.VARS` context 及 result artifacts，並套用既有 redaction policy；不會建立第二個 Debug-only namespace。
 
@@ -1025,12 +1044,12 @@ Load 專用的 evidence retention（`metrics`、`failures`、`samples`、`all`�
 
 `run`、`debug` 和 `load` 默認採用交互式 verbose 行為。Lifecycle、Case、Stage、Action、Resource attempt、retry、assertion 和錯誤事件會即時寫出並及時 flush。實時 Case-log 鏡像復用與 `case.log` 相同的脫敏 append 路徑；`case.log`、`case.yaml`/`result.yaml`、report 和 evidence 仍是持久化事實來源。並發 Case-log 區塊會帶有 Case ID 前綴。`--quiet` 抑制詳細實時進度，但保留最終摘要和錯誤。使用 `--format json` 時，機器可讀內容仍寫入 stdout，實時進度寫入 stderr。Load 只定期輸出有界計數/速率並節流錯誤，不會為每個成功 iteration 輸出一大段內容。
 
-以下每個文件都是完整的 `att-debug/v1.1` 文檔，展示 Template、Flow、分組 Tool、未分組 Tool 和臨時覆蓋值的不同寫法。
+以下每個文件都是完整的 `att-debug/v1.2` 文檔，展示 Template、Flow、分組 Tool、未分組 Tool 和臨時覆蓋值的不同寫法。
 
 Template sidecar（`templates/PAYMENT_INVOKE/debug.yaml`）：
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 case:
   caseName: PAYMENT debug
   amount: 100
@@ -1053,7 +1072,7 @@ Template 表達式應優先讀取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environ
 Flow sidecar（`templates/flows/common/compose/debug.yaml`）：
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 case:
   caseName: Compose debug
   traceId: TRACE-001
@@ -1077,7 +1096,7 @@ Flow 可用 `${EXEC.INPUT.source}` 讀取 `inputs`；如果沒有名為 `inputs`
 分組 Tool sidecar（`fpp.invokeApi` 對應 `config/tools/fpp.debug.yaml`）：
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 case:
   RefNo: REF001
 tools:
@@ -1100,7 +1119,7 @@ tools:
 未分組 Tool sidecar（`config/tools/invokePaymentApi.debug.yaml`）：
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 arguments:
   requestFile: /tmp/payment-request.xml
   environment: SIT
@@ -1127,7 +1146,7 @@ arguments:
 保護字段例子：
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 case:
   caseId: pretend-id
   outputDirectory: /tmp/pretend-output
@@ -1658,7 +1677,18 @@ validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 
 
 DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
 
-以上 `waitForOrder` query 無需後續 Log Action。DBHelper 設定 `evidence: {sql: full, parameters: masked, output: {format: sqlplus, maxChars: 10000}}` 即會自動保留 SQL*Plus-style row snapshot；`sql` 決定 SQL evidence，`parameters` 決定 parameter representation，`output` 只控制人類可讀顯示。Assertion 和後續 Action 仍直接讀取 typed rows；`db.<id>.query`／`scalar` 亦遵循相同 policy。
+以上 `waitForOrder` query 無需後續 Log Action。DBHelper 可作以下設定，自動保留 SQL*Plus-style row snapshot：
+
+```yaml
+evidence:
+  sql: full
+  parameters: masked
+  output:
+    format: sqlplus
+    maxChars: 10000
+```
+
+`sql` 決定 SQL evidence；`parameters` 僅接受 `values`、`types` 或 `masked`（沒有 `no_mask` 選項），預設為 `values`。任何 parameter mode 都會繼續遮蔽 configured credentials。`output` 只控制 presentation；Assertion 和後續 Action 仍讀取 typed rows，`db.<id>.query`／`scalar` 遵循相同 policy。`maxChars` 預設 10000，範圍為 1 至 1000000。大型 `SELECT` 可能需要提高上限，才能保留完整 formatted snapshot。
 
 ### MQHelper
 
@@ -2452,6 +2482,7 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 | `./att.sh debug <type> <id> --set input.path=<yaml-value>` | 覆蓋 typed `EXEC.INPUT` 值；可重復使用 |
 | `./att.sh debug tool <id> --set arg.name=<yaml-value>` | 覆蓋一個 Tool argument；可重復使用 |
 | `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | 在 expression evaluation 前覆蓋 Template/Flow bootstrap `EXEC.VARS` |
+| `./att.sh debug <type> <id> --unsafe-failure-details` | 為此次 standalone local Debug 展開 collector failure diagnostics；會先警告並保留 secret redaction |
 | `./att.sh debug <type> <id> --output-dir <dir>` | 將 debug 輸出隔離到 `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | 輸出緊湊機器可讀摘要；完整證據仍在 `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
@@ -2482,7 +2513,7 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 
 `--set` 可重複使用，並且只接受一個 namespace：`input`、`arg` 或 `vars`。值使用安全 YAML 解析，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可使用 map key 和數字 list index，例如 `input.customer.ids[0]=42`。重複賦值按順序套用，最後一個值生效。解析 override 時不會評估 ATT expression；若 shell 可能展開類似 expression 的值，請加上引號。`arg.*` 僅適用於 Tool，`vars.*` 僅適用於 Template/Flow。多 workload Load scenario 不接受未限定的 override。
 
-`load/load.yaml` 是可選的 policy-only `att-load/v1.6` 檔案，可包含 `load`、`execution`、`thresholds`、`evidence` 和 `seed`，但不包含 target 或 business inputs。`load --debug` 會將 sidecar `inputs` 提升為 `EXEC.INPUT`、Template/Flow `vars` 提升為 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，然後使用一般 Load validator、scheduler 和 evidence pipeline 執行。明確的 CLI pacing fields 會覆蓋 policy；沒有 policy 時，請直接在 CLI 指定完整 policy。
+`load/load.yaml` 是可選的 policy-only `att-load/v1.6` 檔案，可包含 `load`、`execution`、`thresholds`、`evidence` 和 `seed`，但不包含 target 或 business inputs。`load --debug` 會將 sidecar `inputs` 提升為 `EXEC.INPUT`、Template/Flow `vars` 提升為 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，然後使用一般 Load validator、scheduler 和 evidence pipeline 執行。若 sidecar 含 Debug-local `testdata` imports，`load --debug` 會拒絕；請把 imports 宣告於 Load scenario。明確的 CLI pacing fields 會覆蓋 policy；沒有 policy 時，請直接在 CLI 指定完整 policy。
 
 ### Debug input 與 output
 
@@ -2817,7 +2848,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.6 |
 | Flow | att-flow/v3.6 |
-| Debug input | att-debug/v1.1 |
+| Debug input | att-debug/v1.2 |
 | Load scenario | att-load/v1.6 |
 | Load summary | att-load-summary/v1.1 |
 | Run manifest | att-run/v2.1 |
@@ -2921,7 +2952,7 @@ Unsupported schemaVersion 會在 execution 前由 validation 拒絕並提供 mig
 
 ### Debug schema migration
 
-`att-debug/v1.0` 為 historical schema；請升級至 `att-debug/v1.1`。Template/Flow 可配置 `vars` 以 seed `EXEC.VARS`；Tool 不支援 `vars`。Input 與 arguments 的現行規則見 [Debug](reference.zh/execution-modes/debug.md)。
+`att-debug/v1.0` 及 `att-debug/v1.1` 為 historical schema；請升級至 `att-debug/v1.2`。Template/Flow 可配置 `vars` 以 seed `EXEC.VARS`；Tool 不支援 `vars`。現行 schema 亦允許 package-relative `testdata` imports，並限定在 standalone Debug invocation。Input 與 arguments 的現行規則見 [Debug](reference.zh/execution-modes/debug.md)。
 
 ### Environment profile migration
 

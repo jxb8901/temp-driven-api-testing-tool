@@ -148,6 +148,30 @@ class FileExpressionResolverTest {
         assertEquals(1, snapshot.size());
     }
 
+    @Test void directFlowLoadSnapshotTraversesTheActualFlowBehindItsSyntheticWrapper() throws Exception {
+        att.TestSchemas.install(project);
+        Path flowDirectory = project.resolve("templates/flows/mqtest");
+        Files.createDirectories(flowDirectory);
+        Path source = write("templates/flows/mqtest/AFT19222.xml", "before-load");
+        Files.write(flowDirectory.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.4\n"
+                + "id: mqtest.v1\nname: MQ Test\ndescription: MQ Test Flow\nactions:\n"
+                + "  request: {type: assign, name: request, expression: '&{AFT19222.xml}'}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        att.flow.FlowRegistry flows = new att.flow.FlowRegistry(project, project.resolve("templates"), false);
+        Map<String, Object> wrapperAction = values("type", "flow", "use", "mqtest.v1");
+        StageTemplate wrapper = new StageTemplate("MQ Test", flowDirectory,
+                Collections.singletonList(new TemplateAction("loadFlow", wrapperAction, Version.TEMPLATE_SCHEMA)),
+                Version.TEMPLATE_SCHEMA, flowDirectory.resolve("flow.yaml"));
+
+        FileExpressionResolver.FileExpressionSnapshot snapshot = new FileExpressionResolver(project)
+                .snapshotForLoadFlow(wrapper, flows, "mqtest.v1");
+        assertEquals(1, snapshot.size());
+        Files.write(source, "after-load".getBytes(StandardCharsets.UTF_8));
+        FileExpressionResolver frozen = new FileExpressionResolver(project, snapshot);
+        assertEquals("before-load", frozen.evaluate("AFT19222.xml", flowDirectory,
+                runtime(Collections.<String, Object>emptyMap())));
+    }
+
     @Test void runtimeStringsNeverBecomeFileLocatorsInRunDebugOrLoad() throws Exception {
         write("templates/T/private.txt", "private-content");
         write("templates/T/request.txt", "${EXEC.INPUT.value}");

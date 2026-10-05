@@ -36,6 +36,7 @@ public final class ExecutionOptions {
     private final String debugTargetType;
     private final String debugTargetId;
     private final Path debugInput;
+    private final boolean unsafeFailureDetails;
     private final Path loadScenario;
     private final String loadUsers;
     private final String loadArrivalRate;
@@ -112,7 +113,7 @@ public final class ExecutionOptions {
                 dryRun, failFast, outputDirectory, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode,
                 updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
                 loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime, loadMaxConcurrent,
-                loadOverloadPolicy, environment, Collections.<String>emptyList());
+                loadOverloadPolicy, environment, Collections.<String>emptyList(), false);
     }
 
     private ExecutionOptions(String command, Path configPath, List<Path> suitePaths, Path suiteDirectory,
@@ -122,7 +123,8 @@ public final class ExecutionOptions {
                              boolean updateSnapshot, boolean profile, String debugTargetType, String debugTargetId, Path debugInput,
                              Path loadScenario, String loadUsers, String loadArrivalRate, String loadWarmup, String loadRampUp,
                              String loadDuration, String loadRampDown, String loadThinkTime, String loadMaxConcurrent,
-                             String loadOverloadPolicy, String environment, List<String> variableOverrides) {
+                             String loadOverloadPolicy, String environment, List<String> variableOverrides,
+                             boolean unsafeFailureDetails) {
         this.command = command;
         this.configPath = configPath;
         this.environment = environment;
@@ -148,6 +150,7 @@ public final class ExecutionOptions {
         this.debugTargetType = debugTargetType == null ? "" : debugTargetType;
         this.debugTargetId = debugTargetId == null ? "" : debugTargetId;
         this.debugInput = debugInput;
+        this.unsafeFailureDetails = unsafeFailureDetails;
         this.loadScenario = loadScenario;
         this.loadUsers = loadUsers;
         this.loadArrivalRate = loadArrivalRate;
@@ -221,6 +224,7 @@ public final class ExecutionOptions {
                 loadOverloadPolicy = null;
         Set<String> ciOutputs = defaultCiOutputs();
         List<String> variableOverrides = new ArrayList<String>();
+        boolean unsafeFailureDetails = false;
         Set<String> seenOptions = new LinkedHashSet<String>();
         for (int i = start; i < args.length; i++) {
             String arg = args[i];
@@ -238,6 +242,7 @@ public final class ExecutionOptions {
             else if ("--run-id".equals(arg)) runId = value(args, ++i, arg);
             else if ("--output-dir".equals(arg)) output = Paths.get(value(args, ++i, arg));
             else if ("--input".equals(arg)) debugInput = Paths.get(value(args, ++i, arg));
+            else if ("--unsafe-failure-details".equals(arg)) unsafeFailureDetails = true;
             else if ("--set".equals(arg)) variableOverrides.add(value(args, ++i, arg));
             else if ("--format".equals(arg)) format = value(args, ++i, arg);
             else if ("--ci-output".equals(arg)) ciOutputs = parseCiOutputs(value(args, ++i, arg));
@@ -299,7 +304,7 @@ public final class ExecutionOptions {
                 rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode,
                 updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
                 loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime,
-                loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides);
+                loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails);
     }
 
     private static void validateAllowed(String command, Set<String> seen) {
@@ -309,7 +314,7 @@ public final class ExecutionOptions {
         else if ("snapshot".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--all"));
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
         else if ("build".equals(command)) allowed.add("--output-dir");
-        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--output-dir", "--format", "--quiet", "--verbose", "--env"));
+        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--output-dir", "--format", "--quiet", "--verbose", "--env", "--unsafe-failure-details"));
         else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--format", "--quiet", "--verbose", "--profile", "--output-dir", "--run-id", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy", "--env"));
         for (String option : seen) if (!allowed.contains(option)) throw new IllegalArgumentException("Option " + option + " is not valid for command " + command);
     }
@@ -347,6 +352,7 @@ public final class ExecutionOptions {
     public String debugTargetType() { return debugTargetType; }
     public String debugTargetId() { return debugTargetId; }
     public Path debugInput() { return debugInput; }
+    public boolean unsafeFailureDetails() { return unsafeFailureDetails; }
     public List<String> variableOverrides() { return variableOverrides; }
     public List<String> setOverrides() { return variableOverrides; }
     public boolean loadDebug() { return "load".equals(command) && !debugTargetType.isEmpty(); }

@@ -84,7 +84,7 @@ See [Runtime and Context Model](../runtime-context.md) for META lifecycle and [L
 
 ## Debug schema migration
 
-`att-debug/v1.0` is historical; upgrade to `att-debug/v1.1`. Template/Flow may define `vars` to seed `EXEC.VARS`; Tool targets do not support `vars`. See [Debug](../execution-modes/debug.md) for current input and argument rules.
+`att-debug/v1.0` and `att-debug/v1.1` are historical; upgrade to `att-debug/v1.2`. Template/Flow may define `vars` to seed `EXEC.VARS`; Tool targets do not support `vars`. The current schema also permits package-relative `testdata` imports scoped to a standalone Debug invocation. See [Debug](../execution-modes/debug.md) for current input and argument rules.
 
 ## Global configuration migration
 

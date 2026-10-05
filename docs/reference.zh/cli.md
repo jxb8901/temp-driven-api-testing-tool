@@ -77,6 +77,7 @@
 | `./att.sh debug <type> <id> --set input.path=<yaml-value>` | 覆蓋 typed `EXEC.INPUT` 值；可重復使用 |
 | `./att.sh debug tool <id> --set arg.name=<yaml-value>` | 覆蓋一個 Tool argument；可重復使用 |
 | `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | 在 expression evaluation 前覆蓋 Template/Flow bootstrap `EXEC.VARS` |
+| `./att.sh debug <type> <id> --unsafe-failure-details` | 為此次 standalone local Debug 展開 collector failure diagnostics；會先警告並保留 secret redaction |
 | `./att.sh debug <type> <id> --output-dir <dir>` | 將 debug 輸出隔離到 `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | 輸出緊湊機器可讀摘要；完整證據仍在 `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
@@ -107,7 +108,7 @@
 
 `--set` 可重複使用，並且只接受一個 namespace：`input`、`arg` 或 `vars`。值使用安全 YAML 解析，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可使用 map key 和數字 list index，例如 `input.customer.ids[0]=42`。重複賦值按順序套用，最後一個值生效。解析 override 時不會評估 ATT expression；若 shell 可能展開類似 expression 的值，請加上引號。`arg.*` 僅適用於 Tool，`vars.*` 僅適用於 Template/Flow。多 workload Load scenario 不接受未限定的 override。
 
-`load/load.yaml` 是可選的 policy-only `att-load/v1.6` 檔案，可包含 `load`、`execution`、`thresholds`、`evidence` 和 `seed`，但不包含 target 或 business inputs。`load --debug` 會將 sidecar `inputs` 提升為 `EXEC.INPUT`、Template/Flow `vars` 提升為 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，然後使用一般 Load validator、scheduler 和 evidence pipeline 執行。明確的 CLI pacing fields 會覆蓋 policy；沒有 policy 時，請直接在 CLI 指定完整 policy。
+`load/load.yaml` 是可選的 policy-only `att-load/v1.6` 檔案，可包含 `load`、`execution`、`thresholds`、`evidence` 和 `seed`，但不包含 target 或 business inputs。`load --debug` 會將 sidecar `inputs` 提升為 `EXEC.INPUT`、Template/Flow `vars` 提升為 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，然後使用一般 Load validator、scheduler 和 evidence pipeline 執行。若 sidecar 含 Debug-local `testdata` imports，`load --debug` 會拒絕；請把 imports 宣告於 Load scenario。明確的 CLI pacing fields 會覆蓋 policy；沒有 policy 時，請直接在 CLI 指定完整 policy。
 
 ## Debug input 與 output
 

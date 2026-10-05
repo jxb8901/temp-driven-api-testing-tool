@@ -171,13 +171,15 @@ public class CaseExecutionLog implements AutoCloseable {
         } else if (data instanceof String) {
             String value = String.valueOf(data);
             text.append(diagnosticSection(section)
-                            ? PathPresentation.displayDiagnosticText(redactSecrets(value), projectRoot, knownRemotePaths) : value)
-                    .append("\n\n");
+                    ? PathPresentation.displayDiagnosticText(redactSecrets(value), projectRoot, knownRemotePaths) : value);
+            appendRecordSeparator(text);
+            text.append('\n');
         } else {
             Object serializable = serializable(data, new IdentityHashMap<Object, Object>(), new IdentityHashMap<Object, Boolean>(),
                     false, false, knownRemotePaths);
             text.append(containsMultilineString(serializable)
-                    ? renderHumanYaml(serializable, 0) : yaml.dump(serializable)).append("\n");
+                    ? renderHumanYaml(serializable, 0) : yaml.dump(serializable));
+            appendRecordSeparator(text);
         }
         write(text.toString());
     }
@@ -192,6 +194,7 @@ public class CaseExecutionLog implements AutoCloseable {
                 ? PathPresentation.displayDiagnosticText(redactSecrets(value), projectRoot,
                         java.util.Collections.<String>emptySet()) : value);
         if (!endsInLineBreak(value)) text.append('\n');
+        else if (endsInLoneCarriageReturn(value)) text.append("\r\n");
         text.append('\n');
         write(text.toString());
     }
@@ -208,6 +211,7 @@ public class CaseExecutionLog implements AutoCloseable {
         if (source == null || !Files.isRegularFile(source)) return;
         write("[" + section + "]\n");
         boolean endedWithNewline = false;
+        char lastCharacter = 0;
         int longestRedaction = 0;
         if (redactions != null) for (String token : redactions)
             if (token != null) longestRedaction = Math.max(longestRedaction, token.length());
@@ -225,6 +229,7 @@ public class CaseExecutionLog implements AutoCloseable {
                 if (chunk.length() > 0) {
                     writeRedactedChunk(chunk.toString(), pending, redactions, longestRedaction);
                     char last = chunk.charAt(chunk.length() - 1);
+                    lastCharacter = last;
                     endedWithNewline = last == '\n' || last == '\r';
                 }
             }
@@ -237,6 +242,7 @@ public class CaseExecutionLog implements AutoCloseable {
             write(tail);
         }
         if (!endedWithNewline) write("\n");
+        else if (lastCharacter == '\r') write("\r\n");
         if (truncated) write("... ATT process output truncated; totalBytes=" + totalBytes + " ...\n");
         write("\n");
     }
@@ -335,6 +341,16 @@ public class CaseExecutionLog implements AutoCloseable {
 
     private static boolean endsInLineBreak(String value) {
         return !value.isEmpty() && (value.charAt(value.length() - 1) == '\n' || value.charAt(value.length() - 1) == '\r');
+    }
+
+    private static boolean endsInLoneCarriageReturn(String value) {
+        return !value.isEmpty() && value.charAt(value.length() - 1) == '\r';
+    }
+
+    /** Keeps a content-ending lone CR distinct from the following log-record separator. */
+    private static void appendRecordSeparator(StringBuilder text) {
+        if (text.length() > 0 && text.charAt(text.length() - 1) == '\r') text.append("\r\n");
+        else text.append('\n');
     }
 
     /** Renders nested values for people while leaving multiline String characters intact. */

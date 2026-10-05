@@ -54,6 +54,16 @@ class ExecutionOptionsTest {
         assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"debug", "template", "X", "--all"}));
     }
 
+    @Test void unsafeFailureDetailsIsStandaloneDebugOnly() {
+        ExecutionOptions debug = ExecutionOptions.parse(new String[]{"debug", "template", "SIMPLE", "--unsafe-failure-details"});
+        assertTrue(debug.unsafeFailureDetails());
+        assertFalse(ExecutionOptions.parse(new String[]{"debug", "template", "SIMPLE"}).unsafeFailureDetails());
+        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"run", "--all", "--unsafe-failure-details"}));
+        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"load", "--debug", "template", "SIMPLE", "--unsafe-failure-details"}));
+        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"validate", "--package", "--unsafe-failure-details"}));
+        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"snapshot", "--all", "--unsafe-failure-details"}));
+    }
+
     @Test void parsesBootstrapOverridesAndLoadDebugPromotion() {
         ExecutionOptions debug = ExecutionOptions.parse(new String[]{"debug", "flow", "common.compose.v1",
                 "--set", "vars.refNo=R001", "--set", "vars.copy=${EXEC.INPUT.refNo}"});

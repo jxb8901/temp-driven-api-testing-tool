@@ -135,10 +135,21 @@ public final class FileExpressionResolver {
      * The returned snapshot is safe to share across concurrent Load iterations.
      */
     public FileExpressionSnapshot snapshotFor(StageTemplate template, FlowRegistry flows) throws Exception {
+        return captureSnapshot(template, flows, null);
+    }
+
+    /** Captures a synthetic direct-Flow Load wrapper and the actual Flow as distinct sources. */
+    public FileExpressionSnapshot snapshotForLoadFlow(StageTemplate wrapper, FlowRegistry flows, String flowId) throws Exception {
+        if (flowId == null || flowId.trim().isEmpty()) throw new IllegalArgumentException("Load Flow id is required");
+        return captureSnapshot(wrapper, flows, "synthetic-load-flow:" + flowId);
+    }
+
+    private FileExpressionSnapshot captureSnapshot(StageTemplate template, FlowRegistry flows,
+                                                    String rootSourceOverride) throws Exception {
         Map<ReferenceKey, CompiledFilePlan> captured = new LinkedHashMap<ReferenceKey, CompiledFilePlan>();
         Deque<Reference> pending = new ArrayDeque<Reference>();
-        Set<Path> visitedTemplates = new LinkedHashSet<Path>();
-        enqueueActions(template, pending, visitedTemplates, flows);
+        Set<String> visitedTemplates = new LinkedHashSet<String>();
+        enqueueActions(template, pending, visitedTemplates, flows, rootSourceOverride);
         Set<ReferenceKey> visited = new LinkedHashSet<ReferenceKey>();
         while (!pending.isEmpty()) {
             Reference reference = pending.removeFirst();
@@ -147,16 +158,15 @@ public final class FileExpressionResolver {
             if (!visited.add(key)) continue;
             CompiledFilePlan plan = compile(reference.authoredPath, sourceDirectory);
             captured.put(key, plan);
-            for (String nested : plan.filePaths()) {
+            for (String nested : plan.filePaths())
                 pending.addLast(new Reference(nested, plan.file().getParent()));
-            }
         }
         return new FileExpressionSnapshot(projectRoot, captured);
     }
 
     private void enqueueActions(StageTemplate template, Deque<Reference> pending,
-                                Set<Path> visitedTemplates, FlowRegistry flows) throws Exception {
-        if (template == null || !visitedTemplates.add(template.directory().toAbsolutePath().normalize())) return;
+                                Set<String> visitedTemplates, FlowRegistry flows, String sourceOverride) throws Exception {
+        if (template == null || !visitedTemplates.add(sourceOverride == null ? sourceIdentity(template) : sourceOverride)) return;
         for (TemplateAction action : template.actions()) {
             collectStrings(action.raw(), template.directory(), pending);
             if ("flow".equalsIgnoreCase(action.type()) && flows != null) {
@@ -164,10 +174,20 @@ public final class FileExpressionResolver {
                 if (flow != null) {
                     enqueueActions(new StageTemplate(flow.name(), flow.directory(), flow.actions(),
                             flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml")), pending,
-                            visitedTemplates, flows);
+                            visitedTemplates, flows, null);
                 }
             }
         }
+    }
+
+    private String sourceIdentity(StageTemplate template) throws Exception {
+        Path source = template.sourceFile();
+        if (source != null) {
+            Path canonical = source.toAbsolutePath().normalize();
+            if (Files.exists(canonical)) canonical = canonical.toRealPath();
+            return "descriptor:" + canonical;
+        }
+        return "synthetic-object:" + System.identityHashCode(template);
     }
 
     @SuppressWarnings("unchecked")

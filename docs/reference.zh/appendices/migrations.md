@@ -86,7 +86,7 @@ Unsupported schemaVersion 會在 execution 前由 validation 拒絕並提供 mig
 
 ## Debug schema migration
 
-`att-debug/v1.0` 為 historical schema；請升級至 `att-debug/v1.1`。Template/Flow 可配置 `vars` 以 seed `EXEC.VARS`；Tool 不支援 `vars`。Input 與 arguments 的現行規則見 [Debug](../execution-modes/debug.md)。
+`att-debug/v1.0` 及 `att-debug/v1.1` 為 historical schema；請升級至 `att-debug/v1.2`。Template/Flow 可配置 `vars` 以 seed `EXEC.VARS`；Tool 不支援 `vars`。現行 schema 亦允許 package-relative `testdata` imports，並限定在 standalone Debug invocation。Input 與 arguments 的現行規則見 [Debug](../execution-modes/debug.md)。
 
 ## Environment profile migration
 

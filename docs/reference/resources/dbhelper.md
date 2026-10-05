@@ -74,4 +74,15 @@ The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignor
 
 DB/MQ/HTTP share the optional `evidence.output: {format: json, maxChars: 10000}` presentation policy. Supported formats are `text`, `json`, `yaml`, `xml`, and `sqlplus`; `sqlplus` requires a DB query/update result. `maxChars` defaults to 10000 and accepts 1–1000000. Credentials are redacted before deterministic character truncation; snapshots contain `format`, `text`, and `truncated`. Formatting failure adds only a bounded `outputError` and changes neither typed `output.result` nor operation status. Normal Run/Debug invocations automatically include the snapshot in Action evidence and the Case log, without an extra Log Action; SQL, parameters, MQ payload metadata, and HTTP status/header diagnostics keep their own contracts. Load defers formatting until an iteration is retained, then materializes `resource-output.yaml`; `evidence.resources.output: none` skips it entirely. Presentation never introduces credential values into evidence.
 
-The `waitForOrder` query above needs no following Log Action: configure its DBHelper with `evidence: {sql: full, parameters: masked, output: {format: sqlplus, maxChars: 10000}}` to retain an automatic SQL*Plus-style row snapshot. `sql` controls SQL evidence, `parameters` controls parameter representation, and `output` controls human-readable presentation only. Assertions and later Actions still read typed rows; `db.<id>.query`/`scalar` use the same policy.
+The `waitForOrder` query above needs no following Log Action. Configure its DBHelper like this to retain an automatic SQL*Plus-style row snapshot:
+
+```yaml
+evidence:
+  sql: full
+  parameters: masked
+  output:
+    format: sqlplus
+    maxChars: 10000
+```
+
+`sql` controls SQL evidence; `parameters` accepts only `values`, `types`, or `masked` (there is no `no_mask` option), and defaults to `values`. Configured credentials remain redacted under every parameter mode. `output` affects presentation only; assertions and later Actions still read typed rows, and `db.<id>.query`/`scalar` use the same policy. `maxChars` defaults to 10000 and ranges from 1 to 1000000. A large `SELECT` may need a higher limit to retain its complete formatted snapshot.

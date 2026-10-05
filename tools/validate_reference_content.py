@@ -10,7 +10,7 @@ MANIFEST = DOCS / "reference-manifest.txt"
 REQUIRED = {
     "runtime-context.md": ["EXEC.INPUT", "EXEC.VARS", "EXEC.ACTIONS", "EXEC.LOAD", "META", "EXEC.ACTIONS.<id>.output", "META.HTTPHELPER"],
     "execution-modes/run.md": ["run", "Testcase", "Stage", "latest-run.yaml", "exit"],
-    "execution-modes/debug.md": ["att-debug/v1.1", "vars", "EXEC.VARS", "template", "flow", "tool", "debug.yaml", "--input", "--env", "output/debug", "exit"],
+    "execution-modes/debug.md": ["att-debug/v1.2", "vars", "EXEC.VARS", "template", "flow", "tool", "debug.yaml", "--input", "--env", "output/debug", "exit"],
     "execution-modes/load.md": ["att-load/v1.6", "testdata", "scope", "selection", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
     "resources/tools.md": ["command-backed", "call-backed", "output.result", "stdoutFormat", "evidence"],
     "resources/dbhelper.md": ["att-dbhelper/v2.6", "query", "update", "transaction", "JDBC", "evidence"],

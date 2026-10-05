@@ -157,7 +157,7 @@ Run, Debug and Load adapt different inputs into the same execution-neutral Conte
 | Mode | Primary input | Reuses |
 |---|---|---|
 | Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ/HTTP/SSH |
-| Debug | `att-debug/v1.1` sidecar or `--input` | one Template, Flow or Tool target |
+| Debug | `att-debug/v1.2` sidecar or `--input` | one Template, Flow or Tool target |
 | Load | `att-load/v1.6` scenario | one or more Template, Flow or Tool workloads repeatedly |
 
 Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
@@ -969,7 +969,7 @@ Debug executes one Template, Flow or Tool without requiring a workbook Testcase.
 
 Run `./att.sh debug` with no target to list statically valid runnable Tools, Templates and Flows with copyable commands. A default sidecar path is displayed only when that regular non-symlink file exists. Discovery validates selected target dependencies but does not create Debug output or invoke Tools. Use `--format json` for machine-readable discovery output.
 
-Debug input uses the current `schemaVersion: att-debug/v1.1`. Supported top-level data is `case`, optional `stage`, `inputs`, `vars`, `arguments`, and grouped `tools.<localKey>.arguments`. `inputs` is adapted into canonical `EXEC.INPUT`; Template/Flow `vars` is evaluated as a typed bootstrap tree and seeds canonical `EXEC.VARS` before a target starts. Tool Debug uses `arguments` and does not support `vars`. Framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input. Schema migration is documented in [Migration Notes](reference/appendices/migrations.md).
+Debug input uses the current `schemaVersion: att-debug/v1.2`. Supported top-level data is `case`, optional `stage`, `inputs`, `vars`, `arguments`, grouped `tools.<localKey>.arguments`, and optional `testdata`. `testdata` lists package-relative descriptor paths and forms a Debug-local whole-descriptor overlay over the selected environment registry; duplicate paths or IDs within that local layer are rejected. The overlay exists for this Debug invocation only and is not inherited by Run. `load --debug` rejects sidecars with Debug-local imports; put those imports on a Load scenario instead. `inputs` is adapted into canonical `EXEC.INPUT`; Template/Flow `vars` is evaluated as a typed bootstrap tree and seeds canonical `EXEC.VARS` before a target starts. Tool Debug uses `arguments` and does not support `vars`. Framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input. Schema migration is documented in [Migration Notes](reference/appendices/migrations.md).
 
 #### Standalone Debug bootstrap data
 
@@ -986,7 +986,7 @@ A Flow that only consumes `EXEC.INPUT` needs no `vars`. A Flow that normally run
 Debug `inputs` use the same Testdata mapping syntax as Run: select a configured environment with `--env`, then use exact `@{id}` / `@{id.path}` references or scalar interpolation. ATT resolves these before publishing `EXEC.INPUT`; direct Testdata markers remain invalid inside the reusable Template, Flow or Tool definition. See [Testdata Registry and Input Mapping](reference/test-authoring.md).
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 inputs:
   amount: 100
 vars:
@@ -1001,6 +1001,25 @@ vars:
 ```sh
 ./att.sh debug flow common.payment --input common.payment.debug.yaml
 ```
+
+Use `testdata` when this Debug run needs descriptors that should not be added to the shared environment configuration:
+
+```yaml
+schemaVersion: att-debug/v1.2
+testdata: [debug-data/accounts.yaml]
+inputs:
+  accountId: '@{accounts.id}'
+```
+
+Descriptor paths are relative to the package root and use the normal `att-testdata/v1.0` format.
+
+For collector failures whose safe projection hides details, local runs can opt in with `--unsafe-failure-details`:
+
+```sh
+./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
+```
+
+This flag is accepted only by standalone `debug`. ATT prints a warning before execution, preserves configured-secret redaction, and includes `failureDetailMode: local-unsafe` in the result. It does not dump raw inputs, argv, request bodies, or Context values. The default remains `safe-default`; `load --debug`, Run, Validate, and Snapshot cannot enable the override.
 
 `vars` values use the shared expression engine: an exact `${EXEC.INPUT.amount}` preserves its native type, interpolated text becomes a string, and `#{...}` preserves the expression result type. Maps and lists recurse; map keys remain literal. Vars may reference other vars regardless of declaration order; cycles, missing vars, unavailable roots, and side-effecting calls fail before the target starts. The first normal `assign` may replace a bootstrapped variable, after which normal duplicate-assignment rules apply. Final values appear through the normal `EXEC.VARS`/`CASE.VARS` context and result artifacts, subject to existing redaction rules; no second Debug-only namespace is created.
 
@@ -1041,12 +1060,12 @@ Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does 
 
 ##### Configuration examples
 
-The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.1` document.
+The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.2` document.
 
 Template sidecar (`templates/PAYMENT_INVOKE/debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 case:
   caseName: PAYMENT debug
   amount: 100
@@ -1063,7 +1082,7 @@ Run it with `./att.sh debug template PAYMENT_INVOKE`. Template expressions shoul
 Flow sidecar (`templates/flows/common/compose/debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 case:
   caseName: Compose debug
   traceId: TRACE-001
@@ -1081,7 +1100,7 @@ Run it with `./att.sh debug flow common.compose.v1`. Flow inputs are available a
 Grouped Tool sidecar (`config/tools/fpp.debug.yaml` for `fpp.invokeApi`):
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 case:
   RefNo: REF001
 tools:
@@ -1098,7 +1117,7 @@ Run it with `./att.sh debug tool fpp.invokeApi`. The `invokeApi` key is the grou
 Ungrouped Tool sidecar (`config/tools/invokePaymentApi.debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 arguments:
   requestFile: /tmp/payment-request.xml
   environment: SIT
@@ -1702,7 +1721,18 @@ The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignor
 
 DB/MQ/HTTP share the optional `evidence.output: {format: json, maxChars: 10000}` presentation policy. Supported formats are `text`, `json`, `yaml`, `xml`, and `sqlplus`; `sqlplus` requires a DB query/update result. `maxChars` defaults to 10000 and accepts 1–1000000. Credentials are redacted before deterministic character truncation; snapshots contain `format`, `text`, and `truncated`. Formatting failure adds only a bounded `outputError` and changes neither typed `output.result` nor operation status. Normal Run/Debug invocations automatically include the snapshot in Action evidence and the Case log, without an extra Log Action; SQL, parameters, MQ payload metadata, and HTTP status/header diagnostics keep their own contracts. Load defers formatting until an iteration is retained, then materializes `resource-output.yaml`; `evidence.resources.output: none` skips it entirely. Presentation never introduces credential values into evidence.
 
-The `waitForOrder` query above needs no following Log Action: configure its DBHelper with `evidence: {sql: full, parameters: masked, output: {format: sqlplus, maxChars: 10000}}` to retain an automatic SQL*Plus-style row snapshot. `sql` controls SQL evidence, `parameters` controls parameter representation, and `output` controls human-readable presentation only. Assertions and later Actions still read typed rows; `db.<id>.query`/`scalar` use the same policy.
+The `waitForOrder` query above needs no following Log Action. Configure its DBHelper like this to retain an automatic SQL*Plus-style row snapshot:
+
+```yaml
+evidence:
+  sql: full
+  parameters: masked
+  output:
+    format: sqlplus
+    maxChars: 10000
+```
+
+`sql` controls SQL evidence; `parameters` accepts only `values`, `types`, or `masked` (there is no `no_mask` option), and defaults to `values`. Configured credentials remain redacted under every parameter mode. `output` affects presentation only; assertions and later Actions still read typed rows, and `db.<id>.query`/`scalar` use the same policy. `maxChars` defaults to 10000 and ranges from 1 to 1000000. A large `SELECT` may need a higher limit to retain its complete formatted snapshot.
 
 ### MQHelper
 
@@ -2518,6 +2548,7 @@ On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not in
 | `./att.sh debug <type> <id> --set input.path=<yaml-value>` | Override a typed `EXEC.INPUT` value; repeatable |
 | `./att.sh debug tool <id> --set arg.name=<yaml-value>` | Override one Tool argument; repeatable |
 | `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | Override Template/Flow bootstrap `EXEC.VARS` before expression evaluation |
+| `./att.sh debug <type> <id> --unsafe-failure-details` | Opt into expanded collector failure diagnostics for this standalone local Debug run; prints a warning and keeps secret redaction |
 | `./att.sh debug <type> <id> --output-dir <dir>` | Isolate debug output below `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | Emit a compact machine-readable console summary; full evidence remains in `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | Suppress detailed live progress; keep the final summary and errors |
@@ -2552,7 +2583,7 @@ No-target `debug` and `load` are read-only discovery commands. Debug validates t
 
 `--set` is repeatable and accepts exactly one namespace: `input`, `arg`, or `vars`. Values use safe YAML parsing (for example `42`, `true`, `null`, `[a, b]`, or `{id: 7}`), and nested paths may use map keys and numeric list indexes such as `input.customer.ids[0]=42`. Duplicate assignments are applied in order, so the last value wins. ATT expressions are not evaluated while parsing an override; quote expression-looking values when a shell could expand them. `arg.*` is Tool-only; `vars.*` is Template/Flow-only. Unqualified overrides are rejected for multi-workload Load scenarios.
 
-`load/load.yaml` is an optional, policy-only `att-load/v1.6` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. Explicit CLI pacing fields override the policy. Without a policy, provide a complete policy on the command line; for example:
+`load/load.yaml` is an optional, policy-only `att-load/v1.6` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. It rejects sidecars with Debug-local `testdata` imports; declare those imports on a Load scenario. Explicit CLI pacing fields override the policy. Without a policy, provide a complete policy on the command line; for example:
 
 ```yaml
 schemaVersion: att-load/v1.6
@@ -2893,7 +2924,7 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.6 |
 | Flow | att-flow/v3.6 |
-| Debug input | att-debug/v1.1 |
+| Debug input | att-debug/v1.2 |
 | Load scenario | att-load/v1.6 |
 | Load summary | att-load-summary/v1.1 |
 | Run manifest | att-run/v2.1 |
@@ -2995,7 +3026,7 @@ See [Runtime and Context Model](reference/runtime-context.md) for META lifecycle
 
 ### Debug schema migration
 
-`att-debug/v1.0` is historical; upgrade to `att-debug/v1.1`. Template/Flow may define `vars` to seed `EXEC.VARS`; Tool targets do not support `vars`. See [Debug](reference/execution-modes/debug.md) for current input and argument rules.
+`att-debug/v1.0` and `att-debug/v1.1` are historical; upgrade to `att-debug/v1.2`. Template/Flow may define `vars` to seed `EXEC.VARS`; Tool targets do not support `vars`. The current schema also permits package-relative `testdata` imports scoped to a standalone Debug invocation. See [Debug](reference/execution-modes/debug.md) for current input and argument rules.
 
 ### Global configuration migration
 
