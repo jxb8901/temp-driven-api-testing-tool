@@ -708,7 +708,7 @@ public class StageTemplateRunner {
                 }
                 Object status = result.invocation().get("status");
                 boolean passed = result.executionSuccess() && "PASS".equalsIgnoreCase(String.valueOf(status));
-                if (!passed) result = CollectorExceptionEvidence.project(result);
+                if (!passed) result = CollectorExceptionEvidence.project(result, context.unsafeFailureDetails());
                 record.put("status", passed ? "PASS" : (status == null ? "ERROR" : String.valueOf(status)));
                 record.put("success", Boolean.valueOf(passed));
                 record.put("invocationId", result.invocationId());
@@ -740,14 +740,14 @@ public class StageTemplateRunner {
                 if ("stop".equals(collector.onFailure())) throw failure;
             } catch (Exception error) {
                 if (error instanceof att.exec.ToolExecutionException) {
-                    error = CollectorExceptionEvidence.project((att.exec.ToolExecutionException) error);
+                    error = CollectorExceptionEvidence.project((att.exec.ToolExecutionException) error, context.unsafeFailureDetails());
                 }
                 record.put("status", error instanceof att.exec.ToolExecutionException
                         ? ((att.exec.ToolExecutionException) error).category() : "ERROR");
                 record.put("success", false);
                 record.put("durationMs", Duration.ofNanos(System.nanoTime() - started).toMillis());
                 record.put("error", collectorError(error));
-                Map<String, Object> failureEvidence = collectorFailureEvidence(error);
+                Map<String, Object> failureEvidence = collectorFailureEvidence(error, context.unsafeFailureDetails());
                 if (!failureEvidence.isEmpty()) record.put("evidence", failureEvidence);
                 att.validation.DiagnosticException diagnostic = collectorDiagnostic(template, action, collector, record, error);
                 record.put("diagnostic", diagnostic.toDiagnostic().toMap());
@@ -837,10 +837,10 @@ public class StageTemplateRunner {
         return collectorError((Object) null, safeMessage(error));
     }
 
-    private Map<String, Object> collectorFailureEvidence(Exception error) {
+    private Map<String, Object> collectorFailureEvidence(Exception error, boolean unsafeLocal) {
         if (error instanceof att.exec.ToolExecutionException) {
             att.exec.ToolExecutionException tool = (att.exec.ToolExecutionException) error;
-            return ActionExecutionResult.evidence("tool", CollectorExceptionEvidence.project(tool).evidence());
+            return ActionExecutionResult.evidence("tool", CollectorExceptionEvidence.project(tool, unsafeLocal).evidence());
         }
         att.validation.DiagnosticException diagnostic = att.validation.DiagnosticException.find(error);
         if (diagnostic == null) return Collections.emptyMap();

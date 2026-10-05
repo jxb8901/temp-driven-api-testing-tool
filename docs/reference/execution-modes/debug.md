@@ -10,7 +10,7 @@ Debug executes one Template, Flow or Tool without requiring a workbook Testcase.
 
 Run `./att.sh debug` with no target to list statically valid runnable Tools, Templates and Flows with copyable commands. A default sidecar path is displayed only when that regular non-symlink file exists. Discovery validates selected target dependencies but does not create Debug output or invoke Tools. Use `--format json` for machine-readable discovery output.
 
-Debug input uses the current `schemaVersion: att-debug/v1.1`. Supported top-level data is `case`, optional `stage`, `inputs`, `vars`, `arguments`, and grouped `tools.<localKey>.arguments`. `inputs` is adapted into canonical `EXEC.INPUT`; Template/Flow `vars` is evaluated as a typed bootstrap tree and seeds canonical `EXEC.VARS` before a target starts. Tool Debug uses `arguments` and does not support `vars`. Framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input. Schema migration is documented in [Migration Notes](../appendices/migrations.md).
+Debug input uses the current `schemaVersion: att-debug/v1.2`. Supported top-level data is `case`, optional `stage`, `inputs`, `vars`, `arguments`, grouped `tools.<localKey>.arguments`, and optional `testdata`. `testdata` lists package-relative descriptor paths and forms a Debug-local whole-descriptor overlay over the selected environment registry; duplicate paths or IDs within that local layer are rejected. The overlay exists for this Debug invocation only and is not inherited by Run. `load --debug` rejects sidecars with Debug-local imports; put those imports on a Load scenario instead. `inputs` is adapted into canonical `EXEC.INPUT`; Template/Flow `vars` is evaluated as a typed bootstrap tree and seeds canonical `EXEC.VARS` before a target starts. Tool Debug uses `arguments` and does not support `vars`. Framework-owned identity, output, Actions, resource metadata and compatibility views cannot be overwritten by user input. Schema migration is documented in [Migration Notes](../appendices/migrations.md).
 
 ## Standalone Debug bootstrap data
 
@@ -27,7 +27,7 @@ A Flow that only consumes `EXEC.INPUT` needs no `vars`. A Flow that normally run
 Debug `inputs` use the same Testdata mapping syntax as Run: select a configured environment with `--env`, then use exact `@{id}` / `@{id.path}` references or scalar interpolation. ATT resolves these before publishing `EXEC.INPUT`; direct Testdata markers remain invalid inside the reusable Template, Flow or Tool definition. See [Testdata Registry and Input Mapping](../test-authoring.md).
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 inputs:
   amount: 100
 vars:
@@ -42,6 +42,25 @@ vars:
 ```sh
 ./att.sh debug flow common.payment --input common.payment.debug.yaml
 ```
+
+Use `testdata` when this Debug run needs descriptors that should not be added to the shared environment configuration:
+
+```yaml
+schemaVersion: att-debug/v1.2
+testdata: [debug-data/accounts.yaml]
+inputs:
+  accountId: '@{accounts.id}'
+```
+
+Descriptor paths are relative to the package root and use the normal `att-testdata/v1.0` format.
+
+For collector failures whose safe projection hides details, local runs can opt in with `--unsafe-failure-details`:
+
+```sh
+./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
+```
+
+This flag is accepted only by standalone `debug`. ATT prints a warning before execution, preserves configured-secret redaction, and includes `failureDetailMode: local-unsafe` in the result. It does not dump raw inputs, argv, request bodies, or Context values. The default remains `safe-default`; `load --debug`, Run, Validate, and Snapshot cannot enable the override.
 
 `vars` values use the shared expression engine: an exact `${EXEC.INPUT.amount}` preserves its native type, interpolated text becomes a string, and `#{...}` preserves the expression result type. Maps and lists recurse; map keys remain literal. Vars may reference other vars regardless of declaration order; cycles, missing vars, unavailable roots, and side-effecting calls fail before the target starts. The first normal `assign` may replace a bootstrapped variable, after which normal duplicate-assignment rules apply. Final values appear through the normal `EXEC.VARS`/`CASE.VARS` context and result artifacts, subject to existing redaction rules; no second Debug-only namespace is created.
 
@@ -66,7 +85,7 @@ Debug does not create or update normal `latest-run.yaml`. Exit codes are `0` PAS
 
 When a debug target cannot be resolved, check the target kind and identifier first, then use `--input <path>` to remove sidecar discovery from the diagnosis. Template and Flow debug discover `<target directory>/debug.yaml`; grouped Tool debug discovers `config/tools/<group>.debug.yaml`. The selected target's dependency closure is validated, so an unrelated workbook or Case file is not a prerequisite.
 
-Use the same `&{project-relative-file}` expression in Debug, Run and Load, then pass its UTF-8 String as HTTP `body`, MQ `payload`, or SSH upload `payload`. These Resource Helpers do not resolve separate local paths. Validation resolves project files before external I/O; obsolete HTTP/MQ `file`, SSH upload `localPath`, and SSH `download` calls are rejected.
+Use the same `&{package-relative-file}` expression in Debug, Run and Load, then pass its UTF-8 String as HTTP `body`, MQ `payload`, or SSH upload `payload`. These Resource Helpers do not resolve separate local paths. Validation resolves package files before external I/O; obsolete HTTP/MQ `file`, SSH upload `localPath`, and SSH `download` calls are rejected.
 
 Use the output directory to separate diagnosis stages:
 
@@ -82,12 +101,12 @@ Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does 
 
 ### Configuration examples
 
-The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.1` document.
+The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.2` document.
 
 Template sidecar (`templates/PAYMENT_INVOKE/debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 case:
   caseName: PAYMENT debug
   amount: 100
@@ -104,7 +123,7 @@ Run it with `./att.sh debug template PAYMENT_INVOKE`. Template expressions shoul
 Flow sidecar (`templates/flows/common/compose/debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 case:
   caseName: Compose debug
   traceId: TRACE-001
@@ -122,7 +141,7 @@ Run it with `./att.sh debug flow common.compose.v1`. Flow inputs are available a
 Grouped Tool sidecar (`config/tools/fpp.debug.yaml` for `fpp.invokeApi`):
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 case:
   RefNo: REF001
 tools:
@@ -139,7 +158,7 @@ Run it with `./att.sh debug tool fpp.invokeApi`. The `invokeApi` key is the grou
 Ungrouped Tool sidecar (`config/tools/invokePaymentApi.debug.yaml`):
 
 ```yaml
-schemaVersion: att-debug/v1.1
+schemaVersion: att-debug/v1.2
 arguments:
   requestFile: /tmp/payment-request.xml
   environment: SIT

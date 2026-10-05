@@ -26,12 +26,11 @@ EXEC.LOAD 只公開穩定 identity。Scheduler counter、queue state 與 timing 
 
 ## META 欄位清單與生命週期
 
-公開 META root 只包含下表列出的 `PROJECT`、`SOURCE`、`TARGET`、`TEMPLATE`、`FLOW`、`TOOL`、`DBHELPER`、`MQHELPER`、`HTTPHELPER` 和 `SSHHELPER`。META 只包含描述欄位。元件在目前 mode/scope 尚未 active 時，相應路徑可能不存在。
+公開 META root 包含 `PACKAGE_ROOT`、`SOURCE`、`TARGET`、`TEMPLATE`、`FLOW`、`TOOL`、`DBHELPER`、`MQHELPER`、`HTTPHELPER` 和 `SSHHELPER`。`META.PACKAGE_ROOT` 是 active ATT package root 的正規化絕對路徑，在 Run、Debug 和 Load package binding 後全程可用。舊有 `META.PROJECT.id` 與 `META.PROJECT.root` 已移除，不提供相容 alias。ATT installation scope (`ATT_HOME`)、package scope (`META.PACKAGE_ROOT`) 和 execution output scope (`EXEC.OUTPUT_DIR`) 各自獨立。META 只包含描述欄位；元件在目前 mode/scope 尚未 active 時，相應路徑可能不存在。
 
 | 公開路徑 | 意義、type 與範例 | Mode 與可用時機 | Scope 與缺席時機 |
 |---|---|---|---|
-| META.PROJECT.id | Project 目錄名稱；String，例如 `payment-att`。 | Run、Debug、Load；project 綁定後。 | Execution-wide。 |
-| META.PROJECT.root | 正規化 project root 路徑；String，例如 `/srv/att/payment`。 | Run、Debug、Load；project 綁定後。 | Execution-wide。 |
+| META.PACKAGE_ROOT | 正規化絕對 package root 路徑；String，例如 `/srv/att/payment`。 | Run、Debug、Load；package binding 後。 | Execution-wide。 |
 | META.SOURCE.type | Source 類型；String：`testcase`、`debug` 或 `load`。 | Run、Debug、Load。 | Execution-wide。 |
 | META.SOURCE.path | 正規化絕對 source path；String，例如 `/srv/att/payment/testcase/payment.xlsx`、`/srv/att/payment/debug.yaml` 或 `/srv/att/payment/load/payment.yaml`。 | Run、Debug、Load，source file 存在時。 | Execution-wide；memory source 可缺席。 |
 | META.SOURCE.caseId | Canonical TestCase 或 synthetic Debug Case ID；String，例如 `payment.default.P001`。 | Run、Debug。 | Execution-wide；Load 缺席。 |

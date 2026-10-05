@@ -328,7 +328,7 @@ public final class MqHelperExecutor {
 
     private void validateRequestPayload(Object payload, Object format) {
         boolean structured = payload instanceof Map || payload instanceof Iterable
-                || payload != null && payload.getClass().isArray();
+                || payload != null && payload.getClass().isArray() && !(payload instanceof byte[]);
         if (structured && format == null) throw new IllegalArgumentException("A Map/List MQ payload requires requestFormat");
         if (!structured && format != null)
             throw new IllegalArgumentException("requestFormat is valid only for a Map/List MQ payload");
@@ -340,7 +340,7 @@ public final class MqHelperExecutor {
         java.nio.charset.Charset charset = MqCcsid.charset(helper.charset());
         if (payload instanceof byte[]) return ((byte[]) payload).clone();
         boolean structured = payload instanceof Map || payload instanceof Iterable
-                || payload != null && payload.getClass().isArray();
+                || payload != null && payload.getClass().isArray() && !(payload instanceof byte[]);
         if (structured) return new TypedValueFormatter().format(payload, String.valueOf(format)).getBytes(charset);
         return String.valueOf(payload == null ? "" : payload).getBytes(charset);
     }

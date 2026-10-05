@@ -15,7 +15,7 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.6 |
 | Flow | att-flow/v3.6 |
-| Debug input | att-debug/v1.1 |
+| Debug input | att-debug/v1.2 |
 | Load scenario | att-load/v1.6 |
 | Load summary | att-load-summary/v1.1 |
 | Run manifest | att-run/v2.1 |

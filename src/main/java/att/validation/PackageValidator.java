@@ -85,10 +85,12 @@ public final class PackageValidator {
         att.core.ExecutionBootstrapVariables.InputMappingMode mappingMode = "load".equalsIgnoreCase(executionMode)
                 ? att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD
                 : att.core.ExecutionBootstrapVariables.InputMappingMode.DEBUG;
+        String localLayerName = mappingMode == att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD
+                ? "load-local" : "debug-local";
         validateTestdataMapping(testCase.caseData(), global, loadTestdataDescriptors, debugInput,
-                "inputs", mappingMode, null);
+                "inputs", mappingMode, null, localLayerName);
         validateTestdataMapping(stage.values(), global, loadTestdataDescriptors, debugInput,
-                "inputs.stage", mappingMode, null);
+                "inputs.stage", mappingMode, null, localLayerName);
         this.flows = selectedFlows;
         validateTemplate(template, global);
         validateReferencedToolsClosure(template, global, new LinkedHashSet<String>());
@@ -155,6 +157,7 @@ public final class PackageValidator {
                 validateReferencedTools(body, global);
             } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, flow.directory().resolve("flow.yaml"))); }
             validatePackageTools(diagnostics);
+            validateDebugSidecars(diagnostics, loader);
         }
         for (Path suite : suites) {
             try {
@@ -207,18 +210,46 @@ public final class PackageValidator {
             removeRedundantHistoricalSchemaWarnings(diagnostics);
         }
         deduplicateMigrationDiagnostics(diagnostics);
-        if (cases == 0) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTION_EMPTY, Diagnostic.Severity.ERROR, "Case selection is empty", null, null, null, null, null, null));
+        if (cases == 0 && !"package".equals(options.validationScope())) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTION_EMPTY, Diagnostic.Severity.ERROR, "Case selection is empty", null, null, null, null, null, null));
         if ("selected".equals(options.validationScope())) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTED_SCOPE, Diagnostic.Severity.INFO, "Only the selected dependency closure was validated; unselected package content was not validated", null, null, null, null, null, null));
         Collections.sort(diagnostics);
         return new ValidationSummary(options.validationScope(), suites.size(), cases, templates.size(), global.tools().size(), diagnostics);
+    }
+
+    private void validateDebugSidecars(List<Diagnostic> diagnostics, StageTemplateLoader loader) throws Exception {
+        att.debug.DebugEngine debug = new att.debug.DebugEngine(projectRoot, global);
+        for (String id : global.tools().keySet()) validateDebugSidecar(debug, "tool", id, diagnostics);
+        for (String id : loader.paths()) validateDebugSidecar(debug, "template", id, diagnostics);
+        for (att.flow.FlowDefinition flow : flows.all()) validateDebugSidecar(debug, "flow", flow.id(), diagnostics);
+    }
+
+    private void validateDebugSidecar(att.debug.DebugEngine debug, String type, String id,
+                                      List<Diagnostic> diagnostics) {
+        Path sidecar;
+        try { sidecar = debug.discoverableInputPath(type, id); }
+        catch (Exception error) {
+            diagnostics.add(diagnostic(DiagnosticCodes.DEBUG_INVALID, error, null));
+            return;
+        }
+        if (!Files.isRegularFile(sidecar) || Files.isSymbolicLink(sidecar)) return;
+        try { debug.validateDiscoverableTarget(type, id); }
+        catch (Exception error) { diagnostics.add(diagnostic(DiagnosticCodes.DEBUG_INVALID, error, sidecar)); }
     }
 
     private void validateTestdataMapping(Map<String, Object> mapping, FrameworkConfig config,
                                          List<Path> loadTestdataDescriptors, Path source, String field,
                                          att.core.ExecutionBootstrapVariables.InputMappingMode mode,
                                          Set<String> availableLoadFields) throws Exception {
+        validateTestdataMapping(mapping, config, loadTestdataDescriptors, source, field, mode,
+                availableLoadFields, "load-local");
+    }
+
+    private void validateTestdataMapping(Map<String, Object> mapping, FrameworkConfig config,
+                                         List<Path> loadTestdataDescriptors, Path source, String field,
+                                         att.core.ExecutionBootstrapVariables.InputMappingMode mode,
+                                         Set<String> availableLoadFields, String localLayerName) throws Exception {
         att.testdata.TestdataRegistry registry = new att.testdata.TestdataRegistry(projectRoot,
-                config.testdataDescriptors(), loadTestdataDescriptors);
+                config.testdataDescriptors(), loadTestdataDescriptors, localLayerName);
         att.testdata.TestdataMappingValidator.validate(mapping, registry);
         String diagnosticCode = mode == att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD
                 ? DiagnosticCodes.LOAD_INVALID
@@ -238,6 +269,7 @@ public final class PackageValidator {
         List<Diagnostic> retained = new ArrayList<Diagnostic>();
         for (Diagnostic diagnostic : diagnostics) {
             if (DiagnosticCodes.SCHEMA_VERSION_OLD.equals(diagnostic.code())
+                    && diagnostic.severity() == Diagnostic.Severity.WARNING
                     && invalidFiles.contains(diagnostic.file())) continue;
             retained.add(diagnostic);
         }
@@ -608,9 +640,79 @@ public final class PackageValidator {
     private void validateReferencedCall(ToolCallParser.ParsedCall call, FrameworkConfig config) {
         if (BUILT_INS.contains(call.name().toLowerCase(java.util.Locale.ROOT))) return;
         ToolConfig tool = config.tool(call.name());
+        validateStaticArgumentContracts(call, tool);
         if (tool != null && tool.commandBacked()) validateToolExecutable(tool);
         else if (tool != null && tool.callBacked()) validateCallBackedDefinition(tool, config);
     }
+
+    /** Constant-folds only pure built-ins and static package files for shared target contracts. */
+    private void validateStaticArgumentContracts(ToolCallParser.ParsedCall call, ToolConfig tool) {
+        Map<String, Object> resolved = new LinkedHashMap<String, Object>();
+        Map<String, att.template.ExpressionBlockEvaluator.ValueType> inferred = new LinkedHashMap<String, att.template.ExpressionBlockEvaluator.ValueType>();
+        for (ToolCallParser.Argument argument : call.arguments()) {
+            String key = argument.key();
+            if (argument.positional()) {
+                if (tool == null || tool.arguments().size() != 1) continue;
+                key = tool.arguments().keySet().iterator().next();
+            }
+            try {
+                att.template.ExpressionBlockEvaluator.CompiledExpression expression = argument.compiled() == null
+                        ? new att.template.ExpressionBlockEvaluator().compile(argument.expression()) : argument.compiled();
+                Object value = expression.evaluate(staticResolver());
+                resolved.put(key, value);
+            } catch (NotStaticallyEvaluable deferred) {
+                // Retain safe result-type information while deferring the dynamic value itself.
+                att.template.ExpressionBlockEvaluator.CompiledExpression expression = argument.compiled() == null
+                        ? new att.template.ExpressionBlockEvaluator().compile(argument.expression()) : argument.compiled();
+                inferred.put(key, expression.inferredType());
+            }
+            catch (Exception error) {
+                throw new IllegalArgumentException("Unable to statically validate argument '" + key
+                        + "' for " + call.name() + ": " + error.getMessage(), error);
+            }
+        }
+        att.template.ArgumentContracts.coerce(call.name(), resolved, tool);
+        att.template.ArgumentContracts.validateInferredTypes(call.name(), inferred, tool);
+    }
+
+    private att.template.ExpressionBlockEvaluator.Resolver staticResolver() {
+        return new att.template.ExpressionBlockEvaluator.Resolver() {
+            @Override public Object context(String path) { throw new NotStaticallyEvaluable(); }
+            @Override public Object contextOptional(String path) { throw new NotStaticallyEvaluable(); }
+            @Override public boolean hasContext(String path) { return false; }
+            @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                if (!BUILT_INS.contains(name.toLowerCase(java.util.Locale.ROOT))
+                        || !att.template.DefaultBuiltInProvider.isSafeForBootstrap(name))
+                    throw new NotStaticallyEvaluable();
+                return builtIns.invoke(name, arguments);
+            }
+            @Override public String interpolate(String value) {
+                if (value.contains("${") || value.contains("#{") || value.contains("&{"))
+                    throw new NotStaticallyEvaluable();
+                return value;
+            }
+            @Override public String file(String path) throws Exception {
+                return fileExpressions.evaluate(path, validationSourceDirectories.get(), new att.template.FileExpressionResolver.Runtime() {
+                    @Override public Object context(String contextPath, boolean optional) { throw new NotStaticallyEvaluable(); }
+                    @Override public Object call(String name, Map<String, Object> arguments) throws Exception {
+                        if (!BUILT_INS.contains(name.toLowerCase(java.util.Locale.ROOT))
+                                || !att.template.DefaultBuiltInProvider.isSafeForBootstrap(name))
+                            throw new NotStaticallyEvaluable();
+                        return builtIns.invoke(name, arguments);
+                    }
+                    @Override public String interpolate(String value) {
+                        if (value.contains("${") || value.contains("#{") || value.contains("&{"))
+                            throw new NotStaticallyEvaluable();
+                        return value;
+                    }
+                    @Override public boolean hasContext(String contextPath) { return false; }
+                    @Override public String file(String nested) { throw new NotStaticallyEvaluable(); }
+                });
+            }
+        };
+    }
+
+    private static final class NotStaticallyEvaluable extends RuntimeException { }
 
     @SuppressWarnings("unchecked")
     private void validatePackageLayout(List<Diagnostic> diagnostics) {
@@ -912,7 +1014,7 @@ public final class PackageValidator {
                 throw new IllegalArgumentException("Action type 'db' is historical-only; use type: tool with a db.<helper>.query|scalar|update(...) call under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
             }
             if ("render".equals(type) && att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())) {
-                throw new IllegalArgumentException("Render actions are historical-only; use an Assign expression with &{project-relative-file} under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
+                throw new IllegalArgumentException("Render actions are historical-only; use an Assign expression with &{package-relative-file} under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
             }
             if (!"tool".equals(type) && action.raw().containsKey("evidence")) {
                 throw new IllegalArgumentException("Field 'evidence' is only supported for tool actions: " + action.id());
@@ -1378,9 +1480,14 @@ public final class PackageValidator {
             return;
         }
         String child = firstChildSegment(referencePath, "META");
+        if ("PACKAGE_ROOT".equals(child)) {
+            if (!"META.PACKAGE_ROOT".equals(referencePath))
+                throw invalidCanonicalPath(originalPath, "META.PACKAGE_ROOT is a String value; it has no child fields.");
+            return;
+        }
         if (child.isEmpty() || !att.core.ContextPathPolicy.isCanonicalMetaField(child)) {
             throw invalidCanonicalPath(originalPath,
-                    "Unknown META field '" + child + "'; use PROJECT, SOURCE, TARGET, TEMPLATE, FLOW, TOOL, DBHELPER, or MQHELPER.");
+                    "Unknown META field '" + child + "'; use PACKAGE_ROOT, SOURCE, TARGET, TEMPLATE, FLOW, TOOL, DBHELPER, or MQHELPER.");
         }
     }
 
@@ -1977,6 +2084,7 @@ public final class PackageValidator {
     }
 
     private void validateHttpCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        validateStaticArgumentContracts(parsed, null);
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || parts[1].isEmpty() || !("request".equals(parts[2])
                 || "get".equals(parts[2]) || "post".equals(parts[2]) || "put".equals(parts[2])
@@ -1991,30 +2099,21 @@ public final class PackageValidator {
             if (!("method".equals(key) || "path".equals(key) || "query".equals(key) || "headers".equals(key)
                     || "body".equals(key) || "contentType".equals(key)
                     || "connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
-                    || "connectionRequestTimeoutMs".equals(key) || "followRedirects".equals(key)))
+                    || "connectionRequestTimeoutMs".equals(key) || "followRedirects".equals(key)
+                    || "requestFormat".equals(key) || "responseFormat".equals(key)))
                 throw new IllegalArgumentException("Unknown HTTP argument: " + key);
             if (!supplied.add(key)) throw new IllegalArgumentException("Duplicate HTTP argument: " + key);
             String expression = argument.expression();
-            if (expression.contains("${") || expression.contains("#{")) continue;
+            if (expression.contains("${") || expression.contains("#{") || expression.contains("&{")) continue;
             Object value = callParser.literal(expression);
-            if ("method".equals(key)) {
-                if (!(value instanceof String) || !String.valueOf(value).toUpperCase(java.util.Locale.ROOT)
-                        .matches("GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS"))
-                    throw new IllegalArgumentException("Unsupported HTTP method");
-            } else if ("path".equals(key)) {
+            if ("path".equals(key)) {
                 if (!(value instanceof String)) throw new IllegalArgumentException("HTTP path must be a string");
                 String path = (String) value;
                 if (path.startsWith("//") || path.contains("?") || path.contains("#"))
                     throw new IllegalArgumentException("HTTP path must be relative and query/fragment-free");
                 try { if (new java.net.URI(path).isAbsolute()) throw new IllegalArgumentException("Absolute per-call HTTP URL is forbidden"); }
                 catch (java.net.URISyntaxException invalid) { throw new IllegalArgumentException("Invalid HTTP path"); }
-            } else if ("connectTimeoutMs".equals(key) || "readTimeoutMs".equals(key)
-                    || "connectionRequestTimeoutMs".equals(key)) {
-                if (!(value instanceof Number) || ((Number) value).doubleValue() != ((Number) value).longValue()
-                        || ((Number) value).longValue() < 1 || ((Number) value).longValue() > 3600000)
-                    throw new IllegalArgumentException("HTTP timeout must be 1..3600000 ms: " + key);
-            } else if ("followRedirects".equals(key) && !(value instanceof Boolean))
-                throw new IllegalArgumentException("HTTP followRedirects must be boolean");
+            }
         }
         if ("request".equals(parts[2]) && !supplied.contains("method"))
             throw new IllegalArgumentException("http.<helper>.request requires method");
@@ -2026,6 +2125,7 @@ public final class PackageValidator {
     }
 
     private void validateMqCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        validateStaticArgumentContracts(parsed, null);
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || !"mq".equals(parts[0]) || parts[1].isEmpty()) {
             throw new IllegalArgumentException("MQ call must be mq.<instance>.send|receive|request: " + parsed.name());
@@ -2057,19 +2157,11 @@ public final class PackageValidator {
             boolean dynamic = value.contains("${") || value.contains("#{") || value.contains("&{");
             if (dynamic) continue;
             Object literal = callParser.literal(value);
-            if ("waitMs".equals(argument.key())) {
-                if (!(literal instanceof Number)) throw new IllegalArgumentException(parsed.name() + ".waitMs must be an integer from 0 to 3600000");
-                Number number = (Number) literal;
-                if (number.doubleValue() != number.longValue() || number.longValue() < 0 || number.longValue() > 3600000) {
-                    throw new IllegalArgumentException(parsed.name() + ".waitMs must be an integer from 0 to 3600000");
-                }
-            } else if ("payload".equals(argument.key())) {
+            if ("payload".equals(argument.key())) {
                 if (!(literal instanceof String || literal instanceof Map || literal instanceof List))
                     throw new IllegalArgumentException("MQ payload must be a String, Map, or List");
-            } else if ("requestFormat".equals(argument.key()) || "responseFormat".equals(argument.key())) {
-                if (!(literal instanceof String) || !java.util.Arrays.asList("text", "json", "yaml", "xml").contains(literal))
-                    throw new IllegalArgumentException("MQ " + argument.key() + " must be text, json, yaml, or xml");
-            } else {
+            } else if (!("waitMs".equals(argument.key()) || "requestFormat".equals(argument.key())
+                    || "responseFormat".equals(argument.key()))) {
                 if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty()) {
                     throw new IllegalArgumentException(parsed.name() + "." + argument.key() + " must be a non-blank string");
                 }
@@ -2084,7 +2176,7 @@ public final class PackageValidator {
             }
         }
         if (("send".equals(operation) || "request".equals(operation)) && !supplied.contains("payload"))
-            throw new IllegalArgumentException("MQ send/request requires payload; resolve project files with &{...}");
+            throw new IllegalArgumentException("MQ send/request requires payload; resolve package files with &{...}");
         if ("send".equals(operation) && !supplied.contains("queue")) {
             boolean hasDefault = selected != null ? !selected.requestQueue().isEmpty() : allInstancesHaveRequestQueue(helper, true);
             if (!hasDefault) throw new IllegalArgumentException("Missing effective send queue: provide queue or configure message.requestQueue on every selectable instance");
@@ -2107,6 +2199,7 @@ public final class PackageValidator {
     }
 
     private void validateSshCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
+        validateStaticArgumentContracts(parsed, null);
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || !"ssh".equals(parts[0]) || parts[1].isEmpty())
             throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|stat|mkdirs|move|delete: " + parsed.name());
@@ -2138,20 +2231,13 @@ public final class PackageValidator {
             if (!allowed.contains(key)) throw new IllegalArgumentException("Unknown SSH argument '" + key + "' for " + parsed.name());
             if (!supplied.add(key)) throw new IllegalArgumentException("Duplicate SSH argument '" + key + "'");
             String expression = argument.expression().trim();
-            boolean dynamic = expression.contains("${") || expression.contains("#{")
+            boolean dynamic = expression.contains("${") || expression.contains("#{") || expression.contains("&{")
                     || expression.startsWith("input.") || expression.startsWith("TOOL.input.");
             if (dynamic) continue;
             Object literal = callParser.literal(expression);
-            if ("timeoutMs".equals(key)) {
-                if (!(literal instanceof Number) || ((Number) literal).doubleValue() != ((Number) literal).longValue()
-                        || ((Number) literal).longValue() < 1L || ((Number) literal).longValue() > 3600000L)
-                    throw new IllegalArgumentException("SSH timeoutMs must be an integer from 1 to 3600000");
-            } else if ("overwrite".equals(key) || "missingOk".equals(key)) {
-                if (!(literal instanceof Boolean)) throw new IllegalArgumentException("SSH " + key + " must be boolean");
-            } else if ("stdoutFormat".equals(key)) {
-                if (!(literal instanceof String) || !String.valueOf(literal).toLowerCase(java.util.Locale.ROOT)
-                        .matches("text|json|yaml|xml"))
-                    throw new IllegalArgumentException("SSH stdoutFormat must be text, json, yaml, or xml");
+            if ("timeoutMs".equals(key) || "overwrite".equals(key) || "missingOk".equals(key)
+                    || "stdoutFormat".equals(key)) {
+                continue;
             } else if ("command".equals(key) || "remotePath".equals(key) || "sourcePath".equals(key) || "targetPath".equals(key)) {
                 if (!(literal instanceof String) || String.valueOf(literal).trim().isEmpty())
                     throw new IllegalArgumentException("SSH " + key + " must be a non-blank string");
@@ -2169,7 +2255,7 @@ public final class PackageValidator {
         }
         for (String key : required) if (!supplied.contains(key)) throw new IllegalArgumentException("Missing required SSH argument '" + key + "' for " + parsed.name());
         if ("upload".equals(operation) && !supplied.contains("payload"))
-            throw new IllegalArgumentException("SSH upload requires payload content; resolve project files with &{...}");
+            throw new IllegalArgumentException("SSH upload requires payload content; resolve package files with &{...}");
     }
 
     private boolean allInstancesHaveRequestQueue(att.config.MqHelperConfig helper, boolean request) {
@@ -2286,7 +2372,7 @@ public final class PackageValidator {
             } catch (RuntimeException error) {
                 throw error;
             } catch (Exception error) {
-                throw new IllegalArgumentException(callName + ".sql project-file expression could not be read: "
+                throw new IllegalArgumentException(callName + ".sql file-content expression could not be read: "
                         + error.getMessage(), error);
             }
         }
@@ -2378,7 +2464,7 @@ public final class PackageValidator {
         }
         if (arguments.containsKey("sqlFile")) {
             if (!Boolean.TRUE.equals(legacyDbSqlFileAllowed.get())) {
-                throw new IllegalArgumentException(parsed.name() + ".sqlFile is historical-only; use sql=&{project-relative-sql-file}");
+                throw new IllegalArgumentException(parsed.name() + ".sqlFile is historical-only; use sql=&{package-relative-sql-file}");
             }
             String expression = arguments.get("sqlFile").expression().trim();
             if (expression.contains("${") || expression.contains("#{")) {
@@ -2466,7 +2552,7 @@ public final class PackageValidator {
                 stream.filter(Files::isRegularFile).filter(p -> p.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".xlsx")).sorted().forEach(result::add);
             }
         } else result.addAll(options.suitePaths());
-        if (result.isEmpty()) throw new IllegalArgumentException("No Excel suites selected");
+        if (result.isEmpty() && !"package".equals(options.validationScope())) throw new IllegalArgumentException("No Excel suites selected");
         return result;
     }
 

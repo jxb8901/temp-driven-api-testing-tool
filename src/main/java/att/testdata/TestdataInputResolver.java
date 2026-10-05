@@ -587,7 +587,8 @@ public final class TestdataInputResolver {
             descriptor = registry.resolve(id);
             layer = registry.layer(id);
         } catch (Exception error) {
-            throw new IllegalArgumentException("Unable to prepare Load testdata '" + id + "': " + error.getMessage(), error);
+            throw new IllegalArgumentException("Unable to prepare " + registry.localLayerName()
+                    + " testdata '" + id + "': " + error.getMessage(), error);
         }
         WorkloadPolicy override = workloadPolicy(id);
         if (descriptor.count() == 1 && override != null && override.selection != null)

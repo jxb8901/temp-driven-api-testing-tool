@@ -55,7 +55,7 @@ Tool 的 `command` 也擁有獨立的受限 Context，只能引用該 Tool `argu
 tools:
   invokePaymentApi:
     name: Invoke Payment API
-    description: Invoke a project-file payment request
+    description: Invoke a file-content payment request
     command:
       - ./tools/invoke_payment_api.sh
       - "${input.requestText}"
@@ -155,4 +155,6 @@ Global `tools` and Tool-group `tools` entries use the same Tool contract:
 |---|---|
 | `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
 | call-backed `tools.<key>.cache` | required `scope: case|db` |
-| `arguments.<key>` | `name`, `description`, `required`, optional `argName`, `argNameMode`, `delimit`, `x-*` |
+| `arguments.<key>` | `name`, `description`, `required`, optional `type`, `enumValues`（僅 `type: enum` 時必須），`argName`、`argNameMode`、`delimit`、`x-*` |
+
+`type` 宣告 configured Tool 完整解析後的值 contract，可用 `any`、`string`、`integer`、`long`、`decimal`、`boolean`、`enum`、`bytes`、`map` 或 `list`。未填 `type` 時仍按 `any` 處理，維持舊 descriptor 行為。數值和 Boolean scalar 接受原生值或去除前後空白的數字／`true`／`false` 字串；enum 必須符合其中一個 `enumValues`；`bytes` 接受 byte array 或 UTF-8 String。`string`、`map` 和 `list` 要求原生值型別吻合。這些檢查在巢狀 expression 完整解析後執行；靜態安全可求值的內容會在 validation 檢查，其餘在 runtime 檢查。

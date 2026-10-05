@@ -21,9 +21,12 @@ import java.util.Map;
  */
 public final class CaseRuntimeContext {
     private boolean resourceOutputEnabled = true;
+    private boolean unsafeFailureDetails;
     private final java.util.List<java.util.function.Supplier<Map<String, Object>>> deferredResourceOutputs = new java.util.ArrayList<java.util.function.Supplier<Map<String, Object>>>();
 
     public void setResourceOutputEnabled(boolean enabled) { resourceOutputEnabled = enabled; }
+    public void setUnsafeFailureDetails(boolean enabled) { unsafeFailureDetails = enabled; }
+    public boolean unsafeFailureDetails() { return unsafeFailureDetails; }
 
     /** Formatting is deferred in Load until the scheduler has granted a retention slot. */
     public synchronized void recordResourceOutput(final att.config.ResourceOutputConfig policy,
@@ -702,7 +705,7 @@ public final class CaseRuntimeContext {
     /** Adds only curated component metadata; credentials/config objects never enter META. */
     public void setProject(Path projectRoot) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
-        setComponentMetadata("PROJECT", mapOf("root", this.projectRoot.toString(), "id", projectRoot.getFileName() == null ? "" : projectRoot.getFileName().toString()));
+        metaNode.put("PACKAGE_ROOT", this.projectRoot.toString());
     }
 
     public Path projectRoot() { return projectRoot; }

@@ -14,11 +14,17 @@ assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-依各欄位支援的形式使用 expression。Project-file 內容、Action description/assert、Log message/value、assign expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](actions.md)。
+依各欄位支援的形式使用 expression。File-content 內容、Action description/assert、Log message/value、assign expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](actions.md)。
 
-## Project-file string expression
+## File-content expression
 
-`&{path}` 是 typed project-file expression。它只解析一個 regular UTF-8 檔案，並且一定回傳 `String`；不會推斷 document format、解析副檔名、展開 glob 或建立 output file。Path 相對於 canonical ATT project root。Descriptor-relative 的 `./` 與 `../` 只有在 canonical target 仍位於該 root 內時才允許。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation 失敗。
+`&{path}` 是 file-content expression：它讀取 active ATT package root 內一個靜態指定的 regular UTF-8 檔案，並回傳原始 String content。它不會推斷或解析文件格式、展開 glob 或建立 output file。Descriptor-relative 的 `./` 與 `../` 只有在 canonical target 仍位於 `META.PACKAGE_ROOT` 內時才允許。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation 失敗。File content 不會自動解析為 JSON、YAML 或 XML。
+
+## Argument 結果型別
+
+Argument expression 會先遞迴求值，再呼叫接收它的 function。Target argument contract 只套用在最終結果：例如 `str.substr` 先接收 `&{...}` 產生的 file String，再回傳 String，最後 outer target argument 才執行型別與 range 檢查。因此 `waitMs=#{str.substr(&{params/wait.txt}, 0, 4)}` 在結果為 integral value 時可供 numeric helper 使用；String payload 則保留所有原始字元。Scalar String 只會在數值或 Boolean parsing 時 trim，不會全域修剪 String/payload。Map/List 會保留型別；不會依副檔名或檔案內容推斷並解析結構。
+
+Package validation 會在 inputs 靜態可知時解析 literal、static file content 及明確 pure built-in，再套用與 runtime 相同的 target argument contract。Runtime-dependent expression 會檢查結構及已宣告型別，並將最終值/range 檢查留待執行；validation 絕不執行 Tool、resource 或 external call 來取得值。
 
 Standalone value 或嵌入較大 expression 時，請使用 YAML string：
 
@@ -66,7 +72,7 @@ Descriptor 和 generated record 語法見[Testdata Registry 與 Input Mapping](t
 
 ## 內建函數
 
-只有作者直接撰寫的 file-expression node 才會求值。Context value、Tool result 和 file output 即使包含 `&{...}`，亦維持 literal String。檔案內的 Context path 和 call 依 enclosing Action 的一般 ordering、scope 和 resource validation 規則驗證。V1 在 Run、Debug、validation 和 Load snapshot discovery 都拒絕 project-file 內容中的巢狀 `&{...}`，包括 `#{...}` argument 內的 locator。
+只有作者直接撰寫的 file-expression node 才會求值。Context value、Tool result 和 file output 即使包含 `&{...}`，亦維持 literal String。檔案內的 Context path 和 call 依 enclosing Action 的一般 ordering、scope 和 resource validation 規則驗證。V1 在 Run、Debug、validation 和 Load snapshot discovery 都拒絕 file-content 內容中的巢狀 `&{...}`，包括 `#{...}` argument 內的 locator。
 
 內建函數通過 `#{...}` 調用。Canonical 名稱使用 framework-owned `str.*`、`date.*`、`file.*`、`misc.*` 與 `seq.*` package；舊 flat 名稱保留為兼容 alias。Tool group 同樣以 `group.tool` 組成 package-like 調用名；配置 Tool 不得佔用 built-in package root 或任何 canonical／legacy built-in 名稱。
 
@@ -123,7 +129,7 @@ Descriptor 和 generated record 語法見[Testdata Registry 與 Input Mapping](t
 
 | Method | 參數（未標 optional 即必填） | 示例 |
 |---|---|---|
-| `db.<id>.query` / `db.<id>.scalar` | `sql: String`；optional `params: List` **或** `parameters: Map<String, value>`（兩者互斥；預設沒有 bind value）。`sql` 可為 inline SQL 或返回 String 的 project-file expression。 | `#{db.orders.query(sql='select status from orders where id = :id', parameters={id: ${EXEC.INPUT.orderId}})}` |
+| `db.<id>.query` / `db.<id>.scalar` | `sql: String`；optional `params: List` **或** `parameters: Map<String, value>`（兩者互斥；預設沒有 bind value）。`sql` 可為 inline SQL 或返回 String 的 file-content expression。 | `#{db.orders.query(sql='select status from orders where id = :id', parameters={id: ${EXEC.INPUT.orderId}})}` |
 | `db.<id>.update` | 與 `query` 相同的參數和型別；只可作為 Tool Action 的主要 call。 | `#{db.orders.update(sql='update orders set status = ? where id = ?', params=['DONE', ${EXEC.INPUT.orderId}])}` |
 
 `query` 返回 typed rows，`scalar` 返回 scalar result，`update` 返回更新結果。SQL binding、transaction 和 result 詳情見 [DBHelper](resources/dbhelper.md)。
@@ -171,7 +177,7 @@ SSH operation 只接受具名參數；path 是 remote path，upload 接受內容
 
 Expression language 由本頁定義；可用 roots 與求值時機由欄位的 semantic owner 定義：[Tool command/call](resources/tools.md)、[Load execIdFormat 與 vars](execution-modes/load.md)、[Debug vars](execution-modes/debug.md)、[report filename](configuration.md)。`${path?}` 只允許缺少的 map/list path 回傳 null；語法錯誤與非法 scope 仍會失敗。Expression syntax 或缺少的必需 Context path 會提供結構化 diagnostic；見[Validation](validation-diagnostics.md)。
 
-已移除 presentation-only `dbText`／`misc.dbText`、`prettyPrint`／`misc.prettyPrint`／`format.pretty` 和所有 local `file.*`／legacy file alias。DB result 保持 typed；顯示時改用 Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` 加 `format: sqlplus`，Map/List 則使用 `format: json` 或 `yaml`。Project content 使用 `&{...}`，並將 String 傳入 HTTP body、MQ payload 或 SSH upload payload。SSHHelper upload 只接受 content；native SSH download 已移除。ATT local output 由 framework 管理。移除的 API 會提供 migration diagnostic。
+已移除 presentation-only `dbText`／`misc.dbText`、`prettyPrint`／`misc.prettyPrint`／`format.pretty` 和所有 local `file.*`／legacy file alias。DB result 保持 typed；顯示時改用 Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` 加 `format: sqlplus`，Map/List 則使用 `format: json` 或 `yaml`。Package content 使用 `&{...}`，並將 String 傳入 HTTP body、MQ payload 或 SSH upload payload。SSHHelper upload 只接受 content；native SSH download 已移除。ATT local output 由 framework 管理。移除的 API 會提供 migration diagnostic。
 
 ## Retry condition 的生命週期
 

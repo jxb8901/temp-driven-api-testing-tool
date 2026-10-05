@@ -14,11 +14,17 @@ assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-Use the expression form supported by each field. Project-file content, Action descriptions/assertions, Log message/value, assign expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](actions.md).
+Use the expression form supported by each field. File-content content, Action descriptions/assertions, Log message/value, assign expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](actions.md).
 
-## Project-file string expressions
+## File-content expressions
 
-`&{path}` is a typed project-file expression. It resolves exactly one regular UTF-8 file and always returns a `String`; it never infers a document format, parses an extension, expands a glob or creates an output file. The path is relative to the canonical ATT project root. Descriptor-relative `./` and `../` paths are allowed only when their canonical target remains inside that root. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace, glob syntax and dynamic locators fail validation.
+`&{path}` is a file-content expression. It reads exactly one statically addressed regular UTF-8 file contained by the active ATT package root and returns its String content. It never infers or parses a document format, expands a glob or creates an output file. Descriptor-relative `./` and `../` paths are allowed only when their canonical target remains inside `META.PACKAGE_ROOT`. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace, glob syntax and dynamic locators fail validation. File content is not implicitly parsed as JSON, YAML or XML.
+
+## Argument result typing
+
+An argument expression is evaluated recursively before its receiving call runs. The call's argument contract applies to the final resolved value only: an inner `&{...}` passed to `str.substr` first produces file text, `str.substr` returns its String result, and only then does the outer target argument apply its type and range rules. Thus a numeric helper argument may accept `waitMs=#{str.substr(&{params/wait.txt}, 0, 4)}` when that result is an integral value, while a String payload keeps every original character. Scalar String coercion trims only for numeric or Boolean parsing; it does not globally trim String/payload values. Map/List values remain typed and are never inferred from file extensions or parsed file content.
+
+Package validation resolves literal values, static file content and explicitly pure built-ins when their inputs are static, then applies the same target argument contract used at runtime. It checks the structure and declared types of runtime-dependent expressions and defers only their final value/range checks. Tool, resource and external calls are never run to discover values during validation.
 
 Use a YAML string when authoring a standalone value or embedding the locator in a larger expression:
 
@@ -56,7 +62,7 @@ Comparison first recognizes boolean literals. If both operands are valid decimal
 
 ## Built-in functions
 
-Only authored file-expression nodes are executable. Context values, Tool results and file output remain literal Strings even when they contain `&{...}`. Embedded Context paths and calls follow the enclosing Action's normal ordering, scope and resource validation rules. Nested `&{...}` inside project-file content, including inside `#{...}` arguments, is rejected in v1 in Run, Debug, validation and Load snapshot discovery.
+Only authored file-expression nodes are executable. Context values, Tool results and file output remain literal Strings even when they contain `&{...}`. Embedded Context paths and calls follow the enclosing Action's normal ordering, scope and resource validation rules. Nested `&{...}` inside file content, including inside `#{...}` arguments, is rejected in v1 in Run, Debug, validation and Load snapshot discovery.
 
 Built-ins are called with `#{...}`. Canonical names use framework-owned `str.*`, `date.*`, `file.*`, `misc.*`, and `seq.*` packages. Legacy flat names remain aliases for compatibility. Tool groups use the same package-like `group.tool` shape; configured Tools cannot claim a built-in package root or any canonical/legacy built-in name.
 
@@ -142,7 +148,7 @@ Configured `db.*`, `mq.*`, `ssh.*`, and `http.*` calls use the same `#{...}` syn
 
 | Method | Arguments (required unless marked optional) | Example |
 |---|---|---|
-| `db.<id>.query` / `db.<id>.scalar` | `sql: String`; optional `params: List` **or** `parameters: Map<String, value>` (mutually exclusive; default: no bind values). `sql` may be an inline SQL string or a project-file expression returning a String. | `#{db.orders.query(sql='select status from orders where id = :id', parameters={id: ${EXEC.INPUT.orderId}})}` |
+| `db.<id>.query` / `db.<id>.scalar` | `sql: String`; optional `params: List` **or** `parameters: Map<String, value>` (mutually exclusive; default: no bind values). `sql` may be an inline SQL string or a file-content expression returning a String. | `#{db.orders.query(sql='select status from orders where id = :id', parameters={id: ${EXEC.INPUT.orderId}})}` |
 | `db.<id>.update` | Same arguments and types as `query`; primary Tool Action only. | `#{db.orders.update(sql='update orders set status = ? where id = ?', params=['DONE', ${EXEC.INPUT.orderId}])}` |
 
 `query` returns typed rows, `scalar` returns a scalar result, and `update` returns the update result. See [DBHelper](resources/dbhelper.md) for SQL binding, transaction, and result details.
@@ -190,7 +196,7 @@ Example: `#{http.payment.post(path='/v1/payments', query={dryRun: true}, headers
 
 This page defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](resources/tools.md), [Load execIdFormat and vars](execution-modes/load.md), [Debug vars](execution-modes/debug.md), and [report filenames](configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](validation-diagnostics.md).
 
-Removed APIs: `dbText`/`misc.dbText`, `prettyPrint`/`misc.prettyPrint`/`format.pretty`, all local `file.*` built-ins and their legacy aliases. Keep DB results typed and migrate display calls to Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` with `format: sqlplus`; use `format: json` or `yaml` for Maps/Lists. Read project content with `&{...}` and pass its String to HTTP body, MQ payload, or SSH upload payload. SSHHelper upload accepts content only; native SSH download was removed. ATT local output remains framework-owned. Removed calls fail with migration guidance.
+Removed APIs: `dbText`/`misc.dbText`, `prettyPrint`/`misc.prettyPrint`/`format.pretty`, all local `file.*` built-ins and their legacy aliases. Keep DB results typed and migrate display calls to Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` with `format: sqlplus`; use `format: json` or `yaml` for Maps/Lists. Read package content with `&{...}` and pass its String to HTTP body, MQ payload, or SSH upload payload. SSHHelper upload accepts content only; native SSH download was removed. ATT local output remains framework-owned. Removed calls fail with migration guidance.
 
 ## Retry-condition lifecycle
 

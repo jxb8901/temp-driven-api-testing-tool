@@ -1,6 +1,6 @@
 schemaVersion: att-template/v3.6
 name: PAYMENT_INVOKE
-description: Read the payment request project file as a String and invoke the payment API.
+description: Read the payment request package file as a String and invoke the payment API.
 
 actions:
   prepareRequest:
@@ -10,7 +10,7 @@ actions:
 
   logRequest:
     type: log
-    message: "Project-file request for ${META.SOURCE.caseId}"
+    message: "File-content request for ${META.SOURCE.caseId}"
     value: "${EXEC.VARS.requestText}"
 
   callApi:

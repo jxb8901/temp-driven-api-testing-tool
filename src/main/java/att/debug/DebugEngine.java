@@ -63,6 +63,9 @@ public final class DebugEngine {
     public Map<String, Object> loadBootstrapInputForLoad(ExecutionOptions options) throws Exception {
         DebugInput input = loadInput(options, options.debugTargetType(), options.debugTargetId(),
                 att.core.ExecutionBootstrapVariables.Scope.LOAD);
+        if (!input.testdataDescriptors.isEmpty())
+            throw debugError("Debug-local testdata imports cannot be promoted by load --debug",
+                    "Use a Load scenario with its own top-level testdata imports.");
         Map<String, Object> promoted = new LinkedHashMap<String, Object>();
         promoted.put("source", input.path);
         promoted.put("inputs", input.inputs);
@@ -92,8 +95,13 @@ public final class DebugEngine {
                     "vars", DiagnosticCodes.DEBUG_INVALID, att.core.ExecutionBootstrapVariables.Scope.DEBUG);
         }
         new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
-                resolved.flows, input.path, "debug", input.inputs, input.vars);
+                resolved.flows, input.path, "debug", input.inputs, input.vars, input.testdataDescriptors);
         return Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar) ? sidecar : null;
+    }
+
+    /** Returns the exact optional sidecar path used by Debug auto-discovery. */
+    public Path discoverableInputPath(String type, String id) throws Exception {
+        return autoInput(type, id);
     }
 
     /** Validates a sidecar using the exact Load promotion path, not standalone Debug root availability. */
@@ -123,6 +131,8 @@ public final class DebugEngine {
         Instant started = Instant.now();
         String targetType = options.debugTargetType();
         String targetId = options.debugTargetId();
+        if (options.unsafeFailureDetails())
+            System.err.println("[ATT WARNING] --unsafe-failure-details is enabled: collector diagnostics may expose local data. Configured secrets remain redacted. Use only with trusted local data.");
         Path debugDirectory = createDebugDirectory(options, targetType, targetId);
         Path artifacts = debugDirectory.resolve("artifacts");
         Path logPath = debugDirectory.resolve("case.log");
@@ -139,6 +149,7 @@ public final class DebugEngine {
         result.put("outputDirectory", att.core.PathPresentation.displayPath(debugDirectory, projectRoot));
         result.put("log", att.core.PathPresentation.displayPath(logPath, projectRoot));
         result.put("artifacts", att.core.PathPresentation.displayPath(artifacts, projectRoot));
+        result.put("failureDetailMode", options.unsafeFailureDetails() ? "local-unsafe" : "safe-default");
 
         DebugInput input = null;
         CaseRuntimeContext context = null;
@@ -181,16 +192,19 @@ public final class DebugEngine {
                         + att.core.PathPresentation.displayPath(input.path, projectRoot));
 
             new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
-                    resolved.flows, input.path, "debug", testCase.caseData(), input.vars);
+                    resolved.flows, input.path, "debug", testCase.caseData(), input.vars, input.testdataDescriptors);
 
             context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug");
             context.setProject(projectRoot);
+            context.setUnsafeFailureDetails(options.unsafeFailureDetails());
             context.setSourceMetadata("debug", input.path, testCase.caseId());
             context.setTargetMetadata(targetType, targetId);
             context.setTemplateMetadata(resolved.template.name(), resolved.template.directory());
             context.put("CASE.environment", config.environment());
+            context.put("CASE.failureDetailMode", options.unsafeFailureDetails() ? "local-unsafe" : "safe-default");
             att.testdata.TestdataInputResolver testdata = new att.testdata.TestdataInputResolver(
-                    new att.testdata.TestdataRegistry(projectRoot, config.testdataDescriptors(), Collections.<Path>emptyList()));
+                    new att.testdata.TestdataRegistry(projectRoot, config.testdataDescriptors(), input.testdataDescriptors,
+                            "debug-local"));
             context.replaceInputValues(testdata.resolve(testCase.caseData(), context, null, null));
             if ("template".equals(targetType) || "flow".equals(targetType))
                 att.core.ExecutionBootstrapVariables.evaluate(input.vars, context, bootstrapEngine,
@@ -338,14 +352,12 @@ public final class DebugEngine {
             Map<String, Object> map = objectMap((Map<?, ?>) loaded);
             Object declaredVersion = map.get("schemaVersion");
             String schemaVersion = declaredVersion == null ? "" : String.valueOf(declaredVersion);
-            String schemaName = Version.DEBUG_SCHEMA.equals(schemaVersion)
-                    ? "att-debug-v1.1.schema.json" : "att-debug-v1.0.schema.json";
-            Path schema = att.validation.SchemaFiles.resolve(projectRoot, schemaName);
+            Path schema = att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion);
             JsonSchemaVerifier.verify(schema, map);
-            if (Version.PREVIOUS_DEBUG_SCHEMA.equals(schemaVersion)) {
+            if (Version.PREVIOUS_DEBUG_SCHEMA.equals(schemaVersion) || Version.OLDER_DEBUG_SCHEMA.equals(schemaVersion)) {
                 throw new DiagnosticException(DiagnosticCodes.SCHEMA_VERSION_OLD,
                         "Debug input uses a historical schemaVersion",
-                        "declaredSchemaVersion=" + Version.PREVIOUS_DEBUG_SCHEMA
+                        "declaredSchemaVersion=" + schemaVersion
                                 + "\ncurrentSchemaVersion=" + Version.DEBUG_SCHEMA,
                         path.toString(), "schemaVersion", null, null, null, null, null,
                         "Upgrade schemaVersion to " + Version.DEBUG_SCHEMA + "; use top-level vars for initial EXEC.VARS values.", null);
@@ -376,14 +388,34 @@ public final class DebugEngine {
                         new DebugInput(path, map, type, id, config).arguments);
                 effectiveToolArguments = att.core.CliSetOverrides.apply(effectiveToolArguments, overrides, "arg");
             }
-            return new DebugInput(path, map, type, id, config, effectiveToolArguments);
+            List<Path> debugTestdata = projectRelativeDescriptors(map.get("testdata"));
+            if (!debugTestdata.isEmpty())
+                new att.testdata.TestdataRegistry(projectRoot, Collections.<Path>emptyList(), debugTestdata,
+                        "debug-local").validateAll();
+            return new DebugInput(path, map, type, id, config, debugTestdata, effectiveToolArguments);
         } catch (DiagnosticException e) {
             throw e;
         } catch (Exception e) {
             throw new DiagnosticException(DiagnosticCodes.DEBUG_INVALID, "Invalid debug input", e.getMessage(), path.toString(),
                     "debug", null, null, null, id, null,
-                    "Correct the debug YAML and validate it against schemas/att-debug-v1.1.schema.json.", e);
+                    "Correct the debug YAML and validate it against schemas/att-debug-v1.2.schema.json.", e);
         }
+    }
+
+    private List<Path> projectRelativeDescriptors(Object raw) {
+        if (!(raw instanceof List)) return Collections.emptyList();
+        List<Path> result = new ArrayList<Path>();
+        Path root = projectRoot.toAbsolutePath().normalize();
+        for (Object value : (List<?>) raw) {
+            if (!(value instanceof String) || ((String) value).trim().isEmpty())
+                throw new IllegalArgumentException("Debug testdata entries must be non-empty package-relative paths");
+            Path declared = java.nio.file.Paths.get((String) value);
+            if (declared.isAbsolute()) throw new IllegalArgumentException("Debug testdata paths must be package-relative");
+            Path resolved = root.resolve(declared).normalize();
+            if (!resolved.startsWith(root)) throw new IllegalArgumentException("Debug testdata path escapes package root");
+            result.add(resolved);
+        }
+        return Collections.unmodifiableList(result);
     }
 
     private Path autoInput(String type, String id) throws Exception {
@@ -551,17 +583,18 @@ public final class DebugEngine {
     }
 
     private static final class DebugInput {
-        private final Path path; private final Map<String, Object> caseValues; private final Map<String, Object> inputs; private final Map<String, Object> vars; private final Map<String, Object> arguments; private final Map<String, Object> stageValues; private final String stageKey;
+        private final Path path; private final Map<String, Object> caseValues; private final Map<String, Object> inputs; private final Map<String, Object> vars; private final Map<String, Object> arguments; private final Map<String, Object> stageValues; private final String stageKey; private final List<Path> testdataDescriptors;
         private DebugInput(Path path, Map<String, Object> root, String type, String id, FrameworkConfig config) {
-            this(path, root, type, id, config, null);
+            this(path, root, type, id, config, Collections.<Path>emptyList(), null);
         }
         private DebugInput(Path path, Map<String, Object> root, String type, String id, FrameworkConfig config,
-                           Map<String, Object> effectiveToolArguments) {
+                           List<Path> testdataDescriptors, Map<String, Object> effectiveToolArguments) {
             this.path = path;
             this.caseValues = map(root.get("case"));
             this.inputs = map(root.get("inputs"));
             this.vars = map(root.get("vars"));
             this.stageValues = map(map(root.get("stage")).get("values"));
+            this.testdataDescriptors = testdataDescriptors;
             Object key = map(root.get("stage")).get("key");
             this.stageKey = key == null ? "DEBUG" : String.valueOf(key);
             Map<String, Object> rootArguments = map(root.get("arguments"));

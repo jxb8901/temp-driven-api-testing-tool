@@ -74,12 +74,90 @@ class CaseExecutionLogTest {
         assertFalse(text.contains("command:"));
     }
 
-    @Test void rawContentPreservesPhysicalLinesAndNormalizesLineEndings() throws Exception {
+    @Test void rawContentPreservesOriginalLineEndings() throws Exception {
         Path file = tempDir.resolve("raw.log");
         new CaseExecutionLog(file).appendRaw("LOG note INFO", "first\r\nsecond\rthird");
         String text = new String(Files.readAllBytes(file), "UTF-8");
-        assertTrue(text.contains("[LOG note INFO]\nfirst\nsecond\nthird\n\n"));
+        assertTrue(text.contains("[LOG note INFO]\nfirst\r\nsecond\rthird\n\n"));
         assertFalse(text.contains("\\n"));
+    }
+
+    @Test void recordSeparatorsDoNotConvertTerminalLoneCrToCrLf() throws Exception {
+        String[][] samples = {{"A\n", "A\n\n"}, {"A\r\n", "A\r\n\n"}, {"A\r", "A\r\r\n\n"}};
+        for (int index = 0; index < samples.length; index++) {
+            Path file = tempDir.resolve("terminal-" + index + ".log");
+            new CaseExecutionLog(file).appendRaw("RAW", samples[index][0]);
+            String text = new String(Files.readAllBytes(file), "UTF-8");
+            assertTrue(text.endsWith(samples[index][1]), text.replace("\r", "<CR>").replace("\n", "<LF>"));
+        }
+    }
+
+    @Test void structuredMultilineStringsRenderAsBlocksAndPreserveCrLf() throws Exception {
+        Path file = tempDir.resolve("structured-lines.log");
+        Map<String, Object> attempt = new LinkedHashMap<String, Object>();
+        attempt.put("payload", "<A>x</A>\r\n  <B> y </B>\r\n\r\n");
+        Map<String, Object> record = new LinkedHashMap<String, Object>();
+        record.put("output", Collections.singletonMap("attempts", Collections.singletonList(
+                Collections.singletonMap("input", attempt))));
+
+        new CaseExecutionLog(file).append("ACTION call", record);
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("payload: |+\n          <A>x</A>\r\n            <B> y </B>\r\n          \r\n"), text);
+        assertFalse(text.contains("\\\\"), text);
+        assertFalse(text.contains("\\r\\n"), text);
+
+        Path loneCrFile = tempDir.resolve("structured-terminal-cr.log");
+        new CaseExecutionLog(loneCrFile).append("ACTION call", Collections.singletonMap("payload", "A\r"));
+        String loneCrText = new String(Files.readAllBytes(loneCrFile), "UTF-8");
+        assertTrue(loneCrText.contains("A\r\r\n"), loneCrText.replace("\r", "<CR>").replace("\n", "<LF>"));
+    }
+
+    @Test void consoleMirrorAndRetainedLoadLogKeepTheSameMultilinePresentation() throws Exception {
+        String payload = "<A>  leading  </A>\r\n\r\n<B>trailing  </B>\n";
+        Map<String, Object> record = new LinkedHashMap<String, Object>();
+        record.put("output", Collections.singletonMap("attempts", Collections.singletonList(
+                Collections.singletonMap("input", Collections.singletonMap("payload", payload)))));
+
+        StringBuilder mirror = new StringBuilder();
+        Path runFile = tempDir.resolve("mirrored-case.log");
+        try (CaseExecutionLog runLog = new CaseExecutionLog(runFile, false, part -> mirror.append(part))) {
+            runLog.append("ACTION call", record);
+        }
+        String runText = new String(Files.readAllBytes(runFile), "UTF-8");
+        assertEquals(runText, mirror.toString());
+        assertTrue(runText.contains("<A>  leading  </A>\r\n"), runText);
+        assertTrue(runText.contains("\r\n          \r\n"), runText);
+        assertTrue(runText.contains("<B>trailing  </B>\n"), runText);
+        assertTrue(runText.contains("payload: |\n"), runText);
+
+        Path retained = tempDir.resolve("retained-load-case.log");
+        CaseExecutionLog loadLog = CaseExecutionLog.lightweight(tempDir.resolve("logical-load/case.log"));
+        loadLog.append("ACTION call", record);
+        assertEquals(retained.toAbsolutePath().normalize(), loadLog.materialize(retained));
+        assertEquals(runText, new String(Files.readAllBytes(retained), "UTF-8"));
+
+        StringBuilder loneCrMirror = new StringBuilder();
+        Path loneCrFile = tempDir.resolve("mirrored-terminal-cr.log");
+        try (CaseExecutionLog loneCrLog = new CaseExecutionLog(loneCrFile, false, part -> loneCrMirror.append(part))) {
+            loneCrLog.append("ACTION terminal CR", Collections.singletonMap("payload", "A\r"));
+        }
+        String loneCrText = new String(Files.readAllBytes(loneCrFile), "UTF-8");
+        assertEquals(loneCrText, loneCrMirror.toString());
+        assertTrue(loneCrText.contains("A\r\r\n"), loneCrText.replace("\r", "<CR>").replace("\n", "<LF>"));
+    }
+
+    @Test void rawFileKeepsCrLfAndLoneCrAcrossReaderChunks() throws Exception {
+        Path source = tempDir.resolve("process-spool.txt");
+        StringBuilder content = new StringBuilder();
+        for (int index = 0; index < 9000; index++) content.append('x');
+        content.append("\r\nend\r");
+        Files.write(source, content.toString().getBytes("UTF-8"));
+        Path file = tempDir.resolve("raw-file-lines.log");
+
+        new CaseExecutionLog(file).appendRawFile("TOOL STDOUT", source, false, content.length());
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.endsWith("x\r\nend\r\r\n\n"));
+        assertFalse(text.endsWith("end\r\n\n"));
     }
 
     @Test void presentsProjectPathsPortablyAndBoundsExternalPathFields() throws Exception {

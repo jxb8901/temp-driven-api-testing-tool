@@ -83,6 +83,23 @@ class ToolInvokerTest {
         assertNull(context.resolve("TOOL.outputFile"));
     }
 
+    @Test void appliesDeclaredScalarContractsBeforeExternalCommandExpansion() throws Exception {
+        Map<String, ToolArgumentConfig> arguments = new LinkedHashMap<String, ToolArgumentConfig>();
+        arguments.put("count", new ToolArgumentConfig("count", "Count", "Count", true, "", "", "once", "integer", null));
+        arguments.put("enabled", new ToolArgumentConfig("enabled", "Enabled", "Enabled", true, "", "", "once", "boolean", null));
+        ToolConfig tool = new ToolConfig("typed", "typed", "", "Typed", "Typed",
+                Arrays.asList("capture", "${input.count}", "${input.enabled}"), Collections.<String>emptyList(), "text", arguments, null);
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>(); tools.put(tool.key(), tool);
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tools, null, null);
+        CapturingRunner runner = new CapturingRunner();
+        Map<String, Object> input = new LinkedHashMap<String, Object>(); input.put("count", " 12\n"); input.put("enabled", " TrUe ");
+
+        new ToolInvoker(tempDir, config, runner).invokeAttempt("typed", "typed", input, context(),
+                new CaseExecutionLog(tempDir.resolve("typed.log")), 1000L);
+
+        assertEquals(Arrays.asList("capture", "12", "true"), runner.argv);
+    }
+
     @Test void saveAsIsTheOnlyToolFileOutput() throws Exception {
         Map<String,ToolConfig> tools=new LinkedHashMap<String,ToolConfig>();
         tools.put("echo",new ToolConfig("echo","Echo","Echo stdout","echo result","txt",Collections.<String,ToolArgumentConfig>emptyMap()));

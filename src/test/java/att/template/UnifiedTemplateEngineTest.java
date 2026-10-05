@@ -356,6 +356,31 @@ class UnifiedTemplateEngineTest {
         assertNull(context.resolve("ACTIONS.grouped"));
     }
 
+    @Test void typedCallResultsUseTheSameCoercionInRunDebugAndLoadContexts() throws Exception {
+        Map<String, ToolArgumentConfig> arguments = new LinkedHashMap<String, ToolArgumentConfig>();
+        arguments.put("count", new ToolArgumentConfig("count", "Count", "Count", true,
+                "", "", "once", "integer", null));
+        ToolConfig tool = new ToolConfig("capture", "capture", "", "Capture", "Capture typed values",
+                Arrays.asList("capture", "${input.count}"), Collections.<String>emptyList(), "text", arguments, null);
+        Map<String, ToolConfig> tools = Collections.singletonMap("capture", tool);
+        CapturingRunner runner = new CapturingRunner();
+        ToolInvoker invoker = new ToolInvoker(tempDir,
+                new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir, tools, null, null), runner);
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(invoker);
+        for (String mode : Arrays.asList("testcase", "debug", "load")) {
+            TestCase testCase = new TestCase(1, "g", "s", "TC1", Collections.<String>emptyList(),
+                    Collections.<String, Object>singletonMap("reference", "5000-ABC"),
+                    Collections.<String, att.core.StageCaseData>emptyMap(), null);
+            CaseRuntimeContext context = new CaseRuntimeContext(testCase, tempDir.resolve(mode), "RUN-1",
+                    tempDir, tempDir.resolve(mode + ".log"), mode);
+            context.beginStage(new att.core.StageCaseData("invoke", "T", Collections.<String, Object>emptyMap()), "T", tempDir);
+            engine.executeCall("#{capture(count=#{str.substr(${CASE.reference}, 0, 4)})}", context,
+                    new CaseExecutionLog(tempDir.resolve(mode + ".log")), "capture-" + mode);
+            assertEquals(Arrays.asList("capture", "5000"), runner.calls.get(runner.calls.size() - 1), mode);
+        }
+        assertEquals(3, runner.calls.size());
+    }
+
     private static final class CapturingInvoker extends ToolInvoker {
         private Map<String,Object> input;
         CapturingInvoker(Path root){super(root,new FrameworkConfig(null,null,null,"SIT",10000,null,null,null,null));}

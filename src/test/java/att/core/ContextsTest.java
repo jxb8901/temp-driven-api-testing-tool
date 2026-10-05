@@ -35,6 +35,19 @@ class ContextsTest {
     }
 
     @Test
+    void publishesPackageRootAsExecutionWideStringWithoutProjectMetadata() {
+        CaseRuntimeContext context = new CaseRuntimeContext(
+                new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
+                        Collections.<String, Object>emptyMap(), Collections.<String, StageCaseData>emptyMap(), null),
+                tempDir, "RUN", tempDir, tempDir.resolve("case.log"));
+        context.setProject(tempDir);
+
+        assertEquals(tempDir.toAbsolutePath().normalize().toString(), context.resolve("META.PACKAGE_ROOT"));
+        assertNull(context.resolve("META.PROJECT"));
+        assertNull(context.resolve("META.PACKAGE_ROOT.root"));
+    }
+
+    @Test
     void buildsUppercaseConceptTreeWithCamelCaseProperties() {
         Map<String, Object> data = new LinkedHashMap<String, Object>();
         data.put("amount", "100");

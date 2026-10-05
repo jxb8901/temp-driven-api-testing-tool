@@ -46,8 +46,9 @@ public final class Version {
     public static final String MQHELPER_SCHEMA_V1_1 = "att-mqhelper/v1.1";
     public static final String MQHELPER_SCHEMA = "att-mqhelper/v1.2";
     public static final String MQHELPER_SCHEMA_CURRENT = MQHELPER_SCHEMA;
-    public static final String PREVIOUS_DEBUG_SCHEMA = "att-debug/v1.0";
-    public static final String DEBUG_SCHEMA = "att-debug/v1.1";
+    public static final String OLDER_DEBUG_SCHEMA = "att-debug/v1.0";
+    public static final String PREVIOUS_DEBUG_SCHEMA = "att-debug/v1.1";
+    public static final String DEBUG_SCHEMA = "att-debug/v1.2";
     public static final String LOAD_SCHEMA_V1_0 = "att-load/v1.0";
     public static final String LOAD_SCHEMA_V1_1 = "att-load/v1.1";
     public static final String LOAD_SCHEMA_V1_2 = "att-load/v1.2";

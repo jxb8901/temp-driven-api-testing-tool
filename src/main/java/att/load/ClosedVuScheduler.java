@@ -95,6 +95,9 @@ public final class ClosedVuScheduler implements LoadScheduler {
         } else {
             workerCount = Math.min(workerCount, workers.getMaximumPoolSize());
         }
+        // cancel() may shut down and clear the scheduler field while this run
+        // is still unwinding. Retain the executor for safe queue telemetry.
+        final ThreadPoolExecutor runWorkers = workers;
         java.util.List<VuState> users = new java.util.ArrayList<VuState>(scenario.users());
         for (int user = 0; user < scenario.users(); user++) {
             String userId = "VU-" + (user + 1);
@@ -118,7 +121,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 }
                 long now = timing.now();
                 long elapsed = now - startedAt;
-                metrics.recordSchedulerWakeup(((ThreadPoolExecutor) workers).getQueue().size());
+                metrics.recordSchedulerWakeup(runWorkers.getQueue().size());
                 int active = activeUsers(elapsed);
                 for (int scanned = 0; scanned < users.size(); scanned++) {
                     if (cancelled.get() || elapsed >= LoadPhase.totalMs(scenario) || inFlight >= workerCount) break;

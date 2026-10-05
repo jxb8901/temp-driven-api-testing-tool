@@ -9,7 +9,7 @@ from documentation_contracts import (active_schemas, stale_claims, current_html,
                                      standalone_page_errors)
 from build_reference_manual import rebase_headings, assembly_heading_offset
 
-VERSION = "3.7.3"
+VERSION = "3.7.4"
 CATALOG = """schemaVersion: att-schema-catalog/v3.0
 schemas:
   att-load/v1.6: att-load-v1.6.schema.json
@@ -34,7 +34,7 @@ class DocumentationContractsTest(unittest.TestCase):
                 self.assertTrue(stale_claims(text, self.active, VERSION))
 
     def test_current_schemas_pass(self):
-        self.assertEqual([], stale_claims("ATT 3.7.3; att-load/v1.6; config v2.11; att-testdata/v1.0",
+        self.assertEqual([], stale_claims("ATT 3.7.4; att-load/v1.6; config v2.11; att-testdata/v1.0",
                                           self.active, VERSION))
 
     def test_testdata_mapping_example_is_bootstrap_safe_and_uses_selected_record_paths(self):
@@ -231,7 +231,7 @@ class DocumentationContractsTest(unittest.TestCase):
                           if line.startswith("## ")]
                 self.assertIn(expected, actual)
         for rel, expected in (
-                ("docs/reference/actions.md", "## Project-file expressions return a `String`"),
+                ("docs/reference/actions.md", "## File-content expressions return a `String`"),
                 ("docs/reference/reliability-execution-control.md", "## Tool timeout precedence")):
             with self.subTest(path=rel):
                 self.assertIn(expected, (root / rel).read_text(encoding="utf-8"))

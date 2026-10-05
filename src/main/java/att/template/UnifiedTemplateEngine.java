@@ -101,7 +101,7 @@ public class UnifiedTemplateEngine {
         if (this.toolInvoker != null) this.toolInvoker.setCommandBuiltIns(builtIns);
     }
 
-    /** Creates an expression engine that can resolve project-contained &{...} values. */
+    /** Creates an expression engine that can resolve package-contained &{...} values. */
     public static UnifiedTemplateEngine forProject(java.nio.file.Path projectRoot) {
         return forProject(projectRoot, new DefaultBuiltInProvider());
     }
@@ -583,6 +583,7 @@ public class UnifiedTemplateEngine {
                                        ToolCallParser.ParsedCall boundToolCall,
                                        CompiledExecutionPlan.TargetBinding targetBinding,
                                        CompiledExecutionPlan.TargetBinding toolTargetBinding) throws Exception {
+        input = ArgumentContracts.coerce(name, input);
         CaseRuntimeContext.MetadataScope scope = metadataScope(name, context);
         try { return executeResolvedCallScoped(name, input, context, log, invocationId, attempt, actionId,
                 timeoutMs, saveAs, saveFormat, overwrite, bypassCache, boundTool, boundHelper, boundToolCall,
@@ -810,6 +811,7 @@ public class UnifiedTemplateEngine {
                                          ToolCallParser.ParsedCall compiledTarget,
                                          CompiledExecutionPlan.TargetBinding targetBinding) throws Exception {
         Map<String, Object> input = toolInvoker.prepareInput(tool, supplied);
+        input = ArgumentContracts.coerce(tool.key(), input, tool);
         ToolCallParser.ParsedCall target = compiledTarget == null ? callParser.parseCompiled(tool.call()) : compiledTarget;
         boolean write = target.name().startsWith("db.") && target.name().endsWith(".update");
         boolean resourceCall = target.name().startsWith("mq.") || target.name().startsWith("http.") || target.name().startsWith("ssh.");
@@ -1195,7 +1197,7 @@ public class UnifiedTemplateEngine {
 
     private Object resolveDbValue(String expression, CaseRuntimeContext context, CaseExecutionLog log) throws Exception {
         // Use the normal typed expression resolver so quoted SQL, Context
-        // values, and project-file values are each evaluated once.
+        // values, and file-content values are each evaluated once.
         return resolveArgumentValue(expression, context, log);
     }
 
@@ -1332,7 +1334,7 @@ public class UnifiedTemplateEngine {
     private String evaluateFile(final String authoredPath, final CaseRuntimeContext context,
                                  final CaseExecutionLog log) throws Exception {
         if (fileExpressions == null)
-            throw new IllegalArgumentException("Project-file expressions require an ATT project-aware execution scope");
+            throw new IllegalArgumentException("File-content expressions require an ATT package-aware execution scope");
         return fileExpressions.evaluate(authoredPath, sourceDirectories.get(), new FileExpressionResolver.Runtime() {
             @Override public Object context(String path, boolean optional) {
                 return optional ? context.requireOptional(path) : context.require(path);

@@ -57,8 +57,10 @@ public final class LoadTargetValidator {
             }
             new PackageValidator(projectRoot, config).validateDebugTarget(target.template(), testCase, stage, target.flows(),
                     scenario.source(), "load", scenario.inputs(), scenario.vars(), scenario.testdataDescriptors());
-            target.withFileSnapshot(new att.template.FileExpressionResolver(projectRoot)
-                    .snapshotFor(target.template(), target.flows()));
+            att.template.FileExpressionResolver files = new att.template.FileExpressionResolver(projectRoot);
+            target.withFileSnapshot("flow".equals(target.type())
+                    ? files.snapshotForLoadFlow(target.template(), target.flows(), target.id())
+                    : files.snapshotFor(target.template(), target.flows()));
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             if (typed != null) throw typed;

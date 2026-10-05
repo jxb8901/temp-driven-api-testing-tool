@@ -332,7 +332,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
         if (args.containsKey("body")) {
             Object suppliedBody = args.get("body");
             boolean structured = suppliedBody instanceof Map || suppliedBody instanceof Iterable
-                    || suppliedBody != null && suppliedBody.getClass().isArray();
+                    || suppliedBody != null && suppliedBody.getClass().isArray() && !(suppliedBody instanceof byte[]);
             String requestFormat = null;
             if (args.containsKey("requestFormat")) {
                 if (args.get("requestFormat") == null)

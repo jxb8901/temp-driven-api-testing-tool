@@ -51,6 +51,18 @@ class FrameworkConfigLoaderTest {
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config, tempDir, "UAT"));
     }
 
+    @Test void loadsDeclaredArgumentTypesAndEnumValuesFromCurrentSchemas() throws Exception {
+        Path config = write("typed-tool.yaml", "schemaVersion: att-config/v2.11\n"
+                + "tools:\n  typed:\n    name: Typed\n    description: Typed inputs\n"
+                + "    command: [echo, '${input.mode}']\n    stdoutFormat: text\n"
+                + "    arguments:\n      mode: {name: Mode, description: Mode, required: true, type: enum, enumValues: [SAFE, FAST]}\n");
+
+        ToolArgumentConfig mode = new FrameworkConfigLoader().load(config, tempDir).tool("typed").arguments().get("mode");
+
+        assertEquals("enum", mode.type());
+        assertEquals(java.util.Arrays.asList("SAFE", "FAST"), mode.enumValues());
+    }
+
     @Test void ignoresDisabledToolArgumentDeclarationsInGlobalAndGroupTools() throws Exception {
         String activeArgument = "    arguments:\n"
                 + "      x-oldCustomerId: not-an-argument-descriptor\n"

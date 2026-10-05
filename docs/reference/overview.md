@@ -9,7 +9,7 @@ Testcase
   `-- ordered Stage
         `-- Template
               |-- Action
-              |     |-- project-file expression / assert / log / assign
+              |     |-- file-content expression / assert / log / assign
               |     |-- Tool
               |     `-- DB
               `-- Flow -> ordered Actions
@@ -24,7 +24,7 @@ Run, Debug and Load adapt different inputs into the same execution-neutral Conte
 | Mode | Primary input | Reuses |
 |---|---|---|
 | Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ/HTTP/SSH |
-| Debug | `att-debug/v1.1` sidecar or `--input` | one Template, Flow or Tool target |
+| Debug | `att-debug/v1.2` sidecar or `--input` | one Template, Flow or Tool target |
 | Load | `att-load/v1.6` scenario | one or more Template, Flow or Tool workloads repeatedly |
 
 Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.

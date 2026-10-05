@@ -53,9 +53,13 @@ final class CollectorExceptionEvidence {
     private CollectorExceptionEvidence() {}
 
     static ToolExecutionException project(ToolExecutionException failure) {
+        return project(failure, false);
+    }
+
+    static ToolExecutionException project(ToolExecutionException failure, boolean unsafeLocal) {
         Map<String, Object> source = failure.evidence();
         if (source == null) source = Collections.emptyMap();
-        Redaction redaction = new Redaction();
+        Redaction redaction = new Redaction(unsafeLocal);
         redaction.limited = Boolean.TRUE.equals(source.get("inputRedactionLimited"));
         redaction.captureTruncated = truncatedDetails(source);
         redaction.collect(source.get("input"));
@@ -71,7 +75,11 @@ final class CollectorExceptionEvidence {
 
     /** Project a returned failure before any collector publication or logging. */
     static ToolInvocationResult project(ToolInvocationResult failure) {
-        Redaction redaction = new Redaction();
+        return project(failure, false);
+    }
+
+    static ToolInvocationResult project(ToolInvocationResult failure, boolean unsafeLocal) {
+        Redaction redaction = new Redaction(unsafeLocal);
         Map<String, Object> invocation = failure.invocation();
         redaction.limited = Boolean.TRUE.equals(invocation.get("inputRedactionLimited"));
         redaction.captureTruncated = truncatedDetails(invocation);
@@ -213,7 +221,8 @@ final class CollectorExceptionEvidence {
         // Full-value substitution cannot prove that an upstream-truncated echo is safe.
         // Omit details when private inputs cannot be completely inspected within the budget.
         // Also avoid scanning/materializing oversized diagnostic strings.
-        if (redaction.limited || value.length() > TEXT_LIMIT || ((truncated || redaction.captureTruncated) && !redaction.tokens.isEmpty())) {
+        int textLimit = redaction.unsafeLocal ? 8192 : TEXT_LIMIT;
+        if (redaction.limited || value.length() > textLimit || ((truncated || redaction.captureTruncated) && !redaction.tokens.isEmpty())) {
             target.put("failureDetailsOmitted", Boolean.TRUE);
             if (value.length() > TEXT_LIMIT) {
                 target.put(field + "Truncated", Boolean.TRUE);
@@ -224,14 +233,14 @@ final class CollectorExceptionEvidence {
         String safe = value;
         for (String token : redaction.tokens) {
             safe = safe.replace(token, "[REDACTED_SECRET]");
-            if (safe.length() > TEXT_LIMIT) {
+            if (safe.length() > textLimit) {
                 target.put(field + "Truncated", Boolean.TRUE);
                 target.put("evidenceTruncated", Boolean.TRUE);
                 target.put("failureDetailsOmitted", Boolean.TRUE);
                 return OMITTED_TEXT;
             }
         }
-        return bound(safe);
+        return redaction.unsafeLocal ? safe : bound(safe);
     }
 
     private static boolean truncatedDetails(Map<?, ?> source) {
@@ -251,10 +260,15 @@ final class CollectorExceptionEvidence {
         int characters;
         boolean limited;
         boolean captureTruncated;
+        final boolean unsafeLocal;
+
+        Redaction(boolean unsafeLocal) { this.unsafeLocal = unsafeLocal; }
 
         void token(String value) {
             if (limited || value == null || value.isEmpty()) return;
-            if (value.length() < MIN_TOKEN_LENGTH || value.length() > TEXT_LIMIT || characters + value.length() > TOKEN_CHARACTER_LIMIT) {
+            int textLimit = unsafeLocal ? 65536 : TEXT_LIMIT;
+            int tokenLimit = unsafeLocal ? 1048576 : TOKEN_CHARACTER_LIMIT;
+            if (value.length() < MIN_TOKEN_LENGTH || value.length() > textLimit || characters + value.length() > tokenLimit) {
                 limited = true;
                 return;
             }
@@ -264,12 +278,12 @@ final class CollectorExceptionEvidence {
 
         void collect(Object value) {
             if (limited || value == null) return;
-            if (++nodes > INPUT_NODE_LIMIT) { limited = true; return; }
+            if (++nodes > (unsafeLocal ? 10000 : INPUT_NODE_LIMIT)) { limited = true; return; }
             if (value instanceof String) {
                 token((String) value);
             } else if (value instanceof byte[]) {
                 byte[] bytes = (byte[]) value;
-                if (bytes.length > BINARY_LIMIT) { limited = true; return; }
+                if (bytes.length > (unsafeLocal ? 65536 : BINARY_LIMIT)) { limited = true; return; }
                 token(new String(bytes, StandardCharsets.UTF_8));
                 token(Base64.getEncoder().encodeToString(bytes));
                 StringBuilder hex = new StringBuilder(bytes.length * 2);
@@ -279,7 +293,7 @@ final class CollectorExceptionEvidence {
                 token(Arrays.toString(bytes));
             } else if (value instanceof char[]) {
                 char[] chars = (char[]) value;
-                if (chars.length > TEXT_LIMIT) { limited = true; return; }
+                if (chars.length > (unsafeLocal ? 65536 : TEXT_LIMIT)) { limited = true; return; }
                 token(new String(chars));
             } else if (value instanceof Map && visited.add(value)) {
                 for (Object nested : ((Map<?, ?>) value).values()) {
@@ -293,7 +307,7 @@ final class CollectorExceptionEvidence {
                 }
             } else if (value.getClass().isArray() && visited.add(value)) {
                 int length = Array.getLength(value);
-                if (length > ARRAY_LIMIT) { limited = true; return; }
+                if (length > (unsafeLocal ? 4096 : ARRAY_LIMIT)) { limited = true; return; }
                 if (value.getClass().getComponentType().isPrimitive()) {
                     List<Object> elements = new ArrayList<Object>(length);
                     for (int index = 0; index < length; index++) elements.add(Array.get(value, index));

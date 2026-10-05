@@ -46,9 +46,9 @@ public final class FileExpressionResolver {
     }
 
     public FileExpressionResolver(Path projectRoot, FileExpressionSnapshot snapshot) {
-        if (projectRoot == null) throw new IllegalArgumentException("ATT project root is required for &{...}");
+        if (projectRoot == null) throw new IllegalArgumentException("ATT package root is required for &{...}");
         try { this.projectRoot = projectRoot.toRealPath(); }
-        catch (Exception error) { throw new IllegalArgumentException("ATT project root is unavailable: " + projectRoot, error); }
+        catch (Exception error) { throw new IllegalArgumentException("ATT package root is unavailable: " + projectRoot, error); }
         this.snapshot = snapshot;
     }
 
@@ -77,7 +77,7 @@ public final class FileExpressionResolver {
         if (snapshot != null) {
             CompiledFilePlan frozen = snapshot.lookup(path, base);
             if (frozen != null) { hits.incrementAndGet(); return frozen; }
-            throw new IllegalArgumentException("Project file was not captured in the active Load snapshot: " + path);
+            throw new IllegalArgumentException("File content was not captured in the active Load snapshot: " + path);
         }
 
         ResolvedFile resolved = resolveFile(path, base);
@@ -123,7 +123,7 @@ public final class FileExpressionResolver {
             int start = text.indexOf("&{", cursor);
             if (start < 0) break;
             int end = matchingBrace(text, start + 2);
-            if (end < 0) throw new ExpressionSyntaxException(start, text.length(), "'}' to close project-file expression", "end of text");
+            if (end < 0) throw new ExpressionSyntaxException(start, text.length(), "'}' to close file-content expression", "end of text");
             result.add(validateAuthoredPath(text.substring(start + 2, end)));
             cursor = end + 1;
         }
@@ -135,10 +135,21 @@ public final class FileExpressionResolver {
      * The returned snapshot is safe to share across concurrent Load iterations.
      */
     public FileExpressionSnapshot snapshotFor(StageTemplate template, FlowRegistry flows) throws Exception {
+        return captureSnapshot(template, flows, null);
+    }
+
+    /** Captures a synthetic direct-Flow Load wrapper and the actual Flow as distinct sources. */
+    public FileExpressionSnapshot snapshotForLoadFlow(StageTemplate wrapper, FlowRegistry flows, String flowId) throws Exception {
+        if (flowId == null || flowId.trim().isEmpty()) throw new IllegalArgumentException("Load Flow id is required");
+        return captureSnapshot(wrapper, flows, "synthetic-load-flow:" + flowId);
+    }
+
+    private FileExpressionSnapshot captureSnapshot(StageTemplate template, FlowRegistry flows,
+                                                    String rootSourceOverride) throws Exception {
         Map<ReferenceKey, CompiledFilePlan> captured = new LinkedHashMap<ReferenceKey, CompiledFilePlan>();
         Deque<Reference> pending = new ArrayDeque<Reference>();
-        Set<Path> visitedTemplates = new LinkedHashSet<Path>();
-        enqueueActions(template, pending, visitedTemplates, flows);
+        Set<String> visitedTemplates = new LinkedHashSet<String>();
+        enqueueActions(template, pending, visitedTemplates, flows, rootSourceOverride);
         Set<ReferenceKey> visited = new LinkedHashSet<ReferenceKey>();
         while (!pending.isEmpty()) {
             Reference reference = pending.removeFirst();
@@ -147,16 +158,15 @@ public final class FileExpressionResolver {
             if (!visited.add(key)) continue;
             CompiledFilePlan plan = compile(reference.authoredPath, sourceDirectory);
             captured.put(key, plan);
-            for (String nested : plan.filePaths()) {
+            for (String nested : plan.filePaths())
                 pending.addLast(new Reference(nested, plan.file().getParent()));
-            }
         }
         return new FileExpressionSnapshot(projectRoot, captured);
     }
 
     private void enqueueActions(StageTemplate template, Deque<Reference> pending,
-                                Set<Path> visitedTemplates, FlowRegistry flows) throws Exception {
-        if (template == null || !visitedTemplates.add(template.directory().toAbsolutePath().normalize())) return;
+                                Set<String> visitedTemplates, FlowRegistry flows, String sourceOverride) throws Exception {
+        if (template == null || !visitedTemplates.add(sourceOverride == null ? sourceIdentity(template) : sourceOverride)) return;
         for (TemplateAction action : template.actions()) {
             collectStrings(action.raw(), template.directory(), pending);
             if ("flow".equalsIgnoreCase(action.type()) && flows != null) {
@@ -164,10 +174,20 @@ public final class FileExpressionResolver {
                 if (flow != null) {
                     enqueueActions(new StageTemplate(flow.name(), flow.directory(), flow.actions(),
                             flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml")), pending,
-                            visitedTemplates, flows);
+                            visitedTemplates, flows, null);
                 }
             }
         }
+    }
+
+    private String sourceIdentity(StageTemplate template) throws Exception {
+        Path source = template.sourceFile();
+        if (source != null) {
+            Path canonical = source.toAbsolutePath().normalize();
+            if (Files.exists(canonical)) canonical = canonical.toRealPath();
+            return "descriptor:" + canonical;
+        }
+        return "synthetic-object:" + System.identityHashCode(template);
     }
 
     @SuppressWarnings("unchecked")
@@ -186,7 +206,7 @@ public final class FileExpressionResolver {
 
     private CompiledFilePlan compilePlan(String authoredPath, Path sourceDirectory, Path canonical, String source) {
         if (source.contains("&{"))
-            throw new IllegalArgumentException("Nested project-file expressions are not supported in v1: " + canonical);
+            throw new IllegalArgumentException("Nested file-content expressions are not supported in v1: " + canonical);
         List<Segment> segments = new ArrayList<Segment>();
         int cursor = 0;
         while (cursor < source.length()) {
@@ -233,11 +253,11 @@ public final class FileExpressionResolver {
                 : (Files.exists(rootCandidate, LinkOption.NOFOLLOW_LINKS) ? rootCandidate : sourceCandidate);
         if (!candidate.startsWith(root)) throw unsafe(authoredPath, candidate, root);
         if (!Files.exists(candidate, LinkOption.NOFOLLOW_LINKS))
-            throw new IllegalArgumentException("Project file does not exist: " + authoredPath + " (resolved=" + candidate + ")");
+            throw new IllegalArgumentException("File-content target does not exist: " + authoredPath + " (resolved=" + candidate + ")");
         Path canonical = candidate.toRealPath();
         if (!canonical.startsWith(root)) throw unsafe(authoredPath, canonical, root);
         if (!Files.isRegularFile(canonical, LinkOption.NOFOLLOW_LINKS))
-            throw new IllegalArgumentException("Project file is not a regular file: " + authoredPath + " (resolved=" + canonical + ")");
+            throw new IllegalArgumentException("File-content target is not a regular file: " + authoredPath + " (resolved=" + canonical + ")");
         return new ResolvedFile(canonical);
     }
 
@@ -251,23 +271,23 @@ public final class FileExpressionResolver {
 
     private String validateAuthoredPath(String authoredPath) {
         if (authoredPath == null || authoredPath.trim().isEmpty() || !authoredPath.equals(authoredPath.trim()))
-            throw new IllegalArgumentException("Project-file path must be non-blank and must not have surrounding whitespace: " + authoredPath);
+            throw new IllegalArgumentException("File locator must be non-blank and must not have surrounding whitespace: " + authoredPath);
         Path path;
         try { path = Paths.get(authoredPath.replace('/', java.io.File.separatorChar)); }
-        catch (RuntimeException error) { throw new IllegalArgumentException("Invalid project-file path: " + authoredPath, error); }
+        catch (RuntimeException error) { throw new IllegalArgumentException("Invalid file locator: " + authoredPath, error); }
         if (path.isAbsolute() || authoredPath.matches("^[A-Za-z]:.*") || authoredPath.startsWith("\\\\") || authoredPath.startsWith("\\"))
-            throw new IllegalArgumentException("Project-file path must be relative to the ATT project: " + authoredPath);
+            throw new IllegalArgumentException("File locator must be package-relative: " + authoredPath);
         for (char token : new char[]{'*', '?', '[', ']', '{', '}'}) {
             if (authoredPath.indexOf(token) >= 0)
                 throw new IllegalArgumentException("Glob syntax is not supported in &{...}: " + authoredPath);
         }
         if (authoredPath.contains("${") || authoredPath.contains("#{") || authoredPath.contains("&{"))
-            throw new IllegalArgumentException("Project-file locator must be static: " + authoredPath);
+            throw new IllegalArgumentException("File-content expression locator must be static: " + authoredPath);
         return authoredPath;
     }
 
     private IllegalArgumentException unsafe(String authored, Path resolved, Path root) {
-        return new IllegalArgumentException("Project file escapes the ATT project root: authoredPath=" + authored
+        return new IllegalArgumentException("File-content target escapes META.PACKAGE_ROOT: authoredPath=" + authored
                 + ", resolvedPath=" + resolved + ", projectRoot=" + root);
     }
 
@@ -280,7 +300,7 @@ public final class FileExpressionResolver {
                     .decode(ByteBuffer.wrap(bytes));
             return decoded.toString();
         } catch (CharacterCodingException error) {
-            throw new IllegalArgumentException("Project file is not valid UTF-8: " + file, error);
+            throw new IllegalArgumentException("File-content target is not valid UTF-8: " + file, error);
         }
     }
 
@@ -366,7 +386,7 @@ public final class FileExpressionResolver {
             StringBuilder result = new StringBuilder(source.length());
             for (Segment segment : segments) {
                 Object value = segment.evaluate(runtime);
-                if (value instanceof Map) throw new IllegalArgumentException("A typed Map cannot be interpolated into a project-file String");
+                if (value instanceof Map) throw new IllegalArgumentException("A typed Map cannot be interpolated into a file-content String");
                 result.append(value == null ? "" : String.valueOf(value));
             }
             return result.toString();
