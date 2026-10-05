@@ -84,6 +84,47 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         return function != null && BOOTSTRAP_SAFE_FUNCTIONS.contains(function);
     }
 
+    /** Returns a built-in's statically declared result type without evaluating arguments. */
+    public static ExpressionBlockEvaluator.ValueType inferredResultType(String name,
+            Map<String, ExpressionBlockEvaluator.ValueType> arguments) {
+        String function = name == null ? null : ALIASES.get(name.toLowerCase(Locale.ROOT));
+        if (function == null) return ExpressionBlockEvaluator.ValueType.UNKNOWN;
+        if ("nvl".equals(function)) return commonType(argumentType(arguments, "value", "arg0"),
+                argumentType(arguments, "defaultValue", "arg1"));
+        if ("iif".equals(function)) return commonType(argumentType(arguments, "trueValue", "arg1"),
+                argumentType(arguments, "falseValue", "arg2"));
+        if ("coalesce".equals(function) || "randomchoice".equals(function)) {
+            ExpressionBlockEvaluator.ValueType result = ExpressionBlockEvaluator.ValueType.UNKNOWN;
+            for (ExpressionBlockEvaluator.ValueType value : arguments.values()) {
+                if (value == ExpressionBlockEvaluator.ValueType.UNKNOWN) return ExpressionBlockEvaluator.ValueType.UNKNOWN;
+                if (result == ExpressionBlockEvaluator.ValueType.UNKNOWN) result = value;
+                else if (result != value) return ExpressionBlockEvaluator.ValueType.UNKNOWN;
+            }
+            return result;
+        }
+        if ("seq.next".equals(function) || "sysdate".equals(function) || "systimestamp".equals(function)
+                || "upper".equals(function) || "lower".equals(function) || "trim".equals(function)
+                || "ltrim".equals(function) || "rtrim".equals(function) || "string".equals(function)
+                || "number".equals(function) || "boolean".equals(function) || "length".equals(function)
+                || "concat".equals(function) || "nchar".equals(function) || "substr".equals(function)
+                || "indexof".equals(function) || "contains".equals(function) || "startswith".equals(function)
+                || "endswith".equals(function) || "replace".equals(function) || "padleft".equals(function)
+                || "padright".equals(function) || "formatdate".equals(function) || "dateadd".equals(function)
+                || "format".equals(function)) return ExpressionBlockEvaluator.ValueType.STRING;
+        return ExpressionBlockEvaluator.ValueType.UNKNOWN;
+    }
+
+    private static ExpressionBlockEvaluator.ValueType argumentType(
+            Map<String, ExpressionBlockEvaluator.ValueType> arguments, String named, String positional) {
+        ExpressionBlockEvaluator.ValueType value = arguments.get(named);
+        return value == null ? arguments.get(positional) : value;
+    }
+
+    private static ExpressionBlockEvaluator.ValueType commonType(ExpressionBlockEvaluator.ValueType left,
+            ExpressionBlockEvaluator.ValueType right) {
+        return left != null && left == right ? left : ExpressionBlockEvaluator.ValueType.UNKNOWN;
+    }
+
     @Override public Object invoke(String name, Map<String, Object> input) {
         String function = resolve(name);
 
@@ -196,7 +237,7 @@ public final class DefaultBuiltInProvider implements BuiltInProvider {
         if (normalized.startsWith("file.") || java.util.Arrays.asList("fileexists", "directoryexists", "filesize",
                 "makedirectories", "copyfile", "movefile", "deletefile").contains(normalized))
             throw new IllegalArgumentException("Removed local file built-in " + name
-                    + "; use &{...} for project content or ssh.<helper>.stat/mkdirs/move/delete/upload/download for remote files; use execute for explicit remote copy.");
+                    + "; use &{...} for package content or ssh.<helper>.stat/mkdirs/move/delete/upload/download for remote files; use execute for explicit remote copy.");
     }
 
     private static Map<String, String> aliases() {

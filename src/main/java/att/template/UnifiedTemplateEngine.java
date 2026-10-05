@@ -101,7 +101,7 @@ public class UnifiedTemplateEngine {
         if (this.toolInvoker != null) this.toolInvoker.setCommandBuiltIns(builtIns);
     }
 
-    /** Creates an expression engine that can resolve project-contained &{...} values. */
+    /** Creates an expression engine that can resolve package-contained &{...} values. */
     public static UnifiedTemplateEngine forProject(java.nio.file.Path projectRoot) {
         return forProject(projectRoot, new DefaultBuiltInProvider());
     }

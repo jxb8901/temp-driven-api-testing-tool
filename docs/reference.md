@@ -437,7 +437,7 @@ ATT keeps the logical operation result separate from human or wire representatio
 
 DB results are already typed values. Tool, Action, Template, Flow and expression results remain typed while they move through ATT.
 
-DB query, scalar, and update operations use the first-class DBHelper call forms `db.<helper>.query(...)`, `db.<helper>.scalar(...)`, and `db.<helper>.update(...)` inside a normal `type: tool` Action. A DB call accepts one String `sql` argument plus either positional `params` or named `parameters`; `sql=&{project-relative-file.sql}` supplies package SQL content. The historical `type: db` Action is retained only by archived schema versions.
+DB query, scalar, and update operations use the first-class DBHelper call forms `db.<helper>.query(...)`, `db.<helper>.scalar(...)`, and `db.<helper>.update(...)` inside a normal `type: tool` Action. A DB call accepts one String `sql` argument plus either positional `params` or named `parameters`; `sql=&{package-relative-file.sql}` supplies package SQL content. The historical `type: db` Action is retained only by archived schema versions.
 
 ### File-content expressions return a `String`
 
@@ -911,7 +911,7 @@ Example: `#{http.payment.post(path='/v1/payments', query={dryRun: true}, headers
 
 This page defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](reference/resources/tools.md), [Load execIdFormat and vars](reference/execution-modes/load.md), [Debug vars](reference/execution-modes/debug.md), and [report filenames](reference/configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](reference/validation-diagnostics.md).
 
-Removed APIs: `dbText`/`misc.dbText`, `prettyPrint`/`misc.prettyPrint`/`format.pretty`, all local `file.*` built-ins and their legacy aliases. Keep DB results typed and migrate display calls to Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` with `format: sqlplus`; use `format: json` or `yaml` for Maps/Lists. Read project content with `&{...}` and pass its String to HTTP body, MQ payload, or SSH upload payload. SSHHelper upload accepts content only; native SSH download was removed. ATT local output remains framework-owned. Removed calls fail with migration guidance.
+Removed APIs: `dbText`/`misc.dbText`, `prettyPrint`/`misc.prettyPrint`/`format.pretty`, all local `file.*` built-ins and their legacy aliases. Keep DB results typed and migrate display calls to Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` with `format: sqlplus`; use `format: json` or `yaml` for Maps/Lists. Read package content with `&{...}` and pass its String to HTTP body, MQ payload, or SSH upload payload. SSHHelper upload accepts content only; native SSH download was removed. ATT local output remains framework-owned. Removed calls fail with migration guidance.
 
 ### Retry-condition lifecycle
 
@@ -1025,7 +1025,7 @@ Debug does not create or update normal `latest-run.yaml`. Exit codes are `0` PAS
 
 When a debug target cannot be resolved, check the target kind and identifier first, then use `--input <path>` to remove sidecar discovery from the diagnosis. Template and Flow debug discover `<target directory>/debug.yaml`; grouped Tool debug discovers `config/tools/<group>.debug.yaml`. The selected target's dependency closure is validated, so an unrelated workbook or Case file is not a prerequisite.
 
-Use the same `&{project-relative-file}` expression in Debug, Run and Load, then pass its UTF-8 String as HTTP `body`, MQ `payload`, or SSH upload `payload`. These Resource Helpers do not resolve separate local paths. Validation resolves package files before external I/O; obsolete HTTP/MQ `file`, SSH upload `localPath`, and SSH `download` calls are rejected.
+Use the same `&{package-relative-file}` expression in Debug, Run and Load, then pass its UTF-8 String as HTTP `body`, MQ `payload`, or SSH upload `payload`. These Resource Helpers do not resolve separate local paths. Validation resolves package files before external I/O; obsolete HTTP/MQ `file`, SSH upload `localPath`, and SSH `download` calls are rejected.
 
 Use the output directory to separate diagnosis stages:
 
@@ -2727,6 +2727,8 @@ Generated envelopes reject additional top-level fields according to their schema
 
 Case log structured entries use YAML. The human log records each normal Action and each Tool/DB invocation once; duplicated attempt fields and persisted TOOL/DB subtrees are omitted from this projection. Complete final Stage/Template/Action/Tool/DB state remains in `case.yaml`. `caseLog.yamlAnchors: false` fully expands shared Map/List objects; `true` permits YAML anchor markers, which carry no ATT identifier semantics.
 
+Multiline String values nested in structured entries are shown as readable YAML block content. ATT preserves their LF, CRLF or lone-CR separators and does not parse, trim or reformat the business text. Raw process and user content also keeps its original line endings. The live console mirror uses the same rendered log text as the persisted `case.log`.
+
 ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
 
 ## Validation and troubleshooting
@@ -2911,7 +2913,7 @@ Deterministic legacy aliases may remain readable with migration warnings. Aliase
 
 ### File arguments and case-log paths
 
-HTTPHelper calls no longer accept `file`; pass `&{project-relative-file}` directly as `body`. MQHelper `send` and `request` no longer accept `file`; pass the expression as `payload`. SSHHelper `upload` now requires content in `payload` and rejects `localPath`; pass `&{...}` directly. SSHHelper no longer supports `download`, because it requires a local destination path. Use a deliberately configured command-backed Tool for workflows that must retrieve files from a host. These changes remove native arbitrary-binary local-file input from these Resource APIs; `&{...}` supplies UTF-8 text.
+HTTPHelper calls no longer accept `file`; pass `&{package-relative-file}` directly as `body`. MQHelper `send` and `request` no longer accept `file`; pass the expression as `payload`. SSHHelper `upload` now requires content in `payload` and rejects `localPath`; pass `&{...}` directly. SSHHelper no longer supports `download`, because it requires a local destination path. Use a deliberately configured command-backed Tool for workflows that must retrieve files from a host. These changes remove native arbitrary-binary local-file input from these Resource APIs; `&{...}` supplies UTF-8 text.
 
 Case logs, CLI output, and emitted case evidence display paths under the canonical package root as `$ATT_HOME` or `$ATT_HOME/<relative-path>`, with `/` separators. `$ATT_HOME` is a presentation token, not an environment variable, Context root, or file-expression locator. Runtime resolution and filesystem access continue to use canonical absolute Paths. Absolute paths outside the package root use a bounded `$EXTERNAL/<basename>` presentation when logged as Path values or embedded in diagnostic messages. Explicit remote-path fields and URLs retain their values.
 
@@ -2928,13 +2930,13 @@ ATT 3.6.2 separates typed operation results, external parsing, file-content Stri
 | Previous field/model | 3.6.2 migration |
 |---|---|
 | `att-template/v3.4` or `att-flow/v3.4` with `type: render` | Change the descriptor to the active v3.5 schema and replace each Render Action with an Assign that uses a file-content expression. Historical v3.4 descriptors remain loadable only through the historical schema path. |
-| `type: render` / `payload: path` | Use `type: assign`, a variable `name`, and `expression: "&{project-relative-file}"`; pass `${EXEC.VARS.<name>}` to the consumer. |
+| `type: render` / `payload: path` | Use `type: assign`, a variable `name`, and `expression: "&{package-relative-file}"`; pass `${EXEC.VARS.<name>}` to the consumer. |
 | Command Tool result.format | Move the parsing choice to the Tool descriptor's stdoutFormat. |
 | Common Action result.format/path/overwrite | Remove it. output.result is the native logical typed value; no implicit file replacement exists. |
 | Render result.format/path or renderAs/saveAs | Remove the old format/persistence fields. The file-content expression returns the exact UTF-8 String and creates no result file or targetFiles. |
 | Render file handoff through targetFiles | Pass the file-content String directly as HTTP body, MQ payload, or SSH upload payload. |
 | requestFormat on a file-content String | Remove it. requestFormat is only for abstract Map/List values; String + requestFormat fails. |
-| Dynamic or unsafe file locator | Replace it with one static project-relative file. Absolute paths, globs, dynamic locators, missing files, directories, non-UTF-8 bytes and symlink escapes are rejected. |
+| Dynamic or unsafe file locator | Replace it with one static package-relative file. Absolute paths, globs, dynamic locators, missing files, directories, non-UTF-8 bytes and symlink escapes are rejected. |
 | Log file | Pass the value directly to Log.value. |
 | Log fields | Put the typed map/list in Log.value and select Log.format. |
 | HTTP/MQ common result formatting | Use responseFormat for ingress parsing; optional evidence.output.format is human presentation only. |
@@ -2976,8 +2978,8 @@ ATT 3.6.2 uses `att-template/v3.6` and `att-flow/v3.6` as the active schemas. Th
 |---|---|
 | `att-template/v3.3` or `att-flow/v3.3` | Follow the historical release migration to v3.4, then change to v3.6 and migrate the Render/DB Actions. |
 | Historical `type: db` with `query` or `update` | Use an ordinary `type: tool` Action with `#{db.<id>.query(...)}`, `scalar(...)`, or `update(...)`; query/scalar may retry, update must not use automatic retry. |
-| Historical `sqlFile` | Use the single String argument `sql=&{project-relative-sql-file}`. `params` and `parameters` remain mutually exclusive. |
-| Historical `type: render` | Replace it with an Assign whose expression is `"&{project-relative-file}"`; use `${EXEC.VARS.<name>}` in later Actions. |
+| Historical `sqlFile` | Use the single String argument `sql=&{package-relative-sql-file}`. `params` and `parameters` remain mutually exclusive. |
+| Historical `type: render` | Replace it with an Assign whose expression is `"&{package-relative-file}"`; use `${EXEC.VARS.<name>}` in later Actions. |
 | Command Tool result.format | Tool descriptor stdoutFormat |
 | Render result.format/path/overwrite or renderAs/saveAs | Remove the old persistence fields. The file-content expression returns the exact UTF-8 String and creates no implicit result file. |
 | Log file | Pass a typed value to Log.value |

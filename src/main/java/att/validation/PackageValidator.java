@@ -638,6 +638,7 @@ public final class PackageValidator {
     /** Constant-folds only pure built-ins and static package files for shared target contracts. */
     private void validateStaticArgumentContracts(ToolCallParser.ParsedCall call, ToolConfig tool) {
         Map<String, Object> resolved = new LinkedHashMap<String, Object>();
+        Map<String, att.template.ExpressionBlockEvaluator.ValueType> inferred = new LinkedHashMap<String, att.template.ExpressionBlockEvaluator.ValueType>();
         for (ToolCallParser.Argument argument : call.arguments()) {
             String key = argument.key();
             if (argument.positional()) {
@@ -650,7 +651,10 @@ public final class PackageValidator {
                 Object value = expression.evaluate(staticResolver());
                 resolved.put(key, value);
             } catch (NotStaticallyEvaluable deferred) {
-                // Validate every other argument we can resolve without side effects.
+                // Retain safe result-type information while deferring the dynamic value itself.
+                att.template.ExpressionBlockEvaluator.CompiledExpression expression = argument.compiled() == null
+                        ? new att.template.ExpressionBlockEvaluator().compile(argument.expression()) : argument.compiled();
+                inferred.put(key, expression.inferredType());
             }
             catch (Exception error) {
                 throw new IllegalArgumentException("Unable to statically validate argument '" + key
@@ -658,6 +662,7 @@ public final class PackageValidator {
             }
         }
         att.template.ArgumentContracts.coerce(call.name(), resolved, tool);
+        att.template.ArgumentContracts.validateInferredTypes(call.name(), inferred, tool);
     }
 
     private att.template.ExpressionBlockEvaluator.Resolver staticResolver() {
@@ -995,7 +1000,7 @@ public final class PackageValidator {
                 throw new IllegalArgumentException("Action type 'db' is historical-only; use type: tool with a db.<helper>.query|scalar|update(...) call under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
             }
             if ("render".equals(type) && att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())) {
-                throw new IllegalArgumentException("Render actions are historical-only; use an Assign expression with &{project-relative-file} under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
+                throw new IllegalArgumentException("Render actions are historical-only; use an Assign expression with &{package-relative-file} under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
             }
             if (!"tool".equals(type) && action.raw().containsKey("evidence")) {
                 throw new IllegalArgumentException("Field 'evidence' is only supported for tool actions: " + action.id());
@@ -2182,7 +2187,7 @@ public final class PackageValidator {
             }
         }
         if (("send".equals(operation) || "request".equals(operation)) && !supplied.contains("payload"))
-            throw new IllegalArgumentException("MQ send/request requires payload; resolve project files with &{...}");
+            throw new IllegalArgumentException("MQ send/request requires payload; resolve package files with &{...}");
         if ("send".equals(operation) && !supplied.contains("queue")) {
             boolean hasDefault = selected != null ? !selected.requestQueue().isEmpty() : allInstancesHaveRequestQueue(helper, true);
             if (!hasDefault) throw new IllegalArgumentException("Missing effective send queue: provide queue or configure message.requestQueue on every selectable instance");
@@ -2267,7 +2272,7 @@ public final class PackageValidator {
         }
         for (String key : required) if (!supplied.contains(key)) throw new IllegalArgumentException("Missing required SSH argument '" + key + "' for " + parsed.name());
         if ("upload".equals(operation) && !supplied.contains("payload"))
-            throw new IllegalArgumentException("SSH upload requires payload content; resolve project files with &{...}");
+            throw new IllegalArgumentException("SSH upload requires payload content; resolve package files with &{...}");
     }
 
     private boolean allInstancesHaveRequestQueue(att.config.MqHelperConfig helper, boolean request) {
@@ -2476,7 +2481,7 @@ public final class PackageValidator {
         }
         if (arguments.containsKey("sqlFile")) {
             if (!Boolean.TRUE.equals(legacyDbSqlFileAllowed.get())) {
-                throw new IllegalArgumentException(parsed.name() + ".sqlFile is historical-only; use sql=&{project-relative-sql-file}");
+                throw new IllegalArgumentException(parsed.name() + ".sqlFile is historical-only; use sql=&{package-relative-sql-file}");
             }
             String expression = arguments.get("sqlFile").expression().trim();
             if (expression.contains("${") || expression.contains("#{")) {

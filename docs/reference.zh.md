@@ -437,7 +437,7 @@ ATT 將 operation 的邏輯結果與人類可讀或 wire representation 分開�
 
 DB result 本身已是型別化值。Tool、Action、Template、Flow 和 expression results 在 ATT 中傳遞時均保留型別。
 
-DB query、scalar、update operation 在普通 `type: tool` Action 內使用 `db.<helper>.query(...)`、`db.<helper>.scalar(...)`、`db.<helper>.update(...)`。DB call 接受一個 String `sql`，以及 `params` 或 `parameters` 其中一種；`sql=&{project-relative-file.sql}` 可提供 package SQL 內容。歷史 `type: db` Action 只由 archived schema 保留。
+DB query、scalar、update operation 在普通 `type: tool` Action 內使用 `db.<helper>.query(...)`、`db.<helper>.scalar(...)`、`db.<helper>.update(...)`。DB call 接受一個 String `sql`，以及 `params` 或 `parameters` 其中一種；`sql=&{package-relative-file.sql}` 可提供 package SQL 內容。歷史 `type: db` Action 只由 archived schema 保留。
 
 ### File-content expression 回傳 string
 
@@ -893,7 +893,7 @@ SSH operation 只接受具名參數；path 是 remote path，upload 接受內容
 
 Expression language 由本頁定義；可用 roots 與求值時機由欄位的 semantic owner 定義：[Tool command/call](reference.zh/resources/tools.md)、[Load execIdFormat 與 vars](reference.zh/execution-modes/load.md)、[Debug vars](reference.zh/execution-modes/debug.md)、[report filename](reference.zh/configuration.md)。`${path?}` 只允許缺少的 map/list path 回傳 null；語法錯誤與非法 scope 仍會失敗。Expression syntax 或缺少的必需 Context path 會提供結構化 diagnostic；見[Validation](reference.zh/validation-diagnostics.md)。
 
-已移除 presentation-only `dbText`／`misc.dbText`、`prettyPrint`／`misc.prettyPrint`／`format.pretty` 和所有 local `file.*`／legacy file alias。DB result 保持 typed；顯示時改用 Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` 加 `format: sqlplus`，Map/List 則使用 `format: json` 或 `yaml`。Project content 使用 `&{...}`，並將 String 傳入 HTTP body、MQ payload 或 SSH upload payload。SSHHelper upload 只接受 content；native SSH download 已移除。ATT local output 由 framework 管理。移除的 API 會提供 migration diagnostic。
+已移除 presentation-only `dbText`／`misc.dbText`、`prettyPrint`／`misc.prettyPrint`／`format.pretty` 和所有 local `file.*`／legacy file alias。DB result 保持 typed；顯示時改用 Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` 加 `format: sqlplus`，Map/List 則使用 `format: json` 或 `yaml`。Package content 使用 `&{...}`，並將 String 傳入 HTTP body、MQ payload 或 SSH upload payload。SSHHelper upload 只接受 content；native SSH download 已移除。ATT local output 由 framework 管理。移除的 API 會提供 migration diagnostic。
 
 ### Retry condition 的生命週期
 
@@ -1007,7 +1007,7 @@ Debug 不建立或更新普通 `latest-run.yaml`。Exit code：`0` PASS、`1` FA
 
 當 debug target 無法解析時，先確認 target kind 及 identifier，再用 `--input <path>` 排除 sidecar discovery 因素。Template/Flow debug 會尋找 `<target directory>/debug.yaml`；grouped Tool debug 會尋找 `config/tools/<group>.debug.yaml`。只會驗證 selected target 的 dependency closure，因此不需要無關 workbook 或 Case 檔案。
 
-Debug、Run、Load 都使用相同的 `&{project-relative-file}` expression，再將 UTF-8 String 傳入 HTTP `body`、MQ `payload` 或 SSH upload `payload`。這些 Resource Helper 不會解析各自的 local path。Validation 會在外部 I/O 前解析 package file；舊 HTTP/MQ `file`、SSH upload `localPath` 及 SSH `download` call 均會被拒絕。
+Debug、Run、Load 都使用相同的 `&{package-relative-file}` expression，再將 UTF-8 String 傳入 HTTP `body`、MQ `payload` 或 SSH upload `payload`。這些 Resource Helper 不會解析各自的 local path。Validation 會在外部 I/O 前解析 package file；舊 HTTP/MQ `file`、SSH upload `localPath` 及 SSH `download` call 均會被拒絕。
 
 按 output directory 分辨排錯階段：
 
@@ -2651,6 +2651,8 @@ DIAG 是 evidence-only。Expression 不可讀取 DIAG、EXEC.MODE 或任意 sche
 
 Case log structured entries use YAML. The human log records each normal Action and each Tool/DB invocation once; duplicated attempt fields and persisted TOOL/DB subtrees are omitted from this projection. Complete final Stage/Template/Action/Tool/DB state remains in `case.yaml`. `caseLog.yamlAnchors: false` fully expands shared Map/List objects; `true` permits YAML anchor markers, which carry no ATT identifier semantics.
 
+巢狀 structured entry 中的 multiline String 會以易讀的 YAML block content 顯示。ATT 保留 LF、CRLF 或單獨 CR 分隔符，不會解析、修剪或重排 business text。Raw process 與 user content 也保留原始換行。Live console mirror 與已寫入的 `case.log` 使用相同的 render text。
+
 ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
 
 ## Validation 與 troubleshooting
@@ -2835,7 +2837,7 @@ Deterministic legacy alias 在可一對一映射時可以保留並產生 migrati
 
 ### File arguments 與 case log paths
 
-HTTPHelper call 不再接受 `file`；請直接將 `&{project-relative-file}` 傳入 `body`。MQHelper `send` 和 `request` 不再接受 `file`；請將 expression 傳入 `payload`。SSHHelper `upload` 現在要求 `payload` content，並拒絕 `localPath`；請直接傳入 `&{...}`。SSHHelper 不再支援 `download`，因為它需要 local destination path。若工作必須從主機取回檔案，請明確配置 command-backed Tool。這些變更移除 Resource API 原生的任意 binary local-file input；`&{...}` 提供 UTF-8 text。
+HTTPHelper call 不再接受 `file`；請直接將 `&{package-relative-file}` 傳入 `body`。MQHelper `send` 和 `request` 不再接受 `file`；請將 expression 傳入 `payload`。SSHHelper `upload` 現在要求 `payload` content，並拒絕 `localPath`；請直接傳入 `&{...}`。SSHHelper 不再支援 `download`，因為它需要 local destination path。若工作必須從主機取回檔案，請明確配置 command-backed Tool。這些變更移除 Resource API 原生的任意 binary local-file input；`&{...}` 提供 UTF-8 text。
 
 Case log、CLI output 和輸出的 case evidence 會將 canonical package root 下的 path 顯示為 `$ATT_HOME` 或 `$ATT_HOME/<relative-path>`，並統一使用 `/`。`$ATT_HOME` 只是在 presentation 中使用的 token，不是 environment variable、Context root 或 file-expression locator。Runtime resolution 和 filesystem access 仍使用 canonical absolute Path。package root 以外的 absolute path，不論是 Path value 或診斷訊息內的路徑，都會以受限的 `$EXTERNAL/<basename>` 顯示。明確的 remote-path 欄位及 URL 會保留原值。
 
@@ -2850,13 +2852,13 @@ ATT 3.6.2 將型別化 operation result、外部 parsing、file-content String�
 | 舊欄位／模型 | 3.6.2 遷移方式 |
 |---|---|
 | `att-template/v3.4` 或 `att-flow/v3.4` 的 `type: render` | 將 descriptor 改為 active v3.5 schema，並以使用 file-content expression 的 Assign 取代每個 Render Action。Historical v3.4 descriptor 只可經由 historical schema path 載入。 |
-| `type: render` / `payload: path` | 使用 `type: assign`、variable `name` 及 `expression: "&{project-relative-file}"`；將 `${EXEC.VARS.<name>}` 傳給 consumer。 |
+| `type: render` / `payload: path` | 使用 `type: assign`、variable `name` 及 `expression: "&{package-relative-file}"`；將 `${EXEC.VARS.<name>}` 傳給 consumer。 |
 | Command Tool result.format | 將 parsing 設定移至 Tool descriptor 的 stdoutFormat。 |
 | 共用 Action result.format/path/overwrite | 移除。output.result 是 native logical typed value；沒有隱式檔案替代方案。 |
 | Render result.format/path 或 renderAs/saveAs | 移除舊欄位。File-content expression 回傳 exact UTF-8 String，不建立結果檔或 targetFiles。 |
 | 透過 targetFiles 傳遞 Render 檔案 | 直接將 file-content String 傳入 HTTP body、MQ payload 或 SSH upload payload。 |
 | 在 file-content String 使用 requestFormat | 移除。requestFormat 僅供抽象 Map/List；String + requestFormat 會失敗。 |
-| Dynamic 或不安全 file locator | 改為一個 static project-relative file。Absolute path、glob、dynamic locator、missing file、directory、非 UTF-8 bytes 及 symlink escape 都會被拒絕。 |
+| Dynamic 或不安全 file locator | 改為一個 static package-relative file。Absolute path、glob、dynamic locator、missing file、directory、非 UTF-8 bytes 及 symlink escape 都會被拒絕。 |
 | Log file | 直接將 value 傳入 Log.value。 |
 | Log fields | 將 typed map/list 放在 Log.value，並選擇 Log.format。 |
 | HTTP/MQ 共用 result 格式設定 | 使用 responseFormat 做 ingress parsing；可選 evidence.output.format 只控制人類可讀表示。 |
@@ -2902,8 +2904,8 @@ ATT 3.6.2 使用 `att-template/v3.6` 與 `att-flow/v3.6` 作為 active schemas�
 |---|---|
 | `att-template/v3.3` 或 `att-flow/v3.3` | 先按 historical release migration 遷移至 v3.4，再改為 v3.6 並遷移 Render/DB Action。 |
 | Historical `type: db` 及 `query`/`update` | 改為普通 `type: tool` Action，使用 `#{db.<id>.query(...)}`、`scalar(...)` 或 `update(...)`；query/scalar 可 retry，update 不可 automatic retry。 |
-| Historical `sqlFile` | 改用單一 String argument `sql=&{project-relative-sql-file}`；`params` 與 `parameters` 互斥。 |
-| Historical `type: render` | 改為使用 `"&{project-relative-file}"` expression 的 Assign；後續 Action 使用 `${EXEC.VARS.<name>}`。 |
+| Historical `sqlFile` | 改用單一 String argument `sql=&{package-relative-sql-file}`；`params` 與 `parameters` 互斥。 |
+| Historical `type: render` | 改為使用 `"&{package-relative-file}"` expression 的 Assign；後續 Action 使用 `${EXEC.VARS.<name>}`。 |
 | Command Tool result.format | Tool descriptor stdoutFormat |
 | Render result.format/path/overwrite 或 renderAs/saveAs | 移除舊 persistence 欄位。File-content expression 回傳 exact UTF-8 String，不會隱式建立結果檔。 |
 | Log file | 將 typed value 直接傳入 Log.value |

@@ -12,6 +12,9 @@ import java.util.Map;
 
 /** Typed parser/evaluator for V3.2 #{...} expression blocks. */
 public final class ExpressionBlockEvaluator {
+    /** Static result type when an expression's runtime value is not available to validation. */
+    public enum ValueType { STRING, NUMBER, BOOLEAN, MAP, LIST, BYTES, UNKNOWN }
+
     public interface Resolver {
         Object context(String path) throws Exception;
         Object call(String name, Map<String, Object> arguments) throws Exception;
@@ -96,6 +99,7 @@ public final class ExpressionBlockEvaluator {
         private CompiledExpression(Node root) { this.root = root; }
 
         public Object evaluate(Resolver resolver) throws Exception { return root.evaluate(resolver); }
+        public ValueType inferredType() { return root.inferredType(); }
 
         public List<ToolCallParser.ParsedCall> calls() {
             List<ToolCallParser.ParsedCall> result = new ArrayList<ToolCallParser.ParsedCall>();
@@ -121,6 +125,7 @@ public final class ExpressionBlockEvaluator {
         void collectCalls(List<ToolCallParser.ParsedCall> calls);
         void collectContextPaths(List<String> paths);
         default void collectFilePaths(List<String> paths) { }
+        default ValueType inferredType() { return ValueType.UNKNOWN; }
         String source();
     }
 
@@ -138,6 +143,7 @@ public final class ExpressionBlockEvaluator {
         @Override public Object evaluate(Resolver resolver) throws Exception {
             return interpolate && value instanceof String ? resolver.interpolate((String) value) : value;
         }
+        @Override public ValueType inferredType() { return typeOf(value); }
     }
 
     private static final class ContextNode extends BaseNode {
@@ -151,6 +157,7 @@ public final class ExpressionBlockEvaluator {
         private final String path;
         FileNode(String source, String path) { super(source); this.path = path; }
         @Override public Object evaluate(Resolver resolver) throws Exception { return resolver.file(path); }
+        @Override public ValueType inferredType() { return ValueType.STRING; }
         @Override public void collectFilePaths(List<String> paths) { paths.add(path); }
     }
 
@@ -163,6 +170,7 @@ public final class ExpressionBlockEvaluator {
             }
             return value;
         }
+        @Override public ValueType inferredType() { return ValueType.STRING; }
     }
 
     private static final class ListNode extends BaseNode {
@@ -173,6 +181,7 @@ public final class ExpressionBlockEvaluator {
             for (Node value : values) result.add(value.evaluate(resolver));
             return result;
         }
+        @Override public ValueType inferredType() { return ValueType.LIST; }
         @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) { for (Node value : values) value.collectCalls(calls); }
         @Override public void collectContextPaths(List<String> paths) { for (Node value : values) value.collectContextPaths(paths); }
         @Override public void collectFilePaths(List<String> paths) { for (Node value : values) value.collectFilePaths(paths); }
@@ -186,6 +195,7 @@ public final class ExpressionBlockEvaluator {
             for (Map.Entry<String, Node> entry : values.entrySet()) result.put(entry.getKey(), entry.getValue().evaluate(resolver));
             return result;
         }
+        @Override public ValueType inferredType() { return ValueType.MAP; }
         @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) {
             for (Node value : values.values()) value.collectCalls(calls);
         }
@@ -206,6 +216,7 @@ public final class ExpressionBlockEvaluator {
             BigDecimal number = number(resolved, "Unary " + operator);
             return "+".equals(operator) ? number : number.negate();
         }
+        @Override public ValueType inferredType() { return "not".equals(operator) ? ValueType.BOOLEAN : ValueType.NUMBER; }
         @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) { value.collectCalls(calls); }
         @Override public void collectContextPaths(List<String> paths) { value.collectContextPaths(paths); }
         @Override public void collectFilePaths(List<String> paths) { value.collectFilePaths(paths); }
@@ -240,6 +251,10 @@ public final class ExpressionBlockEvaluator {
             if ("<=".equals(operator)) return Boolean.valueOf(comparison <= 0);
             throw new IllegalArgumentException("Unsupported expression operator: " + operator);
         }
+        @Override public ValueType inferredType() {
+            return java.util.Arrays.asList("and", "or", "in", "like", "==", "!=", ">", ">=", "<", "<=").contains(operator)
+                    ? ValueType.BOOLEAN : ValueType.NUMBER;
+        }
         @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) { left.collectCalls(calls); right.collectCalls(calls); }
         @Override public void collectContextPaths(List<String> paths) { left.collectContextPaths(paths); right.collectContextPaths(paths); }
         @Override public void collectFilePaths(List<String> paths) { left.collectFilePaths(paths); right.collectFilePaths(paths); }
@@ -249,6 +264,7 @@ public final class ExpressionBlockEvaluator {
         private final Node value; private final boolean negate;
         IsNullNode(String source, Node value, boolean negate) { super(source); this.value = value; this.negate = negate; }
         @Override public Object evaluate(Resolver resolver) throws Exception { return Boolean.valueOf(negate ? value.evaluate(resolver) != null : value.evaluate(resolver) == null); }
+        @Override public ValueType inferredType() { return ValueType.BOOLEAN; }
         @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) { value.collectCalls(calls); }
         @Override public void collectContextPaths(List<String> paths) { value.collectContextPaths(paths); }
         @Override public void collectFilePaths(List<String> paths) { value.collectFilePaths(paths); }
@@ -266,6 +282,15 @@ public final class ExpressionBlockEvaluator {
                 values.put(key, argument.value.evaluate(resolver));
             }
             return resolver.call(name, values);
+        }
+        @Override public ValueType inferredType() {
+            Map<String, ValueType> types = new LinkedHashMap<String, ValueType>();
+            int positional = 0;
+            for (CallArgument argument : arguments) {
+                String key = argument.name == null ? "arg" + positional++ : argument.name;
+                types.put(key, argument.value.inferredType());
+            }
+            return DefaultBuiltInProvider.inferredResultType(name, types);
         }
         @Override public void collectCalls(List<ToolCallParser.ParsedCall> calls) {
             List<ToolCallParser.Argument> parsed = new ArrayList<ToolCallParser.Argument>();
@@ -287,6 +312,16 @@ public final class ExpressionBlockEvaluator {
         if (value instanceof Boolean) return ((Boolean) value).booleanValue();
         if (value instanceof String && ("true".equalsIgnoreCase((String) value) || "false".equalsIgnoreCase((String) value))) return Boolean.parseBoolean((String) value);
         throw new IllegalArgumentException("Expression requires a boolean but was " + type(value));
+    }
+
+    private static ValueType typeOf(Object value) {
+        if (value instanceof String || value instanceof Character) return ValueType.STRING;
+        if (value instanceof Number) return ValueType.NUMBER;
+        if (value instanceof Boolean) return ValueType.BOOLEAN;
+        if (value instanceof Map) return ValueType.MAP;
+        if (value instanceof Iterable || (value != null && value.getClass().isArray())) return ValueType.LIST;
+        if (value instanceof byte[]) return ValueType.BYTES;
+        return ValueType.UNKNOWN;
     }
 
     private static BigDecimal number(Object value, String owner) {

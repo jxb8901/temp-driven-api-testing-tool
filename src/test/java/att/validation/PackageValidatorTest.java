@@ -89,6 +89,29 @@ class PackageValidatorTest {
         } finally { sourceDirectory.remove(); }
     }
 
+    @Test void validatesKnownReturnTypeOfDynamicPureBuiltInWithoutResolvingContext() throws Exception {
+        Map<String, att.config.ToolArgumentConfig> arguments = Collections.singletonMap("value",
+                new att.config.ToolArgumentConfig("value", "Value", "Value", true,
+                        "", "", "once", "map", null));
+        ToolConfig tool = new ToolConfig("typed", "typed", "", "Typed", "Typed",
+                Arrays.asList("echo", "${input.value}"), Collections.<String>emptyList(), "text", arguments, null);
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.singletonMap("typed", tool), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("validateReferencedCall",
+                ToolCallParser.ParsedCall.class, FrameworkConfig.class);
+        method.setAccessible(true);
+
+        java.lang.reflect.InvocationTargetException incompatible = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> method.invoke(validator, new ToolCallParser().parse(
+                        "#{typed(value=str.substr(${EXEC.INPUT.text}, 0, 4))}"), config));
+        assertTrue(incompatible.getCause().getMessage().contains("statically known STRING"));
+        assertTrue(incompatible.getCause().getMessage().contains("target contract map"));
+
+        assertDoesNotThrow(() -> method.invoke(validator, new ToolCallParser().parse(
+                "#{typed(value=${EXEC.INPUT.data})}"), config));
+    }
+
     @Test void packageValidationFindsHistoricalTemplateDebugSidecarBeforeDebugRun() throws Exception {
         for (String directory : Arrays.asList("config", "testcase", "templates/T", "tools"))
             Files.createDirectories(tempDir.resolve(directory));
@@ -119,6 +142,62 @@ class PackageValidatorTest {
         assertEquals("schemaVersion", historical.field());
         assertTrue(historical.message().contains("att-debug/v1.0"));
         assertTrue(historical.suggestion().contains("att-debug/v1.1"));
+    }
+
+    @Test void packageValidationFindsHistoricalDebugSidecarsForFlowsAndBothToolKinds() throws Exception {
+        for (String directory : Arrays.asList("config", "config/tools", "testcase", "templates/T", "templates/flows/g/e", "tools"))
+            Files.createDirectories(tempDir.resolve(directory));
+        Files.write(tempDir.resolve("config/config.yaml"), "{}\n".getBytes("UTF-8"));
+        Files.write(tempDir.resolve("att.sh"), new byte[0]);
+        Files.write(tempDir.resolve("att.bat"), new byte[0]);
+        Files.write(tempDir.resolve("templates/T/template.yaml"),
+                ("schemaVersion: att-template/v3.6\nname: T\ndescription: T\nactions:\n  show:\n    type: log\n    message: ok\n").getBytes("UTF-8"));
+        Files.write(tempDir.resolve("templates/flows/g/e/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: g.e.v1\nname: E\ndescription: E\nactions:\n  show:\n    type: log\n    message: ok\n").getBytes("UTF-8"));
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put("plain", new ToolConfig("plain", "plain", "", "Plain", "Plain",
+                Arrays.asList("/bin/echo", "ok"), Collections.<String>emptyList(), "txt",
+                Collections.<String, att.config.ToolArgumentConfig>emptyMap(), null));
+        tools.put("g.named", new ToolConfig("g.named", "named", "g", "Named", "Grouped",
+                Arrays.asList("/bin/echo", "ok"), Collections.<String>emptyList(), "txt",
+                Collections.<String, att.config.ToolArgumentConfig>emptyMap(), null));
+        FrameworkConfig config = new FrameworkConfig(tempDir.resolve("output"), tempDir.resolve("report"),
+                tempDir.resolve("logs"), "SIT", 1000, tempDir.resolve("templates"), tools, null, null);
+        String historical = "schemaVersion: att-debug/v1.0\n";
+        Map<String, Path> sidecars = new LinkedHashMap<String, Path>();
+        sidecars.put("template", tempDir.resolve("templates/T/debug.yaml"));
+        sidecars.put("flow", tempDir.resolve("templates/flows/g/e/debug.yaml"));
+        sidecars.put("plain tool", tempDir.resolve("config/tools/plain.debug.yaml"));
+        sidecars.put("grouped tool", tempDir.resolve("config/tools/g.debug.yaml"));
+        for (Path sidecar : sidecars.values()) Files.write(sidecar, historical.getBytes("UTF-8"));
+
+        PackageValidator.ValidationSummary summary = new PackageValidator(tempDir, config)
+                .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
+        for (Map.Entry<String, Path> sidecar : sidecars.entrySet()) {
+            Diagnostic found = summary.diagnostics.stream()
+                    .filter(item -> DiagnosticCodes.SCHEMA_VERSION_OLD.equals(item.code())
+                            && item.file() != null && item.file().replace('\\', '/').endsWith(
+                                tempDir.relativize(sidecar.getValue()).toString().replace('\\', '/')))
+                    .findFirst().orElse(null);
+            assertNotNull(found, sidecar.getKey() + " sidecar was not reported: " + summary.diagnostics.stream()
+                    .map(item -> item.code() + " " + item.file() + " " + item.message())
+                    .collect(java.util.stream.Collectors.joining("\n")));
+            assertEquals("schemaVersion", found.field(), sidecar.getKey());
+            assertTrue(found.suggestion().contains("att-debug/v1.1"), sidecar.getKey());
+        }
+
+        for (Path sidecar : sidecars.values()) Files.write(sidecar,
+                "schemaVersion: att-debug/v1.1\n".getBytes("UTF-8"));
+        PackageValidator.ValidationSummary current = new PackageValidator(tempDir, config)
+                .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
+        assertFalse(current.diagnostics.stream().anyMatch(item -> DiagnosticCodes.SCHEMA_VERSION_OLD.equals(item.code())
+                && item.file() != null && item.file().replace('\\', '/').contains("debug.yaml")));
+
+        Files.delete(sidecars.get("grouped tool"));
+        PackageValidator.ValidationSummary optional = new PackageValidator(tempDir, config)
+                .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
+        assertFalse(optional.diagnostics.stream().anyMatch(item -> item.code().equals(DiagnosticCodes.DEBUG_INVALID)
+                && item.message().contains("config/tools/g.debug.yaml")));
     }
 
     @Test void projectFileCallsFollowNormalToolAndHelperValidation() throws Exception {

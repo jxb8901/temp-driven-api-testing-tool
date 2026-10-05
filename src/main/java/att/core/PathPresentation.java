@@ -48,7 +48,7 @@ public final class PathPresentation {
         return name == null ? "$EXTERNAL" : "$EXTERNAL/" + name.toString();
     }
 
-    /** Replaces the project root in free-form text without interpreting arbitrary values as local paths. */
+    /** Replaces the package root in free-form text without interpreting arbitrary values as local paths. */
     public static String displayText(String text, Path projectRoot) {
         return displayText(text, projectRoot, false);
     }

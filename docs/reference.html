@@ -1193,7 +1193,7 @@ call forms <code>db.&lt;helper&gt;.query(...)</code>,
 <code>type: tool</code> Action. A DB call accepts one String
 <code>sql</code> argument plus either positional <code>params</code> or
 named <code>parameters</code>;
-<code>sql=&amp;{project-relative-file.sql}</code> supplies package SQL
+<code>sql=&amp;{package-relative-file.sql}</code> supplies package SQL
 content. The historical <code>type: db</code> Action is retained only by
 archived schema versions.</p>
 <h3 id="file-content-expressions-return-a-string">File-content
@@ -2515,7 +2515,7 @@ all local <code>file.*</code> built-ins and their legacy aliases. Keep
 DB results typed and migrate display calls to Log
 <code>value: ${EXEC.ACTIONS.queryOrders.output.result}</code> with
 <code>format: sqlplus</code>; use <code>format: json</code> or
-<code>yaml</code> for Maps/Lists. Read project content with
+<code>yaml</code> for Maps/Lists. Read package content with
 <code>&amp;{...}</code> and pass its String to HTTP body, MQ payload, or
 SSH upload payload. SSHHelper upload accepts content only; native SSH
 download was removed. ATT local output remains framework-owned. Removed
@@ -2769,7 +2769,7 @@ sidecar discovery from the diagnosis. Template and Flow debug discover
 discovers <code>config/tools/&lt;group&gt;.debug.yaml</code>. The
 selected target's dependency closure is validated, so an unrelated
 workbook or Case file is not a prerequisite.</p>
-<p>Use the same <code>&amp;{project-relative-file}</code> expression in
+<p>Use the same <code>&amp;{package-relative-file}</code> expression in
 Debug, Run and Load, then pass its UTF-8 String as HTTP
 <code>body</code>, MQ <code>payload</code>, or SSH upload
 <code>payload</code>. These Resource Helpers do not resolve separate
@@ -6364,6 +6364,12 @@ Complete final Stage/Template/Action/Tool/DB state remains in
 <code>case.yaml</code>. <code>caseLog.yamlAnchors: false</code> fully
 expands shared Map/List objects; <code>true</code> permits YAML anchor
 markers, which carry no ATT identifier semantics.</p>
+<p>Multiline String values nested in structured entries are shown as
+readable YAML block content. ATT preserves their LF, CRLF or lone-CR
+separators and does not parse, trim or reformat the business text. Raw
+process and user content also keeps its original line endings. The live
+console mirror uses the same rendered log text as the persisted
+<code>case.log</code>.</p>
 <p>ATT prefixes Case log blocks whose section or nested status is ERROR,
 FAIL or INVALID with <code>【!!!!!】</code>. Search for that marker to
 find abnormal blocks; PASS, SKIPPED and informational blocks remain
@@ -6750,7 +6756,7 @@ CHANGELOG only when users still need a migration path.</p>
 <h3 id="file-arguments-and-case-log-paths">File arguments and case-log
 paths</h3>
 <p>HTTPHelper calls no longer accept <code>file</code>; pass
-<code>&amp;{project-relative-file}</code> directly as <code>body</code>.
+<code>&amp;{package-relative-file}</code> directly as <code>body</code>.
 MQHelper <code>send</code> and <code>request</code> no longer accept
 <code>file</code>; pass the expression as <code>payload</code>.
 SSHHelper <code>upload</code> now requires content in
@@ -6826,7 +6832,7 @@ schema path.</td>
 <tr class="even">
 <td><code>type: render</code> / <code>payload: path</code></td>
 <td>Use <code>type: assign</code>, a variable <code>name</code>, and
-<code>expression: "&amp;{project-relative-file}"</code>; pass
+<code>expression: "&amp;{package-relative-file}"</code>; pass
 <code>${EXEC.VARS.&lt;name&gt;}</code> to the consumer.</td>
 </tr>
 <tr class="odd">
@@ -6856,7 +6862,7 @@ String + requestFormat fails.</td>
 </tr>
 <tr class="even">
 <td>Dynamic or unsafe file locator</td>
-<td>Replace it with one static project-relative file. Absolute paths,
+<td>Replace it with one static package-relative file. Absolute paths,
 globs, dynamic locators, missing files, directories, non-UTF-8 bytes and
 symlink escapes are rejected.</td>
 </tr>
@@ -6961,13 +6967,13 @@ automatic retry.</td>
 <tr class="odd">
 <td>Historical <code>sqlFile</code></td>
 <td>Use the single String argument
-<code>sql=&amp;{project-relative-sql-file}</code>. <code>params</code>
+<code>sql=&amp;{package-relative-sql-file}</code>. <code>params</code>
 and <code>parameters</code> remain mutually exclusive.</td>
 </tr>
 <tr class="even">
 <td>Historical <code>type: render</code></td>
 <td>Replace it with an Assign whose expression is
-<code>"&amp;{project-relative-file}"</code>; use
+<code>"&amp;{package-relative-file}"</code>; use
 <code>${EXEC.VARS.&lt;name&gt;}</code> in later Actions.</td>
 </tr>
 <tr class="odd">

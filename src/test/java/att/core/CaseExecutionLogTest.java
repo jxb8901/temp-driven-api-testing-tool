@@ -97,6 +97,31 @@ class CaseExecutionLogTest {
         assertFalse(text.contains("\\r\\n"), text);
     }
 
+    @Test void consoleMirrorAndRetainedLoadLogKeepTheSameMultilinePresentation() throws Exception {
+        String payload = "<A>  leading  </A>\r\n\r\n<B>trailing  </B>\n";
+        Map<String, Object> record = new LinkedHashMap<String, Object>();
+        record.put("output", Collections.singletonMap("attempts", Collections.singletonList(
+                Collections.singletonMap("input", Collections.singletonMap("payload", payload)))));
+
+        StringBuilder mirror = new StringBuilder();
+        Path runFile = tempDir.resolve("mirrored-case.log");
+        try (CaseExecutionLog runLog = new CaseExecutionLog(runFile, false, mirror::append)) {
+            runLog.append("ACTION call", record);
+        }
+        String runText = new String(Files.readAllBytes(runFile), "UTF-8");
+        assertEquals(runText, mirror.toString());
+        assertTrue(runText.contains("<A>  leading  </A>\r\n"), runText);
+        assertTrue(runText.contains("\r\n          \r\n"), runText);
+        assertTrue(runText.contains("<B>trailing  </B>\n"), runText);
+        assertTrue(runText.contains("payload: |\n"), runText);
+
+        Path retained = tempDir.resolve("retained-load-case.log");
+        CaseExecutionLog loadLog = CaseExecutionLog.lightweight(tempDir.resolve("logical-load/case.log"));
+        loadLog.append("ACTION call", record);
+        assertEquals(retained.toAbsolutePath().normalize(), loadLog.materialize(retained));
+        assertEquals(runText, new String(Files.readAllBytes(retained), "UTF-8"));
+    }
+
     @Test void rawFileKeepsCrLfAndLoneCrAcrossReaderChunks() throws Exception {
         Path source = tempDir.resolve("process-spool.txt");
         StringBuilder content = new StringBuilder();

@@ -1128,7 +1128,7 @@ Action 內使用
 <code>db.&lt;helper&gt;.query(...)</code>、<code>db.&lt;helper&gt;.scalar(...)</code>、<code>db.&lt;helper&gt;.update(...)</code>。DB
 call 接受一個 String <code>sql</code>，以及 <code>params</code> 或
 <code>parameters</code>
-其中一種；<code>sql=&amp;{project-relative-file.sql}</code> 可提供
+其中一種；<code>sql=&amp;{package-relative-file.sql}</code> 可提供
 package SQL 內容。歷史 <code>type: db</code> Action 只由 archived schema
 保留。</p>
 <h3 id="file-content-expression-回傳-string">File-content expression
@@ -2256,7 +2256,7 @@ href="reference.zh/validation-diagnostics.md">Validation</a>。</p>
 typed；顯示時改用 Log
 <code>value: ${EXEC.ACTIONS.queryOrders.output.result}</code> 加
 <code>format: sqlplus</code>，Map/List 則使用 <code>format: json</code>
-或 <code>yaml</code>。Project content 使用 <code>&amp;{...}</code>，並將
+或 <code>yaml</code>。Package content 使用 <code>&amp;{...}</code>，並將
 String 傳入 HTTP body、MQ payload 或 SSH upload payload。SSHHelper
 upload 只接受 content；native SSH download 已移除。ATT local output 由
 framework 管理。移除的 API 會提供 migration diagnostic。</p>
@@ -2500,7 +2500,7 @@ result-workbook lifecycle。</p>
 selected target 的 dependency closure，因此不需要無關 workbook 或 Case
 檔案。</p>
 <p>Debug、Run、Load 都使用相同的
-<code>&amp;{project-relative-file}</code> expression，再將 UTF-8 String
+<code>&amp;{package-relative-file}</code> expression，再將 UTF-8 String
 傳入 HTTP <code>body</code>、MQ <code>payload</code> 或 SSH upload
 <code>payload</code>。這些 Resource Helper 不會解析各自的 local
 path。Validation 會在外部 I/O 前解析 package file；舊 HTTP/MQ
@@ -5783,6 +5783,10 @@ Complete final Stage/Template/Action/Tool/DB state remains in
 <code>case.yaml</code>. <code>caseLog.yamlAnchors: false</code> fully
 expands shared Map/List objects; <code>true</code> permits YAML anchor
 markers, which carry no ATT identifier semantics.</p>
+<p>巢狀 structured entry 中的 multiline String 會以易讀的 YAML block
+content 顯示。ATT 保留 LF、CRLF 或單獨 CR 分隔符，不會解析、修剪或重排
+business text。Raw process 與 user content 也保留原始換行。Live console
+mirror 與已寫入的 <code>case.log</code> 使用相同的 render text。</p>
 <p>ATT prefixes Case log blocks whose section or nested status is ERROR,
 FAIL or INVALID with <code>【!!!!!】</code>. Search for that marker to
 find abnormal blocks; PASS, SKIPPED and informational blocks remain
@@ -6130,7 +6134,7 @@ migration path 時才保留在其 owner page 或 CHANGELOG。</p>
 <h3 id="file-arguments-與-case-log-paths">File arguments 與 case log
 paths</h3>
 <p>HTTPHelper call 不再接受 <code>file</code>；請直接將
-<code>&amp;{project-relative-file}</code> 傳入
+<code>&amp;{package-relative-file}</code> 傳入
 <code>body</code>。MQHelper <code>send</code> 和 <code>request</code>
 不再接受 <code>file</code>；請將 expression 傳入
 <code>payload</code>。SSHHelper <code>upload</code> 現在要求
@@ -6190,7 +6194,7 @@ expression 的 Assign 取代每個 Render Action。Historical v3.4 descriptor
 <tr class="even">
 <td><code>type: render</code> / <code>payload: path</code></td>
 <td>使用 <code>type: assign</code>、variable <code>name</code> 及
-<code>expression: "&amp;{project-relative-file}"</code>；將
+<code>expression: "&amp;{package-relative-file}"</code>；將
 <code>${EXEC.VARS.&lt;name&gt;}</code> 傳給 consumer。</td>
 </tr>
 <tr class="odd">
@@ -6219,7 +6223,7 @@ payload。</td>
 </tr>
 <tr class="even">
 <td>Dynamic 或不安全 file locator</td>
-<td>改為一個 static project-relative file。Absolute path、glob、dynamic
+<td>改為一個 static package-relative file。Absolute path、glob、dynamic
 locator、missing file、directory、非 UTF-8 bytes 及 symlink escape
 都會被拒絕。</td>
 </tr>
@@ -6324,12 +6328,12 @@ retry。</td>
 <tr class="odd">
 <td>Historical <code>sqlFile</code></td>
 <td>改用單一 String argument
-<code>sql=&amp;{project-relative-sql-file}</code>；<code>params</code>
+<code>sql=&amp;{package-relative-sql-file}</code>；<code>params</code>
 與 <code>parameters</code> 互斥。</td>
 </tr>
 <tr class="even">
 <td>Historical <code>type: render</code></td>
-<td>改為使用 <code>"&amp;{project-relative-file}"</code> expression 的
+<td>改為使用 <code>"&amp;{package-relative-file}"</code> expression 的
 Assign；後續 Action 使用 <code>${EXEC.VARS.&lt;name&gt;}</code>。</td>
 </tr>
 <tr class="odd">

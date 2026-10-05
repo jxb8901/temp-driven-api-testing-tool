@@ -71,6 +71,92 @@ public final class ArgumentContracts {
         return result;
     }
 
+    /** Rejects only statically known return types that cannot satisfy their target contract. */
+    public static void validateInferredTypes(String call,
+            Map<String, ExpressionBlockEvaluator.ValueType> arguments, att.config.ToolConfig tool) {
+        if (arguments == null || arguments.isEmpty()) return;
+        if (tool != null) {
+            for (att.config.ToolArgumentConfig contract : tool.arguments().values()) {
+                ExpressionBlockEvaluator.ValueType type = arguments.get(contract.key());
+                if (type != null && type != ExpressionBlockEvaluator.ValueType.UNKNOWN
+                        && !acceptsDeclared(contract.type(), type)) {
+                    throw incompatible(call, contract.key(), type, contract.type());
+                }
+            }
+            return;
+        }
+        for (Map.Entry<String, ExpressionBlockEvaluator.ValueType> argument : arguments.entrySet()) {
+            ExpressionBlockEvaluator.ValueType type = argument.getValue();
+            if (type == null || type == ExpressionBlockEvaluator.ValueType.UNKNOWN) continue;
+            String target = nativeTarget(call, argument.getKey());
+            if (target != null && !accepts(target, type)) throw incompatible(call, argument.getKey(), type, target);
+        }
+    }
+
+    private static boolean acceptsDeclared(String target, ExpressionBlockEvaluator.ValueType type) {
+        if ("any".equals(target)) return true;
+        if ("string".equals(target) || "enum".equals(target)) return type == ExpressionBlockEvaluator.ValueType.STRING;
+        if ("integer".equals(target) || "long".equals(target) || "decimal".equals(target))
+            return type == ExpressionBlockEvaluator.ValueType.NUMBER || type == ExpressionBlockEvaluator.ValueType.STRING;
+        if ("boolean".equals(target)) return type == ExpressionBlockEvaluator.ValueType.BOOLEAN || type == ExpressionBlockEvaluator.ValueType.STRING;
+        if ("bytes".equals(target)) return type == ExpressionBlockEvaluator.ValueType.BYTES || type == ExpressionBlockEvaluator.ValueType.STRING;
+        if ("map".equals(target)) return type == ExpressionBlockEvaluator.ValueType.MAP;
+        if ("list".equals(target)) return type == ExpressionBlockEvaluator.ValueType.LIST;
+        return true;
+    }
+
+    private static String nativeTarget(String call, String argument) {
+        argument = argument.toLowerCase(java.util.Locale.ROOT);
+        String[] parts = call == null ? new String[0] : call.toLowerCase(java.util.Locale.ROOT).split("\\.", -1);
+        if (parts.length != 3) return null;
+        String family = parts[0];
+        if ("mq".equals(family)) {
+            if (java.util.Arrays.asList("queue", "requestqueue", "replyqueue", "correlationid", "instance").contains(argument.toLowerCase(java.util.Locale.ROOT))) return "string";
+            if ("payload".equals(argument)) return "payload";
+            if ("waitms".equals(argument)) return "numeric";
+            if ("requestformat".equals(argument) || "responseformat".equals(argument)) return "string";
+        } else if ("ssh".equals(family)) {
+            if (java.util.Arrays.asList("command", "remotepath", "sourcepath", "targetpath").contains(argument.toLowerCase(java.util.Locale.ROOT))) return "string";
+            if ("payload".equals(argument)) return "string-bytes";
+            if ("stdoutformat".equals(argument)) return "string";
+            if ("timeoutms".equals(argument)) return "numeric";
+            if ("overwrite".equals(argument) || "missingok".equals(argument)) return "boolean";
+        } else if ("http".equals(family)) {
+            if ("path".equals(argument) || "contenttype".equals(argument)
+                    || "method".equals(argument) || "requestformat".equals(argument) || "responseformat".equals(argument)) return "string";
+            if ("query".equals(argument) || "headers".equals(argument)) return "map";
+            if ("body".equals(argument)) return "payload";
+            if ("connectionrequesttimeoutms".equals(argument) || "connecttimeoutms".equals(argument)
+                    || "readtimeoutms".equals(argument)) return "numeric";
+            if ("followredirects".equals(argument)) return "boolean";
+        } else if ("db".equals(family)) {
+            if ("sql".equals(argument) || "sqlfile".equals(argument)) return "string";
+            if ("params".equals(argument)) return "list";
+            if ("parameters".equals(argument)) return "map";
+        }
+        return null;
+    }
+
+    private static boolean accepts(String target, ExpressionBlockEvaluator.ValueType type) {
+        if ("string".equals(target) || "enum".equals(target)) return type == ExpressionBlockEvaluator.ValueType.STRING;
+        if ("numeric".equals(target)) return type == ExpressionBlockEvaluator.ValueType.NUMBER || type == ExpressionBlockEvaluator.ValueType.STRING;
+        if ("boolean".equals(target)) return type == ExpressionBlockEvaluator.ValueType.BOOLEAN || type == ExpressionBlockEvaluator.ValueType.STRING;
+        if ("map".equals(target)) return type == ExpressionBlockEvaluator.ValueType.MAP;
+        if ("list".equals(target)) return type == ExpressionBlockEvaluator.ValueType.LIST;
+        if ("payload".equals(target)) return type == ExpressionBlockEvaluator.ValueType.STRING
+                || type == ExpressionBlockEvaluator.ValueType.BYTES || type == ExpressionBlockEvaluator.ValueType.MAP
+                || type == ExpressionBlockEvaluator.ValueType.LIST;
+        if ("string-bytes".equals(target)) return type == ExpressionBlockEvaluator.ValueType.STRING
+                || type == ExpressionBlockEvaluator.ValueType.BYTES;
+        return true;
+    }
+
+    private static IllegalArgumentException incompatible(String call, String key,
+            ExpressionBlockEvaluator.ValueType type, String target) {
+        return new IllegalArgumentException(call + "." + key + " has statically known " + type
+                + " expression result, incompatible with target contract " + target);
+    }
+
     private static Object coerceDeclared(String call, att.config.ToolArgumentConfig contract, Object value) {
         String type = contract.type();
         if ("string".equals(type)) return requireType(call, contract.key(), value, String.class, "String");

@@ -2,7 +2,7 @@
 
 ## File arguments and case-log paths
 
-HTTPHelper calls no longer accept `file`; pass `&{project-relative-file}` directly as `body`. MQHelper `send` and `request` no longer accept `file`; pass the expression as `payload`. SSHHelper `upload` now requires content in `payload` and rejects `localPath`; pass `&{...}` directly. SSHHelper no longer supports `download`, because it requires a local destination path. Use a deliberately configured command-backed Tool for workflows that must retrieve files from a host. These changes remove native arbitrary-binary local-file input from these Resource APIs; `&{...}` supplies UTF-8 text.
+HTTPHelper calls no longer accept `file`; pass `&{package-relative-file}` directly as `body`. MQHelper `send` and `request` no longer accept `file`; pass the expression as `payload`. SSHHelper `upload` now requires content in `payload` and rejects `localPath`; pass `&{...}` directly. SSHHelper no longer supports `download`, because it requires a local destination path. Use a deliberately configured command-backed Tool for workflows that must retrieve files from a host. These changes remove native arbitrary-binary local-file input from these Resource APIs; `&{...}` supplies UTF-8 text.
 
 Case logs, CLI output, and emitted case evidence display paths under the canonical package root as `$ATT_HOME` or `$ATT_HOME/<relative-path>`, with `/` separators. `$ATT_HOME` is a presentation token, not an environment variable, Context root, or file-expression locator. Runtime resolution and filesystem access continue to use canonical absolute Paths. Absolute paths outside the package root use a bounded `$EXTERNAL/<basename>` presentation when logged as Path values or embedded in diagnostic messages. Explicit remote-path fields and URLs retain their values.
 
@@ -19,13 +19,13 @@ ATT 3.6.2 separates typed operation results, external parsing, file-content Stri
 | Previous field/model | 3.6.2 migration |
 |---|---|
 | `att-template/v3.4` or `att-flow/v3.4` with `type: render` | Change the descriptor to the active v3.5 schema and replace each Render Action with an Assign that uses a file-content expression. Historical v3.4 descriptors remain loadable only through the historical schema path. |
-| `type: render` / `payload: path` | Use `type: assign`, a variable `name`, and `expression: "&{project-relative-file}"`; pass `${EXEC.VARS.<name>}` to the consumer. |
+| `type: render` / `payload: path` | Use `type: assign`, a variable `name`, and `expression: "&{package-relative-file}"`; pass `${EXEC.VARS.<name>}` to the consumer. |
 | Command Tool result.format | Move the parsing choice to the Tool descriptor's stdoutFormat. |
 | Common Action result.format/path/overwrite | Remove it. output.result is the native logical typed value; no implicit file replacement exists. |
 | Render result.format/path or renderAs/saveAs | Remove the old format/persistence fields. The file-content expression returns the exact UTF-8 String and creates no result file or targetFiles. |
 | Render file handoff through targetFiles | Pass the file-content String directly as HTTP body, MQ payload, or SSH upload payload. |
 | requestFormat on a file-content String | Remove it. requestFormat is only for abstract Map/List values; String + requestFormat fails. |
-| Dynamic or unsafe file locator | Replace it with one static project-relative file. Absolute paths, globs, dynamic locators, missing files, directories, non-UTF-8 bytes and symlink escapes are rejected. |
+| Dynamic or unsafe file locator | Replace it with one static package-relative file. Absolute paths, globs, dynamic locators, missing files, directories, non-UTF-8 bytes and symlink escapes are rejected. |
 | Log file | Pass the value directly to Log.value. |
 | Log fields | Put the typed map/list in Log.value and select Log.format. |
 | HTTP/MQ common result formatting | Use responseFormat for ingress parsing; optional evidence.output.format is human presentation only. |
@@ -67,8 +67,8 @@ ATT 3.6.2 uses `att-template/v3.6` and `att-flow/v3.6` as the active schemas. Th
 |---|---|
 | `att-template/v3.3` or `att-flow/v3.3` | Follow the historical release migration to v3.4, then change to v3.6 and migrate the Render/DB Actions. |
 | Historical `type: db` with `query` or `update` | Use an ordinary `type: tool` Action with `#{db.<id>.query(...)}`, `scalar(...)`, or `update(...)`; query/scalar may retry, update must not use automatic retry. |
-| Historical `sqlFile` | Use the single String argument `sql=&{project-relative-sql-file}`. `params` and `parameters` remain mutually exclusive. |
-| Historical `type: render` | Replace it with an Assign whose expression is `"&{project-relative-file}"`; use `${EXEC.VARS.<name>}` in later Actions. |
+| Historical `sqlFile` | Use the single String argument `sql=&{package-relative-sql-file}`. `params` and `parameters` remain mutually exclusive. |
+| Historical `type: render` | Replace it with an Assign whose expression is `"&{package-relative-file}"`; use `${EXEC.VARS.<name>}` in later Actions. |
 | Command Tool result.format | Tool descriptor stdoutFormat |
 | Render result.format/path/overwrite or renderAs/saveAs | Remove the old persistence fields. The file-content expression returns the exact UTF-8 String and creates no implicit result file. |
 | Log file | Pass a typed value to Log.value |
