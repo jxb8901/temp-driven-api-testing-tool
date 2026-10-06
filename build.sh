@@ -30,6 +30,7 @@ done
 rm -rf "$RELEASE_WORK"; mkdir -p "$RELEASE_WORK" "$DIST_DIR"
 tar -xzf "$BINARY_ARCHIVE" -C "$RELEASE_WORK"
 PACKAGE_DIR="$RELEASE_WORK/$PACKAGE_NAME"
+mkdir -p "$PACKAGE_DIR/output"
 if [ -n "${IBM_MQ_JAR:-}" ]; then
   if [ ! -f "$IBM_MQ_JAR" ]; then echo "IBM_MQ_JAR does not point to a file: $IBM_MQ_JAR" >&2; exit 2; fi
   cp "$IBM_MQ_JAR" "$PACKAGE_DIR/lib/"
