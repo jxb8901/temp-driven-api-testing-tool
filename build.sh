@@ -34,9 +34,16 @@ mkdir -p "$PACKAGE_DIR/output"
 if [ -n "${IBM_MQ_JAR:-}" ]; then
   if [ ! -f "$IBM_MQ_JAR" ]; then echo "IBM_MQ_JAR does not point to a file: $IBM_MQ_JAR" >&2; exit 2; fi
   cp "$IBM_MQ_JAR" "$PACKAGE_DIR/lib/"
-  rm -f "$BINARY_ARCHIVE"
-  (cd "$RELEASE_WORK" && COPYFILE_DISABLE=1 tar --no-xattrs -czf "$BINARY_ARCHIVE" "$PACKAGE_NAME")
 fi
+
+# Finalize the exact binary tree delivered to users, then re-extract that
+# archive and smoke-test the extracted final artifact.
+rm -f "$BINARY_ARCHIVE"
+(cd "$RELEASE_WORK" && COPYFILE_DISABLE=1 tar --no-xattrs -czf "$BINARY_ARCHIVE" "$PACKAGE_NAME")
+rm -rf "$PACKAGE_DIR"
+tar -xzf "$BINARY_ARCHIVE" -C "$RELEASE_WORK"
+PACKAGE_DIR="$RELEASE_WORK/$PACKAGE_NAME"
+
 (
   cd "$PACKAGE_DIR"
   ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}"
