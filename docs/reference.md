@@ -1,7 +1,7 @@
-# ATT v3.7.4 reference manual
+# ATT v3.8.0 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 3.7.4
+Version: 3.8.0
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -2850,7 +2850,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.7.4",
+  "attVersion": "3.8.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
