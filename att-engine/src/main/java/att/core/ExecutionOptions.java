@@ -192,6 +192,17 @@ public final class ExecutionOptions {
                 unsafeFailureDetails);
     }
 
+    /** Applies Run-only execution policies to an otherwise quiet API request. */
+    public ExecutionOptions withRunPolicies(Set<String> outputs, String concurrency, boolean profileEnabled) {
+        if (!"run".equals(command)) throw new IllegalStateException("Run policies apply only to Run requests");
+        return new ExecutionOptions(command, configPath, suitePaths, suiteDirectory, caseIds, tags, excludeTags, runId,
+                all, rerunFailed, dryRun, failFast, outputDirectory, format, quiet, verbose, validationScope,
+                outputs == null ? defaultCiOutputs() : outputs, concurrency == null ? "reject" : concurrency,
+                updateSnapshot, profileEnabled, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
+                loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime, loadMaxConcurrent,
+                loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails);
+    }
+
     public static ExecutionOptions parse(String[] args) {
         if (args.length == 0 || "--help".equals(args[0]) || "help".equals(args[0])) return empty("help");
         String command = args[0].startsWith("--") ? "run" : args[0];

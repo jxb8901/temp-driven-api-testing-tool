@@ -177,7 +177,7 @@ public class FrameworkEngine {
         // incomplete and cannot be consumed as a finished run.
         writeManifest(runDirectory, runId, results, runStarted, runEnded, html, options, inputs, validationDiagnostics);
         writeLatest(outputRoot, runDirectory, runId, summary, runEnded);
-        return new RunSummary(results, runDirectory.resolve("report/index.html"));
+        return new RunSummary(results, runDirectory.resolve("report/index.html"), runId);
         } finally {
             try { concurrencyGuard.close(); }
             finally { cancellation.close(); }

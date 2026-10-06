@@ -10,19 +10,56 @@ public final class LoadRequest extends AttRequest {
     private final Path scenario; private final String debugTargetType, debugTargetId;
     private final String users, arrivalRate, warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overloadPolicy;
     private final List<String> overrides;
+    private final att.load.LoadEventListener listener;
+    private final att.load.LoadScenario parsedScenario;
+    private final att.core.PerformanceProfile profile;
     public LoadRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory, String runId,
                        Path scenario, String debugTargetType, String debugTargetId, String users, String arrivalRate,
                        String warmup, String rampUp, String duration, String rampDown, String thinkTime,
                        String maxConcurrent, String overloadPolicy, List<String> overrides) {
+        this(packageRoot, configPath, environment, outputDirectory, runId, scenario, debugTargetType, debugTargetId,
+                users, arrivalRate, warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overloadPolicy,
+                overrides, null, null, null);
+    }
+    public LoadRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory, String runId,
+                       Path scenario, String debugTargetType, String debugTargetId, String users, String arrivalRate,
+                       String warmup, String rampUp, String duration, String rampDown, String thinkTime,
+                       String maxConcurrent, String overloadPolicy, List<String> overrides,
+                       att.load.LoadEventListener listener) {
+        this(packageRoot, configPath, environment, outputDirectory, runId, scenario, debugTargetType, debugTargetId,
+                users, arrivalRate, warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overloadPolicy,
+                overrides, listener, null, null);
+    }
+    public LoadRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory, String runId,
+                       Path scenario, String debugTargetType, String debugTargetId, String users, String arrivalRate,
+                       String warmup, String rampUp, String duration, String rampDown, String thinkTime,
+                       String maxConcurrent, String overloadPolicy, List<String> overrides,
+                       att.load.LoadEventListener listener, att.load.LoadScenario parsedScenario) {
+        this(packageRoot, configPath, environment, outputDirectory, runId, scenario, debugTargetType, debugTargetId,
+                users, arrivalRate, warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overloadPolicy,
+                overrides, listener, parsedScenario, null);
+    }
+    public LoadRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory, String runId,
+                       Path scenario, String debugTargetType, String debugTargetId, String users, String arrivalRate,
+                       String warmup, String rampUp, String duration, String rampDown, String thinkTime,
+                       String maxConcurrent, String overloadPolicy, List<String> overrides,
+                       att.load.LoadEventListener listener, att.load.LoadScenario parsedScenario,
+                       att.core.PerformanceProfile profile) {
         super(packageRoot, configPath, environment, outputDirectory, runId);
         if (scenario == null && (debugTargetType == null || debugTargetId == null)) throw new IllegalArgumentException("Load requires a scenario or a Debug target");
         this.scenario = scenario; this.debugTargetType = debugTargetType; this.debugTargetId = debugTargetId;
         this.users=users; this.arrivalRate=arrivalRate; this.warmup=warmup; this.rampUp=rampUp; this.duration=duration;
         this.rampDown=rampDown; this.thinkTime=thinkTime; this.maxConcurrent=maxConcurrent; this.overloadPolicy=overloadPolicy;
         this.overrides = Collections.unmodifiableList(new ArrayList<String>(overrides == null ? Collections.<String>emptyList() : overrides));
+        this.listener = listener;
+        this.parsedScenario = parsedScenario;
+        this.profile = profile;
     }
     public Path scenario() { return scenario; } public String debugTargetType() { return debugTargetType; } public String debugTargetId() { return debugTargetId; }
     public String users() { return users; } public String arrivalRate() { return arrivalRate; } public String warmup() { return warmup; } public String rampUp() { return rampUp; }
     public String duration() { return duration; } public String rampDown() { return rampDown; } public String thinkTime() { return thinkTime; }
     public String maxConcurrent() { return maxConcurrent; } public String overloadPolicy() { return overloadPolicy; } public List<String> overrides() { return overrides; }
+    public att.load.LoadEventListener listener() { return listener; }
+    public att.load.LoadScenario parsedScenario() { return parsedScenario; }
+    public att.core.PerformanceProfile profile() { return profile; }
 }

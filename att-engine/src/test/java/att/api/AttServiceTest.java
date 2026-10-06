@@ -35,4 +35,19 @@ class AttServiceTest {
         assertEquals("",out.toString("UTF-8"));
         assertEquals("",err.toString("UTF-8"));
     }
+
+    @Test void debugResultRetainsTheCompleteTypedDiagnostic() throws Exception {
+        Path root=temp.resolve("debug-package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates"));
+        Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools"));
+        att.TestSchemas.install(root);
+        Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.11\n"
+                + "outputDirectory: output\nenvironment: SIT\n"
+                + "templates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes("UTF-8"));
+        DebugResult result=new DefaultAttService().debug(new DebugRequest(root,Paths.get("config/config.yaml"),null,
+                null,null,"template","MISSING",null,false));
+        assertEquals(1,result.diagnostics().size());
+        assertNotNull(result.diagnostics().get(0).suggestion());
+        assertEquals(result.diagnostics().get(0).toMap(),result.toMap().get("diagnostics") instanceof java.util.List
+                ? ((java.util.List<java.util.Map<String,Object>>)result.toMap().get("diagnostics")).get(0) : null);
+    }
 }

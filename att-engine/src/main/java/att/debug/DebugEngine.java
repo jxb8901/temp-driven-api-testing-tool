@@ -76,7 +76,7 @@ public final class DebugEngine {
 
     /** Validates one discovery candidate without creating output or executing a resource call. */
     public Path validateDiscoverableTarget(String type, String id) throws Exception {
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"debug", type, id});
+        ExecutionOptions options = targetOptions("debug", type, id);
         Path sidecar = autoInput(type, id);
         DebugInput input;
         if (Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar)) input = loadInput(options, type, id);
@@ -107,7 +107,7 @@ public final class DebugEngine {
     /** Validates a sidecar using the exact Load promotion path, not standalone Debug root availability. */
     public Path validateDiscoverableTargetForLoad(String type, String id,
                                                   Map<String, Object> quickLoadPolicy) throws Exception {
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", type, id});
+        ExecutionOptions options = targetOptions("load", type, id);
         Map<String, Object> promoted = loadBootstrapInputForLoad(options);
         att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(projectRoot).fromDebugInput(
                 (Path) promoted.get("source"), type, id, DebugInput.map(promoted.get("inputs")),
@@ -129,11 +129,19 @@ public final class DebugEngine {
         finally { cancellation.close(); }
     }
 
+    private ExecutionOptions targetOptions(String command, String type, String id) {
+        return ExecutionOptions.forApi(command, projectRoot.resolve("config/config.yaml"), config.environment(),
+                Collections.<Path>emptyList(), null, Collections.<String>emptySet(), Collections.<String>emptySet(),
+                Collections.<String>emptySet(), null, false, false, false, false, null, "selected", type, id,
+                null, false, null, null, null, null, null, null, null, null, null, null,
+                Collections.<String>emptyList());
+    }
+
     private Result runInternal(ExecutionOptions options) throws Exception {
         Instant started = Instant.now();
         String targetType = options.debugTargetType();
         String targetId = options.debugTargetId();
-        if (options.unsafeFailureDetails())
+        if (options.unsafeFailureDetails() && !"machine".equals(options.format()))
             System.err.println("[ATT WARNING] --unsafe-failure-details is enabled: collector diagnostics may expose local data. Configured secrets remain redacted. Use only with trusted local data.");
         Path debugDirectory = createDebugDirectory(options, targetType, targetId);
         Path artifacts = debugDirectory.resolve("artifacts");
@@ -577,6 +585,7 @@ public final class DebugEngine {
         public ResultStatus status() { return status; } public int exitCode() { return exitCode; } public long durationMs() { return durationMs; }
         public Path outputDirectory() { return outputDirectory; } public Path logPath() { return logPath; } public Path resultPath() { return resultPath; }
         public DiagnosticException diagnostic() { return diagnostic; }
+        public String executionId() { return outputDirectory == null ? null : outputDirectory.getFileName().toString(); }
     }
 
     private static final class ResolvedTarget {

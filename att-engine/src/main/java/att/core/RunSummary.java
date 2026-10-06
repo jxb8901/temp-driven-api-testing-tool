@@ -13,11 +13,19 @@ import java.util.List;
 public class RunSummary {
     private final List<TestResult> results;
     private final Path reportPath;
+    private final String runId;
 
     public RunSummary(List<TestResult> results, Path reportPath) {
+        this(results, reportPath, null);
+    }
+
+    public RunSummary(List<TestResult> results, Path reportPath, String runId) {
         this.results = results;
         this.reportPath = reportPath;
+        this.runId = runId;
     }
+
+    public String runId() { return runId; }
 
     public List<TestResult> results() {
         return results;

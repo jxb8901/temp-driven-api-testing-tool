@@ -31,12 +31,23 @@ public final class WorkerMain {
     }
     private int execute() throws Exception {
         JsonParser parser=mapper.getFactory().createParser(new BufferedReader(new InputStreamReader(System.in,StandardCharsets.UTF_8)));
-        JsonNode input=mapper.readTree(parser);
+        JsonNode input;
+        try {
+            input=mapper.readTree(parser);
+        } catch(Exception error) {
+            emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
+            return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
+        }
         if(input==null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","A JSON request is required"); }
-        if(parser.nextToken()!=null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","Only one JSON request is accepted per Worker process"); }
         if(input!=null&&input.hasNonNull("jobId")) jobId=input.get("jobId").asText();
-        emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
+        try {
+            if(parser.nextToken()!=null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","Only one JSON request is accepted per Worker process"); }
+        } catch(Exception error) {
+            emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
+            return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
+        }
         WorkerRequest request;
+        emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
         try { request=mapper.treeToValue(input,WorkerRequest.class); }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
         if(!PROTOCOL.equals(request.protocolVersion)) return fail("WORKER_PROTOCOL_UNSUPPORTED","Unsupported protocolVersion; expected "+PROTOCOL);
@@ -53,7 +64,7 @@ public final class WorkerMain {
             if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
             emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message==null?"ATT operation failed":message));
-            emit(WorkerEvent.Type.RESULT,fields("status",status,"exitCode",exit,"result",fields("jobId",jobId,"status",status,"exitCode",exit)));
+            emit(WorkerEvent.Type.RESULT,fields("status",status,"exitCode",exit,"result",fields("executionId",null,"status",status,"exitCode",exit)));
             return exit;
         }
     }
@@ -72,7 +83,7 @@ public final class WorkerMain {
     }
     private Map<String,Object> requiredTarget(WorkerRequest r) { if(r.target==null)throw new IllegalArgumentException("target is required"); return r.target; }
     private void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception { protocol.println(mapper.writeValueAsString(new WorkerEvent(type,jobId,data).toMap())); protocol.flush(); }
-    private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message)); emit(WorkerEvent.Type.RESULT,fields("status","INVALID","exitCode",2,"result",fields("jobId",jobId,"status","INVALID","exitCode",2))); return 2; }
+    private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message)); emit(WorkerEvent.Type.RESULT,fields("status","INVALID","exitCode",2,"result",fields("executionId",null,"status","INVALID","exitCode",2))); return 2; }
     private static Map<String,Object> fields(Object... values) { Map<String,Object> map=new LinkedHashMap<String,Object>(); for(int i=0;i+1<values.length;i+=2)map.put(String.valueOf(values[i]),values[i+1]); return map; }
     private static boolean bool(Boolean value) { return Boolean.TRUE.equals(value); }
     private static String text(Map<String,Object> value,String key) { String found=optionalText(value,key); if(found==null||found.trim().isEmpty())throw new IllegalArgumentException("target."+key+" is required"); return found; }
