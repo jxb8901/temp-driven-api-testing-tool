@@ -1,38 +1,24 @@
 #!/usr/bin/env sh
 # Author: Jeffrey + ChatGPT
 set -eu
-
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 cd "$ROOT_DIR"
-
-# Package validation checks configuration structure and templates without
-# opening database or MQ connections. Supply non-secret values only when the
-# sample package's optional resource credentials are otherwise unset.
 if [ "${1:-}" = "validate" ]; then
-  ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-validation-placeholder}"
-  ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-validation-placeholder}"
-  PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-validation-placeholder}"
-  PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-validation-placeholder}"
+  ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-validation-placeholder}"; ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-validation-placeholder}"
+  PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-validation-placeholder}"; PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-validation-placeholder}"
   export ORDERS_DB_USERNAME ORDERS_DB_PASSWORD PAYMENT_MQ_USERNAME PAYMENT_MQ_PASSWORD
 fi
-
 APP_JAR=""
-for candidate in "$ROOT_DIR"/lib/att-*.jar; do
-  if [ -f "$candidate" ]; then APP_JAR="$candidate"; break; fi
-done
+for candidate in "$ROOT_DIR"/lib/att-*.jar; do if [ -f "$candidate" ]; then APP_JAR="$candidate"; break; fi; done
 if [ -n "$APP_JAR" ]; then
   CP="$APP_JAR"
-  for jar in "$ROOT_DIR"/lib/*.jar; do
-    [ -f "$jar" ] || continue
-    [ "$jar" = "$APP_JAR" ] && continue
-    CP="$CP:$jar"
-  done
+  for jar in "$ROOT_DIR"/lib/*.jar; do [ -f "$jar" ] || continue; [ "$jar" = "$APP_JAR" ] && continue; CP="$CP:$jar"; done
   exec java -cp "$CP" att.FrameworkRunner "$@"
 fi
-
-CP="$ROOT_DIR/target/classes:$ROOT_DIR/target/test-classes"
-
-for jar in "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1.jar \
+CLI_DIR="$ROOT_DIR/att-cli"
+CP="$CLI_DIR/target/classes:$CLI_DIR/target/test-classes"
+for jar in \
+  "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1.jar \
   "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.17.2/jackson-annotations-2.17.2.jar \
   "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.17.2/jackson-core-2.17.2.jar \
   "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.17.2/jackson-databind-2.17.2.jar \
@@ -52,45 +38,19 @@ for jar in "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1
   "$HOME"/.m2/repository/org/apache/poi/poi-ooxml-lite/5.2.5/poi-ooxml-lite-5.2.5.jar \
   "$HOME"/.m2/repository/com/github/virtuald/curvesapi/1.08/curvesapi-1.08.jar \
   "$HOME"/.m2/repository/org/yaml/snakeyaml/2.2/snakeyaml-2.2.jar \
-  "$HOME"/.m2/repository/org/apache/logging/log4j/log4j-api/2.21.1/log4j-api-2.21.1.jar; do
-  CP="$CP:$jar"
-done
-
-# Source-tree extensions (for example JDBC drivers) use the same lib contract
-# as a packaged ATT distribution.
-for jar in "$ROOT_DIR"/lib/*.jar; do
-  [ -f "$jar" ] || continue
-  CP="$CP:$jar"
-done
-
+  "$HOME"/.m2/repository/org/apache/logging/log4j/log4j-api/2.21.1/log4j-api-2.21.1.jar; do CP="$CP:$jar"; done
+for jar in "$ROOT_DIR"/lib/*.jar; do [ -f "$jar" ] || continue; CP="$CP:$jar"; done
 NEEDS_BUILD=false
-BUILD_MARKER="$ROOT_DIR/target/classes/att-build.properties"
-if [ ! -f "$BUILD_MARKER" ]; then
-  NEEDS_BUILD=true
-elif find "$ROOT_DIR/src/main/java" -name '*.java' -newer "$BUILD_MARKER" -print -quit | grep -q .; then
-  NEEDS_BUILD=true
-fi
-
+BUILD_MARKER="$CLI_DIR/target/classes/att-build.properties"
+if [ ! -f "$BUILD_MARKER" ]; then NEEDS_BUILD=true
+elif find "$CLI_DIR/src/main/java" -name '*.java' -newer "$BUILD_MARKER" -print -quit | grep -q .; then NEEDS_BUILD=true; fi
 if [ "$NEEDS_BUILD" = true ]; then
   echo "Compiling ATT sources..."
   if command -v mvn >/dev/null 2>&1; then
-    # Try a parallel Maven build (1 core); if Maven doesn't support -T it will ignore it.
-    (cd "$ROOT_DIR" && mvn -q -DskipTests -T 1C compile) && touch "$BUILD_MARKER"
+    (cd "$ROOT_DIR" && mvn -q -DskipTests -T 1C -pl att-cli -am compile)
   elif command -v javac >/dev/null 2>&1; then
-    mkdir -p "$ROOT_DIR/target/classes"
-    # Avoid ARG_MAX issues by writing sources to an argfile for javac
-    SRC_LIST="$ROOT_DIR/target/sources.list"
-    find "$ROOT_DIR/src/main/java" -name '*.java' > "$SRC_LIST"
-    if [ -s "$SRC_LIST" ]; then
-      # Use javac @argfile to pass many source files safely
-      javac -source 8 -target 8 -cp "$CP" -d "$ROOT_DIR/target/classes" @"$SRC_LIST" && touch "$BUILD_MARKER"
-    else
-      echo "No Java sources found to compile." >&2
-    fi
-  else
-    echo "Neither Maven nor javac is available. Build a release package first." >&2
-    exit 2
-  fi
+    mkdir -p "$CLI_DIR/target/classes"; SRC_LIST="$CLI_DIR/target/sources.list"; find "$CLI_DIR/src/main/java" -name '*.java' > "$SRC_LIST"
+    if [ -s "$SRC_LIST" ]; then javac -source 8 -target 8 -cp "$CP" -d "$CLI_DIR/target/classes" @"$SRC_LIST"; touch "$BUILD_MARKER"; else echo "No Java sources found to compile." >&2; fi
+  else echo "Neither Maven nor javac is available. Build a release package first." >&2; exit 2; fi
 fi
-
 exec java -cp "$CP" att.FrameworkRunner "$@"

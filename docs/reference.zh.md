@@ -1,7 +1,7 @@
-# ATT v3.7.4 使用手冊與參考
+# ATT v3.8.0 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 3.7.4
+Version: 3.8.0
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -2774,7 +2774,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.7.4",
+  "attVersion": "3.8.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},

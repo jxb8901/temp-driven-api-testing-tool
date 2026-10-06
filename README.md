@@ -1,4 +1,4 @@
-# ATT 3.7.4 - Automated Testing Tool
+# ATT 3.8.0 - Automated Testing Tool
 
 ATT is an offline, template-driven API and integration test runner for SIT/UAT. Excel rows define Testcases; Stages select Templates; Templates execute ordered Actions; reusable Flows and configured Resources keep implementation logic out of test data.
 
@@ -56,6 +56,19 @@ The current Reference Manual is organized by product concepts rather than releas
 
 DB operations run under ordinary `type: tool` Actions through `db.<helper>.<query|scalar|update>(...)` calls. Action-level `timeoutMs` overrides the DBHelper statement timeout. Read-only query/scalar calls may use bounded retry for `ASSERTION` and `TIMEOUT`; mutating update calls deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/resources/dbhelper.md).
 
+## Repository modules
+
+The repository is a minimal Maven reactor while the runtime/package root stays compatible with earlier ATT releases:
+
+```text
+pom.xml       parent / aggregator
+att-cli/      current ATT application, all existing Java packages and tests
+att-server/   empty placeholder reserved for future ATT Server work
+att-dist/     binary/source release assembly
+```
+
+**ATT Server is not implemented yet.** The `att-server` module contains no server framework, API, worker, persistence, scheduler, authentication, or alternate entry point. Existing execution remains in `att-cli`, with `att.FrameworkRunner` as the application entry point. Java compatibility is module-specific: `att-cli` explicitly remains Java 8-compatible, while the parent does not impose Java 8 bytecode on every module, so a future Server issue can independently choose a newer Java baseline. See [Multi-module build layout](docs/system-design/multi-module-build.md).
+
 ## Core package layout
 
 ```text
@@ -67,7 +80,7 @@ schemas/      published ATT schemas
 output/       run/debug/load evidence and reports
 ```
 
-ATT 3.7.4 uses `att-config/v2.11`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.6`. Current schemas live under `schemas/`; previous and older definitions are historical references under `schemas/history/`, not current runtime contracts.
+ATT 3.8.0 uses `att-config/v2.11`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.6`. Current schemas live under `schemas/`; previous and older definitions are historical references under `schemas/history/`, not current runtime contracts.
 
 ## Build and validation
 
@@ -78,4 +91,4 @@ python3 tools/validate_reference_content.py
 ./build.sh
 ```
 
-`build.sh` runs the release gate and regenerates the modular Reference Manual before packaging. Java 8+ remains the runtime baseline. JDBC drivers are supplied in `lib/`; IBM MQ remains an optional runtime integration.
+`mvn clean verify` runs the full reactor: it tests `att-cli`, builds the empty `att-server` placeholder, and assembles binary/source releases through `att-dist`. `build.sh` remains the compatibility/release entry point: it regenerates the Reference Manual, runs the reactor gate, and smoke-tests the assembled distribution. Release packaging consumes the Maven-built `att-cli` JAR rather than recompiling Java sources separately. Java 8+ remains the runtime baseline for the current CLI/distribution; #162 deliberately does not choose the future Server Java baseline. JDBC drivers are supplied in `lib/`; IBM MQ remains an optional runtime integration.

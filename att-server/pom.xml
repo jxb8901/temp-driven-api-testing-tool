@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent><groupId>att</groupId><artifactId>template-driven-api-testing-tool</artifactId><version>3.8.0</version><relativePath>../pom.xml</relativePath></parent>
+    <artifactId>att-server</artifactId>
+    <name>ATT Server (reserved)</name>
+    <description>Empty placeholder module reserved for future ATT Server work.</description>
+    <!-- No Java compiler baseline is selected by #162. A future Server issue may
+         choose Java 17, Java 21, or another baseline independently of att-cli. -->
+</project>

@@ -1,0 +1,16 @@
+name: att-${project.version}
+main: att.sh
+mainWindows: att.bat
+java: JDK 8+ runtime
+contents:
+  - att.sh
+  - att.bat
+  - lib/att-${project.version}.jar
+  - lib/
+  - config/
+  - templates/
+  - tools/
+  - testcase/
+  - sql/ (when present)
+  - docs/
+  - schemas/
