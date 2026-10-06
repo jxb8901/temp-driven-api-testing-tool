@@ -22,10 +22,13 @@ class WindowsLauncherTest {
         assertTrue(text.contains(";%M2_REPO%"));
     }
 
-    @Test void releaseBuildPackagesWindowsLauncher() throws Exception {
-        String text = new String(Files.readAllBytes(Paths.get("build.sh")), StandardCharsets.UTF_8);
-        assertTrue(text.contains("cp \"$ROOT_DIR/att.bat\" \"$PACKAGE_DIR/att.bat\""));
-        assertTrue(text.contains("cp \"$ROOT_DIR/att.bat\" \"$SOURCE_PACKAGE_DIR/att.bat\""));
-        assertTrue(text.contains("mainWindows: att.bat"));
+    @Test void releaseAssemblyPackagesWindowsLauncher() throws Exception {
+        String binary = new String(Files.readAllBytes(Paths.get("att-dist/src/assembly/binary.xml")), StandardCharsets.UTF_8);
+        String source = new String(Files.readAllBytes(Paths.get("att-dist/src/assembly/source.xml")), StandardCharsets.UTF_8);
+        String manifest = new String(Files.readAllBytes(Paths.get("att-dist/src/release/binary/RELEASE_MANIFEST.txt")), StandardCharsets.UTF_8);
+        assertTrue(binary.contains("<source>${project.basedir}/../att.bat</source>"));
+        assertTrue(binary.contains("<destName>att.bat</destName>"));
+        assertTrue(source.contains("<include>att.bat</include>"));
+        assertTrue(manifest.contains("mainWindows: att.bat"));
     }
 }

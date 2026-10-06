@@ -37,7 +37,8 @@ class MultiModuleLayoutTest {
         String build = read(root.resolve("build.sh"));
         assertFalse(build.contains("javac "), build);
         assertTrue(build.contains("att-dist/target/$PACKAGE_NAME.tar.gz"), build);
-        assertTrue(read(root.resolve("att.sh")).contains("att-cli/target/classes"));
+        assertTrue(read(root.resolve("att.sh")).contains("CLI_DIR=\"$ROOT_DIR/att-cli\""));
+        assertTrue(read(root.resolve("att.sh")).contains("$CLI_DIR/target/classes"));
     }
 
     @Test void cleanCannotDeleteAnyModuleSourceTree() throws Exception {
