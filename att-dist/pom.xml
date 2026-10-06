@@ -12,10 +12,10 @@
         <groupId>org.apache.maven.plugins</groupId><artifactId>maven-assembly-plugin</artifactId>
         <executions>
             <execution><id>binary-release</id><phase>package</phase><goals><goal>single</goal></goals><configuration>
-                <descriptors><descriptor>src/assembly/binary.xml</descriptor></descriptors><finalName>att-${project.version}</finalName><appendAssemblyId>false</appendAssemblyId><tarLongFileMode>posix</tarLongFileMode>
+                <descriptors><descriptor>src/assembly/binary.xml</descriptor></descriptors><finalName>att-${project.version}</finalName><appendAssemblyId>false</appendAssemblyId><attach>false</attach><tarLongFileMode>posix</tarLongFileMode>
             </configuration></execution>
             <execution><id>source-release</id><phase>package</phase><goals><goal>single</goal></goals><configuration>
-                <descriptors><descriptor>src/assembly/source.xml</descriptor></descriptors><finalName>att-${project.version}-src</finalName><appendAssemblyId>false</appendAssemblyId><tarLongFileMode>posix</tarLongFileMode>
+                <descriptors><descriptor>src/assembly/source.xml</descriptor></descriptors><finalName>att-${project.version}-src</finalName><appendAssemblyId>false</appendAssemblyId><attach>false</attach><tarLongFileMode>posix</tarLongFileMode>
             </configuration></execution>
         </executions>
     </plugin></plugins></build>
