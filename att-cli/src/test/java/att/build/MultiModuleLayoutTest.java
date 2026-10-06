@@ -52,10 +52,19 @@ class MultiModuleLayoutTest {
         String binary = read(root.resolve("att-dist/src/assembly/binary.xml"));
         assertTrue(binary.contains("<include>att:att-cli</include>"), binary);
         assertTrue(binary.contains("<outputFileNameMapping>att-${project.version}.jar</outputFileNameMapping>"), binary);
+
+        String distPom = read(root.resolve("att-dist/pom.xml"));
+        assertTrue(count(distPom, "<attach>false</attach>") == 2, distPom);
+
         String build = read(root.resolve("build.sh"));
         assertFalse(build.contains("javac "), build);
         assertFalse(build.contains("jar cf "), build);
         assertTrue(build.contains("att-dist/target/$PACKAGE_NAME.tar.gz"), build);
+        int outputDir = build.indexOf("mkdir -p \"$PACKAGE_DIR/output\"");
+        int finalRepack = build.indexOf("tar --no-xattrs -czf \"$BINARY_ARCHIVE\" \"$PACKAGE_NAME\"");
+        int finalExtract = build.indexOf("tar -xzf \"$BINARY_ARCHIVE\" -C \"$RELEASE_WORK\"", finalRepack);
+        int smoke = build.indexOf("./att.sh version | grep -Fx");
+        assertTrue(outputDir >= 0 && finalRepack > outputDir && finalExtract > finalRepack && smoke > finalExtract, build);
         assertTrue(read(root.resolve("att.sh")).contains("CLI_DIR=\"$ROOT_DIR/att-cli\""));
         assertTrue(read(root.resolve("att.sh")).contains("$CLI_DIR/target/classes"));
     }
@@ -69,6 +78,16 @@ class MultiModuleLayoutTest {
             assertThrows(IllegalArgumentException.class, () -> new GeneratedOutputCleaner().clean(root, config));
             assertTrue(Files.isDirectory(root.resolve(module)));
         }
+    }
+
+    private static int count(String value, String token) {
+        int count = 0;
+        int from = 0;
+        while ((from = value.indexOf(token, from)) >= 0) {
+            count++;
+            from += token.length();
+        }
+        return count;
     }
 
     private static String read(Path path) throws Exception {
