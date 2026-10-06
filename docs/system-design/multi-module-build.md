@@ -16,6 +16,12 @@ template-driven-api-testing-tool/
 
 `att-dist` is packaging-only. Its Maven assembly consumes the JAR already built by `att-cli`, adds runtime dependencies plus the existing package assets, and produces both `att-<version>.tar.gz` and `att-<version>-src.tar.gz`. Release packaging no longer recompiles application sources through a separate raw `javac` path.
 
+## Java compatibility is module-specific
+
+The current CLI remains Java 8-compatible. The parent defines the CLI-specific `att.cli.java=8` value, and `att-cli/pom.xml` explicitly applies it to the compiler. The parent does not define repository-wide `maven.compiler.source` or `maven.compiler.target` values.
+
+The empty `att-server` module intentionally declares no compiler baseline in #162. A future Server issue can choose Java 17, Java 21, or another justified runtime independently without requiring the current CLI to move off Java 8. #162 reserves that option; it does not choose or implement the Server Java version.
+
 Root runtime assets remain unchanged: `config/`, `templates/`, `tools/`, `testcase/`, `sql/`, `schemas/`, `docs/`, and `examples/`. PACKAGE_ROOT semantics and CLI discovery therefore remain unchanged.
 
 ## Developer and release flow
