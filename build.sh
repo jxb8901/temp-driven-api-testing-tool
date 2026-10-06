@@ -36,11 +36,19 @@ if [ -n "${IBM_MQ_JAR:-}" ]; then
   rm -f "$BINARY_ARCHIVE"
   (cd "$RELEASE_WORK" && COPYFILE_DISABLE=1 tar --no-xattrs -czf "$BINARY_ARCHIVE" "$PACKAGE_NAME")
 fi
-(cd "$PACKAGE_DIR" && ./att.sh version | grep -Fx "ATT V$VERSION" >/dev/null)
-(cd "$PACKAGE_DIR" && ./att.sh help >/dev/null)
-(cd "$PACKAGE_DIR" && ./att.sh debug >/dev/null)
-(cd "$PACKAGE_DIR" && ./att.sh load >/dev/null)
-(cd "$PACKAGE_DIR" && ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}" ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-build-placeholder}" PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-build-placeholder}" PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-build-placeholder}" ./att.sh validate --package)
+(
+  cd "$PACKAGE_DIR"
+  ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}"
+  ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-build-placeholder}"
+  PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-build-placeholder}"
+  PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-build-placeholder}"
+  export ORDERS_DB_USERNAME ORDERS_DB_PASSWORD PAYMENT_MQ_USERNAME PAYMENT_MQ_PASSWORD
+  ./att.sh version | grep -Fx "ATT V$VERSION" >/dev/null
+  ./att.sh help >/dev/null
+  ./att.sh debug >/dev/null
+  ./att.sh load >/dev/null
+  ./att.sh validate --package
+)
 cp "$BINARY_ARCHIVE" "$DIST_DIR/$PACKAGE_NAME.tar.gz"
 cp "$SOURCE_ARCHIVE" "$DIST_DIR/$SOURCE_PACKAGE_NAME.tar.gz"
 echo "$DIST_DIR/$PACKAGE_NAME.tar.gz"
