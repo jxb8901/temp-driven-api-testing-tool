@@ -119,7 +119,9 @@ public final class DebugEngine {
     }
 
     public Result run(ExecutionOptions options) throws Exception {
-        java.io.PrintStream cancellationOutput = "json".equals(options.format()) ? System.err : System.out;
+        java.io.PrintStream cancellationOutput = "machine".equals(options.format())
+                ? new java.io.PrintStream(new java.io.OutputStream() { @Override public void write(int value) { } })
+                : "json".equals(options.format()) ? System.err : System.out;
         String target = options.debugTargetType() + ":" + safeConsoleIdentity(options.debugTargetId());
         att.core.ConsoleCancellationHook cancellation = new att.core.ConsoleCancellationHook(cancellationOutput,
                 "[DEBUG] CANCELLED target=" + target);

@@ -3,10 +3,10 @@
 set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 if [ "${1:-}" = "clean" ]; then
-  rm -rf "$ROOT_DIR/target" "$ROOT_DIR/dist" "$ROOT_DIR/att-cli/target" "$ROOT_DIR/att-server/target" "$ROOT_DIR/att-dist/target"
+  rm -rf "$ROOT_DIR/target" "$ROOT_DIR/dist" "$ROOT_DIR/att-engine/target" "$ROOT_DIR/att-cli/target" "$ROOT_DIR/att-worker/target" "$ROOT_DIR/att-server/target" "$ROOT_DIR/att-dist/target"
   exit 0
 fi
-for required in pom.xml att-cli/pom.xml att-cli/src/main/java att-server/pom.xml att-dist/pom.xml config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md; do
+for required in pom.xml att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-server/pom.xml att-dist/pom.xml config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md; do
   if [ ! -e "$ROOT_DIR/$required" ]; then echo "Missing required package path: $ROOT_DIR/$required" >&2; exit 2; fi
 done
 VERSION="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' "$ROOT_DIR/pom.xml" | head -n 1)"

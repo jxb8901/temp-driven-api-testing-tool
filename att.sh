@@ -16,7 +16,8 @@ if [ -n "$APP_JAR" ]; then
   exec java -cp "$CP" att.FrameworkRunner "$@"
 fi
 CLI_DIR="$ROOT_DIR/att-cli"
-CP="$CLI_DIR/target/classes:$CLI_DIR/target/test-classes"
+ENGINE_DIR="$ROOT_DIR/att-engine"
+CP="$CLI_DIR/target/classes:$CLI_DIR/target/test-classes:$ENGINE_DIR/target/classes"
 for jar in \
   "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1.jar \
   "$HOME"/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.17.2/jackson-annotations-2.17.2.jar \
@@ -42,8 +43,10 @@ for jar in \
 for jar in "$ROOT_DIR"/lib/*.jar; do [ -f "$jar" ] || continue; CP="$CP:$jar"; done
 NEEDS_BUILD=false
 BUILD_MARKER="$CLI_DIR/target/classes/att-build.properties"
-if [ ! -f "$BUILD_MARKER" ]; then NEEDS_BUILD=true
-elif find "$CLI_DIR/src/main/java" -name '*.java' -newer "$BUILD_MARKER" -print -quit | grep -q .; then NEEDS_BUILD=true; fi
+ENGINE_BUILD_MARKER="$ENGINE_DIR/target/classes/att-build.properties"
+if [ ! -f "$BUILD_MARKER" ] || [ ! -f "$ENGINE_BUILD_MARKER" ]; then NEEDS_BUILD=true
+elif find "$CLI_DIR/src/main/java" "$ENGINE_DIR/src/main/java" -name '*.java' -newer "$BUILD_MARKER" -print -quit | grep -q .; then NEEDS_BUILD=true
+elif find "$ENGINE_DIR/src/main/java" -name '*.java' -newer "$ENGINE_BUILD_MARKER" -print -quit | grep -q .; then NEEDS_BUILD=true; fi
 if [ "$NEEDS_BUILD" = true ]; then
   echo "Compiling ATT sources..."
   if command -v mvn >/dev/null 2>&1; then

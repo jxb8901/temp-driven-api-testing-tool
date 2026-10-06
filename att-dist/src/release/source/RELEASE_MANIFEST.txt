@@ -2,12 +2,18 @@ name: att-${project.version}-src
 main: att.sh
 mainWindows: att.bat
 modules:
-  - att-cli/      current ATT CLI/runtime application
+  - att-engine/   reusable execution engine and typed API
+  - att-cli/      command-line adapter
+  - att-worker/   one-job JSON protocol adapter
   - att-server/   empty placeholder for future ATT Server work
   - att-dist/     release packaging
 contents:
+  - att-engine/src/
+  - att-engine/pom.xml
   - att-cli/src/
   - att-cli/pom.xml
+  - att-worker/src/
+  - att-worker/pom.xml
   - att-server/pom.xml
   - att-dist/pom.xml
   - templates/

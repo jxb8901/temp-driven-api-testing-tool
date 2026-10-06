@@ -83,7 +83,9 @@ public class FrameworkEngine {
                 verbose(options, "[RUN] queued: waiting for the active run to complete");
             }
         });
-        java.io.PrintStream cancellationOutput = "json".equals(options.format()) ? System.err : System.out;
+        java.io.PrintStream cancellationOutput = "machine".equals(options.format())
+                ? new java.io.PrintStream(new java.io.OutputStream() { @Override public void write(int value) { } })
+                : "json".equals(options.format()) ? System.err : System.out;
         ConsoleCancellationHook cancellation = new ConsoleCancellationHook(cancellationOutput,
                 "[RUN] CANCELLED runId=" + runId);
         try {

@@ -1,0 +1,42 @@
+# ATT Worker protocol v1
+
+`att-worker` is an internal process adapter for future ATT Server work. It is not a new public CLI command and does not implement ATT Server. Each process accepts one JSON request on stdin, invokes one typed `AttService` operation directly, writes JSON Lines records to stdout, and exits.
+
+## Request
+
+The request is a JSON object. `protocolVersion` must equal `att-worker/v1`; unsupported versions are rejected with a `DIAGNOSTIC` followed by an `INVALID` `RESULT`. `jobId` identifies all events for this process. `command` is one of `run`, `debug`, `load`, `validate`, or `snapshot`. `packageRoot` is required and is passed explicitly to the engine, independently of the process working directory.
+
+Common optional fields are `config`, `environment`, `outputDirectory`, and `runId`. Relative config, suite, scenario, and output paths are interpreted by the engine relative to the supplied package root. `target` contains `type` and `id` for Debug or `load` without a scenario. `suites`, `suiteDirectory`, `caseIds`, `tags`, `excludeTags`, and `all` select Run, Validate, or Snapshot input. `load` contains optional policy overrides such as `users`, `arrivalRate`, `duration`, and `maxConcurrent`; `overrides` carries typed input/argument/variable assignments using the same safe value syntax accepted by ATT.
+
+Example:
+
+```json
+{
+  "protocolVersion": "att-worker/v1",
+  "jobId": "J20261006-000123",
+  "command": "debug",
+  "packageRoot": "/srv/att/packages/payment",
+  "environment": "SIT",
+  "target": { "type": "flow", "id": "payment.invoke.v1" }
+}
+```
+
+## Events
+
+Every event is one JSON object followed by a newline. Each event includes `type` and, when known, `jobId`. Stable v1 types are:
+
+| Type | Meaning |
+| --- | --- |
+| `STATUS` | Worker lifecycle, initially `RUNNING`. |
+| `LOG` | A safe, structured execution log message. |
+| `PROGRESS` | A machine-readable progress observation. |
+| `DIAGNOSTIC` | A structured request, configuration, validation, or runtime problem. |
+| `RESULT` | The canonical operation result, status, and process exit code. |
+
+The first implementation always emits lifecycle status and a final result; it emits a diagnostic for rejected or failed operations. CLI-formatted text is never written to Worker stdout. A request that starts successfully has a structured terminal result even when its ATT operation fails. Bootstrap parse errors are also represented as protocol events once stdout has been initialized.
+
+## Process and output boundary
+
+Run the packaged Worker with `java -cp 'lib/*' att.worker.WorkerMain`. Terminating that process cancels the job boundary. Engine resources use their normal cleanup paths during graceful termination; a future server may escalate to forced termination after its configured timeout. Package-authored files are the caller's responsibility and are addressed only below `packageRoot` or an explicitly supplied output location.
+
+The Worker artifact is shipped for future Server integration, but the supported end-user entry points remain `att.sh` and `att.bat`.

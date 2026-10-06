@@ -41,7 +41,7 @@ public final class GeneratedOutputCleaner {
             throw new IllegalArgumentException("clean refuses a directory outside the ATT package: " + target);
         }
         if (target.equals(root.resolve("build")) || target.equals(root.resolve("target")) || target.equals(root.resolve("dist"))) throw new IllegalArgumentException("clean refuses a shared build/development directory: " + target);
-        for (String sourceDirectory : new String[]{"config", "testcase", "templates", "tools", "docs", "schemas", "lib", "src", "att-cli", "att-server", "att-dist", ".git"}) {
+        for (String sourceDirectory : new String[]{"config", "testcase", "templates", "tools", "docs", "schemas", "lib", "src", "att-engine", "att-cli", "att-worker", "att-server", "att-dist", ".git"}) {
             if (target.startsWith(root.resolve(sourceDirectory))) {
                 throw new IllegalArgumentException("clean refuses an ATT source directory: " + target);
             }

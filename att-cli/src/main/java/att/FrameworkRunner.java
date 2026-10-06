@@ -14,6 +14,12 @@ import att.report.ReportRegenerator;
 import att.validation.PackageValidator;
 import att.validation.DiagnosticCodes;
 import att.snapshot.SnapshotCommand;
+import att.api.AttService;
+import att.api.DefaultAttService;
+import att.api.DebugRequest;
+import att.api.DebugResult;
+import att.api.SnapshotRequest;
+import att.api.SnapshotResult;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -50,22 +56,25 @@ public final class FrameworkRunner {
                     CliDiscovery.printDebug(CliDiscovery.debug(root, config), options.format());
                     return;
                 }
-                att.debug.DebugEngine.Result debug = new att.debug.DebugEngine(root, config).run(options);
+                AttService service = new DefaultAttService();
+                DebugResult debug = service.debug(new DebugRequest(root, options.configPath(), options.environment(),
+                        options.outputDirectory(), options.runId(), options.debugTargetType(), options.debugTargetId(),
+                        options.debugInput(), options.unsafeFailureDetails()));
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
-                    output.put("status", debug.status().name()); output.put("exitCode", debug.exitCode());
+                    output.put("status", debug.status()); output.put("exitCode", debug.exitCode());
                     output.put("failureDetailMode", options.unsafeFailureDetails() ? "local-unsafe" : "safe-default");
-                    output.put("durationMs", debug.durationMs()); output.put("log", att.core.PathPresentation.displayPath(debug.logPath(), root));
-                    output.put("result", att.core.PathPresentation.displayPath(debug.resultPath(), root)); System.out.println(att.validation.JsonSupport.write(output));
+                    output.put("durationMs", debug.durationMs()); output.put("log", cliDisplayPath(debug.paths().get("log"), root));
+                    output.put("result", cliDisplayPath(debug.paths().get("result"), root)); System.out.println(att.validation.JsonSupport.write(output));
                 } else {
-                    String consoleStatus = debug.status() == att.core.ResultStatus.INVALID ? "ERROR" : debug.status().name();
+                    String consoleStatus = "INVALID".equals(debug.status()) ? "ERROR" : debug.status();
                     System.out.println("DEBUG " + consoleStatus + " | Target: " + options.debugTargetType() + " " + options.debugTargetId()
                             + " | Duration: " + debug.durationMs() + "ms");
                     if (!options.quiet()) {
-                        System.out.println("Log: " + att.core.PathPresentation.displayPath(debug.logPath(), root));
-                        System.out.println("Result: " + att.core.PathPresentation.displayPath(debug.resultPath(), root));
+                        System.out.println("Log: " + cliDisplayPath(debug.paths().get("log"), root));
+                        System.out.println("Result: " + cliDisplayPath(debug.paths().get("result"), root));
                     }
-                    if (debug.diagnostic() != null) System.err.println(debug.diagnostic().format());
+                    if (!debug.diagnostics().isEmpty()) System.err.println(att.validation.DiagnosticRenderer.validation(cliDiagnostic(debug.diagnostics().get(0))));
                 }
                 if (debug.exitCode() != 0) System.exit(debug.exitCode());
                 return;
@@ -111,9 +120,10 @@ public final class FrameworkRunner {
                 return;
             }
             if ("snapshot".equals(options.command())) {
-                for (Path snapshot : new SnapshotCommand().generate(root, config, options)) {
-                    System.out.println("Snapshot: " + root.relativize(snapshot.toAbsolutePath().normalize()));
-                }
+                SnapshotResult result = new DefaultAttService().snapshot(new SnapshotRequest(root, options.configPath(),
+                        options.environment(), options.suitePaths(), options.suiteDirectory(), options.caseIds(), options.all()));
+                @SuppressWarnings("unchecked") java.util.List<String> snapshots = (java.util.List<String>) result.summary().get("paths");
+                for (String snapshot : snapshots) System.out.println("Snapshot: " + root.relativize(Paths.get(snapshot).toAbsolutePath().normalize()));
                 return;
             }
             if ("build".equals(options.command())) {
@@ -166,7 +176,7 @@ public final class FrameworkRunner {
             }
             RunSummary summary = new FrameworkEngine(root, config).run(options, validation.diagnostics, profile);
             if ("json".equals(options.format())) {
-                java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>(); output.put("total", summary.total()); output.put("passed", summary.passed()); output.put("failed", summary.failed()); output.put("error", summary.error()); output.put("skipped", summary.skipped()); output.put("invalid", summary.invalid()); output.put("report", att.core.PathPresentation.displayPath(summary.reportPath(), root)); System.out.println(att.validation.JsonSupport.write(output));
+                java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>(); output.put("status", summary.status().name()); output.put("exitCode", summary.exitCode()); output.put("total", summary.total()); output.put("passed", summary.passed()); output.put("failed", summary.failed()); output.put("error", summary.error()); output.put("skipped", summary.skipped()); output.put("invalid", summary.invalid()); output.put("report", att.core.PathPresentation.displayPath(summary.reportPath(), root)); System.out.println(att.validation.JsonSupport.write(output));
             } else if (!options.quiet()) {
                 System.out.printf(options.verbose() ? "[4/4] Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n" : "Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n",
                         summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid());
@@ -211,6 +221,20 @@ public final class FrameworkRunner {
         output.put("valid", false);
         output.putAll(displayed);
         return att.validation.JsonSupport.write(output);
+    }
+
+    private static att.validation.Diagnostic cliDiagnostic(java.util.Map<String, Object> value) {
+        return new att.validation.Diagnostic(String.valueOf(value.get("code")),
+                att.validation.Diagnostic.Severity.valueOf(String.valueOf(value.get("severity"))),
+                String.valueOf(value.get("message")), stringValue(value.get("file")), stringValue(value.get("field")),
+                stringValue(value.get("sheet")), integerValue(value.get("row")), integerValue(value.get("column")),
+                stringValue(value.get("template")), stringValue(value.get("action")), stringValue(value.get("suggestion")));
+    }
+
+    private static String stringValue(Object value) { return value == null ? null : String.valueOf(value); }
+    private static Integer integerValue(Object value) { return value instanceof Number ? ((Number) value).intValue() : null; }
+    private static String cliDisplayPath(String value, Path root) {
+        return value == null ? null : att.core.PathPresentation.displayPath(Paths.get(value), root);
     }
 
     @SuppressWarnings("unchecked")

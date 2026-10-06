@@ -9,7 +9,9 @@
     <packaging>pom</packaging>
     <name>ATT Parent</name>
     <modules>
+        <module>att-engine</module>
         <module>att-cli</module>
+        <module>att-worker</module>
         <module>att-server</module>
         <module>att-dist</module>
     </modules>

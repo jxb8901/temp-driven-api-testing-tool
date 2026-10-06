@@ -164,6 +164,34 @@ public final class ExecutionOptions {
         this.variableOverrides = Collections.unmodifiableList(new ArrayList<String>(variableOverrides));
     }
 
+    /** Creates execution intent from typed callers. This factory accepts no argv or presentation settings. */
+    public static ExecutionOptions forApi(String command, Path configPath, String environment,
+                                          List<Path> suites, Path suiteDirectory, Set<String> caseIds,
+                                          Set<String> tags, Set<String> excludeTags, String runId, boolean all,
+                                          boolean rerunFailed, boolean dryRun, boolean failFast, Path outputDirectory,
+                                          String validationScope, String debugTargetType, String debugTargetId,
+                                          Path debugInput, boolean unsafeFailureDetails, Path loadScenario,
+                                          String loadUsers, String loadArrivalRate, String loadWarmup,
+                                          String loadRampUp, String loadDuration, String loadRampDown,
+                                          String loadThinkTime, String loadMaxConcurrent, String loadOverloadPolicy,
+                                          List<String> variableOverrides) {
+        if (!("run".equals(command) || "validate".equals(command) || "snapshot".equals(command)
+                || "debug".equals(command) || "load".equals(command)))
+            throw new IllegalArgumentException("Unsupported engine operation: " + command);
+        return new ExecutionOptions(command, configPath == null ? Paths.get("config/config.yaml") : configPath,
+                suites == null ? Collections.<Path>emptyList() : suites, suiteDirectory,
+                caseIds == null ? Collections.<String>emptySet() : caseIds,
+                tags == null ? Collections.<String>emptySet() : tags,
+                excludeTags == null ? Collections.<String>emptySet() : excludeTags,
+                runId == null ? "" : runId, all, rerunFailed, dryRun, failFast, outputDirectory,
+                "machine", true, false, validationScope == null ? "selected" : validationScope,
+                defaultCiOutputs(), "reject", false, false, debugTargetType, debugTargetId, debugInput,
+                loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration,
+                loadRampDown, loadThinkTime, loadMaxConcurrent, loadOverloadPolicy, environment,
+                variableOverrides == null ? Collections.<String>emptyList() : variableOverrides,
+                unsafeFailureDetails);
+    }
+
     public static ExecutionOptions parse(String[] args) {
         if (args.length == 0 || "--help".equals(args[0]) || "help".equals(args[0])) return empty("help");
         String command = args[0].startsWith("--") ? "run" : args[0];
