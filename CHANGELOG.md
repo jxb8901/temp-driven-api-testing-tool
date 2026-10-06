@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.8.0 - 2026-10-06
+
+- Restructure ATT into the minimal multi-module Maven layout with `att-cli`, empty `att-server`, and packaging-only `att-dist` (#162).
+- Keep the current CLI/distribution on Java 8-compatible bytecode while allowing future modules to choose newer Java baselines independently.
+- Upgrade ATT product version to 3.8.0.
+
 ## 3.7.4 - 2026-10-05
 
 - Unify final-value coercion for native helper and configured Tool arguments, including nested file-content and pure built-in results; add optional declared Tool argument types (#153).
