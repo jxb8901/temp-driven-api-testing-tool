@@ -22,7 +22,7 @@ jobs:
   build-test:
     name: Java 8 / Maven verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -51,11 +51,14 @@ jobs:
       - name: Verify documentation release gate
         run: python3 tools/verify_documentation.py
 
+      - name: Verify assembled release
+        run: ./build.sh
+
       - name: Upload test reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: surefire-reports-${{ github.run_id }}
-          path: target/surefire-reports/
+          path: att-cli/target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 7

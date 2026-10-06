@@ -1,0 +1,26 @@
+name: att-${project.version}-src
+main: att.sh
+mainWindows: att.bat
+modules:
+  - att-cli/      current ATT CLI/runtime application
+  - att-server/   empty placeholder for future ATT Server work
+  - att-dist/     release packaging
+contents:
+  - att-cli/src/
+  - att-cli/pom.xml
+  - att-server/pom.xml
+  - att-dist/pom.xml
+  - templates/
+  - tools/
+  - testcase/
+  - sql/ (when present)
+  - config/
+  - docs/
+  - schemas/
+  - examples/
+  - README.md
+  - CHANGELOG.md
+  - pom.xml
+  - att.sh
+  - att.bat
+  - build.sh

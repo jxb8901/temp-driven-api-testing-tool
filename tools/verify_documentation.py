@@ -280,7 +280,7 @@ def check_schema_references():
 
 
 def check_cli_documentation():
-    source = read(ROOT / "src/main/java/att/core/ExecutionOptions.java")
+    source = read(ROOT / "att-cli/src/main/java/att/core/ExecutionOptions.java")
     supported_options = set(re.findall(r'"(--[a-z][a-z0-9-]*)"', source))
     public_commands = set(("run", "validate", "snapshot", "docs", "report",
                            "build", "clean", "version", "debug", "load", "help"))
@@ -394,9 +394,9 @@ def check_critical_examples():
     if call_group.is_file() and "call:" not in read(call_group):
         fail("config/tools/orders-db.yaml must remain a call-backed Tool documentation example")
 
-    test = ROOT / "src/test/java/att/docs/DocumentationExamplesTest.java"
+    test = ROOT / "att-cli/src/test/java/att/docs/DocumentationExamplesTest.java"
     if not test.is_file():
-        fail("missing Java documentation example regression test: src/test/java/att/docs/DocumentationExamplesTest.java")
+        fail("missing Java documentation example regression test: att-cli/src/test/java/att/docs/DocumentationExamplesTest.java")
     else:
         test_text = read(test)
         for rel in ("testcase/payment2.xlsx", "templates/PAYMENT_INVOKE/debug.yaml",

@@ -1,35 +1,22 @@
 @echo off
 rem Author: Jeffrey + ChatGPT
 setlocal EnableExtensions DisableDelayedExpansion
-
 set "ROOT_DIR=%~dp0"
 cd /d "%ROOT_DIR%" || exit /b 2
-
 where java >nul 2>&1
-if errorlevel 1 (
-  echo Java is required. Please install JDK 8 or newer. 1>&2
-  exit /b 2
-)
-
+if errorlevel 1 (echo Java is required. Please install JDK 8 or newer. 1>&2& exit /b 2)
 set "APP_JAR="
 for %%F in ("%ROOT_DIR%lib\att-*.jar") do if exist "%%~fF" if not defined APP_JAR set "APP_JAR=%%~fF"
 if defined APP_JAR goto packaged
-
-rem Source-tree mode. Compile when Maven is available; otherwise use existing classes.
 where mvn >nul 2>&1
 if errorlevel 1 goto source_classes
 echo Compiling ATT sources...
-call mvn -q -DskipTests compile
+call mvn -q -DskipTests -pl att-cli -am compile
 if errorlevel 1 exit /b 1
-
 :source_classes
-if not exist "%ROOT_DIR%target\classes\att\FrameworkRunner.class" (
-  echo Maven is required to compile ATT sources. Build a release package first or install Maven. 1>&2
-  exit /b 2
-)
-
+if not exist "%ROOT_DIR%att-cli\target\classes\att\FrameworkRunner.class" (echo Maven is required to compile ATT sources. Build a release package first or install Maven. 1>&2& exit /b 2)
 if not defined M2_REPO set "M2_REPO=%USERPROFILE%\.m2\repository"
-set "CP=%ROOT_DIR%target\classes;%ROOT_DIR%target\test-classes"
+set "CP=%ROOT_DIR%att-cli\target\classes;%ROOT_DIR%att-cli\target\test-classes"
 set "CP=%CP%;%M2_REPO%\commons-io\commons-io\2.16.1\commons-io-2.16.1.jar"
 set "CP=%CP%;%M2_REPO%\com\fasterxml\jackson\core\jackson-annotations\2.17.2\jackson-annotations-2.17.2.jar"
 set "CP=%CP%;%M2_REPO%\com\fasterxml\jackson\core\jackson-core\2.17.2\jackson-core-2.17.2.jar"
@@ -52,10 +39,8 @@ set "CP=%CP%;%M2_REPO%\com\github\virtuald\curvesapi\1.08\curvesapi-1.08.jar"
 set "CP=%CP%;%M2_REPO%\org\yaml\snakeyaml\2.2\snakeyaml-2.2.jar"
 set "CP=%CP%;%M2_REPO%\org\apache\logging\log4j\log4j-api\2.21.1\log4j-api-2.21.1.jar"
 set "CP=%CP%;%ROOT_DIR%lib\*"
-
 java -cp "%CP%" att.FrameworkRunner %*
 exit /b %ERRORLEVEL%
-
 :packaged
 java -cp "%ROOT_DIR%lib\*" att.FrameworkRunner %*
 exit /b %ERRORLEVEL%

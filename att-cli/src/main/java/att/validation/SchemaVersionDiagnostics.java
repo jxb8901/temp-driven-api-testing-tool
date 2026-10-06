@@ -19,7 +19,7 @@ import java.util.Set;
 /** Discovers valid package descriptors that use a registered historical schema. */
 public final class SchemaVersionDiagnostics {
     private static final Set<String> EXCLUDED_DIRECTORIES = Collections.unmodifiableSet(
-            new LinkedHashSet<String>(Arrays.asList(".git", ".codex", "docs", "dist", "output", "schemas", "src", "target")));
+            new LinkedHashSet<String>(Arrays.asList(".git", ".codex", "docs", "dist", "output", "schemas", "src", "target", "att-cli", "att-server", "att-dist")));
     private SchemaVersionDiagnostics() { }
 
     public static List<Diagnostic> collect(final Path projectRoot) {

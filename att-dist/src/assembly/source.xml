@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.2.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 https://maven.apache.org/xsd/assembly-2.2.0.xsd">
+    <id>source</id><formats><format>tar.gz</format></formats><includeBaseDirectory>true</includeBaseDirectory><baseDirectory>att-${project.version}-src</baseDirectory>
+    <files>
+        <file><source>${project.basedir}/../att.sh</source><outputDirectory>/</outputDirectory><destName>att.sh</destName><fileMode>0755</fileMode></file>
+        <file><source>${project.basedir}/../build.sh</source><outputDirectory>/</outputDirectory><destName>build.sh</destName><fileMode>0755</fileMode></file>
+        <file><source>${project.basedir}/src/release/source/RELEASE_MANIFEST.txt</source><outputDirectory>/</outputDirectory><destName>RELEASE_MANIFEST.txt</destName><fileMode>0644</fileMode><filtered>true</filtered></file>
+    </files>
+    <fileSets>
+        <fileSet><directory>${project.basedir}/..</directory><outputDirectory>/</outputDirectory><useDefaultExcludes>true</useDefaultExcludes>
+            <includes>
+                <include>.gitignore</include><include>pom.xml</include><include>att.bat</include><include>README.md</include><include>CHANGELOG.md</include>
+                <include>att-cli/**</include><include>att-server/**</include><include>att-dist/**</include>
+                <include>config/**</include><include>templates/**</include><include>testcase/**</include><include>sql/**</include><include>docs/**</include><include>schemas/**</include><include>examples/**</include>
+            </includes>
+            <excludes><exclude>**/target/**</exclude><exclude>dist/**</exclude><exclude>output/**</exclude><exclude>report/**</exclude><exclude>logs/**</exclude></excludes>
+        </fileSet>
+        <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>tools</outputDirectory><excludes><exclude>**/*.sh</exclude></excludes></fileSet>
+        <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>tools</outputDirectory><includes><include>**/*.sh</include></includes><fileMode>0755</fileMode></fileSet>
+    </fileSets>
+</assembly>
