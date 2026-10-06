@@ -25,6 +25,24 @@
     <build>
         <finalName>att-${project.version}</finalName>
         <resources><resource><directory>src/main/resources</directory><filtering>true</filtering></resource></resources>
-        <plugins><plugin><groupId>org.codehaus.mojo</groupId><artifactId>exec-maven-plugin</artifactId><configuration><mainClass>att.FrameworkRunner</mainClass></configuration></plugin></plugins>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId>
+                <configuration><source>${att.cli.java}</source><target>${att.cli.java}</target><fork>true</fork></configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
+                    <environmentVariables>
+                        <ORDERS_DB_USERNAME>profile-test</ORDERS_DB_USERNAME>
+                        <ORDERS_DB_PASSWORD>profile-test</ORDERS_DB_PASSWORD>
+                        <PAYMENT_MQ_USERNAME>profile-test</PAYMENT_MQ_USERNAME>
+                        <PAYMENT_MQ_PASSWORD>profile-test</PAYMENT_MQ_PASSWORD>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+            <plugin><groupId>org.codehaus.mojo</groupId><artifactId>exec-maven-plugin</artifactId><configuration><mainClass>att.FrameworkRunner</mainClass></configuration></plugin>
+        </plugins>
     </build>
 </project>
