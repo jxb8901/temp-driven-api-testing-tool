@@ -45,7 +45,8 @@ public final class FrameworkRunner {
                 AttService service = new DefaultAttService();
                 DebugResult debug = service.debug(new DebugRequest(root, options.configPath(), options.environment(),
                         options.outputDirectory(), null, options.debugTargetType(), options.debugTargetId(),
-                        options.debugInput(), options.unsafeFailureDetails(), cliObserver(options, root), options.debugId()));
+                        options.debugInput(), options.unsafeFailureDetails(), cliObserver(options, root),
+                        options.debugId(), options.variableOverrides()));
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
                     output.put("executionId", debug.executionId()); output.put("status", debug.status()); output.put("exitCode", debug.exitCode());

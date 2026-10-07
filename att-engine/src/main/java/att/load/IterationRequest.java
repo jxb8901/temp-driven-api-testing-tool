@@ -127,6 +127,12 @@ public final class IterationRequest {
         return preserveMix(new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs, directory,
                 directory != null, retainFailureEvidence, workloadId, captureFailureLog, testdataWaitAllowed, testdataOrdinal, true));
     }
+    public IterationRequest withRunStartedAt(Instant value) {
+        if (value == null) throw new IllegalArgumentException("Outer Load run start is required");
+        return preserveMix(new IterationRequest(runId, value, model, iterationId, iteration, phase, startedAt, userId, inputs,
+                outputDirectory, retainSuccessEvidence, retainFailureEvidence, workloadId, captureFailureLog,
+                testdataWaitAllowed, testdataOrdinal, true));
+    }
     public IterationRequest withFailureEvidence(boolean enabled) {
         return preserveMix(new IterationRequest(runId, runStartedAt, model, iterationId, iteration, phase, startedAt, userId, inputs,
                 outputDirectory, retainSuccessEvidence, enabled, workloadId, enabled, testdataWaitAllowed, testdataOrdinal, true));

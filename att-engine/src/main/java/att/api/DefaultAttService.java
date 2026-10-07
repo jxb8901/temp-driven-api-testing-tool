@@ -95,7 +95,7 @@ public final class DefaultAttService implements AttService {
         long started=System.nanoTime();
         String requestedDebugId = request.debugId() == null || request.debugId().trim().isEmpty()
                 ? request.runId() : request.debugId();
-        ExecutionOptions opts=options(request,"debug",null,null,null,null,null,false,false,false,false,"selected",request.targetType(),request.targetId(),request.input(),request.unsafeFailureDetails(),null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList())
+        ExecutionOptions opts=options(request,"debug",null,null,null,null,null,false,false,false,false,"selected",request.targetType(),request.targetId(),request.input(),request.unsafeFailureDetails(),null,null,null,null,null,null,null,null,null,null,request.overrides())
                 .withRunId(requestedDebugId).withObserver(request.observer());
         DebugEngine.Result result=new DebugEngine(request.packageRoot(),config(request)).run(opts);
         List<Diagnostic> ds=result.diagnostic()==null?Collections.<Diagnostic>emptyList():Collections.singletonList(result.diagnostic().toDiagnostic());
@@ -133,10 +133,11 @@ public final class DefaultAttService implements AttService {
         if(scenario.policyOnly()) throw new IllegalArgumentException("Load descriptor is policy-only and cannot be executed directly");
         LoadTarget target=null; if(!scenario.coordinatorRequired()){target=new LoadTargetResolver(request.packageRoot(),cfg).resolve(scenario);new LoadTargetValidator(request.packageRoot(),cfg).validate(scenario,target);}
         profile.endAccumulated("validationMs",validationPhase);
+        att.core.ExecutionIdentitySeed identitySeed=att.core.ExecutionIdentitySeed.now();
         String fallback="load-"+System.currentTimeMillis();
         String id=request.runId()==null||request.runId().trim().isEmpty()
                 ? att.core.ExecutionIdentityFormat.runId(cfg.run().runIdFormat(), fallback, request.packageRoot(),
-                        "load", scenario.source())
+                        "load", scenario.source(), identitySeed.startedAt())
                 : att.core.IdentifierValidator.runId(request.runId());
         Path outputRoot=(request.outputDirectory()==null?request.packageRoot().resolve(cfg.outputDirectory()):request.packageRoot().resolve(request.outputDirectory())).toAbsolutePath().normalize();
         Path loadRoot=outputRoot.resolve("load"); Path runDir=att.core.IdentifierValidator.strictChild(loadRoot,id,"Load run directory");
@@ -150,8 +151,8 @@ public final class DefaultAttService implements AttService {
         LoadRunResult result; Map<String,Object> resourceMetrics;
         long executionPhase=profile.begin();
         try(LoadRunResources resources=new LoadRunResources(request.packageRoot(),cfg)){
-            if(scenario.coordinatorRequired()) result=LoadRunCoordinator.runFrom(request.packageRoot(),cfg,scenario,resources,id,evidence,outputRoot);
-            else { IterationExecutor iterations=new IterationExecutor(request.packageRoot(),cfg,target,resources,outputRoot); LoadScheduler scheduler=scenario.model()==LoadScenario.Model.CLOSED?new ClosedVuScheduler(scenario,iterations,id,evidence,outputRoot):new FixedArrivalRateScheduler(scenario,iterations,id,evidence,outputRoot); try{result=scheduler.run();}finally{scheduler.close();} }
+            if(scenario.coordinatorRequired()) result=LoadRunCoordinator.runFrom(request.packageRoot(),cfg,scenario,resources,id,evidence,outputRoot,identitySeed.startedAt());
+            else { IterationExecutor iterations=new IterationExecutor(request.packageRoot(),cfg,target,resources,outputRoot,null,identitySeed.startedAt()); LoadScheduler scheduler=scenario.model()==LoadScenario.Model.CLOSED?new ClosedVuScheduler(scenario,iterations,id,evidence,outputRoot):new FixedArrivalRateScheduler(scenario,iterations,id,evidence,outputRoot); try{result=scheduler.run();}finally{scheduler.close();} }
             resourceMetrics=resources.metrics();
         }
         profile.end("loadExecutionMs",executionPhase);

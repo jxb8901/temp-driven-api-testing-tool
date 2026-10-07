@@ -26,6 +26,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
     private final Path outputRoot;
     private final String runId;
     private final LoadEvidenceStore evidenceStore;
+    private final Instant runStartedAt;
     private final Map<String, LoadScheduler> schedulers = new LinkedHashMap<String, LoadScheduler>();
     private final Map<String, LoadMetrics> mixCollectors = new java.util.concurrent.ConcurrentHashMap<String, LoadMetrics>();
     private final Map<String, java.util.concurrent.atomic.AtomicLong> mixSelections = new java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>();
@@ -38,13 +39,19 @@ public final class LoadRunCoordinator implements AutoCloseable {
         Path root = seedExecutor.projectRoot();
         FrameworkConfig config = seedExecutor.config();
         return runFrom(root, config, scenario, seedExecutor.resources(), runId, evidenceStore,
-                outputRoot == null ? seedExecutor.outputRoot() : outputRoot);
+                outputRoot == null ? seedExecutor.outputRoot() : outputRoot, null);
     }
 
     /** Resolves every workload target before scheduling without requiring a synthetic seed target. */
     public static LoadRunResult runFrom(Path projectRoot, FrameworkConfig config, LoadScenario scenario,
                                         LoadRunResources resources, String runId,
                                         LoadEvidenceStore evidenceStore, Path outputRoot) throws Exception {
+        return runFrom(projectRoot, config, scenario, resources, runId, evidenceStore, outputRoot, null);
+    }
+
+    public static LoadRunResult runFrom(Path projectRoot, FrameworkConfig config, LoadScenario scenario,
+                                        LoadRunResources resources, String runId,
+                                        LoadEvidenceStore evidenceStore, Path outputRoot, Instant runStartedAt) throws Exception {
         Path root = projectRoot.toAbsolutePath().normalize();
         Map<String, LoadTarget> targets = new LinkedHashMap<String, LoadTarget>();
         LoadTargetResolver resolver = new LoadTargetResolver(root, config);
@@ -66,7 +73,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
         }
         try (LoadRunCoordinator coordinator = new LoadRunCoordinator(root, config, scenario, targets,
                 resources, outputRoot == null ? root.resolve(config.outputDirectory()) : outputRoot,
-                runId, evidenceStore)) {
+                runId, evidenceStore, runStartedAt)) {
             return coordinator.run();
         }
     }
@@ -74,6 +81,12 @@ public final class LoadRunCoordinator implements AutoCloseable {
     public LoadRunCoordinator(Path projectRoot, FrameworkConfig config, LoadScenario scenario,
                               Map<String, LoadTarget> targets, LoadRunResources resources,
                               Path outputRoot, String runId, LoadEvidenceStore evidenceStore) {
+        this(projectRoot, config, scenario, targets, resources, outputRoot, runId, evidenceStore, null);
+    }
+
+    public LoadRunCoordinator(Path projectRoot, FrameworkConfig config, LoadScenario scenario,
+                              Map<String, LoadTarget> targets, LoadRunResources resources,
+                              Path outputRoot, String runId, LoadEvidenceStore evidenceStore, Instant runStartedAt) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
         this.config = config;
         this.scenario = scenario;
@@ -82,6 +95,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
         this.outputRoot = outputRoot.toAbsolutePath().normalize();
         this.runId = runId;
         this.evidenceStore = evidenceStore;
+        this.runStartedAt = runStartedAt;
         int expectedTargets = 0; for (LoadWorkload workload : scenario.workloads()) expectedTargets += workload.mixed() ? workload.mix().size() : 1;
         if (targets.size() != expectedTargets)
             throw new IllegalArgumentException("Every workload must have exactly one validated target before scheduling");
@@ -133,7 +147,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
                             sharedSelections = resolver;
                         } else resolver = sharedSelections.forLoadMapping(workload.testdata(), target.compiledTestdataMapping());
                         testdataResolvers.put(key, resolver);
-                        dispatch.put(entry.id(), new IterationExecutor(projectRoot, config, target, resources, outputRoot, resolver));
+                        dispatch.put(entry.id(), new IterationExecutor(projectRoot, config, target, resources, outputRoot, resolver, runStartedAt));
                     }
                     iterations = new MixIterationRunner(dispatch);
                 } else {
@@ -143,7 +157,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
                             testdataRegistry, workload.testdata(), workload.id(), workload.model().wireName(),
                             scenario.seed(), Math.max(1, workload.users()), true, target.compiledTestdataMapping());
                     testdataResolvers.put(workload.id(), testdataResolver);
-                    iterations = new IterationExecutor(projectRoot, config, target, resources, outputRoot, testdataResolver);
+                    iterations = new IterationExecutor(projectRoot, config, target, resources, outputRoot, testdataResolver, runStartedAt);
                 }
                 LoadScheduler scheduler = child.model() == LoadScenario.Model.CLOSED
                         ? new ClosedVuScheduler(child, iterations, runId, aggregateListener, timing, evidenceStore, outputRoot, startGate)

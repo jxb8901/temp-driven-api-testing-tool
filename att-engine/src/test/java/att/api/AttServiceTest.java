@@ -119,4 +119,42 @@ class AttServiceTest {
             workers.awaitTermination(2,TimeUnit.SECONDS);
         }
     }
+
+    @Test void configuredLoadIdentityUsesTheSameEnclosingTimestampAsIterationContext() throws Exception {
+        Path root=temp.resolve("load-identity-time-package");
+        Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
+        Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("load"));
+        att.TestSchemas.install(root);
+        Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.12\n"
+                + "outputDirectory: output\nenvironment: SIT\ntemplates: {root: templates}\n"
+                + "testcase: {root: testcase}\ntools: {}\n"
+                + "execution: {runIdFormat: \"run-#{str.replace(value=${EXEC.RUN_STARTED_AT}, target=':', replacement='-')}\"}\n").getBytes("UTF-8"));
+        Files.write(root.resolve("templates/SIMPLE/template.yaml"), ("schemaVersion: att-template/v3.4\n"
+                + "name: SIMPLE\ndescription: load identity timestamp\nactions:\n"
+                + "  show: {type: log, message: 'run=${EXEC.RUN_STARTED_AT}'}\n").getBytes("UTF-8"));
+        Path scenario=root.resolve("load/scenario.yaml");
+        Files.write(scenario, ("schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: time\n    target: {type: template, id: SIMPLE}\n"
+                + "    load: {users: 1, duration: 20ms}\n    execution: {thinkTime: 0ms}\n"
+                + "evidence: {mode: all}\n").getBytes("UTF-8"));
+
+        LoadResult result=new DefaultAttService().load(new LoadRequest(root,Paths.get("config/config.yaml"),null,
+                null,null,scenario,null,null,null,null,null,null,null,null,null,null,null,
+                Collections.<String>emptyList()));
+
+        assertTrue(result.executionId().startsWith("run-"));
+        Path runDirectory=root.resolve("output/load").resolve(result.executionId());
+        Path caseYaml;
+        try(java.util.stream.Stream<Path> files=Files.walk(runDirectory)) {
+            caseYaml=files.filter(path -> path.getFileName().toString().equals("case.yaml")).findFirst()
+                    .orElseThrow(() -> new AssertionError("Load did not retain its iteration Context"));
+        }
+        String caseLog=new String(Files.readAllBytes(caseYaml.getParent().resolve("case.log")),"UTF-8");
+        String marker="run=";
+        int start=caseLog.indexOf(marker);
+        assertTrue(start>=0,caseLog);
+        int end=caseLog.indexOf('\n',start);
+        String runStartedAt=caseLog.substring(start+marker.length(),end<0?caseLog.length():end).trim();
+        assertEquals(result.executionId(),"run-"+runStartedAt.replace(":","-"));
+    }
 }

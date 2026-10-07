@@ -29,6 +29,8 @@ class ExecutionIdentityFormatTest {
                 "${EXEC.INPUT.account}", "fallback", packageRoot));
         assertThrows(IllegalArgumentException.class, () -> ExecutionIdentityFormat.runId(
                 "${META.TARGET.id}", "fallback", packageRoot));
+        assertThrows(IllegalArgumentException.class, () -> ExecutionIdentityFormat.runId(
+                "${EXEC.STARTED_AT}", "fallback", packageRoot));
         assertThrows(IllegalArgumentException.class, () -> ExecutionIdentityFormat.debugId(
                 "#{env.get(name='HOME')}", "fallback", packageRoot, "tool", "helper"));
         assertThrows(IllegalArgumentException.class, () -> ExecutionIdentityFormat.runId(
@@ -63,5 +65,8 @@ class ExecutionIdentityFormatTest {
                 "#{str.replace(str.substr(${EXEC.RUN_STARTED_AT}, 0, 10), '-', '')}",
                 "fallback", packageRoot, "testcase", packageRoot, startedAt);
         assertEquals("20261007", id);
+        assertEquals("debug-2026-10-07T01-02-03Z", ExecutionIdentityFormat.debugId(
+                "debug-#{str.replace(value=${EXEC.STARTED_AT}, target=':', replacement='-')}", "fallback",
+                packageRoot, "template", "SIMPLE", packageRoot, startedAt));
     }
 }

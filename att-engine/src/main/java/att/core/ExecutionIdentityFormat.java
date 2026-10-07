@@ -72,7 +72,7 @@ public final class ExecutionIdentityFormat {
             if (targetType != null) metadata.put("TARGET", mapOf("type", targetType, "id", targetId));
             Map<String, Object> execution = new LinkedHashMap<String, Object>();
             String timestamp = (startedAt == null ? Instant.now() : startedAt).toString();
-            execution.put("STARTED_AT", timestamp);
+            if ("debug".equals(sourceType)) execution.put("STARTED_AT", timestamp);
             execution.put("RUN_STARTED_AT", timestamp);
             Map<String, Object> scope = new LinkedHashMap<String, Object>();
             scope.put("META", metadata);
@@ -125,8 +125,9 @@ public final class ExecutionIdentityFormat {
     }
 
     private static boolean allowedPath(String path, boolean debug) {
-        if ("META.SOURCE.type".equals(path) || "META.SOURCE.path".equals(path) || "EXEC.STARTED_AT".equals(path)
+        if ("META.SOURCE.type".equals(path) || "META.SOURCE.path".equals(path)
                 || "EXEC.RUN_STARTED_AT".equals(path)) return true;
+        if (debug && "EXEC.STARTED_AT".equals(path)) return true;
         return debug && ("META.TARGET.type".equals(path) || "META.TARGET.id".equals(path));
     }
 

@@ -4792,10 +4792,15 @@ iteration 的
 timestamp default，Debug 維持 <code>&lt;type&gt;-&lt;targetId&gt;</code>
 default。</p>
 <p>Format 在 identity 發布或建立 output directory 前只求值一次。Run/Load
-可讀取 <code>META.SOURCE.type/path</code>、<code>EXEC.STARTED_AT</code>
-和 <code>EXEC.RUN_STARTED_AT</code>；Debug 另可讀取
-<code>META.TARGET.type/id</code>。可使用純 identity-format
-built-ins，以及 <code>date.sysdate</code> /
+可讀取 <code>META.SOURCE.type/path</code> 和
+<code>EXEC.RUN_STARTED_AT</code>；不可讀取每個 Case 或 Load iteration
+各自捕捉的 <code>EXEC.STARTED_AT</code>。生成 Run/Load ID
+使用的外層開始時間，會與 runtime Context 的
+<code>EXEC.RUN_STARTED_AT</code> 相同。Debug format 可讀取
+<code>META.TARGET.type/id</code>、<code>EXEC.STARTED_AT</code> 和
+<code>EXEC.RUN_STARTED_AT</code>；兩個 timestamp 都代表 standalone Debug
+的開始時間。可使用純 identity-format built-ins，以及
+<code>date.sysdate</code> /
 <code>date.systimestamp</code>；不可呼叫外部服務、random/sequence、filesystem
 或 invocation state。正在生成的 identity 不可被讀取，例如
 <code>${EXEC.RUN_ID}</code>、<code>${EXEC.ID}</code>、<code>${EXEC.OUTPUT_DIR}</code>、<code>${EXEC.VARS}</code>

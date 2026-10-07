@@ -22,12 +22,14 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -90,6 +92,29 @@ class FrameworkEngineTest {
         assertTrue(ci.contains("\"callChain\""));
         Path regenerated = new att.report.ReportRegenerator().regenerate(projectRoot.resolve("output"), "V3-FLOW-ERROR");
         assertTrue(new String(Files.readAllBytes(regenerated), "UTF-8").contains("common.inner.v1"));
+    }
+
+    @Test void configuredRunIdentityUsesTheSameEnclosingTimestampAsCaseContext() throws Exception {
+        writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
+                "schemaVersion: att-template/v3.4\nname: PAYMENT_INVOKE\ndescription: timestamp identity\nactions:\n"
+                        + "  show: {type: log, message: 'run=${EXEC.RUN_STARTED_AT}|case=${EXEC.STARTED_AT}'}\n");
+        writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
+        writeText(projectRoot.resolve("testcase/payment.yaml"),
+                "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n"
+                        + "  caseId: 案例編號\n  tags: 標籤\n  dataColumns: caseName=案例名稱\nstages:\n"
+                        + "  - key: invoke\n    template: 執行模板\n    required: true\n");
+        writeSnapshot(projectRoot.resolve("testcase/payment.xlsx"));
+        Instant seed = Instant.parse("2026-10-07T01:02:03Z");
+        String format = "run-#{str.replace(value=${EXEC.RUN_STARTED_AT}, target=':', replacement='-')}";
+        FrameworkConfig config = globalConfig("none", new RunConfig("timestamp", "yyyyMMdd-HHmmss", format, ""));
+        ExecutionOptions options = ExecutionOptionsTestSupport.parse(new String[]{"run", "--suite",
+                projectRoot.resolve("testcase/payment.xlsx").toString()}).withIdentitySeed(new ExecutionIdentitySeed(seed));
+
+        RunSummary summary = new FrameworkEngine(projectRoot, config).run(options);
+
+        assertEquals("run-2026-10-07T01-02-03Z", summary.runId());
+        String caseLog = new String(Files.readAllBytes(summary.results().get(0).caseLogPath()), "UTF-8");
+        assertTrue(caseLog.contains("run=" + seed + "|case="), caseLog);
     }
 
     @Test void ordinaryRunReloadsRenderPayloadBetweenTestcases() throws Exception {

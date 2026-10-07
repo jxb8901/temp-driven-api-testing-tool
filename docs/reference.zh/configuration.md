@@ -230,7 +230,7 @@ environments:
 
 `runIdFormat` 會產生外層 Run ID；Load 沒有指定 `--run-id` 時也會使用此 policy。它不會改變 Load 每個 iteration 的 `execution.execIdFormat`（`EXEC.ID`）。`debugIdFormat` 只產生 standalone Debug 目錄 identity。沒有設定時，Run/Load 維持原有 timestamp default，Debug 維持 `<type>-<targetId>` default。
 
-Format 在 identity 發布或建立 output directory 前只求值一次。Run/Load 可讀取 `META.SOURCE.type/path`、`EXEC.STARTED_AT` 和 `EXEC.RUN_STARTED_AT`；Debug 另可讀取 `META.TARGET.type/id`。可使用純 identity-format built-ins，以及 `date.sysdate` / `date.systimestamp`；不可呼叫外部服務、random/sequence、filesystem 或 invocation state。正在生成的 identity 不可被讀取，例如 `${EXEC.RUN_ID}`、`${EXEC.ID}`、`${EXEC.OUTPUT_DIR}`、`${EXEC.VARS}` 和 `${EXEC.ACTIONS}` 會被拒絕。生成值必須本身是有效的單一路徑段，ATT 不會替它 sanitize。Run/Load 以及明確或配置的 Debug ID 發生 collision 時會 fail；legacy Debug default 仍會加 timestamp suffix。
+Format 在 identity 發布或建立 output directory 前只求值一次。Run/Load 可讀取 `META.SOURCE.type/path` 和 `EXEC.RUN_STARTED_AT`；不可讀取每個 Case 或 Load iteration 各自捕捉的 `EXEC.STARTED_AT`。生成 Run/Load ID 使用的外層開始時間，會與 runtime Context 的 `EXEC.RUN_STARTED_AT` 相同。Debug format 可讀取 `META.TARGET.type/id`、`EXEC.STARTED_AT` 和 `EXEC.RUN_STARTED_AT`；兩個 timestamp 都代表 standalone Debug 的開始時間。可使用純 identity-format built-ins，以及 `date.sysdate` / `date.systimestamp`；不可呼叫外部服務、random/sequence、filesystem 或 invocation state。正在生成的 identity 不可被讀取，例如 `${EXEC.RUN_ID}`、`${EXEC.ID}`、`${EXEC.OUTPUT_DIR}`、`${EXEC.VARS}` 和 `${EXEC.ACTIONS}` 會被拒絕。生成值必須本身是有效的單一路徑段，ATT 不會替它 sanitize。Run/Load 以及明確或配置的 Debug ID 發生 collision 時會 fail；legacy Debug default 仍會加 timestamp suffix。
 
 ```yaml
 execution:

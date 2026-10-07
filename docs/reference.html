@@ -5240,9 +5240,14 @@ existing timestamp Run/Load default and
 effect.</p>
 <p>Formats are evaluated once before their identity or output directory
 is published. Run and Load formats can read
-<code>META.SOURCE.type/path</code>, <code>EXEC.STARTED_AT</code>, and
-<code>EXEC.RUN_STARTED_AT</code>. Debug formats can also read
-<code>META.TARGET.type/id</code>. Pure identity-format built-ins and
+<code>META.SOURCE.type/path</code> and <code>EXEC.RUN_STARTED_AT</code>;
+they cannot read <code>EXEC.STARTED_AT</code>, which is captured
+separately for each Case or Load iteration. ATT uses the same enclosing
+start timestamp in the generated Run/Load ID and each runtime Context's
+<code>EXEC.RUN_STARTED_AT</code>. Debug formats can read
+<code>META.TARGET.type/id</code>, <code>EXEC.STARTED_AT</code>, and
+<code>EXEC.RUN_STARTED_AT</code>; both timestamps represent the
+standalone Debug start. Pure identity-format built-ins and
 <code>date.sysdate</code> / <code>date.systimestamp</code> are
 available; external calls, random/sequence functions, filesystem calls,
 and invocation state are not. The identity being created is unavailable:
