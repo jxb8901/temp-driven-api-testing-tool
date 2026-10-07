@@ -3,14 +3,53 @@ package att;
 
 import org.junit.jupiter.api.Test;
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FrameworkRunnerTest {
+    @TempDir Path temp;
+
     @Test void helpDocumentsCleanAndAllSelection() throws Exception {
         java.lang.reflect.Method help=FrameworkRunner.class.getDeclaredMethod("help"); help.setAccessible(true);
         ByteArrayOutputStream bytes=new ByteArrayOutputStream(); PrintStream previous=System.out;
         try { System.setOut(new PrintStream(bytes)); help.invoke(null); } finally { System.setOut(previous); }
         String text=bytes.toString("UTF-8"); assertTrue(text.contains("clean")); assertTrue(text.contains("--all")); assertTrue(text.contains("--update-snapshot")); assertTrue(text.contains("att.bat")); assertTrue(text.contains("defaults to --all")); assertTrue(text.contains("stream bounded progress by default")); assertTrue(text.contains("debug template|flow|tool")); assertTrue(text.contains("--overload-policy")); assertTrue(text.contains("load-summary.json|yaml")); assertFalse(text.contains("--single-page"));
+    }
+
+    @Test void reportRunIdLoadsConfigWhenOutputDirectoryIsOmitted() throws Exception {
+        Files.createDirectories(temp.resolve("templates"));
+        Files.createDirectories(temp.resolve("testcase"));
+        try (java.util.stream.Stream<Path> paths = Files.walk(Paths.get("schemas"))) {
+            for (Path source : (Iterable<Path>) paths::iterator) {
+                Path destination = temp.resolve(source);
+                if (Files.isDirectory(source)) Files.createDirectories(destination);
+                else Files.copy(source, destination);
+            }
+        }
+        Path config = temp.resolve("config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.11\nenvironment: SIT\noutputDirectory: reports\n"
+                + "templates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n")
+                .getBytes("UTF-8"));
+        Process process = new ProcessBuilder(Paths.get(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", System.getProperty("java.class.path"), FrameworkRunner.class.getName(), "report",
+                "--run-id", "MISSING-RUN", "--config", config.toString())
+                .directory(temp.toFile()).start();
+        String stdout = read(process.getInputStream());
+        String stderr = read(process.getErrorStream());
+        assertEquals(2, process.waitFor(), stdout + "\n" + stderr);
+        assertFalse(stderr.contains("NullPointerException"), stderr);
+        assertTrue(stderr.contains("MISSING-RUN") || stderr.contains("run"), stderr);
+    }
+
+    private static String read(InputStream stream) throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        byte[] buffer = new byte[4096];
+        int count;
+        while ((count = stream.read(buffer)) >= 0) bytes.write(buffer, 0, count);
+        return new String(bytes.toByteArray(), "UTF-8");
     }
 
     @Test void verboseIsAnExplicitOutputModeAndConflictsWithQuiet() {

@@ -12,6 +12,8 @@ import att.api.RunResult;
 import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
 import java.nio.file.Files;
@@ -27,6 +29,68 @@ import static org.junit.jupiter.api.Assertions.*;
 class WorkerMainTest {
     @TempDir Path temp;
     private final ObjectMapper mapper=new ObjectMapper();
+
+    @Test void terminatingActiveWorkerLeavesPackageAuthoredFilesUntouched() throws Exception {
+        Path root=temp.resolve("terminated-worker-package");
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("templates/SIMPLE"));
+        Files.createDirectories(root.resolve("testcase"));
+        Files.createDirectories(root.resolve("load"));
+        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("schemas"))) {
+            for(Path source:(Iterable<Path>)paths::iterator) {
+                Path dest=root.resolve(source);
+                if(Files.isDirectory(source)) Files.createDirectories(dest);
+                else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+        Path config=root.resolve("config/config.yaml");
+        Path template=root.resolve("templates/SIMPLE/template.yaml");
+        Path scenario=root.resolve("load/long-running.yaml");
+        Files.write(config,("schemaVersion: att-config/v2.11\nenvironment: SIT\noutputDirectory: output\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(template,("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: termination boundary\n"
+                +"actions: {show: {type: log, message: worker-termination}}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(scenario,("schemaVersion: att-load/v1.6\nworkloads:\n- id: long-running\n"
+                +"  target: {type: template, id: SIMPLE}\n  load: {users: 1, duration: 30s}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        byte[] originalConfig=Files.readAllBytes(config);
+        byte[] originalTemplate=Files.readAllBytes(template);
+        byte[] originalScenario=Files.readAllBytes(scenario);
+        String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","terminate-job",
+                "command","load","packageRoot",root.toString(),"scenario",root.relativize(scenario).toString(),
+                "runId","terminate-run"));
+        Process process=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",
+                System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
+        process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+        process.getOutputStream().close();
+        BufferedReader stdout=new BufferedReader(new InputStreamReader(process.getInputStream(),StandardCharsets.UTF_8));
+        String statusLine=stdout.readLine();
+        assertNotNull(statusLine,"Worker did not initialize its protocol stream");
+        assertEquals("STATUS",mapper.readTree(statusLine).get("type").asText());
+        long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        boolean sawProgress=false;
+        while(System.nanoTime()<deadline&&!sawProgress) {
+            if(stdout.ready()) {
+                String line=stdout.readLine();
+                if(line==null) break;
+                sawProgress="PROGRESS".equals(mapper.readTree(line).get("type").asText());
+            } else Thread.sleep(25L);
+        }
+        assertTrue(sawProgress,"Worker never entered its active operation before termination");
+        process.destroy();
+        if(!process.waitFor(3,java.util.concurrent.TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            assertTrue(process.waitFor(3,java.util.concurrent.TimeUnit.SECONDS),"Worker process could not be forcibly stopped");
+        }
+        assertArrayEquals(originalConfig,Files.readAllBytes(config));
+        assertArrayEquals(originalTemplate,Files.readAllBytes(template));
+        assertArrayEquals(originalScenario,Files.readAllBytes(scenario));
+        try(java.util.stream.Stream<Path> children=Files.list(root)) {
+            assertEquals(new java.util.HashSet<String>(java.util.Arrays.asList("config","templates","testcase","load","schemas","output")),
+                    children.map(path -> path.getFileName().toString()).collect(java.util.stream.Collectors.toSet()));
+        }
+        assertTrue(Files.isDirectory(root.resolve("output")));
+    }
     @Test void unsupportedProtocolVersionHasStructuredTerminalFailure() throws Exception {
         String request="{\"protocolVersion\":\"att-worker/v9\",\"jobId\":\"J-invalid\",\"command\":\"validate\",\"packageRoot\":\".\"}";
         Process process=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",

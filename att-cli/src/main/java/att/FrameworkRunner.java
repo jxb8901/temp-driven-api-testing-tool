@@ -136,6 +136,7 @@ public final class FrameworkRunner {
                 return;
             }
             if ("report".equals(options.command())) {
+                config = loadConfig(options, root);
                 Path output = options.outputDirectory() == null ? root.resolve(config.outputDirectory()) : root.resolve(options.outputDirectory());
                 System.out.println("Report: " + new ReportRegenerator().regenerate(output.normalize(), options.runId()));
                 return;
