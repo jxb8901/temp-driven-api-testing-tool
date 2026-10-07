@@ -23,6 +23,11 @@ public final class PackageResourceResolver {
 
     public Path packageRoot() { return packageRoot; }
 
+    /** Resolves a package-relative configuration/resource path from the package root. */
+    public PackageResource resolvePackageRelative(String authoredPath, Kind kind) {
+        return resolve(new ResourceLocator(authoredPath), new ResourceOrigin(""), kind);
+    }
+
     /** Creates an origin from a canonical package-relative descriptor directory. */
     public ResourceOrigin origin(Path descriptorDirectory) {
         if (descriptorDirectory == null) return new ResourceOrigin("");

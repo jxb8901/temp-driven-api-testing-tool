@@ -195,7 +195,8 @@ class WorkerMainTest {
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: worker parity\nactions: {show: {type: log, message: worker-parity}}\n").getBytes(StandardCharsets.UTF_8));
         DebugResult direct=new DefaultAttService().debug(new DebugRequest(root,null,null,null,"api-job","template","SIMPLE",null,false));
-        String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-job","command","debug","packageRoot",root.toString(),"outputDirectory",root.resolve("output-worker").toString(),"target",fields("type","template","id","SIMPLE")));
+        assertEquals("api-job", direct.executionId());
+        String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-job","command","debug","packageRoot",root.toString(),"outputDirectory",root.resolve("output-worker").toString(),"runId","api-job","target",fields("type","template","id","SIMPLE")));
         Process process=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
         process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8)); process.getOutputStream().close();
         String stdout=read(process.getInputStream()); String stderr=read(process.getErrorStream());
@@ -206,12 +207,13 @@ class WorkerMainTest {
         assertTrue(java.util.Arrays.stream(lines).map(line -> { try { return mapper.readTree(line).get("type").asText(); } catch(Exception error) { throw new IllegalStateException(error); } }).anyMatch("PROGRESS"::equals),stdout);
         assertTrue(java.util.Arrays.stream(lines).map(line -> { try { return mapper.readTree(line).get("type").asText(); } catch(Exception error) { throw new IllegalStateException(error); } }).anyMatch("LOG"::equals),stdout);
         assertEquals("worker-job",terminal.get("jobId").asText());
+        assertEquals("api-job",terminal.get("result").get("executionId").asText());
         assertEquals(direct.status(),terminal.get("result").get("status").asText());
         assertEquals(direct.exitCode(),terminal.get("result").get("exitCode").asInt());
         assertEquals(direct.executionId(),terminal.get("result").get("executionId").asText());
         assertFalse(terminal.get("result").has("jobId"));
         assertTrue(stdout.startsWith("{\"type\":\"STATUS\""),stdout);
-        Process cli=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),"att.FrameworkRunner","debug","template","SIMPLE","--output-dir",root.resolve("output-cli").toString(),"--format","json","--quiet").directory(root.toFile()).start();
+        Process cli=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),"att.FrameworkRunner","debug","template","SIMPLE","--debug-id","api-job","--output-dir",root.resolve("output-cli").toString(),"--format","json","--quiet").directory(root.toFile()).start();
         String cliOut=read(cli.getInputStream()); String cliErr=read(cli.getErrorStream()); assertEquals(direct.exitCode(),cli.waitFor(),cliErr+"\\n"+cliOut);
         JsonNode cliResult=mapper.readTree(cliOut); assertEquals(direct.status(),cliResult.get("status").asText()); assertEquals(direct.exitCode(),cliResult.get("exitCode").asInt());
         assertEquals(direct.executionId(),cliResult.get("executionId").asText());

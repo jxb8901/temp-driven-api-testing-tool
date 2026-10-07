@@ -144,7 +144,7 @@ public final class DebugEngine {
                 null,null,null,null,"UNSAFE_FAILURE_DETAILS",null,
                 "[ATT WARNING] --unsafe-failure-details is enabled: collector diagnostics may expose local data. Configured secrets remain redacted. Use only with trusted local data.",
                 java.util.Collections.<String,Object>emptyMap()));
-        Path debugDirectory = createDebugDirectory(options, targetType, targetId);
+        Path debugDirectory = createDebugDirectory(options, targetType, targetId, started);
         Path artifacts = debugDirectory.resolve("artifacts");
         Path logPath = debugDirectory.resolve("case.log");
         Path resultPath = debugDirectory.resolve("result.yaml");
@@ -213,7 +213,9 @@ public final class DebugEngine {
             new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
                     resolved.flows, input.path, "debug", testCase.caseData(), input.vars, input.testdataDescriptors);
 
-            context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug");
+            context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(),
+                    debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug",
+                    started.toString(), started.toString());
             context.setProject(projectRoot);
             context.setUnsafeFailureDetails(options.unsafeFailureDetails());
             context.setSourceMetadata("debug", input.path, testCase.caseId());
@@ -457,7 +459,7 @@ public final class DebugEngine {
         return (configured.isAbsolute() ? configured : projectRoot.resolve(configured)).toAbsolutePath().normalize();
     }
 
-    private Path createDebugDirectory(ExecutionOptions options, String type, String id) throws Exception {
+    private Path createDebugDirectory(ExecutionOptions options, String type, String id, Instant startedAt) throws Exception {
         Path root = options.outputDirectory() == null ? projectRoot.resolve(config.outputDirectory()) : resolveInput(options.outputDirectory());
         Path debugRoot = root.resolve("debug").normalize();
         boolean explicit = options.runId() != null && !options.runId().trim().isEmpty();
@@ -466,7 +468,7 @@ public final class DebugEngine {
         if (explicit) safe = IdentifierValidator.runId(options.runId());
         else if (configured) safe = att.core.ExecutionIdentityFormat.debugId(config.run().debugIdFormat(),
                 type + "-" + id, projectRoot, type, id,
-                options.debugInput() == null ? projectRoot : resolveInput(options.debugInput()));
+                options.debugInput() == null ? autoInput(type, id) : resolveInput(options.debugInput()), startedAt);
         else safe = IdentifierValidator.runId((type + "-" + id).replaceAll("[^A-Za-z0-9_.-]", "_"));
         Path result = debugRoot.resolve(safe).normalize();
         Files.createDirectories(debugRoot);

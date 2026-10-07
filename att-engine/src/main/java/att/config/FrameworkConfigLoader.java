@@ -2,6 +2,7 @@
 package att.config;
 
 import att.Version;
+import att.resource.PackageResourceResolver;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -111,7 +112,7 @@ public final class FrameworkConfigLoader {
                     templatesRoot(map), testcasesRoot(map), tools, dbHelpers, mqHelpers, sshHelpers, httpHelpers, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map),
                     descriptorPaths(map.get("testdata"), projectRoot, "config.environments." + String.valueOf(map.get("environment")) + ".testdata"));
         } catch (att.validation.DiagnosticException e) {
-            throw YamlSupport.locate(e, path, e.field());
+            throw YamlSupport.locate(e, path, e.field()).forPackage(projectRoot);
         } catch (Exception e) {
             att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(e);
             String field = schema == null ? "config" : schema.field();
@@ -122,8 +123,8 @@ public final class FrameworkConfigLoader {
                     toolField
                             ? "Check the qualified tool/group name, descriptor fields, argument declarations, and command argv contract."
                             : "Compare the reported field with the strict config schema and correct its name, type, or value.", e);
-            throw schema == null ? YamlSupport.locate(diagnostic, path, field)
-                    : YamlSupport.locateSchema(diagnostic, path, schema.structuredViolations());
+            throw (schema == null ? YamlSupport.locate(diagnostic, path, field)
+                    : YamlSupport.locateSchema(diagnostic, path, schema.structuredViolations())).forPackage(projectRoot);
         }
     }
 
@@ -555,14 +556,15 @@ public final class FrameworkConfigLoader {
         if (!(configured instanceof Iterable)) throw new IllegalArgumentException("toolGroups must be a list");
         Set<Path> paths = new LinkedHashSet<Path>();
         Set<String> ids = new LinkedHashSet<String>();
-        Path canonicalRoot = projectRoot.toRealPath();
+        PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
+        Path root = resources.packageRoot();
         for (Object value : (Iterable<?>) configured) {
             if (value == null) throw new IllegalArgumentException("toolGroups paths must be non-blank strings");
             Path relative = relativePath(value, null, "toolGroups path");
-            Path logical = projectRoot.resolve(relative).normalize();
-            if (!logical.startsWith(projectRoot.normalize())) throw new IllegalArgumentException("Tool group escapes package root: " + value);
-            Path file = logical.toRealPath();
-            if (!file.startsWith(canonicalRoot) || Files.isSymbolicLink(logical) || !Files.isRegularFile(file)) throw new IllegalArgumentException("Missing/unsafe tool group file: " + value);
+            Path logical = root.resolve(relative).normalize();
+            if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe tool group file: " + value);
+            Path file = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
+            if (!Files.isRegularFile(file)) throw new IllegalArgumentException("Missing/unsafe tool group file: " + value);
             if (!paths.add(file)) throw new IllegalArgumentException("Duplicate tool group path: " + value);
             loadToolGroup(file, projectRoot, tools, ids, sshHelpers);
         }

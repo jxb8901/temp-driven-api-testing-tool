@@ -107,6 +107,32 @@ public class DiagnosticException extends IllegalArgumentException {
                 suggestion, this, source, context, maps);
     }
 
+    /** Replace package-local physical paths in a configuration error with stable package paths. */
+    public DiagnosticException forPackage(java.nio.file.Path projectRoot) {
+        String safeFile = displayPath(file, projectRoot);
+        String safeSummary = att.core.PathPresentation.displayDiagnosticText(summary, projectRoot);
+        String safeDetail = att.core.PathPresentation.displayDiagnosticText(detail, projectRoot);
+        String safeSuggestion = att.core.PathPresentation.displayDiagnosticText(suggestion, projectRoot);
+        SourceLocation safeSource = source == null ? null : new SourceLocation(
+                displayPath(source.file(), projectRoot), source.line(), source.column(), source.endLine(),
+                source.endColumn(), att.core.PathPresentation.displayDiagnosticText(source.excerpt(), projectRoot),
+                source.excerptStartLine());
+        DiagnosticContext safeContext = new DiagnosticContext(
+                displayPath(context.caseFile(), projectRoot), context.caseId(), context.stage(), context.flowId(),
+                context.callChain());
+        DiagnosticException safe = new DiagnosticException(code, safeSummary, safeDetail, safeFile, field,
+                sheet, row, column, template, action, safeSuggestion, this, safeSource, safeContext, schemaViolations);
+        return safe;
+    }
+
+    private static String displayPath(String value, java.nio.file.Path projectRoot) {
+        if (value == null) return null;
+        try { return att.core.PathPresentation.displayPath(java.nio.file.Paths.get(value), projectRoot); }
+        catch (java.nio.file.InvalidPathException ignored) {
+            return att.core.PathPresentation.displayDiagnosticText(value, projectRoot);
+        }
+    }
+
     public static DiagnosticException find(Throwable value) {
         Throwable current = value;
         java.util.Set<Throwable> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Throwable, Boolean>());

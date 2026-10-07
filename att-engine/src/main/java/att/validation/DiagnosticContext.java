@@ -32,5 +32,10 @@ public final class DiagnosticContext {
         if (!callChain.isEmpty()) map.put("callChain", callChain);
         return map;
     }
+    public String caseFile() { return caseFile; }
+    public String caseId() { return caseId; }
+    public String stage() { return stage; }
+    public String flowId() { return flowId; }
+    public List<String> callChain() { return callChain; }
     private static String first(String value, String fallback) { return value == null ? fallback : value; }
 }

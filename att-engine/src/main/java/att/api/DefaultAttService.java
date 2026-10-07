@@ -46,7 +46,8 @@ public final class DefaultAttService implements AttService {
         long phase=profile.begin(); FrameworkConfig cfg=config(request); profile.end("configLoadMs",phase);
         ExecutionOptions opts=options(request,"run",request.suites(),request.suiteDirectory(),request.caseIds(),request.tags(),request.excludeTags(),request.all(),request.rerunFailed(),request.dryRun(),request.failFast(),"selected",null,null,null,false,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList())
                 .withRunPolicies(request.ciOutputs(),request.concurrencyMode(),request.profile())
-                .withObserver(request.observer());
+                .withObserver(request.observer())
+                .withIdentitySeed(att.core.ExecutionIdentitySeed.now());
         FrameworkEngine engine=new FrameworkEngine(request.packageRoot(),cfg);
         opts=opts.withRunId(engine.effectiveRunId(opts));
         if(request.updateSnapshot()) {
@@ -92,8 +93,10 @@ public final class DefaultAttService implements AttService {
     }
     @Override public DebugResult debug(DebugRequest request) throws Exception {
         long started=System.nanoTime();
+        String requestedDebugId = request.debugId() == null || request.debugId().trim().isEmpty()
+                ? request.runId() : request.debugId();
         ExecutionOptions opts=options(request,"debug",null,null,null,null,null,false,false,false,false,"selected",request.targetType(),request.targetId(),request.input(),request.unsafeFailureDetails(),null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList())
-                .withRunId(request.debugId()).withObserver(request.observer());
+                .withRunId(requestedDebugId).withObserver(request.observer());
         DebugEngine.Result result=new DebugEngine(request.packageRoot(),config(request)).run(opts);
         List<Diagnostic> ds=result.diagnostic()==null?Collections.<Diagnostic>emptyList():Collections.singletonList(result.diagnostic().toDiagnostic());
         Map<String,String> paths=paths("outputDirectory",OperationResult.display(result.outputDirectory(),request.packageRoot()),"log",OperationResult.display(result.logPath(),request.packageRoot()),"result",OperationResult.display(result.resultPath(),request.packageRoot()));
@@ -137,8 +140,12 @@ public final class DefaultAttService implements AttService {
                 : att.core.IdentifierValidator.runId(request.runId());
         Path outputRoot=(request.outputDirectory()==null?request.packageRoot().resolve(cfg.outputDirectory()):request.packageRoot().resolve(request.outputDirectory())).toAbsolutePath().normalize();
         Path loadRoot=outputRoot.resolve("load"); Path runDir=att.core.IdentifierValidator.strictChild(loadRoot,id,"Load run directory");
-        if(Files.exists(runDir)) throw new IllegalArgumentException("Load run ID already exists: "+id+" ("+runDir+"). Choose a different --run-id.");
         Files.createDirectories(loadRoot);
+        try {
+            Files.createDirectory(runDir);
+        } catch (java.nio.file.FileAlreadyExistsException collision) {
+            throw new IllegalArgumentException("Load run ID already exists: "+id+" ("+runDir+"). Choose a different --run-id.", collision);
+        }
         LoadEvidenceStore evidence=new LoadEvidenceStore(LoadEvidencePolicy.from(scenario),request.listener());
         LoadRunResult result; Map<String,Object> resourceMetrics;
         long executionPhase=profile.begin();
@@ -148,7 +155,7 @@ public final class DefaultAttService implements AttService {
             resourceMetrics=resources.metrics();
         }
         profile.end("loadExecutionMs",executionPhase);
-        Files.createDirectories(runDir); Map<String,Object> retained=evidence.write(runDir);
+        Map<String,Object> retained=evidence.write(runDir);
         result=result.withResources(resourceMetrics).withThresholds(new LoadThresholdEvaluator().evaluate(scenario,result.metrics())).withEvidence(retained);
         long reportPhase=profile.begin();
         Path report=new LoadReportWriter().write(outputRoot,result);

@@ -2,6 +2,7 @@
 package att.config;
 
 import att.core.IdentifierValidator;
+import att.resource.PackageResourceResolver;
 import att.validation.JsonSchemaVerifier;
 
 import java.io.Reader;
@@ -19,7 +20,7 @@ public final class DbHelperConfigLoader {
     public Map<String, DbHelperConfig> load(Object configured, Path projectRoot) throws Exception {
         if (configured == null) return Collections.emptyMap();
         if (!(configured instanceof Iterable)) throw new IllegalArgumentException("dbhelpers must be a list of package-relative YAML paths");
-        Path canonicalRoot = projectRoot.toRealPath();
+        PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
 
         Set<Path> files = new LinkedHashSet<Path>();
         Set<String> ids = new LinkedHashSet<String>();
@@ -33,10 +34,10 @@ public final class DbHelperConfigLoader {
                 throw new IllegalArgumentException("dbhelper path must end in .yaml or .yml: " + text);
             }
             Path relative = IdentifierValidator.relativePath(text, "dbhelper path");
-            Path logical = projectRoot.resolve(relative).normalize();
-            if (!logical.startsWith(projectRoot.normalize())) throw new IllegalArgumentException("Dbhelper path escapes package root: " + text);
-            Path file = logical.toRealPath();
-            if (!file.startsWith(canonicalRoot) || Files.isSymbolicLink(logical) || !Files.isRegularFile(file)) {
+            Path logical = resources.packageRoot().resolve(relative).normalize();
+            if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe DB helper file: " + text);
+            Path file = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
+            if (!Files.isRegularFile(file)) {
                 throw new IllegalArgumentException("Missing/unsafe dbhelper file: " + text);
             }
             if (!files.add(file)) throw new IllegalArgumentException("Duplicate dbhelper path: " + text);

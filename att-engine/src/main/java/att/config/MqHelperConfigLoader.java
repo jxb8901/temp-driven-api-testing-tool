@@ -3,6 +3,7 @@ package att.config;
 
 import att.Version;
 import att.core.IdentifierValidator;
+import att.resource.PackageResourceResolver;
 import att.validation.JsonSchemaVerifier;
 
 import java.nio.file.Files;
@@ -21,7 +22,7 @@ public final class MqHelperConfigLoader {
     public Map<String, MqHelperConfig> load(Object configured, Path projectRoot) throws Exception {
         if (configured == null) return Collections.emptyMap();
         if (!(configured instanceof Iterable)) throw new IllegalArgumentException("mqhelpers must be a list of package-relative YAML paths");
-        Path canonicalRoot = projectRoot.toRealPath();
+        PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
         Set<Path> files = new LinkedHashSet<Path>();
         Set<String> ids = new LinkedHashSet<String>();
         Map<String, MqHelperConfig> result = new LinkedHashMap<String, MqHelperConfig>();
@@ -34,10 +35,10 @@ public final class MqHelperConfigLoader {
                 throw new IllegalArgumentException("mqhelper path must end in .yaml or .yml: " + text);
             }
             Path relative = IdentifierValidator.relativePath(text, "mqhelper path");
-            Path logical = projectRoot.resolve(relative).normalize();
-            if (!logical.startsWith(projectRoot.normalize())) throw new IllegalArgumentException("MQ helper path escapes package root: " + text);
-            Path file = logical.toRealPath();
-            if (!file.startsWith(canonicalRoot) || Files.isSymbolicLink(logical) || !Files.isRegularFile(file)) {
+            Path logical = resources.packageRoot().resolve(relative).normalize();
+            if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe MQ helper file: " + text);
+            Path file = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
+            if (!Files.isRegularFile(file)) {
                 throw new IllegalArgumentException("Missing/unsafe MQ helper file: " + text);
             }
             if (!files.add(file)) throw new IllegalArgumentException("Duplicate MQ helper path: " + text);

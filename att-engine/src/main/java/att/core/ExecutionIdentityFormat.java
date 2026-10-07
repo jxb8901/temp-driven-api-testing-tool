@@ -19,8 +19,13 @@ public final class ExecutionIdentityFormat {
 
     public static String runId(String configured, String fallback, Path packageRoot,
                                String sourceType, Path sourcePath) {
+        return runId(configured, fallback, packageRoot, sourceType, sourcePath, Instant.now());
+    }
+
+    public static String runId(String configured, String fallback, Path packageRoot,
+                               String sourceType, Path sourcePath, Instant startedAt) {
         return resolve(configured, fallback, "execution.runIdFormat", packageRoot, sourceType,
-                sourcePath, null, null);
+                sourcePath, null, null, startedAt);
     }
 
     public static String debugId(String configured, String fallback, Path packageRoot,
@@ -30,23 +35,71 @@ public final class ExecutionIdentityFormat {
 
     public static String debugId(String configured, String fallback, Path packageRoot,
                                  String targetType, String targetId, Path sourcePath) {
+        return debugId(configured, fallback, packageRoot, targetType, targetId, sourcePath, Instant.now());
+    }
+
+    public static String debugId(String configured, String fallback, Path packageRoot,
+                                 String targetType, String targetId, Path sourcePath, Instant startedAt) {
         return resolve(configured, fallback, "execution.debugIdFormat", packageRoot, "debug",
-                sourcePath, targetType, targetId);
+                sourcePath, targetType, targetId, startedAt);
+    }
+
+    /** Parses and checks allow-lists without evaluating functions or reading the clock. */
+    public static void validateRunIdFormat(String configured) {
+        validateConfiguredFormat(configured, "execution.runIdFormat", false);
+    }
+
+    /** Parses and checks allow-lists without evaluating functions or reading the clock. */
+    public static void validateDebugIdFormat(String configured) {
+        validateConfiguredFormat(configured, "execution.debugIdFormat", true);
     }
 
     private static String resolve(String configured, String fallback, String field, Path packageRoot,
-                                  String sourceType, Path sourcePath, String targetType, String targetId) {
+                                  String sourceType, Path sourcePath, String targetType, String targetId,
+                                  Instant startedAt) {
         if (configured == null || configured.isEmpty())
             return IdentifierValidator.runId(fallback);
+        validateConfiguredFormat(configured, field, "debug".equals(sourceType));
+        String value;
+        try {
+            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null, null, null, null,
+                    new DefaultBuiltInProvider());
+            Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+            Map<String, Object> source = mapOf("type", sourceType, null, null);
+            String logicalSource = logicalPackageName(packageRoot, sourcePath);
+            if (logicalSource != null) source.put("path", logicalSource);
+            metadata.put("SOURCE", source);
+            if (targetType != null) metadata.put("TARGET", mapOf("type", targetType, "id", targetId));
+            Map<String, Object> execution = new LinkedHashMap<String, Object>();
+            String timestamp = (startedAt == null ? Instant.now() : startedAt).toString();
+            execution.put("STARTED_AT", timestamp);
+            execution.put("RUN_STARTED_AT", timestamp);
+            Map<String, Object> scope = new LinkedHashMap<String, Object>();
+            scope.put("META", metadata);
+            scope.put("EXEC", execution);
+            value = engine.renderScoped(configured, scope);
+        } catch (RuntimeException error) {
+            throw new IllegalArgumentException("Invalid " + field + ": " + error.getMessage(), error);
+        } catch (Exception error) {
+            throw new IllegalArgumentException("Unable to evaluate " + field + ": " + error.getMessage(), error);
+        }
+        try {
+            return IdentifierValidator.runId(value);
+        } catch (RuntimeException invalid) {
+            throw new IllegalArgumentException(field + " generated an invalid Run ID: " + safe(value), invalid);
+        }
+    }
+
+    private static void validateConfiguredFormat(String configured, String field, boolean debug) {
+        if (configured == null || configured.isEmpty()) return;
         if (configured.trim().isEmpty())
             throw new IllegalArgumentException(field + " must not be whitespace-only");
-        String value;
         try {
             UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null, null, null, null,
                     new DefaultBuiltInProvider());
             engine.validateValueSyntax(configured);
             for (String path : engine.parseContextPaths(configured)) {
-                if (!allowedPath(path, sourceType.equals("debug")))
+                if (!allowedPath(path, debug))
                     throw new IllegalArgumentException(field + " cannot read ${" + path
                             + "}; identity formats have no access to the identity being created or invocation state");
             }
@@ -64,29 +117,10 @@ public final class ExecutionIdentityFormat {
                 }
                 DefaultBuiltInProvider.validateInvocation(call.name(), arguments);
             }
-            Map<String, Object> metadata = new LinkedHashMap<String, Object>();
-            Map<String, Object> source = mapOf("type", sourceType, null, null);
-            String logicalSource = logicalPackageName(packageRoot, sourcePath);
-            if (logicalSource != null) source.put("path", logicalSource);
-            metadata.put("SOURCE", source);
-            if (targetType != null) metadata.put("TARGET", mapOf("type", targetType, "id", targetId));
-            Map<String, Object> execution = new LinkedHashMap<String, Object>();
-            String startedAt = Instant.now().toString();
-            execution.put("STARTED_AT", startedAt);
-            execution.put("RUN_STARTED_AT", startedAt);
-            Map<String, Object> scope = new LinkedHashMap<String, Object>();
-            scope.put("META", metadata);
-            scope.put("EXEC", execution);
-            value = engine.renderScoped(configured, scope);
         } catch (RuntimeException error) {
             throw new IllegalArgumentException("Invalid " + field + ": " + error.getMessage(), error);
         } catch (Exception error) {
-            throw new IllegalArgumentException("Unable to evaluate " + field + ": " + error.getMessage(), error);
-        }
-        try {
-            return IdentifierValidator.runId(value);
-        } catch (RuntimeException invalid) {
-            throw new IllegalArgumentException(field + " generated an invalid Run ID: " + safe(value), invalid);
+            throw new IllegalArgumentException("Unable to validate " + field + ": " + error.getMessage(), error);
         }
     }
 

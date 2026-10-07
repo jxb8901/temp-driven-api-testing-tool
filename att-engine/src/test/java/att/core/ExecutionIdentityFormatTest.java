@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -47,5 +48,20 @@ class ExecutionIdentityFormatTest {
     @Test void keepsExistingDefaultsWhenFormatIsNotConfigured() {
         assertEquals("fallback", ExecutionIdentityFormat.runId("", "fallback", packageRoot));
         assertEquals("fallback", ExecutionIdentityFormat.debugId("", "fallback", packageRoot, "tool", "helper"));
+    }
+
+    @Test void validatesFormatsWithoutEvaluatingThemAndUsesTheSuppliedStartTime() {
+        assertDoesNotThrow(() -> ExecutionIdentityFormat.validateRunIdFormat(
+                "#{str.replace(str.substr(${EXEC.RUN_STARTED_AT}, 0, 10), '-', '')}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExecutionIdentityFormat.validateRunIdFormat("#{seq.next()}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExecutionIdentityFormat.validateDebugIdFormat("${EXEC.INPUT.secret}"));
+
+        Instant startedAt=Instant.parse("2026-10-07T01:02:03Z");
+        String id=ExecutionIdentityFormat.runId(
+                "#{str.replace(str.substr(${EXEC.RUN_STARTED_AT}, 0, 10), '-', '')}",
+                "fallback", packageRoot, "testcase", packageRoot, startedAt);
+        assertEquals("20261007", id);
     }
 }

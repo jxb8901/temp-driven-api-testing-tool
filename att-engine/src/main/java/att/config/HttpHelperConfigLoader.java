@@ -5,6 +5,7 @@ import att.core.IdentifierValidator;
 import att.validation.DiagnosticCodes;
 import att.validation.DiagnosticException;
 import att.validation.JsonSchemaVerifier;
+import att.resource.PackageResourceResolver;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,18 +22,20 @@ public final class HttpHelperConfigLoader {
     public Map<String, HttpHelperConfig> load(Object configured, Path projectRoot) throws Exception {
         if (configured == null) return Collections.emptyMap();
         if (!(configured instanceof List)) throw new IllegalArgumentException("httphelpers must be a list of YAML paths");
-        Path root = projectRoot.toRealPath();
+        PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
+        Path root = resources.packageRoot();
         Map<String, HttpHelperConfig> result = new LinkedHashMap<String, HttpHelperConfig>();
         Set<Path> files = new LinkedHashSet<Path>();
         Set<String> ids = new LinkedHashSet<String>();
         for (Object value : (List<?>) configured) {
             if (!(value instanceof String) || !((String) value).matches(".+\\.ya?ml"))
                 throw new IllegalArgumentException("httphelper path must be a YAML file");
-            Path logical = projectRoot.resolve(IdentifierValidator.relativePath((String) value, "httphelper path")).normalize();
-            if (!logical.startsWith(projectRoot.normalize()) || Files.isSymbolicLink(logical))
+            Path relative = IdentifierValidator.relativePath((String) value, "httphelper path");
+            Path logical = root.resolve(relative).normalize();
+            if (Files.isSymbolicLink(logical))
                 throw new IllegalArgumentException("Unsafe HTTP helper path: " + value);
-            Path file = logical.toRealPath();
-            if (!file.startsWith(root) || !Files.isRegularFile(file) || !files.add(file))
+            Path file = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
+            if (!Files.isRegularFile(file) || !files.add(file))
                 throw new IllegalArgumentException("Missing, unsafe or duplicate HTTP helper file: " + value);
             HttpHelperConfig helper;
             try {
@@ -44,7 +47,7 @@ public final class HttpHelperConfigLoader {
                             + "'; ATT supports only " + Version.HTTPHELPER_SCHEMA + ". See docs/reference/appendices/migrations.md.");
                 Path schema = att.validation.SchemaFiles.resolveVersion(projectRoot, String.valueOf(map.get("schemaVersion")));
                 JsonSchemaVerifier.verify(schema, map);
-                helper = parse(map, projectRoot).withEvidenceOutput(map.get("evidence"));
+                helper = parse(map, root, resources).withEvidenceOutput(map.get("evidence"));
             } catch (Exception error) {
                 JsonSchemaVerifier.SchemaValidationException invalid = JsonSchemaVerifier.SchemaValidationException.find(error);
                 String field = invalid == null ? "httphelper" : invalid.field();
@@ -61,7 +64,7 @@ public final class HttpHelperConfigLoader {
         return Collections.unmodifiableMap(result);
     }
 
-    private HttpHelperConfig parse(Map<?, ?> map, Path root) throws Exception {
+    private HttpHelperConfig parse(Map<?, ?> map, Path root, PackageResourceResolver resources) throws Exception {
         SchemaSupport.requireVersion(map, Version.HTTPHELPER_SCHEMA, "httphelper");
         String id = SchemaSupport.string(map.get("id"), "httphelper.id", true);
         if (!id.matches("[A-Za-z_][A-Za-z0-9_-]*")) throw new IllegalArgumentException("Invalid HTTP helper id");
@@ -104,10 +107,11 @@ public final class HttpHelperConfigLoader {
         Path trust = null;
         if (tls.get("trustStore") != null) {
             String configured = secret(tls.get("trustStore"), "tls.trustStore");
-            Path logical = root.resolve(IdentifierValidator.relativePath(configured, "tls.trustStore")).normalize();
-            if (!logical.startsWith(root.normalize()) || Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe HTTP TLS trustStore path");
-            trust = logical.toRealPath();
-            if (!trust.startsWith(root.toRealPath()) || !Files.isRegularFile(trust)) throw new IllegalArgumentException("Missing or unsafe HTTP TLS trustStore");
+            Path relative = IdentifierValidator.relativePath(configured, "tls.trustStore");
+            Path logical = root.resolve(relative).normalize();
+            if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe HTTP TLS trustStore path");
+            trust = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
+            if (!Files.isRegularFile(trust)) throw new IllegalArgumentException("Missing or unsafe HTTP TLS trustStore");
         }
         return new HttpHelperConfig(id, base, headers,
                 number(defaults.get("connectTimeoutMs"), 5000, "defaults.connectTimeoutMs"),

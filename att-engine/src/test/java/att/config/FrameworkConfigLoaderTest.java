@@ -398,7 +398,7 @@ class FrameworkConfigLoaderTest {
                 () -> new FrameworkConfigLoader().load(config));
 
         assertEquals(att.validation.DiagnosticCodes.TOOL_INVALID, error.code());
-        assertEquals(config.toString(), error.file());
+        assertEquals("$ATT_HOME/bad-tool.yaml", error.file());
         assertTrue(error.field().contains("tools"));
         assertTrue(error.detail().contains("missing"));
         assertNotNull(error.suggestion());

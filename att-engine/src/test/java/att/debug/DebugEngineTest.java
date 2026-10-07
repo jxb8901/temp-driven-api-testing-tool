@@ -62,6 +62,18 @@ class DebugEngineTest {
         assertTrue(collision.getMessage().contains("Debug ID already exists"), collision.getMessage());
     }
 
+    @Test void autoDiscoveredDebugIdentityUsesTheLogicalSidecarSource() throws Exception {
+        Path project = fixture();
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null,
+                new RunConfig("timestamp", "yyyyMMdd-HHmmss", "",
+                        "#{str.replace(${META.SOURCE.path}, '/', '-') }"));
+        DebugEngine.Result result = run(project, config, "template", "SIMPLE");
+        assertEquals("templates-SIMPLE-debug.yaml", result.executionId());
+        String caseYaml = new String(Files.readAllBytes(result.outputDirectory().resolve("artifacts/case.yaml")), StandardCharsets.UTF_8);
+        assertTrue(caseYaml.contains("templates/SIMPLE/debug.yaml"), caseYaml);
+    }
+
     @Test void explicitInputOverridesTemplateSidecar() throws Exception {
         Path project = fixture();
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,

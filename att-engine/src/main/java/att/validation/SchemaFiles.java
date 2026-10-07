@@ -29,7 +29,7 @@ public final class SchemaFiles {
                     .fromInternalPath(catalog, PackageResourceResolver.Kind.FILE).canonicalPath();
             Object loaded = YamlSupport.load(canonicalCatalog);
             if (!(loaded instanceof Map) || !"att-schema-catalog/v3.0".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion"))))
-                throw unavailable("Schema catalog is invalid", "catalog=" + catalog,
+                throw unavailable("Schema catalog is invalid", "catalog=schemas/catalog.yaml",
                         "Restore a valid att-schema-catalog/v3.0 catalog from the ATT package.");
             Object registry = ((Map<?, ?>) loaded).get("schemas");
             if (!(registry instanceof Map)) throw unavailable("Schema catalog is invalid", "catalog.schemas is missing",
@@ -62,7 +62,7 @@ public final class SchemaFiles {
         } catch (DiagnosticException error) {
             throw error;
         } catch (Exception error) {
-            throw unavailable("Schema catalog cannot be read", "catalog=" + catalog + ", reason=" + error.getMessage(),
+            throw unavailable("Schema catalog cannot be read", "catalog=schemas/catalog.yaml, reason=" + att.core.PathPresentation.displayDiagnosticText(error.getMessage(), root),
                     "Restore a readable schema catalog and the registered schema resources from the ATT package.");
         }
     }
@@ -142,7 +142,7 @@ public final class SchemaFiles {
         } catch (DiagnosticException error) {
             throw error;
         } catch (Exception error) {
-            throw unavailable("Schema catalog cannot be read", "catalog=" + catalog + ", reason=" + error.getMessage(),
+            throw unavailable("Schema catalog cannot be read", "catalog=schemas/catalog.yaml, reason=" + att.core.PathPresentation.displayDiagnosticText(error.getMessage(), root),
                     "Restore a readable schema catalog and its registered JSON Schema resources.");
         }
     }
@@ -169,7 +169,7 @@ public final class SchemaFiles {
             requireRegular(catalog, "Schema catalog is unavailable", "Restore schemas/catalog.yaml before validating this ATT package.");
             Object loaded = YamlSupport.load(catalog);
             if (!(loaded instanceof Map) || !"att-schema-catalog/v3.0".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion"))))
-                throw unavailable("Schema catalog is invalid", "catalog=" + catalog,
+                throw unavailable("Schema catalog is invalid", "catalog=schemas/catalog.yaml",
                         "Restore a valid att-schema-catalog/v3.0 catalog from the ATT package.");
             Object registry = ((Map<?, ?>) loaded).get("schemas");
             if (!(registry instanceof Map) || ((Map<?, ?>) registry).isEmpty())
@@ -198,25 +198,32 @@ public final class SchemaFiles {
         } catch (DiagnosticException error) {
             throw error;
         } catch (Exception error) {
-            throw unavailable("Schema catalog cannot be read", "catalog=" + catalog + ", reason=" + error.getMessage(),
+            throw unavailable("Schema catalog cannot be read", "catalog=schemas/catalog.yaml, reason=" + att.core.PathPresentation.displayDiagnosticText(error.getMessage(), projectRoot),
                     "Restore a readable schema catalog and every registered schema resource from the ATT package.");
         }
     }
 
     private static void requireSchemaDirectory(Path schemas) {
         if (Files.isSymbolicLink(schemas) || !Files.isDirectory(schemas, LinkOption.NOFOLLOW_LINKS))
-            throw unavailable("Schema directory is unavailable", "expected=" + schemas,
+            throw unavailable("Schema directory is unavailable", "expected=schemas/",
                     "Restore the package schemas/ directory without symlinks.");
         Path history = schemas.resolve("history");
         if (Files.exists(history, LinkOption.NOFOLLOW_LINKS)
                 && (Files.isSymbolicLink(history) || !Files.isDirectory(history, LinkOption.NOFOLLOW_LINKS)))
-            throw unavailable("Historical schema directory is unsafe", "expected=" + history,
+            throw unavailable("Historical schema directory is unsafe", "expected=schemas/history/",
                     "Restore schemas/history/ as a regular package directory without symlinks.");
     }
 
     private static void requireRegular(Path path, String title, String suggestion) {
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path) || !Files.isReadable(path))
-            throw unavailable(title, "expected=" + path, suggestion);
+            throw unavailable(title, "expected=" + logicalSchemaPath(path), suggestion);
+    }
+
+    private static String logicalSchemaPath(Path path) {
+        Path parent = path.getParent();
+        if (parent != null && parent.getFileName() != null && "history".equals(parent.getFileName().toString()))
+            return "schemas/history/" + path.getFileName();
+        return "schemas/" + path.getFileName();
     }
 
     private static DiagnosticException unavailable(String title, String detail, String suggestion) {

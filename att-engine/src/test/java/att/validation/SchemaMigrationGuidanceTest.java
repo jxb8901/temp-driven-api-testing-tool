@@ -52,7 +52,7 @@ class SchemaMigrationGuidanceTest {
         assertTrue(error.detail().contains("att-config/v2.12"));
         assertTrue(error.detail().contains("Upgrade schemaVersion"));
         assertTrue(error.detail().contains("Schema validation failed"));
-        assertEquals(file.toString(), error.file());
+        assertEquals("$ATT_HOME/config/config.yaml", error.file());
         assertFalse(error.schemaViolations().isEmpty());
         assertNotNull(error.source());
     }
@@ -132,6 +132,7 @@ class SchemaMigrationGuidanceTest {
                 () -> SchemaFiles.resolve(root, "att-flow-v3.0.schema.json"));
         assertEquals(DiagnosticCodes.PACKAGE_INVALID, pointOfUse.code());
         assertTrue(pointOfUse.detail().contains("schemas/history/att-flow-v3.0.schema.json"));
+        assertFalse(pointOfUse.detail().contains(root.toString()), pointOfUse.detail());
         assertTrue(pointOfUse.getMessage().contains("will not skip validation")
                 || pointOfUse.detail().contains("will not skip validation"));
         DiagnosticException proactive = assertThrows(DiagnosticException.class, () -> SchemaFiles.validateCatalog(root));
