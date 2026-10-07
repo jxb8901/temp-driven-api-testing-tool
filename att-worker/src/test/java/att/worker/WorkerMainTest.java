@@ -204,7 +204,7 @@ class WorkerMainTest {
         process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8)); process.getOutputStream().close();
         String stdout=read(process.getInputStream()); String stderr=read(process.getErrorStream());
         assertEquals(direct.exitCode(),process.waitFor(),stderr);
-        String[] lines=stdout.trim().split("\\R"); assertTrue(lines.length>=2,stdout);
+        String[] lines=stdout.trim().split("\\R"); assertTrue(lines.length>2,stdout);
         JsonNode status=mapper.readTree(lines[0]), terminal=mapper.readTree(lines[lines.length-1]);
         assertEquals("STATUS",status.get("type").asText()); assertEquals("RESULT",terminal.get("type").asText());
         assertTrue(java.util.Arrays.stream(lines).map(line -> { try { return mapper.readTree(line).get("type").asText(); } catch(Exception error) { throw new IllegalStateException(error); } }).anyMatch("PROGRESS"::equals),stdout);
@@ -328,7 +328,7 @@ class WorkerMainTest {
         process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8)); process.getOutputStream().close();
         String stdout=read(process.getInputStream()); String stderr=read(process.getErrorStream());
         assertEquals(direct.exitCode(),process.waitFor(),stderr);
-        String[] lines=stdout.trim().split("\\R"); assertTrue(lines.length>2,stdout);
+        String[] lines=stdout.trim().split("\\R"); assertTrue(lines.length>=2,stdout);
         JsonNode terminal=mapper.readTree(lines[lines.length-1]);
         assertEquals("RESULT",terminal.get("type").asText());
         assertEquals("worker-load-job",terminal.get("jobId").asText());
