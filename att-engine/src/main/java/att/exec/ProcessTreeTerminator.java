@@ -31,8 +31,8 @@ final class ProcessTreeTerminator {
             if (process.isAlive()) runQuietly("taskkill", "/PID", String.valueOf(pid), "/T", "/F");
         } else if (pid > 0) {
             Set<Long> descendants = unixDescendants(pid);
-            signal(descendants, "-TERM");
             process.destroy();
+            signal(descendants, "-TERM");
             waitBriefly(process, 500L);
             Set<Long> remaining = unixDescendants(pid);
             remaining.addAll(descendants);
@@ -57,8 +57,8 @@ final class ProcessTreeTerminator {
             finally { stream.close(); }
             Method destroy = handleType.getMethod("destroy");
             Method force = handleType.getMethod("destroyForcibly");
-            for (Object descendant : descendants) destroy.invoke(descendant);
             process.destroy();
+            for (Object descendant : descendants) destroy.invoke(descendant);
             waitBriefly(process, 500L);
             if (process.isAlive()) {
                 for (Object descendant : descendants) force.invoke(descendant);
