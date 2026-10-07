@@ -15,6 +15,9 @@ class ProcessTreeTerminatorWindowsTest {
         try {
             assertTrue(ProcessTreeTerminator.pid(process) > 0L,
                     "Java 8 Windows process handle must resolve to a PID for taskkill /T");
+            ProcessTreeTerminator.attachWindowsJob(process);
+            assertTrue(ProcessTreeTerminator.hasWindowsJob(process),
+                    "Tool process must be attached to a kill-on-close Windows Job Object");
         } finally {
             ProcessTreeTerminator.terminate(process);
         }
