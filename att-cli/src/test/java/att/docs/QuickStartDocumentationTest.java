@@ -63,8 +63,15 @@ class QuickStartDocumentationTest {
         CliResult basic = runCli(root, "run", "--config", config,
                 "--suite", suite, "--case", "quickStart.default.QS001",
                 "--output-dir", temp.resolve("basic-output").toString(),
-                "--run-id", "quick-start-basic", "--format", "json", "--quiet");
+                "--run-id", "quick-start-basic", "--format", "human", "--profile");
         assertEquals(0, basic.exitCode, basic.stderr + "\n" + basic.stdout);
+        assertTrue(basic.stdout.contains("[RUN] id=quick-start-basic"), basic.stdout);
+        assertTrue(basic.stdout.contains("[CASE] id=quickStart.default.QS001"), basic.stdout);
+        @SuppressWarnings("unchecked") java.util.Map<String,Object> performance = att.validation.JsonSupport.mapper()
+                .readValue(temp.resolve("basic-output/quick-start-basic/performance.json").toFile(), java.util.Map.class);
+        @SuppressWarnings("unchecked") java.util.Map<String,Object> phases = (java.util.Map<String,Object>) performance.get("phases");
+        assertTrue(phases.containsKey("configLoadMs"));
+        assertTrue(phases.containsKey("validationMs"));
 
         CliResult tool = runCli(root, "run", "--config", config,
                 "--suite", suite, "--case", "quickStart.default.QS002",

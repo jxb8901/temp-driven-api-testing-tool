@@ -3,10 +3,10 @@
 set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 if [ "${1:-}" = "clean" ]; then
-  rm -rf "$ROOT_DIR/target" "$ROOT_DIR/dist" "$ROOT_DIR/att-cli/target" "$ROOT_DIR/att-server/target" "$ROOT_DIR/att-dist/target"
+  rm -rf "$ROOT_DIR/target" "$ROOT_DIR/dist" "$ROOT_DIR/att-engine/target" "$ROOT_DIR/att-cli/target" "$ROOT_DIR/att-worker/target" "$ROOT_DIR/att-server/target" "$ROOT_DIR/att-dist/target"
   exit 0
 fi
-for required in pom.xml att-cli/pom.xml att-cli/src/main/java att-server/pom.xml att-dist/pom.xml config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md; do
+for required in pom.xml att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-server/pom.xml att-dist/pom.xml config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md; do
   if [ ! -e "$ROOT_DIR/$required" ]; then echo "Missing required package path: $ROOT_DIR/$required" >&2; exit 2; fi
 done
 VERSION="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' "$ROOT_DIR/pom.xml" | head -n 1)"
@@ -23,6 +23,7 @@ done
 GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 (cd "$ROOT_DIR" && python3 tools/build_reference_manual.py)
 (cd "$ROOT_DIR" && mvn -B -ntp -Datt.gitCommit="$GIT_COMMIT" clean verify)
+(cd "$ROOT_DIR" && ./scripts/verify-source-launcher.sh)
 (cd "$ROOT_DIR" && ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}" ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-build-placeholder}" PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-build-placeholder}" PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-build-placeholder}" ./att.sh validate --package)
 for archive in "$BINARY_ARCHIVE" "$SOURCE_ARCHIVE"; do
   if [ ! -f "$archive" ]; then echo "Maven distribution assembly did not produce: $archive" >&2; exit 2; fi

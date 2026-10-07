@@ -3,17 +3,18 @@ package att;
 
 import att.config.FrameworkConfig;
 import att.config.FrameworkConfigLoader;
-import att.core.ExecutionOptions;
-import att.core.FrameworkEngine;
-import att.core.RunSummary;
-import att.core.PerformanceProfile;
 import att.report.PackageDocumentationGenerator;
 import att.report.GeneratedOutputCleaner;
 import att.report.RunArchiveBuilder;
 import att.report.ReportRegenerator;
 import att.validation.PackageValidator;
 import att.validation.DiagnosticCodes;
-import att.snapshot.SnapshotCommand;
+import att.api.AttService;
+import att.api.DefaultAttService;
+import att.api.DebugRequest;
+import att.api.DebugResult;
+import att.api.SnapshotRequest;
+import att.api.SnapshotResult;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -23,10 +24,10 @@ public final class FrameworkRunner {
     private FrameworkRunner() {}
 
     public static void main(String[] args) throws Exception {
-        ExecutionOptions options = null;
+        CliOptions options = null;
         Path root = Paths.get("").toAbsolutePath();
         try {
-            try { options = ExecutionOptions.parse(args); }
+            try { options = CliOptions.parse(args); }
             catch (IllegalArgumentException e) {
                 throw new att.validation.DiagnosticException(DiagnosticCodes.CLI_INVALID, "Invalid ATT command line",
                         e.getMessage(), null, "argv", null, null, null, null, null,
@@ -34,154 +35,171 @@ public final class FrameworkRunner {
             }
             if ("help".equals(options.command())) { help(); return; }
             if ("version".equals(options.command())) { System.out.println(Version.DISPLAY); return; }
-            PerformanceProfile profile = new PerformanceProfile(options.profile());
-            long profilePhase = profile.begin();
-            FrameworkConfig config;
-            try { config = new FrameworkConfigLoader().load(options.configPath(), root, options.environment()); }
-            catch (att.validation.DiagnosticException e) { throw e; }
-            catch (Exception e) {
-                throw att.validation.DiagnosticException.wrap(DiagnosticCodes.CONFIG_INVALID,
-                        "Unable to load ATT global configuration", e, options.configPath().toString(), "config",
-                        "Check that the config file exists, is readable YAML, and conforms to the configured schema version.");
-            }
-            profile.end("configLoadMs", profilePhase);
+            FrameworkConfig config = null;
             if ("debug".equals(options.command())) {
                 if (options.debugTargetType().isEmpty()) {
+                    config = loadConfig(options, root);
                     CliDiscovery.printDebug(CliDiscovery.debug(root, config), options.format());
                     return;
                 }
-                att.debug.DebugEngine.Result debug = new att.debug.DebugEngine(root, config).run(options);
+                AttService service = new DefaultAttService();
+                DebugResult debug = service.debug(new DebugRequest(root, options.configPath(), options.environment(),
+                        options.outputDirectory(), options.runId(), options.debugTargetType(), options.debugTargetId(),
+                        options.debugInput(), options.unsafeFailureDetails(), cliObserver(options, root)));
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
-                    output.put("status", debug.status().name()); output.put("exitCode", debug.exitCode());
+                    output.put("executionId", debug.executionId()); output.put("status", debug.status()); output.put("exitCode", debug.exitCode());
                     output.put("failureDetailMode", options.unsafeFailureDetails() ? "local-unsafe" : "safe-default");
-                    output.put("durationMs", debug.durationMs()); output.put("log", att.core.PathPresentation.displayPath(debug.logPath(), root));
-                    output.put("result", att.core.PathPresentation.displayPath(debug.resultPath(), root)); System.out.println(att.validation.JsonSupport.write(output));
+                    output.put("durationMs", debug.durationMs()); output.put("log", cliDisplayPath(debug.paths().get("log"), root));
+                    output.put("result", cliDisplayPath(debug.paths().get("result"), root));
+                    output.put("diagnostics", presentedDiagnostics(debug.diagnostics(), root));
+                    System.out.println(att.validation.JsonSupport.write(output));
                 } else {
-                    String consoleStatus = debug.status() == att.core.ResultStatus.INVALID ? "ERROR" : debug.status().name();
+                    String consoleStatus = "INVALID".equals(debug.status()) ? "ERROR" : debug.status();
                     System.out.println("DEBUG " + consoleStatus + " | Target: " + options.debugTargetType() + " " + options.debugTargetId()
                             + " | Duration: " + debug.durationMs() + "ms");
                     if (!options.quiet()) {
-                        System.out.println("Log: " + att.core.PathPresentation.displayPath(debug.logPath(), root));
-                        System.out.println("Result: " + att.core.PathPresentation.displayPath(debug.resultPath(), root));
+                        System.out.println("Log: " + cliDisplayPath(debug.paths().get("log"), root));
+                        System.out.println("Result: " + cliDisplayPath(debug.paths().get("result"), root));
                     }
-                    if (debug.diagnostic() != null) System.err.println(debug.diagnostic().format());
+                    if (!debug.diagnostics().isEmpty()) System.err.println(att.core.PathPresentation.displayText(
+                            att.validation.DiagnosticRenderer.exception(debug.diagnostics().get(0)), root));
                 }
                 if (debug.exitCode() != 0) System.exit(debug.exitCode());
                 return;
             }
             if ("load".equals(options.command())) {
                 if (options.loadScenario() == null && !options.loadDebug()) {
+                    config = loadConfig(options, root);
                     CliDiscovery.printLoad(CliDiscovery.load(root, config), options.format());
                     return;
                 }
-                att.load.LoadScenarioLoader loader = new att.load.LoadScenarioLoader(root);
-                att.load.LoadScenario scenario;
-                if (options.loadDebug()) {
-                    java.util.Map<String, Object> promoted = new att.debug.DebugEngine(root, config).loadBootstrapInputForLoad(options);
-                    java.util.Map<String, Object> quickPolicy = loader.loadDefaultPolicy();
-                    scenario = loader.fromDebugInput((Path) promoted.get("source"), options.debugTargetType(),
-                            options.debugTargetId(), castMap(promoted.get("inputs")), castMap(promoted.get("vars")),
-                            castMap(promoted.get("arguments")), quickPolicy, options);
-                } else {
-                    scenario = loader.load(options.loadScenario(), att.load.LoadOverrides.from(options));
+                String loadId = att.core.IdentifierValidator.runId(options.runId() == null || options.runId().trim().isEmpty()
+                        ? "load-" + System.currentTimeMillis() : options.runId());
+                final CliOptions loadOptions = options;
+                att.load.LoadEventListener progress = loadEvent -> {
+                    if (loadOptions.quiet() || !loadOptions.verbose()) return;
+                    java.io.PrintStream output = "json".equals(loadOptions.format()) ? System.err : System.out;
+                    synchronized (output) { output.println("[LOAD] " + att.validation.JsonSupport.write(loadEvent.toMap(root))); output.flush(); }
+                };
+                att.api.LoadResult loadResult = null;
+                try {
+                    loadResult = new DefaultAttService().load(new att.api.LoadRequest(root, options.configPath(),
+                            options.environment(), options.outputDirectory(), loadId, options.loadScenario(),
+                            options.loadDebug() ? options.debugTargetType() : null,
+                            options.loadDebug() ? options.debugTargetId() : null, options.loadUsers(),
+                            options.loadArrivalRate(), options.loadWarmup(), options.loadRampUp(), options.loadDuration(),
+                            options.loadRampDown(), options.loadThinkTime(), options.loadMaxConcurrent(),
+                            options.loadOverloadPolicy(), options.variableOverrides(), progress, null,
+                            options.profile()));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw interrupted;
                 }
-                if (scenario.policyOnly()) {
-                    throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.LOAD_INVALID,
-                            "Load descriptor is policy-only and cannot be executed directly",
-                            "The descriptor contains load defaults but no workloads target.",
-                            scenario.source() == null ? null : scenario.source().toString(), "workloads", null, null, null,
-                            null, null, "Use load --debug with a Template, Flow, or Tool target, or add a workloads list.", null);
+                if ("json".equals(options.format())) {
+                    java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>(loadResult.summary());
+                    output.put("executionId", loadResult.executionId());
+                    output.put("report", cliDisplayPath(loadResult.paths().get("report"), root));
+                    output.put("exitCode", loadResult.exitCode());
+                    System.out.println(att.validation.JsonSupport.write(output));
                 }
-                att.load.LoadTarget target = null;
-                if (!scenario.coordinatorRequired()) {
-                    target = new att.load.LoadTargetResolver(root, config).resolve(scenario);
-                    new att.load.LoadTargetValidator(root, config).validate(scenario, target);
+                else {
+                    System.out.println("Report: " + att.core.PathPresentation.displayPath(Paths.get(loadResult.paths().get("report")), root));
+                    if (!options.quiet()) System.out.println("Metrics: " + loadResult.summary().get("metrics"));
                 }
-                runLoad(root, config, options, scenario, target, profile);
+                if (loadResult.exitCode() != 0) System.exit(loadResult.exitCode());
                 return;
             }
             if ("docs".equals(options.command())) {
+                config = loadConfig(options, root);
                 System.out.println("Documentation: " + new PackageDocumentationGenerator().generate(root, config));
                 return;
             }
             if ("clean".equals(options.command())) {
+                config = loadConfig(options, root);
                 new GeneratedOutputCleaner().clean(root, config);
                 System.out.println("ATT generated output cleaned.");
                 return;
             }
             if ("snapshot".equals(options.command())) {
-                for (Path snapshot : new SnapshotCommand().generate(root, config, options)) {
-                    System.out.println("Snapshot: " + root.relativize(snapshot.toAbsolutePath().normalize()));
-                }
+                SnapshotResult result = new DefaultAttService().snapshot(new SnapshotRequest(root, options.configPath(),
+                        options.environment(), options.suitePaths(), options.suiteDirectory(), options.caseIds(), options.all()));
+                @SuppressWarnings("unchecked") java.util.List<String> snapshots = (java.util.List<String>) result.summary().get("paths");
+                for (String snapshot : snapshots) System.out.println("Snapshot: " + root.relativize(Paths.get(snapshot).toAbsolutePath().normalize()));
                 return;
             }
             if ("build".equals(options.command())) {
+                config = loadConfig(options, root);
                 Path output = options.outputDirectory() == null ? root.resolve(config.outputDirectory()) : root.resolve(options.outputDirectory());
                 System.out.println("Archive: " + new RunArchiveBuilder().build(root, output.normalize()));
                 return;
             }
             if ("report".equals(options.command())) {
+                config = loadConfig(options, root);
                 Path output = options.outputDirectory() == null ? root.resolve(config.outputDirectory()) : root.resolve(options.outputDirectory());
                 System.out.println("Report: " + new ReportRegenerator().regenerate(output.normalize(), options.runId()));
                 return;
             }
-            if ("run".equals(options.command())) {
-                new FrameworkEngine(root, config).assertRunIdAvailable(options);
-                if (options.updateSnapshot()) {
-                    java.util.List<Path> updated = new SnapshotCommand().updateForRun(root, config, options);
-                    if (!options.quiet()) for (Path snapshot : updated) {
-                        String notice = "Snapshot updated: " + root.relativize(snapshot.toAbsolutePath().normalize()).toString().replace('\\', '/');
-                        if ("json".equals(options.format())) System.err.println(notice); else System.out.println(notice);
-                    }
-                }
-            }
-            profilePhase = profile.begin();
-            PackageValidator.ValidationSummary validation = new PackageValidator(root, config).validate(options);
-            profile.end("validationMs", profilePhase);
+            AttService service = new DefaultAttService();
             if ("validate".equals(options.command())) {
-                if ("json".equals(options.format())) { String json = validation.toJson(); att.validation.JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-validation-v2.1.schema.json"), json); System.out.println(json); }
-                else { System.out.println("Validation " + (validation.valid() ? "PASS: " : "FAIL: ") + validation); printDiagnostics(validation, options, System.out, true); }
-                if (!validation.valid()) System.exit(2);
-                return;
-            }
-            if (!validation.valid()) {
+                att.api.ValidateResult result = service.validate(new att.api.ValidateRequest(root, options.configPath(),
+                        options.environment(), options.suitePaths(), options.suiteDirectory(), options.caseIds(),
+                        options.tags(), options.excludeTags(), options.all(), options.validationScope()));
+                java.util.Map<String,Object> counts = result.summary();
+                PackageValidator.ValidationSummary validation = new PackageValidator.ValidationSummary(options.validationScope(),
+                        ((Number) counts.get("suites")).intValue(), ((Number) counts.get("cases")).intValue(),
+                        ((Number) counts.get("templates")).intValue(), ((Number) counts.get("tools")).intValue(), result.diagnostics());
                 if ("json".equals(options.format())) {
                     String json = validation.toJson();
                     att.validation.JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-validation-v2.1.schema.json"), json);
                     System.out.println(json);
                 }
                 else {
-                    System.err.println("Validation FAIL: " + validation);
-                    printDiagnostics(validation, options, System.err, true);
+                    System.out.println("Validation " + (validation.valid() ? "PASS: " : "FAIL: ") + validation);
+                    printDiagnostics(validation, options, System.out, true);
                 }
-                System.exit(2);
+                if (result.exitCode() != 0) System.exit(result.exitCode());
                 return;
             }
-            if (options.verbose() && !options.quiet() && "human".equals(options.format())) System.out.println("[1/4] V" + Version.PRODUCT + " validation PASS: " + validation);
-            printDiagnostics(validation, options, System.out, options.verbose());
-            if (options.verbose() && !options.quiet() && "human".equals(options.format())) {
-                System.out.println("[2/4] Selected: " + validation.cases + " cases from " + validation.suites + " suites");
-                System.out.println("[3/4] Executing cases (verbose Case-log mirroring enabled)");
-            }
-            RunSummary summary = new FrameworkEngine(root, config).run(options, validation.diagnostics, profile);
+            att.api.RunResult run = service.run(new att.api.RunRequest(root, options.configPath(), options.environment(),
+                    options.outputDirectory(), options.runId(), options.suitePaths(), options.suiteDirectory(),
+                    options.caseIds(), options.tags(), options.excludeTags(), options.all(), options.rerunFailed(),
+                    options.dryRun(), options.failFast(), options.ciOutputs(), options.concurrencyMode(), options.profile(),
+                    cliObserver(options, root), options.updateSnapshot()));
             if ("json".equals(options.format())) {
-                java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>(); output.put("total", summary.total()); output.put("passed", summary.passed()); output.put("failed", summary.failed()); output.put("error", summary.error()); output.put("skipped", summary.skipped()); output.put("invalid", summary.invalid()); output.put("report", att.core.PathPresentation.displayPath(summary.reportPath(), root)); System.out.println(att.validation.JsonSupport.write(output));
+                if ("INVALID".equals(run.status())) {
+                    PackageValidator.ValidationSummary invalid = new PackageValidator.ValidationSummary(options.validationScope(),
+                            number(run.summary(), "suites"), number(run.summary(), "cases"), number(run.summary(), "templates"),
+                            number(run.summary(), "tools"), run.diagnostics());
+                    System.out.println(invalid.toJson());
+                } else {
+                    System.out.println(runJson(run, root));
+                }
+            } else if (run.exitCode() == 2) {
+                System.err.println("Validation FAIL");
+                PackageValidator.ValidationSummary invalid = new PackageValidator.ValidationSummary(options.validationScope(),
+                        number(run.summary(), "suites"), number(run.summary(), "cases"), number(run.summary(), "templates"),
+                        number(run.summary(), "tools"), run.diagnostics());
+                printDiagnostics(invalid, options, System.err, true);
+                System.exit(2);
+                return;
             } else if (!options.quiet()) {
-                System.out.printf(options.verbose() ? "[4/4] Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n" : "Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n",
-                        summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid());
-                System.out.println("Report: " + att.core.PathPresentation.displayPath(summary.reportPath(), root));
+                java.util.Map<String,Object> summary = run.summary();
+                System.out.printf(options.verbose() ? "[4/4] Complete: total=%s, passed=%s, failed=%s, error=%s, skipped=%s, invalid=%s%n"
+                                : "Complete: total=%s, passed=%s, failed=%s, error=%s, skipped=%s, invalid=%s%n",
+                        summary.get("total"), summary.get("passed"), summary.get("failed"), summary.get("error"), summary.get("skipped"), summary.get("invalid"));
+                if (run.paths().get("report") != null) System.out.println("Report: " + att.core.PathPresentation.displayPath(Paths.get(run.paths().get("report")), root));
             } else {
-                System.out.printf("Complete: total=%d, passed=%d, failed=%d, error=%d, skipped=%d, invalid=%d%n",
-                        summary.total(), summary.passed(), summary.failed(), summary.error(), summary.skipped(), summary.invalid());
-                System.out.println("Report: " + att.core.PathPresentation.displayPath(summary.reportPath(), root));
-                for (att.core.TestResult result : summary.results()) {
-                    if (result.status() == att.core.ResultStatus.PASS || result.status() == att.core.ResultStatus.SKIPPED) continue;
-                    System.err.println("[RUN] " + result.status() + " case=" + result.caseId()
-                            + " caseLog=" + att.core.PathPresentation.displayPath(result.caseLogPath(), root));
+                java.util.Map<String,Object> summary = run.summary();
+                System.out.printf("Complete: total=%s, passed=%s, failed=%s, error=%s, skipped=%s, invalid=%s%n",
+                        summary.get("total"), summary.get("passed"), summary.get("failed"), summary.get("error"), summary.get("skipped"), summary.get("invalid"));
+                if (run.paths().get("report") != null) System.out.println("Report: " + att.core.PathPresentation.displayPath(Paths.get(run.paths().get("report")), root));
+                for (java.util.Map<String,Object> failure : run.caseFailures()) {
+                    System.err.println("[RUN] " + failure.get("status") + " case=" + failure.get("caseId")
+                            + " caseLog=" + cliDisplayPath((String) failure.get("caseLog"), root));
                 }
             }
-            if (summary.exitCode() != 0) System.exit(summary.exitCode());
+            if (run.exitCode() != 0) System.exit(run.exitCode());
         } catch (IllegalArgumentException e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             if (typed == null) typed = att.validation.DiagnosticException.wrap(DiagnosticCodes.RUN_FAILED,
@@ -213,81 +231,193 @@ public final class FrameworkRunner {
         return att.validation.JsonSupport.write(output);
     }
 
+    private static String cliDisplayPath(String value, Path root) {
+        return value == null ? null : att.core.PathPresentation.displayPath(Paths.get(value), root);
+    }
+
+    private static int number(java.util.Map<String,Object> values, String key) {
+        Object value = values.get(key);
+        return value instanceof Number ? ((Number) value).intValue() : 0;
+    }
+
+    static String runJson(att.api.RunResult run, Path root) {
+        java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>();
+        java.util.Map<String,Object> summary = run.summary();
+        for (String key : new String[]{"total", "passed", "failed", "error", "skipped", "invalid"})
+            output.put(key, summary.get(key));
+        output.put("report", cliDisplayPath(run.paths().get("report"), root));
+        return att.validation.JsonSupport.write(output);
+    }
+
+    private static att.api.ExecutionEventListener cliObserver(final CliOptions options, final Path root) {
+        return event -> {
+            if ((options.quiet() && event.type() != att.api.ExecutionEvent.Type.WARNING)
+                    || (!options.verbose() && event.type() != att.api.ExecutionEvent.Type.WARNING
+                    && event.type() != att.api.ExecutionEvent.Type.STATUS)) return;
+            String message = renderExecutionEvent(event, root);
+            if (message == null) return;
+            java.io.PrintStream output = "json".equals(options.format()) ? System.err : System.out;
+            synchronized (output) { output.println(message); output.flush(); }
+        };
+    }
+
+    private static String renderExecutionEvent(att.api.ExecutionEvent event, Path root) {
+        java.util.Map<String,Object> data = event.data();
+        Object kind = data.get("event");
+        if ("RUN_VALIDATION_SUMMARY".equals(kind)
+                || (event.type() == att.api.ExecutionEvent.Type.PROGRESS && "VALIDATION_PASS".equals(event.status())))
+            return "[1/4] V" + data.get("productVersion") + " validation PASS: "
+                + data.get("suites") + " suites, " + data.get("cases") + " cases, " + data.get("templates") + " templates, " + data.get("tools") + " tools";
+        if ("RUN_SELECTION_SUMMARY".equals(kind)) return "[2/4] Selected: " + data.get("cases") + " cases from " + data.get("suites") + " suites";
+        if ("RUN_EXECUTION_START".equals(kind)) return "[3/4] " + event.message();
+        if ("VALIDATION_DIAGNOSTIC".equals(kind)) {
+            Object value = data.get("diagnostic");
+            if (value instanceof java.util.Map) return renderValidationDiagnostic(
+                    (java.util.Map<?,?>) att.core.PathPresentation.displayStructure(value, root));
+        }
+        if ("DEBUG_STARTED".equals(kind)) return "[DEBUG] START target=" + data.get("targetType") + ":" + data.get("targetId")
+                + " input=" + data.get("input") + " output=" + data.get("output");
+        if ("DEBUG_INPUT_RESOLVED".equals(kind)) return "[DEBUG] INPUT target=" + data.get("targetType") + ":" + data.get("targetId")
+                + " case=" + event.caseId() + " resolved=" + data.get("resolved");
+        if ("RUN_QUEUED".equals(kind)) return "[RUN] queued: " + event.message();
+        if ("RUN_STARTED".equals(kind)) return "[RUN] id=" + event.runId() + " suites=" + data.get("suites") + " output=" + data.get("output");
+        if ("RUN_CANCELLED".equals(kind)) return "[RUN] CANCELLED runId=" + event.runId();
+        if ("SUITE_STARTED".equals(kind)) return "[SUITE] file=" + data.get("file") + " cases=" + data.get("cases");
+        if ("CASE_STARTED".equals(kind)) return "[CASE] id=" + event.caseId() + " status=START";
+        if ("CASE_FINISHED".equals(kind)) return "[CASE] id=" + event.caseId() + " status=" + event.status() + " durationMs=" + event.durationMs();
+        if ("CASE_LOG_PATH".equals(kind)) return "[CASE-LOG] case=" + event.caseId() + " file=" + data.get("file");
+        if ("STAGE_STARTED".equals(kind)) return "[STAGE] case=" + event.caseId() + " stage=" + event.stage() + " template=" + data.get("template") + " status=START";
+        if ("STAGE_FINISHED".equals(kind)) return "[STAGE] case=" + event.caseId() + " stage=" + event.stage() + " template=" + data.get("template") + " status=" + event.status() + " durationMs=" + event.durationMs();
+        if ("ACTION_FINISHED".equals(kind)) return "[ACTION] case=" + event.caseId() + " stage=" + event.stage() + " action=" + event.action() + " status=" + event.status()
+                + (data.get("detail") == null ? "" : " message=" + data.get("detail"));
+        if (event.type() == att.api.ExecutionEvent.Type.CASE_LOG) return "[CASE-LOG case=" + event.caseId() + "] " + event.message();
+        if (event.type() == att.api.ExecutionEvent.Type.STATUS && "SNAPSHOT_UPDATED".equals(event.status())) return event.message();
+        if (event.type() == att.api.ExecutionEvent.Type.STATUS && "CANCELLED".equals(event.status()) && data.get("target") != null)
+            return "[DEBUG] CANCELLED target=" + data.get("target");
+        return event.message();
+    }
+
+    private static String renderValidationDiagnostic(java.util.Map<?,?> diagnostic) {
+        StringBuilder out = new StringBuilder();
+        appendDiagnosticLines(out, "  [" + diagnostic.get("severity") + "] " + diagnostic.get("code") + ": ",
+                "\n    ", diagnostic.get("message"));
+        java.util.Map<?,?> source = diagnostic.get("source") instanceof java.util.Map
+                ? (java.util.Map<?,?>) diagnostic.get("source") : java.util.Collections.emptyMap();
+        String[] locationKeys = {"file", "field", "sheet", "row", "column", "template", "action"};
+        java.util.List<String> location = new java.util.ArrayList<String>();
+        for (String key : locationKeys) addLocation(location, key, diagnostic.get(key));
+        addLocation(location, "sourceFile", source.get("file"));
+        addLocation(location, "line", source.get("line"));
+        addLocation(location, "sourceColumn", source.get("column"));
+        addLocation(location, "endLine", source.get("endLine"));
+        addLocation(location, "endColumn", source.get("endColumn"));
+        if (!location.isEmpty()) out.append("\n    location: ").append(String.join(", ", location));
+        appendDiagnosticContext(out, diagnostic.get("context"));
+        appendDiagnosticSource(out, source);
+        appendDiagnosticSchemaViolations(out, diagnostic.get("schemaViolations"));
+        Object occurrences = diagnostic.get("occurrences");
+        if (occurrences instanceof Number && ((Number) occurrences).intValue() > 1) {
+            out.append("\n    occurrences: ").append(occurrences);
+            Object affected = diagnostic.get("affectedCases");
+            if (affected instanceof Iterable) {
+                out.append("\n    affected cases:");
+                for (Object item : (Iterable<?>) affected) out.append("\n      - ").append(flatMap(item));
+            }
+        }
+        appendDiagnosticLines(out, "\n    suggestion: ", "\n      ", diagnostic.get("suggestion"));
+        return out.toString();
+    }
+
+    private static void appendDiagnosticContext(StringBuilder out, Object value) {
+        if (!(value instanceof java.util.Map)) return;
+        for (java.util.Map.Entry<?,?> item : ((java.util.Map<?,?>) value).entrySet())
+            out.append('\n').append("    ").append(item.getKey()).append(": ").append(item.getValue());
+    }
+
+    private static void appendDiagnosticSource(StringBuilder out, java.util.Map<?,?> source) {
+        Object excerptValue = source.get("excerpt");
+        if (excerptValue == null) return;
+        String[] lines = String.valueOf(excerptValue).split("\\r?\\n", -1);
+        int line = number(source.get("line"), 1);
+        int column = number(source.get("column"), 1);
+        int start = number(source.get("excerptStartLine"), line);
+        int caretLine = Math.max(0, Math.min(lines.length - 1, line - start));
+        String markedLine = lines[caretLine];
+        int spaces = Math.min(Math.max(0, column - 1), markedLine.length());
+        for (int index = 0; index < lines.length; index++) {
+            out.append('\n').append("    ").append(lines[index]);
+            if (index == caretLine) {
+                out.append('\n').append("    ");
+                for (int col = 0; col < spaces; col++) out.append(markedLine.charAt(col) == '\t' ? '\t' : ' ');
+                out.append('^');
+            }
+        }
+    }
+
+    private static void appendDiagnosticSchemaViolations(StringBuilder out, Object value) {
+        if (!(value instanceof Iterable)) return;
+        java.util.Iterator<?> iterator = ((Iterable<?>) value).iterator();
+        if (!iterator.hasNext()) return;
+        out.append("\n    schemaViolations:");
+        while (iterator.hasNext()) {
+            Object item = iterator.next();
+            if (!(item instanceof java.util.Map)) { out.append("\n      ").append(item); continue; }
+            java.util.Map<?,?> violation = (java.util.Map<?,?>) item;
+            out.append("\n      ");
+            Object path = violation.get("path"), keyword = violation.get("keyword"), message = violation.get("message");
+            if (path != null && !String.valueOf(path).isEmpty()) out.append(path).append(' ');
+            if (keyword != null && !String.valueOf(keyword).isEmpty()) out.append('[').append(keyword).append("] ");
+            out.append(message == null ? violation : message);
+        }
+    }
+
+    private static void addLocation(java.util.List<String> location, String key, Object value) {
+        if (value != null && !String.valueOf(value).isEmpty()) location.add(key + "=" + value);
+    }
+
+    private static void appendDiagnosticLines(StringBuilder out, String first, String rest, Object value) {
+        if (value == null) return;
+        String[] lines = String.valueOf(value).split("\\r?\\n", -1);
+        out.append(first).append(lines[0]);
+        for (int i = 1; i < lines.length; i++) out.append(rest).append(lines[i]);
+    }
+
+    private static int number(Object value, int fallback) {
+        return value instanceof Number ? ((Number) value).intValue() : fallback;
+    }
+
+    private static String flatMap(Object value) {
+        if (!(value instanceof java.util.Map)) return String.valueOf(value);
+        java.util.List<String> items = new java.util.ArrayList<String>();
+        for (java.util.Map.Entry<?,?> entry : ((java.util.Map<?,?>) value).entrySet())
+            items.add(entry.getKey() + "=" + entry.getValue());
+        return String.join(", ", items);
+    }
+
+    private static FrameworkConfig loadConfig(CliOptions options, Path root) throws Exception {
+        try { return new FrameworkConfigLoader().load(options.configPath(), root, options.environment()); }
+        catch (att.validation.DiagnosticException e) { throw e; }
+        catch (Exception e) {
+            throw att.validation.DiagnosticException.wrap(DiagnosticCodes.CONFIG_INVALID,
+                    "Unable to load ATT global configuration", e, options.configPath().toString(), "config",
+                    "Check that the config file exists, is readable YAML, and conforms to the configured schema version.");
+        }
+    }
+
+    private static java.util.List<java.util.Map<String, Object>> presentedDiagnostics(
+            java.util.List<att.validation.Diagnostic> diagnostics, Path root) {
+        java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<java.util.Map<String, Object>>();
+        for (att.validation.Diagnostic diagnostic : diagnostics) {
+            @SuppressWarnings("unchecked") java.util.Map<String, Object> displayed =
+                    (java.util.Map<String, Object>) att.core.PathPresentation.displayStructure(diagnostic.toMap(), root);
+            result.add(displayed);
+        }
+        return result;
+    }
+
     @SuppressWarnings("unchecked")
     private static java.util.Map<String, Object> castMap(Object value) {
         return value instanceof java.util.Map ? (java.util.Map<String, Object>) value : java.util.Collections.<String, Object>emptyMap();
-    }
-
-    private static void runLoad(Path root, FrameworkConfig config, ExecutionOptions options,
-                                att.load.LoadScenario scenario, att.load.LoadTarget target,
-                                PerformanceProfile profile) throws Exception {
-        Path outputRoot = options.outputDirectory() == null ? root.resolve(config.outputDirectory()) : root.resolve(options.outputDirectory());
-        String runId = att.core.IdentifierValidator.runId(options.runId() == null || options.runId().trim().isEmpty() ? "load-" + System.currentTimeMillis() : options.runId());
-        java.io.PrintStream progressOutput = "json".equals(options.format()) ? System.err : System.out;
-        att.load.LoadConsoleProgress progress = new att.load.LoadConsoleProgress(runId, scenario, progressOutput,
-                options.verbose() && !options.quiet());
-        try {
-            java.nio.file.Path loadRoot = outputRoot.resolve("load").toAbsolutePath().normalize();
-            java.nio.file.Files.createDirectories(loadRoot);
-            java.nio.file.Path reservedRunDirectory = att.core.IdentifierValidator.strictChild(loadRoot, runId, "Load run directory");
-            if (java.nio.file.Files.exists(reservedRunDirectory))
-                throw new IllegalArgumentException("Load run ID already exists: " + runId + " (" + reservedRunDirectory + "). Choose a different --run-id.");
-            att.load.LoadEvidenceStore evidence = new att.load.LoadEvidenceStore(att.load.LoadEvidencePolicy.from(scenario), progress);
-            att.load.LoadRunResult result;
-            java.util.Map<String, Object> resourceMetrics;
-            long loadExecutionPhase = profile.begin();
-            try (att.load.LoadRunResources resources = new att.load.LoadRunResources(root, config)) {
-                if (scenario.coordinatorRequired()) {
-                    result = att.load.LoadRunCoordinator.runFrom(root, config, scenario, resources, runId, evidence, outputRoot);
-                } else {
-                    att.load.IterationExecutor iterations = new att.load.IterationExecutor(root, config, target, resources, outputRoot);
-                    att.load.LoadScheduler scheduler = scenario.model() == att.load.LoadScenario.Model.CLOSED
-                            ? new att.load.ClosedVuScheduler(scenario, iterations, runId, evidence, outputRoot)
-                            : new att.load.FixedArrivalRateScheduler(scenario, iterations, runId, evidence, outputRoot);
-                    try { result = scheduler.run(); } finally { scheduler.close(); }
-                }
-                resourceMetrics = resources.metrics();
-            }
-            profile.end("loadExecutionMs", loadExecutionPhase);
-            java.nio.file.Path runDirectory = reservedRunDirectory;
-            java.nio.file.Files.createDirectories(runDirectory);
-            java.util.Map<String, Object> retainedEvidence = evidence.write(runDirectory);
-            result = result.withResources(resourceMetrics)
-                    .withThresholds(new att.load.LoadThresholdEvaluator().evaluate(scenario, result.metrics()))
-                    .withEvidence(retainedEvidence);
-            long loadReportPhase = profile.begin();
-            java.nio.file.Path report = new att.load.LoadReportWriter().write(outputRoot, result);
-            profile.end("loadReportMs", loadReportPhase);
-            profile.counter("loadScheduled", result.metrics().longValue("scheduled"));
-            profile.counter("loadStarted", result.metrics().longValue("started"));
-            profile.counter("loadCompleted", result.metrics().longValue("completed"));
-            profile.counter("loadDropped", result.metrics().longValue("dropped"));
-            java.util.Map<String, Object> renderStats = (java.util.Map<String, Object>) resourceMetrics.get("render");
-            for (java.util.Map.Entry<String, Object> entry : renderStats.entrySet())
-                profile.counter(entry.getKey(), ((Number) entry.getValue()).longValue());
-            profile.write(runDirectory);
-            int exitCode = result.exitCode();
-            progress.finish(result.status().name());
-            if ("json".equals(options.format())) {
-                java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>(result.toMap());
-                output.put("report", att.core.PathPresentation.displayPath(report, root)); output.put("exitCode", exitCode); System.out.println(att.validation.JsonSupport.write(output));
-            } else if (options.quiet()) {
-                System.out.println("Report: " + att.core.PathPresentation.displayPath(report, root));
-            } else {
-                System.out.println("Report: " + att.core.PathPresentation.displayPath(report, root));
-                System.out.println("Metrics: " + result.metrics().values());
-            }
-            if (exitCode != 0) System.exit(exitCode);
-        } catch (InterruptedException interrupted) {
-            progress.finish("CANCELLED");
-            Thread.currentThread().interrupt();
-            throw interrupted;
-        } catch (Exception error) {
-            progress.finish(Thread.currentThread().isInterrupted() ? "CANCELLED" : "ERROR");
-            throw error;
-        } finally {
-            progress.close();
-        }
     }
 
     private static void help() {
@@ -302,13 +432,13 @@ public final class FrameworkRunner {
         System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  load      Execute a closed or fixed-arrival-rate load scenario and report metrics\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run, debug, and load stream bounded progress by default; --quiet keeps the final summary; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
     }
 
-    private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options) {
+    private static void printDiagnostics(PackageValidator.ValidationSummary validation, CliOptions options) {
         printDiagnostics(validation, options, System.out, false);
     }
-    private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options, java.io.PrintStream output) {
+    private static void printDiagnostics(PackageValidator.ValidationSummary validation, CliOptions options, java.io.PrintStream output) {
         printDiagnostics(validation, options, output, false);
     }
-    private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options, java.io.PrintStream output, boolean leadingBlank) {
+    private static void printDiagnostics(PackageValidator.ValidationSummary validation, CliOptions options, java.io.PrintStream output, boolean leadingBlank) {
         if (!"human".equals(options.format())) return;
         java.util.List<att.validation.Diagnostic> visible = new java.util.ArrayList<att.validation.Diagnostic>();
         for (att.validation.Diagnostic diagnostic : validation.diagnostics) {

@@ -265,8 +265,11 @@ def check_schema_references():
     catalog_path = SCHEMAS / "catalog.yaml"
     registered = active_schemas(read(catalog_path)) if catalog_path.is_file() else {}
     registered_tokens = {name + "/v" + version for name, version in registered.items()}
+    documented_protocols = {"att-worker/v1": DOCS / "system-design/worker-protocol.md"}
     for token in sorted(tokens):
-        if token not in schema_corpus and token not in registered_tokens:
+        protocol_doc = documented_protocols.get(token)
+        if (token not in schema_corpus and token not in registered_tokens
+                and (protocol_doc is None or not protocol_doc.is_file())):
             fail("current documentation references schemaVersion with no matching schema contract: %s" % token)
 
     catalog = SCHEMAS / "catalog.yaml"
@@ -280,7 +283,7 @@ def check_schema_references():
 
 
 def check_cli_documentation():
-    source = read(ROOT / "att-cli/src/main/java/att/core/ExecutionOptions.java")
+    source = read(ROOT / "att-cli/src/main/java/att/CliOptions.java")
     supported_options = set(re.findall(r'"(--[a-z][a-z0-9-]*)"', source))
     public_commands = set(("run", "validate", "snapshot", "docs", "report",
                            "build", "clean", "version", "debug", "load", "help"))

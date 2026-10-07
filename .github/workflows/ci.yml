@@ -59,6 +59,28 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: surefire-reports-${{ github.run_id }}
-          path: att-cli/target/surefire-reports/
+          path: |
+            att-engine/target/surefire-reports/
+            att-cli/target/surefire-reports/
+            att-worker/target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 7
+
+  windows-worker-process-tree:
+    name: Java 8 Windows Tool and source-launcher regressions
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+          cache: maven
+
+      - name: Verify Java 8 Windows Tool cancellation and source-tree launcher
+        run: mvn -B -ntp -pl att-cli,att-worker -am "-Dtest=ProcessTreeTerminatorWindowsTest,WorkerMainTest#terminatingWorkerStopsAnActiveCommandBackedTool,WindowsLauncherTest" "-Dsurefire.failIfNoSpecifiedTests=false" test

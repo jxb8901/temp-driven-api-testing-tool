@@ -8,7 +8,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.stream.Stream;
 
-/** Installs the real catalog and schema tree into isolated package fixtures. */
+/** CLI test fixture helper. Kept local to avoid making the CLI depend on engine tests. */
 public final class TestSchemas {
     private TestSchemas() { }
 

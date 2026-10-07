@@ -1,7 +1,7 @@
 /* Author: Jeffrey + ChatGPT */
 package att.config;
 
-import att.core.ExecutionOptions;
+import att.CliOptions;
 import att.validation.JsonSchemaVerifier;
 import att.validation.JsonSupport;
 import org.junit.jupiter.api.Test;
@@ -30,11 +30,11 @@ class EnvironmentProfileTest {
 
     @Test
     void cliEnvironmentSelectorIsSharedByTheFourProfileAwareModes() {
-        assertEquals("UAT", ExecutionOptions.parse(new String[]{"run", "--all", "--env", "UAT"}).environment());
-        assertEquals("UAT", ExecutionOptions.parse(new String[]{"validate", "--package", "--env", "UAT"}).environment());
-        assertEquals("UAT", ExecutionOptions.parse(new String[]{"debug", "template", "PAYMENT", "--env", "UAT"}).environment());
-        assertEquals("UAT", ExecutionOptions.parse(new String[]{"load", "scenario.yaml", "--env", "UAT"}).environment());
-        assertThrows(IllegalArgumentException.class, () -> ExecutionOptions.parse(new String[]{"docs", "--env", "UAT"}));
+        assertEquals("UAT", CliOptions.parse(new String[]{"run", "--all", "--env", "UAT"}).environment());
+        assertEquals("UAT", CliOptions.parse(new String[]{"validate", "--package", "--env", "UAT"}).environment());
+        assertEquals("UAT", CliOptions.parse(new String[]{"debug", "template", "PAYMENT", "--env", "UAT"}).environment());
+        assertEquals("UAT", CliOptions.parse(new String[]{"load", "scenario.yaml", "--env", "UAT"}).environment());
+        assertThrows(IllegalArgumentException.class, () -> CliOptions.parse(new String[]{"docs", "--env", "UAT"}));
     }
 
     @Test

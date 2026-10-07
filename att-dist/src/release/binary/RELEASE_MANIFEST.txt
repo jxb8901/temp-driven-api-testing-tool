@@ -6,6 +6,7 @@ contents:
   - att.sh
   - att.bat
   - lib/att-${project.version}.jar
+  - lib/att-worker-${project.version}.jar
   - lib/
   - config/
   - templates/

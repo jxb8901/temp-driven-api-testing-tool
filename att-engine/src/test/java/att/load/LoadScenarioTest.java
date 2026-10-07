@@ -1,0 +1,1164 @@
+package att.load;
+
+import att.config.FrameworkConfig;
+import att.config.ToolConfig;
+import att.config.ToolArgumentConfig;
+import att.core.CaseExecutionLog;
+import att.core.ExecutionOptions;
+import att.core.ResultStatus;
+import att.core.TestCase;
+import att.validation.DiagnosticException;
+import att.validation.JsonSupport;
+import att.validation.PackageValidator;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.time.Instant;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class LoadScenarioTest {
+    @TempDir Path temp;
+
+    @Test void xPrefixDisablesLoadConfigurationFieldsButPreservesUserMaps() throws Exception {
+        Path project = project();
+        Path file = write(project, "x-prefix.yaml", "schemaVersion: att-load/v1.4\n"
+                + "thresholds: {p95: '< 20ms', x-disabled: [not, a, threshold]}\n"
+                + "evidence: {mode: metrics, x-disabled: invalid, resources: {output: none, x-retired: invalid}}\n"
+                + "workloads:\n  - id: normal\n"
+                + "    target: {type: tool, id: sample.echo, x-disabled: invalid, arguments: {x-correlation-id: retained}}\n"
+                + "    inputs: {x-correlation-id: retained}\n"
+                + "    load: {users: 1, duration: 1s, x-disabled: [ignored]}\n"
+                + "    execution:\n      thinkTime: {min: 1ms, max: 2ms, x-disabled: invalid}\n");
+
+        LoadScenario scenario = new LoadScenarioLoader(project).load(file);
+        assertFalse(scenario.thresholds().containsKey("x-disabled"));
+        assertFalse(scenario.evidence().containsKey("x-disabled"));
+        assertFalse(((Map<?, ?>) scenario.evidence().get("resources")).containsKey("x-retired"));
+        assertEquals("retained", scenario.inputs().get("x-correlation-id"));
+        assertEquals("retained", scenario.targetArguments().get("x-correlation-id"));
+        assertEquals(1L, scenario.thinkTimePolicy().min().toMillis());
+        assertEquals(2L, scenario.thinkTimePolicy().max().toMillis());
+    }
+
+    @Test void rejectsHistoricalLoadSchemaAndAcceptsCurrentEvidencePolicy() throws Exception {
+        Path project = project();
+        Path legacy = project.resolve("legacy-v10.yaml");
+        Files.write(legacy, ("schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\n").getBytes(StandardCharsets.UTF_8));
+        DiagnosticException unsupported = assertThrows(DiagnosticException.class,
+                () -> new LoadScenarioLoader(project).load(legacy));
+        assertTrue(unsupported.getMessage().contains("att-load/v1.3"), unsupported.getMessage());
+
+        Path current = write(project, "full-v12.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: default\n"
+                + "    target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "    load: {users: 1, duration: 1s}\n"
+                + "evidence: {success: full, failure: full}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(current);
+        assertEquals(LoadEvidencePolicy.Success.FULL, LoadEvidencePolicy.from(scenario).success());
+        assertEquals(LoadEvidencePolicy.Failure.FULL, LoadEvidencePolicy.from(scenario).failure());
+
+        Path prior = write(project, "prior-v12.yaml", "schemaVersion: att-load/v1.2\nworkloads:\n"
+                + "  - id: default\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 1, duration: 1s}\n");
+        DiagnosticException oldCurrent = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(prior));
+        assertTrue(oldCurrent.getMessage().contains("att-load/v1.6"), oldCurrent.getMessage());
+    }
+
+    @Test void currentWorkloadVarsRemainDefinitionsAndCliOverridesAreAppliedBeforeEvaluation() throws Exception {
+        Path project = project();
+        Path file = write(project, "bootstrap.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: payments\n    target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "    inputs: {amount: 7}\n    vars: {base: 2, derived: '${EXEC.VARS.base}', nested: {value: old}}\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", file.toString(),
+                "--set", "vars.base=${EXEC.INPUT.amount}", "--set", "vars.nested.value=updated"});
+        LoadScenario scenario = new LoadScenarioLoader(project).load(file, LoadOverrides.from(options));
+
+        assertEquals("${EXEC.INPUT.amount}", scenario.vars().get("base"));
+        assertEquals("${EXEC.VARS.base}", scenario.vars().get("derived"));
+        assertEquals("updated", ((Map<?, ?>) scenario.vars().get("nested")).get("value"));
+        assertFalse(scenario.toSummaryMap().toString().contains("derived"), "summary projection must not expose vars");
+
+        Path toolVars = write(project, "tool-vars.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: tool\n    target: {type: tool, id: sample.echo}\n"
+                + "    vars: {notArguments: value}\n    load: {users: 1, duration: 1s}\n");
+        DiagnosticException toolError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(toolVars));
+        assertTrue(toolError.getMessage().contains("Tool arguments remain a separate contract"), toolError.getMessage());
+    }
+
+    @Test void unifiedSetOverridesInputAndToolArgumentWithTypedValues() throws Exception {
+        Path project = project();
+        Path templateFile = write(project, "input-set.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: template\n    target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "    inputs: {customer: {ids: [1, 2]}}\n    load: {users: 1, duration: 1s}\n");
+        ExecutionOptions inputOptions = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", templateFile.toString(),
+                "--set", "input.customer.ids[1]=false", "--set", "input.customer.active=true"});
+        LoadScenario template = new LoadScenarioLoader(project).load(templateFile, LoadOverrides.from(inputOptions));
+        Map<?, ?> customer = (Map<?, ?>) template.inputs().get("customer");
+        assertEquals(java.util.Arrays.asList(1, false), customer.get("ids"));
+        assertEquals(Boolean.TRUE, customer.get("active"));
+
+        Path toolFile = write(project, "tool-set.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: tool\n    target: {type: tool, id: sample.echo, arguments: {amount: 2}}\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        ExecutionOptions toolOptions = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", toolFile.toString(),
+                "--set", "arg.amount=19"});
+        LoadScenario tool = new LoadScenarioLoader(project).load(toolFile, LoadOverrides.from(toolOptions));
+        assertEquals(19, tool.targetArguments().get("amount"));
+
+        Path multi = write(project, "multi-set.yaml", "schemaVersion: att-load/v1.3\nworkloads:\n"
+                + "  - id: first\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 1, duration: 1s}\n"
+                + "  - id: second\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 1, duration: 1s}\n");
+        ExecutionOptions multiOptions = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", multi.toString(), "--set", "input.value=1"});
+        DiagnosticException ambiguous = assertThrows(DiagnosticException.class,
+                () -> new LoadScenarioLoader(project).load(multi, LoadOverrides.from(multiOptions)));
+        assertTrue(ambiguous.getMessage().contains("ambiguous for multi-workload"), ambiguous.getMessage());
+    }
+
+    @Test void quickLoadProfileProvidesDefaultsAndCliIntensityWins() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("load"));
+        Path profile = write(project, "load/load.yaml", "schemaVersion: att-load-profile/v1.0\n"
+                + "load: {users: 2, duration: 5s}\nexecution: {thinkTime: 1ms}\n"
+                + "thresholds: {p95: '< 20ms'}\nevidence: {mode: metrics}\nseed: 7\n");
+        Map<String, Object> policy = new LoadProfileLoader(project).loadDefault();
+        assertNotNull(policy);
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", "--debug", "template", "LOAD_TEMPLATE",
+                "--users", "4", "--duration", "2s"});
+        LoadScenario scenario = new LoadScenarioLoader(project).fromDebugInput(profile, "template", "LOAD_TEMPLATE",
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(),
+                Collections.<String, Object>emptyMap(), policy, options);
+        assertEquals(4, scenario.users());
+        assertEquals(2000L, scenario.duration().toMillis());
+        assertEquals(7L, scenario.seed());
+        assertEquals("< 20ms", scenario.thresholds().get("p95"));
+        assertEquals(LoadEvidencePolicy.Failure.NONE, LoadEvidencePolicy.from(scenario).failure());
+        assertEquals(1L, scenario.thinkTime().toMillis());
+
+        ExecutionOptions arrivalOptions = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", "--debug", "template", "LOAD_TEMPLATE",
+                "--arrival-rate", "5/s", "--duration", "2s", "--max-concurrent", "2", "--overload-policy", "drop"});
+        LoadScenario arrivalScenario = new LoadScenarioLoader(project).fromDebugInput(profile, "template", "LOAD_TEMPLATE",
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(),
+                Collections.<String, Object>emptyMap(), policy, arrivalOptions);
+        assertEquals(LoadScenario.Model.ARRIVAL_RATE, arrivalScenario.model());
+        assertEquals(0L, arrivalScenario.thinkTime().toMillis());
+
+        Path invalid = write(project, "load/load.yaml", "schemaVersion: att-load-profile/v1.0\n"
+                + "load: {users: 1, duration: 1s}\ntarget: {type: template, id: BAD}\n");
+        assertThrows(DiagnosticException.class, () -> new LoadProfileLoader(project).loadDefault());
+        assertTrue(Files.exists(invalid));
+        assertNull(new LoadProfileLoader(temp.resolve("no-profile")).loadDefault());
+
+        ExecutionOptions incomplete = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", "--debug", "template", "LOAD_TEMPLATE"});
+        DiagnosticException missingPolicy = assertThrows(DiagnosticException.class,
+                () -> new LoadScenarioLoader(project).fromDebugInput(profile, "template", "LOAD_TEMPLATE",
+                        Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), incomplete));
+        assertTrue(missingPolicy.getMessage().contains("Quick Load needs a policy"), missingPolicy.getMessage());
+    }
+
+    @Test void previousV14QuickLoadPolicyIsAcceptedWithoutWorkloads() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("load"));
+        write(project, "load/load.yaml", "schemaVersion: att-load/v1.4\n"
+                + "load: {users: 2, duration: 10s}\n"
+                + "execution: {thinkTime: 250ms}\n"
+                + "evidence: {mode: failures}\n");
+
+        Map<String, Object> policy = new LoadScenarioLoader(project).loadDefaultPolicy();
+
+        assertEquals("att-load/v1.6", policy.get("schemaVersion"));
+        assertFalse(policy.containsKey("workloads"));
+        assertEquals(2, ((Number) ((Map<?, ?>) policy.get("load")).get("users")).intValue());
+    }
+
+    @Test void validatesBothWorkloadModelsAndExplicitOverridesWin() throws Exception {
+        Path project = project();
+        Path closed = write(project, "closed.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load:\n  users: 2\n  duration: 5s\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(closed);
+        assertEquals(LoadScenario.Model.CLOSED, scenario.model());
+        assertEquals(2, scenario.users());
+        assertEquals(5000L, scenario.duration().toMillis());
+
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", "closed.yaml", "--users", "7", "--duration", "2s"});
+        LoadScenario overridden = new LoadScenarioLoader(project).load(closed, LoadOverrides.from(options));
+        assertEquals(7, overridden.users());
+        assertEquals(2000L, overridden.duration().toMillis());
+
+        Path arrival = write(project, "arrival.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: flow, id: load.echo.v1}\n"
+                + "load:\n  arrivalRate: 100/s\n  duration: 1m\n  maxConcurrent: 4\n  overloadPolicy: drop\n");
+        LoadScenario open = new LoadScenarioLoader(project).load(arrival);
+        assertEquals(LoadScenario.Model.ARRIVAL_RATE, open.model());
+        assertEquals(100.0, open.arrivalRatePerSecond(), 0.0001);
+        assertEquals(4, open.maxConcurrent());
+
+        Path closedArrivalThreshold = write(project, "closed-arrival-threshold.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "thresholds: {achievedArrivalRate: '>= 1%'}\n");
+        DiagnosticException closedThresholdError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(closedArrivalThreshold));
+        assertEquals("thresholds.achievedArrivalRate", closedThresholdError.field());
+
+        Path arrivalThroughputThreshold = write(project, "arrival-throughput-threshold.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n"
+                + "thresholds: {minThroughput: '>= 1/s', achievedArrivalRate: '>= 99%'}\n");
+        LoadScenario arrivalThresholds = new LoadScenarioLoader(project).load(arrivalThroughputThreshold);
+        assertEquals(">= 1/s", arrivalThresholds.thresholds().get("minThroughput"));
+        assertEquals(">= 99%", arrivalThresholds.thresholds().get("achievedArrivalRate"));
+
+        Path arrivalRateThreshold = write(project, "arrival-rate-threshold.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n"
+                + "thresholds: {achievedArrivalRate: '>= 95/s'}\n");
+        LoadScenario arrivalRateThresholdScenario = new LoadScenarioLoader(project).load(arrivalRateThreshold);
+        assertEquals(">= 95/s", arrivalRateThresholdScenario.thresholds().get("achievedArrivalRate"));
+
+        Path arrivalPerMinuteThreshold = write(project, "arrival-per-minute-threshold.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {arrivalRate: 1/s, duration: 1s, maxConcurrent: 1, overloadPolicy: drop}\n"
+                + "thresholds: {achievedArrivalRate: '>= 5700/m'}\n");
+        LoadScenario arrivalPerMinuteThresholdScenario = new LoadScenarioLoader(project).load(arrivalPerMinuteThreshold);
+        assertEquals(">= 5700/m", arrivalPerMinuteThresholdScenario.thresholds().get("achievedArrivalRate"));
+    }
+
+    @Test void currentV14RootDefaultsMergeIntoWorkloadsButRootThresholdsStayAggregateOnly() throws Exception {
+        Path project = project();
+        Path scenarioFile = write(project, "v14-defaults.yaml", "schemaVersion: att-load/v1.4\n"
+                + "load: {duration: 5s, warmup: 1s}\n"
+                + "execution: {thinkTime: 10ms, execIdFormat: '${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.ITERATION}'}\n"
+                + "thresholds: {p95: '< 100ms'}\n"
+                + "workloads:\n"
+                + "  - id: first\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 3}\n    thresholds: {p99: '< 200ms'}\n"
+                + "  - id: second\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 2}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        assertEquals(3, scenario.workload("first").users());
+        assertEquals(2, scenario.workload("second").users());
+        assertEquals(1000L, scenario.workload("second").warmup().toMillis());
+        assertEquals(10L, scenario.workload("second").thinkTimePolicy().min().toMillis());
+        assertEquals("< 100ms", scenario.thresholds().get("p95"));
+        assertEquals("< 200ms", scenario.workload("first").thresholds().get("p99"));
+        assertFalse(scenario.workload("first").thresholds().containsKey("p95"));
+        assertTrue(scenario.workload("second").thresholds().isEmpty());
+        assertEquals("${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.ITERATION}", scenario.execIdFormat());
+
+        Path singleFile = write(project, "v14-single.yaml", "schemaVersion: att-load/v1.4\n"
+                + "load: {users: 2, duration: 5s}\n"
+                + "workloads:\n  - id: only\n    target: {type: template, id: LOAD_TEMPLATE}\n");
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", singleFile.toString(), "--users", "7", "--duration", "2s"});
+        LoadScenario overridden = new LoadScenarioLoader(project).load(singleFile, LoadOverrides.from(options));
+        assertEquals(7, overridden.workload().users());
+        assertEquals(2000L, overridden.workload().duration().toMillis());
+        assertEquals("5s", overridden.loadDefaults().get("duration"));
+    }
+
+    @Test void historicalV13RootThresholdsRemainAggregateOnlyAfterNormalization() throws Exception {
+        Path project = project();
+        Path scenarioFile = write(project, "v13-root-threshold.yaml", "schemaVersion: att-load/v1.3\n"
+                + "thresholds: {minThroughput: '>= 100/s'}\n"
+                + "workloads:\n"
+                + "  - id: first\n"
+                + "    target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "    load: {users: 1, duration: 1s}\n"
+                + "  - id: second\n"
+                + "    target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "    load: {users: 1, duration: 1s}\n");
+
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+
+        assertEquals(">= 100/s", scenario.thresholds().get("minThroughput"));
+        assertTrue(scenario.workload("first").thresholds().isEmpty());
+        assertTrue(scenario.workload("second").thresholds().isEmpty());
+        assertTrue(scenario.forWorkload(scenario.workload("first")).thresholds().isEmpty());
+    }
+
+    @Test void rejectsAmbiguousWorkloadAndClosedOnlyOptionsWithSourceDiagnostics() throws Exception {
+        Path project = project();
+        Path invalid = write(project, "invalid.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load:\n  users: 2\n  arrivalRate: 10/s\n  duration: 1s\n");
+        DiagnosticException error = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(invalid));
+        assertEquals("ATT-LOAD-001", error.code());
+        assertEquals(invalid.toString(), error.file());
+        assertTrue(error.field() != null);
+
+        Path invalidThink = write(project, "invalid-think.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {arrivalRate: 10/s, duration: 1s, maxConcurrent: 2, overloadPolicy: drop}\n"
+                + "execution: {thinkTime: 10ms}\n");
+        DiagnosticException thinkError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(invalidThink));
+        assertEquals("workloads[0].execution.thinkTime", thinkError.field());
+
+        Path invalidArguments = write(project, "invalid-arguments.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE, arguments: {ignored: true}}\n"
+                + "load: {users: 1, duration: 1s}\n");
+        DiagnosticException argumentsError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(invalidArguments));
+        assertEquals("workloads[0].target.arguments", argumentsError.field());
+
+        Path invalidMaxConcurrent = write(project, "invalid-max-concurrent.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "load: {arrivalRate: 10/s, duration: 1s, maxConcurrent: invalid, overloadPolicy: drop}\n");
+        DiagnosticException maxConcurrentError = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(invalidMaxConcurrent));
+        assertEquals("workloads[0].load.maxConcurrent", maxConcurrentError.field());
+    }
+
+    @Test void iterationExecutorIsolatesLoadAndCaseStateForClosedAndArrivalIterations() throws Exception {
+        Path project = project();
+        Path scenarioFile = write(project, "closed.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\n"
+                + "inputs: {input: validated}\n"
+                + "load: {users: 2, duration: 1s}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        final IterationExecutor executor = new IterationExecutor(project, config, target);
+        final Instant iterationStarted = Instant.parse("2026-09-19T09:00:00Z");
+
+        ExecutorService pool = Executors.newFixedThreadPool(4);
+        try {
+            Future<IterationResult> first = pool.submit(() -> executor.execute(IterationRequest.closed("run-29", "i-1", 1, "STEADY", iterationStarted, "VU-1", Collections.singletonMap("input", "one"))));
+            Future<IterationResult> second = pool.submit(() -> executor.execute(IterationRequest.closed("run-29", "i-2", 2, "STEADY", iterationStarted, "VU-2", Collections.singletonMap("input", "two"))));
+            IterationResult a = first.get(); IterationResult b = second.get();
+            assertEquals(ResultStatus.PASS, a.status()); assertEquals(ResultStatus.PASS, b.status());
+            assertNotEquals(a.context().resolve("EXEC.ID"), b.context().resolve("EXEC.ID"));
+            assertTrue(String.valueOf(a.context().resolve("EXEC.ID")).startsWith("run-29-execution-"));
+            assertEquals("run-29", a.context().resolve("EXEC.RUN_ID"));
+            assertEquals("run-29", b.context().resolve("EXEC.RUN_ID"));
+            assertEquals(iterationStarted.toString(), a.context().resolve("EXEC.STARTED_AT"));
+            assertEquals("i-1", att.core.CaseRuntimeContext.getPath(a.context().diagnosticsTree(), "load.iterationId"));
+            assertEquals("i-2", att.core.CaseRuntimeContext.getPath(b.context().diagnosticsTree(), "load.iterationId"));
+            assertEquals("load", att.core.CaseRuntimeContext.getPath(a.context().diagnosticsTree(), "execution.mode"));
+            assertEquals("VU-1", att.core.CaseRuntimeContext.getPath(a.context().diagnosticsTree(), "load.userId"));
+            assertEquals("VU-2", att.core.CaseRuntimeContext.getPath(b.context().diagnosticsTree(), "load.userId"));
+            assertEquals("run-29", a.context().resolve("EXEC.LOAD.RUN_ID"));
+            assertEquals("closed", a.context().resolve("EXEC.LOAD.MODEL"));
+            assertEquals("VU-1", a.context().resolve("EXEC.LOAD.USER_ID"));
+            assertEquals("i-1", a.context().resolve("EXEC.LOAD.ITERATION_ID"));
+            assertEquals(Long.valueOf(1L), a.context().resolve("EXEC.LOAD.ITERATION"));
+            assertEquals("STEADY", a.context().resolve("EXEC.LOAD.PHASE"));
+            assertEquals("one", a.context().resolve("EXEC.INPUT.input"));
+            assertEquals("one", a.context().resolve("EXEC.ACTIONS.phase.output.result"));
+            assertEquals("two", b.context().resolve("EXEC.ACTIONS.phase.output.result"));
+            assertEquals("one", a.context().resolve("EXEC.VARS.flowInput"));
+            assertEquals("two", b.context().resolve("EXEC.VARS.flowInput"));
+            assertNull(a.context().resolve("output.result"));
+            assertNull(a.context().resolve("EXEC.INPUT.inputs.input"));
+            assertEquals("one", a.context().resolve("CASE.inputs.input"));
+            assertEquals("LOAD_TEMPLATE", a.context().resolve("META.TARGET.id"));
+            assertEquals("load", a.context().resolve("META.SOURCE.type"));
+            assertEquals("closed", a.context().resolve("META.SOURCE.scenario"));
+            assertNull(a.context().resolve("META.SOURCE.caseId"));
+            assertFalse(a.context().metadataTree().toString().contains("i-1"));
+            assertEquals("closed", att.core.CaseRuntimeContext.getPath(a.context().diagnosticsTree(), "load.model"));
+            assertNull(a.context().resolve("LOAD.model"));
+            assertThrows(IllegalArgumentException.class, () -> a.context().put("EXEC.LOAD.MODEL", "arrivalRate"));
+            assertEquals("one", a.context().resolve("CASE.VARS.iteration"));
+            assertEquals("two", b.context().resolve("CASE.VARS.iteration"));
+            assertFalse(Files.exists(a.outputDirectory()), "successful load iterations should not materialize case workspaces by default");
+            assertFalse(Files.exists(b.outputDirectory()), "successful load iterations should not materialize case workspaces by default");
+
+            IterationResult arrival = executor.execute(IterationRequest.arrivalRate("run-29", "arrival-1", 3, "RAMP_UP", Instant.now(), Collections.singletonMap("input", "arrival")));
+            assertEquals(ResultStatus.PASS, arrival.status());
+            assertEquals("arrivalRate", att.core.CaseRuntimeContext.getPath(arrival.context().diagnosticsTree(), "load.model"));
+            assertNull(att.core.CaseRuntimeContext.getPath(arrival.context().diagnosticsTree(), "load.userId"));
+        } finally { pool.shutdownNow(); }
+    }
+
+    @Test void iterationWorkspaceAndFailureEvidenceUseResolvedLoadOutputRoot() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/FAIL_TEMPLATE"));
+        write(project, "templates/FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: FAIL_TEMPLATE\ndescription: retained failure\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("configured-output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("cli-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("resolved-run", "resolved-iteration", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+            assertEquals(ResultStatus.FAIL, result.status());
+            Path expectedWorkspace = outputRoot.resolve("load/resolved-run/executions")
+                    .resolve(result.executionId()).toAbsolutePath().normalize();
+            assertEquals(expectedWorkspace, result.outputDirectory().toAbsolutePath().normalize());
+            assertEquals(expectedWorkspace.toString(), result.context().resolve("EXEC.OUTPUT_DIR"));
+            assertEquals(expectedWorkspace.toString(), result.context().resolve("CASE.outputDirectory"));
+            assertTrue(Files.isDirectory(expectedWorkspace));
+            assertTrue(Files.isRegularFile(expectedWorkspace.resolve("case.log")));
+            assertTrue(Files.isRegularFile(expectedWorkspace.resolve("case.yaml")));
+            @SuppressWarnings("unchecked") Map<String, Object> caseYaml = new org.yaml.snakeyaml.Yaml().load(
+                    new String(Files.readAllBytes(expectedWorkspace.resolve("case.yaml")), "UTF-8"));
+            assertEquals(att.core.PathPresentation.displayPath(expectedWorkspace, project), caseYaml.get("outputDirectory"));
+            assertNotNull(result.evidenceRef());
+
+            LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(
+                    LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 10));
+            assertTrue(evidence.reserveEvidence("resolved-iteration"));
+            long now = System.currentTimeMillis();
+            evidence.onEvent(LoadEvent.completed("resolved-run", "closed", "STEADY", "resolved-iteration", "VU-1", 1,
+                    now, now, now + 1, result.status(), result.evidenceRef()));
+            Path runDirectory = outputRoot.resolve("load/resolved-run");
+            Map<String, Object> written = evidence.write(runDirectory);
+            assertEquals(1, written.get("count"));
+            @SuppressWarnings("unchecked") List<Map<String, Object>> items = (List<Map<String, Object>>) written.get("items");
+            Path eventFile = runDirectory.resolve(String.valueOf(items.get(0).get("path")));
+            @SuppressWarnings("unchecked") Map<String, Object> event = JsonSupport.mapper().readValue(eventFile.toFile(), Map.class);
+            @SuppressWarnings("unchecked") Map<String, Object> reference = (Map<String, Object>) event.get("evidence");
+            assertEquals("failures/" + result.executionId(), reference.get("workspace"));
+            assertEquals("failures/" + result.executionId() + "/case.log", reference.get("caseLog"));
+            assertSameFileOrEqualContent(expectedWorkspace.resolve("case.log"),
+                    runDirectory.resolve("failures").resolve(result.executionId()).resolve("case.log"));
+        } finally { resources.close(); }
+    }
+
+    @Test void fileProducingActionGetsAnIsolatedWorkspaceWithoutEvidenceRetention() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/FILE_TEMPLATE"));
+        Path payload = write(project, "templates/FILE_TEMPLATE/payload.txt", "payload\n");
+        String sourcePath = payload.toAbsolutePath().toString();
+        String call = "#{fileWriter(source='" + sourcePath + "', target='${EXEC.OUTPUT_DIR}/rendered.txt')}";
+        write(project, "templates/FILE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: FILE_TEMPLATE\ndescription: file-producing load action\nactions:\n"
+                + "  write: {type: tool, call: \"" + call + "\"}\n");
+        Path scenarioFile = write(project, "file.yaml", "schemaVersion: att-load/v1.3\n"
+                + "workloads:\n  - id: files\n    target: {type: template, id: FILE_TEMPLATE}\n"
+                + "    load: {users: 1, duration: 1s}\n");
+        Map<String, ToolArgumentConfig> arguments = new LinkedHashMap<String, ToolArgumentConfig>();
+        arguments.put("source", new ToolArgumentConfig("source", "Source", "Payload source", true, ""));
+        arguments.put("target", new ToolArgumentConfig("target", "Target", "Output path", true, ""));
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put("fileWriter", new ToolConfig("fileWriter", "File writer", "Writes a file into the execution workspace",
+                "cp ${source} ${target}", "text", arguments));
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), tools, null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("file-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("file-run", "file-iteration", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+            assertEquals(ResultStatus.PASS, result.status());
+            assertEquals(result.outputDirectory().toString(), result.context().resolve("EXEC.OUTPUT_DIR"));
+            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("rendered.txt")),
+                    String.valueOf(result.context().resolve("ACTIONS.write.output.evidence.tool.invocations[0].argv")));
+            assertFalse(Files.isRegularFile(result.outputDirectory().resolve("case.log")),
+                    "file-producing actions need a workspace but must not force a case log");
+        } finally { resources.close(); }
+    }
+    @Test void metricsOnlyFailureDoesNotMaterializeOrLinkEvidence() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/METRICS_FAIL_TEMPLATE"));
+        write(project, "templates/METRICS_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: METRICS_FAIL_TEMPLATE\ndescription: metrics-only failure\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "metrics-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: METRICS_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\nevidence: {mode: metrics}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("metrics-only-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("metrics-run", "metrics-failure-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withFailureEvidence(evidence.retainsFailureEvidence()));
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertFalse(Files.exists(result.outputDirectory()));
+            assertFalse(Files.exists(result.outputDirectory().resolve("case.log")));
+            assertFalse(Files.exists(result.outputDirectory().resolve("case.yaml")));
+            assertNull(result.evidenceRef());
+
+            long now = System.currentTimeMillis();
+            evidence.onEvent(LoadEvent.completed("metrics-run", "closed", "STEADY", "metrics-failure-1", "VU-1", 1,
+                    now, now, now + 1, result.status(), result.evidenceRef()));
+            assertTrue(evidence.events().isEmpty());
+            assertEquals(0, evidence.write(outputRoot.resolve("load/metrics-run")).get("count"));
+            assertFalse(Files.exists(outputRoot.resolve("load/metrics-run")));
+        } finally { resources.close(); }
+    }
+
+    @Test void zeroFailureCapacitySkipsFailureLogCaptureBeforeExecution() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/ZERO_CAP_FAIL_TEMPLATE"));
+        write(project, "templates/ZERO_CAP_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: ZERO_CAP_FAIL_TEMPLATE\ndescription: zero-capacity failure\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "zero-cap-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: ZERO_CAP_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\nevidence: {mode: failures, maxSamples: 0}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("zero-cap-failure-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("zero-cap-run", "zero-cap-failure-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withEvidenceRetention(false, false)
+                            .withFailureLogCapture(evidence.retainsFailureEvidence()));
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertFalse(evidence.retainsFailureEvidence());
+            assertNull(result.evidenceRef());
+            assertTrue(Files.notExists(result.outputDirectory()));
+            assertFalse(Files.exists(result.outputDirectory().resolve("case.log")));
+        } finally { resources.close(); }
+    }
+
+    @Test void metricsOnlyNonFileIterationDoesNotCreateExecutionWorkspace() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/METRICS_PROBE_TEMPLATE"));
+        write(project, "templates/METRICS_PROBE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: METRICS_PROBE_TEMPLATE\ndescription: metrics-only workspace probe\nactions:\n"
+                + "  probe: {type: tool, call: \"#{str.lower('FALSE')}\", assert: \"${output.result} == 'false'\"}\n");
+        Path scenarioFile = write(project, "metrics-probe.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: METRICS_PROBE_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\nevidence: {mode: metrics}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("metrics-probe-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("metrics-probe-run", "metrics-probe-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+            assertEquals(ResultStatus.PASS, result.status(), result.diagnostic() == null ? "" : result.diagnostic().toString());
+            assertEquals("false", result.context().resolve("ACTIONS.probe.output.result"));
+            assertFalse(Files.exists(result.outputDirectory()), "metrics-only non-file iterations must keep EXEC.OUTPUT_DIR logical");
+            assertFalse(Files.exists(outputRoot.resolve("load/metrics-probe-run")));
+        } finally { resources.close(); }
+    }
+
+    @Test void deferredFailureEvidenceMaterializesTheBoundedLogAfterRetentionClaim() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/DEFERRED_FAIL_TEMPLATE"));
+        write(project, "templates/DEFERRED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: DEFERRED_FAIL_TEMPLATE\ndescription: deferred failure evidence\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "deferred-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: DEFERRED_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\nevidence: {mode: failures}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("deferred-failure-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("deferred-run", "deferred-failure-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withEvidenceRetention(false, false).withFailureLogCapture(true));
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertNull(result.evidenceRef(), "the executor must leave the retention decision to the scheduler");
+            assertTrue(Files.notExists(result.outputDirectory()));
+
+            IterationResult retained = result.materializeEvidence();
+            assertNotNull(retained.evidenceRef());
+            assertSameFileOrEqualContent(retained.outputDirectory().resolve("case.log"), retained.evidenceRef().caseLog());
+            String caseLog = new String(Files.readAllBytes(retained.evidenceRef().caseLog()), "UTF-8");
+            assertTrue(caseLog.contains("ACTION verify"));
+            assertTrue(caseLog.contains("LOAD OUTCOME"));
+            assertTrue(caseLog.contains("FAIL"));
+        } finally { resources.close(); }
+    }
+
+    @Test void reservedSuccessFailureDoesNotOverrideFailureNone() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/RESERVED_FAIL_TEMPLATE"));
+        write(project, "templates/RESERVED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: RESERVED_FAIL_TEMPLATE\ndescription: reserved sample failure\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "reserved-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: RESERVED_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "evidence: {success: sample, failure: none, sampleRate: 1.0, maxSamples: 1}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("reserved-failure-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            assertTrue(evidence.reserveSuccess("reserved-run-1"));
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("reserved-run", "reserved-run-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withOutputDirectory(outputRoot.resolve("load/reserved-run/iterations"))
+                            .withFailureEvidence(evidence.retainsFailureEvidence()));
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertFalse(Files.exists(result.outputDirectory()));
+            assertFalse(Files.exists(result.outputDirectory().resolve("case.log")));
+            assertFalse(Files.exists(result.outputDirectory().resolve("case.yaml")));
+            assertNull(result.evidenceRef());
+
+            long now = System.currentTimeMillis();
+            evidence.onEvent(LoadEvent.completed("reserved-run", "closed", "STEADY", "reserved-run-1", "VU-1", 1,
+                    now, now, now + 1, result.status(), result.evidenceRef()));
+            assertTrue(evidence.events().isEmpty());
+            assertEquals(0, evidence.write(outputRoot.resolve("load/reserved-run")).get("count"));
+            assertFalse(Files.exists(outputRoot.resolve("load/reserved-run")));
+        } finally { resources.close(); }
+    }
+
+    @Test void concurrentFailureEvidenceReservationsBoundWorkspacesAndRetainedLinks() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/CAPPED_FAIL_TEMPLATE"));
+        write(project, "templates/CAPPED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: CAPPED_FAIL_TEMPLATE\ndescription: capped concurrent failures\nactions:\n"
+                + "  verify: {type: assert, assert: \"'actual' == 'expected'\", expected: expected, actual: actual}\n");
+        Path scenarioFile = write(project, "capped-failures.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: CAPPED_FAIL_TEMPLATE}\n"
+                + "load: {users: 8, duration: 150ms}\n"
+                + "evidence: {mode: failures, maxSamples: 3}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("capped-failure-output");
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario,
+                    new IterationExecutor(project, config, target, resources, outputRoot), "capped-run", evidence, outputRoot);
+            try { scheduler.run(); } finally { scheduler.close(); }
+
+            Path executions = outputRoot.resolve("load/capped-run/executions");
+            long workspaceCount;
+            try (java.util.stream.Stream<Path> paths = Files.list(executions)) {
+                workspaceCount = paths.filter(Files::isDirectory).count();
+            }
+            assertEquals(3, evidence.events().size());
+            assertEquals(evidence.events().size(), workspaceCount,
+                    "a reservation that is not retained must not leave an orphan workspace");
+            assertTrue(evidence.events().stream().allMatch(event -> event.evidence() != null
+                    && Files.isDirectory(event.evidence().workspace())
+                    && Files.isRegularFile(event.evidence().caseLog())));
+        } finally { resources.close(); }
+    }
+
+    @Test void sampledSuccessRetainsBoundedEvidenceWithoutChangingResult() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/SAMPLE_TEMPLATE"));
+        write(project, "templates/SAMPLE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: SAMPLE_TEMPLATE\ndescription: sampled success\nactions:\n"
+                + "  record: {type: log, message: sampled}\n");
+        Path scenarioFile = write(project, "sample.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: SAMPLE_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "evidence: {success: sample, failure: full, sampleRate: 1.0, maxSamples: 3}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("sample-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            assertTrue(evidence.reserveSuccess("sample-run-1"));
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                    IterationRequest.closed("sample-run", "sample-run-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                            .withOutputDirectory(outputRoot.resolve("load/sample-run/iterations")));
+            assertEquals(ResultStatus.PASS, result.status());
+            assertNotNull(result.evidenceRef());
+            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("case.log")));
+            assertTrue(Files.isRegularFile(result.outputDirectory().resolve("case.yaml")));
+            assertSameFileOrEqualContent(result.outputDirectory().resolve("case.log"), result.evidenceRef().caseLog());
+            assertSameFileOrEqualContent(result.outputDirectory().resolve("case.yaml"),
+                    result.evidenceRef().workspace().resolve("case.yaml"));
+
+            long now = System.currentTimeMillis();
+            evidence.onEvent(LoadEvent.completed("sample-run", "closed", "STEADY", "sample-run-1", "VU-1", 1,
+                    now, now, now + 1, result.status(), result.evidenceRef()));
+            for (int sequence = 2; sequence <= 3; sequence++) {
+                String id = "sample-run-" + sequence;
+                assertTrue(evidence.reserveSuccess(id));
+                IterationResult additional = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                        IterationRequest.closed("sample-run", id, sequence, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                                .withOutputDirectory(outputRoot.resolve("load/sample-run/iterations")));
+                assertEquals(ResultStatus.PASS, additional.status());
+                assertNotNull(additional.evidenceRef());
+                assertSameFileOrEqualContent(additional.outputDirectory().resolve("case.log"), additional.evidenceRef().caseLog());
+                evidence.onEvent(LoadEvent.completed("sample-run", "closed", "STEADY", id, "VU-1", sequence,
+                        now, now, now + 1, additional.status(), additional.evidenceRef()));
+            }
+            Map<String, Object> written = evidence.write(outputRoot.resolve("load/sample-run"));
+            assertEquals(3, written.get("count"));
+            @SuppressWarnings("unchecked") List<Map<String, Object>> items = (List<Map<String, Object>>) written.get("items");
+            Path eventFile = outputRoot.resolve("load/sample-run").resolve(String.valueOf(items.get(0).get("path")));
+            @SuppressWarnings("unchecked") Map<String, Object> event = JsonSupport.mapper().readValue(eventFile.toFile(), Map.class);
+            @SuppressWarnings("unchecked") Map<String, Object> reference = (Map<String, Object>) event.get("evidence");
+            assertTrue(String.valueOf(reference.get("workspace")).startsWith("samples/"));
+            assertTrue(Files.isRegularFile(outputRoot.resolve("load/sample-run").resolve(String.valueOf(reference.get("caseLog")))));
+        } finally { resources.close(); }
+    }
+
+    @Test void allSuccessEvidenceRetainsEverySuccessfulIteration() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/ALL_EVIDENCE_TEMPLATE"));
+        write(project, "templates/ALL_EVIDENCE_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: ALL_EVIDENCE_TEMPLATE\ndescription: all success evidence\nactions:\n"
+                + "  record: {type: log, message: all-mode}\n");
+        Path scenarioFile = write(project, "all-evidence.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: ALL_EVIDENCE_TEMPLATE}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "evidence: {mode: all, failure: full}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("all-evidence-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            long now = System.currentTimeMillis();
+            for (int sequence = 1; sequence <= 2; sequence++) {
+                String id = "all-run-" + sequence;
+                assertTrue(evidence.reserveSuccessEvidence(id));
+                IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(
+                        IterationRequest.closed("all-run", id, sequence, "STEADY", Instant.now(), "VU-1", scenario.inputs())
+                                .withOutputDirectory(outputRoot.resolve("load/all-run/iterations")));
+                assertEquals(ResultStatus.PASS, result.status());
+                assertNotNull(result.evidenceRef());
+                evidence.onEvent(LoadEvent.completed("all-run", "closed", "STEADY", id, "VU-1", sequence,
+                        now, now, now + 1, result.status(), result.evidenceRef()));
+            }
+            Map<String, Object> written = evidence.write(outputRoot.resolve("load/all-run"));
+            assertEquals(2, written.get("count"));
+            assertEquals(2, evidence.events().size());
+        } finally { resources.close(); }
+    }
+
+    @Test void successReservedSampleFailureRetainsItsFullDeferredLogAtCapacity() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/SAMPLED_FAIL_TEMPLATE"));
+        write(project, "templates/SAMPLED_FAIL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: SAMPLED_FAIL_TEMPLATE\ndescription: pre-reserved sample failure\nactions:\n"
+                + "  verify: {type: assert, assert: \"${EXEC.INPUT.value} == 'expected'\", expected: expected, actual: \"${EXEC.INPUT.value}\"}\n");
+        Path scenarioFile = write(project, "sampled-failure.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: SAMPLED_FAIL_TEMPLATE}\ninputs: {value: actual}\n"
+                + "load: {users: 1, duration: 1s}\n"
+                + "evidence: {mode: samples, sampleRate: 1.0, maxSamples: 1}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Path outputRoot = temp.resolve("sampled-failure-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try {
+            String iterationId = "sampled-failure-1";
+            assertTrue(evidence.reserveSuccessEvidence(iterationId));
+            IterationRequest request = IterationRequest.closed("sampled-failure-run", iterationId, 1, "STEADY",
+                            Instant.now(), "VU-1", scenario.inputs())
+                    .withOutputDirectory(outputRoot.resolve("load/sampled-failure-run/iterations"))
+                    .withEvidenceRetention(true, false)
+                    .withFailureLogCapture(evidence.retainsFailureEvidence());
+            assertFalse(request.captureFailureLog(), "the reservation fills the only slot, so the shared capacity check is conservative");
+
+            IterationResult result = new IterationExecutor(project, config, target, resources, outputRoot).execute(request);
+            assertEquals(ResultStatus.FAIL, result.status());
+            assertTrue(evidence.claimFailureEvidence(iterationId), "the failing iteration may use its own success reservation");
+
+            IterationResult retained = result.materializeEvidence();
+            assertNotNull(retained.evidenceRef(), "the reserved full log must remain available for failure materialization");
+            String caseLog = new String(Files.readAllBytes(retained.evidenceRef().caseLog()), "UTF-8");
+            assertTrue(caseLog.contains("ACTION verify"));
+            assertTrue(caseLog.contains("LOAD OUTCOME"));
+            assertTrue(caseLog.contains("FAIL"));
+
+            long now = System.currentTimeMillis();
+            evidence.onEvent(LoadEvent.completed("sampled-failure-run", "closed", "STEADY", iterationId, "VU-1", 1,
+                    now, now, now + 1, retained.status(), retained.evidenceRef()));
+            assertEquals(1, evidence.events().size());
+            assertEquals(iterationId, evidence.events().get(0).iterationId());
+        } finally { resources.close(); }
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test void concurrentIterationsIsolateNestedMapAndListInputMutation() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/NESTED_TEMPLATE"));
+        write(project, "templates/NESTED_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: NESTED_TEMPLATE\ndescription: nested input isolation\nactions:\n"
+                + "  mapValue: {type: log, message: \"${EXEC.INPUT.payload.value}\"}\n"
+                + "  listValue: {type: log, message: \"${EXEC.INPUT.payload.items[0].value}\"}\n");
+        Path scenarioFile = write(project, "nested.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: NESTED_TEMPLATE}\nload: {users: 2, duration: 1s}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+
+        Map<String, Object> source = new LinkedHashMap<String, Object>();
+        Map<String, Object> sourcePayload = new LinkedHashMap<String, Object>();
+        sourcePayload.put("value", "original");
+        List<Object> sourceItems = new ArrayList<Object>();
+        Map<String, Object> sourceItem = new LinkedHashMap<String, Object>(); sourceItem.put("value", "original-list");
+        sourceItems.add(sourceItem); sourcePayload.put("items", sourceItems); source.put("payload", sourcePayload);
+        IterationRequest first = IterationRequest.closed("nested-run", "nested-a", 1, "STEADY", Instant.now(), "VU-1", source);
+        IterationRequest second = IterationRequest.closed("nested-run", "nested-b", 2, "STEADY", Instant.now(), "VU-2", source);
+
+        Map<String, Object> firstPayload = (Map<String, Object>) first.inputs().get("payload");
+        Map<String, Object> secondPayload = (Map<String, Object>) second.inputs().get("payload");
+        assertNotSame(firstPayload, secondPayload, "each request freezes its own input tree");
+        assertThrows(UnsupportedOperationException.class, () -> firstPayload.put("value", "runtime-change"));
+        assertThrows(UnsupportedOperationException.class, () -> ((List<Object>) firstPayload.get("items")).set(0, "runtime-change"));
+        assertThrows(UnsupportedOperationException.class, () -> ((Map<String, Object>) ((List<?>) firstPayload.get("items")).get(0))
+                .put("value", "runtime-change"));
+
+        sourcePayload.put("value", "source-changed");
+        sourceItem.put("value", "source-list-changed");
+
+        assertEquals("source-changed", sourcePayload.get("value"));
+        assertEquals("source-list-changed", ((Map<?, ?>) sourceItems.get(0)).get("value"));
+        assertEquals("original", firstPayload.get("value"));
+        assertEquals("original", secondPayload.get("value"));
+
+        LoadRunResources resources = new LoadRunResources(project, config);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            IterationExecutor executor = new IterationExecutor(project, config, target, resources);
+            Future<IterationResult> firstResult = pool.submit(() -> executor.execute(first));
+            Future<IterationResult> secondResult = pool.submit(() -> executor.execute(second));
+            IterationResult a = firstResult.get(); IterationResult b = secondResult.get();
+            assertEquals(ResultStatus.PASS, a.status()); assertEquals(ResultStatus.PASS, b.status());
+            assertEquals("original", a.context().resolve("EXEC.INPUT.payload.value"));
+            assertEquals("original-list", a.context().resolve("EXEC.INPUT.payload.items[0].value"));
+            assertEquals("original", b.context().resolve("EXEC.INPUT.payload.value"));
+            assertEquals("original-list", b.context().resolve("EXEC.INPUT.payload.items[0].value"));
+            a.context().replaceInputValues(Collections.singletonMap("payload", Collections.singletonMap("value", "runtime-A")));
+            assertEquals("runtime-A", a.context().resolve("EXEC.INPUT.payload.value"));
+            assertEquals("original", b.context().resolve("EXEC.INPUT.payload.value"));
+            assertEquals("source-changed", sourcePayload.get("value"));
+            assertEquals("source-list-changed", ((Map<?, ?>) sourceItems.get(0)).get("value"));
+        } finally {
+            pool.shutdownNow();
+            resources.close();
+        }
+    }
+
+    @Test void cancellationRetainsFailureEvidenceAndStopsActiveToolIteration() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("templates/SLOW_TEMPLATE"));
+        Path started = temp.resolve("slow-started");
+        Path completed = temp.resolve("slow-completed");
+        Path slowScript = project.resolve("tools/slow-tool.sh");
+        Files.createDirectories(slowScript.getParent());
+        Files.write(slowScript, ("#!/bin/sh\ntouch '" + started + "'\nsleep 1\ntouch '" + completed + "'\n").getBytes("UTF-8"));
+        slowScript.toFile().setExecutable(true);
+        write(project, "templates/SLOW_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: SLOW_TEMPLATE\ndescription: cancellable load action\nactions:\n"
+                + "  run: {type: tool, call: \"#{slow()}\"}\n");
+        Path scenarioFile = write(project, "slow.yaml", "schemaVersion: att-load/v1.3\n"
+                + "workloads:\n  - id: slow\n    target: {type: template, id: SLOW_TEMPLATE}\n"
+                + "    load: {users: 1, duration: 10s}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.singletonMap("slow", new ToolConfig("slow", "Slow", "Slow", slowScript.toString(), "text", Collections.emptyMap())), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadScenario workloadScenario = scenario.forWorkload(scenario.workload());
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(workloadScenario);
+        Path outputRoot = temp.resolve("cancel-output");
+        LoadRunResources resources = new LoadRunResources(project, config);
+        List<LoadEvent> observedEvents = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(
+                LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 10),
+                event -> observedEvents.add(event));
+        ClosedVuScheduler scheduler = new ClosedVuScheduler(workloadScenario,
+                new IterationExecutor(project, config, target, resources, outputRoot), "cancel-run", evidence);
+        ExecutorService runner = Executors.newSingleThreadExecutor();
+        try {
+            Future<LoadRunResult> future = runner.submit(scheduler::run);
+            long deadline = System.currentTimeMillis() + 3000L;
+            while (!Files.exists(started) && System.currentTimeMillis() < deadline) Thread.sleep(10L);
+            assertTrue(Files.exists(started), "the active iteration did not start");
+            Thread.sleep(100L);
+            scheduler.cancel();
+            future.get(5, TimeUnit.SECONDS);
+            Thread.sleep(1500L);
+            assertFalse(Files.exists(completed), "the cancelled tool completed after scheduler shutdown");
+            List<String> observedSummary = new ArrayList<String>();
+            for (LoadEvent event : observedEvents) observedSummary.add(event.iterationId() + ":" + event.status()
+                    + ":completed=" + event.completed() + ":evidence=" + String.valueOf(event.evidence()));
+            assertEquals(1, evidence.events().size(), "observed events: " + observedSummary);
+            assertEquals(ResultStatus.ERROR, evidence.events().get(0).status());
+            assertNotNull(evidence.events().get(0).evidence());
+            assertFalse(resources.isClosed());
+        } finally {
+            scheduler.close();
+            runner.shutdownNow();
+            resources.close();
+            assertTrue(resources.isClosed());
+        }
+    }
+
+    @Test void failureEvidenceClaimsQuotaAfterOutcomeInsteadOfStarvingAConcurrentFailure() throws Exception {
+        Map<String, Object> evidenceConfig = new LinkedHashMap<String, Object>();
+        evidenceConfig.put("mode", "failures");
+        evidenceConfig.put("maxSamples", Integer.valueOf(1));
+        LoadScenario scenario = new LoadScenario(Paths.get("failure-race.yaml"), "template", "LOAD_TEMPLATE",
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), LoadScenario.Model.CLOSED,
+                2, 0.0, null, Duration.ZERO, Duration.ZERO, Duration.ofMillis(200L), Duration.ZERO,
+                Duration.ofSeconds(1L), 0, "drop", Collections.<String, Object>emptyMap(), evidenceConfig);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        Path outputRoot = temp.resolve("failure-race-output");
+        CountDownLatch firstEntered = new CountDownLatch(1);
+        CountDownLatch secondEntered = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        LoadIterationRunner runner = request -> {
+            assertTrue(request.captureFailureLog(), "failure policy must keep a bounded log until the outcome is known");
+            assertFalse(request.retainSuccessEvidence(), "failures mode must not capture full logs for successful iterations");
+            int call = calls.incrementAndGet();
+            try {
+                if (call == 1) {
+                    firstEntered.countDown();
+                    releaseFirst.await(2L, TimeUnit.SECONDS);
+                    return deferredResult(outputRoot, request, ResultStatus.PASS);
+                }
+                if (call == 2) {
+                    secondEntered.countDown();
+                    return deferredResult(outputRoot, request, ResultStatus.FAIL);
+                }
+                return deferredResult(outputRoot, request, ResultStatus.PASS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+        };
+        ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "failure-race", event -> evidence.onEvent(event),
+                LoadSchedulerTiming.system(), evidence, outputRoot, null);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        try {
+            Future<LoadRunResult> future = control.submit(scheduler::run);
+            assertTrue(firstEntered.await(2L, TimeUnit.SECONDS));
+            assertTrue(secondEntered.await(2L, TimeUnit.SECONDS));
+            releaseFirst.countDown();
+            future.get(5L, TimeUnit.SECONDS);
+            assertEquals(1, evidence.events().size(), "the completed failure must claim the free slot");
+            LoadEvent retained = evidence.events().get(0);
+            assertEquals(ResultStatus.FAIL, retained.status());
+            assertNotNull(retained.evidence());
+            assertTrue(Files.isDirectory(retained.evidence().workspace()));
+            assertTrue(Files.isRegularFile(retained.evidence().caseLog()));
+            try (java.util.stream.Stream<Path> paths = Files.walk(outputRoot)) {
+                List<Path> workspaces = paths.filter(Files::isDirectory)
+                        .filter(path -> path.getFileName().toString().startsWith("failure-race-VU-"))
+                        .collect(java.util.stream.Collectors.toList());
+                assertEquals(1, workspaces.size(), workspaces.toString());
+            }
+        } finally {
+            releaseFirst.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(2L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void loadValidationIsModeAwareAndOptionalLoadPathsRemainPortable() throws Exception {
+        Path project = project();
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        Files.createDirectories(project.resolve("templates/STRICT_TEMPLATE"));
+        Files.createDirectories(project.resolve("templates/OPTIONAL_TEMPLATE"));
+        write(project, "templates/STRICT_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: STRICT_TEMPLATE\ndescription: strict load context\nactions:\n"
+                + "  strict:\n    type: log\n    message: \"${EXEC.MODE}\"\n");
+        write(project, "templates/OPTIONAL_TEMPLATE/template.yaml", "schemaVersion: att-template/v3.4\n"
+                + "name: OPTIONAL_TEMPLATE\ndescription: optional load context\nactions:\n"
+                + "  optional:\n    type: log\n    message: \"${EXEC.INPUT.input}\"\n");
+
+        Path strictFile = write(project, "strict.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: STRICT_TEMPLATE}\ninputs: {input: strict}\nload: {users: 1, duration: 1s}\n");
+        LoadScenario strict = new LoadScenarioLoader(project).load(strictFile);
+        LoadTarget strictTarget = new LoadTargetResolver(project, config).resolve(strict);
+        LoadExecutionContextAdapter strictAdapter = new LoadExecutionContextAdapter(project, config, strictTarget);
+        TestCase strictCase = strictAdapter.testCase("debug-strict", strict.inputs());
+        DiagnosticException error = assertThrows(DiagnosticException.class, () -> new PackageValidator(project, config)
+                .validateDebugTarget(strictTarget.template(), strictCase, strictAdapter.stage(), strictTarget.flows(),
+                        strict.source(), "debug", strict.inputs()));
+        assertTrue(error.format().contains("EXEC.MODE"), error.format());
+        assertThrows(DiagnosticException.class, () -> new LoadTargetValidator(project, config).validate(strict, strictTarget));
+
+        Path optionalFile = write(project, "optional.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: OPTIONAL_TEMPLATE}\ninputs: {input: optional}\nload: {users: 1, duration: 1s}\n");
+        LoadScenario optional = new LoadScenarioLoader(project).load(optionalFile);
+        LoadTarget optionalTarget = new LoadTargetResolver(project, config).resolve(optional);
+        LoadExecutionContextAdapter optionalAdapter = new LoadExecutionContextAdapter(project, config, optionalTarget);
+        TestCase optionalCase = optionalAdapter.testCase("debug-optional", optional.inputs());
+        new PackageValidator(project, config).validateDebugTarget(optionalTarget.template(), optionalCase, optionalAdapter.stage(),
+                optionalTarget.flows(), optional.source(), "debug", optional.inputs());
+        new LoadTargetValidator(project, config).validate(optional, optionalTarget);
+    }
+
+    @Test void loadInputNamedInputsRemainsAFlatBusinessField() throws Exception {
+        Path project = project();
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.emptyMap(), null, null);
+        Path scenarioFile = write(project, "collision.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: template, id: LOAD_TEMPLATE}\nload: {users: 1, duration: 1s}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        Map<String, Object> inputs = new LinkedHashMap<String, Object>();
+        inputs.put("inputs", "business-value");
+        inputs.put("input", "ordinary-value");
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("value", "nested-business-value");
+        inputs.put("payload", payload);
+        IterationRequest request = IterationRequest.closed("run-inputs", "iteration-inputs", 1, "STEADY", Instant.now(), "VU-1", inputs);
+        LoadExecutionContextAdapter.Prepared prepared = new LoadExecutionContextAdapter(project, config, target)
+                .prepare(request,
+                        "run-inputs-execution-1", temp.resolve("iteration-inputs"), temp.resolve("iteration-inputs/case.log"));
+        assertSame(request.inputs().get("payload"), prepared.testCase().caseData().get("payload"),
+                "the Load adapter must pass the frozen nested values through without another deep copy");
+        assertEquals("business-value", prepared.context().resolve("EXEC.INPUT.inputs"));
+        assertEquals("business-value", prepared.context().resolve("CASE.inputs"));
+        assertEquals("nested-business-value", prepared.context().resolve("EXEC.INPUT.payload.value"));
+        assertNull(prepared.context().resolve("EXEC.INPUT.inputs.value"));
+
+        Path people = write(project, "data/people.yaml", "schemaVersion: att-testdata/v1.0\n"
+                + "id: people\nrecords:\n  - id: ada\n    profile: {labels: [gold, verified]}\n");
+        att.testdata.TestdataRegistry registry = new att.testdata.TestdataRegistry(project,
+                Collections.emptyList(), Collections.singletonList(people));
+        att.testdata.TestdataInputResolver resolver = new att.testdata.TestdataInputResolver(registry,
+                Collections.emptyMap(), "payments", "closed", null, 1, true);
+        LoadRunResources resources = new LoadRunResources(project, config);
+        try {
+            IterationExecutor executor = new IterationExecutor(project, config, target, resources,
+                    temp.resolve("input-snapshot-output"), resolver);
+            IterationResult noMarker = executor.execute(request);
+            assertEquals(ResultStatus.PASS, noMarker.status());
+            assertSame(request.inputs().get("payload"), noMarker.context().resolve("EXEC.INPUT.payload"),
+                    "modern Load execution must pass frozen nested values through the resolver and Context");
+            assertThrows(UnsupportedOperationException.class, () -> ((Map<String, Object>) noMarker.context()
+                    .resolve("EXEC.INPUT.payload")).put("value", "mutation"));
+
+            Map<String, Object> markedInputs = new LinkedHashMap<String, Object>();
+            markedInputs.put("input", "ordinary-value");
+            markedInputs.put("record", "@{people}");
+            IterationRequest marked = IterationRequest.closed("run-inputs", "iteration-testdata", 2, "STEADY",
+                    Instant.now(), "VU-1", markedInputs);
+            IterationResult resolved = executor.execute(marked);
+            assertEquals(ResultStatus.PASS, resolved.status());
+            Map<String, Object> record = (Map<String, Object>) resolved.context().resolve("EXEC.INPUT.record");
+            assertEquals("ada", record.get("id"));
+            Map<String, Object> profile = (Map<String, Object>) record.get("profile");
+            assertThrows(UnsupportedOperationException.class, () -> profile.put("name", "Ada"));
+            assertThrows(UnsupportedOperationException.class, () -> ((List<Object>) profile.get("labels")).add("new"));
+        } finally {
+            resources.close();
+        }
+    }
+
+    @Test void resolvesAndExecutesAConfiguredToolTargetThroughTheSameExecutor() throws Exception {
+        Path project = project();
+        Path scenarioFile = write(project, "tool.yaml", "schemaVersion: att-load/v1.0\n"
+                + "target: {type: tool, id: echo}\nload: {users: 1, duration: 1s}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.singletonMap("echo", new ToolConfig("echo", "Echo", "Echo", "/bin/echo load", "txt", Collections.emptyMap())), null, null);
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        IterationResult result = new IterationExecutor(project, config, target).execute(
+                IterationRequest.closed("tool-1", 1, "STEADY", Instant.now(), "VU-1", Collections.emptyMap()));
+        assertEquals(ResultStatus.PASS, result.status());
+        assertEquals("load", att.core.CaseRuntimeContext.getPath(result.context().diagnosticsTree(), "execution.mode"));
+    }
+
+    @Test void cliRecognizesLoadAndRejectsMissingScenario() {
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", "scenario.yaml", "--arrival-rate", "100/s"});
+        assertEquals("load", options.command());
+        assertEquals(Paths.get("scenario.yaml"), options.loadScenario());
+        assertEquals("100/s", options.loadArrivalRate());
+        assertNull(att.core.ExecutionOptionsTestSupport.parse(new String[]{"load"}).loadScenario(), "no scenario selects discovery");
+    }
+
+    private void assertSameFileOrEqualContent(Path first, Path second) throws Exception {
+        assertArrayEquals(Files.readAllBytes(first), Files.readAllBytes(second),
+                "public artifact paths must resolve to identical evidence content");
+        if (hardLinksSupported(first.getParent())) assertTrue(Files.isSameFile(first, second));
+    }
+
+    private boolean hardLinksSupported(Path directory) throws Exception {
+        Path source = Files.createTempFile(directory, "hard-link-probe-", ".tmp");
+        Path target = source.resolveSibling(source.getFileName().toString() + ".link");
+        try {
+            Files.createLink(target, source);
+            return Files.isSameFile(source, target);
+        } catch (UnsupportedOperationException | java.io.IOException unavailable) {
+            return false;
+        } finally {
+            Files.deleteIfExists(target);
+            Files.deleteIfExists(source);
+        }
+    }
+
+    private Path project() throws Exception {
+        Path project = temp.resolve("project-" + System.nanoTime());
+        att.TestSchemas.install(project);
+        Files.createDirectories(project.resolve("templates/LOAD_TEMPLATE"));
+        Files.createDirectories(project.resolve("templates/flows/load/echo"));
+        Files.createDirectories(project.resolve("output"));
+        Files.write(project.resolve("templates/LOAD_TEMPLATE/template.yaml"), (
+                "schemaVersion: att-template/v3.4\nname: LOAD_TEMPLATE\ndescription: load fixture\nactions:\n"
+                + "  iteration:\n    type: assign\n    name: iteration\n    expression: \"${EXEC.INPUT.input}\"\n"
+                + "  phase:\n    type: log\n    message: \"${EXEC.INPUT.input}\"\n"
+                + "  nested:\n    type: flow\n    use: load.echo.v1\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(project.resolve("templates/flows/load/echo/flow.yaml"), (
+                "schemaVersion: att-flow/v3.4\nid: load.echo.v1\nname: Load Echo\ndescription: load flow\nactions:\n"
+                + "  echo:\n    type: assign\n    name: flowInput\n    expression: \"${EXEC.INPUT.input}\"\n").getBytes(StandardCharsets.UTF_8));
+        return project;
+    }
+
+    private Path write(Path project, String name, String content) throws Exception {
+        Path file = project.resolve(name);
+        Files.createDirectories(file.getParent());
+        return LoadTestSupport.writeScenario(file, content);
+    }
+
+    private IterationResult deferredResult(Path outputRoot, IterationRequest request, ResultStatus status) {
+        Path directory = outputRoot.resolve("load").resolve("failure-race").resolve("iterations")
+                .resolve(LoadIsolation.workspaceName(request.runId(), request.iterationId(), request.iteration()));
+        try {
+            CaseExecutionLog log = CaseExecutionLog.lightweight(directory.resolve("case.log"));
+            log.append("TEST", "deferred evidence");
+            log.close();
+            return new IterationResult(request.iterationId(), status, Duration.ofMillis(1L), null,
+                    Collections.emptyList(), directory, null, false, log);
+        } catch (Exception error) {
+            throw new IllegalStateException(error);
+        }
+    }
+}
