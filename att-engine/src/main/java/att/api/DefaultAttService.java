@@ -41,17 +41,26 @@ public final class DefaultAttService implements AttService {
     private static Map<String,String> paths(String... pairs) { Map<String,String> out=new LinkedHashMap<String,String>(); for(int i=0;i+1<pairs.length;i+=2) if(pairs[i+1]!=null) out.put(pairs[i],pairs[i+1]); return out; }
 
     @Override public RunResult run(RunRequest request) throws Exception {
-        long started=System.nanoTime(); boolean callerProfile=request.performanceProfile()!=null;
-        att.core.PerformanceProfile profile=callerProfile?request.performanceProfile():new att.core.PerformanceProfile(request.profile());
-        long phase=profile.begin(); FrameworkConfig cfg=config(request); if(!callerProfile) profile.end("configLoadMs",phase);
+        long started=System.nanoTime();
+        att.core.PerformanceProfile profile=new att.core.PerformanceProfile(request.profile());
+        long phase=profile.begin(); FrameworkConfig cfg=config(request); profile.end("configLoadMs",phase);
         ExecutionOptions opts=options(request,"run",request.suites(),request.suiteDirectory(),request.caseIds(),request.tags(),request.excludeTags(),request.all(),request.rerunFailed(),request.dryRun(),request.failFast(),"selected",null,null,null,false,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList())
                 .withRunPolicies(request.ciOutputs(),request.concurrencyMode(),request.profile())
-                .withPresentation(request.outputFormat(),request.quiet(),request.verbose(),request.outputListener());
+                .withObserver(request.observer());
+        if(request.updateSnapshot()) {
+            List<Path> updated=new SnapshotCommand().updateForRun(request.packageRoot(),cfg,opts);
+            for(Path snapshot:updated) if(request.observer()!=null) request.observer().onEvent(new ExecutionEvent(
+                    ExecutionEvent.Type.STATUS,request.runId(),null,null,null,"SNAPSHOT_UPDATED",null,
+                    "Snapshot updated: "+request.packageRoot().relativize(snapshot.toAbsolutePath().normalize()).toString().replace('\\','/'),
+                    Collections.<String,Object>emptyMap()));
+        }
         FrameworkEngine engine=new FrameworkEngine(request.packageRoot(),cfg); engine.assertRunIdAvailable(opts);
         phase=profile.begin(); PackageValidator.ValidationSummary validation=new PackageValidator(request.packageRoot(),cfg).validate(opts);
         profile.end("validationMs",phase);
         if(!validation.valid()) return new RunResult(request.runId(),"INVALID",2,elapsed(started),validation.diagnostics,Collections.<String,String>emptyMap(),validationMap(validation));
-        if(request.outputListener()!=null&&"human".equals(request.outputFormat())&&request.verbose()&&!request.quiet()) {
+        if(request.observer()!=null) {
+            request.observer().onEvent(new ExecutionEvent(ExecutionEvent.Type.PROGRESS, request.runId(), null, null, null,
+                    "VALIDATION_PASS", null, "Validation passed", validationMap(validation)));
             opts.emitOutput("[1/4] V"+att.Version.PRODUCT+" validation PASS: "+validation);
             List<Diagnostic> visible=new ArrayList<Diagnostic>(validation.diagnostics);
             if(!visible.isEmpty()) {
@@ -77,7 +86,7 @@ public final class DefaultAttService implements AttService {
     @Override public DebugResult debug(DebugRequest request) throws Exception {
         long started=System.nanoTime();
         ExecutionOptions opts=options(request,"debug",null,null,null,null,null,false,false,false,false,"selected",request.targetType(),request.targetId(),request.input(),request.unsafeFailureDetails(),null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList())
-                .withPresentation(request.outputFormat(),request.quiet(),request.verbose(),request.outputListener());
+                .withObserver(request.observer());
         DebugEngine.Result result=new DebugEngine(request.packageRoot(),config(request)).run(opts);
         List<Diagnostic> ds=result.diagnostic()==null?Collections.<Diagnostic>emptyList():Collections.singletonList(result.diagnostic().toDiagnostic());
         Map<String,String> paths=paths("outputDirectory",OperationResult.display(result.outputDirectory(),request.packageRoot()),"log",OperationResult.display(result.logPath(),request.packageRoot()),"result",OperationResult.display(result.resultPath(),request.packageRoot()));
@@ -98,9 +107,9 @@ public final class DefaultAttService implements AttService {
         return new SnapshotResult(null,"PASS",0,elapsed(started),Collections.<Diagnostic>emptyList(),Collections.<String,String>emptyMap(),summary);
     }
     @Override public LoadResult load(LoadRequest request) throws Exception {
-        long started=System.nanoTime(); boolean callerProfile=request.profile()!=null;
-        att.core.PerformanceProfile profile=callerProfile?request.profile():new att.core.PerformanceProfile(false);
-        long configPhase=profile.begin(); FrameworkConfig cfg=config(request); if(!callerProfile) profile.end("configLoadMs",configPhase);
+        long started=System.nanoTime();
+        att.core.PerformanceProfile profile=new att.core.PerformanceProfile(request.profileEnabled());
+        long configPhase=profile.begin(); FrameworkConfig cfg=config(request); profile.end("configLoadMs",configPhase);
         ExecutionOptions opts=options(request,"load",null,null,null,null,null,false,false,false,false,"selected",request.debugTargetType(),request.debugTargetId(),null,false,request.scenario(),request.users(),request.arrivalRate(),request.warmup(),request.rampUp(),request.duration(),request.rampDown(),request.thinkTime(),request.maxConcurrent(),request.overloadPolicy(),request.overrides());
         long validationPhase=profile.begin();
         LoadScenarioLoader loader=new LoadScenarioLoader(request.packageRoot()); LoadScenario scenario=request.parsedScenario();

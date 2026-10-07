@@ -10,7 +10,6 @@ import att.report.RunArchiveBuilder;
 import att.report.ReportRegenerator;
 import att.validation.PackageValidator;
 import att.validation.DiagnosticCodes;
-import att.snapshot.SnapshotCommand;
 import att.api.AttService;
 import att.api.DefaultAttService;
 import att.api.DebugRequest;
@@ -37,27 +36,17 @@ public final class FrameworkRunner {
             }
             if ("help".equals(options.command())) { help(); return; }
             if ("version".equals(options.command())) { System.out.println(Version.DISPLAY); return; }
-            att.core.PerformanceProfile profile = new att.core.PerformanceProfile(options.profile());
-            long profilePhase = profile.begin();
-            FrameworkConfig config;
-            try { config = new FrameworkConfigLoader().load(options.configPath(), root, options.environment()); }
-            catch (att.validation.DiagnosticException e) { throw e; }
-            catch (Exception e) {
-                throw att.validation.DiagnosticException.wrap(DiagnosticCodes.CONFIG_INVALID,
-                        "Unable to load ATT global configuration", e, options.configPath().toString(), "config",
-                        "Check that the config file exists, is readable YAML, and conforms to the configured schema version.");
-            }
-            profile.end("configLoadMs", profilePhase);
+            FrameworkConfig config = null;
             if ("debug".equals(options.command())) {
                 if (options.debugTargetType().isEmpty()) {
+                    config = loadConfig(options, root);
                     CliDiscovery.printDebug(CliDiscovery.debug(root, config), options.format());
                     return;
                 }
                 AttService service = new DefaultAttService();
                 DebugResult debug = service.debug(new DebugRequest(root, options.configPath(), options.environment(),
                         options.outputDirectory(), options.runId(), options.debugTargetType(), options.debugTargetId(),
-                        options.debugInput(), options.unsafeFailureDetails(), options.format(), options.quiet(),
-                        options.verbose(), cliOutput(options)));
+                        options.debugInput(), options.unsafeFailureDetails(), cliObserver(options)));
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
                     output.put("executionId", debug.executionId()); output.put("status", debug.status()); output.put("exitCode", debug.exitCode());
@@ -82,27 +71,18 @@ public final class FrameworkRunner {
             }
             if ("load".equals(options.command())) {
                 if (options.loadScenario() == null && !options.loadDebug()) {
+                    config = loadConfig(options, root);
                     CliDiscovery.printLoad(CliDiscovery.load(root, config), options.format());
                     return;
                 }
-                profilePhase = profile.begin();
-                att.load.LoadScenarioLoader loader = new att.load.LoadScenarioLoader(root);
-                att.load.LoadScenario scenario;
-                if (options.loadDebug()) {
-                    java.util.Map<String, Object> promoted = new att.debug.DebugEngine(root, config).loadBootstrapInputForLoad(options);
-                    java.util.Map<String, Object> quickPolicy = loader.loadDefaultPolicy();
-                    scenario = loader.fromDebugInput((Path) promoted.get("source"), options.debugTargetType(),
-                            options.debugTargetId(), castMap(promoted.get("inputs")), castMap(promoted.get("vars")),
-                            castMap(promoted.get("arguments")), quickPolicy, options);
-                } else {
-                    scenario = loader.load(options.loadScenario(), att.load.LoadOverrides.from(options));
-                }
-                profile.endAccumulated("validationMs", profilePhase);
                 String loadId = att.core.IdentifierValidator.runId(options.runId() == null || options.runId().trim().isEmpty()
                         ? "load-" + System.currentTimeMillis() : options.runId());
-                java.io.PrintStream progressOutput = "json".equals(options.format()) ? System.err : System.out;
-                att.load.LoadConsoleProgress progress = new att.load.LoadConsoleProgress(loadId, scenario, progressOutput,
-                        options.verbose() && !options.quiet());
+                final ExecutionOptions loadOptions = options;
+                att.load.LoadEventListener progress = loadEvent -> {
+                    if (loadOptions.quiet() || !loadOptions.verbose()) return;
+                    java.io.PrintStream output = "json".equals(loadOptions.format()) ? System.err : System.out;
+                    synchronized (output) { output.println("[LOAD] " + att.validation.JsonSupport.write(loadEvent.toMap(root))); output.flush(); }
+                };
                 att.api.LoadResult loadResult = null;
                 try {
                     loadResult = new DefaultAttService().load(new att.api.LoadRequest(root, options.configPath(),
@@ -111,17 +91,12 @@ public final class FrameworkRunner {
                             options.loadDebug() ? options.debugTargetId() : null, options.loadUsers(),
                             options.loadArrivalRate(), options.loadWarmup(), options.loadRampUp(), options.loadDuration(),
                             options.loadRampDown(), options.loadThinkTime(), options.loadMaxConcurrent(),
-                            options.loadOverloadPolicy(), options.variableOverrides(), progress, scenario,
-                            profile));
-                    progress.finish(loadResult.status());
+                            options.loadOverloadPolicy(), options.variableOverrides(), progress, null,
+                            options.profile()));
                 } catch (InterruptedException interrupted) {
-                    progress.finish("CANCELLED");
                     Thread.currentThread().interrupt();
                     throw interrupted;
-                } catch (Exception error) {
-                    progress.finish(Thread.currentThread().isInterrupted() ? "CANCELLED" : "ERROR");
-                    throw error;
-                } finally { progress.close(); }
+                }
                 if ("json".equals(options.format())) {
                     java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>(loadResult.summary());
                     output.put("executionId", loadResult.executionId());
@@ -137,10 +112,12 @@ public final class FrameworkRunner {
                 return;
             }
             if ("docs".equals(options.command())) {
+                config = loadConfig(options, root);
                 System.out.println("Documentation: " + new PackageDocumentationGenerator().generate(root, config));
                 return;
             }
             if ("clean".equals(options.command())) {
+                config = loadConfig(options, root);
                 new GeneratedOutputCleaner().clean(root, config);
                 System.out.println("ATT generated output cleaned.");
                 return;
@@ -153,6 +130,7 @@ public final class FrameworkRunner {
                 return;
             }
             if ("build".equals(options.command())) {
+                config = loadConfig(options, root);
                 Path output = options.outputDirectory() == null ? root.resolve(config.outputDirectory()) : root.resolve(options.outputDirectory());
                 System.out.println("Archive: " + new RunArchiveBuilder().build(root, output.normalize()));
                 return;
@@ -161,15 +139,6 @@ public final class FrameworkRunner {
                 Path output = options.outputDirectory() == null ? root.resolve(config.outputDirectory()) : root.resolve(options.outputDirectory());
                 System.out.println("Report: " + new ReportRegenerator().regenerate(output.normalize(), options.runId()));
                 return;
-            }
-            if ("run".equals(options.command())) {
-                if (options.updateSnapshot()) {
-                    java.util.List<Path> updated = new SnapshotCommand().updateForRun(root, config, options);
-                    if (!options.quiet()) for (Path snapshot : updated) {
-                        String notice = "Snapshot updated: " + root.relativize(snapshot.toAbsolutePath().normalize()).toString().replace('\\', '/');
-                        if ("json".equals(options.format())) System.err.println(notice); else System.out.println(notice);
-                    }
-                }
             }
             AttService service = new DefaultAttService();
             if ("validate".equals(options.command())) {
@@ -196,7 +165,7 @@ public final class FrameworkRunner {
                     options.outputDirectory(), options.runId(), options.suitePaths(), options.suiteDirectory(),
                     options.caseIds(), options.tags(), options.excludeTags(), options.all(), options.rerunFailed(),
                     options.dryRun(), options.failFast(), options.ciOutputs(), options.concurrencyMode(), options.profile(),
-                    options.format(), options.quiet(), options.verbose(), cliOutput(options), profile));
+                    cliObserver(options), options.updateSnapshot()));
             if ("json".equals(options.format())) {
                 if ("INVALID".equals(run.status())) {
                     PackageValidator.ValidationSummary invalid = new PackageValidator.ValidationSummary(options.validationScope(),
@@ -280,11 +249,51 @@ public final class FrameworkRunner {
         return att.validation.JsonSupport.write(output);
     }
 
-    private static java.util.function.Consumer<String> cliOutput(final ExecutionOptions options) {
-        return message -> {
+    private static att.api.ExecutionEventListener cliObserver(final ExecutionOptions options) {
+        return event -> {
+            if ((options.quiet() && event.type() != att.api.ExecutionEvent.Type.WARNING)
+                    || (!options.verbose() && event.type() != att.api.ExecutionEvent.Type.WARNING
+                    && event.type() != att.api.ExecutionEvent.Type.STATUS)) return;
+            String message = renderExecutionEvent(event);
+            if (message == null) return;
             java.io.PrintStream output = "json".equals(options.format()) ? System.err : System.out;
             synchronized (output) { output.println(message); output.flush(); }
         };
+    }
+
+    private static String renderExecutionEvent(att.api.ExecutionEvent event) {
+        java.util.Map<String,Object> data = event.data();
+        Object kind = data.get("event");
+        if ("DEBUG_STARTED".equals(kind)) return "[DEBUG] START target=" + data.get("targetType") + ":" + data.get("targetId")
+                + " input=" + data.get("input") + " output=" + data.get("output");
+        if ("DEBUG_INPUT_RESOLVED".equals(kind)) return "[DEBUG] INPUT target=" + data.get("targetType") + ":" + data.get("targetId")
+                + " case=" + event.caseId() + " resolved=" + data.get("resolved");
+        if ("RUN_QUEUED".equals(kind)) return "[RUN] queued: " + event.message();
+        if ("RUN_STARTED".equals(kind)) return "[RUN] id=" + event.runId() + " suites=" + data.get("suites") + " output=" + data.get("output");
+        if ("RUN_CANCELLED".equals(kind)) return "[RUN] CANCELLED runId=" + event.runId();
+        if ("SUITE_STARTED".equals(kind)) return "[SUITE] file=" + data.get("file") + " cases=" + data.get("cases");
+        if ("CASE_STARTED".equals(kind)) return "[CASE] id=" + event.caseId() + " status=START";
+        if ("CASE_FINISHED".equals(kind)) return "[CASE] id=" + event.caseId() + " status=" + event.status() + " durationMs=" + event.durationMs();
+        if ("CASE_LOG_PATH".equals(kind)) return "[CASE-LOG] case=" + event.caseId() + " file=" + data.get("file");
+        if ("STAGE_STARTED".equals(kind)) return "[STAGE] case=" + event.caseId() + " stage=" + event.stage() + " template=" + data.get("template") + " status=START";
+        if ("STAGE_FINISHED".equals(kind)) return "[STAGE] case=" + event.caseId() + " stage=" + event.stage() + " template=" + data.get("template") + " status=" + event.status() + " durationMs=" + event.durationMs();
+        if ("ACTION_FINISHED".equals(kind)) return "[ACTION] case=" + event.caseId() + " stage=" + event.stage() + " action=" + event.action() + " status=" + event.status()
+                + (data.get("detail") == null ? "" : " message=" + data.get("detail"));
+        if (event.type() == att.api.ExecutionEvent.Type.CASE_LOG) return "[CASE-LOG case=" + event.caseId() + "] " + event.message();
+        if (event.type() == att.api.ExecutionEvent.Type.STATUS && "SNAPSHOT_UPDATED".equals(event.status())) return event.message();
+        if (event.type() == att.api.ExecutionEvent.Type.STATUS && "CANCELLED".equals(event.status()) && data.get("target") != null)
+            return "[DEBUG] CANCELLED target=" + data.get("target");
+        return event.message();
+    }
+
+    private static FrameworkConfig loadConfig(ExecutionOptions options, Path root) throws Exception {
+        try { return new FrameworkConfigLoader().load(options.configPath(), root, options.environment()); }
+        catch (att.validation.DiagnosticException e) { throw e; }
+        catch (Exception e) {
+            throw att.validation.DiagnosticException.wrap(DiagnosticCodes.CONFIG_INVALID,
+                    "Unable to load ATT global configuration", e, options.configPath().toString(), "config",
+                    "Check that the config file exists, is readable YAML, and conforms to the configured schema version.");
+        }
     }
 
     private static java.util.List<java.util.Map<String, Object>> presentedDiagnostics(

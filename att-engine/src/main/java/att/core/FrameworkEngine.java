@@ -80,14 +80,13 @@ public class FrameworkEngine {
         Path finalRunDirectory = plan.finalRunDirectory();
         RunConcurrencyGuard concurrencyGuard = RunConcurrencyGuard.acquire(outputRoot, options.concurrencyMode(), new Runnable() {
             @Override public void run() {
-                verbose(options, "[RUN] queued: waiting for the active run to complete");
+                progress(options, "RUN_QUEUED", runId, null, null, null, null, null,
+                        "waiting for the active run to complete", Collections.<String,Object>emptyMap());
             }
         });
-        java.io.PrintStream cancellationOutput = "machine".equals(options.format())
-                ? new java.io.PrintStream(new java.io.OutputStream() { @Override public void write(int value) { } })
-                : "json".equals(options.format()) ? System.err : System.out;
-        ConsoleCancellationHook cancellation = new ConsoleCancellationHook(cancellationOutput,
-                "[RUN] CANCELLED runId=" + runId);
+        ConsoleCancellationHook cancellation = new ConsoleCancellationHook(new Runnable() {
+            @Override public void run() { progress(options, "RUN_CANCELLED", runId, null, null, null, "CANCELLED", null, null, Collections.<String,Object>emptyMap()); }
+        });
         try {
         Files.createDirectories(outputRoot);
         Path runDirectory = finalRunDirectory;
@@ -103,7 +102,8 @@ public class FrameworkEngine {
         Map<ExecutionPlan.Suite, List<TestResult>> suiteReportResults = new LinkedHashMap<ExecutionPlan.Suite, List<TestResult>>();
         boolean stopRun = false;
         att.template.DefaultBuiltInProvider runBuiltIns = new att.template.DefaultBuiltInProvider(new att.template.SequenceService());
-        verbose(options, "[RUN] id=" + runId + " suites=" + plan.suites().size() + " output=" + portable(outputRoot));
+        Map<String,Object> runData = new LinkedHashMap<String,Object>(); runData.put("suites", plan.suites().size()); runData.put("output", portable(outputRoot));
+        progress(options, "RUN_STARTED", runId, null, null, null, "RUNNING", null, null, runData);
 
         phaseStarted = profile.begin();
         for (ExecutionPlan.Suite suitePlan : plan.suites()) {
@@ -118,18 +118,19 @@ public class FrameworkEngine {
             att.exec.HttpHelperExecutor httpHelperExecutor = new att.exec.HttpHelperExecutor(projectRoot, suiteConfig);
             UnifiedTemplateEngine unifiedTemplateEngine = new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor, mqHelperExecutor, httpHelperExecutor, runBuiltIns);
             List<TestCase> cases = suitePlan.cases();
-            verbose(options, "[SUITE] file=" + portable(resolve(suite)) + " cases=" + cases.size());
+            Map<String,Object> suiteData = new LinkedHashMap<String,Object>(); suiteData.put("file", portable(resolve(suite))); suiteData.put("cases", cases.size());
+            progress(options, "SUITE_STARTED", runId, null, null, null, "RUNNING", null, null, suiteData);
             List<TestResult> suiteResults = new ArrayList<TestResult>();
             try {
                 for (TestCase testCase : cases) {
-                    verbose(options, "[CASE] id=" + testCase.caseId() + " status=START");
+                    progress(options, "CASE_STARTED", runId, testCase.caseId(), null, null, "START", null, null, Collections.<String,Object>emptyMap());
                     // A Run Render plan follows one Testcase execution. Nested
                     // stages and Flows share this runner, while the next
                     // Testcase observes edits made after the current one.
                     StageTemplateRunner templateRunner = new StageTemplateRunner(unifiedTemplateEngine, suitePlan.flows());
                     TestResult result = runCase(testCase, suiteConfig, options, runId, runStarted, runDirectory,
                             suitePlan, templateRunner, dbHelperExecutor, testdataAllocator);
-                    verbose(options, "[CASE] id=" + testCase.caseId() + " status=" + result.status() + " durationMs=" + result.duration().toMillis());
+                    progress(options, "CASE_FINISHED", runId, testCase.caseId(), null, null, result.status().name(), result.duration().toMillis(), null, Collections.<String,Object>emptyMap());
                     results.add(result);
                     suiteResults.add(result);
                     if (options.failFast() && (result.status() == ResultStatus.FAIL || result.status() == ResultStatus.ERROR)) {
@@ -198,14 +199,15 @@ public class FrameworkEngine {
         Path caseOutputDir = IdentifierValidator.strictChild(executionsDirectory, validatedCaseId, "Execution directory");
         Files.createDirectories(caseOutputDir);
         Path caseLogPath = caseOutputDir.resolve("case.log");
-        java.io.PrintStream console = "json".equals(options.format()) ? System.err : System.out;
-        if (options.verbose() && !options.quiet()) {
-            options.emitOutput("[CASE-LOG] case=" + testCase.caseId() + " file=" + portable(caseLogPath));
+        if (options.hasObserver()) {
+            Map<String,Object> logData = new LinkedHashMap<String,Object>(); logData.put("file", portable(caseLogPath));
+            progress(options, "CASE_LOG_PATH", runId, testCase.caseId(), null, null, null, null, null, logData);
         }
         CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath, suiteConfig.caseLogYamlAnchors(),
-                options.verbose() && !options.quiet()
-                        ? options.outputListener() == null ? new CaseLogConsoleMirror(testCase.caseId(), console)
-                            : new CaseLogConsoleMirror(testCase.caseId(), options.outputListener())
+                options.hasObserver()
+                        ? new CaseLogConsoleMirror(testCase.caseId(), new java.util.function.Consumer<String>() {
+                            @Override public void accept(String text) { options.emitCaseLog(runId, testCase.caseId(), text); }
+                        })
                         : null);
         caseLog.setProjectRoot(projectRoot);
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, validatedCaseId, runId,
@@ -236,7 +238,8 @@ public class FrameworkEngine {
                     }
                     StageTemplate template = suitePlan.template(stageData.templateName());
                     if (template == null) throw new IllegalArgumentException("Template was not resolved in execution plan: " + stageData.templateName());
-                    verbose(options, "[STAGE] case=" + testCase.caseId() + " stage=" + stage.key() + " template=" + template.name() + " status=START");
+                    Map<String,Object> stageEventData = new LinkedHashMap<String,Object>(); stageEventData.put("template", template.name());
+                    progress(options, "STAGE_STARTED", runId, testCase.caseId(), stage.key(), null, "START", null, null, stageEventData);
                     Map<String, Object> resolvedStageInput = testdata.resolve(stageData.values(), context, null, null);
                     if (!testdata.selectionEvidence().isEmpty())
                         context.put("CASE.testdataSelections", testdata.selectionEvidence());
@@ -247,11 +250,12 @@ public class FrameworkEngine {
                     List<ValidationResult> stageResults = templateRunner.execute(stage.key(), template, context, caseLog);
                     ResultStatus stageStatus = aggregate(stageResults);
                     for (ValidationResult actionResult : stageResults) {
-                        String detail = actionResult.message() == null || actionResult.message().isEmpty() ? "" : " message=" + actionResult.message();
-                        verbose(options, "[ACTION] case=" + testCase.caseId() + " stage=" + stage.key() + " action=" + actionResult.name() + " status=" + actionResult.status() + detail);
+                        Map<String,Object> actionData = new LinkedHashMap<String,Object>();
+                        if(actionResult.message()!=null&&!actionResult.message().isEmpty()) actionData.put("detail", actionResult.message());
+                        progress(options, "ACTION_FINISHED", runId, testCase.caseId(), stage.key(), actionResult.name(), actionResult.status().name(), null, null, actionData);
                     }
                     context.finishStage(stageStatus.name(), Duration.between(stageStarted, Instant.now()).toMillis());
-                    verbose(options, "[STAGE] case=" + testCase.caseId() + " stage=" + stage.key() + " template=" + template.name() + " status=" + stageStatus + " durationMs=" + Duration.between(stageStarted, Instant.now()).toMillis());
+                    progress(options, "STAGE_FINISHED", runId, testCase.caseId(), stage.key(), null, stageStatus.name(), Duration.between(stageStarted, Instant.now()).toMillis(), null, stageEventData);
                     validations.addAll(stageResults);
                     if (stageStatus == ResultStatus.FAIL || stageStatus == ResultStatus.ERROR || stageStatus == ResultStatus.INVALID) {
                         hasPriorFailure = true;
@@ -359,10 +363,12 @@ public class FrameworkEngine {
         return plan;
     }
 
-    private void verbose(ExecutionOptions options, String message) {
-        if (options.verbose() && !options.quiet()) {
-            options.emitOutput(message);
-        }
+    private void progress(ExecutionOptions options, String event, String runId, String caseId, String stage,
+                         String action, String status, Long durationMs, String message, Map<String,Object> data) {
+        if (!options.hasObserver()) return;
+        Map<String,Object> fields = new LinkedHashMap<String,Object>(data); fields.put("event", event);
+        options.emitEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.PROGRESS, runId, caseId,
+                stage, action, status, durationMs, message, fields));
     }
 
     private String message(Exception error) {

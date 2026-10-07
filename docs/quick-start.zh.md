@@ -40,7 +40,7 @@ Workbook 內有兩個 Testcase：
 
 ## 確認前置條件
 
-ATT 需要 Java 8 或以上版本。在 repository root：
+ATT 需要 Java 8 或以上版本。Source checkout 的 launcher 首次編譯亦需要 Maven；如沒有 Maven，必須有 `javac` 及本機 Maven cache 內的 ATT dependency jars。已打包的 release 不需要 Maven。在 repository root：
 
 1. 在 macOS/Linux 上，如有需要先令 launcher 可執行：
    ```sh

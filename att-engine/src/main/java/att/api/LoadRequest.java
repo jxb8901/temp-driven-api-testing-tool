@@ -12,14 +12,14 @@ public final class LoadRequest extends AttRequest {
     private final List<String> overrides;
     private final att.load.LoadEventListener listener;
     private final att.load.LoadScenario parsedScenario;
-    private final att.core.PerformanceProfile profile;
+    private final boolean profile;
     public LoadRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory, String runId,
                        Path scenario, String debugTargetType, String debugTargetId, String users, String arrivalRate,
                        String warmup, String rampUp, String duration, String rampDown, String thinkTime,
                        String maxConcurrent, String overloadPolicy, List<String> overrides) {
         this(packageRoot, configPath, environment, outputDirectory, runId, scenario, debugTargetType, debugTargetId,
                 users, arrivalRate, warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overloadPolicy,
-                overrides, null, null, null);
+                overrides, null, null, false);
     }
     public LoadRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory, String runId,
                        Path scenario, String debugTargetType, String debugTargetId, String users, String arrivalRate,
@@ -28,7 +28,7 @@ public final class LoadRequest extends AttRequest {
                        att.load.LoadEventListener listener) {
         this(packageRoot, configPath, environment, outputDirectory, runId, scenario, debugTargetType, debugTargetId,
                 users, arrivalRate, warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overloadPolicy,
-                overrides, listener, null, null);
+                overrides, listener, null, false);
     }
     public LoadRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory, String runId,
                        Path scenario, String debugTargetType, String debugTargetId, String users, String arrivalRate,
@@ -37,14 +37,14 @@ public final class LoadRequest extends AttRequest {
                        att.load.LoadEventListener listener, att.load.LoadScenario parsedScenario) {
         this(packageRoot, configPath, environment, outputDirectory, runId, scenario, debugTargetType, debugTargetId,
                 users, arrivalRate, warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overloadPolicy,
-                overrides, listener, parsedScenario, null);
+                overrides, listener, parsedScenario, false);
     }
     public LoadRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory, String runId,
                        Path scenario, String debugTargetType, String debugTargetId, String users, String arrivalRate,
                        String warmup, String rampUp, String duration, String rampDown, String thinkTime,
                        String maxConcurrent, String overloadPolicy, List<String> overrides,
                        att.load.LoadEventListener listener, att.load.LoadScenario parsedScenario,
-                       att.core.PerformanceProfile profile) {
+                       boolean profile) {
         super(packageRoot, configPath, environment, outputDirectory, runId);
         if (scenario == null && (debugTargetType == null || debugTargetId == null)) throw new IllegalArgumentException("Load requires a scenario or a Debug target");
         this.scenario = scenario; this.debugTargetType = debugTargetType; this.debugTargetId = debugTargetId;
@@ -61,5 +61,5 @@ public final class LoadRequest extends AttRequest {
     public String maxConcurrent() { return maxConcurrent; } public String overloadPolicy() { return overloadPolicy; } public List<String> overrides() { return overrides; }
     public att.load.LoadEventListener listener() { return listener; }
     public att.load.LoadScenario parsedScenario() { return parsedScenario; }
-    public att.core.PerformanceProfile profile() { return profile; }
+    public boolean profileEnabled() { return profile; }
 }

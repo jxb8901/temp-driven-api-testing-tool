@@ -8,7 +8,8 @@ import java.util.Set;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.function.Consumer;
+import att.api.ExecutionEvent;
+import att.api.ExecutionEventListener;
 
 /** V2 command and case-selection options. */
 public final class ExecutionOptions {
@@ -49,7 +50,7 @@ public final class ExecutionOptions {
     private final String loadMaxConcurrent;
     private final String loadOverloadPolicy;
     private final List<String> variableOverrides;
-    private final Consumer<String> outputListener;
+    private final ExecutionEventListener observer;
 
     public ExecutionOptions(Path configPath, Path suitePath, Path suiteDirectory, Set<String> caseIds, Set<String> tags,
                             Set<String> excludeTags, String runId, boolean rerunFailed, boolean dryRun,
@@ -142,7 +143,7 @@ public final class ExecutionOptions {
                              Path loadScenario, String loadUsers, String loadArrivalRate, String loadWarmup, String loadRampUp,
                              String loadDuration, String loadRampDown, String loadThinkTime, String loadMaxConcurrent,
                              String loadOverloadPolicy, String environment, List<String> variableOverrides,
-                             boolean unsafeFailureDetails, Consumer<String> outputListener) {
+                             boolean unsafeFailureDetails, ExecutionEventListener observer) {
         this.command = command;
         this.configPath = configPath;
         this.environment = environment;
@@ -180,14 +181,13 @@ public final class ExecutionOptions {
         this.loadMaxConcurrent = loadMaxConcurrent;
         this.loadOverloadPolicy = loadOverloadPolicy;
         this.variableOverrides = Collections.unmodifiableList(new ArrayList<String>(variableOverrides));
-        this.outputListener = outputListener;
+        this.observer = observer;
     }
 
     /** Enables CLI presentation for a typed request while leaving the API default silent. */
-    public ExecutionOptions withPresentation(String outputFormat, boolean quietOutput, boolean verboseOutput,
-                                             Consumer<String> listener) {
+    public ExecutionOptions withObserver(ExecutionEventListener listener) {
         return new ExecutionOptions(command, configPath, suitePaths, suiteDirectory, caseIds, tags, excludeTags, runId,
-                all, rerunFailed, dryRun, failFast, outputDirectory, outputFormat, quietOutput, verboseOutput,
+                all, rerunFailed, dryRun, failFast, outputDirectory, format, quiet, verbose,
                 validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId,
                 debugInput, loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration,
                 loadRampDown, loadThinkTime, loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides,
@@ -195,14 +195,17 @@ public final class ExecutionOptions {
     }
 
     public void emitOutput(String message) {
-        if (outputListener != null) outputListener.accept(message);
-        else if (!"machine".equals(format)) {
-            java.io.PrintStream console = "json".equals(format) ? System.err : System.out;
-            synchronized (console) { console.println(message); console.flush(); }
-        }
+        if (observer != null) observer.onEvent(ExecutionEvent.log(message));
+    }
+    public void emitEvent(ExecutionEvent event) { if (observer != null && event != null) observer.onEvent(event); }
+    public boolean hasObserver() { return observer != null; }
+
+    public void emitCaseLog(String runId, String caseId, String text) {
+        if (observer != null && text != null && !text.isEmpty()) observer.onEvent(new ExecutionEvent(
+                ExecutionEvent.Type.CASE_LOG, runId, caseId, null, null, null, null, text, null));
     }
 
-    public Consumer<String> outputListener() { return outputListener; }
+    public ExecutionEventListener observer() { return observer; }
 
     /** Creates execution intent from typed callers. This factory accepts no argv or presentation settings. */
     public static ExecutionOptions forApi(String command, Path configPath, String environment,

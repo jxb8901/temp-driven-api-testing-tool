@@ -119,12 +119,11 @@ public final class DebugEngine {
     }
 
     public Result run(ExecutionOptions options) throws Exception {
-        java.io.PrintStream cancellationOutput = "machine".equals(options.format())
-                ? new java.io.PrintStream(new java.io.OutputStream() { @Override public void write(int value) { } })
-                : "json".equals(options.format()) ? System.err : System.out;
         String target = options.debugTargetType() + ":" + safeConsoleIdentity(options.debugTargetId());
-        att.core.ConsoleCancellationHook cancellation = new att.core.ConsoleCancellationHook(cancellationOutput,
-                "[DEBUG] CANCELLED target=" + target);
+        att.core.ConsoleCancellationHook cancellation = new att.core.ConsoleCancellationHook(new Runnable() {
+            @Override public void run() { options.emitEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.STATUS,
+                    null,null,null,null,"CANCELLED",null,null,java.util.Collections.<String,Object>singletonMap("target",target))); }
+        });
         try { return runInternal(options); }
         finally { cancellation.close(); }
     }
@@ -141,8 +140,10 @@ public final class DebugEngine {
         Instant started = Instant.now();
         String targetType = options.debugTargetType();
         String targetId = options.debugTargetId();
-        if (options.unsafeFailureDetails() && !"machine".equals(options.format()))
-            System.err.println("[ATT WARNING] --unsafe-failure-details is enabled: collector diagnostics may expose local data. Configured secrets remain redacted. Use only with trusted local data.");
+        if (options.unsafeFailureDetails()) options.emitEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.WARNING,
+                null,null,null,null,"UNSAFE_FAILURE_DETAILS",null,
+                "[ATT WARNING] --unsafe-failure-details is enabled: collector diagnostics may expose local data. Configured secrets remain redacted. Use only with trusted local data.",
+                java.util.Collections.<String,Object>emptyMap()));
         Path debugDirectory = createDebugDirectory(options, targetType, targetId);
         Path artifacts = debugDirectory.resolve("artifacts");
         Path logPath = debugDirectory.resolve("case.log");
@@ -175,17 +176,19 @@ public final class DebugEngine {
         List<ValidationResult> actionResults = new ArrayList<ValidationResult>();
 
         try {
-            if (options.verbose() && !options.quiet())
-                options.emitOutput("[DEBUG] START target=" + targetType + ":" + targetId
-                        + " input=" + (options.debugInput() == null ? "auto" : options.debugInput())
-                        + " output=" + att.core.PathPresentation.displayPath(debugDirectory, projectRoot));
+            if (options.hasObserver()) {
+                Map<String,Object> eventData=new LinkedHashMap<String,Object>(); eventData.put("event","DEBUG_STARTED");
+                eventData.put("targetType",targetType); eventData.put("targetId",targetId);
+                eventData.put("input",options.debugInput()==null?"auto":options.debugInput().toString());
+                eventData.put("output",att.core.PathPresentation.displayPath(debugDirectory,projectRoot));
+                options.emitEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.DEBUG,debugDirectory.getFileName().toString(),null,null,null,"START",null,null,eventData));
+            }
             log = new CaseExecutionLog(logPath, config.caseLogYamlAnchors(),
-                    options.verbose() && !options.quiet()
-                            ? options.outputListener() == null
-                                ? new att.core.CaseLogConsoleMirror("debug:" + targetType + ":" + targetId,
-                                    "json".equals(options.format()) ? System.err : System.out)
-                                : new att.core.CaseLogConsoleMirror("debug:" + targetType + ":" + targetId,
-                                    options.outputListener())
+                    options.hasObserver()
+                            ? new att.core.CaseLogConsoleMirror("debug:" + targetType + ":" + targetId,
+                                new java.util.function.Consumer<String>() {
+                                    @Override public void accept(String text) { options.emitCaseLog(debugDirectory.getFileName().toString(), "debug:" + targetType + ":" + targetId, text); }
+                                })
                             : null);
             log.setProjectRoot(projectRoot);
             input = loadInput(options, targetType, targetId);
@@ -199,10 +202,13 @@ public final class DebugEngine {
                     new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
             att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine, input.inputs, input.path,
                     "vars", DiagnosticCodes.DEBUG_INVALID, att.core.ExecutionBootstrapVariables.Scope.DEBUG);
-            if (options.verbose() && !options.quiet())
-                options.emitOutput("[DEBUG] INPUT target=" + targetType + ":" + targetId
-                        + " case=" + testCase.caseId() + " resolved="
-                        + att.core.PathPresentation.displayPath(input.path, projectRoot));
+            if (options.hasObserver()) {
+                Map<String,Object> eventData=new LinkedHashMap<String,Object>(); eventData.put("event","DEBUG_INPUT_RESOLVED");
+                eventData.put("targetType",targetType); eventData.put("targetId",targetId);
+                eventData.put("resolved",att.core.PathPresentation.displayPath(input.path,projectRoot));
+                options.emitEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.DEBUG,debugDirectory.getFileName().toString(),
+                        testCase.caseId(),null,null,"INPUT_RESOLVED",null,null,eventData));
+            }
 
             new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
                     resolved.flows, input.path, "debug", testCase.caseData(), input.vars, input.testdataDescriptors);
