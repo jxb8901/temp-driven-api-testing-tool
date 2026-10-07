@@ -342,9 +342,9 @@ Workbook/Sidecar/Snapshot defines Testcase data. Testcase and Stage business inp
 
 Use `att-testdata/v1.0` descriptors for reusable records, then reference them only from a Case, Stage, Debug `inputs`, or Load workload `inputs` mapping. An exact `@{id}` reference keeps the record's native map/list/scalar type; `@{id.path}` selects a nested value, including a numeric list index. Interpolated references such as `"ORD-@{accounts.id}"` produce text and therefore require a scalar value from the selected record. `${...}` in a mapping reads Context roots initialized before that mapping is resolved. The allowed roots depend on the mapping phase, and validation checks them before execution starts (before the scheduler starts for Load):
 
-- Run Case/Stage mappings may read `EXEC.ID`, `EXEC.RUN_ID`, `EXEC.STARTED_AT`, `EXEC.RUN_STARTED_AT`, `EXEC.OUTPUT_DIR`, and `META.PACKAGE_ROOT`, `META.SOURCE`, or `META.TARGET`.
+- Run Case/Stage mappings may read `EXEC.ID`, `EXEC.RUN_ID`, `EXEC.STARTED_AT`, `EXEC.RUN_STARTED_AT`, `EXEC.OUTPUT_DIR`, and `META.SOURCE` or `META.TARGET`.
 - Debug `inputs` may read the same execution roots and metadata, plus `META.TEMPLATE`.
-- Load workload `inputs` may read `EXEC.RUN_ID`, `EXEC.STARTED_AT`, `EXEC.RUN_STARTED_AT`, initialized `EXEC.LOAD` identity fields, and `META.PACKAGE_ROOT`, `META.SOURCE`, `META.TARGET`, or `META.TEMPLATE`. `EXEC.ID` and `EXEC.OUTPUT_DIR` are initialized only after input resolution. `EXEC.LOAD.USER_ID` is absent for arrival-rate workloads; use the optional path form `${EXEC.LOAD.USER_ID?}` when one mapping must support both models.
+- Load workload `inputs` may read `EXEC.RUN_ID`, `EXEC.STARTED_AT`, `EXEC.RUN_STARTED_AT`, initialized `EXEC.LOAD` identity fields, and `META.SOURCE`, `META.TARGET`, or `META.TEMPLATE`. `EXEC.ID` and `EXEC.OUTPUT_DIR` are initialized only after input resolution. `EXEC.LOAD.USER_ID` is absent for arrival-rate workloads; use the optional path form `${EXEC.LOAD.USER_ID?}` when one mapping must support both models.
 
 Every mode rejects references to `EXEC.INPUT` (the value being built), `EXEC.VARS`, `EXEC.ACTIONS`, Action `output`, and invocation-scoped helper metadata. The V1 mapping grammar evaluates literals, selected-record `@{...}` references, and `${...}` Context references; built-in calls are not evaluated. `#{...}`, `&{...}`, and `%{...}` are not input-mapping expressions.
 
@@ -663,13 +663,12 @@ EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing di
 
 ### META field inventory and lifecycle
 
-The public META root contains `PACKAGE_ROOT`, `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER`. `META.PACKAGE_ROOT` is the normalized absolute path of the active ATT package and is execution-wide in Run, Debug and Load after package binding. Legacy `META.PROJECT.id` and `META.PROJECT.root` are removed with no compatibility alias. ATT installation scope (`ATT_HOME`), package scope (`META.PACKAGE_ROOT`) and execution output scope (`EXEC.OUTPUT_DIR`) are distinct. META contains descriptive fields only. A path may be absent when its component is not active.
+The public META root contains `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER`. `META.PACKAGE_ROOT` and `CASE.outputDirectory` were removed from the author Context. Use `&{logical/package/resource}` to read package content and `EXEC.OUTPUT_DIR` for execution output. Legacy `META.PROJECT.id` and `META.PROJECT.root` are removed with no compatibility alias. Package resources use logical package-relative names; only `EXEC.OUTPUT_DIR` exposes an execution path. META contains descriptive fields only. A path may be absent when its component is not active.
 
 | Public path | Meaning, type and example | Modes and availability | Scope and when absent |
 |---|---|---|---|
-| META.PACKAGE_ROOT | Normalized absolute package-root path; String, for example, `/srv/att/payment`. | Run, Debug, Load; after package binding. | Execution-wide. |
 | META.SOURCE.type | Source kind; String: `testcase`, `debug` or `load`. | Run, Debug, Load. | Execution-wide. |
-| META.SOURCE.path | Normalized absolute source path; String, for example, `/srv/att/payment/testcase/payment.xlsx`, `/srv/att/payment/debug.yaml` or `/srv/att/payment/load/payment.yaml`. | Run, Debug, Load when a source file exists. | Execution-wide; absent for an in-memory source. |
+| META.SOURCE.path | Logical package-relative source name; String, for example, `testcase/payment.xlsx`, `debug.yaml` or `load/payment.yaml`. | Run, Debug, Load when a source file exists. | Execution-wide; absent for an in-memory source. |
 | META.SOURCE.caseId | Canonical TestCase or synthetic Debug Case ID; String, for example, `payment.default.P001`. | Run, Debug. | Execution-wide; absent in Load. |
 | META.SOURCE.workbookId | Workbook identifier; String, for example, `payment`. | Run. | Execution-wide; absent outside workbook Cases. |
 | META.SOURCE.groupId | Workbook group identifier; String, for example, `default`. | Run. | Execution-wide; absent outside workbook Cases. |
@@ -681,7 +680,7 @@ The public META root contains `PACKAGE_ROOT`, `SOURCE`, `TARGET`, `TEMPLATE`, `F
 | META.TARGET.type | Resolved target kind; String: `testcase`, `template`, `flow` or `tool`. | Run, Debug, Load; after target selection. | Execution-wide. |
 | META.TARGET.id | Resolved target identifier; String, for example, `PAYMENT_INVOKE` or `payment.flow.v1`. | Run, Debug, Load; after target selection. | Execution-wide. |
 | META.TEMPLATE.id | Active Template or resolved Load execution-wrapper ID; String, for example, `PAYMENT_INVOKE`. | Run/Debug while a Stage runs; Load after target resolution and while its wrapper runs. | Component scope; absent before target/template resolution, restored or removed after the scope. In Load Flow/Tool targets this is the resolved synthetic wrapper. |
-| META.TEMPLATE.path | Normalized Template or execution-wrapper directory; String, for example, `/srv/att/templates/PAYMENT_INVOKE`. | Same availability as META.TEMPLATE.id. | Component scope; absent before resolution, restored or removed after the scope. |
+| META.TEMPLATE.path | Logical package-relative Template or execution-wrapper directory; String, for example, `templates/PAYMENT_INVOKE`. | Same availability as META.TEMPLATE.id. | Component scope; absent before resolution, restored or removed after the scope. |
 | META.FLOW.id | Active Flow ID; String, for example, `payment.request.v1`. | Run, Debug, Load while that Flow invocation runs. | Invocation scope; push on entry, restore on return, absent when inactive. |
 | META.FLOW.invocationId | Caller Action ID; String, for example, `sendRequest`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
 | META.FLOW.depth | One-based nested Flow depth; Number, for example, `1`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
@@ -734,7 +733,7 @@ Use the expression form supported by each field. File-content content, Action de
 
 ### File-content expressions
 
-`&{path}` is a file-content expression. It reads exactly one statically addressed regular UTF-8 file contained by the active ATT package root and returns its String content. It never infers or parses a document format, expands a glob or creates an output file. Descriptor-relative `./` and `../` paths are allowed only when their canonical target remains inside `META.PACKAGE_ROOT`. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace, glob syntax and dynamic locators fail validation. File content is not implicitly parsed as JSON, YAML or XML.
+`&{path}` is a file-content expression. It reads exactly one statically addressed regular UTF-8 package resource and returns its String content. Bare names resolve from the package root; explicit `./` and `../` locators resolve from the referring descriptor directory. Resolution rejects absolute names, package escapes and symlink targets outside the package. It never infers or parses a document format, expands a glob or creates an output file. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace, glob syntax and dynamic locators fail validation. File content is not implicitly parsed as JSON, YAML or XML.
 
 ### Argument result typing
 
@@ -1149,7 +1148,7 @@ output/debug/<debugId>/
     └── case.yaml
 ```
 
-`result.yaml` contains the target, status, exit code, duration, input path, Case ID, action results, diagnostic (when present), and evidence locations. Synthetic framework-owned fields always win over same-named values in `case`; debug inputs cannot replace `CASE.caseId`, `CASE.workbookId`, `CASE.groupId`, `CASE.rowCaseId`, `CASE.outputDirectory`, the legacy `CASE.STAGES` evidence view, `CASE.DB`, `CASE.VARS`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, or `DB.*`. Debug output is independent of ordinary `output/latest-run.yaml` and report lifecycle.
+`result.yaml` contains the target, status, exit code, duration, input path, Case ID, action results, diagnostic (when present), and evidence locations. Synthetic framework-owned fields always win over same-named values in `case`; debug inputs cannot replace `CASE.caseId`, `CASE.workbookId`, `CASE.groupId`, `CASE.rowCaseId`, the legacy `CASE.STAGES` evidence view, `CASE.DB`, `CASE.VARS`, `RUN.*`, `ACTIONS.*`, `TOOL.*`, or `DB.*`. Debug output is independent of ordinary `output/latest-run.yaml` and report lifecycle.
 
 For `validate --format json`, stdout contains exactly one JSON document; progress and human diagnostics go to stderr.
 
@@ -1369,7 +1368,7 @@ The outer Load directory uses the same `execution.runIdFormat` policy as Run whe
 
 Load uses schema att-load/v1.6. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
 
-Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT, EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only EXEC.LOAD.USER_ID and the already curated META.PACKAGE_ROOT/SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID determines the workspace. No Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are absent.
+Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT, EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only EXEC.LOAD.USER_ID and the already curated META.SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID determines the workspace. No Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are absent.
 
 Only deterministic, side-effect-free built-ins are allowed. External Tool/DB/MQ/HTTP/SSH calls and stateful, random, clock or filesystem functions are rejected. seq.next() is neither allowed nor required. Use stable identity components:
 
@@ -2347,7 +2346,7 @@ environments:
 
 `runIdFormat` generates the outer Run ID and, when Load has no exact `--run-id`, the outer Load ID. It does not affect Load's per-iteration `execution.execIdFormat` (`EXEC.ID`). `debugIdFormat` generates the standalone Debug directory identity. When no format is configured, the existing timestamp Run/Load default and `<type>-<targetId>` Debug default remain in effect.
 
-Formats are evaluated once before their identity or output directory is published. Run and Load formats can read `META.PACKAGE_ROOT`, `META.SOURCE.type/path`, `EXEC.STARTED_AT`, and `EXEC.RUN_STARTED_AT`. Debug formats can also read `META.TARGET.type/id`. Pure identity-format built-ins and `date.sysdate` / `date.systimestamp` are available; external calls, random/sequence functions, filesystem calls, and invocation state are not. The identity being created is unavailable: references such as `${EXEC.RUN_ID}`, `${EXEC.ID}`, `${EXEC.OUTPUT_DIR}`, `${EXEC.VARS}`, or `${EXEC.ACTIONS}` are rejected. Generated values must already be valid single path segments; ATT does not sanitize them. Run/Load and configured or explicit Debug IDs fail on collision. The legacy default Debug ID keeps its timestamp collision suffix.
+Formats are evaluated once before their identity or output directory is published. Run and Load formats can read `META.SOURCE.type/path`, `EXEC.STARTED_AT`, and `EXEC.RUN_STARTED_AT`. Debug formats can also read `META.TARGET.type/id`. Pure identity-format built-ins and `date.sysdate` / `date.systimestamp` are available; external calls, random/sequence functions, filesystem calls, and invocation state are not. The identity being created is unavailable: references such as `${EXEC.RUN_ID}`, `${EXEC.ID}`, `${EXEC.OUTPUT_DIR}`, `${EXEC.VARS}`, or `${EXEC.ACTIONS}` are rejected. Generated values must already be valid single path segments; ATT does not sanitize them. Run/Load and configured or explicit Debug IDs fail on collision. The legacy default Debug ID keeps its timestamp collision suffix.
 
 For example, a package can use timestamped identities with target-specific standalone Debug folders:
 
@@ -2764,7 +2763,7 @@ Clean never removes testcase, template, tool, configuration, documentation, sche
 | EXEC.ID | Current Case/Debug/Load execution. | Execution. | Key for logs/evidence when a workspace exists. |
 | EXEC.OUTPUT_DIR | Workspace path associated with EXEC.ID. | Execution. | Physical Run/Debug workspace or planned lazy Load workspace. |
 
-Normal Run stores functional Cases under output/<RUN_ID>/executions/<EXEC.ID>/. In Load, EXEC.OUTPUT_DIR and CASE.outputDirectory remain at output/load/<RUN_ID>/executions/<EXEC.ID>/ throughout the iteration. When retained, a copy of its artifacts is also stored under samples/<EXEC.ID>/ or failures/<EXEC.ID>/. Metrics-only iterations have EXEC.ID but no per-iteration directory after the scheduler releases their temporary workspace. Retained Load rows show EXEC.ID and link to case.log when present. Debug uses its debug ID as both EXEC.RUN_ID and EXEC.ID.
+Normal Run stores functional Cases under output/<RUN_ID>/executions/<EXEC.ID>/. In Load, EXEC.OUTPUT_DIR remains at output/load/<RUN_ID>/executions/<EXEC.ID>/ throughout the iteration. When retained, a copy of its artifacts is also stored under samples/<EXEC.ID>/ or failures/<EXEC.ID>/. Metrics-only iterations have EXEC.ID but no per-iteration directory after the scheduler releases their temporary workspace. Retained Load rows show EXEC.ID and link to case.log when present. Debug uses its debug ID as both EXEC.RUN_ID and EXEC.ID.
 
 DIAG is evidence-only. Do not reference DIAG, EXEC.MODE or arbitrary scheduler counters in expressions; pass business variation through EXEC.INPUT.
 

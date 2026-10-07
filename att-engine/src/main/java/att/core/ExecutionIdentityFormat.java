@@ -65,9 +65,9 @@ public final class ExecutionIdentityFormat {
                 DefaultBuiltInProvider.validateInvocation(call.name(), arguments);
             }
             Map<String, Object> metadata = new LinkedHashMap<String, Object>();
-            metadata.put("PACKAGE_ROOT", packageRoot.toAbsolutePath().normalize().toString());
             Map<String, Object> source = mapOf("type", sourceType, null, null);
-            if (sourcePath != null) source.put("path", sourcePath.toAbsolutePath().normalize().toString());
+            String logicalSource = logicalPackageName(packageRoot, sourcePath);
+            if (logicalSource != null) source.put("path", logicalSource);
             metadata.put("SOURCE", source);
             if (targetType != null) metadata.put("TARGET", mapOf("type", targetType, "id", targetId));
             Map<String, Object> execution = new LinkedHashMap<String, Object>();
@@ -91,10 +91,22 @@ public final class ExecutionIdentityFormat {
     }
 
     private static boolean allowedPath(String path, boolean debug) {
-        if ("META.PACKAGE_ROOT".equals(path) || "META.SOURCE.type".equals(path)
-                || "META.SOURCE.path".equals(path) || "EXEC.STARTED_AT".equals(path)
+        if ("META.SOURCE.type".equals(path) || "META.SOURCE.path".equals(path) || "EXEC.STARTED_AT".equals(path)
                 || "EXEC.RUN_STARTED_AT".equals(path)) return true;
         return debug && ("META.TARGET.type".equals(path) || "META.TARGET.id".equals(path));
+    }
+
+    private static String logicalPackageName(Path packageRoot, Path sourcePath) {
+        if (packageRoot == null || sourcePath == null) return null;
+        try {
+            Path root = packageRoot.toRealPath();
+            Path source = sourcePath.isAbsolute() ? sourcePath.toRealPath() : root.resolve(sourcePath).normalize().toRealPath();
+            return source.startsWith(root) ? root.relativize(source).toString().replace('\\', '/') : null;
+        } catch (Exception unavailable) {
+            Path root = packageRoot.toAbsolutePath().normalize();
+            Path source = sourcePath.isAbsolute() ? sourcePath.toAbsolutePath().normalize() : root.resolve(sourcePath).normalize();
+            return source.startsWith(root) ? root.relativize(source).toString().replace('\\', '/') : null;
+        }
     }
 
     private static Map<String, Object> mapOf(String key, Object value, String key2, Object value2) {

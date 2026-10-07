@@ -10,10 +10,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import att.resource.PackageResourceResolver;
 
 /** Immutable environment base plus an optional execution-local whole-descriptor overlay. */
 public final class TestdataRegistry {
     private final Path projectRoot;
+    private final PackageResourceResolver packageResources;
     private final List<Path> environmentFiles;
     private final List<Path> loadFiles;
     private final String localLayerName;
@@ -29,7 +31,8 @@ public final class TestdataRegistry {
 
     public TestdataRegistry(Path projectRoot, List<Path> environmentFiles, List<Path> loadFiles,
                             String localLayerName) {
-        this.projectRoot = projectRoot.toAbsolutePath().normalize();
+        this.packageResources = new PackageResourceResolver(projectRoot);
+        this.projectRoot = packageResources.packageRoot();
         this.environmentFiles = immutablePaths(environmentFiles);
         this.loadFiles = immutablePaths(loadFiles);
         if (!"load-local".equals(localLayerName) && !"debug-local".equals(localLayerName))
@@ -80,9 +83,7 @@ public final class TestdataRegistry {
         Set<Path> uniqueFiles = new LinkedHashSet<Path>();
         for (Path path : files) {
             rejectSymlinkImport(path);
-            Path canonical = path.toRealPath();
-            if (!canonical.startsWith(projectRoot.toRealPath()))
-                throw new IllegalArgumentException("Testdata descriptor path escapes package root");
+            Path canonical = canonicalImport(path);
             if (!uniqueFiles.add(canonical)) throw new IllegalArgumentException("Duplicate testdata path in " + layer + " layer");
             TestdataDescriptor descriptor = load(path);
             if (result.putIfAbsent(descriptor.id(), descriptor) != null)
@@ -124,9 +125,7 @@ public final class TestdataRegistry {
         Map<String, List<Path>> result = new LinkedHashMap<String, List<Path>>();
         for (Path path : files) {
             rejectSymlinkImport(path);
-            Path canonical = path.toRealPath();
-            if (!canonical.startsWith(projectRoot.toRealPath()))
-                throw new IllegalArgumentException("Testdata descriptor path escapes package root");
+            Path canonical = canonicalImport(path);
             String id = idsByPath.get(canonical);
             if (id == null) {
                 id = loader.readId(canonical);
@@ -155,8 +154,15 @@ public final class TestdataRegistry {
 
     private void rejectSymlinkImport(Path path) throws Exception {
         Path normalized = path.isAbsolute() ? path.normalize() : projectRoot.resolve(path).normalize();
-        if (!normalized.startsWith(projectRoot) || Files.isSymbolicLink(normalized))
+        if (Files.isSymbolicLink(normalized))
             throw new IllegalArgumentException("Testdata descriptor must be a package-contained non-symlink file");
+        packageResources.fromInternalPath(normalized, PackageResourceResolver.Kind.FILE);
+    }
+
+    private Path canonicalImport(Path path) throws Exception {
+        rejectSymlinkImport(path);
+        Path normalized = path.isAbsolute() ? path.normalize() : projectRoot.resolve(path).normalize();
+        return packageResources.fromInternalPath(normalized, PackageResourceResolver.Kind.FILE).canonicalPath();
     }
 
     private static List<Path> immutablePaths(List<Path> paths) {

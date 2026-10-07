@@ -18,7 +18,7 @@ description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 
 ## File-content expression
 
-`&{path}` 是 file-content expression：它讀取 active ATT package root 內一個靜態指定的 regular UTF-8 檔案，並回傳原始 String content。它不會推斷或解析文件格式、展開 glob 或建立 output file。Descriptor-relative 的 `./` 與 `../` 只有在 canonical target 仍位於 `META.PACKAGE_ROOT` 內時才允許。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation 失敗。File content 不會自動解析為 JSON、YAML 或 XML。
+`&{path}` 是 file-content expression：它讀取 package resource 中一個靜態指定的 regular UTF-8 檔案，並回傳原始 String content。Bare name 從 package root 解析；明確 `./` 和 `../` locator 從引用 descriptor 的目錄解析。Resolver 會拒絕 absolute name、package escape，以及指向 package 外的 symlink。它不會推斷或解析文件格式、展開 glob 或建立 output file。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation 失敗。File content 不會自動解析為 JSON、YAML 或 XML。
 
 ## Argument 結果型別
 

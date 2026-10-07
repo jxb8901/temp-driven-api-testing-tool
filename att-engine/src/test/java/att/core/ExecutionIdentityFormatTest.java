@@ -21,6 +21,8 @@ class ExecutionIdentityFormatTest {
 
     @Test void rejectsUnavailableContextExternalCallsAndUnsafeSegments() {
         assertThrows(IllegalArgumentException.class, () -> ExecutionIdentityFormat.runId(
+                "${META.PACKAGE_ROOT}", "fallback", packageRoot));
+        assertThrows(IllegalArgumentException.class, () -> ExecutionIdentityFormat.runId(
                 "${EXEC.RUN_ID}", "fallback", packageRoot));
         assertThrows(IllegalArgumentException.class, () -> ExecutionIdentityFormat.runId(
                 "${EXEC.INPUT.account}", "fallback", packageRoot));
@@ -32,6 +34,14 @@ class ExecutionIdentityFormatTest {
                 "../escape", "fallback", packageRoot));
         assertThrows(IllegalArgumentException.class, () -> ExecutionIdentityFormat.runId(
                 "   ", "fallback", packageRoot));
+    }
+
+    @Test void sourcePathInIdentityFormatUsesLogicalPackageName() throws Exception {
+        Path source = packageRoot.resolve("testcase/payment.xlsx");
+        java.nio.file.Files.createDirectories(source.getParent());
+        java.nio.file.Files.write(source, new byte[0]);
+        assertEquals("testcase-payment.xlsx", ExecutionIdentityFormat.runId(
+                "#{str.replace(${META.SOURCE.path}, '/', '-')}", "fallback", packageRoot, "testcase", source));
     }
 
     @Test void keepsExistingDefaultsWhenFormatIsNotConfigured() {

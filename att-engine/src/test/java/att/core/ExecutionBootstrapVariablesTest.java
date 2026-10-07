@@ -83,8 +83,7 @@ class ExecutionBootstrapVariablesTest {
 
     @Test void inputMappingsUseOnlyContextRootsInitializedBeforeTheirExecutionPhase() {
         Map<String, Object> validLoad = mapOf("runId", "${EXEC.RUN_ID}",
-                "userId", "${EXEC.LOAD.USER_ID}", "template", "${META.TEMPLATE.name}",
-                "packageRoot", "${META.PACKAGE_ROOT}");
+                "userId", "${EXEC.LOAD.USER_ID}", "template", "${META.TEMPLATE.name}");
         assertDoesNotThrow(() -> ExecutionBootstrapVariables.validateInputMapping(validLoad, engine(), null,
                 "inputs", att.validation.DiagnosticCodes.LOAD_INVALID,
                 ExecutionBootstrapVariables.InputMappingMode.LOAD,
@@ -105,13 +104,14 @@ class ExecutionBootstrapVariablesTest {
                 att.validation.DiagnosticCodes.DEBUG_INVALID,
                 ExecutionBootstrapVariables.InputMappingMode.DEBUG, null));
         for (ExecutionBootstrapVariables.InputMappingMode mode : ExecutionBootstrapVariables.InputMappingMode.values()) {
-            assertDoesNotThrow(() -> ExecutionBootstrapVariables.validateInputMapping(
-                    mapOf("value", "${META.PACKAGE_ROOT}"), engine(), null, "inputs",
-                    att.validation.DiagnosticCodes.TESTCASE_INVALID, mode, null));
-            assertThrows(att.validation.DiagnosticException.class, () -> ExecutionBootstrapVariables.validateInputMapping(
-                    mapOf("value", "${META.PROJECT.root}"), engine(), null, "inputs",
-                    att.validation.DiagnosticCodes.TESTCASE_INVALID, mode, null));
+            att.validation.DiagnosticException removedPackageRoot = assertThrows(att.validation.DiagnosticException.class,
+                    () -> ExecutionBootstrapVariables.validateInputMapping(mapOf("value", "${META.PACKAGE_ROOT}"),
+                            engine(), null, "inputs", att.validation.DiagnosticCodes.TESTCASE_INVALID, mode, null));
+            assertTrue(removedPackageRoot.detail().contains("&{logical/package/resource}"));
         }
+        assertThrows(att.validation.DiagnosticException.class, () -> ExecutionBootstrapVariables.validateInputMapping(
+                mapOf("value", "${META.PROJECT.root}"), engine(), null, "inputs",
+                att.validation.DiagnosticCodes.TESTCASE_INVALID, ExecutionBootstrapVariables.InputMappingMode.TESTCASE, null));
         att.validation.DiagnosticException unavailableTestcaseTemplate = assertThrows(
                 att.validation.DiagnosticException.class,
                 () -> ExecutionBootstrapVariables.validateInputMapping(mapOf("value", "${META.TEMPLATE.name}"),

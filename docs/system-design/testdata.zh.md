@@ -21,7 +21,7 @@ Input mapping 會在解析值發布至 `EXEC.INPUT` 前執行：
 - `@{id}` 回傳所選 record，並保留原生型別。
 - `@{id.path}` 及數字 list index 可存取巢狀值。
 - `@{id}` 可內嵌於文字，但所選值必須是非 null scalar；結果為字串。
-- `${...}` 只可讀取該 mapping 階段開始前已初始化的 Context。Run Case/Stage mapping 可使用 `EXEC.ID`、`EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、`EXEC.OUTPUT_DIR` 及 `META.PACKAGE_ROOT/SOURCE/TARGET`。Debug `inputs` 另可使用 `META.TEMPLATE`。Load workload `inputs` 可使用 `EXEC.RUN_ID`、兩個 timestamp、當前可用的 `EXEC.LOAD` identity fields 及 `META.PACKAGE_ROOT/SOURCE/TARGET/TEMPLATE`；`EXEC.ID` 與 `EXEC.OUTPUT_DIR` 只會在 input 解析後初始化。`EXEC.LOAD.USER_ID` 只在 closed workload 提供；若要支援 arrival-rate，可用 optional path `${EXEC.LOAD.USER_ID?}`。
+- `${...}` 只可讀取該 mapping 階段開始前已初始化的 Context。Run Case/Stage mapping 可使用 `EXEC.ID`、`EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、`EXEC.OUTPUT_DIR` 及 `META.SOURCE/TARGET`。Debug `inputs` 另可使用 `META.TEMPLATE`。Load workload `inputs` 可使用 `EXEC.RUN_ID`、兩個 timestamp、當前可用的 `EXEC.LOAD` identity fields 及 `META.SOURCE/TARGET/TEMPLATE`；`EXEC.ID` 與 `EXEC.OUTPUT_DIR` 只會在 input 解析後初始化。`EXEC.LOAD.USER_ID` 只在 closed workload 提供；若要支援 arrival-rate，可用 optional path `${EXEC.LOAD.USER_ID?}`。
 - 所有 mode 都拒絕在建立時引用 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、Action `output` 及 invocation-scoped helper metadata。Mapping 會在 execution 前驗證；Load 會在 scheduler 啟動前驗證。V1 mapping grammar 會評估 literal、selected-record `@{...}` reference 及 `${...}` Context reference；不會評估 built-in call。
 - Mapping 不會評估 `#{...}`、`&{...}` 或 `%{...}`。
 

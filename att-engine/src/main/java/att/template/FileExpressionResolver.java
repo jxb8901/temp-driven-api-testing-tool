@@ -3,6 +3,7 @@ package att.template;
 import att.core.CaseRuntimeContext;
 import att.flow.FlowDefinition;
 import att.flow.FlowRegistry;
+import att.resource.PackageResourceResolver;
 
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
@@ -31,6 +32,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class FileExpressionResolver {
     private final Path projectRoot;
+    private final PackageResourceResolver packageResources;
     private final FileExpressionSnapshot snapshot;
     private final Map<PlanKey, CompiledFilePlan> plans = new LinkedHashMap<PlanKey, CompiledFilePlan>();
     private final AtomicLong compiled = new AtomicLong();
@@ -48,7 +50,8 @@ public final class FileExpressionResolver {
     public FileExpressionResolver(Path projectRoot, FileExpressionSnapshot snapshot) {
         if (projectRoot == null) throw new IllegalArgumentException("ATT package root is required for &{...}");
         try { this.projectRoot = projectRoot.toRealPath(); }
-        catch (Exception error) { throw new IllegalArgumentException("ATT package root is unavailable: " + projectRoot, error); }
+        catch (Exception error) { throw new IllegalArgumentException("ATT package root is unavailable", error); }
+        this.packageResources = new PackageResourceResolver(this.projectRoot);
         this.snapshot = snapshot;
     }
 
@@ -87,7 +90,7 @@ public final class FileExpressionResolver {
             if (cached != null) { hits.incrementAndGet(); return cached; }
             misses.incrementAndGet();
         }
-        String source = readUtf8(resolved.canonical);
+        String source = readUtf8(resolved.canonical, path);
         CompiledFilePlan loaded = compilePlan(path, base, resolved.canonical, source);
         synchronized (plans) {
             // A writer may have won the race while this thread decoded the
@@ -206,7 +209,7 @@ public final class FileExpressionResolver {
 
     private CompiledFilePlan compilePlan(String authoredPath, Path sourceDirectory, Path canonical, String source) {
         if (source.contains("&{"))
-            throw new IllegalArgumentException("Nested file-content expressions are not supported in v1: " + canonical);
+            throw new IllegalArgumentException("Nested file-content expressions are not supported in v1: " + authoredPath);
         List<Segment> segments = new ArrayList<Segment>();
         int cursor = 0;
         while (cursor < source.length()) {
@@ -244,28 +247,17 @@ public final class FileExpressionResolver {
     }
 
     private ResolvedFile resolveFile(String authoredPath, Path sourceDirectory) throws Exception {
-        Path root = projectRoot;
-        Path rootCandidate = root.resolve(authoredPath.replace('/', java.io.File.separatorChar)).normalize();
-        Path sourceCandidate = sourceDirectory.resolve(authoredPath.replace('/', java.io.File.separatorChar)).normalize();
-        boolean sourcePreferred = authoredPath.startsWith("./") || authoredPath.startsWith("../")
-                || authoredPath.equals(".") || authoredPath.equals("..");
-        Path candidate = sourcePreferred ? sourceCandidate
-                : (Files.exists(rootCandidate, LinkOption.NOFOLLOW_LINKS) ? rootCandidate : sourceCandidate);
-        if (!candidate.startsWith(root)) throw unsafe(authoredPath, candidate, root);
-        if (!Files.exists(candidate, LinkOption.NOFOLLOW_LINKS))
-            throw new IllegalArgumentException("File-content target does not exist: " + authoredPath + " (resolved=" + candidate + ")");
-        Path canonical = candidate.toRealPath();
-        if (!canonical.startsWith(root)) throw unsafe(authoredPath, canonical, root);
-        if (!Files.isRegularFile(canonical, LinkOption.NOFOLLOW_LINKS))
-            throw new IllegalArgumentException("File-content target is not a regular file: " + authoredPath + " (resolved=" + canonical + ")");
-        return new ResolvedFile(canonical);
+        PackageResourceResolver.PackageResource resource = packageResources.resolve(
+                new PackageResourceResolver.ResourceLocator(authoredPath), packageResources.origin(sourceDirectory),
+                PackageResourceResolver.Kind.FILE);
+        return new ResolvedFile(resource.canonicalPath());
     }
 
     private Path safeSourceDirectory(Path sourceDirectory) throws Exception {
         Path normalized;
         try { normalized = sourceDirectory.toRealPath().normalize(); }
         catch (java.io.IOException error) { throw new IllegalArgumentException("Project source directory is unavailable: " + sourceDirectory, error); }
-        if (!normalized.startsWith(projectRoot)) throw unsafe(sourceDirectory.toString(), normalized, projectRoot);
+        if (!normalized.startsWith(projectRoot)) throw unsafe("<descriptor-origin>", normalized, projectRoot);
         return normalized;
     }
 
@@ -287,12 +279,15 @@ public final class FileExpressionResolver {
     }
 
     private IllegalArgumentException unsafe(String authored, Path resolved, Path root) {
-        return new IllegalArgumentException("File-content target escapes META.PACKAGE_ROOT: authoredPath=" + authored
-                + ", resolvedPath=" + resolved + ", projectRoot=" + root);
+        return new IllegalArgumentException("Package resource escapes the package root: " + authored);
     }
 
-    private String readUtf8(Path file) throws Exception {
-        byte[] bytes = Files.readAllBytes(file);
+    private String readUtf8(Path file, String logicalName) throws Exception {
+        byte[] bytes;
+        try { bytes = Files.readAllBytes(file); }
+        catch (java.io.IOException error) {
+            throw new IllegalArgumentException("Unable to read package resource: " + logicalName, error);
+        }
         try {
             CharBuffer decoded = StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
@@ -300,7 +295,7 @@ public final class FileExpressionResolver {
                     .decode(ByteBuffer.wrap(bytes));
             return decoded.toString();
         } catch (CharacterCodingException error) {
-            throw new IllegalArgumentException("File-content target is not valid UTF-8: " + file, error);
+            throw new IllegalArgumentException("File-content target is not valid UTF-8: " + logicalName, error);
         }
     }
 

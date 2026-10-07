@@ -58,7 +58,7 @@ public final class LoadExecutionIdPattern {
         if ("EXEC.LOAD.MODEL".equals(path) || "EXEC.LOAD.WORKLOAD_ID".equals(path)
                 || "EXEC.LOAD.USER_ID".equals(path) || "EXEC.LOAD.ITERATION".equals(path)
                 || "EXEC.LOAD.PHASE".equals(path)) return true;
-        return "META.PACKAGE_ROOT".equals(path) || path.startsWith("META.SOURCE.")
+        return path.startsWith("META.SOURCE.")
                 || path.startsWith("META.TARGET.") || path.startsWith("META.TEMPLATE.");
     }
 }

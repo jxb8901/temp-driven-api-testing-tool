@@ -169,6 +169,7 @@ public final class CaseRuntimeContext {
         execNode.put("STARTED_AT", startedAt);
         execNode.put("RUN_STARTED_AT", runStartedAt);
         execNode.put("OUTPUT_DIR", this.caseOutputDir.toString());
+        caseNode.put("outputDirectory", this.caseOutputDir.toString());
         execNode.put("INPUT", inputNode);
         execNode.put("VARS", varsNode);
         execNode.put("ACTIONS", actionsView);
@@ -208,7 +209,6 @@ public final class CaseRuntimeContext {
         caseNode.put("tags", testCase.tags());
         caseNode.put("status", "RUNNING");
         caseNode.put("startedAt", startedAt);
-        caseNode.put("outputDirectory", this.caseOutputDir.toString());
         caseNode.put("VARS", varsNode);
         caseNode.put("DB", caseDbNode);
         caseNode.put("STAGES", stagesNode);
@@ -220,8 +220,6 @@ public final class CaseRuntimeContext {
         root.put("DB", new LinkedHashMap<String, Object>());
         runNode.put("runId", runId);
         runNode.put("id", runId);
-        runNode.put("runDirectory", runDirectory.toString());
-        runNode.put("caseLog", caseLog.toString());
     }
 
     @SuppressWarnings("unchecked")
@@ -243,7 +241,8 @@ public final class CaseRuntimeContext {
         Map<String, Object> template = new LinkedHashMap<String, Object>();
         template.put("name", templateName);
         template.put("id", templateName);
-        template.put("path", templatePath.toString());
+        String templateResource = logicalPackageName(templatePath);
+        if (templateResource != null) template.put("path", templateResource);
         template.put("status", "RUNNING");
         template.put("startedAt", java.time.Instant.now().toString());
         currentActions = new LinkedHashMap<String, Object>();
@@ -421,8 +420,17 @@ public final class CaseRuntimeContext {
 
     /** Validates path grammar without requiring the referenced value to exist. */
     public static void validateReferencePath(String path) {
-        java.util.List<Segment> segments = parsePath(requiredReferencePath(path));
+        String required = requiredReferencePath(path);
+        if (isPathOrChild(required, "META.PACKAGE_ROOT"))
+            throw new IllegalArgumentException("META.PACKAGE_ROOT is no longer exposed; use &{logical/package/resource} to read package content and EXEC.OUTPUT_DIR for execution output");
+        if (isPathOrChild(required, "CASE.outputDirectory"))
+            throw new IllegalArgumentException("CASE.outputDirectory was removed; use EXEC.OUTPUT_DIR for the execution workspace");
+        java.util.List<Segment> segments = parsePath(required);
         if (segments.isEmpty()) throw new IllegalArgumentException("Context path must contain at least one segment");
+    }
+
+    private static boolean isPathOrChild(String path, String root) {
+        return root.equals(path) || (path != null && (path.startsWith(root + ".") || path.startsWith(root + "[")));
     }
 
     /** Result of statically probing a path beneath EXEC.INPUT. */
@@ -467,8 +475,13 @@ public final class CaseRuntimeContext {
     }
 
     private Resolution resolution(String path) {
+        String required = requiredReferencePath(path);
+        if (isPathOrChild(required, "CASE.outputDirectory"))
+            throw new IllegalArgumentException("CASE.outputDirectory was removed; use EXEC.OUTPUT_DIR for the execution workspace");
+        if (isPathOrChild(required, "META.PACKAGE_ROOT"))
+            throw new IllegalArgumentException("META.PACKAGE_ROOT is no longer exposed; use &{logical/package/resource} to read package content and EXEC.OUTPUT_DIR for execution output");
         java.util.List<Segment> requested;
-        try { requested = parsePath(path); }
+        try { requested = parsePath(required); }
         catch (Exception error) { return Resolution.invalidPath("<root>", error.getMessage()); }
         if (requested.isEmpty()) return Resolution.missing("<root>", "<empty>");
         String first = requested.get(0).key;
@@ -660,7 +673,9 @@ public final class CaseRuntimeContext {
     }
 
     private Map<String, Object> expressionCaseView() {
-        return legacyCaseView(false);
+        Map<String, Object> result = legacyCaseView(false);
+        result.remove("outputDirectory");
+        return result;
     }
 
     private Map<String, Object> legacyCaseView(boolean includeStageHistory) {
@@ -672,7 +687,6 @@ public final class CaseRuntimeContext {
         result.put("status", statusPublished || !inputNode.containsKey("status")
                 ? lifecycleNode.get("status") : inputNode.get("status"));
         result.put("startedAt", execNode.get("STARTED_AT"));
-        result.put("outputDirectory", execNode.get("OUTPUT_DIR"));
         result.put("durationMs", lifecycleNode.get("durationMs"));
         if (lifecycleNode.containsKey("environment")) result.put("environment", lifecycleNode.get("environment"));
         if (lifecycleNode.containsKey("debugInput")) result.put("debugInput", lifecycleNode.get("debugInput"));
@@ -699,13 +713,29 @@ public final class CaseRuntimeContext {
 
     private Map<String, Object> templateMetadata(String id, Path path) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("id", id); result.put("path", path.toString()); return result;
+        result.put("id", id);
+        String resource = logicalPackageName(path);
+        if (resource != null) result.put("path", resource);
+        return result;
     }
 
     /** Adds only curated component metadata; credentials/config objects never enter META. */
     public void setProject(Path projectRoot) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
-        metaNode.put("PACKAGE_ROOT", this.projectRoot.toString());
+    }
+
+    /** Returns a package-relative logical resource name, never a host path. */
+    public String logicalPackageName(Path path) {
+        if (path == null || projectRoot == null) return null;
+        try {
+            Path root = projectRoot.toRealPath();
+            Path canonical = path.toRealPath();
+            return canonical.startsWith(root) ? root.relativize(canonical).toString().replace('\\', '/') : null;
+        } catch (Exception unavailable) {
+            Path root = projectRoot.toAbsolutePath().normalize();
+            Path normalized = path.toAbsolutePath().normalize();
+            return normalized.startsWith(root) ? root.relativize(normalized).toString().replace('\\', '/') : null;
+        }
     }
 
     public Path projectRoot() { return projectRoot; }
@@ -723,7 +753,8 @@ public final class CaseRuntimeContext {
         values.put("type", type);
         if (caseId != null && !caseId.trim().isEmpty()) values.put("caseId", caseId);
         if (scenario != null && !scenario.trim().isEmpty()) values.put("scenario", scenario);
-        if (source != null) values.put("path", source.toAbsolutePath().normalize().toString());
+        String logicalSource = logicalPackageName(source);
+        if (logicalSource != null) values.put("path", logicalSource);
         setComponentMetadata("SOURCE", values);
     }
 
@@ -832,13 +863,12 @@ public final class CaseRuntimeContext {
         if (executionId == null || executionId.trim().isEmpty()) throw new IllegalArgumentException("EXEC.ID must not be blank");
         this.caseOutputDir = outputDirectory.toAbsolutePath().normalize();
         this.caseLogPath = logPath.toAbsolutePath().normalize();
+        caseNode.put("outputDirectory", this.caseOutputDir.toString());
         execNode.put("ID", executionId);
         execNode.put("OUTPUT_DIR", this.caseOutputDir.toString());
-        caseNode.put("outputDirectory", this.caseOutputDir.toString());
         Map<String, Object> executionDiagnostics = castMap(diagnosticsNode.get("execution"));
         executionDiagnostics.put("id", executionId);
         executionIdInitializing = false;
-        runNode.put("caseLog", this.caseLogPath.toString());
     }
 
     public void setTemplateMetadata(String id, Path path) {
@@ -1561,7 +1591,8 @@ public final class CaseRuntimeContext {
         if (canonical.startsWith("EXEC.VARS.")) return "CASE.VARS" + canonical.substring("EXEC.VARS".length());
         if (canonical.startsWith("EXEC.ACTIONS.")) return "ACTIONS" + canonical.substring("EXEC.ACTIONS".length());
         if ("EXEC.ID".equals(canonical)) return "RUN.id";
-        if ("EXEC.OUTPUT_DIR".equals(canonical)) return "CASE.outputDirectory";
+        if ("CASE.outputDirectory".equals(canonical))
+            throw new IllegalArgumentException("CASE.outputDirectory was removed; use EXEC.OUTPUT_DIR for the execution workspace");
         return null;
     }
 

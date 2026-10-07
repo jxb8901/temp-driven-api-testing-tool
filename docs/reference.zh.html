@@ -917,15 +917,14 @@ execution 開始前驗證（Load 則在 scheduler 啟動前驗證）：</p>
 <ul>
 <li>Run Case/Stage mapping 可讀取
 <code>EXEC.ID</code>、<code>EXEC.RUN_ID</code>、<code>EXEC.STARTED_AT</code>、<code>EXEC.RUN_STARTED_AT</code>、<code>EXEC.OUTPUT_DIR</code>，以及
-<code>META.PACKAGE_ROOT</code>、<code>META.SOURCE</code> 或
-<code>META.TARGET</code>。</li>
+<code>META.SOURCE</code> 或 <code>META.TARGET</code>。</li>
 <li>Debug <code>inputs</code> 可讀取相同的 execution root 與
 metadata，另加 <code>META.TEMPLATE</code>。</li>
 <li>Load workload <code>inputs</code> 可讀取
 <code>EXEC.RUN_ID</code>、<code>EXEC.STARTED_AT</code>、<code>EXEC.RUN_STARTED_AT</code>、已初始化的
 <code>EXEC.LOAD</code> identity fields，以及
-<code>META.PACKAGE_ROOT</code>、<code>META.SOURCE</code>、<code>META.TARGET</code>
-或 <code>META.TEMPLATE</code>。<code>EXEC.ID</code> 與
+<code>META.SOURCE</code>、<code>META.TARGET</code> 或
+<code>META.TEMPLATE</code>。<code>EXEC.ID</code> 與
 <code>EXEC.OUTPUT_DIR</code> 只會在 input 解析後初始化。Arrival-rate
 workload 不提供 <code>EXEC.LOAD.USER_ID</code>；若 mapping
 要同時支援兩種模型，請使用 optional path
@@ -1507,15 +1506,16 @@ timing diagnostics 留在 evidence-only DIAG.load，不能作為 expression
 root。</p>
 <h3 id="meta-欄位清單與生命週期">META 欄位清單與生命週期</h3>
 <p>公開 META root 包含
-<code>PACKAGE_ROOT</code>、<code>SOURCE</code>、<code>TARGET</code>、<code>TEMPLATE</code>、<code>FLOW</code>、<code>TOOL</code>、<code>DBHELPER</code>、<code>MQHELPER</code>、<code>HTTPHELPER</code>
-和 <code>SSHHELPER</code>。<code>META.PACKAGE_ROOT</code> 是 active ATT
-package root 的正規化絕對路徑，在 Run、Debug 和 Load package binding
-後全程可用。舊有 <code>META.PROJECT.id</code> 與
-<code>META.PROJECT.root</code> 已移除，不提供相容 alias。ATT
-installation scope (<code>ATT_HOME</code>)、package scope
-(<code>META.PACKAGE_ROOT</code>) 和 execution output scope
-(<code>EXEC.OUTPUT_DIR</code>) 各自獨立。META 只包含描述欄位；元件在目前
-mode/scope 尚未 active 時，相應路徑可能不存在。</p>
+<code>SOURCE</code>、<code>TARGET</code>、<code>TEMPLATE</code>、<code>FLOW</code>、<code>TOOL</code>、<code>DBHELPER</code>、<code>MQHELPER</code>、<code>HTTPHELPER</code>
+和 <code>SSHHELPER</code>。<code>META.PACKAGE_ROOT</code> 和
+<code>CASE.outputDirectory</code> 已從 author Context 移除。讀取 package
+content 請使用 <code>&amp;{logical/package/resource}</code>；execution
+output 請使用 <code>EXEC.OUTPUT_DIR</code>。舊有
+<code>META.PROJECT.id</code> 與 <code>META.PROJECT.root</code>
+已移除，不提供相容 alias。Package resource 使用 package-relative logical
+name；只有 <code>EXEC.OUTPUT_DIR</code> 公開 execution path。META
+只包含描述欄位；元件在目前 mode/scope 尚未 active
+時，相應路徑可能不存在。</p>
 <table>
 <thead>
 <tr class="header">
@@ -1527,79 +1527,72 @@ mode/scope 尚未 active 時，相應路徑可能不存在。</p>
 </thead>
 <tbody>
 <tr class="odd">
-<td>META.PACKAGE_ROOT</td>
-<td>正規化絕對 package root 路徑；String，例如
-<code>/srv/att/payment</code>。</td>
-<td>Run、Debug、Load；package binding 後。</td>
-<td>Execution-wide。</td>
-</tr>
-<tr class="even">
 <td>META.SOURCE.type</td>
 <td>Source 類型；String：<code>testcase</code>、<code>debug</code> 或
 <code>load</code>。</td>
 <td>Run、Debug、Load。</td>
 <td>Execution-wide。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.path</td>
-<td>正規化絕對 source path；String，例如
-<code>/srv/att/payment/testcase/payment.xlsx</code>、<code>/srv/att/payment/debug.yaml</code>
-或 <code>/srv/att/payment/load/payment.yaml</code>。</td>
+<td>Package-relative logical source name；String，例如
+<code>testcase/payment.xlsx</code>、<code>debug.yaml</code> 或
+<code>load/payment.yaml</code>。</td>
 <td>Run、Debug、Load，source file 存在時。</td>
 <td>Execution-wide；memory source 可缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.caseId</td>
 <td>Canonical TestCase 或 synthetic Debug Case ID；String，例如
 <code>payment.default.P001</code>。</td>
 <td>Run、Debug。</td>
 <td>Execution-wide；Load 缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.workbookId</td>
 <td>Workbook identifier；String，例如 <code>payment</code>。</td>
 <td>Run。</td>
 <td>Execution-wide；非 workbook Case 缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.groupId</td>
 <td>Workbook group identifier；String，例如 <code>default</code>。</td>
 <td>Run。</td>
 <td>Execution-wide；非 workbook Case 缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.rowCaseId</td>
 <td>Workbook row 的 Case ID；String，例如 <code>P001</code>。</td>
 <td>Run。</td>
 <td>Execution-wide；非 workbook Case 缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.sheet</td>
 <td>Workbook sheet 名稱；String，例如 <code>Payment</code>。</td>
 <td>Run，adapter 有提供時。</td>
 <td>Execution-wide；Debug/Load 或無值時缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.row</td>
 <td>Workbook 由 1 起始的 row number；Number，例如 <code>12</code>。</td>
 <td>Run，adapter 有提供時。</td>
 <td>Execution-wide；Debug/Load 或無值時缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.workbook</td>
 <td>可選 workbook label；有值時為 String，例如
 <code>payment_regression.xlsx</code>。</td>
 <td>Run，adapter 有提供時。</td>
 <td>Execution-wide；否則缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.scenario</td>
 <td>不含副檔名的 Load scenario 名稱；String，例如
 <code>payment-smoke</code>。</td>
 <td>Load。</td>
 <td>Execution-wide；非 Load 時缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TARGET.type</td>
 <td>已解析 target
 類型；String：<code>testcase</code>、<code>template</code>、<code>flow</code>
@@ -1607,14 +1600,14 @@ mode/scope 尚未 active 時，相應路徑可能不存在。</p>
 <td>Run、Debug、Load；選定 target 後。</td>
 <td>Execution-wide。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TARGET.id</td>
 <td>已解析 target identifier；String，例如 <code>PAYMENT_INVOKE</code>
 或 <code>payment.flow.v1</code>。</td>
 <td>Run、Debug、Load；選定 target 後。</td>
 <td>Execution-wide。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TEMPLATE.id</td>
 <td>Active Template 或已解析 Load execution-wrapper ID；String，例如
 <code>PAYMENT_INVOKE</code>。</td>
@@ -1623,88 +1616,88 @@ mode/scope 尚未 active 時，相應路徑可能不存在。</p>
 <td>Component scope；解析前缺席，scope 結束後 restore/remove。Load
 Flow/Tool target 使用已解析的 synthetic wrapper。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TEMPLATE.path</td>
-<td>正規化 Template 或 execution-wrapper 目錄；String，例如
-<code>/srv/att/templates/PAYMENT_INVOKE</code>。</td>
+<td>Package-relative logical Template 或 execution-wrapper
+目錄；String，例如 <code>templates/PAYMENT_INVOKE</code>。</td>
 <td>與 META.TEMPLATE.id 相同。</td>
 <td>Component scope；解析前缺席，scope 結束後 restore/remove。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.FLOW.id</td>
 <td>Active Flow ID；String，例如 <code>payment.request.v1</code>。</td>
 <td>Run、Debug、Load 的 Flow invocation 期間。</td>
 <td>Invocation scope；進入 push、返回 restore、inactive 時缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.FLOW.invocationId</td>
 <td>Caller Action ID；String，例如 <code>sendRequest</code>。</td>
 <td>與 META.FLOW.id 相同。</td>
 <td>沒有 active Flow 時缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.FLOW.depth</td>
 <td>由 1 開始的巢狀 Flow 深度；Number，例如 <code>1</code>。</td>
 <td>與 META.FLOW.id 相同。</td>
 <td>沒有 active Flow 時缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TOOL.id</td>
 <td>Active configured Tool 或 built-in 名稱；String，例如
 <code>payment.queryOrder</code> 或 <code>upper</code>。</td>
 <td>Run、Debug、Load invocation 期間。</td>
 <td>Invocation scope；返回後不保留最後一次 Tool。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TOOL.type</td>
 <td>Invocation 類型；String，例如 <code>tool</code> 或
 <code>builtin</code>。</td>
 <td>與 META.TOOL.id 相同。</td>
 <td>外層 invocation 不存在時，返回後缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.DBHELPER.id</td>
 <td>Logical DBHelper ID；String，例如 <code>orders</code>。</td>
 <td>Run、Debug、Load 的 DBHelper operation/DB Action 期間。</td>
 <td>Invocation scope；外層 scope 不存在時返回後缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.DBHELPER.type</td>
 <td>Resource 類型；String，<code>dbhelper</code>。</td>
 <td>與 META.DBHELPER.id 相同。</td>
 <td>外層 scope 不存在時返回後缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.MQHELPER.id</td>
 <td>Logical MQHelper ID；String，例如 <code>payment</code>。</td>
 <td>Run、Debug、Load 的 MQHelper operation 期間。</td>
 <td>Invocation scope；push/restore，返回後無外層 scope 時缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.MQHELPER.type</td>
 <td>Resource 類型；String，<code>mqhelper</code>。</td>
 <td>與 META.MQHELPER.id 相同。</td>
 <td>返回後無外層 scope 時缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.HTTPHELPER.id</td>
 <td>Logical HTTPHelper ID；String，例如 <code>payment</code>。</td>
 <td>Run、Debug、Load 的 HTTPHelper operation 期間。</td>
 <td>Invocation scope；push/restore，返回後無外層 scope 時缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.HTTPHELPER.type</td>
 <td>Resource 類型；String，<code>httphelper</code>。</td>
 <td>與 META.HTTPHELPER.id 相同。</td>
 <td>返回後無外層 scope 時缺席。</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SSHHELPER.id</td>
 <td>Logical SSHHelper ID；String，例如 <code>application</code>。</td>
 <td>Run、Debug、Load 的 SSH Resource Helper operation 期間。</td>
 <td>Invocation scope；push/restore，返回後無外層 scope 時缺席。</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SSHHELPER.type</td>
 <td>Resource 類型；String，<code>sshhelper</code>。</td>
 <td>與 META.SSHHELPER.id 相同。</td>
@@ -1762,13 +1755,14 @@ description/assert、Log message/value、assign expression 和 Tool call
 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見<a
 href="reference.zh/actions.md">Action 與型別化值</a>。</p>
 <h3 id="file-content-expression">File-content expression</h3>
-<p><code>&amp;{path}</code> 是 file-content expression：它讀取 active
-ATT package root 內一個靜態指定的 regular UTF-8 檔案，並回傳原始 String
-content。它不會推斷或解析文件格式、展開 glob 或建立 output
-file。Descriptor-relative 的 <code>./</code> 與 <code>../</code> 只有在
-canonical target 仍位於 <code>META.PACKAGE_ROOT</code>
-內時才允許。Absolute path、missing file、directory、symlink escape、非
-UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation
+<p><code>&amp;{path}</code> 是 file-content expression：它讀取 package
+resource 中一個靜態指定的 regular UTF-8 檔案，並回傳原始 String
+content。Bare name 從 package root 解析；明確 <code>./</code> 和
+<code>../</code> locator 從引用 descriptor 的目錄解析。Resolver 會拒絕
+absolute name、package escape，以及指向 package 外的
+symlink。它不會推斷或解析文件格式、展開 glob 或建立 output
+file。Absolute path、missing file、directory、symlink escape、非 UTF-8
+bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation
 失敗。File content 不會自動解析為 JSON、YAML 或 XML。</p>
 <h3 id="argument-結果型別">Argument 結果型別</h3>
 <p>Argument expression 會先遞迴求值，再呼叫接收它的 function。Target
@@ -3115,10 +3109,9 @@ iteration initialization 使用一般 ${...} / #{...} engine
 output path 發布後評估。</p>
 <p>可用值有
 EXEC.RUN_ID、timestamps、EXEC.INPUT、EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE、closed-only
-EXEC.LOAD.USER_ID，以及已建立的
-META.PACKAGE_ROOT/SOURCE/TARGET/TEMPLATE。EXEC.ID 和 EXEC.OUTPUT_DIR
-尚未可用，因為生成的 ID 決定 workspace。還沒有 Action 執行，所以
-EXEC.ACTIONS 與 Flow/Tool/helper invocation META 缺席。</p>
+EXEC.LOAD.USER_ID，以及已建立的 META.SOURCE/TARGET/TEMPLATE。EXEC.ID 和
+EXEC.OUTPUT_DIR 尚未可用，因為生成的 ID 決定 workspace。還沒有 Action
+執行，所以 EXEC.ACTIONS 與 Flow/Tool/helper invocation META 缺席。</p>
 <p>只允許 deterministic、side-effect-free built-ins。External
 Tool/DB/MQ/HTTP/SSH calls 及 stateful、random、clock、filesystem
 functions 會被拒絕。seq.next() 不允許也不需要。請使用穩定 identity：</p>
@@ -4799,8 +4792,7 @@ iteration 的
 timestamp default，Debug 維持 <code>&lt;type&gt;-&lt;targetId&gt;</code>
 default。</p>
 <p>Format 在 identity 發布或建立 output directory 前只求值一次。Run/Load
-可讀取
-<code>META.PACKAGE_ROOT</code>、<code>META.SOURCE.type/path</code>、<code>EXEC.STARTED_AT</code>
+可讀取 <code>META.SOURCE.type/path</code>、<code>EXEC.STARTED_AT</code>
 和 <code>EXEC.RUN_STARTED_AT</code>；Debug 另可讀取
 <code>META.TARGET.type/id</code>。可使用純 identity-format
 built-ins，以及 <code>date.sysdate</code> /
@@ -5847,7 +5839,7 @@ artifact</h3>
 </table>
 <p>一般 Run 的功能性 Case 位於
 output/&lt;RUN_ID&gt;/executions/&lt;EXEC.ID&gt;/。Load
-執行期間，EXEC.OUTPUT_DIR 與 CASE.outputDirectory 固定指向
+執行期間，EXEC.OUTPUT_DIR 固定指向
 output/load/&lt;RUN_ID&gt;/executions/&lt;EXEC.ID&gt;/。Iteration
 被保留時，artifact 也會複製到 samples/&lt;EXEC.ID&gt;/ 或
 failures/&lt;EXEC.ID&gt;/。Metrics-only iteration 有 EXEC.ID；scheduler

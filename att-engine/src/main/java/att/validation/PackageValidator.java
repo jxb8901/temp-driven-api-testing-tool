@@ -589,7 +589,6 @@ public final class PackageValidator {
         if (path.startsWith("CASE.STAGES") || path.startsWith("TOOL") || path.startsWith("DB")) return null;
         if (path.startsWith("CASE.VARS.")) return "EXEC.VARS." + path.substring("CASE.VARS.".length());
         if ("CASE.VARS".equals(path)) return "EXEC.VARS";
-        if ("CASE.outputDirectory".equals(path)) return "EXEC.OUTPUT_DIR";
         if (path.startsWith("ACTIONS.")) return "EXEC.ACTIONS." + path.substring("ACTIONS.".length());
         if ("ACTIONS".equals(path)) return "EXEC.ACTIONS";
         if ("RUN.id".equals(path) || "RUN.runId".equals(path)) return "EXEC.ID";
@@ -1481,13 +1480,12 @@ public final class PackageValidator {
         }
         String child = firstChildSegment(referencePath, "META");
         if ("PACKAGE_ROOT".equals(child)) {
-            if (!"META.PACKAGE_ROOT".equals(referencePath))
-                throw invalidCanonicalPath(originalPath, "META.PACKAGE_ROOT is a String value; it has no child fields.");
-            return;
+            throw invalidCanonicalPath(originalPath,
+                    "META.PACKAGE_ROOT was removed from the author Context. Use &{logical/package/resource} to read package content and EXEC.OUTPUT_DIR for execution output.");
         }
         if (child.isEmpty() || !att.core.ContextPathPolicy.isCanonicalMetaField(child)) {
             throw invalidCanonicalPath(originalPath,
-                    "Unknown META field '" + child + "'; use PACKAGE_ROOT, SOURCE, TARGET, TEMPLATE, FLOW, TOOL, DBHELPER, or MQHELPER.");
+                    "Unknown META field '" + child + "'; use SOURCE, TARGET, TEMPLATE, FLOW, TOOL, DBHELPER, or MQHELPER.");
         }
     }
 

@@ -965,20 +965,18 @@ before execution starts (before the scheduler starts for Load):</p>
 <li>Run Case/Stage mappings may read <code>EXEC.ID</code>,
 <code>EXEC.RUN_ID</code>, <code>EXEC.STARTED_AT</code>,
 <code>EXEC.RUN_STARTED_AT</code>, <code>EXEC.OUTPUT_DIR</code>, and
-<code>META.PACKAGE_ROOT</code>, <code>META.SOURCE</code>, or
-<code>META.TARGET</code>.</li>
+<code>META.SOURCE</code> or <code>META.TARGET</code>.</li>
 <li>Debug <code>inputs</code> may read the same execution roots and
 metadata, plus <code>META.TEMPLATE</code>.</li>
 <li>Load workload <code>inputs</code> may read <code>EXEC.RUN_ID</code>,
 <code>EXEC.STARTED_AT</code>, <code>EXEC.RUN_STARTED_AT</code>,
 initialized <code>EXEC.LOAD</code> identity fields, and
-<code>META.PACKAGE_ROOT</code>, <code>META.SOURCE</code>,
-<code>META.TARGET</code>, or <code>META.TEMPLATE</code>.
-<code>EXEC.ID</code> and <code>EXEC.OUTPUT_DIR</code> are initialized
-only after input resolution. <code>EXEC.LOAD.USER_ID</code> is absent
-for arrival-rate workloads; use the optional path form
-<code>${EXEC.LOAD.USER_ID?}</code> when one mapping must support both
-models.</li>
+<code>META.SOURCE</code>, <code>META.TARGET</code>, or
+<code>META.TEMPLATE</code>. <code>EXEC.ID</code> and
+<code>EXEC.OUTPUT_DIR</code> are initialized only after input
+resolution. <code>EXEC.LOAD.USER_ID</code> is absent for arrival-rate
+workloads; use the optional path form <code>${EXEC.LOAD.USER_ID?}</code>
+when one mapping must support both models.</li>
 </ul>
 <p>Every mode rejects references to <code>EXEC.INPUT</code> (the value
 being built), <code>EXEC.VARS</code>, <code>EXEC.ACTIONS</code>, Action
@@ -1605,19 +1603,19 @@ and timing diagnostics stay in evidence-only DIAG.load, which is not an
 expression root.</p>
 <h3 id="meta-field-inventory-and-lifecycle">META field inventory and
 lifecycle</h3>
-<p>The public META root contains <code>PACKAGE_ROOT</code>,
-<code>SOURCE</code>, <code>TARGET</code>, <code>TEMPLATE</code>,
-<code>FLOW</code>, <code>TOOL</code>, <code>DBHELPER</code>,
-<code>MQHELPER</code>, <code>HTTPHELPER</code>, and
-<code>SSHHELPER</code>. <code>META.PACKAGE_ROOT</code> is the normalized
-absolute path of the active ATT package and is execution-wide in Run,
-Debug and Load after package binding. Legacy
+<p>The public META root contains <code>SOURCE</code>,
+<code>TARGET</code>, <code>TEMPLATE</code>, <code>FLOW</code>,
+<code>TOOL</code>, <code>DBHELPER</code>, <code>MQHELPER</code>,
+<code>HTTPHELPER</code>, and <code>SSHHELPER</code>.
+<code>META.PACKAGE_ROOT</code> and <code>CASE.outputDirectory</code>
+were removed from the author Context. Use
+<code>&amp;{logical/package/resource}</code> to read package content and
+<code>EXEC.OUTPUT_DIR</code> for execution output. Legacy
 <code>META.PROJECT.id</code> and <code>META.PROJECT.root</code> are
-removed with no compatibility alias. ATT installation scope
-(<code>ATT_HOME</code>), package scope (<code>META.PACKAGE_ROOT</code>)
-and execution output scope (<code>EXEC.OUTPUT_DIR</code>) are distinct.
-META contains descriptive fields only. A path may be absent when its
-component is not active.</p>
+removed with no compatibility alias. Package resources use logical
+package-relative names; only <code>EXEC.OUTPUT_DIR</code> exposes an
+execution path. META contains descriptive fields only. A path may be
+absent when its component is not active.</p>
 <table>
 <thead>
 <tr class="header">
@@ -1629,97 +1627,89 @@ component is not active.</p>
 </thead>
 <tbody>
 <tr class="odd">
-<td>META.PACKAGE_ROOT</td>
-<td>Normalized absolute package-root path; String, for example,
-<code>/srv/att/payment</code>.</td>
-<td>Run, Debug, Load; after package binding.</td>
-<td>Execution-wide.</td>
-</tr>
-<tr class="even">
 <td>META.SOURCE.type</td>
 <td>Source kind; String: <code>testcase</code>, <code>debug</code> or
 <code>load</code>.</td>
 <td>Run, Debug, Load.</td>
 <td>Execution-wide.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.path</td>
-<td>Normalized absolute source path; String, for example,
-<code>/srv/att/payment/testcase/payment.xlsx</code>,
-<code>/srv/att/payment/debug.yaml</code> or
-<code>/srv/att/payment/load/payment.yaml</code>.</td>
+<td>Logical package-relative source name; String, for example,
+<code>testcase/payment.xlsx</code>, <code>debug.yaml</code> or
+<code>load/payment.yaml</code>.</td>
 <td>Run, Debug, Load when a source file exists.</td>
 <td>Execution-wide; absent for an in-memory source.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.caseId</td>
 <td>Canonical TestCase or synthetic Debug Case ID; String, for example,
 <code>payment.default.P001</code>.</td>
 <td>Run, Debug.</td>
 <td>Execution-wide; absent in Load.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.workbookId</td>
 <td>Workbook identifier; String, for example, <code>payment</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.groupId</td>
 <td>Workbook group identifier; String, for example,
 <code>default</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.rowCaseId</td>
 <td>Case ID from the workbook row; String, for example,
 <code>P001</code>.</td>
 <td>Run.</td>
 <td>Execution-wide; absent outside workbook Cases.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.sheet</td>
 <td>Workbook sheet name; String, for example, <code>Payment</code>.</td>
 <td>Run when supplied by the workbook adapter.</td>
 <td>Execution-wide; absent for Debug/Load or when unavailable.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.row</td>
 <td>One-based workbook row number; Number, for example,
 <code>12</code>.</td>
 <td>Run when supplied by the workbook adapter.</td>
 <td>Execution-wide; absent for Debug/Load or when unavailable.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SOURCE.workbook</td>
 <td>Optional workbook label; String when present, for example,
 <code>payment_regression.xlsx</code>.</td>
 <td>Run when supplied by the adapter.</td>
 <td>Execution-wide; optional and otherwise absent.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SOURCE.scenario</td>
 <td>Load scenario basename without its suffix; String, for example,
 <code>payment-smoke</code>.</td>
 <td>Load.</td>
 <td>Execution-wide; absent outside Load.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TARGET.type</td>
 <td>Resolved target kind; String: <code>testcase</code>,
 <code>template</code>, <code>flow</code> or <code>tool</code>.</td>
 <td>Run, Debug, Load; after target selection.</td>
 <td>Execution-wide.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TARGET.id</td>
 <td>Resolved target identifier; String, for example,
 <code>PAYMENT_INVOKE</code> or <code>payment.flow.v1</code>.</td>
 <td>Run, Debug, Load; after target selection.</td>
 <td>Execution-wide.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TEMPLATE.id</td>
 <td>Active Template or resolved Load execution-wrapper ID; String, for
 example, <code>PAYMENT_INVOKE</code>.</td>
@@ -1729,15 +1719,15 @@ its wrapper runs.</td>
 or removed after the scope. In Load Flow/Tool targets this is the
 resolved synthetic wrapper.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TEMPLATE.path</td>
-<td>Normalized Template or execution-wrapper directory; String, for
-example, <code>/srv/att/templates/PAYMENT_INVOKE</code>.</td>
+<td>Logical package-relative Template or execution-wrapper directory;
+String, for example, <code>templates/PAYMENT_INVOKE</code>.</td>
 <td>Same availability as META.TEMPLATE.id.</td>
 <td>Component scope; absent before resolution, restored or removed after
 the scope.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.FLOW.id</td>
 <td>Active Flow ID; String, for example,
 <code>payment.request.v1</code>.</td>
@@ -1745,21 +1735,21 @@ the scope.</td>
 <td>Invocation scope; push on entry, restore on return, absent when
 inactive.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.FLOW.invocationId</td>
 <td>Caller Action ID; String, for example,
 <code>sendRequest</code>.</td>
 <td>Same availability as META.FLOW.id.</td>
 <td>Invocation scope; absent when no Flow is active.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.FLOW.depth</td>
 <td>One-based nested Flow depth; Number, for example,
 <code>1</code>.</td>
 <td>Same availability as META.FLOW.id.</td>
 <td>Invocation scope; absent when no Flow is active.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.TOOL.id</td>
 <td>Active configured Tool or built-in name; String, for example,
 <code>payment.queryOrder</code> or <code>upper</code>.</td>
@@ -1767,7 +1757,7 @@ inactive.</td>
 <td>Invocation scope; never retained as the “last Tool” after
 return.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.TOOL.type</td>
 <td>Invocation kind; String, for example, <code>tool</code> or
 <code>builtin</code>.</td>
@@ -1775,35 +1765,35 @@ return.</td>
 <td>Invocation scope; absent after return unless an outer invocation
 remains.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.DBHELPER.id</td>
 <td>Logical DBHelper ID; String, for example, <code>orders</code>.</td>
 <td>Run, Debug, Load during a DBHelper operation/DB Action.</td>
 <td>Invocation scope; absent after return unless an outer scope
 remains.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.DBHELPER.type</td>
 <td>Resource kind; String, <code>dbhelper</code>.</td>
 <td>Same availability as META.DBHELPER.id.</td>
 <td>Invocation scope; absent after return unless an outer scope
 remains.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.MQHELPER.id</td>
 <td>Logical MQHelper ID; String, for example, <code>payment</code>.</td>
 <td>Run, Debug, Load during an MQHelper operation.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.MQHELPER.type</td>
 <td>Resource kind; String, <code>mqhelper</code>.</td>
 <td>Same availability as META.MQHELPER.id.</td>
 <td>Invocation scope; absent after return unless an outer scope
 remains.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.HTTPHELPER.id</td>
 <td>Logical HTTPHelper ID; String, for example,
 <code>payment</code>.</td>
@@ -1811,14 +1801,14 @@ remains.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.HTTPHELPER.type</td>
 <td>Resource kind; String, <code>httphelper</code>.</td>
 <td>Same availability as META.HTTPHELPER.id.</td>
 <td>Invocation scope; absent after return unless an outer scope
 remains.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>META.SSHHELPER.id</td>
 <td>Logical SSHHelper ID; String, for example,
 <code>application</code>.</td>
@@ -1826,7 +1816,7 @@ remains.</td>
 <td>Invocation scope; push/restore; absent after return unless an outer
 scope remains.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>META.SSHHELPER.type</td>
 <td>Resource kind; String, <code>sshhelper</code>.</td>
 <td>Same availability as META.SSHHELPER.id.</td>
@@ -1892,15 +1882,16 @@ can recursively contain typed expressions; see <a
 href="reference/actions.md">Actions and Typed Values</a>.</p>
 <h3 id="file-content-expressions">File-content expressions</h3>
 <p><code>&amp;{path}</code> is a file-content expression. It reads
-exactly one statically addressed regular UTF-8 file contained by the
-active ATT package root and returns its String content. It never infers
+exactly one statically addressed regular UTF-8 package resource and
+returns its String content. Bare names resolve from the package root;
+explicit <code>./</code> and <code>../</code> locators resolve from the
+referring descriptor directory. Resolution rejects absolute names,
+package escapes and symlink targets outside the package. It never infers
 or parses a document format, expands a glob or creates an output file.
-Descriptor-relative <code>./</code> and <code>../</code> paths are
-allowed only when their canonical target remains inside
-<code>META.PACKAGE_ROOT</code>. Absolute paths, missing files,
-directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace,
-glob syntax and dynamic locators fail validation. File content is not
-implicitly parsed as JSON, YAML or XML.</p>
+Absolute paths, missing files, directories, symlink escapes, non-UTF-8
+bytes, surrounding whitespace, glob syntax and dynamic locators fail
+validation. File content is not implicitly parsed as JSON, YAML or
+XML.</p>
 <h3 id="argument-result-typing">Argument result typing</h3>
 <p>An argument expression is evaluated recursively before its receiving
 call runs. The call's argument contract applies to the final resolved
@@ -2966,12 +2957,12 @@ duration, input path, Case ID, action results, diagnostic (when
 present), and evidence locations. Synthetic framework-owned fields
 always win over same-named values in <code>case</code>; debug inputs
 cannot replace <code>CASE.caseId</code>, <code>CASE.workbookId</code>,
-<code>CASE.groupId</code>, <code>CASE.rowCaseId</code>,
-<code>CASE.outputDirectory</code>, the legacy <code>CASE.STAGES</code>
-evidence view, <code>CASE.DB</code>, <code>CASE.VARS</code>,
-<code>RUN.*</code>, <code>ACTIONS.*</code>, <code>TOOL.*</code>, or
-<code>DB.*</code>. Debug output is independent of ordinary
-<code>output/latest-run.yaml</code> and report lifecycle.</p>
+<code>CASE.groupId</code>, <code>CASE.rowCaseId</code>, the legacy
+<code>CASE.STAGES</code> evidence view, <code>CASE.DB</code>,
+<code>CASE.VARS</code>, <code>RUN.*</code>, <code>ACTIONS.*</code>,
+<code>TOOL.*</code>, or <code>DB.*</code>. Debug output is independent
+of ordinary <code>output/latest-run.yaml</code> and report
+lifecycle.</p>
 <p>For <code>validate --format json</code>, stdout contains exactly one
 JSON document; progress and human diagnostics go to stderr.</p>
 <h3 id="load-mode">Load mode</h3>
@@ -3427,11 +3418,10 @@ remains in effect. Bootstrap vars are evaluated after the generated ID
 and output path are published.</p>
 <p>Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT,
 EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only
-EXEC.LOAD.USER_ID and the already curated
-META.PACKAGE_ROOT/SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR
-are unavailable because the generated ID determines the workspace. No
-Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper
-META are absent.</p>
+EXEC.LOAD.USER_ID and the already curated META.SOURCE/TARGET/TEMPLATE.
+EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID
+determines the workspace. No Action has run, so EXEC.ACTIONS and
+invocation-scoped Flow/Tool/helper META are absent.</p>
 <p>Only deterministic, side-effect-free built-ins are allowed. External
 Tool/DB/MQ/HTTP/SSH calls and stateful, random, clock or filesystem
 functions are rejected. seq.next() is neither allowed nor required. Use
@@ -5250,14 +5240,13 @@ existing timestamp Run/Load default and
 effect.</p>
 <p>Formats are evaluated once before their identity or output directory
 is published. Run and Load formats can read
-<code>META.PACKAGE_ROOT</code>, <code>META.SOURCE.type/path</code>,
-<code>EXEC.STARTED_AT</code>, and <code>EXEC.RUN_STARTED_AT</code>.
-Debug formats can also read <code>META.TARGET.type/id</code>. Pure
-identity-format built-ins and <code>date.sysdate</code> /
-<code>date.systimestamp</code> are available; external calls,
-random/sequence functions, filesystem calls, and invocation state are
-not. The identity being created is unavailable: references such as
-<code>${EXEC.RUN_ID}</code>, <code>${EXEC.ID}</code>,
+<code>META.SOURCE.type/path</code>, <code>EXEC.STARTED_AT</code>, and
+<code>EXEC.RUN_STARTED_AT</code>. Debug formats can also read
+<code>META.TARGET.type/id</code>. Pure identity-format built-ins and
+<code>date.sysdate</code> / <code>date.systimestamp</code> are
+available; external calls, random/sequence functions, filesystem calls,
+and invocation state are not. The identity being created is unavailable:
+references such as <code>${EXEC.RUN_ID}</code>, <code>${EXEC.ID}</code>,
 <code>${EXEC.OUTPUT_DIR}</code>, <code>${EXEC.VARS}</code>, or
 <code>${EXEC.ACTIONS}</code> are rejected. Generated values must already
 be valid single path segments; ATT does not sanitize them. Run/Load and
@@ -6427,7 +6416,7 @@ identity to an artifact</h3>
 </table>
 <p>Normal Run stores functional Cases under
 output/&lt;RUN_ID&gt;/executions/&lt;EXEC.ID&gt;/. In Load,
-EXEC.OUTPUT_DIR and CASE.outputDirectory remain at
+EXEC.OUTPUT_DIR remains at
 output/load/&lt;RUN_ID&gt;/executions/&lt;EXEC.ID&gt;/ throughout the
 iteration. When retained, a copy of its artifacts is also stored under
 samples/&lt;EXEC.ID&gt;/ or failures/&lt;EXEC.ID&gt;/. Metrics-only

@@ -18,7 +18,7 @@ Use the expression form supported by each field. File-content content, Action de
 
 ## File-content expressions
 
-`&{path}` is a file-content expression. It reads exactly one statically addressed regular UTF-8 file contained by the active ATT package root and returns its String content. It never infers or parses a document format, expands a glob or creates an output file. Descriptor-relative `./` and `../` paths are allowed only when their canonical target remains inside `META.PACKAGE_ROOT`. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace, glob syntax and dynamic locators fail validation. File content is not implicitly parsed as JSON, YAML or XML.
+`&{path}` is a file-content expression. It reads exactly one statically addressed regular UTF-8 package resource and returns its String content. Bare names resolve from the package root; explicit `./` and `../` locators resolve from the referring descriptor directory. Resolution rejects absolute names, package escapes and symlink targets outside the package. It never infers or parses a document format, expands a glob or creates an output file. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace, glob syntax and dynamic locators fail validation. File content is not implicitly parsed as JSON, YAML or XML.
 
 ## Argument result typing
 

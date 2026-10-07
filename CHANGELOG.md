@@ -2,6 +2,7 @@
 
 ## 3.8.0 - 2026-10-06
 
+- Add a package resource resolver with deterministic package-root and descriptor-relative lookup, and remove package filesystem paths from the author Context (#170).
 - Restructure ATT into the minimal multi-module Maven layout with `att-cli`, empty `att-server`, and packaging-only `att-dist` (#162).
 - Keep the current CLI/distribution on Java 8-compatible bytecode while allowing future modules to choose newer Java baselines independently.
 - Upgrade ATT product version to 3.8.0.

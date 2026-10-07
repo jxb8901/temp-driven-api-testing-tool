@@ -1,6 +1,7 @@
 package att.validation;
 
 import att.config.YamlSupport;
+import att.resource.PackageResourceResolver;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -24,7 +25,9 @@ public final class SchemaFiles {
         try {
             requireSchemaDirectory(schemas);
             requireRegular(catalog, "Schema catalog is unavailable", "Restore schemas/catalog.yaml before validating this ATT package.");
-            Object loaded = YamlSupport.load(catalog);
+            Path canonicalCatalog = new PackageResourceResolver(root)
+                    .fromInternalPath(catalog, PackageResourceResolver.Kind.FILE).canonicalPath();
+            Object loaded = YamlSupport.load(canonicalCatalog);
             if (!(loaded instanceof Map) || !"att-schema-catalog/v3.0".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion"))))
                 throw unavailable("Schema catalog is invalid", "catalog=" + catalog,
                         "Restore a valid att-schema-catalog/v3.0 catalog from the ATT package.");
@@ -55,7 +58,7 @@ public final class SchemaFiles {
                         "Keep the schema only at its catalog-registered location.");
             requireRegular(selected, "Registered schema resource is unavailable",
                     "Restore the registered schema at " + registeredPath + "; ATT will not skip validation or fall back to another copy.");
-            return selected;
+            return new PackageResourceResolver(root).fromInternalPath(selected, PackageResourceResolver.Kind.FILE).canonicalPath();
         } catch (DiagnosticException error) {
             throw error;
         } catch (Exception error) {
@@ -99,7 +102,8 @@ public final class SchemaFiles {
                         "Use a package-contained path in the schema catalog.");
                 requireRegular(selected, "Registered schema resource is unavailable",
                         "Restore the registered schema at " + schema.path + ".");
-                return selected;
+                return new PackageResourceResolver(projectRoot)
+                        .fromInternalPath(selected, PackageResourceResolver.Kind.FILE).canonicalPath();
             }
         }
         throw unavailable("Schema version is not registered", "schemaVersion=" + schemaVersion,
@@ -112,7 +116,9 @@ public final class SchemaFiles {
         Path schemas = root.resolve("schemas");
         Path catalog = schemas.resolve("catalog.yaml");
         try {
-            Object loaded = YamlSupport.load(catalog);
+            Path canonicalCatalog = new PackageResourceResolver(root)
+                    .fromInternalPath(catalog, PackageResourceResolver.Kind.FILE).canonicalPath();
+            Object loaded = YamlSupport.load(canonicalCatalog);
             Object registry = ((Map<?, ?>) loaded).get("schemas");
             List<RegisteredSchema> result = new ArrayList<RegisteredSchema>();
             Set<String> versions = new HashSet<String>();
@@ -122,7 +128,9 @@ public final class SchemaFiles {
                 Path resource = schemas.resolve(path).normalize();
                 if (!resource.startsWith(schemas)) throw unavailable("Schema catalog contains an unsafe path", "path=" + path,
                         "Use a package-contained schemas/ or schemas/history/ path in the catalog.");
-                com.fasterxml.jackson.databind.JsonNode document = JsonSupport.mapper().readTree(Files.readAllBytes(resource));
+                Path canonicalResource = new PackageResourceResolver(root)
+                        .fromInternalPath(resource, PackageResourceResolver.Kind.FILE).canonicalPath();
+                com.fasterxml.jackson.databind.JsonNode document = JsonSupport.mapper().readTree(Files.readAllBytes(canonicalResource));
                 com.fasterxml.jackson.databind.JsonNode versionNode = document.path("properties").path("schemaVersion").path("const");
                 if (!versionNode.isTextual()) continue;
                 String version = versionNode.asText();

@@ -35,16 +35,16 @@ class ContextsTest {
     }
 
     @Test
-    void publishesPackageRootAsExecutionWideStringWithoutProjectMetadata() {
+    void doesNotPublishPackageFilesystemPathsInAuthorContext() {
         CaseRuntimeContext context = new CaseRuntimeContext(
                 new TestCase(2, "payment", "sheet", "TC001", Collections.<String>emptyList(),
                         Collections.<String, Object>emptyMap(), Collections.<String, StageCaseData>emptyMap(), null),
                 tempDir, "RUN", tempDir, tempDir.resolve("case.log"));
         context.setProject(tempDir);
 
-        assertEquals(tempDir.toAbsolutePath().normalize().toString(), context.resolve("META.PACKAGE_ROOT"));
+        assertThrows(IllegalArgumentException.class, () -> context.resolve("META.PACKAGE_ROOT"));
         assertNull(context.resolve("META.PROJECT"));
-        assertNull(context.resolve("META.PACKAGE_ROOT.root"));
+        assertThrows(IllegalArgumentException.class, () -> context.resolve("META.PACKAGE_ROOT.root"));
     }
 
     @Test
@@ -70,7 +70,8 @@ class ContextsTest {
         assertEquals("SUCCESS", context.resolve("EXEC.INPUT.response['{urn:payment}Status']"));
         assertEquals("payments", context.resolve("CASE.workbookId"));
         assertEquals("100", context.resolve("CASE.amount"));
-        assertEquals(tempDir.toAbsolutePath().normalize().toString(), context.resolve("CASE.outputDirectory"));
+        assertEquals(tempDir.toAbsolutePath().normalize().toString(), context.resolve("EXEC.OUTPUT_DIR"));
+        assertThrows(IllegalArgumentException.class, () -> context.resolve("CASE.outputDirectory"));
         assertEquals(tempDir.toAbsolutePath().normalize(), context.caseOutputDirectory());
         assertNull(context.resolve("CASE.STAGES.invoke.channel"));
         assertNull(context.resolve("STAGES.invoke.channel"));
@@ -348,7 +349,7 @@ class ContextsTest {
         assertEquals("RUN-1", context.resolve("RUN.id"));
         assertTrue(context.resolve("EXEC.RUN_STARTED_AT") != null);
         assertEquals(tempDir.toAbsolutePath().normalize().toString(), context.resolve("EXEC.OUTPUT_DIR"));
-        assertEquals(context.resolve("EXEC.OUTPUT_DIR"), context.resolve("CASE.outputDirectory"));
+        assertThrows(IllegalArgumentException.class, () -> context.resolve("CASE.outputDirectory"));
         assertEquals("PAYMENT", context.resolve("META.TEMPLATE.id"));
         assertNull(context.resolve("META.TEMPLATE.missing"));
         assertNull(context.resolve("EXEC.STAGES.invoke.channel"));
@@ -394,13 +395,14 @@ class ContextsTest {
                 new TestCase(2, "payment", "sheet", "DEBUG.template.PAYMENT", Collections.<String>emptyList(),
                         Collections.<String, Object>emptyMap(), Collections.singletonMap("invoke", stage), null),
                 tempDir, "DEBUG-1", tempDir, tempDir.resolve("debug.log"), "debug");
+        debug.setProject(tempDir);
         debug.setSourceMetadata("debug", tempDir.resolve("debug.yaml"), "DEBUG.template.PAYMENT");
         assertEquals("debug", CaseRuntimeContext.getPath(debug.diagnosticsTree(), "execution.mode"));
         assertEquals("DEBUG-1", debug.resolve("EXEC.ID"));
         assertEquals("DEBUG-1", debug.resolve("EXEC.RUN_ID"));
         assertNull(debug.resolve("EXEC.MODE"));
         assertEquals("debug", debug.resolve("META.SOURCE.type"));
-        assertEquals(tempDir.resolve("debug.yaml").toAbsolutePath().normalize().toString(),
+        assertEquals("debug.yaml",
                 debug.resolve("META.SOURCE.path"));
     }
 }

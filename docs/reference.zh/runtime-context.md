@@ -26,13 +26,12 @@ EXEC.LOAD 只公開穩定 identity。Scheduler counter、queue state 與 timing 
 
 ## META 欄位清單與生命週期
 
-公開 META root 包含 `PACKAGE_ROOT`、`SOURCE`、`TARGET`、`TEMPLATE`、`FLOW`、`TOOL`、`DBHELPER`、`MQHELPER`、`HTTPHELPER` 和 `SSHHELPER`。`META.PACKAGE_ROOT` 是 active ATT package root 的正規化絕對路徑，在 Run、Debug 和 Load package binding 後全程可用。舊有 `META.PROJECT.id` 與 `META.PROJECT.root` 已移除，不提供相容 alias。ATT installation scope (`ATT_HOME`)、package scope (`META.PACKAGE_ROOT`) 和 execution output scope (`EXEC.OUTPUT_DIR`) 各自獨立。META 只包含描述欄位；元件在目前 mode/scope 尚未 active 時，相應路徑可能不存在。
+公開 META root 包含 `SOURCE`、`TARGET`、`TEMPLATE`、`FLOW`、`TOOL`、`DBHELPER`、`MQHELPER`、`HTTPHELPER` 和 `SSHHELPER`。`META.PACKAGE_ROOT` 和 `CASE.outputDirectory` 已從 author Context 移除。讀取 package content 請使用 `&{logical/package/resource}`；execution output 請使用 `EXEC.OUTPUT_DIR`。舊有 `META.PROJECT.id` 與 `META.PROJECT.root` 已移除，不提供相容 alias。Package resource 使用 package-relative logical name；只有 `EXEC.OUTPUT_DIR` 公開 execution path。META 只包含描述欄位；元件在目前 mode/scope 尚未 active 時，相應路徑可能不存在。
 
 | 公開路徑 | 意義、type 與範例 | Mode 與可用時機 | Scope 與缺席時機 |
 |---|---|---|---|
-| META.PACKAGE_ROOT | 正規化絕對 package root 路徑；String，例如 `/srv/att/payment`。 | Run、Debug、Load；package binding 後。 | Execution-wide。 |
 | META.SOURCE.type | Source 類型；String：`testcase`、`debug` 或 `load`。 | Run、Debug、Load。 | Execution-wide。 |
-| META.SOURCE.path | 正規化絕對 source path；String，例如 `/srv/att/payment/testcase/payment.xlsx`、`/srv/att/payment/debug.yaml` 或 `/srv/att/payment/load/payment.yaml`。 | Run、Debug、Load，source file 存在時。 | Execution-wide；memory source 可缺席。 |
+| META.SOURCE.path | Package-relative logical source name；String，例如 `testcase/payment.xlsx`、`debug.yaml` 或 `load/payment.yaml`。 | Run、Debug、Load，source file 存在時。 | Execution-wide；memory source 可缺席。 |
 | META.SOURCE.caseId | Canonical TestCase 或 synthetic Debug Case ID；String，例如 `payment.default.P001`。 | Run、Debug。 | Execution-wide；Load 缺席。 |
 | META.SOURCE.workbookId | Workbook identifier；String，例如 `payment`。 | Run。 | Execution-wide；非 workbook Case 缺席。 |
 | META.SOURCE.groupId | Workbook group identifier；String，例如 `default`。 | Run。 | Execution-wide；非 workbook Case 缺席。 |
@@ -44,7 +43,7 @@ EXEC.LOAD 只公開穩定 identity。Scheduler counter、queue state 與 timing 
 | META.TARGET.type | 已解析 target 類型；String：`testcase`、`template`、`flow` 或 `tool`。 | Run、Debug、Load；選定 target 後。 | Execution-wide。 |
 | META.TARGET.id | 已解析 target identifier；String，例如 `PAYMENT_INVOKE` 或 `payment.flow.v1`。 | Run、Debug、Load；選定 target 後。 | Execution-wide。 |
 | META.TEMPLATE.id | Active Template 或已解析 Load execution-wrapper ID；String，例如 `PAYMENT_INVOKE`。 | Run/Debug 的 Stage 執行期間；Load 的 target resolution 後及 wrapper 執行期間。 | Component scope；解析前缺席，scope 結束後 restore/remove。Load Flow/Tool target 使用已解析的 synthetic wrapper。 |
-| META.TEMPLATE.path | 正規化 Template 或 execution-wrapper 目錄；String，例如 `/srv/att/templates/PAYMENT_INVOKE`。 | 與 META.TEMPLATE.id 相同。 | Component scope；解析前缺席，scope 結束後 restore/remove。 |
+| META.TEMPLATE.path | Package-relative logical Template 或 execution-wrapper 目錄；String，例如 `templates/PAYMENT_INVOKE`。 | 與 META.TEMPLATE.id 相同。 | Component scope；解析前缺席，scope 結束後 restore/remove。 |
 | META.FLOW.id | Active Flow ID；String，例如 `payment.request.v1`。 | Run、Debug、Load 的 Flow invocation 期間。 | Invocation scope；進入 push、返回 restore、inactive 時缺席。 |
 | META.FLOW.invocationId | Caller Action ID；String，例如 `sendRequest`。 | 與 META.FLOW.id 相同。 | 沒有 active Flow 時缺席。 |
 | META.FLOW.depth | 由 1 開始的巢狀 Flow 深度；Number，例如 `1`。 | 與 META.FLOW.id 相同。 | 沒有 active Flow 時缺席。 |

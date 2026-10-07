@@ -342,9 +342,9 @@ Workbook/Sidecar/Snapshot 定義 Testcase data；Testcase 與 Stage 的 business
 
 可用 `att-testdata/v1.0` descriptor 儲存可重用 records；只在 Case、Stage、Debug `inputs` 或 Load workload `inputs` mapping 中引用。完整 `@{id}` 會保留 record 的原生 map/list/scalar 型別；`@{id.path}` 可讀取巢狀值，也支援數字 list index。內嵌參照（例如 `"ORD-@{accounts.id}"`）會產生文字，因此所選 record 的欄位必須是 scalar。Mapping 中的 `${...}` 只能讀取該 mapping 解析前已初始化的 Context root。允許的 root 依 mapping 階段而異，並會在 execution 開始前驗證（Load 則在 scheduler 啟動前驗證）：
 
-- Run Case/Stage mapping 可讀取 `EXEC.ID`、`EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、`EXEC.OUTPUT_DIR`，以及 `META.PACKAGE_ROOT`、`META.SOURCE` 或 `META.TARGET`。
+- Run Case/Stage mapping 可讀取 `EXEC.ID`、`EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、`EXEC.OUTPUT_DIR`，以及 `META.SOURCE` 或 `META.TARGET`。
 - Debug `inputs` 可讀取相同的 execution root 與 metadata，另加 `META.TEMPLATE`。
-- Load workload `inputs` 可讀取 `EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、已初始化的 `EXEC.LOAD` identity fields，以及 `META.PACKAGE_ROOT`、`META.SOURCE`、`META.TARGET` 或 `META.TEMPLATE`。`EXEC.ID` 與 `EXEC.OUTPUT_DIR` 只會在 input 解析後初始化。Arrival-rate workload 不提供 `EXEC.LOAD.USER_ID`；若 mapping 要同時支援兩種模型，請使用 optional path `${EXEC.LOAD.USER_ID?}`。
+- Load workload `inputs` 可讀取 `EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、已初始化的 `EXEC.LOAD` identity fields，以及 `META.SOURCE`、`META.TARGET` 或 `META.TEMPLATE`。`EXEC.ID` 與 `EXEC.OUTPUT_DIR` 只會在 input 解析後初始化。Arrival-rate workload 不提供 `EXEC.LOAD.USER_ID`；若 mapping 要同時支援兩種模型，請使用 optional path `${EXEC.LOAD.USER_ID?}`。
 
 所有 mode 都拒絕引用 `EXEC.INPUT`（正在建立的值）、`EXEC.VARS`、`EXEC.ACTIONS`、Action `output` 及 invocation-scoped helper metadata。V1 mapping grammar 會評估 literal、selected-record `@{...}` reference 及 `${...}` Context reference；不會評估 built-in call。`#{...}`、`&{...}` 和 `%{...}` 都不是 input-mapping expression。
 
@@ -664,13 +664,12 @@ EXEC.LOAD 只公開穩定 identity。Scheduler counter、queue state 與 timing 
 
 ### META 欄位清單與生命週期
 
-公開 META root 包含 `PACKAGE_ROOT`、`SOURCE`、`TARGET`、`TEMPLATE`、`FLOW`、`TOOL`、`DBHELPER`、`MQHELPER`、`HTTPHELPER` 和 `SSHHELPER`。`META.PACKAGE_ROOT` 是 active ATT package root 的正規化絕對路徑，在 Run、Debug 和 Load package binding 後全程可用。舊有 `META.PROJECT.id` 與 `META.PROJECT.root` 已移除，不提供相容 alias。ATT installation scope (`ATT_HOME`)、package scope (`META.PACKAGE_ROOT`) 和 execution output scope (`EXEC.OUTPUT_DIR`) 各自獨立。META 只包含描述欄位；元件在目前 mode/scope 尚未 active 時，相應路徑可能不存在。
+公開 META root 包含 `SOURCE`、`TARGET`、`TEMPLATE`、`FLOW`、`TOOL`、`DBHELPER`、`MQHELPER`、`HTTPHELPER` 和 `SSHHELPER`。`META.PACKAGE_ROOT` 和 `CASE.outputDirectory` 已從 author Context 移除。讀取 package content 請使用 `&{logical/package/resource}`；execution output 請使用 `EXEC.OUTPUT_DIR`。舊有 `META.PROJECT.id` 與 `META.PROJECT.root` 已移除，不提供相容 alias。Package resource 使用 package-relative logical name；只有 `EXEC.OUTPUT_DIR` 公開 execution path。META 只包含描述欄位；元件在目前 mode/scope 尚未 active 時，相應路徑可能不存在。
 
 | 公開路徑 | 意義、type 與範例 | Mode 與可用時機 | Scope 與缺席時機 |
 |---|---|---|---|
-| META.PACKAGE_ROOT | 正規化絕對 package root 路徑；String，例如 `/srv/att/payment`。 | Run、Debug、Load；package binding 後。 | Execution-wide。 |
 | META.SOURCE.type | Source 類型；String：`testcase`、`debug` 或 `load`。 | Run、Debug、Load。 | Execution-wide。 |
-| META.SOURCE.path | 正規化絕對 source path；String，例如 `/srv/att/payment/testcase/payment.xlsx`、`/srv/att/payment/debug.yaml` 或 `/srv/att/payment/load/payment.yaml`。 | Run、Debug、Load，source file 存在時。 | Execution-wide；memory source 可缺席。 |
+| META.SOURCE.path | Package-relative logical source name；String，例如 `testcase/payment.xlsx`、`debug.yaml` 或 `load/payment.yaml`。 | Run、Debug、Load，source file 存在時。 | Execution-wide；memory source 可缺席。 |
 | META.SOURCE.caseId | Canonical TestCase 或 synthetic Debug Case ID；String，例如 `payment.default.P001`。 | Run、Debug。 | Execution-wide；Load 缺席。 |
 | META.SOURCE.workbookId | Workbook identifier；String，例如 `payment`。 | Run。 | Execution-wide；非 workbook Case 缺席。 |
 | META.SOURCE.groupId | Workbook group identifier；String，例如 `default`。 | Run。 | Execution-wide；非 workbook Case 缺席。 |
@@ -682,7 +681,7 @@ EXEC.LOAD 只公開穩定 identity。Scheduler counter、queue state 與 timing 
 | META.TARGET.type | 已解析 target 類型；String：`testcase`、`template`、`flow` 或 `tool`。 | Run、Debug、Load；選定 target 後。 | Execution-wide。 |
 | META.TARGET.id | 已解析 target identifier；String，例如 `PAYMENT_INVOKE` 或 `payment.flow.v1`。 | Run、Debug、Load；選定 target 後。 | Execution-wide。 |
 | META.TEMPLATE.id | Active Template 或已解析 Load execution-wrapper ID；String，例如 `PAYMENT_INVOKE`。 | Run/Debug 的 Stage 執行期間；Load 的 target resolution 後及 wrapper 執行期間。 | Component scope；解析前缺席，scope 結束後 restore/remove。Load Flow/Tool target 使用已解析的 synthetic wrapper。 |
-| META.TEMPLATE.path | 正規化 Template 或 execution-wrapper 目錄；String，例如 `/srv/att/templates/PAYMENT_INVOKE`。 | 與 META.TEMPLATE.id 相同。 | Component scope；解析前缺席，scope 結束後 restore/remove。 |
+| META.TEMPLATE.path | Package-relative logical Template 或 execution-wrapper 目錄；String，例如 `templates/PAYMENT_INVOKE`。 | 與 META.TEMPLATE.id 相同。 | Component scope；解析前缺席，scope 結束後 restore/remove。 |
 | META.FLOW.id | Active Flow ID；String，例如 `payment.request.v1`。 | Run、Debug、Load 的 Flow invocation 期間。 | Invocation scope；進入 push、返回 restore、inactive 時缺席。 |
 | META.FLOW.invocationId | Caller Action ID；String，例如 `sendRequest`。 | 與 META.FLOW.id 相同。 | 沒有 active Flow 時缺席。 |
 | META.FLOW.depth | 由 1 開始的巢狀 Flow 深度；Number，例如 `1`。 | 與 META.FLOW.id 相同。 | 沒有 active Flow 時缺席。 |
@@ -735,7 +734,7 @@ description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 
 ### File-content expression
 
-`&{path}` 是 file-content expression：它讀取 active ATT package root 內一個靜態指定的 regular UTF-8 檔案，並回傳原始 String content。它不會推斷或解析文件格式、展開 glob 或建立 output file。Descriptor-relative 的 `./` 與 `../` 只有在 canonical target 仍位於 `META.PACKAGE_ROOT` 內時才允許。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation 失敗。File content 不會自動解析為 JSON、YAML 或 XML。
+`&{path}` 是 file-content expression：它讀取 package resource 中一個靜態指定的 regular UTF-8 檔案，並回傳原始 String content。Bare name 從 package root 解析；明確 `./` 和 `../` locator 從引用 descriptor 的目錄解析。Resolver 會拒絕 absolute name、package escape，以及指向 package 外的 symlink。它不會推斷或解析文件格式、展開 glob 或建立 output file。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation 失敗。File content 不會自動解析為 JSON、YAML 或 XML。
 
 ### Argument 結果型別
 
@@ -1377,7 +1376,7 @@ evidence: {mode: failures}
 
 Load 使用 att-load/v1.6。設定 execution.execIdFormat 時，ATT 在每個 iteration initialization 使用一般 ${...} / #{...} engine 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及 output path 發布後評估。
 
-可用值有 EXEC.RUN_ID、timestamps、EXEC.INPUT、EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE、closed-only EXEC.LOAD.USER_ID，以及已建立的 META.PACKAGE_ROOT/SOURCE/TARGET/TEMPLATE。EXEC.ID 和 EXEC.OUTPUT_DIR 尚未可用，因為生成的 ID 決定 workspace。還沒有 Action 執行，所以 EXEC.ACTIONS 與 Flow/Tool/helper invocation META 缺席。
+可用值有 EXEC.RUN_ID、timestamps、EXEC.INPUT、EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE、closed-only EXEC.LOAD.USER_ID，以及已建立的 META.SOURCE/TARGET/TEMPLATE。EXEC.ID 和 EXEC.OUTPUT_DIR 尚未可用，因為生成的 ID 決定 workspace。還沒有 Action 執行，所以 EXEC.ACTIONS 與 Flow/Tool/helper invocation META 缺席。
 
 只允許 deterministic、side-effect-free built-ins。External Tool/DB/MQ/HTTP/SSH calls 及 stateful、random、clock、filesystem functions 會被拒絕。seq.next() 不允許也不需要。請使用穩定 identity：
 
@@ -2304,7 +2303,7 @@ environments:
 
 `runIdFormat` 會產生外層 Run ID；Load 沒有指定 `--run-id` 時也會使用此 policy。它不會改變 Load 每個 iteration 的 `execution.execIdFormat`（`EXEC.ID`）。`debugIdFormat` 只產生 standalone Debug 目錄 identity。沒有設定時，Run/Load 維持原有 timestamp default，Debug 維持 `<type>-<targetId>` default。
 
-Format 在 identity 發布或建立 output directory 前只求值一次。Run/Load 可讀取 `META.PACKAGE_ROOT`、`META.SOURCE.type/path`、`EXEC.STARTED_AT` 和 `EXEC.RUN_STARTED_AT`；Debug 另可讀取 `META.TARGET.type/id`。可使用純 identity-format built-ins，以及 `date.sysdate` / `date.systimestamp`；不可呼叫外部服務、random/sequence、filesystem 或 invocation state。正在生成的 identity 不可被讀取，例如 `${EXEC.RUN_ID}`、`${EXEC.ID}`、`${EXEC.OUTPUT_DIR}`、`${EXEC.VARS}` 和 `${EXEC.ACTIONS}` 會被拒絕。生成值必須本身是有效的單一路徑段，ATT 不會替它 sanitize。Run/Load 以及明確或配置的 Debug ID 發生 collision 時會 fail；legacy Debug default 仍會加 timestamp suffix。
+Format 在 identity 發布或建立 output directory 前只求值一次。Run/Load 可讀取 `META.SOURCE.type/path`、`EXEC.STARTED_AT` 和 `EXEC.RUN_STARTED_AT`；Debug 另可讀取 `META.TARGET.type/id`。可使用純 identity-format built-ins，以及 `date.sysdate` / `date.systimestamp`；不可呼叫外部服務、random/sequence、filesystem 或 invocation state。正在生成的 identity 不可被讀取，例如 `${EXEC.RUN_ID}`、`${EXEC.ID}`、`${EXEC.OUTPUT_DIR}`、`${EXEC.VARS}` 和 `${EXEC.ACTIONS}` 會被拒絕。生成值必須本身是有效的單一路徑段，ATT 不會替它 sanitize。Run/Load 以及明確或配置的 Debug ID 發生 collision 時會 fail；legacy Debug default 仍會加 timestamp suffix。
 
 ```yaml
 execution:
@@ -2688,7 +2687,7 @@ ATT 會復制源 Workbook，並使用 `report.mode: append-to-copy` 追加配置
 | EXEC.ID | 目前 Case/Debug/Load execution。 | Execution。 | Workspace 建立時作為 log/evidence key。 |
 | EXEC.OUTPUT_DIR | 與 EXEC.ID 關聯的 workspace。 | Execution。 | Run/Debug 實體 workspace 或 Load planned lazy workspace。 |
 
-一般 Run 的功能性 Case 位於 output/<RUN_ID>/executions/<EXEC.ID>/。Load 執行期間，EXEC.OUTPUT_DIR 與 CASE.outputDirectory 固定指向 output/load/<RUN_ID>/executions/<EXEC.ID>/。Iteration 被保留時，artifact 也會複製到 samples/<EXEC.ID>/ 或 failures/<EXEC.ID>/。Metrics-only iteration 有 EXEC.ID；scheduler 清理暫存 workspace 後不保留 per-iteration 目錄。Load report 顯示 retained rows 的 EXEC.ID，有保留 case.log 時提供連結。Debug 使用同一 debug ID 作為 EXEC.RUN_ID 與 EXEC.ID。
+一般 Run 的功能性 Case 位於 output/<RUN_ID>/executions/<EXEC.ID>/。Load 執行期間，EXEC.OUTPUT_DIR 固定指向 output/load/<RUN_ID>/executions/<EXEC.ID>/。Iteration 被保留時，artifact 也會複製到 samples/<EXEC.ID>/ 或 failures/<EXEC.ID>/。Metrics-only iteration 有 EXEC.ID；scheduler 清理暫存 workspace 後不保留 per-iteration 目錄。Load report 顯示 retained rows 的 EXEC.ID，有保留 case.log 時提供連結。Debug 使用同一 debug ID 作為 EXEC.RUN_ID 與 EXEC.ID。
 
 DIAG 是 evidence-only。Expression 不可讀取 DIAG、EXEC.MODE 或任意 scheduler counter；業務差異請透過 EXEC.INPUT 傳入。
 

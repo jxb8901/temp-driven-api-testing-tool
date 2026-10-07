@@ -179,7 +179,7 @@ public final class DebugEngine {
             if (options.hasObserver()) {
                 Map<String,Object> eventData=new LinkedHashMap<String,Object>(); eventData.put("event","DEBUG_STARTED");
                 eventData.put("targetType",targetType); eventData.put("targetId",targetId);
-                eventData.put("input",options.debugInput()==null?"auto":options.debugInput().toString());
+                eventData.put("input",options.debugInput()==null?"auto":logicalInputName(options.debugInput()));
                 eventData.put("output",att.core.PathPresentation.displayPath(debugDirectory,projectRoot));
                 options.emitEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.DEBUG,debugDirectory.getFileName().toString(),null,null,null,"START",null,null,eventData));
             }
@@ -232,10 +232,10 @@ public final class DebugEngine {
             if (!testdata.selectionEvidence().isEmpty())
                 context.put("CASE.testdataSelections", testdata.selectionEvidence());
             stage = new StageCaseData(stage.key(), stage.templateName(), resolvedStageValues);
-            context.put("CASE.debugInput", input.path.toString());
+            context.put("CASE.debugInput", context.logicalPackageName(input.path));
             Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();
             debugHeader.put("target", target);
-            debugHeader.put("input", input.path.toString());
+            debugHeader.put("input", logicalInputName(input.path));
             debugHeader.put("caseId", testCase.caseId());
             log.append("DEBUG TARGET", debugHeader);
             context.beginStage(stage, resolved.template.name(), resolved.template.directory());
@@ -481,9 +481,19 @@ public final class DebugEngine {
     }
 
     private String expectedInput(ExecutionOptions options, String type, String id) {
-        if (options.debugInput() != null) return resolveInput(options.debugInput()).toString();
-        try { return autoInput(type, id).toString(); }
+        if (options.debugInput() != null) return logicalInputName(resolveInput(options.debugInput()));
+        try { return logicalInputName(autoInput(type, id)); }
         catch (Exception ignored) { return type + " sidecar for " + id; }
+    }
+
+    private String logicalInputName(Path path) {
+        if (path == null) return null;
+        try {
+            Path root = projectRoot.toRealPath();
+            Path canonical = path.toRealPath();
+            if (canonical.startsWith(root)) return root.relativize(canonical).toString().replace('\\', '/');
+        } catch (Exception ignored) { }
+        return att.core.PathPresentation.displayPath(path, projectRoot);
     }
 
     private ToolConfig findTool(String id) {

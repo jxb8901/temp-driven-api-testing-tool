@@ -26,13 +26,12 @@ EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing di
 
 ## META field inventory and lifecycle
 
-The public META root contains `PACKAGE_ROOT`, `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER`. `META.PACKAGE_ROOT` is the normalized absolute path of the active ATT package and is execution-wide in Run, Debug and Load after package binding. Legacy `META.PROJECT.id` and `META.PROJECT.root` are removed with no compatibility alias. ATT installation scope (`ATT_HOME`), package scope (`META.PACKAGE_ROOT`) and execution output scope (`EXEC.OUTPUT_DIR`) are distinct. META contains descriptive fields only. A path may be absent when its component is not active.
+The public META root contains `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER`. `META.PACKAGE_ROOT` and `CASE.outputDirectory` were removed from the author Context. Use `&{logical/package/resource}` to read package content and `EXEC.OUTPUT_DIR` for execution output. Legacy `META.PROJECT.id` and `META.PROJECT.root` are removed with no compatibility alias. Package resources use logical package-relative names; only `EXEC.OUTPUT_DIR` exposes an execution path. META contains descriptive fields only. A path may be absent when its component is not active.
 
 | Public path | Meaning, type and example | Modes and availability | Scope and when absent |
 |---|---|---|---|
-| META.PACKAGE_ROOT | Normalized absolute package-root path; String, for example, `/srv/att/payment`. | Run, Debug, Load; after package binding. | Execution-wide. |
 | META.SOURCE.type | Source kind; String: `testcase`, `debug` or `load`. | Run, Debug, Load. | Execution-wide. |
-| META.SOURCE.path | Normalized absolute source path; String, for example, `/srv/att/payment/testcase/payment.xlsx`, `/srv/att/payment/debug.yaml` or `/srv/att/payment/load/payment.yaml`. | Run, Debug, Load when a source file exists. | Execution-wide; absent for an in-memory source. |
+| META.SOURCE.path | Logical package-relative source name; String, for example, `testcase/payment.xlsx`, `debug.yaml` or `load/payment.yaml`. | Run, Debug, Load when a source file exists. | Execution-wide; absent for an in-memory source. |
 | META.SOURCE.caseId | Canonical TestCase or synthetic Debug Case ID; String, for example, `payment.default.P001`. | Run, Debug. | Execution-wide; absent in Load. |
 | META.SOURCE.workbookId | Workbook identifier; String, for example, `payment`. | Run. | Execution-wide; absent outside workbook Cases. |
 | META.SOURCE.groupId | Workbook group identifier; String, for example, `default`. | Run. | Execution-wide; absent outside workbook Cases. |
@@ -44,7 +43,7 @@ The public META root contains `PACKAGE_ROOT`, `SOURCE`, `TARGET`, `TEMPLATE`, `F
 | META.TARGET.type | Resolved target kind; String: `testcase`, `template`, `flow` or `tool`. | Run, Debug, Load; after target selection. | Execution-wide. |
 | META.TARGET.id | Resolved target identifier; String, for example, `PAYMENT_INVOKE` or `payment.flow.v1`. | Run, Debug, Load; after target selection. | Execution-wide. |
 | META.TEMPLATE.id | Active Template or resolved Load execution-wrapper ID; String, for example, `PAYMENT_INVOKE`. | Run/Debug while a Stage runs; Load after target resolution and while its wrapper runs. | Component scope; absent before target/template resolution, restored or removed after the scope. In Load Flow/Tool targets this is the resolved synthetic wrapper. |
-| META.TEMPLATE.path | Normalized Template or execution-wrapper directory; String, for example, `/srv/att/templates/PAYMENT_INVOKE`. | Same availability as META.TEMPLATE.id. | Component scope; absent before resolution, restored or removed after the scope. |
+| META.TEMPLATE.path | Logical package-relative Template or execution-wrapper directory; String, for example, `templates/PAYMENT_INVOKE`. | Same availability as META.TEMPLATE.id. | Component scope; absent before resolution, restored or removed after the scope. |
 | META.FLOW.id | Active Flow ID; String, for example, `payment.request.v1`. | Run, Debug, Load while that Flow invocation runs. | Invocation scope; push on entry, restore on return, absent when inactive. |
 | META.FLOW.invocationId | Caller Action ID; String, for example, `sendRequest`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
 | META.FLOW.depth | One-based nested Flow depth; Number, for example, `1`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
