@@ -450,9 +450,17 @@ class DebugEngineTest {
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.singletonMap("slow", slow), null, null);
         DebugEngine engine = new DebugEngine(project, config);
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"debug", "template", "SLOW"});
+        ExecutionOptions parsedOptions = ExecutionOptions.parse(new String[]{"debug", "template", "SLOW"});
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        PrintStream previous = System.out;
+        PrintStream eventOutput = new PrintStream(bytes, true, "UTF-8");
+        java.util.List<att.api.ExecutionEvent> events = new java.util.concurrent.CopyOnWriteArrayList<att.api.ExecutionEvent>();
+        final ExecutionOptions options = parsedOptions.withObserver(event -> {
+            events.add(event);
+            String message = event.message();
+            if (event.type() == att.api.ExecutionEvent.Type.CASE_LOG)
+                message = "[CASE-LOG case=" + event.caseId() + "] " + message;
+            if (message != null) synchronized (eventOutput) { eventOutput.println(message); }
+        });
         AtomicReference<DebugEngine.Result> result = new AtomicReference<DebugEngine.Result>();
         AtomicReference<Throwable> error = new AtomicReference<Throwable>();
         Thread execution = new Thread(() -> {
@@ -462,7 +470,6 @@ class DebugEngineTest {
         boolean sawStart = false;
         boolean stillRunningAtStart = false;
         try {
-            System.setOut(new PrintStream(bytes, true, "UTF-8"));
             execution.start();
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(4L);
             while (System.nanoTime() < deadline && execution.isAlive()) {
@@ -475,16 +482,15 @@ class DebugEngineTest {
                 Thread.sleep(10L);
             }
             execution.join(4000L);
-        } finally {
-            System.setOut(previous);
-        }
+        } finally { eventOutput.close(); }
         assertNull(error.get());
         assertTrue(sawStart, bytes.toString("UTF-8"));
         assertTrue(stillRunningAtStart, "the Action start must be visible while the Tool is still running");
         assertNotNull(result.get());
         assertEquals(ResultStatus.PASS, result.get().status());
         String live = bytes.toString("UTF-8");
-        assertTrue(live.contains("[DEBUG] INPUT target=template:SLOW"));
+        assertTrue(events.stream().anyMatch(event -> "DEBUG_INPUT_RESOLVED".equals(event.data().get("event"))
+                && "INPUT_RESOLVED".equals(event.status()) && "template".equals(event.data().get("targetType"))));
         assertTrue(live.contains("resource: TOOL"));
         assertTrue(live.contains("status: PASS"));
     }

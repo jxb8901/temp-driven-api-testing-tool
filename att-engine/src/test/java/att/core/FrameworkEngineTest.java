@@ -182,16 +182,23 @@ class FrameworkEngineTest {
         writeText(projectRoot.resolve("schemas/att-run-v2.1.schema.json"), "{\"type\":\"object\",\"required\":[\"schemaVersion\",\"run\",\"inputs\"]}");
         writeText(projectRoot.resolve("schemas/att-junit-v2.1.xsd"), "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><xs:element name=\"testsuite\"><xs:complexType mixed=\"true\"><xs:sequence><xs:any minOccurs=\"0\" maxOccurs=\"unbounded\" processContents=\"skip\"/></xs:sequence><xs:anyAttribute processContents=\"skip\"/></xs:complexType></xs:element></xs:schema>");
 
-        ExecutionOptions verboseOptions = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-V2", "--verbose", "--profile"});
+        ExecutionOptions parsedVerboseOptions = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-V2", "--verbose", "--profile"});
         java.io.ByteArrayOutputStream console = new java.io.ByteArrayOutputStream();
-        java.io.PrintStream previous = System.out;
+        java.io.PrintStream eventOutput = new java.io.PrintStream(console, true, "UTF-8");
+        java.util.List<att.api.ExecutionEvent> events = new java.util.concurrent.CopyOnWriteArrayList<att.api.ExecutionEvent>();
+        final ExecutionOptions verboseOptions = parsedVerboseOptions.withObserver(event -> {
+            events.add(event);
+            String message = event.message();
+            if (event.type() == att.api.ExecutionEvent.Type.CASE_LOG)
+                message = "[CASE-LOG case=" + event.caseId() + "] " + message;
+            if (message != null) synchronized (eventOutput) { eventOutput.println(message); }
+        });
         java.util.concurrent.atomic.AtomicReference<RunSummary> summaryRef = new java.util.concurrent.atomic.AtomicReference<RunSummary>();
         java.util.concurrent.atomic.AtomicReference<Throwable> runError = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         Thread running;
         boolean sawLiveActionStart = false;
         boolean runStillActiveAtActionStart = false;
         try {
-            System.setOut(new java.io.PrintStream(console));
             running = new Thread(() -> {
                 try { summaryRef.set(new FrameworkEngine(projectRoot, globalConfig()).run(verboseOptions)); }
                 catch (Throwable error) { runError.set(error); }
@@ -207,34 +214,32 @@ class FrameworkEngineTest {
                 Thread.sleep(10L);
             }
             running.join(4000L);
-        } finally {
-            System.setOut(previous);
-        }
+        } finally { eventOutput.close(); }
         assertTrue(runError.get() == null, String.valueOf(runError.get()));
         assertTrue(sawLiveActionStart, console.toString("UTF-8"));
         assertTrue(runStillActiveAtActionStart, "Run Action start must be visible while the Tool is still running");
         RunSummary summary = summaryRef.get();
+        assertTrue(events.stream().anyMatch(event -> "RUN_STARTED".equals(event.data().get("event")) && "TEST-V2".equals(event.runId())));
+        assertTrue(events.stream().anyMatch(event -> "SUITE_STARTED".equals(event.data().get("event"))));
+        assertTrue(events.stream().anyMatch(event -> "CASE_STARTED".equals(event.data().get("event")) && "payments.payment.TC001".equals(event.caseId())));
+        assertTrue(events.stream().anyMatch(event -> "STAGE_STARTED".equals(event.data().get("event")) && "invoke".equals(event.stage())));
+        assertTrue(events.stream().anyMatch(event -> "ACTION_FINISHED".equals(event.data().get("event")) && "callApi".equals(event.action())));
+        assertTrue(events.stream().anyMatch(event -> "CASE_LOG_PATH".equals(event.data().get("event"))));
         String verbose = console.toString("UTF-8");
-        assertTrue(verbose.contains("[RUN] id=TEST-V2"));
-        assertTrue(verbose.contains("[SUITE]"));
-        assertTrue(verbose.contains("[CASE] id=payments.payment.TC001 status=START"));
-        assertTrue(verbose.contains("[STAGE] case=payments.payment.TC001 stage=invoke"));
-        assertTrue(verbose.contains("[ACTION] case=payments.payment.TC001 stage=invoke action=callApi status=PASS"));
-        assertTrue(verbose.contains("[CASE-LOG] case=payments.payment.TC001"));
         assertTrue(verbose.contains("[CASE-LOG case=payments.payment.TC001] [ACTION]"));
         assertTrue(verbose.contains("resource: TOOL"));
         assertTrue(verbose.contains("<Response>"));
 
         ExecutionOptions defaultOptions = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-DEFAULT"});
         java.io.ByteArrayOutputStream defaultConsole = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream previous = System.out;
         try {
             System.setOut(new java.io.PrintStream(defaultConsole));
             new FrameworkEngine(projectRoot, globalConfig()).run(defaultOptions);
         } finally {
             System.setOut(previous);
         }
-        assertTrue(defaultConsole.toString("UTF-8").contains("[RUN] id=TEST-DEFAULT"));
-        assertTrue(defaultConsole.toString("UTF-8").contains("type: tool, status: START"));
+        assertEquals("", defaultConsole.toString("UTF-8"));
 
         ExecutionOptions noWorkbook = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-NO-WORKBOOK"});
         new FrameworkEngine(projectRoot, globalConfig("none")).run(noWorkbook);
