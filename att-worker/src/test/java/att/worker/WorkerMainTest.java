@@ -89,7 +89,7 @@ class WorkerMainTest {
             Thread.sleep(7000L);
             assertFalse(Files.exists(completed),"ATT-started Tool command completed after its Worker was terminated. stderr="
                     +new String(Files.readAllBytes(workerError),StandardCharsets.UTF_8));
-        }
+        } else Thread.sleep(7000L); // Allow a best-effort descendant to finish before @TempDir cleanup.
     }
 
     @Test void terminatingActiveWorkerLeavesPackageAuthoredFilesUntouched() throws Exception {
