@@ -57,10 +57,15 @@ class WindowsLauncherTest {
         Files.write(simple.resolve("debug.yaml"), "schemaVersion: att-debug/v1.2\ninputs: {}\n".getBytes(StandardCharsets.UTF_8));
 
         Path output = temp.resolve("launcher.stdout"), error = temp.resolve("launcher.stderr");
-        Process process = new ProcessBuilder("cmd.exe", "/c", Paths.get("att.bat").toAbsolutePath().toString(),
+        Path mavenRepository = Paths.get(System.getProperty("user.home"), ".m2", "repository");
+        Path snakeYaml = mavenRepository.resolve("org/yaml/snakeyaml/2.2/snakeyaml-2.2.jar");
+        assertTrue(Files.isRegularFile(snakeYaml), "Maven did not populate the expected SnakeYAML artifact: " + snakeYaml);
+        ProcessBuilder builder = new ProcessBuilder("cmd.exe", "/c", Paths.get("att.bat").toAbsolutePath().toString(),
                 "debug", "template", "SIMPLE", "--config", config.toString(), "--format", "json", "--quiet")
                 .directory(Paths.get("").toAbsolutePath().toFile())
-                .redirectOutput(output.toFile()).redirectError(error.toFile()).start();
+                .redirectOutput(output.toFile()).redirectError(error.toFile());
+        builder.environment().put("M2_REPO", mavenRepository.toString());
+        Process process = builder.start();
         assertTrue(process.waitFor(90, TimeUnit.SECONDS), "att.bat did not finish the command-backed Tool smoke test");
         String stdout = new String(Files.readAllBytes(output), StandardCharsets.UTF_8);
         String stderr = new String(Files.readAllBytes(error), StandardCharsets.UTF_8);
