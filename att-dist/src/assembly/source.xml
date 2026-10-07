@@ -10,7 +10,7 @@
         <fileSet><directory>${project.basedir}/..</directory><outputDirectory>/</outputDirectory><useDefaultExcludes>true</useDefaultExcludes>
             <includes>
                 <include>.gitignore</include><include>pom.xml</include><include>att.bat</include><include>README.md</include><include>CHANGELOG.md</include>
-                <include>att-engine/**</include><include>att-cli/**</include><include>att-worker/**</include><include>att-server/**</include><include>att-dist/**</include>
+                <include>att-engine/**</include><include>att-server-api/**</include><include>att-remote/**</include><include>att-cli/**</include><include>att-worker/**</include><include>att-server/**</include><include>att-dist/**</include>
                 <include>config/**</include><include>templates/**</include><include>testcase/**</include><include>sql/**</include><include>docs/**</include><include>schemas/**</include><include>examples/**</include>
             </includes>
             <excludes><exclude>**/target/**</exclude><exclude>dist/**</exclude><exclude>output/**</exclude><exclude>report/**</exclude><exclude>logs/**</exclude></excludes>

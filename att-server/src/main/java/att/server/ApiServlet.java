@@ -1,6 +1,7 @@
 package att.server;
 
 import att.Version;
+import att.server.api.ServerApi;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.servlet.AsyncContext;
 import jakarta.servlet.ServletException;
@@ -31,8 +32,8 @@ public final class ApiServlet extends HttpServlet {
     @Override protected void doGet(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String path=path(req);String requestId=requestId(req,res);
         try {
-            if("/health".equals(path)){json(res,200,Map.of("status","UP","version",Version.PRODUCT,"requestId",requestId));return;}
-            if("/version".equals(path)){json(res,200,Map.of("version",Version.PRODUCT,"buildTime",Version.BUILD_TIME,"gitCommit",Version.GIT_COMMIT,"javaMinimum",17,"requestId",requestId));return;}
+            if("/health".equals(path)){json(res,200,Map.of("status","UP","version",Version.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
+            if("/version".equals(path)){json(res,200,Map.of("version",Version.PRODUCT,"apiVersion",ServerApi.VERSION,"buildTime",Version.BUILD_TIME,"gitCommit",Version.GIT_COMMIT,"javaMinimum",17,"requestId",requestId));return;}
             String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
             if("/metrics".equals(path)){Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
             if("/packages".equals(path)){json(res,200,Map.of("items",runtime.packages(),"requestId",requestId));return;}

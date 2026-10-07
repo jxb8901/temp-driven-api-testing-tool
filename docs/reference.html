@@ -435,6 +435,9 @@ command</a></li>
 <li><a href="#find-syntax-options-and-examples-by-task"
 id="toc-find-syntax-options-and-examples-by-task">Find syntax, options,
 and examples by task</a></li>
+<li><a href="#use-att-server-from-the-cli"
+id="toc-use-att-server-from-the-cli">Use ATT Server from the
+CLI</a></li>
 <li><a href="#typed-overrides-and-quick-load"
 id="toc-typed-overrides-and-quick-load">Typed overrides and quick
 Load</a></li>
@@ -5679,6 +5682,11 @@ Load</td>
 <td>Remove documented ATT-generated output</td>
 <td style="text-align: right;">No</td>
 </tr>
+<tr class="even">
+<td><code>remote</code></td>
+<td>Submit and manage jobs through ATT Server's REST/SSE API</td>
+<td style="text-align: right;">ATT Server</td>
+</tr>
 </tbody>
 </table>
 <h3 id="find-syntax-options-and-examples-by-task">Find syntax, options,
@@ -6000,6 +6008,49 @@ output</h4>
 </tr>
 </tbody>
 </table>
+<h3 id="use-att-server-from-the-cli">Use ATT Server from the CLI</h3>
+<p>Remote commands use the public ATT Server <code>/api/v1</code>
+contract. Existing commands such as <code>run</code>,
+<code>debug</code>, <code>load</code>, and <code>validate</code> remain
+local unless you explicitly add <code>remote</code>.</p>
+<div class="sourceCode" id="cb90"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb90-1"><a href="#cb90-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit packages</span>
+<span id="cb90-2"><a href="#cb90-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit run payments <span class="at">--suite</span> testcase/smoke.xlsx <span class="at">--env</span> SIT <span class="at">--tag</span> smoke</span>
+<span id="cb90-3"><a href="#cb90-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> ci run payments <span class="at">--all</span> <span class="at">--detach</span></span>
+<span id="cb90-4"><a href="#cb90-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit watch J0123456789ABCDEF</span>
+<span id="cb90-5"><a href="#cb90-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit load payments <span class="at">--scenario</span> load/payment.yaml <span class="at">--users</span> 2 <span class="at">--duration</span> 30s</span>
+<span id="cb90-6"><a href="#cb90-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit artifacts J0123456789ABCDEF <span class="at">--download</span> ./results</span></code></pre></div>
+<p>The <code>--server</code> value selects an entry from
+<code>~/.att/servers.yaml</code>. <code>ATT_SERVER</code> overrides the
+default profile URL; an explicit <code>--server</code> profile takes
+precedence. Remote package, suite, config, scenario, and Debug input
+values are logical names relative to the Server package. Absolute client
+paths and <code>--output-dir</code> are not sent.</p>
+<p>The profile can store a URL, Basic-auth username, and the name of a
+CI secret environment variable. It cannot store a password. If
+<code>passwordEnv</code> is absent, the CLI prompts without echo when a
+terminal is available. Basic authentication requires HTTPS; normal TLS
+certificate and hostname checks stay enabled.</p>
+<p>Attached Run, Debug, Load, and Validate commands submit once, follow
+SSE, reconnect with <code>Last-Event-ID</code>, then retrieve the
+canonical result. <code>--detach</code> prints the accepted job ID and
+exits. Use <code>jobs</code>, <code>job</code>, <code>watch</code>,
+<code>result</code>, <code>artifacts</code>, <code>artifact</code>, or
+<code>cancel</code> to work with retained jobs. Artifacts download under
+the selected local directory and never overwrite an existing file.</p>
+<p>Remote exit codes are <code>0</code> for PASS/success, <code>1</code>
+for ATT FAIL, <code>2</code> for INVALID, <code>3</code> for ATT
+ERROR/CANCELLED, and <code>4</code> when the client cannot establish a
+trustworthy result because of connection, authentication, or protocol
+failure. See <a href="remote-client.md">ATT Remote client</a> for
+profiles, command options, reconnect behavior, and troubleshooting.</p>
+<p>Remote-only options are <code>--server &lt;profile&gt;</code>,
+<code>--detach</code>, <code>--download &lt;directory&gt;</code>, and
+<code>--scenario &lt;package-relative-path&gt;</code>.
+<code>--format human|json</code> and the documented ATT selection,
+environment, Debug, and Load options are accepted where they map to the
+remote job contract. See the linked guide for the remote command
+list.</p>
 <p>Options are command-specific. Unknown commands/options and missing
 option values are errors. <code>--package</code> and
 <code>--selected</code> are mutually exclusive. Selected validation and
@@ -6037,17 +6088,17 @@ pipeline. It rejects sidecars with Debug-local <code>testdata</code>
 imports; declare those imports on a Load scenario. Explicit CLI pacing
 fields override the policy. Without a policy, provide a complete policy
 on the command line; for example:</p>
-<div class="sourceCode" id="cb90"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb90-1"><a href="#cb90-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.6</span></span>
-<span id="cb90-2"><a href="#cb90-2" aria-hidden="true" tabindex="-1"></a><span class="fu">load</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">users</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">,</span><span class="at"> </span><span class="fu">duration</span><span class="kw">:</span><span class="at"> 10s</span><span class="kw">}</span></span>
-<span id="cb90-3"><a href="#cb90-3" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">thinkTime</span><span class="kw">:</span><span class="at"> 250ms</span><span class="kw">}</span></span>
-<span id="cb90-4"><a href="#cb90-4" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">mode</span><span class="kw">:</span><span class="at"> failures</span><span class="kw">}</span></span></code></pre></div>
 <div class="sourceCode" id="cb91"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb91-1"><a href="#cb91-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug</span>
-<span id="cb91-2"><a href="#cb91-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load</span>
-<span id="cb91-3"><a href="#cb91-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> template PAYMENT_INVOKE</span>
-<span id="cb91-4"><a href="#cb91-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> tool fpp.invokeApi <span class="at">--users</span> 1 <span class="at">--duration</span> 10s <span class="at">--set</span> arg.requestId=42</span>
-<span id="cb91-5"><a href="#cb91-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> flow common.payment <span class="at">--users</span> 4 <span class="at">--duration</span> 5s <span class="at">--set</span> input.customer.ids<span class="pp">[</span><span class="ss">0</span><span class="pp">]</span>=42</span></code></pre></div>
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb91-1"><a href="#cb91-1" aria-hidden="true" tabindex="-1"></a><span class="fu">schemaVersion</span><span class="kw">:</span><span class="at"> att-load/v1.6</span></span>
+<span id="cb91-2"><a href="#cb91-2" aria-hidden="true" tabindex="-1"></a><span class="fu">load</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">users</span><span class="kw">:</span><span class="at"> </span><span class="dv">2</span><span class="kw">,</span><span class="at"> </span><span class="fu">duration</span><span class="kw">:</span><span class="at"> 10s</span><span class="kw">}</span></span>
+<span id="cb91-3"><a href="#cb91-3" aria-hidden="true" tabindex="-1"></a><span class="fu">execution</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">thinkTime</span><span class="kw">:</span><span class="at"> 250ms</span><span class="kw">}</span></span>
+<span id="cb91-4"><a href="#cb91-4" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span><span class="fu">mode</span><span class="kw">:</span><span class="at"> failures</span><span class="kw">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb92"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb92-1"><a href="#cb92-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug</span>
+<span id="cb92-2"><a href="#cb92-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load</span>
+<span id="cb92-3"><a href="#cb92-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> template PAYMENT_INVOKE</span>
+<span id="cb92-4"><a href="#cb92-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> tool fpp.invokeApi <span class="at">--users</span> 1 <span class="at">--duration</span> 10s <span class="at">--set</span> arg.requestId=42</span>
+<span id="cb92-5"><a href="#cb92-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> flow common.payment <span class="at">--users</span> 4 <span class="at">--duration</span> 5s <span class="at">--set</span> input.customer.ids<span class="pp">[</span><span class="ss">0</span><span class="pp">]</span>=42</span></code></pre></div>
 <p><code>run</code>, <code>debug</code>, and <code>load</code> default
 to interactive verbose behavior. Lifecycle, Case, Stage, Action,
 resource-attempt, retry, assertion, and error records are written as
@@ -6109,11 +6160,11 @@ control process-level output-root concurrency, not Case workers.
 <p>Load uses the scenario as the base and explicit workload options
 override the corresponding fields before the effective scenario is
 validated again:</p>
-<div class="sourceCode" id="cb92"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb92-1"><a href="#cb92-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--users</span> 2 <span class="at">--duration</span> 5s</span>
-<span id="cb92-2"><a href="#cb92-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="dt">\</span></span>
-<span id="cb92-3"><a href="#cb92-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--arrival-rate</span> 5/s <span class="at">--warmup</span> 1s <span class="at">--ramp-up</span> 1s <span class="at">--duration</span> 5s <span class="at">--ramp-down</span> 1s <span class="dt">\</span></span>
-<span id="cb92-4"><a href="#cb92-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--max-concurrent</span> 4 <span class="at">--overload-policy</span> drop <span class="at">--format</span> json</span></code></pre></div>
+<div class="sourceCode" id="cb93"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb93-1"><a href="#cb93-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/closed-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> SIT <span class="at">--users</span> 2 <span class="at">--duration</span> 5s</span>
+<span id="cb93-2"><a href="#cb93-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load examples/load/arrival-smoke.yaml <span class="at">--config</span> config/config.yaml <span class="at">--env</span> UAT <span class="dt">\</span></span>
+<span id="cb93-3"><a href="#cb93-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--arrival-rate</span> 5/s <span class="at">--warmup</span> 1s <span class="at">--ramp-up</span> 1s <span class="at">--duration</span> 5s <span class="at">--ramp-down</span> 1s <span class="dt">\</span></span>
+<span id="cb93-4"><a href="#cb93-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--max-concurrent</span> 4 <span class="at">--overload-policy</span> drop <span class="at">--format</span> json</span></code></pre></div>
 <p>Repeatable
 <code>--set &lt;input|arg|vars&gt;.&lt;path&gt;=&lt;yaml-value&gt;</code>
 applies safe-YAML typed overrides before expression evaluation. The same
@@ -6121,9 +6172,9 @@ option works for <code>debug</code>, single-workload Load scenarios, and
 <code>load --debug template|flow|tool &lt;id&gt;</code>. Quick Load uses
 <code>load/load.yaml</code> when present; otherwise provide a complete
 policy on the command line. For example:</p>
-<div class="sourceCode" id="cb93"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb93-1"><a href="#cb93-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span>
-<span id="cb93-2"><a href="#cb93-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> flow common.payment <span class="at">--users</span> 2 <span class="at">--duration</span> 10s <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span></code></pre></div>
+<div class="sourceCode" id="cb94"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb94-1"><a href="#cb94-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span>
+<span id="cb94-2"><a href="#cb94-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> load <span class="at">--debug</span> flow common.payment <span class="at">--users</span> 2 <span class="at">--duration</span> 10s <span class="at">--set</span> <span class="st">&#39;vars.reference=${EXEC.INPUT.reference}&#39;</span></span></code></pre></div>
 <p>The complete workload override set is <code>--users</code>,
 <code>--arrival-rate</code>, <code>--warmup</code>,
 <code>--ramp-up</code>, <code>--duration</code>,
@@ -6233,13 +6284,13 @@ evidence collector failures</h3>
 primary Tool result. With <code>onFailure: continue</code>, the primary
 Action may remain <code>PASS</code> while the collector is independently
 recorded as <code>ERROR</code>:</p>
-<div class="sourceCode" id="cb95"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb95-1"><a href="#cb95-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
-<span id="cb95-2"><a href="#cb95-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">appLog</span><span class="kw">:</span></span>
-<span id="cb95-3"><a href="#cb95-3" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
-<span id="cb95-4"><a href="#cb95-4" aria-hidden="true" tabindex="-1"></a>      #{ssh.app.execute(command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;)}</span>
-<span id="cb95-5"><a href="#cb95-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
-<span id="cb95-6"><a href="#cb95-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span></code></pre></div>
+<div class="sourceCode" id="cb96"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb96-1"><a href="#cb96-1" aria-hidden="true" tabindex="-1"></a><span class="fu">evidence</span><span class="kw">:</span></span>
+<span id="cb96-2"><a href="#cb96-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">appLog</span><span class="kw">:</span></span>
+<span id="cb96-3"><a href="#cb96-3" aria-hidden="true" tabindex="-1"></a><span class="fu">    call</span><span class="kw">: </span><span class="ch">&gt;-</span></span>
+<span id="cb96-4"><a href="#cb96-4" aria-hidden="true" tabindex="-1"></a>      #{ssh.app.execute(command=&#39;grep &quot;${EXEC.INPUT.txnId}&quot; /app/log/payment.log | tail -100&#39;)}</span>
+<span id="cb96-5"><a href="#cb96-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">timeoutMs</span><span class="kw">:</span><span class="at"> </span><span class="dv">5000</span></span>
+<span id="cb96-6"><a href="#cb96-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">onFailure</span><span class="kw">:</span><span class="at"> continue</span></span></code></pre></div>
 <p>Inspect
 <code>EXEC.ACTIONS.&lt;actionId&gt;.output.evidence.collectors.&lt;collectorId&gt;</code>
 (or the equivalent <code>ACTIONS</code> compatibility view). The record
@@ -6512,8 +6563,8 @@ SSH negotiation, and stack-trace policy.</p>
 <h3 id="start-with-validation">Start with validation</h3>
 <p>Run this after every workbook, sidecar, template, helper, or tool
 change:</p>
-<div class="sourceCode" id="cb96"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb96-1"><a href="#cb96-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb97"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb97-1"><a href="#cb97-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p>For one environment, use
 <code>./att.sh validate --config config/config.yaml --env SIT --package</code>.
 ATT validates descriptors against the active schemas in the <a
@@ -6671,27 +6722,27 @@ data in workbook cells, template descriptors, command strings, stdout,
 or stderr. Prefer approved secret injection inside tool scripts. Review
 reports and archives before sharing.</p>
 <h3 id="validation-json-contract">Validation JSON contract</h3>
-<div class="sourceCode" id="cb97"><pre
-class="sourceCode json"><code class="sourceCode json"><span id="cb97-1"><a href="#cb97-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
-<span id="cb97-2"><a href="#cb97-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb97-3"><a href="#cb97-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;4.0.0&quot;</span><span class="fu">,</span></span>
-<span id="cb97-4"><a href="#cb97-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
-<span id="cb97-5"><a href="#cb97-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
-<span id="cb97-6"><a href="#cb97-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
-<span id="cb97-7"><a href="#cb97-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;diagnostics&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span></span>
-<span id="cb97-8"><a href="#cb97-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;ATT-TPL-104&quot;</span><span class="fu">,</span></span>
-<span id="cb97-9"><a href="#cb97-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;severity&quot;</span><span class="fu">:</span> <span class="st">&quot;ERROR&quot;</span><span class="fu">,</span></span>
-<span id="cb97-10"><a href="#cb97-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;assert action requires a non-blank expression&quot;</span><span class="fu">,</span></span>
-<span id="cb97-11"><a href="#cb97-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;file&quot;</span><span class="fu">:</span> <span class="st">&quot;templates/PAYMENT_VERIFY/template.yaml&quot;</span><span class="fu">,</span></span>
-<span id="cb97-12"><a href="#cb97-12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;actions.assertStatus.expression&quot;</span><span class="fu">,</span></span>
-<span id="cb97-13"><a href="#cb97-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;sheet&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb97-14"><a href="#cb97-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;row&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb97-15"><a href="#cb97-15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;column&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
-<span id="cb97-16"><a href="#cb97-16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;template&quot;</span><span class="fu">:</span> <span class="st">&quot;PAYMENT_VERIFY&quot;</span><span class="fu">,</span></span>
-<span id="cb97-17"><a href="#cb97-17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;action&quot;</span><span class="fu">:</span> <span class="st">&quot;assertStatus&quot;</span><span class="fu">,</span></span>
-<span id="cb97-18"><a href="#cb97-18" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;suggestion&quot;</span><span class="fu">:</span> <span class="st">&quot;Add expression to the assert action&quot;</span></span>
-<span id="cb97-19"><a href="#cb97-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span><span class="ot">]</span></span>
-<span id="cb97-20"><a href="#cb97-20" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb98"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb98-1"><a href="#cb98-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb98-2"><a href="#cb98-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
+<span id="cb98-3"><a href="#cb98-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;4.0.0&quot;</span><span class="fu">,</span></span>
+<span id="cb98-4"><a href="#cb98-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
+<span id="cb98-5"><a href="#cb98-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
+<span id="cb98-6"><a href="#cb98-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
+<span id="cb98-7"><a href="#cb98-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;diagnostics&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span></span>
+<span id="cb98-8"><a href="#cb98-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;ATT-TPL-104&quot;</span><span class="fu">,</span></span>
+<span id="cb98-9"><a href="#cb98-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;severity&quot;</span><span class="fu">:</span> <span class="st">&quot;ERROR&quot;</span><span class="fu">,</span></span>
+<span id="cb98-10"><a href="#cb98-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;assert action requires a non-blank expression&quot;</span><span class="fu">,</span></span>
+<span id="cb98-11"><a href="#cb98-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;file&quot;</span><span class="fu">:</span> <span class="st">&quot;templates/PAYMENT_VERIFY/template.yaml&quot;</span><span class="fu">,</span></span>
+<span id="cb98-12"><a href="#cb98-12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;actions.assertStatus.expression&quot;</span><span class="fu">,</span></span>
+<span id="cb98-13"><a href="#cb98-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;sheet&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb98-14"><a href="#cb98-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;row&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb98-15"><a href="#cb98-15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;column&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb98-16"><a href="#cb98-16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;template&quot;</span><span class="fu">:</span> <span class="st">&quot;PAYMENT_VERIFY&quot;</span><span class="fu">,</span></span>
+<span id="cb98-17"><a href="#cb98-17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;action&quot;</span><span class="fu">:</span> <span class="st">&quot;assertStatus&quot;</span><span class="fu">,</span></span>
+<span id="cb98-18"><a href="#cb98-18" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;suggestion&quot;</span><span class="fu">:</span> <span class="st">&quot;Add expression to the assert action&quot;</span></span>
+<span id="cb98-19"><a href="#cb98-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span><span class="ot">]</span></span>
+<span id="cb98-20"><a href="#cb98-20" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
 <p>Every diagnostic always contains <code>code</code>,
 <code>severity</code>, <code>message</code>, <code>file</code>,
 <code>field</code>, <code>sheet</code>, <code>row</code>,
@@ -6730,11 +6781,11 @@ artifact root.</p>
 <p>ATT supports source-tree development and offline release
 packages.</p>
 <h3 id="developmentrelease-gates">Development/release gates</h3>
-<div class="sourceCode" id="cb98"><pre
-class="sourceCode sh"><code class="sourceCode bash"><span id="cb98-1"><a href="#cb98-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
-<span id="cb98-2"><a href="#cb98-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
-<span id="cb98-3"><a href="#cb98-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
-<span id="cb98-4"><a href="#cb98-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
+<div class="sourceCode" id="cb99"><pre
+class="sourceCode sh"><code class="sourceCode bash"><span id="cb99-1"><a href="#cb99-1" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> clean verify</span>
+<span id="cb99-2"><a href="#cb99-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/build_reference_manual.py <span class="at">--check</span></span>
+<span id="cb99-3"><a href="#cb99-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
+<span id="cb99-4"><a href="#cb99-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p><code>build.sh</code> runs the release gate, regenerates the modular
 Reference Manual, builds the application jar and release/source
 archives, and verifies the packaged launcher. It requires Java/Maven
@@ -7024,14 +7075,14 @@ active contracts.</td>
 </tbody>
 </table>
 <p>A file-content String passed to HTTP:</p>
-<div class="sourceCode" id="cb99"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb99-1"><a href="#cb99-1" aria-hidden="true" tabindex="-1"></a><span class="fu">prepareRequest</span><span class="kw">:</span></span>
-<span id="cb99-2"><a href="#cb99-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assign</span></span>
-<span id="cb99-3"><a href="#cb99-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> requestText</span></span>
-<span id="cb99-4"><a href="#cb99-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">expression</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;&amp;{templates/payment/payload/request.xml}&quot;</span></span>
-<span id="cb99-5"><a href="#cb99-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb99-6"><a href="#cb99-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb99-7"><a href="#cb99-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.VARS.requestText})}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb100"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb100-1"><a href="#cb100-1" aria-hidden="true" tabindex="-1"></a><span class="fu">prepareRequest</span><span class="kw">:</span></span>
+<span id="cb100-2"><a href="#cb100-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> assign</span></span>
+<span id="cb100-3"><a href="#cb100-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> requestText</span></span>
+<span id="cb100-4"><a href="#cb100-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">expression</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;&amp;{templates/payment/payload/request.xml}&quot;</span></span>
+<span id="cb100-5"><a href="#cb100-5" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb100-6"><a href="#cb100-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb100-7"><a href="#cb100-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.VARS.requestText})}&quot;</span></span></code></pre></div>
 <p>The file is read as strict UTF-8 text. <code>${...}</code> and
 <code>#{...}</code> inside the file remain runtime expressions and are
 compiled without invoking external resources during validation.
@@ -7040,10 +7091,10 @@ fingerprint changes; Load freezes the validated file identity, content
 and plan for the scenario. File output is not reparsed as a new
 expression source.</p>
 <p>For an abstract value, use requestFormat explicitly:</p>
-<div class="sourceCode" id="cb100"><pre
-class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb100-1"><a href="#cb100-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
-<span id="cb100-2"><a href="#cb100-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
-<span id="cb100-3"><a href="#cb100-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb101"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb101-1"><a href="#cb101-1" aria-hidden="true" tabindex="-1"></a><span class="fu">send</span><span class="kw">:</span></span>
+<span id="cb101-2"><a href="#cb101-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">type</span><span class="kw">:</span><span class="at"> tool</span></span>
+<span id="cb101-3"><a href="#cb101-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">call</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat=&#39;json&#39;)}&quot;</span></span></code></pre></div>
 <p>For Load, migrate old single-target or v1.1 scenarios through the
 historical v1.2/v1.3 loaders, then change the schemaVersion to
 att-load/v1.5. Root defaults may be shared by multiple workloads; each

@@ -37,6 +37,13 @@ Useful peer-mode commands after the basic Run workflow is familiar:
 ./att.sh load examples/load/arrival-smoke.yaml --format json
 ```
 
+To submit work to ATT Server, use the thin `att remote` adapter. Configure a Server profile first; local commands remain offline and do not require Server connectivity. See the [ATT Remote client guide](docs/remote-client.md) and [中文指南](docs/remote-client.zh.md).
+
+```sh
+./att.sh remote --server sit packages
+./att.sh remote --server sit run payments --suite testcase/payment.xlsx --tag smoke
+```
+
 Windows uses the same commands through `att.bat`.
 
 ## Documentation
@@ -62,12 +69,16 @@ The repository is a minimal Maven reactor while the runtime/package root stays c
 
 ```text
 pom.xml       parent / aggregator
-att-cli/      current ATT application, all existing Java packages and tests
+att-engine/   local Run, Debug, Load, validation, and execution contracts
+att-server-api/ Java 8 public REST/SSE contract shared by Server and client
+att-remote/   Java 8 Server REST/SSE client used by `att remote`
+att-cli/      existing ATT command line and local command adapter
+att-worker/   one-job process adapter for ATT Server
 att-server/   Java 17+ Jakarta Servlet WAR for the ATT Server control plane
 att-dist/     binary/source release assembly
 ```
 
-ATT Server is a single-node, API-first control plane deployed as a WAR to external Tomcat 10.1+ on Java 17+. Tomcat owns authentication; Server consumes the Servlet Principal and launches isolated Worker processes. See [ATT Server deployment and API](docs/server-deployment.md). Existing CLI, Engine, and Worker code remains Java 8-compatible. See [Multi-module build layout](docs/system-design/multi-module-build.md).
+ATT Server is a single-node REST/SSE control plane deployed as a WAR to external Tomcat 10.1+ on Java 17+. Tomcat owns authentication; Server consumes the Servlet Principal and launches isolated Worker processes. `att remote` uses the public API, SSE replay, and canonical job results. See [ATT Server deployment and API](docs/server-deployment.md). CLI, Engine, Worker, Remote, and Server API modules remain Java 8-compatible. See [Multi-module build layout](docs/system-design/multi-module-build.md).
 
 ## Core package layout
 
@@ -91,4 +102,4 @@ python3 tools/validate_reference_content.py
 ./build.sh
 ```
 
-`mvn clean verify` runs the full reactor: it tests the CLI, Engine, Worker, and Server modules, packages the Server WAR, and assembles binary/source releases through `att-dist`. `build.sh` remains the CLI compatibility/release entry point and smoke-tests the assembled CLI distribution. The Server WAR requires Java 17 and external Tomcat 10.1+; CLI, Engine, and Worker remain Java 8-compatible. JDBC drivers are supplied in `lib/`; IBM MQ remains an optional runtime integration.
+`mvn clean verify` runs the full reactor: it tests the Engine, Server API, Remote, CLI, Worker, and Server modules, packages the Server WAR, and assembles binary/source releases through `att-dist`. `build.sh` remains the CLI compatibility/release entry point and smoke-tests the assembled CLI, including `att remote help`. The Server WAR requires Java 17 and external Tomcat 10.1+; CLI, Engine, Worker, Remote, and Server API remain Java 8-compatible. JDBC drivers are supplied in `lib/`; IBM MQ remains an optional runtime integration.

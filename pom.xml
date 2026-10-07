@@ -10,6 +10,8 @@
     <name>ATT Parent</name>
     <modules>
         <module>att-engine</module>
+        <module>att-server-api</module>
+        <module>att-remote</module>
         <module>att-cli</module>
         <module>att-worker</module>
         <module>att-server</module>

@@ -6,6 +6,8 @@ Issue #162 established ATT's Maven reactor. Issue #164 separates reusable execut
 template-driven-api-testing-tool/
 |-- pom.xml        parent / Maven reactor
 |-- att-engine/   reusable execution/domain implementation and typed API
+|-- att-server-api/ public Java 8 REST/SSE wire contract
+|-- att-remote/   Java 8 REST/SSE client adapter
 |-- att-cli/       argv parsing, terminal presentation, exit-code adapter
 |-- att-worker/    structured one-job process adapter over att-engine
 |-- att-server/    Java 17+ Jakarta Servlet control plane WAR
@@ -15,6 +17,8 @@ template-driven-api-testing-tool/
 `att-engine` owns Run, Debug, Load, validation, snapshots, reports, resource helpers, Template/Flow execution, and the command-neutral `att.api.AttService` request/result contracts. Existing Java package names remain unchanged. The engine depends on neither adapter nor on `att-server`, and its execution entry points do not call `System.exit()`.
 
 `att-cli` contains `att.FrameworkRunner` and `CliDiscovery`; it parses argv, builds typed Run, Debug, Load, Validate, and Snapshot requests, renders terminal output, and maps engine outcomes to the existing process exit codes. Run, Load, and Validate execution use the same `AttService` path as Worker requests. Optional live Load progress is supplied by the CLI as an observer; the reusable service remains quiet by default. `att.sh` and `att.bat` continue to start `att.FrameworkRunner`, preserving the installed CLI interface.
+
+`att-server-api` contains only public REST/SSE DTOs, status values, and endpoint/version constants. It compiles for Java 8 and is shared by `att-server` and `att-remote`. `att-remote` is a Java 8 client for public Server endpoints; it owns HTTP/authentication, profiles, SSE reconnect, rendering, and artifact downloads. It depends on `att-server-api`, not on `att-engine` or `att-server`. `FrameworkRunner` dispatches explicit `remote` commands before local `CliOptions` parsing.
 
 `att-worker` accepts one JSON request using protocol `att-worker/v1`, calls `AttService` directly, emits JSON Lines events, and exits after that single result. It does not start the CLI or parse terminal text. The protocol reserves `STATUS`, `LOG`, `PROGRESS`, `DIAGNOSTIC`, and `RESULT` event names. Stdout is exclusively the protocol stream; failures after request intake are returned as structured diagnostic and result events. External process termination remains the Worker cancellation boundary. See [worker-protocol.md](worker-protocol.md) for the internal request/event contract and launch form.
 
@@ -32,6 +36,6 @@ Root runtime assets remain unchanged: `config/`, `templates/`, `tools/`, `testca
 
 ## Developer and release flow
 
-Run `mvn clean verify` from the repository root. The reactor tests `att-engine`, `att-cli`, `att-worker`, and `att-server`, packages the Server WAR, and executes `att-dist` assembly. The binary contains the CLI and Server WAR. `build.sh` remains the CLI release entry point; it regenerates documentation, runs the reactor gate, validates the source-tree launcher, smoke-tests the assembled CLI with `version`, `help`, `debug`, `load`, and `validate --package`, and copies binary/source archives to `dist/releases/`.
+Run `mvn clean verify` from the repository root. The reactor tests `att-engine`, `att-server-api`, `att-remote`, `att-cli`, `att-worker`, and `att-server`, packages the Server WAR, and executes `att-dist` assembly. The binary contains the CLI, remote client, shared API, and Server WAR. `build.sh` remains the CLI release entry point; it regenerates documentation, runs the reactor gate, validates the source-tree launcher, smoke-tests the assembled CLI with `version`, `help`, `debug`, `load`, `validate --package`, and `remote help`, and copies binary/source archives to `dist/releases/`.
 
-Source-tree launchers still execute from the repository root and use both `att-cli/target/classes` and `att-engine/target/classes`.
+Source-tree launchers still execute from the repository root and include the CLI, Engine, Remote, and Server API module outputs on the classpath.

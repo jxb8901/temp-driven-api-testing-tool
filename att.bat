@@ -17,6 +17,7 @@ if errorlevel 1 exit /b 1
 if not exist "%ROOT_DIR%att-cli\target\classes\att\FrameworkRunner.class" (echo Maven is required to compile ATT sources. Build a release package first or install Maven. 1>&2& exit /b 2)
 if not defined M2_REPO set "M2_REPO=%USERPROFILE%\.m2\repository"
 set "CP=%ROOT_DIR%att-cli\target\classes;%ROOT_DIR%att-cli\target\test-classes;%ROOT_DIR%att-engine\target\classes"
+set "CP=%CP%;%ROOT_DIR%att-remote\target\classes;%ROOT_DIR%att-server-api\target\classes"
 set "CP=%CP%;%M2_REPO%\commons-io\commons-io\2.16.1\commons-io-2.16.1.jar"
 set "CP=%CP%;%M2_REPO%\org\apache\httpcomponents\httpclient\4.5.13\httpclient-4.5.13.jar"
 set "CP=%CP%;%M2_REPO%\org\apache\httpcomponents\httpcore\4.4.13\httpcore-4.4.13.jar"

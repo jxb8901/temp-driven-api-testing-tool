@@ -24,6 +24,11 @@ public final class FrameworkRunner {
     private FrameworkRunner() {}
 
     public static void main(String[] args) throws Exception {
+        if (args.length > 0 && "remote".equals(args[0])) {
+            int remoteExit = att.remote.RemoteCommand.run(java.util.Arrays.copyOfRange(args, 1, args.length));
+            if (remoteExit != 0) System.exit(remoteExit);
+            return;
+        }
         CliOptions options = null;
         Path root = Paths.get("").toAbsolutePath();
         try {
@@ -429,7 +434,7 @@ public final class FrameworkRunner {
         System.out.println("Load options: --warmup <duration> --ramp-up <duration> --ramp-down <duration> --think-time <duration> --overload-policy drop --output-dir <dir> --profile --quiet|--verbose");
         System.out.println("Load output: <output-dir>/load/<runId>/load-summary.json|yaml and report/index.html; exit codes PASS=0, threshold FAIL=1, validation=2, runtime=3");
         System.out.println("Environment profiles: use --env <name> with run, validate, debug, or load; --config selects the common config.");
-        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  load      Execute a closed or fixed-arrival-rate load scenario and report metrics\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run, debug, and load stream bounded progress by default; --quiet keeps the final summary; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
+        System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  debug     Execute one Template, Flow, or Tool\n  load      Execute a closed or fixed-arrival-rate load scenario\n  remote    Submit and manage jobs through ATT Server\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run, debug, and load stream bounded progress by default; --quiet keeps the final summary; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
     }
 
     private static void printDiagnostics(PackageValidator.ValidationSummary validation, CliOptions options) {

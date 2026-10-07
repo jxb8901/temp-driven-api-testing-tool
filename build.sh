@@ -54,6 +54,7 @@ PACKAGE_DIR="$RELEASE_WORK/$PACKAGE_NAME"
   export ORDERS_DB_USERNAME ORDERS_DB_PASSWORD PAYMENT_MQ_USERNAME PAYMENT_MQ_PASSWORD
   ./att.sh version | grep -Fx "ATT V$VERSION" >/dev/null
   ./att.sh help >/dev/null
+  ./att.sh remote help >/dev/null
   ./att.sh debug >/dev/null
   ./att.sh load >/dev/null
   ./att.sh validate --package

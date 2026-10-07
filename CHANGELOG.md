@@ -5,6 +5,8 @@
 - Implement ATT Server v1 as a Java 17 Jakarta Servlet WAR for external Tomcat 10.1+ (#165).
 - Add container Principal consumption, a read-only configured Package Registry, bounded Worker jobs, persistent control-plane metadata, cancellation, and retained SSE events.
 - Include the Server WAR in the binary distribution while preserving Java 8 compatibility for CLI, Engine, and Worker.
+- Add the Java 8 `att-server-api` contract and `att-remote` REST/SSE client; expose `att remote` through the existing CLI for discovery, Run/Debug/Load/Validate, job management, and safe artifact downloads (#171).
+- Add HTTPS-only Basic authentication, secret-environment profiles, SSE replay, structured JSON results, and remote exit code `4` for transport/protocol failures.
 
 ## 3.8.0 - 2026-10-06
 

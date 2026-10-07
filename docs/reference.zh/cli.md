@@ -15,6 +15,7 @@
 | `report` | 為已完成 run 重新生成報表 | 否 |
 | `build` | 歸檔最新已完成 run | 否 |
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
+| `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
 ## 按任務查閱語法、option 和範例
 
@@ -103,6 +104,29 @@
 | `./att.sh docs` | 生成 `build/docs/index.html` |
 | `./att.sh build` | 在 `build/` 中歸檔最新完成 run |
 | `./att.sh clean` | 刪除文檔化生成輸出 |
+
+## 透過 CLI 使用 ATT Server
+
+Remote command 使用 ATT Server 公開的 `/api/v1` contract。現有 `run`、`debug`、`load` 及 `validate` 命令仍在本機執行，只有明確加入 `remote` 才會連接 Server。
+
+```sh
+./att.sh remote --server sit packages
+./att.sh remote --server sit run payments --suite testcase/smoke.xlsx --env SIT --tag smoke
+./att.sh remote --server ci run payments --all --detach
+./att.sh remote --server sit watch J0123456789ABCDEF
+./att.sh remote --server sit load payments --scenario load/payment.yaml --users 2 --duration 30s
+./att.sh remote --server sit artifacts J0123456789ABCDEF --download ./results
+```
+
+`--server` 選擇 `~/.att/servers.yaml` 中的 profile。`ATT_SERVER` 會覆蓋 default profile 的 URL；明確指定的 `--server` profile 優先。Remote package、suite、config、scenario 及 Debug input 必須是 Server package 的相對邏輯名稱。CLI 不會傳送本機絕對路徑或 `--output-dir`。
+
+Profile 可保存 URL、Basic Auth username 及 CI secret 環境變數名稱，但不能保存 password。若沒有設定 `passwordEnv`，CLI 會在有 terminal 時隱藏輸入 password。Basic authentication 必須使用 HTTPS；TLS certificate 及 hostname 檢查維持啟用。
+
+Attached Run、Debug、Load 及 Validate 只提交一次工作，透過 SSE 追蹤進度，以 `Last-Event-ID` 重新連線，再取得 canonical result。`--detach` 會輸出已接受工作 ID 並結束。使用 `jobs`、`job`、`watch`、`result`、`artifacts`、`artifact` 或 `cancel` 管理已保留的工作。Artifact 只會下載到所選本機目錄，不會覆寫現有檔案。
+
+Remote exit code：PASS/成功為 `0`、ATT FAIL 為 `1`、INVALID 為 `2`、ATT ERROR/CANCELLED 為 `3`；若連線、驗證或 protocol 問題令 client 無法取得可信結果，則為 `4`。Profile、options、reconnect 及 troubleshooting 見 [ATT Remote client](../remote-client.zh.md)。
+
+Remote-only option 為 `--server <profile>`、`--detach`、`--download <directory>` 及 `--scenario <package-relative-path>`。`--format human|json` 及已記錄的 ATT selection、environment、Debug、Load option，會在符合 remote job contract 時使用。Remote command list 見上述指南。
 
 
 ## Typed overrides and quick Load
