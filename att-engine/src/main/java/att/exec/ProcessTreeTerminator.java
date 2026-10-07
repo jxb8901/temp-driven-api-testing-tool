@@ -37,7 +37,9 @@ final class ProcessTreeTerminator {
             NativeLibrary kernel32 = NativeLibrary.getInstance("kernel32");
             job = function(kernel32, "CreateJobObjectW").invokePointer(new Object[] { null, null });
             if (job == null || Pointer.nativeValue(job) == 0L) return;
-            Memory limits = new Memory(Native.POINTER_SIZE == 8 ? 136L : 108L);
+            // Extended limits contain four SIZE_T values after the basic and I/O
+            // counters. Keep the full native structure size for both bitnesses.
+            Memory limits = new Memory(Native.POINTER_SIZE == 8 ? 144L : 112L);
             limits.clear();
             limits.setInt(16L, 0x2000); // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
             int configured = function(kernel32, "SetInformationJobObject").invokeInt(
