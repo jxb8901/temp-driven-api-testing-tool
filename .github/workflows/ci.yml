@@ -83,4 +83,4 @@ jobs:
           cache: maven
 
       - name: Verify Java 8 Windows process-tree cancellation
-        run: mvn -B -ntp -pl att-worker -am "-Dtest=ProcessTreeTerminatorWindowsTest,WorkerMainTest#terminatingWorkerStopsAnActiveCommandBackedTool" -Dsurefire.failIfNoSpecifiedTests=false test
+        run: mvn -B -ntp -pl att-worker -am "-Dtest=ProcessTreeTerminatorWindowsTest,WorkerMainTest#terminatingWorkerStopsAnActiveCommandBackedTool" "-Dsurefire.failIfNoSpecifiedTests=false" test
