@@ -40,7 +40,7 @@ You do not need to understand every ATT schema before running them.
 
 ## Check prerequisites
 
-ATT requires Java 8 or later. The source checkout launcher also needs Maven for its first compile; when Maven is unavailable, `javac` and the ATT dependency jars in the local Maven cache must be present. Packaged releases do not need Maven. From the repository root:
+ATT requires Java 8 or later. On macOS/Linux, the source checkout launcher can compile with Maven or fall back to `javac` when Maven is unavailable and the ATT dependency jars are present in the local Maven cache. On Windows, `att.bat` compiles a source checkout with Maven and requires existing compiled classes if Maven is unavailable. Packaged releases do not need Maven. From the repository root:
 
 1. On macOS/Linux, make the launcher executable if necessary:
    ```sh

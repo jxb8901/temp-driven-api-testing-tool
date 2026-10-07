@@ -12,6 +12,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -19,6 +21,13 @@ import java.util.concurrent.atomic.AtomicLong;
  * Runs shell commands with timeout handling and stdout/stderr capture.
  */
 public class CommandRunner {
+    private static final Set<Process> ACTIVE_PROCESSES = Collections.newSetFromMap(new ConcurrentHashMap<Process, Boolean>());
+    private static boolean shuttingDown;
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+            @Override public void run() { terminateActiveProcesses(); }
+        }, "att-command-process-shutdown"));
+    }
     private static final AtomicLong STDOUT_BYTES = new AtomicLong();
     private static final AtomicLong STDERR_BYTES = new AtomicLong();
     private static final AtomicLong TRUNCATED_STREAMS = new AtomicLong();
@@ -44,6 +53,10 @@ public class CommandRunner {
         if (workingDirectory != null) builder.directory(workingDirectory.toFile());
         if (environment != null && !environment.isEmpty()) builder.environment().putAll(environment);
         Process process = builder.start();
+        synchronized (ACTIVE_PROCESSES) {
+            if (shuttingDown) terminate(process);
+            else ACTIVE_PROCESSES.add(process);
+        }
         // Drain both streams concurrently so a verbose script cannot block on a full pipe.
         CapturePolicy policy = capture.get();
         if (policy == null) policy = CapturePolicy.previewOnly(65536);
@@ -56,33 +69,68 @@ public class CommandRunner {
         outThread.start();
         errThread.start();
 
-        boolean completed;
         try {
-            completed = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (InterruptedException interrupted) {
-            process.destroyForcibly();
-            try { process.waitFor(5L, TimeUnit.SECONDS); } catch (InterruptedException ignored) { }
-            try { join(outThread, process.getInputStream()); } catch (InterruptedException ignored) {
-                try { process.getInputStream().close(); } catch (IOException ignoredInput) { }
+            boolean completed;
+            try {
+                completed = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (InterruptedException interrupted) {
+                terminate(process);
+                try { join(outThread, process.getInputStream()); } catch (InterruptedException ignored) {
+                    try { process.getInputStream().close(); } catch (IOException ignoredInput) { }
+                }
+                try { join(errThread, process.getErrorStream()); } catch (InterruptedException ignored) {
+                    try { process.getErrorStream().close(); } catch (IOException ignoredError) { }
+                }
+                stdoutCapture.close(); stderrCapture.close();
+                Thread.currentThread().interrupt();
+                throw interrupted;
             }
-            try { join(errThread, process.getErrorStream()); } catch (InterruptedException ignored) {
-                try { process.getErrorStream().close(); } catch (IOException ignoredError) { }
+            if (!completed) {
+                terminate(process);
+                join(outThread, process.getInputStream());
+                join(errThread, process.getErrorStream());
+                stdoutCapture.close(); stderrCapture.close();
+                return result(-1, stdoutCapture, stderrCapture, stdout.failure(), stderr.failure(), true);
             }
-            stdoutCapture.close(); stderrCapture.close();
-            Thread.currentThread().interrupt();
-            throw interrupted;
-        }
-        if (!completed) {
-            process.destroyForcibly();
             join(outThread, process.getInputStream());
             join(errThread, process.getErrorStream());
             stdoutCapture.close(); stderrCapture.close();
-            return result(-1, stdoutCapture, stderrCapture, stdout.failure(), stderr.failure(), true);
+            return result(process.exitValue(), stdoutCapture, stderrCapture, stdout.failure(), stderr.failure(), false);
+        } finally {
+            ACTIVE_PROCESSES.remove(process);
         }
-        join(outThread, process.getInputStream());
-        join(errThread, process.getErrorStream());
-        stdoutCapture.close(); stderrCapture.close();
-        return result(process.exitValue(), stdoutCapture, stderrCapture, stdout.failure(), stderr.failure(), false);
+    }
+
+    private static void terminateActiveProcesses() {
+        Process[] processes;
+        synchronized (ACTIVE_PROCESSES) {
+            shuttingDown = true;
+            processes = ACTIVE_PROCESSES.toArray(new Process[ACTIVE_PROCESSES.size()]);
+        }
+        for (Process process : processes) process.destroy();
+        for (Process process : processes) {
+            try {
+                if (!process.waitFor(500L, TimeUnit.MILLISECONDS)) process.destroyForcibly();
+            } catch (InterruptedException interrupted) {
+                process.destroyForcibly();
+                Thread.currentThread().interrupt();
+            }
+        }
+        for (Process process : processes) {
+            try { process.waitFor(2L, TimeUnit.SECONDS); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        }
+        synchronized (ACTIVE_PROCESSES) { ACTIVE_PROCESSES.clear(); }
+    }
+
+    private static void terminate(Process process) {
+        process.destroy();
+        try {
+            if (!process.waitFor(500L, TimeUnit.MILLISECONDS)) process.destroyForcibly();
+        } catch (InterruptedException interrupted) {
+            process.destroyForcibly();
+            Thread.currentThread().interrupt();
+        }
     }
 
     public CommandResult runWithCapture(List<String> commandArguments, Duration timeout, java.nio.file.Path workingDirectory,

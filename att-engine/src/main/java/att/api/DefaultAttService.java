@@ -59,20 +59,25 @@ public final class DefaultAttService implements AttService {
         profile.end("validationMs",phase);
         if(!validation.valid()) return new RunResult(request.runId(),"INVALID",2,elapsed(started),validation.diagnostics,Collections.<String,String>emptyMap(),validationMap(validation));
         if(request.observer()!=null) {
+            Map<String,Object> progress = new LinkedHashMap<String,Object>();
+            progress.put("productVersion", att.Version.PRODUCT);
+            progress.put("cases", validation.cases);
+            progress.put("suites", validation.suites);
+            progress.put("templates", validation.templates);
+            progress.put("tools", validation.tools);
             request.observer().onEvent(new ExecutionEvent(ExecutionEvent.Type.PROGRESS, request.runId(), null, null, null,
-                    "VALIDATION_PASS", null, "Validation passed", validationMap(validation)));
-            opts.emitOutput("[1/4] V"+att.Version.PRODUCT+" validation PASS: "+validation);
+                    "VALIDATION_PASS", null, "Validation passed", progress));
+            emitCliProgress(request.observer(), request.runId(), "RUN_VALIDATION_SUMMARY", "Validation passed", progress);
             List<Diagnostic> visible=new ArrayList<Diagnostic>(validation.diagnostics);
             if(!visible.isEmpty()) {
-                opts.emitOutput("");
                 for(int i=0;i<visible.size();i++) {
-                    if(i>0) opts.emitOutput("");
-                    opts.emitOutput(att.core.PathPresentation.displayText(
-                            att.validation.DiagnosticRenderer.validation(visible.get(i)),request.packageRoot()));
+                    Map<String,Object> diagnostic = new LinkedHashMap<String,Object>();
+                    diagnostic.put("diagnostic", visible.get(i).toMap());
+                    emitCliProgress(request.observer(), request.runId(), "VALIDATION_DIAGNOSTIC", null, diagnostic);
                 }
             }
-            opts.emitOutput("[2/4] Selected: "+validation.cases+" cases from "+validation.suites+" suites");
-            opts.emitOutput("[3/4] Executing cases (verbose Case-log mirroring enabled)");
+            emitCliProgress(request.observer(), request.runId(), "RUN_SELECTION_SUMMARY", "Cases selected", progress);
+            emitCliProgress(request.observer(), request.runId(), "RUN_EXECUTION_START", "Executing cases (verbose Case-log mirroring enabled)", Collections.<String,Object>emptyMap());
         }
         RunSummary result=engine.run(opts,validation.diagnostics,profile);
         Map<String,Object> summary=new LinkedHashMap<String,Object>(); summary.put("total",result.total()); summary.put("passed",result.passed()); summary.put("failed",result.failed()); summary.put("error",result.error()); summary.put("skipped",result.skipped()); summary.put("invalid",result.invalid());
@@ -152,6 +157,13 @@ public final class DefaultAttService implements AttService {
         return new LoadResult(id,result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),paths("report",OperationResult.display(report,request.packageRoot()),"outputDirectory",OperationResult.display(runDir,request.packageRoot())),result.toMap());
     }
     private static long elapsed(long started) { return Math.max(0L,(System.nanoTime()-started)/1000000L); }
+    private static void emitCliProgress(ExecutionEventListener observer, String runId, String event, String message, Map<String,Object> data) {
+        if (observer == null) return;
+        Map<String,Object> attributes = new LinkedHashMap<String,Object>(data);
+        attributes.put("event", event);
+        observer.onEvent(new ExecutionEvent(ExecutionEvent.Type.LOG, runId, null, null, null,
+                null, null, message, attributes));
+    }
     private static Map<String,Object> validationMap(PackageValidator.ValidationSummary value) { Map<String,Object> m=new LinkedHashMap<String,Object>();m.put("mode",value.mode);m.put("suites",value.suites);m.put("cases",value.cases);m.put("templates",value.templates);m.put("tools",value.tools);m.put("errors",value.errors());m.put("warnings",value.warnings());return m; }
     @SuppressWarnings("unchecked") private static Map<String,Object> map(Object value) { return value instanceof Map?(Map<String,Object>)value:Collections.<String,Object>emptyMap(); }
 }

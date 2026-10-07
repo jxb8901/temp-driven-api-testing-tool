@@ -264,6 +264,26 @@ public final class FrameworkRunner {
     private static String renderExecutionEvent(att.api.ExecutionEvent event) {
         java.util.Map<String,Object> data = event.data();
         Object kind = data.get("event");
+        if ("RUN_VALIDATION_SUMMARY".equals(kind)) return "[1/4] V" + data.get("productVersion") + " validation PASS: "
+                + data.get("suites") + " suites, " + data.get("cases") + " cases, " + data.get("templates") + " templates, " + data.get("tools") + " tools";
+        if ("RUN_SELECTION_SUMMARY".equals(kind)) return "[2/4] Selected: " + data.get("cases") + " cases from " + data.get("suites") + " suites";
+        if ("RUN_EXECUTION_START".equals(kind)) return "[3/4] " + event.message();
+        if ("VALIDATION_DIAGNOSTIC".equals(kind)) {
+            Object value = data.get("diagnostic");
+            if (value instanceof java.util.Map) {
+                java.util.Map<?,?> diagnostic = (java.util.Map<?,?>) value;
+                Object severity = diagnostic.get("severity"), code = diagnostic.get("code"), message = diagnostic.get("message");
+                StringBuilder rendered = new StringBuilder("  [").append(severity).append("] ").append(code).append(": ").append(message);
+                Object file = diagnostic.get("file"), field = diagnostic.get("field");
+                if (file != null || field != null) rendered.append("\n    location: ")
+                        .append(file == null ? "" : "file=" + file)
+                        .append(file != null && field != null ? ", " : "")
+                        .append(field == null ? "" : "field=" + field);
+                Object suggestion = diagnostic.get("suggestion");
+                if (suggestion != null) rendered.append("\n    suggestion: ").append(suggestion);
+                return rendered.toString();
+            }
+        }
         if ("DEBUG_STARTED".equals(kind)) return "[DEBUG] START target=" + data.get("targetType") + ":" + data.get("targetId")
                 + " input=" + data.get("input") + " output=" + data.get("output");
         if ("DEBUG_INPUT_RESOLVED".equals(kind)) return "[DEBUG] INPUT target=" + data.get("targetType") + ":" + data.get("targetId")
