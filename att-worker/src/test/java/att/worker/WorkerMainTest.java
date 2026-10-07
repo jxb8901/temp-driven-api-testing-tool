@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import att.api.DebugRequest;
 import att.api.DebugResult;
 import att.api.DefaultAttService;
+import att.api.ExecutionEvent;
 import att.api.LoadRequest;
 import att.api.LoadResult;
 import att.api.RunRequest;
@@ -69,8 +70,14 @@ class WorkerMainTest {
         long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
         while(System.nanoTime()<deadline&&!Files.exists(started)&&worker.isAlive()) Thread.sleep(25L);
         if(!Files.exists(started)) {
+            boolean exited=worker.waitFor(1,java.util.concurrent.TimeUnit.SECONDS);
+            if(!exited) {
+                worker.destroyForcibly();
+                exited=worker.waitFor(2,java.util.concurrent.TimeUnit.SECONDS);
+            }
             String out=read(worker.getInputStream()), err=read(worker.getErrorStream());
-            assertTrue(Files.exists(started),"Worker never started the descendant Tool process. exit="+worker.waitFor()+"\n"+out+"\n"+err);
+            assertTrue(Files.exists(started),"Worker never started the descendant Tool process. exit="
+                    +(exited?worker.exitValue():"still running")+"\n"+out+"\n"+err);
         }
         assertTrue(Files.exists(parentStarted),"Command-backed Tool parent did not start");
         worker.destroy();
@@ -269,8 +276,15 @@ class WorkerMainTest {
         Path dispatcher=root.resolve("tools/tool_group_dispatch.sh"); Files.copy(Paths.get("tools/tool_group_dispatch.sh"),dispatcher);
         dispatcher.toFile().setExecutable(true,true); root.resolve("tools/get_ac_date.sh").toFile().setExecutable(true,true);
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\noutputDirectory: output\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntoolGroups: [config/tools/sample.yaml]\n").getBytes(StandardCharsets.UTF_8));
-        RunResult direct=new DefaultAttService().run(new RunRequest(root,null,null,null,null,Collections.singletonList(Paths.get("testcase/quick_start.xlsx")),null,Collections.<String>emptySet(),Collections.<String>emptySet(),Collections.<String>emptySet(),false,false,false,false));
+        List<ExecutionEvent> directEvents=new ArrayList<ExecutionEvent>();
+        RunResult direct=new DefaultAttService().run(new RunRequest(root,null,null,null,null,
+                Collections.singletonList(Paths.get("testcase/quick_start.xlsx")),null,Collections.<String>emptySet(),
+                Collections.<String>emptySet(),Collections.<String>emptySet(),false,false,false,false,
+                null,"reject",false,directEvents::add));
         assertNotNull(direct.executionId()); assertFalse(direct.executionId().trim().isEmpty());
+        assertEquals(1,directEvents.stream().filter(event->"RUN_VALIDATION_SUMMARY".equals(event.data().get("event"))).count());
+        assertEquals(0,directEvents.stream().filter(event->event.type()==ExecutionEvent.Type.LOG
+                && "RUN_VALIDATION_SUMMARY".equals(event.data().get("event"))).count());
         String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-run-job","command","run","packageRoot",root.toString(),"runId","worker-run","suites",Collections.singletonList("testcase/quick_start.xlsx")));
         Process worker=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
         worker.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8)); worker.getOutputStream().close();
@@ -282,6 +296,10 @@ class WorkerMainTest {
         assertEquals("worker-run-job",terminal.get("jobId").asText());
         assertTrue(java.util.Arrays.stream(workerLines).map(line -> { try { return mapper.readTree(line).get("type").asText(); } catch(Exception error) { throw new IllegalStateException(error); } }).anyMatch("PROGRESS"::equals),stdout);
         assertTrue(java.util.Arrays.stream(workerLines).map(line -> { try { return mapper.readTree(line).get("type").asText(); } catch(Exception error) { throw new IllegalStateException(error); } }).anyMatch("LOG"::equals),stdout);
+        assertEquals(1,java.util.Arrays.stream(workerLines).map(line -> { try { return mapper.readTree(line); } catch(Exception error) { throw new IllegalStateException(error); } })
+                .filter(event->"PROGRESS".equals(event.get("type").asText())&&"RUN_VALIDATION_SUMMARY".equals(event.path("event").asText())).count(),stdout);
+        assertEquals(0,java.util.Arrays.stream(workerLines).map(line -> { try { return mapper.readTree(line); } catch(Exception error) { throw new IllegalStateException(error); } })
+                .filter(event->"LOG".equals(event.get("type").asText())&&"RUN_VALIDATION_SUMMARY".equals(event.path("event").asText())).count(),stdout);
         assertEquals("worker-run",workerResult.get("executionId").asText());
         assertFalse(workerResult.has("jobId"));
         Process cli=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),"att.FrameworkRunner","run","--suite","testcase/quick_start.xlsx","--run-id","cli-run","--output-dir",root.resolve("output-cli").toString(),"--format","json","--quiet").directory(root.toFile()).start();

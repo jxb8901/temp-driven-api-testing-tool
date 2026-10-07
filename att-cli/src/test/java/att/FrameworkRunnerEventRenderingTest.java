@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class FrameworkRunnerEventRenderingTest {
     @TempDir Path root;
@@ -46,6 +47,17 @@ class FrameworkRunnerEventRenderingTest {
         assertTrue(output.contains("affected cases:\n      - caseId=Case-12"), output);
         assertTrue(output.contains("[type] must be a mapping"), output);
         assertTrue(output.contains("suggestion: Fix the expression."), output);
+    }
+
+    @Test void validationPassProgressRendersTheCliSummaryOnceFromTheStructuredEvent() throws Exception {
+        Map<String,Object> data = fields("event", "RUN_VALIDATION_SUMMARY", "productVersion", "3.8.0",
+                "suites", 2, "cases", 5, "templates", 3, "tools", 4);
+        ExecutionEvent event = new ExecutionEvent(ExecutionEvent.Type.PROGRESS, "run-1", null, null, null,
+                "VALIDATION_PASS", null, "Validation passed", data);
+        Method render = FrameworkRunner.class.getDeclaredMethod("renderExecutionEvent", ExecutionEvent.class, Path.class);
+        render.setAccessible(true);
+        assertEquals("[1/4] V3.8.0 validation PASS: 2 suites, 5 cases, 3 templates, 4 tools",
+                render.invoke(null, event, root));
     }
 
     private static Map<String,Object> fields(Object... pairs) {

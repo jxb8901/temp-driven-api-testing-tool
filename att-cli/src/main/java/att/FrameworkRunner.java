@@ -264,7 +264,9 @@ public final class FrameworkRunner {
     private static String renderExecutionEvent(att.api.ExecutionEvent event, Path root) {
         java.util.Map<String,Object> data = event.data();
         Object kind = data.get("event");
-        if ("RUN_VALIDATION_SUMMARY".equals(kind)) return "[1/4] V" + data.get("productVersion") + " validation PASS: "
+        if ("RUN_VALIDATION_SUMMARY".equals(kind)
+                || (event.type() == att.api.ExecutionEvent.Type.PROGRESS && "VALIDATION_PASS".equals(event.status())))
+            return "[1/4] V" + data.get("productVersion") + " validation PASS: "
                 + data.get("suites") + " suites, " + data.get("cases") + " cases, " + data.get("templates") + " templates, " + data.get("tools") + " tools";
         if ("RUN_SELECTION_SUMMARY".equals(kind)) return "[2/4] Selected: " + data.get("cases") + " cases from " + data.get("suites") + " suites";
         if ("RUN_EXECUTION_START".equals(kind)) return "[3/4] " + event.message();

@@ -78,18 +78,52 @@ final class ProcessTreeTerminator {
         }
     }
 
-    private static long pid(Process process) {
+    static long pid(Process process) {
         try {
             Object value = Process.class.getMethod("pid").invoke(process);
             return ((Number) value).longValue();
         } catch (Exception unavailableOnJava8) {
-            for (Class<?> type = process.getClass(); type != null; type = type.getSuperclass()) {
-                try {
-                    Field field = type.getDeclaredField("pid");
-                    field.setAccessible(true);
-                    return ((Number) field.get(process)).longValue();
-                } catch (Exception ignored) { }
+            long pid = numericField(process, "pid");
+            if (pid > 0L) return pid;
+            if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"))
+                return windowsPid(numericField(process, "handle"));
+            return -1L;
+        }
+    }
+
+    private static long numericField(Object value, String name) {
+        for (Class<?> type = value.getClass(); type != null; type = type.getSuperclass()) {
+            try {
+                Field field = type.getDeclaredField(name);
+                field.setAccessible(true);
+                Object found = field.get(value);
+                return found instanceof Number ? ((Number) found).longValue() : -1L;
+            } catch (Exception ignored) { }
+        }
+        return -1L;
+    }
+
+    /** Java 8 Windows exposes a native process handle instead of a PID. */
+    private static long windowsPid(long handle) {
+        if (handle <= 0L) return -1L;
+        Process helper = null;
+        try {
+            String source = "using System; using System.Runtime.InteropServices; public static class AttProcessIdentity { "
+                    + "[DllImport(\"kernel32.dll\", SetLastError=true)] public static extern uint GetProcessId(IntPtr process); }";
+            String script = "Add-Type -TypeDefinition '" + source + "'; [AttProcessIdentity]::GetProcessId([IntPtr]::new([long]"
+                    + handle + "))";
+            helper = new ProcessBuilder("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
+                    .redirectErrorStream(true).start();
+            if (!helper.waitFor(5L, TimeUnit.SECONDS)) {
+                helper.destroyForcibly();
+                return -1L;
             }
+            BufferedReader reader = new BufferedReader(new InputStreamReader(helper.getInputStream(), StandardCharsets.UTF_8));
+            String line, result = null;
+            while ((line = reader.readLine()) != null) if (!line.trim().isEmpty()) result = line.trim();
+            return result == null ? -1L : Long.parseLong(result);
+        } catch (Exception unavailable) {
+            if (helper != null) helper.destroyForcibly();
             return -1L;
         }
     }

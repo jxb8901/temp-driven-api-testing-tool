@@ -65,9 +65,9 @@ public final class DefaultAttService implements AttService {
             progress.put("suites", validation.suites);
             progress.put("templates", validation.templates);
             progress.put("tools", validation.tools);
+            progress.put("event", "RUN_VALIDATION_SUMMARY");
             request.observer().onEvent(new ExecutionEvent(ExecutionEvent.Type.PROGRESS, request.runId(), null, null, null,
                     "VALIDATION_PASS", null, "Validation passed", progress));
-            emitCliProgress(request.observer(), request.runId(), "RUN_VALIDATION_SUMMARY", "Validation passed", progress);
             List<Diagnostic> visible=new ArrayList<Diagnostic>(validation.diagnostics);
             if(!visible.isEmpty()) {
                 for(int i=0;i<visible.size();i++) {
