@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test:
-    name: Java 8 / Maven verify
+  java-8-compatibility:
+    name: Java 8 / CLI, Engine, and Worker
     runs-on: ubuntu-24.04
     timeout-minutes: 25
 
@@ -33,6 +33,37 @@ jobs:
         with:
           distribution: temurin
           java-version: '8'
+          cache: maven
+
+      - name: Verify Java 8 modules
+        run: mvn -B -ntp -pl att-engine,att-cli,att-worker -am clean verify
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-${{ github.run_id }}
+          path: |
+            att-engine/target/surefire-reports/
+            att-cli/target/surefire-reports/
+            att-worker/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  java-17-server-and-release:
+    name: Java 17 / Server and full distribution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
           cache: maven
 
       - name: Install Pandoc
@@ -58,11 +89,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: surefire-reports-${{ github.run_id }}
+          name: java-17-surefire-reports-${{ github.run_id }}
           path: |
             att-engine/target/surefire-reports/
             att-cli/target/surefire-reports/
             att-worker/target/surefire-reports/
+            att-server/target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 7
 
