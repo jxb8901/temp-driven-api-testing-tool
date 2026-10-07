@@ -1,10 +1,5 @@
 package att.exec;
 
-import com.sun.jna.Function;
-import com.sun.jna.Memory;
-import com.sun.jna.Native;
-import com.sun.jna.NativeLibrary;
-import com.sun.jna.Pointer;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.lang.reflect.Field;
@@ -19,59 +14,15 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
-/** Terminates a Tool process and descendants without requiring Java 9 at compile time. */
+/** Best-effort termination of a Tool process and, where supported, its descendants. */
 final class ProcessTreeTerminator {
-    private static final Map<Process,Pointer> WINDOWS_JOBS = new ConcurrentHashMap<Process,Pointer>();
     private ProcessTreeTerminator() { }
-
-    /** Assigns Windows Tool processes to a kill-on-close job owned by this JVM. */
-    static void attachWindowsJob(Process process) {
-        if (!isWindows() || process == null) return;
-        Pointer job = null;
-        try {
-            long processHandle = numericField(process, "handle");
-            if (processHandle <= 0L) return;
-            NativeLibrary kernel32 = NativeLibrary.getInstance("kernel32");
-            job = function(kernel32, "CreateJobObjectW").invokePointer(new Object[] { null, null });
-            if (job == null || Pointer.nativeValue(job) == 0L) return;
-            // Extended limits contain four SIZE_T values after the basic and I/O
-            // counters. Keep the full native structure size for both bitnesses.
-            Memory limits = new Memory(Native.POINTER_SIZE == 8 ? 144L : 112L);
-            limits.clear();
-            limits.setInt(16L, 0x2000); // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            int configured = function(kernel32, "SetInformationJobObject").invokeInt(
-                    new Object[] { job, Integer.valueOf(9), limits, Integer.valueOf((int) limits.size()) });
-            int assigned = configured == 0 ? 0 : function(kernel32, "AssignProcessToJobObject").invokeInt(
-                    new Object[] { job, new Pointer(processHandle) });
-            if (assigned != 0) {
-                WINDOWS_JOBS.put(process, job);
-                job = null;
-            }
-        } catch (RuntimeException unavailable) {
-            // The normal process-tree fallback remains available if job assignment is unavailable.
-        } catch (LinkageError unavailable) {
-            // The normal process-tree fallback remains available if native access is unavailable.
-        } finally {
-            if (job != null) closeWindowsHandle(job);
-        }
-    }
-
-    static void releaseWindowsJob(Process process) {
-        Pointer job = WINDOWS_JOBS.remove(process);
-        if (job != null) closeWindowsHandle(job);
-    }
-
-    static boolean hasWindowsJob(Process process) { return WINDOWS_JOBS.containsKey(process); }
 
     static void terminate(Process process) {
         if (process == null || !process.isAlive()) return;
-        if (terminateWithProcessHandle(process)) {
-            releaseWindowsJob(process);
-            return;
-        }
+        if (terminateWithProcessHandle(process)) return;
         long pid = pid(process);
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (pid > 0 && os.contains("win")) {
@@ -93,7 +44,6 @@ final class ProcessTreeTerminator {
             if (process.isAlive()) process.destroyForcibly();
         }
         waitBriefly(process, 2000L);
-        releaseWindowsJob(process);
     }
 
     /** Uses ProcessHandle reflectively when running on Java 9 or later. */
@@ -135,8 +85,6 @@ final class ProcessTreeTerminator {
         } catch (Exception unavailableOnJava8) {
             long pid = numericField(process, "pid");
             if (pid > 0L) return pid;
-            if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"))
-                return windowsPid(numericField(process, "handle"));
             return -1L;
         }
     }
@@ -151,33 +99,6 @@ final class ProcessTreeTerminator {
             } catch (Exception ignored) { }
         }
         return -1L;
-    }
-
-    /** Java 8 Windows exposes a native process handle instead of a PID. */
-    private static long windowsPid(long handle) {
-        if (handle <= 0L) return -1L;
-        try {
-            Function getProcessId = NativeLibrary.getInstance("kernel32").getFunction("GetProcessId");
-            return getProcessId.invokeInt(new Object[] { new Pointer(handle) }) & 0xffffffffL;
-        } catch (RuntimeException unavailable) {
-            return -1L;
-        } catch (LinkageError unavailable) {
-            return -1L;
-        }
-    }
-
-    private static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-    }
-
-    private static Function function(NativeLibrary library, String name) {
-        return library.getFunction(name, Function.ALT_CONVENTION);
-    }
-
-    private static void closeWindowsHandle(Pointer handle) {
-        try { function(NativeLibrary.getInstance("kernel32"), "CloseHandle").invokeInt(new Object[] { handle }); }
-        catch (RuntimeException ignored) { }
-        catch (LinkageError ignored) { }
     }
 
     private static Set<Long> unixDescendants(long rootPid) {

@@ -53,7 +53,6 @@ public class CommandRunner {
         if (workingDirectory != null) builder.directory(workingDirectory.toFile());
         if (environment != null && !environment.isEmpty()) builder.environment().putAll(environment);
         Process process = builder.start();
-        ProcessTreeTerminator.attachWindowsJob(process);
         synchronized (ACTIVE_PROCESSES) {
             if (shuttingDown) terminate(process);
             else ACTIVE_PROCESSES.add(process);
@@ -99,7 +98,6 @@ public class CommandRunner {
             return result(process.exitValue(), stdoutCapture, stderrCapture, stdout.failure(), stderr.failure(), false);
         } finally {
             ACTIVE_PROCESSES.remove(process);
-            ProcessTreeTerminator.releaseWindowsJob(process);
         }
     }
 

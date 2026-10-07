@@ -37,6 +37,6 @@ The first implementation emits `STATUS`, zero or more `LOG` / `PROGRESS` events 
 
 ## Process and output boundary
 
-Run the packaged Worker with `java -cp 'lib/*' att.worker.WorkerMain`. Terminating that process cancels the job boundary. Engine resources use their normal cleanup paths during graceful termination; a future server may escalate to forced termination after its configured timeout. Package-authored files are the caller's responsibility and are addressed only below `packageRoot` or an explicitly supplied output location.
+Run the packaged Worker with `java -cp 'lib/*' att.worker.WorkerMain`. Terminating that process cancels the job boundary. Engine resources use their normal cleanup paths during graceful termination; command-backed Tool processes receive best-effort cleanup. On Windows with Java 8, stopping a Worker does not guarantee that descendants of an external Tool process are stopped. This Worker contract does not add a mandatory native dependency solely to guarantee descendant cleanup; a future server may apply its own process supervision and escalation policy. Package-authored files are the caller's responsibility and are addressed only below `packageRoot` or an explicitly supplied output location.
 
 The Worker artifact is shipped for future Server integration, but the supported end-user entry points remain `att.sh` and `att.bat`.

@@ -10,17 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ProcessTreeTerminatorWindowsTest {
     @Test
     @EnabledOnOs(OS.WINDOWS)
-    void resolvesJava8WindowsProcessHandleAndTerminatesTheProcess() throws Exception {
+    void bestEffortTerminationStopsTheDirectWindowsProcess() throws Exception {
         Process process = new ProcessBuilder("cmd.exe", "/c", "ping -n 20 127.0.0.1 >NUL").start();
         try {
-            assertTrue(ProcessTreeTerminator.pid(process) > 0L,
-                    "Java 8 Windows process handle must resolve to a PID for taskkill /T");
-            ProcessTreeTerminator.attachWindowsJob(process);
-            assertTrue(ProcessTreeTerminator.hasWindowsJob(process),
-                    "Tool process must be attached to a kill-on-close Windows Job Object");
+            assertTrue(process.isAlive());
         } finally {
             ProcessTreeTerminator.terminate(process);
         }
-        assertFalse(process.isAlive(), "taskkill should terminate the Windows process");
+        assertFalse(process.isAlive(), "best-effort termination should stop the direct Windows process");
     }
 }

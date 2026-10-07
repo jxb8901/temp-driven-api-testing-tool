@@ -43,7 +43,6 @@ for jar in \
   "$HOME"/.m2/repository/org/apache/poi/poi-ooxml-lite/5.2.5/poi-ooxml-lite-5.2.5.jar \
   "$HOME"/.m2/repository/com/github/virtuald/curvesapi/1.08/curvesapi-1.08.jar \
   "$HOME"/.m2/repository/org/yaml/snakeyaml/2.2/snakeyaml-2.2.jar \
-  "$HOME"/.m2/repository/net/java/dev/jna/jna/5.13.0/jna-5.13.0.jar \
   "$HOME"/.m2/repository/org/apache/logging/log4j/log4j-api/2.21.1/log4j-api-2.21.1.jar; do CP="$CP:$jar"; done
 for jar in "$ROOT_DIR"/lib/*.jar; do [ -f "$jar" ] || continue; CP="$CP:$jar"; done
 NEEDS_BUILD=false
