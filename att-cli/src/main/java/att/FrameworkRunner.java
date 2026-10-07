@@ -45,7 +45,7 @@ public final class FrameworkRunner {
                 AttService service = new DefaultAttService();
                 DebugResult debug = service.debug(new DebugRequest(root, options.configPath(), options.environment(),
                         options.outputDirectory(), options.runId(), options.debugTargetType(), options.debugTargetId(),
-                        options.debugInput(), options.unsafeFailureDetails(), cliObserver(options)));
+                        options.debugInput(), options.unsafeFailureDetails(), cliObserver(options, root)));
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
                     output.put("executionId", debug.executionId()); output.put("status", debug.status()); output.put("exitCode", debug.exitCode());
@@ -165,7 +165,7 @@ public final class FrameworkRunner {
                     options.outputDirectory(), options.runId(), options.suitePaths(), options.suiteDirectory(),
                     options.caseIds(), options.tags(), options.excludeTags(), options.all(), options.rerunFailed(),
                     options.dryRun(), options.failFast(), options.ciOutputs(), options.concurrencyMode(), options.profile(),
-                    cliObserver(options), options.updateSnapshot()));
+                    cliObserver(options, root), options.updateSnapshot()));
             if ("json".equals(options.format())) {
                 if ("INVALID".equals(run.status())) {
                     PackageValidator.ValidationSummary invalid = new PackageValidator.ValidationSummary(options.validationScope(),
@@ -249,19 +249,19 @@ public final class FrameworkRunner {
         return att.validation.JsonSupport.write(output);
     }
 
-    private static att.api.ExecutionEventListener cliObserver(final CliOptions options) {
+    private static att.api.ExecutionEventListener cliObserver(final CliOptions options, final Path root) {
         return event -> {
             if ((options.quiet() && event.type() != att.api.ExecutionEvent.Type.WARNING)
                     || (!options.verbose() && event.type() != att.api.ExecutionEvent.Type.WARNING
                     && event.type() != att.api.ExecutionEvent.Type.STATUS)) return;
-            String message = renderExecutionEvent(event);
+            String message = renderExecutionEvent(event, root);
             if (message == null) return;
             java.io.PrintStream output = "json".equals(options.format()) ? System.err : System.out;
             synchronized (output) { output.println(message); output.flush(); }
         };
     }
 
-    private static String renderExecutionEvent(att.api.ExecutionEvent event) {
+    private static String renderExecutionEvent(att.api.ExecutionEvent event, Path root) {
         java.util.Map<String,Object> data = event.data();
         Object kind = data.get("event");
         if ("RUN_VALIDATION_SUMMARY".equals(kind)) return "[1/4] V" + data.get("productVersion") + " validation PASS: "
@@ -270,19 +270,8 @@ public final class FrameworkRunner {
         if ("RUN_EXECUTION_START".equals(kind)) return "[3/4] " + event.message();
         if ("VALIDATION_DIAGNOSTIC".equals(kind)) {
             Object value = data.get("diagnostic");
-            if (value instanceof java.util.Map) {
-                java.util.Map<?,?> diagnostic = (java.util.Map<?,?>) value;
-                Object severity = diagnostic.get("severity"), code = diagnostic.get("code"), message = diagnostic.get("message");
-                StringBuilder rendered = new StringBuilder("  [").append(severity).append("] ").append(code).append(": ").append(message);
-                Object file = diagnostic.get("file"), field = diagnostic.get("field");
-                if (file != null || field != null) rendered.append("\n    location: ")
-                        .append(file == null ? "" : "file=" + file)
-                        .append(file != null && field != null ? ", " : "")
-                        .append(field == null ? "" : "field=" + field);
-                Object suggestion = diagnostic.get("suggestion");
-                if (suggestion != null) rendered.append("\n    suggestion: ").append(suggestion);
-                return rendered.toString();
-            }
+            if (value instanceof java.util.Map) return renderValidationDiagnostic(
+                    (java.util.Map<?,?>) att.core.PathPresentation.displayStructure(value, root));
         }
         if ("DEBUG_STARTED".equals(kind)) return "[DEBUG] START target=" + data.get("targetType") + ":" + data.get("targetId")
                 + " input=" + data.get("input") + " output=" + data.get("output");
@@ -304,6 +293,103 @@ public final class FrameworkRunner {
         if (event.type() == att.api.ExecutionEvent.Type.STATUS && "CANCELLED".equals(event.status()) && data.get("target") != null)
             return "[DEBUG] CANCELLED target=" + data.get("target");
         return event.message();
+    }
+
+    private static String renderValidationDiagnostic(java.util.Map<?,?> diagnostic) {
+        StringBuilder out = new StringBuilder();
+        appendDiagnosticLines(out, "  [" + diagnostic.get("severity") + "] " + diagnostic.get("code") + ": ",
+                "\n    ", diagnostic.get("message"));
+        java.util.Map<?,?> source = diagnostic.get("source") instanceof java.util.Map
+                ? (java.util.Map<?,?>) diagnostic.get("source") : java.util.Collections.emptyMap();
+        String[] locationKeys = {"file", "field", "sheet", "row", "column", "template", "action"};
+        java.util.List<String> location = new java.util.ArrayList<String>();
+        for (String key : locationKeys) addLocation(location, key, diagnostic.get(key));
+        addLocation(location, "sourceFile", source.get("file"));
+        addLocation(location, "line", source.get("line"));
+        addLocation(location, "sourceColumn", source.get("column"));
+        addLocation(location, "endLine", source.get("endLine"));
+        addLocation(location, "endColumn", source.get("endColumn"));
+        if (!location.isEmpty()) out.append("\n    location: ").append(String.join(", ", location));
+        appendDiagnosticContext(out, diagnostic.get("context"));
+        appendDiagnosticSource(out, source);
+        appendDiagnosticSchemaViolations(out, diagnostic.get("schemaViolations"));
+        Object occurrences = diagnostic.get("occurrences");
+        if (occurrences instanceof Number && ((Number) occurrences).intValue() > 1) {
+            out.append("\n    occurrences: ").append(occurrences);
+            Object affected = diagnostic.get("affectedCases");
+            if (affected instanceof Iterable) {
+                out.append("\n    affected cases:");
+                for (Object item : (Iterable<?>) affected) out.append("\n      - ").append(flatMap(item));
+            }
+        }
+        appendDiagnosticLines(out, "\n    suggestion: ", "\n      ", diagnostic.get("suggestion"));
+        return out.toString();
+    }
+
+    private static void appendDiagnosticContext(StringBuilder out, Object value) {
+        if (!(value instanceof java.util.Map)) return;
+        for (java.util.Map.Entry<?,?> item : ((java.util.Map<?,?>) value).entrySet())
+            out.append('\n').append("    ").append(item.getKey()).append(": ").append(item.getValue());
+    }
+
+    private static void appendDiagnosticSource(StringBuilder out, java.util.Map<?,?> source) {
+        Object excerptValue = source.get("excerpt");
+        if (excerptValue == null) return;
+        String[] lines = String.valueOf(excerptValue).split("\\r?\\n", -1);
+        int line = number(source.get("line"), 1);
+        int column = number(source.get("column"), 1);
+        int start = number(source.get("excerptStartLine"), line);
+        int caretLine = Math.max(0, Math.min(lines.length - 1, line - start));
+        String markedLine = lines[caretLine];
+        int spaces = Math.min(Math.max(0, column - 1), markedLine.length());
+        for (int index = 0; index < lines.length; index++) {
+            out.append('\n').append("    ").append(lines[index]);
+            if (index == caretLine) {
+                out.append('\n').append("    ");
+                for (int col = 0; col < spaces; col++) out.append(markedLine.charAt(col) == '\t' ? '\t' : ' ');
+                out.append('^');
+            }
+        }
+    }
+
+    private static void appendDiagnosticSchemaViolations(StringBuilder out, Object value) {
+        if (!(value instanceof Iterable)) return;
+        java.util.Iterator<?> iterator = ((Iterable<?>) value).iterator();
+        if (!iterator.hasNext()) return;
+        out.append("\n    schemaViolations:");
+        while (iterator.hasNext()) {
+            Object item = iterator.next();
+            if (!(item instanceof java.util.Map)) { out.append("\n      ").append(item); continue; }
+            java.util.Map<?,?> violation = (java.util.Map<?,?>) item;
+            out.append("\n      ");
+            Object path = violation.get("path"), keyword = violation.get("keyword"), message = violation.get("message");
+            if (path != null && !String.valueOf(path).isEmpty()) out.append(path).append(' ');
+            if (keyword != null && !String.valueOf(keyword).isEmpty()) out.append('[').append(keyword).append("] ");
+            out.append(message == null ? violation : message);
+        }
+    }
+
+    private static void addLocation(java.util.List<String> location, String key, Object value) {
+        if (value != null && !String.valueOf(value).isEmpty()) location.add(key + "=" + value);
+    }
+
+    private static void appendDiagnosticLines(StringBuilder out, String first, String rest, Object value) {
+        if (value == null) return;
+        String[] lines = String.valueOf(value).split("\\r?\\n", -1);
+        out.append(first).append(lines[0]);
+        for (int i = 1; i < lines.length; i++) out.append(rest).append(lines[i]);
+    }
+
+    private static int number(Object value, int fallback) {
+        return value instanceof Number ? ((Number) value).intValue() : fallback;
+    }
+
+    private static String flatMap(Object value) {
+        if (!(value instanceof java.util.Map)) return String.valueOf(value);
+        java.util.List<String> items = new java.util.ArrayList<String>();
+        for (java.util.Map.Entry<?,?> entry : ((java.util.Map<?,?>) value).entrySet())
+            items.add(entry.getKey() + "=" + entry.getValue());
+        return String.join(", ", items);
     }
 
     private static FrameworkConfig loadConfig(CliOptions options, Path root) throws Exception {

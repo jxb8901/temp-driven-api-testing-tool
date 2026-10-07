@@ -43,14 +43,16 @@ class WorkerMainTest {
                 else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING);
             }
         }
-        Path started=root.resolve("tool-started.marker"), completed=root.resolve("tool-completed.marker");
+        Path parentStarted=root.resolve("tool-parent-started.marker");
+        Path started=root.resolve("tool-descendant-started.marker"), completed=root.resolve("tool-descendant-completed.marker");
         String javaExecutable=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();
         String classpath=System.getProperty("java.class.path");
         Path config=root.resolve("config/config.yaml");
         Files.write(config,("schemaVersion: att-config/v2.11\nenvironment: SIT\noutputDirectory: output\n"
                 +"templates: {root: templates}\ntestcase: {root: testcase}\ntools:\n"
                 +"  slow:\n    name: Slow command\n    description: Worker termination regression\n"
-                +"    command: [\""+javaExecutable+"\", -cp, \""+classpath+"\", att.worker.ToolProcessFixture, \""+started+"\", \""+completed+"\"]\n"
+                +"    command: ["+yamlQuote(javaExecutable)+", '-cp', "+yamlQuote(classpath)+", 'att.worker.ToolProcessFixture', 'parent', "
+                +yamlQuote(parentStarted)+", "+yamlQuote(started)+", "+yamlQuote(completed)+"]\n"
                 +"    stdoutFormat: text\n    arguments: {}\n")
                 .getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SLOW/template.yaml"),("schemaVersion: att-template/v3.4\nname: SLOW\n"
@@ -59,23 +61,26 @@ class WorkerMainTest {
         Files.write(root.resolve("templates/SLOW/debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n".getBytes(StandardCharsets.UTF_8));
         String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","terminate-tool-job",
                 "command","debug","packageRoot",root.toString(),"target",fields("type","template","id","SLOW")));
+        Path workerError=root.resolve("worker.stderr");
         Process worker=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",
-                System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
+                System.getProperty("java.class.path"),WorkerMain.class.getName()).redirectError(workerError.toFile()).start();
         worker.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
         worker.getOutputStream().close();
         long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
         while(System.nanoTime()<deadline&&!Files.exists(started)&&worker.isAlive()) Thread.sleep(25L);
         if(!Files.exists(started)) {
             String out=read(worker.getInputStream()), err=read(worker.getErrorStream());
-            assertTrue(Files.exists(started),"Worker never started the command-backed Tool. exit="+worker.waitFor()+"\n"+out+"\n"+err);
+            assertTrue(Files.exists(started),"Worker never started the descendant Tool process. exit="+worker.waitFor()+"\n"+out+"\n"+err);
         }
+        assertTrue(Files.exists(parentStarted),"Command-backed Tool parent did not start");
         worker.destroy();
         if(!worker.waitFor(4,java.util.concurrent.TimeUnit.SECONDS)) {
             worker.destroyForcibly();
             assertTrue(worker.waitFor(3,java.util.concurrent.TimeUnit.SECONDS),"Worker process could not be stopped");
         }
         Thread.sleep(7000L);
-        assertFalse(Files.exists(completed),"ATT-started Tool command completed after its Worker was terminated");
+        assertFalse(Files.exists(completed),"ATT-started Tool command completed after its Worker was terminated. stderr="
+                +new String(Files.readAllBytes(workerError),StandardCharsets.UTF_8));
     }
 
     @Test void terminatingActiveWorkerLeavesPackageAuthoredFilesUntouched() throws Exception {
@@ -299,5 +304,6 @@ class WorkerMainTest {
     @SuppressWarnings("unchecked") private static Map<String,Object> toMap(Object value) { return (Map<String,Object>)value; }
     private static void copyTree(Path source,Path destination) throws Exception { try(java.util.stream.Stream<Path> paths=Files.walk(source)) { for(Path item:(Iterable<Path>)paths::iterator) { Path target=destination.resolve(source.relativize(item)); if(Files.isDirectory(item))Files.createDirectories(target);else Files.copy(item,target,StandardCopyOption.REPLACE_EXISTING); } } }
     private static boolean isWindows() { return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win"); }
+    private static String yamlQuote(Object value) { return "'"+String.valueOf(value).replace("'", "''")+"'"; }
     private static String read(InputStream stream) throws Exception { ByteArrayOutputStream out=new ByteArrayOutputStream(); byte[] buffer=new byte[4096]; int n; while((n=stream.read(buffer))>=0)out.write(buffer,0,n); return new String(out.toByteArray(),StandardCharsets.UTF_8); }
 }

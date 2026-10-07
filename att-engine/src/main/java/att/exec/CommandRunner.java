@@ -107,30 +107,12 @@ public class CommandRunner {
             shuttingDown = true;
             processes = ACTIVE_PROCESSES.toArray(new Process[ACTIVE_PROCESSES.size()]);
         }
-        for (Process process : processes) process.destroy();
-        for (Process process : processes) {
-            try {
-                if (!process.waitFor(500L, TimeUnit.MILLISECONDS)) process.destroyForcibly();
-            } catch (InterruptedException interrupted) {
-                process.destroyForcibly();
-                Thread.currentThread().interrupt();
-            }
-        }
-        for (Process process : processes) {
-            try { process.waitFor(2L, TimeUnit.SECONDS); }
-            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
-        }
+        for (Process process : processes) ProcessTreeTerminator.terminate(process);
         synchronized (ACTIVE_PROCESSES) { ACTIVE_PROCESSES.clear(); }
     }
 
     private static void terminate(Process process) {
-        process.destroy();
-        try {
-            if (!process.waitFor(500L, TimeUnit.MILLISECONDS)) process.destroyForcibly();
-        } catch (InterruptedException interrupted) {
-            process.destroyForcibly();
-            Thread.currentThread().interrupt();
-        }
+        ProcessTreeTerminator.terminate(process);
     }
 
     public CommandResult runWithCapture(List<String> commandArguments, Duration timeout, java.nio.file.Path workingDirectory,
