@@ -39,7 +39,7 @@ class LoadAcceptanceTest {
         Path closedScenario = writeScenario("closed-cli.yaml",
                 "schemaVersion: att-load/v1.0\n"
                 + "target: {type: tool, id: sample.getAcDate}\n"
-                        + "load: {users: 1, duration: 25ms}\n");
+                        + "load: {users: 1, duration: 500ms}\n");
         Path arrivalScenario = writeScenario("arrival-cli.yaml",
                 "schemaVersion: att-load/v1.0\n"
                         + "target: {type: tool, id: sample.getAcDate}\n"
