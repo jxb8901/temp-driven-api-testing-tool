@@ -1,5 +1,8 @@
 package att.exec;
 
+import com.sun.jna.Function;
+import com.sun.jna.NativeLibrary;
+import com.sun.jna.Pointer;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.lang.reflect.Field;
@@ -106,24 +109,12 @@ final class ProcessTreeTerminator {
     /** Java 8 Windows exposes a native process handle instead of a PID. */
     private static long windowsPid(long handle) {
         if (handle <= 0L) return -1L;
-        Process helper = null;
         try {
-            String source = "using System; using System.Runtime.InteropServices; public static class AttProcessIdentity { "
-                    + "[DllImport(\"kernel32.dll\", SetLastError=true)] public static extern uint GetProcessId(IntPtr process); }";
-            String script = "Add-Type -TypeDefinition '" + source + "'; [AttProcessIdentity]::GetProcessId([IntPtr]::new([long]"
-                    + handle + "))";
-            helper = new ProcessBuilder("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
-                    .redirectErrorStream(true).start();
-            if (!helper.waitFor(5L, TimeUnit.SECONDS)) {
-                helper.destroyForcibly();
-                return -1L;
-            }
-            BufferedReader reader = new BufferedReader(new InputStreamReader(helper.getInputStream(), StandardCharsets.UTF_8));
-            String line, result = null;
-            while ((line = reader.readLine()) != null) if (!line.trim().isEmpty()) result = line.trim();
-            return result == null ? -1L : Long.parseLong(result);
-        } catch (Exception unavailable) {
-            if (helper != null) helper.destroyForcibly();
+            Function getProcessId = NativeLibrary.getInstance("kernel32").getFunction("GetProcessId");
+            return getProcessId.invokeInt(new Object[] { new Pointer(handle) }) & 0xffffffffL;
+        } catch (RuntimeException unavailable) {
+            return -1L;
+        } catch (LinkageError unavailable) {
             return -1L;
         }
     }
