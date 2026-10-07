@@ -27,6 +27,12 @@ public final class PerformanceProfile {
     public PerformanceProfile(boolean enabled) { this.enabled = enabled; }
     public long begin() { return System.nanoTime(); }
     public void end(String phase, long phaseStarted) { if (enabled) phases.put(phase, millis(System.nanoTime() - phaseStarted)); }
+    public void endAccumulated(String phase, long phaseStarted) {
+        if (!enabled) return;
+        long elapsed = millis(System.nanoTime() - phaseStarted);
+        Object previous = phases.get(phase);
+        phases.put(phase, elapsed + (previous instanceof Number ? ((Number) previous).longValue() : 0L));
+    }
     public void counter(String name, long value) { if (enabled) counters.put(name, value); }
 
     public void write(Path runDirectory) throws Exception {

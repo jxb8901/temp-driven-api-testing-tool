@@ -167,15 +167,17 @@ class WorkerMainTest {
         assertEquals(direct.status(),workerResult.get("status").asText()); assertEquals(direct.exitCode(),workerResult.get("exitCode").asInt());
         assertEquals(direct.summary().keySet(),toMap(workerResult.get("summary")).keySet());
         assertEquals(direct.summary().get("total"),workerResult.get("summary").get("total").asLong());
-        assertNotNull(cliResult.get("status"),cliOut+cliErr); assertNotNull(cliResult.get("exitCode"),cliOut+cliErr);
-        assertEquals(direct.status(),cliResult.get("status").asText()); assertEquals(direct.exitCode(),cliResult.get("exitCode").asInt());
-        assertEquals("cli-run",cliResult.get("executionId").asText());
-        assertEquals(direct.summary().keySet(),toMap(cliResult.get("summary")).keySet());
-        assertEquals(direct.summary().get("total"),cliResult.get("summary").get("total").asLong());
+        assertEquals(java.util.Arrays.asList("total", "passed", "failed", "error", "skipped", "invalid", "report"),
+                iterableNames(cliResult.fieldNames()), cliOut+cliErr);
+        assertEquals(((Number)direct.summary().get("total")).longValue(),cliResult.get("total").asLong());
+        assertEquals(((Number)direct.summary().get("passed")).longValue(),cliResult.get("passed").asLong());
+        assertFalse(cliResult.has("status")); assertFalse(cliResult.has("executionId"));
+        assertTrue(cliResult.get("report").asText().endsWith("/cli-run/report/index.html"));
     }
 
     private static Map<String,Object> fields(Object... values) { Map<String,Object> result=new java.util.LinkedHashMap<String,Object>(); for(int i=0;i+1<values.length;i+=2)result.put(String.valueOf(values[i]),values[i+1]); return result; }
     private static Map<String,Object> toMap(JsonNode node) { return new ObjectMapper().convertValue(node,Map.class); }
+    private static java.util.List<String> iterableNames(java.util.Iterator<String> names) { java.util.List<String> result=new java.util.ArrayList<String>(); while(names.hasNext())result.add(names.next()); return result; }
     @SuppressWarnings("unchecked") private static Map<String,Object> toMap(Object value) { return (Map<String,Object>)value; }
     private static void copyTree(Path source,Path destination) throws Exception { try(java.util.stream.Stream<Path> paths=Files.walk(source)) { for(Path item:(Iterable<Path>)paths::iterator) { Path target=destination.resolve(source.relativize(item)); if(Files.isDirectory(item))Files.createDirectories(target);else Files.copy(item,target,StandardCopyOption.REPLACE_EXISTING); } } }
     private static String read(InputStream stream) throws Exception { ByteArrayOutputStream out=new ByteArrayOutputStream(); byte[] buffer=new byte[4096]; int n; while((n=stream.read(buffer))>=0)out.write(buffer,0,n); return new String(out.toByteArray(),StandardCharsets.UTF_8); }

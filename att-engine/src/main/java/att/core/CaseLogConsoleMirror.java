@@ -7,15 +7,29 @@ import java.util.function.Consumer;
 public final class CaseLogConsoleMirror implements Consumer<String> {
     private final String caseId;
     private final PrintStream output;
+    private final Consumer<String> listener;
 
     public CaseLogConsoleMirror(String caseId, PrintStream output) {
         if (output == null) throw new IllegalArgumentException("Case-log console mirror requires an output stream");
         this.caseId = safeIdentity(caseId);
         this.output = output;
+        this.listener = null;
+    }
+
+    public CaseLogConsoleMirror(String caseId, Consumer<String> listener) {
+        if (listener == null) throw new IllegalArgumentException("Case-log listener is required");
+        this.caseId = safeIdentity(caseId);
+        this.output = null;
+        this.listener = listener;
     }
 
     @Override public void accept(String text) {
         if (text == null || text.isEmpty()) return;
+        if (listener != null) {
+            String value = "[CASE-LOG case=" + caseId + "] " + text;
+            listener.accept(value.endsWith("\n") ? value.substring(0, value.length() - 1) : value);
+            return;
+        }
         synchronized (output) {
             output.print("[CASE-LOG case=" + caseId + "] ");
             output.print(text);

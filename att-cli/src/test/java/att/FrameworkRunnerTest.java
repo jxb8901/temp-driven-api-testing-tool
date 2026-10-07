@@ -50,6 +50,23 @@ class FrameworkRunnerTest {
         assertTrue(error.format().contains("suggestion: Choose another --run-id."));
     }
 
+    @Test void runJsonKeepsTheLegacyFlatCliFieldLayout() throws Exception {
+        java.util.Map<String,Object> summary = new java.util.LinkedHashMap<String,Object>();
+        summary.put("total", 1); summary.put("passed", 1); summary.put("failed", 0);
+        summary.put("error", 0); summary.put("skipped", 0); summary.put("invalid", 0);
+        att.api.RunResult result = new att.api.RunResult("run-1", "PASS", 0, 10,
+                java.util.Collections.<att.validation.Diagnostic>emptyList(),
+                java.util.Collections.singletonMap("report", "/tmp/att/output/run-1/report/index.html"), summary);
+        java.lang.reflect.Method method = FrameworkRunner.class.getDeclaredMethod("runJson", att.api.RunResult.class, java.nio.file.Path.class);
+        method.setAccessible(true);
+        @SuppressWarnings("unchecked") java.util.Map<String,Object> json = att.validation.JsonSupport.mapper()
+                .readValue((String) method.invoke(null, result, java.nio.file.Paths.get("/tmp/att")), java.util.Map.class);
+        assertEquals(java.util.Arrays.asList("total", "passed", "failed", "error", "skipped", "invalid", "report"),
+                new java.util.ArrayList<String>(json.keySet()));
+        assertEquals(1L, ((Number) json.get("total")).longValue());
+        assertEquals("$ATT_HOME/output/run-1/report/index.html", json.get("report"));
+    }
+
     @Test void humanValidationDiagnosticsAreIndentedAndSeparated() throws Exception {
         java.util.List<att.validation.Diagnostic> diagnostics = java.util.Arrays.asList(
                 new att.validation.Diagnostic("ATT-CTX-001", att.validation.Diagnostic.Severity.ERROR,

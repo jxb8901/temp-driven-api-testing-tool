@@ -37,6 +37,8 @@ public final class FrameworkRunner {
             }
             if ("help".equals(options.command())) { help(); return; }
             if ("version".equals(options.command())) { System.out.println(Version.DISPLAY); return; }
+            att.core.PerformanceProfile profile = new att.core.PerformanceProfile(options.profile());
+            long profilePhase = profile.begin();
             FrameworkConfig config;
             try { config = new FrameworkConfigLoader().load(options.configPath(), root, options.environment()); }
             catch (att.validation.DiagnosticException e) { throw e; }
@@ -45,6 +47,7 @@ public final class FrameworkRunner {
                         "Unable to load ATT global configuration", e, options.configPath().toString(), "config",
                         "Check that the config file exists, is readable YAML, and conforms to the configured schema version.");
             }
+            profile.end("configLoadMs", profilePhase);
             if ("debug".equals(options.command())) {
                 if (options.debugTargetType().isEmpty()) {
                     CliDiscovery.printDebug(CliDiscovery.debug(root, config), options.format());
@@ -53,7 +56,8 @@ public final class FrameworkRunner {
                 AttService service = new DefaultAttService();
                 DebugResult debug = service.debug(new DebugRequest(root, options.configPath(), options.environment(),
                         options.outputDirectory(), options.runId(), options.debugTargetType(), options.debugTargetId(),
-                        options.debugInput(), options.unsafeFailureDetails()));
+                        options.debugInput(), options.unsafeFailureDetails(), options.format(), options.quiet(),
+                        options.verbose(), cliOutput(options)));
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
                     output.put("executionId", debug.executionId()); output.put("status", debug.status()); output.put("exitCode", debug.exitCode());
@@ -81,6 +85,7 @@ public final class FrameworkRunner {
                     CliDiscovery.printLoad(CliDiscovery.load(root, config), options.format());
                     return;
                 }
+                profilePhase = profile.begin();
                 att.load.LoadScenarioLoader loader = new att.load.LoadScenarioLoader(root);
                 att.load.LoadScenario scenario;
                 if (options.loadDebug()) {
@@ -92,6 +97,7 @@ public final class FrameworkRunner {
                 } else {
                     scenario = loader.load(options.loadScenario(), att.load.LoadOverrides.from(options));
                 }
+                profile.endAccumulated("validationMs", profilePhase);
                 String loadId = att.core.IdentifierValidator.runId(options.runId() == null || options.runId().trim().isEmpty()
                         ? "load-" + System.currentTimeMillis() : options.runId());
                 java.io.PrintStream progressOutput = "json".equals(options.format()) ? System.err : System.out;
@@ -106,7 +112,7 @@ public final class FrameworkRunner {
                             options.loadArrivalRate(), options.loadWarmup(), options.loadRampUp(), options.loadDuration(),
                             options.loadRampDown(), options.loadThinkTime(), options.loadMaxConcurrent(),
                             options.loadOverloadPolicy(), options.variableOverrides(), progress, scenario,
-                            new att.core.PerformanceProfile(options.profile())));
+                            profile));
                     progress.finish(loadResult.status());
                 } catch (InterruptedException interrupted) {
                     progress.finish("CANCELLED");
@@ -125,7 +131,7 @@ public final class FrameworkRunner {
                 }
                 else {
                     System.out.println("Report: " + att.core.PathPresentation.displayPath(Paths.get(loadResult.paths().get("report")), root));
-                    System.out.println("Metrics: " + loadResult.summary().get("metrics"));
+                    if (!options.quiet()) System.out.println("Metrics: " + loadResult.summary().get("metrics"));
                 }
                 if (loadResult.exitCode() != 0) System.exit(loadResult.exitCode());
                 return;
@@ -189,19 +195,29 @@ public final class FrameworkRunner {
             att.api.RunResult run = service.run(new att.api.RunRequest(root, options.configPath(), options.environment(),
                     options.outputDirectory(), options.runId(), options.suitePaths(), options.suiteDirectory(),
                     options.caseIds(), options.tags(), options.excludeTags(), options.all(), options.rerunFailed(),
-                    options.dryRun(), options.failFast(), options.ciOutputs(), options.concurrencyMode(), options.profile()));
+                    options.dryRun(), options.failFast(), options.ciOutputs(), options.concurrencyMode(), options.profile(),
+                    options.format(), options.quiet(), options.verbose(), cliOutput(options), profile));
             if ("json".equals(options.format())) {
-                System.out.println(att.validation.JsonSupport.write(run.toMap()));
-            } else if (!options.quiet()) {
-                if (run.exitCode() == 2) {
-                    System.err.println("Validation FAIL");
-                    for (att.validation.Diagnostic diagnostic : run.diagnostics())
-                        System.err.println(att.core.PathPresentation.displayText(att.validation.DiagnosticRenderer.exception(diagnostic), root));
-                    System.exit(2);
-                    return;
+                if ("INVALID".equals(run.status())) {
+                    PackageValidator.ValidationSummary invalid = new PackageValidator.ValidationSummary(options.validationScope(),
+                            number(run.summary(), "suites"), number(run.summary(), "cases"), number(run.summary(), "templates"),
+                            number(run.summary(), "tools"), run.diagnostics());
+                    System.out.println(invalid.toJson());
+                } else {
+                    System.out.println(runJson(run, root));
                 }
+            } else if (run.exitCode() == 2) {
+                System.err.println("Validation FAIL");
+                PackageValidator.ValidationSummary invalid = new PackageValidator.ValidationSummary(options.validationScope(),
+                        number(run.summary(), "suites"), number(run.summary(), "cases"), number(run.summary(), "templates"),
+                        number(run.summary(), "tools"), run.diagnostics());
+                printDiagnostics(invalid, options, System.err, true);
+                System.exit(2);
+                return;
+            } else if (!options.quiet()) {
                 java.util.Map<String,Object> summary = run.summary();
-                System.out.printf("Complete: total=%s, passed=%s, failed=%s, error=%s, skipped=%s, invalid=%s%n",
+                System.out.printf(options.verbose() ? "[4/4] Complete: total=%s, passed=%s, failed=%s, error=%s, skipped=%s, invalid=%s%n"
+                                : "Complete: total=%s, passed=%s, failed=%s, error=%s, skipped=%s, invalid=%s%n",
                         summary.get("total"), summary.get("passed"), summary.get("failed"), summary.get("error"), summary.get("skipped"), summary.get("invalid"));
                 if (run.paths().get("report") != null) System.out.println("Report: " + att.core.PathPresentation.displayPath(Paths.get(run.paths().get("report")), root));
             } else {
@@ -209,6 +225,10 @@ public final class FrameworkRunner {
                 System.out.printf("Complete: total=%s, passed=%s, failed=%s, error=%s, skipped=%s, invalid=%s%n",
                         summary.get("total"), summary.get("passed"), summary.get("failed"), summary.get("error"), summary.get("skipped"), summary.get("invalid"));
                 if (run.paths().get("report") != null) System.out.println("Report: " + att.core.PathPresentation.displayPath(Paths.get(run.paths().get("report")), root));
+                for (java.util.Map<String,Object> failure : run.caseFailures()) {
+                    System.err.println("[RUN] " + failure.get("status") + " case=" + failure.get("caseId")
+                            + " caseLog=" + cliDisplayPath((String) failure.get("caseLog"), root));
+                }
             }
             if (run.exitCode() != 0) System.exit(run.exitCode());
         } catch (IllegalArgumentException e) {
@@ -244,6 +264,27 @@ public final class FrameworkRunner {
 
     private static String cliDisplayPath(String value, Path root) {
         return value == null ? null : att.core.PathPresentation.displayPath(Paths.get(value), root);
+    }
+
+    private static int number(java.util.Map<String,Object> values, String key) {
+        Object value = values.get(key);
+        return value instanceof Number ? ((Number) value).intValue() : 0;
+    }
+
+    static String runJson(att.api.RunResult run, Path root) {
+        java.util.Map<String,Object> output = new java.util.LinkedHashMap<String,Object>();
+        java.util.Map<String,Object> summary = run.summary();
+        for (String key : new String[]{"total", "passed", "failed", "error", "skipped", "invalid"})
+            output.put(key, summary.get(key));
+        output.put("report", cliDisplayPath(run.paths().get("report"), root));
+        return att.validation.JsonSupport.write(output);
+    }
+
+    private static java.util.function.Consumer<String> cliOutput(final ExecutionOptions options) {
+        return message -> {
+            java.io.PrintStream output = "json".equals(options.format()) ? System.err : System.out;
+            synchronized (output) { output.println(message); output.flush(); }
+        };
     }
 
     private static java.util.List<java.util.Map<String, Object>> presentedDiagnostics(

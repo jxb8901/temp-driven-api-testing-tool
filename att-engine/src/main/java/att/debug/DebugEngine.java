@@ -175,14 +175,17 @@ public final class DebugEngine {
         List<ValidationResult> actionResults = new ArrayList<ValidationResult>();
 
         try {
-            java.io.PrintStream console = "json".equals(options.format()) ? System.err : System.out;
             if (options.verbose() && !options.quiet())
-                consoleLine(console, "[DEBUG] START target=" + targetType + ":" + targetId
+                options.emitOutput("[DEBUG] START target=" + targetType + ":" + targetId
                         + " input=" + (options.debugInput() == null ? "auto" : options.debugInput())
                         + " output=" + att.core.PathPresentation.displayPath(debugDirectory, projectRoot));
             log = new CaseExecutionLog(logPath, config.caseLogYamlAnchors(),
                     options.verbose() && !options.quiet()
-                            ? new att.core.CaseLogConsoleMirror("debug:" + targetType + ":" + targetId, console)
+                            ? options.outputListener() == null
+                                ? new att.core.CaseLogConsoleMirror("debug:" + targetType + ":" + targetId,
+                                    "json".equals(options.format()) ? System.err : System.out)
+                                : new att.core.CaseLogConsoleMirror("debug:" + targetType + ":" + targetId,
+                                    options.outputListener())
                             : null);
             log.setProjectRoot(projectRoot);
             input = loadInput(options, targetType, targetId);
@@ -197,7 +200,7 @@ public final class DebugEngine {
             att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine, input.inputs, input.path,
                     "vars", DiagnosticCodes.DEBUG_INVALID, att.core.ExecutionBootstrapVariables.Scope.DEBUG);
             if (options.verbose() && !options.quiet())
-                consoleLine(console, "[DEBUG] INPUT target=" + targetType + ":" + targetId
+                options.emitOutput("[DEBUG] INPUT target=" + targetType + ":" + targetId
                         + " case=" + testCase.caseId() + " resolved="
                         + att.core.PathPresentation.displayPath(input.path, projectRoot));
 

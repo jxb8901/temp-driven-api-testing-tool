@@ -41,19 +41,43 @@ public final class DefaultAttService implements AttService {
     private static Map<String,String> paths(String... pairs) { Map<String,String> out=new LinkedHashMap<String,String>(); for(int i=0;i+1<pairs.length;i+=2) if(pairs[i+1]!=null) out.put(pairs[i],pairs[i+1]); return out; }
 
     @Override public RunResult run(RunRequest request) throws Exception {
-        long started=System.nanoTime(); FrameworkConfig cfg=config(request);
+        long started=System.nanoTime(); boolean callerProfile=request.performanceProfile()!=null;
+        att.core.PerformanceProfile profile=callerProfile?request.performanceProfile():new att.core.PerformanceProfile(request.profile());
+        long phase=profile.begin(); FrameworkConfig cfg=config(request); if(!callerProfile) profile.end("configLoadMs",phase);
         ExecutionOptions opts=options(request,"run",request.suites(),request.suiteDirectory(),request.caseIds(),request.tags(),request.excludeTags(),request.all(),request.rerunFailed(),request.dryRun(),request.failFast(),"selected",null,null,null,false,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList())
-                .withRunPolicies(request.ciOutputs(),request.concurrencyMode(),request.profile());
+                .withRunPolicies(request.ciOutputs(),request.concurrencyMode(),request.profile())
+                .withPresentation(request.outputFormat(),request.quiet(),request.verbose(),request.outputListener());
         FrameworkEngine engine=new FrameworkEngine(request.packageRoot(),cfg); engine.assertRunIdAvailable(opts);
-        PackageValidator.ValidationSummary validation=new PackageValidator(request.packageRoot(),cfg).validate(opts);
+        phase=profile.begin(); PackageValidator.ValidationSummary validation=new PackageValidator(request.packageRoot(),cfg).validate(opts);
+        profile.end("validationMs",phase);
         if(!validation.valid()) return new RunResult(request.runId(),"INVALID",2,elapsed(started),validation.diagnostics,Collections.<String,String>emptyMap(),validationMap(validation));
-        RunSummary result=engine.run(opts,validation.diagnostics,new att.core.PerformanceProfile(opts.profile()));
+        if(request.outputListener()!=null&&"human".equals(request.outputFormat())&&request.verbose()&&!request.quiet()) {
+            opts.emitOutput("[1/4] V"+att.Version.PRODUCT+" validation PASS: "+validation);
+            List<Diagnostic> visible=new ArrayList<Diagnostic>(validation.diagnostics);
+            if(!visible.isEmpty()) {
+                opts.emitOutput("");
+                for(int i=0;i<visible.size();i++) {
+                    if(i>0) opts.emitOutput("");
+                    opts.emitOutput(att.core.PathPresentation.displayText(
+                            att.validation.DiagnosticRenderer.validation(visible.get(i)),request.packageRoot()));
+                }
+            }
+            opts.emitOutput("[2/4] Selected: "+validation.cases+" cases from "+validation.suites+" suites");
+            opts.emitOutput("[3/4] Executing cases (verbose Case-log mirroring enabled)");
+        }
+        RunSummary result=engine.run(opts,validation.diagnostics,profile);
         Map<String,Object> summary=new LinkedHashMap<String,Object>(); summary.put("total",result.total()); summary.put("passed",result.passed()); summary.put("failed",result.failed()); summary.put("error",result.error()); summary.put("skipped",result.skipped()); summary.put("invalid",result.invalid());
-        return new RunResult(result.runId(),result.status().name(),result.exitCode(),elapsed(started),validation.diagnostics,paths("report",OperationResult.display(result.reportPath(),request.packageRoot())),summary);
+        List<Map<String,Object>> failures=new ArrayList<Map<String,Object>>();
+        for(att.core.TestResult item:result.results()) if(item.status()!=att.core.ResultStatus.PASS&&item.status()!=att.core.ResultStatus.SKIPPED) {
+            Map<String,Object> failure=new LinkedHashMap<String,Object>(); failure.put("status",item.status().name()); failure.put("caseId",item.caseId());
+            failure.put("caseLog",item.caseLogPath()==null?null:OperationResult.display(item.caseLogPath(),request.packageRoot())); failures.add(failure);
+        }
+        return new RunResult(result.runId(),result.status().name(),result.exitCode(),elapsed(started),validation.diagnostics,paths("report",OperationResult.display(result.reportPath(),request.packageRoot())),summary,failures);
     }
     @Override public DebugResult debug(DebugRequest request) throws Exception {
         long started=System.nanoTime();
-        ExecutionOptions opts=options(request,"debug",null,null,null,null,null,false,false,false,false,"selected",request.targetType(),request.targetId(),request.input(),request.unsafeFailureDetails(),null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList());
+        ExecutionOptions opts=options(request,"debug",null,null,null,null,null,false,false,false,false,"selected",request.targetType(),request.targetId(),request.input(),request.unsafeFailureDetails(),null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList())
+                .withPresentation(request.outputFormat(),request.quiet(),request.verbose(),request.outputListener());
         DebugEngine.Result result=new DebugEngine(request.packageRoot(),config(request)).run(opts);
         List<Diagnostic> ds=result.diagnostic()==null?Collections.<Diagnostic>emptyList():Collections.singletonList(result.diagnostic().toDiagnostic());
         Map<String,String> paths=paths("outputDirectory",OperationResult.display(result.outputDirectory(),request.packageRoot()),"log",OperationResult.display(result.logPath(),request.packageRoot()),"result",OperationResult.display(result.resultPath(),request.packageRoot()));
@@ -74,8 +98,11 @@ public final class DefaultAttService implements AttService {
         return new SnapshotResult(null,"PASS",0,elapsed(started),Collections.<Diagnostic>emptyList(),Collections.<String,String>emptyMap(),summary);
     }
     @Override public LoadResult load(LoadRequest request) throws Exception {
-        long started=System.nanoTime(); FrameworkConfig cfg=config(request);
+        long started=System.nanoTime(); boolean callerProfile=request.profile()!=null;
+        att.core.PerformanceProfile profile=callerProfile?request.profile():new att.core.PerformanceProfile(false);
+        long configPhase=profile.begin(); FrameworkConfig cfg=config(request); if(!callerProfile) profile.end("configLoadMs",configPhase);
         ExecutionOptions opts=options(request,"load",null,null,null,null,null,false,false,false,false,"selected",request.debugTargetType(),request.debugTargetId(),null,false,request.scenario(),request.users(),request.arrivalRate(),request.warmup(),request.rampUp(),request.duration(),request.rampDown(),request.thinkTime(),request.maxConcurrent(),request.overloadPolicy(),request.overrides());
+        long validationPhase=profile.begin();
         LoadScenarioLoader loader=new LoadScenarioLoader(request.packageRoot()); LoadScenario scenario=request.parsedScenario();
         if(scenario!=null) { /* CLI supplied the already parsed typed scenario. */ }
         else if(request.scenario()!=null) scenario=loader.load(request.scenario(),LoadOverrides.from(opts));
@@ -86,7 +113,7 @@ public final class DefaultAttService implements AttService {
         }
         if(scenario.policyOnly()) throw new IllegalArgumentException("Load descriptor is policy-only and cannot be executed directly");
         LoadTarget target=null; if(!scenario.coordinatorRequired()){target=new LoadTargetResolver(request.packageRoot(),cfg).resolve(scenario);new LoadTargetValidator(request.packageRoot(),cfg).validate(scenario,target);}
-        att.core.PerformanceProfile profile=request.profile()==null?new att.core.PerformanceProfile(false):request.profile();
+        profile.endAccumulated("validationMs",validationPhase);
         String id=att.core.IdentifierValidator.runId(request.runId()==null||request.runId().trim().isEmpty()?"load-"+System.currentTimeMillis():request.runId());
         Path outputRoot=(request.outputDirectory()==null?request.packageRoot().resolve(cfg.outputDirectory()):request.packageRoot().resolve(request.outputDirectory())).toAbsolutePath().normalize();
         Path loadRoot=outputRoot.resolve("load"); Files.createDirectories(loadRoot); Path runDir=att.core.IdentifierValidator.strictChild(loadRoot,id,"Load run directory");

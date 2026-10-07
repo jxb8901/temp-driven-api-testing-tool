@@ -200,14 +200,12 @@ public class FrameworkEngine {
         Path caseLogPath = caseOutputDir.resolve("case.log");
         java.io.PrintStream console = "json".equals(options.format()) ? System.err : System.out;
         if (options.verbose() && !options.quiet()) {
-            synchronized (console) {
-                console.println("[CASE-LOG] case=" + testCase.caseId() + " file=" + portable(caseLogPath));
-                console.flush();
-            }
+            options.emitOutput("[CASE-LOG] case=" + testCase.caseId() + " file=" + portable(caseLogPath));
         }
         CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath, suiteConfig.caseLogYamlAnchors(),
                 options.verbose() && !options.quiet()
-                        ? new CaseLogConsoleMirror(testCase.caseId(), console)
+                        ? options.outputListener() == null ? new CaseLogConsoleMirror(testCase.caseId(), console)
+                            : new CaseLogConsoleMirror(testCase.caseId(), options.outputListener())
                         : null);
         caseLog.setProjectRoot(projectRoot);
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, validatedCaseId, runId,
@@ -363,11 +361,7 @@ public class FrameworkEngine {
 
     private void verbose(ExecutionOptions options, String message) {
         if (options.verbose() && !options.quiet()) {
-            java.io.PrintStream console = "json".equals(options.format()) ? System.err : System.out;
-            synchronized (console) {
-                console.println(message);
-                console.flush();
-            }
+            options.emitOutput(message);
         }
     }
 

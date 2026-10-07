@@ -76,6 +76,7 @@ class LoadAcceptanceTest {
         assertEquals(0, humanCli.exitCode, humanCli.stderr + "\n" + humanCli.stdout);
         assertTrue(humanCli.stdout.contains("Report: $ATT_HOME/target/review-mix-human-" + suffix
                 + "/load/" + humanRun + "/report/index.html"), humanCli.stdout);
+        assertFalse(humanCli.stdout.contains("Metrics:"), humanCli.stdout);
         assertFalse(humanCli.stdout.contains(root.toString()));
 
         String duplicateRun = "review-mix-diagnostic-" + suffix;
@@ -128,7 +129,10 @@ class LoadAcceptanceTest {
         assertTrue(Files.isRegularFile(performance), "load --profile must write performance.json");
         @SuppressWarnings("unchecked") Map<String, Object> profile = JsonSupport.mapper().readValue(performance.toFile(), Map.class);
         assertEquals(att.Version.PRODUCT, profile.get("attVersion"));
-        assertTrue(((Map<?, ?>) profile.get("phases")).containsKey("loadExecutionMs"));
+        Map<?, ?> phases = (Map<?, ?>) profile.get("phases");
+        assertTrue(phases.containsKey("configLoadMs"));
+        assertTrue(phases.containsKey("validationMs"));
+        assertTrue(phases.containsKey("loadExecutionMs"));
         assertTrue(((Map<?, ?>) profile.get("phases")).containsKey("loadReportMs"));
         assertEquals(1L, ((Number) ((Map<?, ?>) profile.get("counters")).get("loadCompleted")).longValue());
     }

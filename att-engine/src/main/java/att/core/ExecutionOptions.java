@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.function.Consumer;
 
 /** V2 command and case-selection options. */
 public final class ExecutionOptions {
@@ -48,6 +49,7 @@ public final class ExecutionOptions {
     private final String loadMaxConcurrent;
     private final String loadOverloadPolicy;
     private final List<String> variableOverrides;
+    private final Consumer<String> outputListener;
 
     public ExecutionOptions(Path configPath, Path suitePath, Path suiteDirectory, Set<String> caseIds, Set<String> tags,
                             Set<String> excludeTags, String runId, boolean rerunFailed, boolean dryRun,
@@ -125,6 +127,22 @@ public final class ExecutionOptions {
                              String loadDuration, String loadRampDown, String loadThinkTime, String loadMaxConcurrent,
                              String loadOverloadPolicy, String environment, List<String> variableOverrides,
                              boolean unsafeFailureDetails) {
+        this(command, configPath, suitePaths, suiteDirectory, caseIds, tags, excludeTags, runId, all, rerunFailed,
+                dryRun, failFast, outputDirectory, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode,
+                updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
+                loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime, loadMaxConcurrent,
+                loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails, null);
+    }
+
+    private ExecutionOptions(String command, Path configPath, List<Path> suitePaths, Path suiteDirectory,
+                             Set<String> caseIds, Set<String> tags, Set<String> excludeTags, String runId,
+                             boolean all, boolean rerunFailed, boolean dryRun, boolean failFast, Path outputDirectory,
+                             String format, boolean quiet, boolean verbose, String validationScope, Set<String> ciOutputs, String concurrencyMode,
+                             boolean updateSnapshot, boolean profile, String debugTargetType, String debugTargetId, Path debugInput,
+                             Path loadScenario, String loadUsers, String loadArrivalRate, String loadWarmup, String loadRampUp,
+                             String loadDuration, String loadRampDown, String loadThinkTime, String loadMaxConcurrent,
+                             String loadOverloadPolicy, String environment, List<String> variableOverrides,
+                             boolean unsafeFailureDetails, Consumer<String> outputListener) {
         this.command = command;
         this.configPath = configPath;
         this.environment = environment;
@@ -162,7 +180,29 @@ public final class ExecutionOptions {
         this.loadMaxConcurrent = loadMaxConcurrent;
         this.loadOverloadPolicy = loadOverloadPolicy;
         this.variableOverrides = Collections.unmodifiableList(new ArrayList<String>(variableOverrides));
+        this.outputListener = outputListener;
     }
+
+    /** Enables CLI presentation for a typed request while leaving the API default silent. */
+    public ExecutionOptions withPresentation(String outputFormat, boolean quietOutput, boolean verboseOutput,
+                                             Consumer<String> listener) {
+        return new ExecutionOptions(command, configPath, suitePaths, suiteDirectory, caseIds, tags, excludeTags, runId,
+                all, rerunFailed, dryRun, failFast, outputDirectory, outputFormat, quietOutput, verboseOutput,
+                validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId,
+                debugInput, loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration,
+                loadRampDown, loadThinkTime, loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides,
+                unsafeFailureDetails, listener);
+    }
+
+    public void emitOutput(String message) {
+        if (outputListener != null) outputListener.accept(message);
+        else if (!"machine".equals(format)) {
+            java.io.PrintStream console = "json".equals(format) ? System.err : System.out;
+            synchronized (console) { console.println(message); console.flush(); }
+        }
+    }
+
+    public Consumer<String> outputListener() { return outputListener; }
 
     /** Creates execution intent from typed callers. This factory accepts no argv or presentation settings. */
     public static ExecutionOptions forApi(String command, Path configPath, String environment,
