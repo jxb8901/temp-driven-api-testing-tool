@@ -409,7 +409,7 @@ class LoadScenarioTest {
                     .resolve(result.executionId()).toAbsolutePath().normalize();
             assertEquals(expectedWorkspace, result.outputDirectory().toAbsolutePath().normalize());
             assertEquals(expectedWorkspace.toString(), result.context().resolve("EXEC.OUTPUT_DIR"));
-            assertEquals(expectedWorkspace.toString(), result.context().resolve("CASE.outputDirectory"));
+            assertThrows(IllegalArgumentException.class, () -> result.context().resolve("CASE.outputDirectory"));
             assertTrue(Files.isDirectory(expectedWorkspace));
             assertTrue(Files.isRegularFile(expectedWorkspace.resolve("case.log")));
             assertTrue(Files.isRegularFile(expectedWorkspace.resolve("case.yaml")));

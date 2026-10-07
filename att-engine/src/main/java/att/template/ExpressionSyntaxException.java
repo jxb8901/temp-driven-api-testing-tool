@@ -80,7 +80,7 @@ public final class ExpressionSyntaxException extends IllegalArgumentException {
             }
         }
         if (argument != null && looksLikePathArgument(argument) && actual != null && actual.indexOf("'/'") >= 0) {
-            detail.append('\n').append("hint: quote path or text values in calls, for example outputPrefix='${CASE.outputDirectory}/CT001' or logFiles=['/fpp/log/...'].");
+            detail.append('\n').append("hint: quote path or text values in calls, for example outputPrefix='${EXEC.OUTPUT_DIR}/CT001' or logFiles=['/fpp/log/...'].");
         }
         return detail.length() == 0 ? null : detail.toString();
     }

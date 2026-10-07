@@ -88,7 +88,7 @@ class EnvironmentProfileTest {
 
     @Test
     void explicitSelectorOverridesDefaultAndReplacesOnlyTypedResourceLists() throws Exception {
-        Path config = write("config.yaml", "schemaVersion: att-config/v2.11\n"
+        Path config = write("config.yaml", "schemaVersion: att-config/v2.12\n"
                 + "environment: SIT\n"
                 + "templates: {root: templates}\n"
                 + "dbhelpers: [db/common.yaml]\n"
@@ -107,7 +107,7 @@ class EnvironmentProfileTest {
 
         FrameworkConfig defaultConfig = new FrameworkConfigLoader().load(config, temp);
         FrameworkConfig uat = new FrameworkConfigLoader().load(config, temp, "uat");
-        JsonSchemaVerifier.verify(Paths.get("schemas/att-config-v2.11.schema.json"), YamlSupport.load(config));
+        JsonSchemaVerifier.verify(Paths.get("schemas/att-config-v2.12.schema.json"), YamlSupport.load(config));
 
         assertEquals("SIT", defaultConfig.environment());
         assertEquals("jdbc:sit", defaultConfig.dbHelper("orders").url());
@@ -120,16 +120,16 @@ class EnvironmentProfileTest {
 
     @Test
     void rejectsUnknownProfilesMissingDefaultAndUnsupportedOverlayFields() throws Exception {
-        Path unknown = write("unknown.yaml", "schemaVersion: att-config/v2.10\n"
+        Path unknown = write("unknown.yaml", "schemaVersion: att-config/v2.11\n"
                 + "environment: SIT\n"
                 + "environments: {SIT: {}}\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(unknown, temp, "UAT"));
 
-        Path missingDefault = write("missing-default.yaml", "schemaVersion: att-config/v2.10\n"
+        Path missingDefault = write("missing-default.yaml", "schemaVersion: att-config/v2.11\n"
                 + "environments: {SIT: {}}\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missingDefault, temp));
 
-        Path unsupported = write("unsupported.yaml", "schemaVersion: att-config/v2.10\n"
+        Path unsupported = write("unsupported.yaml", "schemaVersion: att-config/v2.11\n"
                 + "environment: SIT\n"
                 + "environments:\n"
                 + "  SIT:\n"
@@ -139,18 +139,18 @@ class EnvironmentProfileTest {
 
     @Test
     void profileDescriptorFailuresRemainPreExecutionConfigurationErrors() throws Exception {
-        Path missing = write("missing-descriptor.yaml", "schemaVersion: att-config/v2.10\n"
+        Path missing = write("missing-descriptor.yaml", "schemaVersion: att-config/v2.11\n"
                 + "environment: SIT\n"
                 + "environments: {SIT: {dbhelpers: [db/not-found.yaml]}}\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missing, temp));
-        Path missingMq = write("missing-mq-descriptor.yaml", "schemaVersion: att-config/v2.10\n"
+        Path missingMq = write("missing-mq-descriptor.yaml", "schemaVersion: att-config/v2.11\n"
                 + "environment: SIT\n"
                 + "environments: {SIT: {mqhelpers: [mq/not-found.yaml]}}\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missingMq, temp));
 
         write("db/one.yaml", db("orders", "jdbc:one"));
         write("db/two.yaml", db("orders", "jdbc:two"));
-        Path duplicate = write("duplicate-descriptor.yaml", "schemaVersion: att-config/v2.10\n"
+        Path duplicate = write("duplicate-descriptor.yaml", "schemaVersion: att-config/v2.11\n"
                 + "environment: SIT\n"
                 + "environments:\n"
                 + "  SIT:\n"
@@ -159,7 +159,7 @@ class EnvironmentProfileTest {
 
         write("mq/one.yaml", mq("payment", "mq-one"));
         write("mq/two.yaml", mq("payment", "mq-two"));
-        Path duplicateMq = write("duplicate-mq-descriptor.yaml", "schemaVersion: att-config/v2.10\n"
+        Path duplicateMq = write("duplicate-mq-descriptor.yaml", "schemaVersion: att-config/v2.11\n"
                 + "environment: SIT\n"
                 + "environments:\n"
                 + "  SIT:\n"
@@ -169,7 +169,7 @@ class EnvironmentProfileTest {
 
     @Test
     void legacyCompleteConfigRemainsCompatibleAndDoesNotAcceptEnvSelector() throws Exception {
-        Path config = write("legacy.yaml", "schemaVersion: att-config/v2.10\nenvironment: SIT\n");
+        Path config = write("legacy.yaml", "schemaVersion: att-config/v2.11\nenvironment: SIT\n");
         assertEquals("SIT", new FrameworkConfigLoader().load(config, temp).environment());
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config, temp, "UAT"));
     }

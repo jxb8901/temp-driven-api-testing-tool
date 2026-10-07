@@ -2,6 +2,7 @@
 package att.config;
 
 import att.Version;
+import att.resource.PackageResourceResolver;
 
 import org.yaml.snakeyaml.Yaml;
 
@@ -18,10 +19,12 @@ import java.util.Set;
 /** Resolves the mandatory V2 sidecar for one Excel workbook. */
 public final class SuiteConfigResolver {
     private final Path projectRoot;
+    private final PackageResourceResolver packageResources;
     private final FrameworkConfig global;
 
     public SuiteConfigResolver(Path projectRoot, FrameworkConfig global) {
-        this.projectRoot = projectRoot;
+        this.packageResources = new PackageResourceResolver(projectRoot);
+        this.projectRoot = packageResources.packageRoot();
         this.global = global;
     }
 
@@ -117,9 +120,14 @@ public final class SuiteConfigResolver {
     }
 
     private Path sidecarPath(Path suitePath) {
-        String file = suitePath.getFileName().toString();
+        Path workbook = packageResources.internalCandidate(suitePath);
+        if (Files.exists(workbook)) workbook = packageResources.fromInternalPath(workbook, PackageResourceResolver.Kind.FILE).canonicalPath();
+        String file = workbook.getFileName().toString();
         String yaml = file.replaceFirst("(?i)\\.xlsx$", ".yaml");
-        return suitePath.resolveSibling(yaml);
+        Path sidecar = workbook.resolveSibling(yaml);
+        return Files.exists(sidecar)
+                ? packageResources.fromInternalPath(sidecar, PackageResourceResolver.Kind.FILE).canonicalPath()
+                : packageResources.internalCandidate(sidecar);
     }
 
     @SuppressWarnings("unchecked")

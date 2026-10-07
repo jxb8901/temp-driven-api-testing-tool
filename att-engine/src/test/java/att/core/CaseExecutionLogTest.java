@@ -71,7 +71,7 @@ class CaseExecutionLogTest {
         assertEquals(1,occurrences(text,"PAYLOAD"));
         assertFalse(text.contains("TOOL:"));
         assertFalse(text.contains("rawOutput:"));
-        assertFalse(text.contains("command:"));
+        assertTrue(text.contains("command: |-"));
     }
 
     @Test void rawContentPreservesOriginalLineEndings() throws Exception {
@@ -110,6 +110,61 @@ class CaseExecutionLogTest {
         new CaseExecutionLog(loneCrFile).append("ACTION call", Collections.singletonMap("payload", "A\r"));
         String loneCrText = new String(Files.readAllBytes(loneCrFile), "UTF-8");
         assertTrue(loneCrText.contains("A\r\r\n"), loneCrText.replace("\r", "<CR>").replace("\n", "<LF>"));
+    }
+
+    @Test void oneLineHumanTextUsesLiteralBlocksWithoutChangingAuthoredQuotes() throws Exception {
+        Path file = tempDir.resolve("human-text.log");
+        Map<String, Object> assertion = new LinkedHashMap<String, Object>();
+        assertion.put("expression", "${output.result.code} == 'A' and value == ''B''");
+        assertion.put("rendered", "X == 'A' and value == ''B''");
+        assertion.put("passed", Boolean.FALSE);
+        Map<String, Object> record = new LinkedHashMap<String, Object>();
+        record.put("output", Collections.<String, Object>singletonMap("assertion", assertion));
+        record.put("command", "\"/opt/att/tools/log helper\" --label 'a b' && echo \"ok\"");
+        record.put("diagnostic", Collections.<String, Object>singletonMap("message", "Unable to read user's file"));
+
+        new CaseExecutionLog(file).append("ACTION call", record);
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("expression: |-\n"), text);
+        assertTrue(text.contains("${output.result.code} == 'A' and value == ''B''"), text);
+        assertFalse(text.contains("''A''"), text);
+        assertTrue(text.contains("command: |-\n"), text);
+        assertTrue(text.contains("--label 'a b' && echo \"ok\""), text);
+        assertTrue(text.contains("message: |-\n"), text);
+        assertTrue(text.contains("passed: false"), text);
+    }
+
+    @Test void executionIdentityPathsStayVerbatimWhilePackagePathsStayPortable() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("att-package"));
+        Path file = tempDir.resolve("execution-identity.log");
+        CaseExecutionLog log = new CaseExecutionLog(file);
+        log.setProjectRoot(root);
+        Map<String, Object> invocation = new LinkedHashMap<String, Object>();
+        invocation.put("command", "\"$ATT_HOME/tools/run\" /fpp/log/FPPCommon.log /fpp/log/FPPCommon.log.*");
+        invocation.put("logicalArgv", java.util.Arrays.asList(root.resolve("tools/run").toString(),
+                "/fpp/log/FPPCommon.log", "/fpp/log/FPPCommon.log.*", "C:\\logs\\app file.log",
+                "\\\\server\\share\\logs\\app.log"));
+        invocation.put("argv", invocation.get("logicalArgv"));
+        invocation.put("status", "TIMEOUT");
+        invocation.put("groupId", "fpp");
+        invocation.put("toolKey", "loghelper");
+        invocation.put("timeoutMs", 15000);
+        invocation.put("durationMs", 15002);
+        invocation.put("exitCode", 124);
+        log.appendToolInvocation("ACTION invoke", invocation);
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("command: |-\n"), text);
+        assertTrue(text.contains("/fpp/log/FPPCommon.log /fpp/log/FPPCommon.log.*"), text);
+        assertTrue(text.contains("$ATT_HOME/tools/run"), text);
+        assertTrue(text.contains("/fpp/log/FPPCommon.log.*"), text);
+        assertTrue(text.contains("C:\\logs\\app file.log"), text);
+        assertTrue(text.contains("\\\\server\\share\\logs\\app.log"), text);
+        assertTrue(text.contains("groupId: fpp"), text);
+        assertTrue(text.contains("toolKey: loghelper"), text);
+        assertTrue(text.contains("timeoutMs: 15000"), text);
+        assertTrue(text.contains("durationMs: 15002"), text);
+        assertTrue(text.contains("exitCode: 124"), text);
+        assertFalse(text.contains("$EXTERNAL/FPPCommon.log"), text);
     }
 
     @Test void consoleMirrorAndRetainedLoadLogKeepTheSameMultilinePresentation() throws Exception {
@@ -158,6 +213,19 @@ class CaseExecutionLogTest {
         String text = new String(Files.readAllBytes(file), "UTF-8");
         assertTrue(text.endsWith("x\r\nend\r\r\n\n"));
         assertFalse(text.endsWith("end\r\n\n"));
+    }
+
+    @Test void registeredSecretsAreRedactedFromRawTextAndProcessFiles() throws Exception {
+        Path source = tempDir.resolve("secret-output.txt");
+        Files.write(source, "token=top-secret-value\n".getBytes("UTF-8"));
+        Path file = tempDir.resolve("secret-output.log");
+        CaseExecutionLog log = new CaseExecutionLog(file);
+        log.registerSecretRedactions(Collections.singletonList("top-secret-value"));
+        log.appendRaw("TOOL run STDOUT", "token=top-secret-value\n");
+        log.appendRawFile("TOOL run STDERR", source, false, Files.size(source));
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("token=[REDACTED_SECRET]"), text);
+        assertFalse(text.contains("top-secret-value"), text);
     }
 
     @Test void presentsProjectPathsPortablyAndBoundsExternalPathFields() throws Exception {

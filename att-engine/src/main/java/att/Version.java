@@ -9,8 +9,8 @@ public final class Version {
     public static final String DISPLAY = "ATT V" + PRODUCT;
     public static final String BUILD_TIME = property("att.buildTime", "unknown");
     public static final String GIT_COMMIT = property("att.gitCommit", "unknown");
-    public static final String CONFIG_SCHEMA = "att-config/v2.11";
-    public static final String PREVIOUS_CONFIG_SCHEMA = "att-config/v2.10";
+    public static final String CONFIG_SCHEMA = "att-config/v2.12";
+    public static final String PREVIOUS_CONFIG_SCHEMA = "att-config/v2.11";
     public static final String OLDER_CONFIG_SCHEMA = "att-config/v2.7";
     public static final String LEGACY_CONFIG_SCHEMA = "att-config/v2.5";
     public static final String DBHELPER_SCHEMA = "att-dbhelper/v2.6";

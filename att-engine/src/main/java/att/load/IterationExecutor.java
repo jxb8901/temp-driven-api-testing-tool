@@ -40,27 +40,33 @@ public final class IterationExecutor implements LoadIterationRunner {
     private final UnifiedTemplateEngine executionEngine;
     private final boolean ownsResources;
     private final att.testdata.TestdataInputResolver testdataResolver;
+    private final Instant runStartedAt;
     private volatile Path initializedRunOutput;
 
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target) {
         this(projectRoot, config, target, new LoadRunResources(projectRoot, config), true,
-                projectRoot.resolve(config.outputDirectory()), null);
+                projectRoot.resolve(config.outputDirectory()), null, null);
     }
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target, LoadRunResources resources) {
-        this(projectRoot, config, target, resources, false, projectRoot.resolve(config.outputDirectory()), null);
+        this(projectRoot, config, target, resources, false, projectRoot.resolve(config.outputDirectory()), null, null);
     }
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
                              LoadRunResources resources, Path outputRoot) {
-        this(projectRoot, config, target, resources, false, outputRoot, null);
+        this(projectRoot, config, target, resources, false, outputRoot, null, null);
     }
     public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
                              LoadRunResources resources, Path outputRoot,
                              att.testdata.TestdataInputResolver testdataResolver) {
-        this(projectRoot, config, target, resources, false, outputRoot, testdataResolver);
+        this(projectRoot, config, target, resources, false, outputRoot, testdataResolver, null);
+    }
+    public IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
+                             LoadRunResources resources, Path outputRoot,
+                             att.testdata.TestdataInputResolver testdataResolver, Instant runStartedAt) {
+        this(projectRoot, config, target, resources, false, outputRoot, testdataResolver, runStartedAt);
     }
     private IterationExecutor(Path projectRoot, FrameworkConfig config, LoadTarget target,
                               LoadRunResources resources, boolean ownsResources, Path outputRoot,
-                              att.testdata.TestdataInputResolver testdataResolver) {
+                              att.testdata.TestdataInputResolver testdataResolver, Instant runStartedAt) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize(); this.config = config; this.target = target;
         this.resources = resources == null ? new LoadRunResources(projectRoot, config) : resources;
         this.outputRoot = (outputRoot == null ? this.projectRoot.resolve(config.outputDirectory()) : outputRoot)
@@ -75,6 +81,7 @@ public final class IterationExecutor implements LoadIterationRunner {
                 this.resources.http(), new DefaultBuiltInProvider(this.resources.sequences()), target.fileSnapshot());
         this.ownsResources = resources == null || ownsResources;
         this.testdataResolver = testdataResolver;
+        this.runStartedAt = runStartedAt;
         try { this.resources.prepareRenderPlans(target); }
         catch (Exception error) { throw new IllegalArgumentException("Unable to freeze Load Render plans", error); }
     }
@@ -102,7 +109,8 @@ public final class IterationExecutor implements LoadIterationRunner {
             Path pending = outputRoot.resolve("load").resolve(safe(request.runId())).resolve("executions")
                     .resolve(".pending-" + LoadIsolation.shortHash(request.iterationId()));
             LoadExecutionContextAdapter.Prepared prepared = new LoadExecutionContextAdapter(projectRoot, config, target)
-                    .prepare(request, request.iterationId(), pending, pending.resolve("case.log"));
+                    .prepare(runStartedAt == null ? request : request.withRunStartedAt(runStartedAt),
+                            request.iterationId(), pending, pending.resolve("case.log"));
             context = prepared.context();
             context.setResourceOutputEnabled(target.resourceOutputEnabled());
             context.setTemplateMetadata(target.template().name(), target.template().directory());

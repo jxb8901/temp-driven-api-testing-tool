@@ -21,6 +21,7 @@ public final class CliOptions {
     private final Set<String> tags;
     private final Set<String> excludeTags;
     private final String runId;
+    private String debugId;
     private final boolean all;
     private final boolean rerunFailed;
     private final boolean dryRun;
@@ -214,6 +215,7 @@ public final class CliOptions {
         Set<String> tags = new LinkedHashSet<String>();
         Set<String> excludeTags = new LinkedHashSet<String>();
         String runId = "";
+        String debugId = "";
         boolean all = false, rerun = false, dry = false, failFast = false, updateSnapshot = false, profile = false;
         boolean quiet = false, verbose = "run".equals(command) || "debug".equals(command) || "load".equals(command), explicitVerbose = false, packageScope = false, selectedScope = false;
         String format = "human";
@@ -241,6 +243,10 @@ public final class CliOptions {
             else if ("--tag".equals(arg)) tags.add(value(args, ++i, arg));
             else if ("--exclude-tag".equals(arg)) excludeTags.add(value(args, ++i, arg));
             else if ("--run-id".equals(arg)) runId = value(args, ++i, arg);
+            else if ("--debug-id".equals(arg)) {
+                debugId = value(args, ++i, arg);
+                if (debugId.trim().isEmpty()) throw new IllegalArgumentException("--debug-id value must not be blank");
+            }
             else if ("--output-dir".equals(arg)) output = Paths.get(value(args, ++i, arg));
             else if ("--input".equals(arg)) debugInput = Paths.get(value(args, ++i, arg));
             else if ("--unsafe-failure-details".equals(arg)) unsafeFailureDetails = true;
@@ -301,11 +307,13 @@ public final class CliOptions {
             throw new IllegalArgumentException("--users and --arrival-rate are mutually exclusive");
         validateAllowed(command, seenOptions);
         CliSetOverrides.validate(variableOverrides);
-        return new CliOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all,
+        CliOptions parsed = new CliOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all,
                 rerun, dry, failFast, output, format, quiet, verbose, validationScope, ciOutputs, concurrencyMode,
                 updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
                 loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime,
                 loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails);
+        parsed.debugId = debugId;
+        return parsed;
     }
 
     private static void validateAllowed(String command, Set<String> seen) {
@@ -315,7 +323,7 @@ public final class CliOptions {
         else if ("snapshot".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--all"));
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
         else if ("build".equals(command)) allowed.add("--output-dir");
-        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--output-dir", "--format", "--quiet", "--verbose", "--env", "--unsafe-failure-details"));
+        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--debug-id", "--output-dir", "--format", "--quiet", "--verbose", "--env", "--unsafe-failure-details"));
         else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--format", "--quiet", "--verbose", "--profile", "--output-dir", "--run-id", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy", "--env"));
         for (String option : seen) if (!allowed.contains(option)) throw new IllegalArgumentException("Option " + option + " is not valid for command " + command);
     }
@@ -337,6 +345,7 @@ public final class CliOptions {
     public Set<String> tags() { return tags; }
     public Set<String> excludeTags() { return excludeTags; }
     public String runId() { return runId; }
+    public String debugId() { return debugId; }
     public boolean all() { return all; }
     public boolean rerunFailed() { return rerunFailed; }
     public boolean dryRun() { return dryRun; }

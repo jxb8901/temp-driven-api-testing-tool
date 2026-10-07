@@ -42,9 +42,9 @@ class FileExpressionResolverTest {
         UnifiedTemplateEngine engine = UnifiedTemplateEngine.forProject(project);
 
         try (UnifiedTemplateEngine.SourceScope ignored = engine.pushSourceDirectory(project.resolve("templates/T"))) {
-            assertEquals("body-suite.TC1", engine.evaluate("&{request.txt}", context, null));
-            assertEquals("prefix body-suite.TC1 suffix", engine.render("prefix &{request.txt} suffix", context, null));
-            assertEquals("BODY-SUITE.TC1", engine.evaluate("#{upper(value=&{request.txt})}", context, null));
+            assertEquals("body-suite.TC1", engine.evaluate("&{./request.txt}", context, null));
+            assertEquals("prefix body-suite.TC1 suffix", engine.render("prefix &{./request.txt} suffix", context, null));
+            assertEquals("BODY-SUITE.TC1", engine.evaluate("#{upper(value=&{./request.txt})}", context, null));
         }
     }
 
@@ -155,7 +155,7 @@ class FileExpressionResolverTest {
         Path source = write("templates/flows/mqtest/AFT19222.xml", "before-load");
         Files.write(flowDirectory.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.4\n"
                 + "id: mqtest.v1\nname: MQ Test\ndescription: MQ Test Flow\nactions:\n"
-                + "  request: {type: assign, name: request, expression: '&{AFT19222.xml}'}\n")
+                + "  request: {type: assign, name: request, expression: '&{./AFT19222.xml}'}\n")
                 .getBytes(StandardCharsets.UTF_8));
         att.flow.FlowRegistry flows = new att.flow.FlowRegistry(project, project.resolve("templates"), false);
         Map<String, Object> wrapperAction = values("type", "flow", "use", "mqtest.v1");
@@ -168,7 +168,7 @@ class FileExpressionResolverTest {
         assertEquals(1, snapshot.size());
         Files.write(source, "after-load".getBytes(StandardCharsets.UTF_8));
         FileExpressionResolver frozen = new FileExpressionResolver(project, snapshot);
-        assertEquals("before-load", frozen.evaluate("AFT19222.xml", flowDirectory,
+        assertEquals("before-load", frozen.evaluate("./AFT19222.xml", flowDirectory,
                 runtime(Collections.<String, Object>emptyMap())));
     }
 
@@ -191,7 +191,7 @@ class FileExpressionResolverTest {
         att.exec.ToolInvoker invoker = new att.exec.ToolInvoker(project, config);
         StageTemplate template = new StageTemplate("T", directory, Collections.singletonList(
                 new TemplateAction("request", values("type", "assign", "name", "request",
-                        "expression", "&{request.txt}"), Version.TEMPLATE_SCHEMA)), Version.TEMPLATE_SCHEMA);
+                        "expression", "&{./request.txt}"), Version.TEMPLATE_SCHEMA)), Version.TEMPLATE_SCHEMA);
         FileExpressionResolver.FileExpressionSnapshot snapshot = new FileExpressionResolver(project).snapshotFor(template, null);
         UnifiedTemplateEngine[] engines = {new UnifiedTemplateEngine(invoker), new UnifiedTemplateEngine(invoker),
                 UnifiedTemplateEngine.withFileSnapshot(invoker, null, null, null, new DefaultBuiltInProvider(), snapshot)};
@@ -203,7 +203,7 @@ class FileExpressionResolverTest {
                         engine.render("prefix #{literal(value=${EXEC.INPUT.value})}", context, null));
                 assertEquals("&{templates/T/private.txt}",
                         engine.evaluate("#{str.concat(a='${EXEC.INPUT.value}')}", context, null));
-                assertEquals("prefix &{templates/T/private.txt}", engine.render("prefix &{request.txt}", context, null));
+                assertEquals("prefix &{templates/T/private.txt}", engine.render("prefix &{./request.txt}", context, null));
             }
         }
         assertEquals(1, snapshot.size());
@@ -224,7 +224,7 @@ class FileExpressionResolverTest {
             for (int mode = 0; mode < 2; mode++) {
                 FileExpressionResolver resolver = new FileExpressionResolver(project);
                 IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                        () -> resolver.evaluate(file, directory, runtime(Collections.<String, Object>emptyMap())));
+                        () -> resolver.evaluate("./" + file, directory, runtime(Collections.<String, Object>emptyMap())));
                 assertTrue(error.getMessage().contains("Nested file-content expressions"));
             }
             assertThrows(IllegalArgumentException.class, () -> new FileExpressionResolver(project).snapshotFor(template, null));

@@ -2,6 +2,7 @@
 package att.config;
 
 import att.Version;
+import att.resource.PackageResourceResolver;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -43,7 +44,7 @@ public final class FrameworkConfigLoader {
             if (!v210) {
                 projectRoot = projectRoot.toAbsolutePath().normalize();
                 Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion);
-                Path currentSchema = schema(projectRoot, "att-config-v2.11.schema.json");
+                Path currentSchema = schema(projectRoot, "att-config-v2.12.schema.json");
                 att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, rawMap,
                         schemaVersion, Version.CONFIG_SCHEMA);
                 throw new IllegalArgumentException("Unsupported config schemaVersion '" + schemaVersion
@@ -57,10 +58,13 @@ public final class FrameworkConfigLoader {
             boolean v25 = false;
             boolean v22 = false;
             projectRoot = projectRoot.toAbsolutePath().normalize();
-            String schemaName = v210 ? (Version.CONFIG_SCHEMA.equals(schemaVersion) ? "att-config-v2.11.schema.json" : "att-config-v2.10.schema.json") : v29 ? "att-config-v2.9.schema.json" : (v28 ? "att-config-v2.8.schema.json" : (v27 ? "att-config-v2.7.schema.json" : (v26 ? "att-config-v2.6.schema.json" : (v25 ? "att-config-v2.5.schema.json" : (v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json")))));
-            Path schema = schema(projectRoot, schemaName);
+            String schemaName = v210 ? null : v29 ? "att-config-v2.9.schema.json" : v28 ? "att-config-v2.8.schema.json" : v27 ? "att-config-v2.7.schema.json" : v26 ? "att-config-v2.6.schema.json" : v25 ? "att-config-v2.5.schema.json" : v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json";
+            Path schema = v210 ? (Version.CONFIG_SCHEMA.equals(schemaVersion)
+                    ? schema(projectRoot, "att-config-v2.12.schema.json")
+                    : att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion))
+                    : schema(projectRoot, schemaName);
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    schema(projectRoot, "att-config-v2.11.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
+                    schema(projectRoot, "att-config-v2.12.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
             SchemaSupport.rejectUnknown(rawMap, "config", v28
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata", "ssh", "tools", "environments"}
                     : v29
@@ -77,7 +81,7 @@ public final class FrameworkConfigLoader {
             Map<String, Object> map = resolveEnvironment(rawMap, v29 || v28 || v27 || v26, v29 || v28 || v27,
                     v29 || v28, selectedEnvironment);
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    schema(projectRoot, "att-config-v2.11.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
+                    schema(projectRoot, "att-config-v2.12.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
             Map<String, SshHelperConfig> sshHelpers = (v29 || v28 || v27)
@@ -108,7 +112,7 @@ public final class FrameworkConfigLoader {
                     templatesRoot(map), testcasesRoot(map), tools, dbHelpers, mqHelpers, sshHelpers, httpHelpers, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map),
                     descriptorPaths(map.get("testdata"), projectRoot, "config.environments." + String.valueOf(map.get("environment")) + ".testdata"));
         } catch (att.validation.DiagnosticException e) {
-            throw YamlSupport.locate(e, path, e.field());
+            throw YamlSupport.locate(e, path, e.field()).forPackage(projectRoot);
         } catch (Exception e) {
             att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(e);
             String field = schema == null ? "config" : schema.field();
@@ -119,8 +123,8 @@ public final class FrameworkConfigLoader {
                     toolField
                             ? "Check the qualified tool/group name, descriptor fields, argument declarations, and command argv contract."
                             : "Compare the reported field with the strict config schema and correct its name, type, or value.", e);
-            throw schema == null ? YamlSupport.locate(diagnostic, path, field)
-                    : YamlSupport.locateSchema(diagnostic, path, schema.structuredViolations());
+            throw (schema == null ? YamlSupport.locate(diagnostic, path, field)
+                    : YamlSupport.locateSchema(diagnostic, path, schema.structuredViolations())).forPackage(projectRoot);
         }
     }
 
@@ -242,7 +246,7 @@ public final class FrameworkConfigLoader {
         if (map.get("caseLog") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(map.get("caseLog"), "config.caseLog"), "config.caseLog", "yamlAnchors");
         if (map.get("execution") != null) {
             Map<?, ?> execution = SchemaSupport.map(map.get("execution"), "config.execution");
-            SchemaSupport.rejectUnknown(execution, "config.execution", "processOutput");
+            SchemaSupport.rejectUnknown(execution, "config.execution", "runIdFormat", "debugIdFormat", "processOutput");
             if (execution.get("processOutput") != null) SchemaSupport.rejectUnknown(SchemaSupport.map(execution.get("processOutput"), "config.execution.processOutput"), "config.execution.processOutput", "memoryLimitBytes", "artifactLimitBytes");
         }
         if (map.get("ssh") != null) validateSshMap(SchemaSupport.map(map.get("ssh"), "config.ssh"), "config.ssh");
@@ -552,14 +556,15 @@ public final class FrameworkConfigLoader {
         if (!(configured instanceof Iterable)) throw new IllegalArgumentException("toolGroups must be a list");
         Set<Path> paths = new LinkedHashSet<Path>();
         Set<String> ids = new LinkedHashSet<String>();
-        Path canonicalRoot = projectRoot.toRealPath();
+        PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
+        Path root = resources.packageRoot();
         for (Object value : (Iterable<?>) configured) {
             if (value == null) throw new IllegalArgumentException("toolGroups paths must be non-blank strings");
             Path relative = relativePath(value, null, "toolGroups path");
-            Path logical = projectRoot.resolve(relative).normalize();
-            if (!logical.startsWith(projectRoot.normalize())) throw new IllegalArgumentException("Tool group escapes package root: " + value);
-            Path file = logical.toRealPath();
-            if (!file.startsWith(canonicalRoot) || Files.isSymbolicLink(logical) || !Files.isRegularFile(file)) throw new IllegalArgumentException("Missing/unsafe tool group file: " + value);
+            Path logical = root.resolve(relative).normalize();
+            if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe tool group file: " + value);
+            Path file = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
+            if (!Files.isRegularFile(file)) throw new IllegalArgumentException("Missing/unsafe tool group file: " + value);
             if (!paths.add(file)) throw new IllegalArgumentException("Duplicate tool group path: " + value);
             loadToolGroup(file, projectRoot, tools, ids, sshHelpers);
         }
@@ -757,11 +762,15 @@ public final class FrameworkConfigLoader {
 
     private static RunConfig run(Map<?, ?> map) {
         Object value = map.get("run");
+        Object executionValue = map.get("execution");
+        Map<?, ?> execution = executionValue instanceof Map ? (Map<?, ?>) executionValue : java.util.Collections.emptyMap();
         if (value instanceof Map && ((Map<?, ?>) value).get("id") instanceof Map) {
             Map<?, ?> id = (Map<?, ?>) ((Map<?, ?>) value).get("id");
-            return new RunConfig(text(id.get("default"), "timestamp"), text(id.get("timestampFormat"), "yyyyMMdd-HHmmss"));
+            return new RunConfig(text(id.get("default"), "timestamp"), text(id.get("timestampFormat"), "yyyyMMdd-HHmmss"),
+                    text(execution.get("runIdFormat"), ""), text(execution.get("debugIdFormat"), ""));
         }
-        return new RunConfig("timestamp", "yyyyMMdd-HHmmss");
+        return new RunConfig("timestamp", "yyyyMMdd-HHmmss", text(execution.get("runIdFormat"), ""),
+                text(execution.get("debugIdFormat"), ""));
     }
 
     private static Map<String, String> reportColumns(Object value) {

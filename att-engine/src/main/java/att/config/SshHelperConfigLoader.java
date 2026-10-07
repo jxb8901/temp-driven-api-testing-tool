@@ -2,6 +2,7 @@ package att.config;
 
 import att.core.IdentifierValidator;
 import att.validation.JsonSchemaVerifier;
+import att.resource.PackageResourceResolver;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
@@ -17,18 +18,22 @@ public final class SshHelperConfigLoader {
     public Map<String, SshHelperConfig> load(Object configured, Path projectRoot) throws Exception {
         if (configured == null) return Collections.emptyMap();
         if (!(configured instanceof List)) throw new IllegalArgumentException("sshhelpers must be a list of YAML paths");
-        Path root = projectRoot.toRealPath();
+        PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
+        Path root = resources.packageRoot();
         Set<Path> files = new LinkedHashSet<Path>();
         Set<String> ids = new LinkedHashSet<String>();
         Map<String, SshHelperConfig> result = new LinkedHashMap<String, SshHelperConfig>();
         for (Object item : (List<?>) configured) {
             if (!(item instanceof String) || !((String) item).matches(".+\\.ya?ml")) throw new IllegalArgumentException("sshhelpers path must be a YAML file");
-            Path logical = projectRoot.resolve(IdentifierValidator.relativePath((String) item, "sshhelper path")).normalize();
-            if (!logical.startsWith(projectRoot.normalize()) || Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe SSH helper path: " + item);
-            Path file = logical.toRealPath();
-            if (!file.startsWith(root) || !Files.isRegularFile(file) || !files.add(file)) throw new IllegalArgumentException("Missing, unsafe or duplicate SSH helper file: " + item);
+            Path relative = IdentifierValidator.relativePath((String) item, "sshhelper path");
+            Path logical = root.resolve(relative).normalize();
+            if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe SSH helper path: " + item);
+            PackageResourceResolver.PackageResource resource = resources.resolvePackageRelative(
+                    relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE);
+            Path file = resource.canonicalPath();
+            if (!Files.isRegularFile(file) || !files.add(file)) throw new IllegalArgumentException("Missing, unsafe or duplicate SSH helper file: " + item);
             Object loaded = YamlSupport.load(file);
-            if (!(loaded instanceof Map)) throw new IllegalArgumentException("SSH helper must be a YAML map: " + file);
+            if (!(loaded instanceof Map)) throw new IllegalArgumentException("SSH helper must be a YAML map: " + resource.logicalName());
             Map<?, ?> map = (Map<?, ?>) loaded;
             Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-sshhelper-v1.0.schema.json");
             JsonSchemaVerifier.verify(schema, map);

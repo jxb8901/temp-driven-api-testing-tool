@@ -116,12 +116,16 @@ public final class PackageValidator {
             Path configured = options.configPath().isAbsolute() ? options.configPath() : projectRoot.resolve(options.configPath());
             if (!att.core.IdentifierValidator.canonicalPath(configured, "configuration").startsWith(att.core.IdentifierValidator.canonicalPath(projectRoot, "package root")) || Files.isSymbolicLink(configured)) throw new IllegalArgumentException("Configuration escapes package root or is a symbolic link: " + options.configPath());
         } catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.PATH_INVALID, e, null))); }
+        List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
+        try { att.core.ExecutionIdentityFormat.validateRunIdFormat(global.run().runIdFormat()); }
+        catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.CONFIG_INVALID, e, projectRoot.resolve(options.configPath()))); }
+        try { att.core.ExecutionIdentityFormat.validateDebugIdFormat(global.run().debugIdFormat()); }
+        catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.CONFIG_INVALID, e, projectRoot.resolve(options.configPath()))); }
         List<Path> suites;
         try { suites = suites(options); }
-        catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.TESTCASE_INVALID, e, null))); }
+        catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, e, null)); return invalid(options.validationScope(), diagnostics); }
         int cases = 0;
         Set<String> templates = new LinkedHashSet<String>();
-        List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
         if ("package".equals(options.validationScope())) {
             try {
                 new att.testdata.TestdataRegistry(projectRoot, global.testdataDescriptors(), Collections.<Path>emptyList()).validateAll();
@@ -589,7 +593,6 @@ public final class PackageValidator {
         if (path.startsWith("CASE.STAGES") || path.startsWith("TOOL") || path.startsWith("DB")) return null;
         if (path.startsWith("CASE.VARS.")) return "EXEC.VARS." + path.substring("CASE.VARS.".length());
         if ("CASE.VARS".equals(path)) return "EXEC.VARS";
-        if ("CASE.outputDirectory".equals(path)) return "EXEC.OUTPUT_DIR";
         if (path.startsWith("ACTIONS.")) return "EXEC.ACTIONS." + path.substring("ACTIONS.".length());
         if ("ACTIONS".equals(path)) return "EXEC.ACTIONS";
         if ("RUN.id".equals(path) || "RUN.runId".equals(path)) return "EXEC.ID";
@@ -951,12 +954,27 @@ public final class PackageValidator {
         DiagnosticException typed = DiagnosticException.find(exception);
         if (typed != null) {
             String locatedFile = typed.file() == null ? portable(file) : portable(java.nio.file.Paths.get(typed.file()));
-            String message = typed.detail() == null ? typed.summary() : typed.summary() + ": " + typed.detail();
+            locatedFile = att.core.PathPresentation.displayDiagnosticText(locatedFile, projectRoot);
+            String summary = att.core.PathPresentation.displayDiagnosticText(typed.summary(), projectRoot);
+            String detail = att.core.PathPresentation.displayDiagnosticText(typed.detail(), projectRoot);
+            String message = detail == null ? summary : summary + ": " + detail;
+            att.validation.SourceLocation source = typed.source() == null ? null : new att.validation.SourceLocation(
+                    portable(java.nio.file.Paths.get(typed.source().file())), typed.source().line(), typed.source().column(),
+                    typed.source().endLine(), typed.source().endColumn(),
+                    att.core.PathPresentation.displayDiagnosticText(typed.source().excerpt(), projectRoot),
+                    typed.source().excerptStartLine());
+            att.validation.DiagnosticContext context = typed.context();
+            att.validation.DiagnosticContext safeContext = new att.validation.DiagnosticContext(
+                    context.caseFile() == null ? null : portable(java.nio.file.Paths.get(context.caseFile())),
+                    context.caseId(), context.stage(), context.flowId(), context.callChain());
             return new Diagnostic(typed.code(), Diagnostic.Severity.ERROR, message, locatedFile, typed.field(),
-                    typed.sheet(), typed.row(), typed.column(), typed.template(), typed.action(), typed.suggestion(),
-                    typed.summary(), typed.detail(), typed.source(), typed.context(), typed.schemaViolations());
+                    typed.sheet(), typed.row(), typed.column(), typed.template(), typed.action(),
+                    att.core.PathPresentation.displayDiagnosticText(typed.suggestion(), projectRoot),
+                    summary, detail, source, safeContext,
+                    typed.schemaViolations());
         }
         String message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+        message = att.core.PathPresentation.displayDiagnosticText(message, projectRoot);
         LocatedValidationException located = exception instanceof LocatedValidationException ? (LocatedValidationException) exception : null;
         return new Diagnostic(code, Diagnostic.Severity.ERROR, message, portable(file), located == null ? null : located.field, null, null, null, located == null ? null : located.template, located == null ? null : located.action, suggestion(code));
     }
@@ -1481,13 +1499,12 @@ public final class PackageValidator {
         }
         String child = firstChildSegment(referencePath, "META");
         if ("PACKAGE_ROOT".equals(child)) {
-            if (!"META.PACKAGE_ROOT".equals(referencePath))
-                throw invalidCanonicalPath(originalPath, "META.PACKAGE_ROOT is a String value; it has no child fields.");
-            return;
+            throw invalidCanonicalPath(originalPath,
+                    "META.PACKAGE_ROOT was removed from the author Context. Use &{logical/package/resource} to read package content and EXEC.OUTPUT_DIR for execution output.");
         }
         if (child.isEmpty() || !att.core.ContextPathPolicy.isCanonicalMetaField(child)) {
             throw invalidCanonicalPath(originalPath,
-                    "Unknown META field '" + child + "'; use PACKAGE_ROOT, SOURCE, TARGET, TEMPLATE, FLOW, TOOL, DBHELPER, or MQHELPER.");
+                    "Unknown META field '" + child + "'; use SOURCE, TARGET, TEMPLATE, FLOW, TOOL, DBHELPER, or MQHELPER.");
         }
     }
 

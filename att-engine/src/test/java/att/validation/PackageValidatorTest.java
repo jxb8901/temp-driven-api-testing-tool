@@ -81,9 +81,9 @@ class PackageValidatorTest {
         sourceDirectory.set(templateDirectory);
         try {
             assertDoesNotThrow(() -> method.invoke(validator,
-                    new ToolCallParser().parse("#{mq.broker.receive(waitMs=str.substr(&{params/wait.txt}, 0, 4))}"), config));
+                    new ToolCallParser().parse("#{mq.broker.receive(waitMs=str.substr(&{./params/wait.txt}, 0, 4))}"), config));
             assertThrows(java.lang.reflect.InvocationTargetException.class, () -> method.invoke(validator,
-                    new ToolCallParser().parse("#{mq.broker.receive(waitMs=str.substr(&{params/wait.txt}, 5, 3))}"), config));
+                    new ToolCallParser().parse("#{mq.broker.receive(waitMs=str.substr(&{./params/wait.txt}, 5, 3))}"), config));
             assertDoesNotThrow(() -> method.invoke(validator,
                     new ToolCallParser().parse("#{mq.broker.receive(waitMs=${EXEC.INPUT.waitMs})}"), config));
         } finally { sourceDirectory.remove(); }

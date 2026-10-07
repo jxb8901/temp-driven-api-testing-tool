@@ -31,7 +31,7 @@ This page is the authoritative reading reference for author-authored configurati
 Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as `tools`, environment profiles, Tool `arguments` declarations, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key. This does not disable or rename argument values supplied when invoking a Tool:
 
 ```yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 x-debug-note: "#{missing.tool()}"      # ignored config field
 tools:
   x-temporary: not-a-tool               # ignored Tool entry
@@ -63,9 +63,9 @@ Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXE
 
 ## Select an environment profile
 
-`att-config/v2.11` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper, HTTPHelper and testdata descriptor lists as a whole. See the resource pages and [Testdata registry and input mapping](test-authoring.md) for each binding.
+`att-config/v2.12` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper, HTTPHelper and testdata descriptor lists as a whole. See the resource pages and [Testdata registry and input mapping](test-authoring.md) for each binding.
 
-ATT selects an environment through one common `att-config/v2.11` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT selects an environment through one common `att-config/v2.12` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -84,7 +84,7 @@ The common config keeps the existing templates, testcase roots, run/execution/re
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
@@ -173,7 +173,7 @@ Use profiles when the same test package is promoted across environments and only
 ## Set package-wide options
 
 ```yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -182,6 +182,8 @@ testcase: {root: testcase}
 templates: {root: templates}
 run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
 execution:
+  runIdFormat: "run-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+  debugIdFormat: "debug-${META.TARGET.type}-${META.TARGET.id}-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
   processOutput: {memoryLimitBytes: 65536, artifactLimitBytes: 104857600}
 report:
   mode: append-to-copy
@@ -209,7 +211,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.11`; the previous schema remains compatible. The example uses the active schema. |
+| `schemaVersion` | required | Current: `att-config/v2.12`; the previous schema remains compatible. The example uses the active schema. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -218,9 +220,25 @@ environments:
 | `testcase.root` | `testcase` | Non-empty package-relative recursive workbook/sidecar discovery root |
 | `run.id.default` | `timestamp` | Only `timestamp` is supported |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
+| `execution.runIdFormat` | unset | Optional expression for the outer Run and Load ID; exact `--run-id` takes precedence |
+| `execution.debugIdFormat` | unset | Optional expression for standalone Debug ID; exact `--debug-id` takes precedence |
 | `execution.processOutput.memoryLimitBytes` | `65536` | Integer 1024–1048576; in-memory head/tail preview per stdout/stderr stream |
 | `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
+
+`runIdFormat` generates the outer Run ID and, when Load has no exact `--run-id`, the outer Load ID. It does not affect Load's per-iteration `execution.execIdFormat` (`EXEC.ID`). `debugIdFormat` generates the standalone Debug directory identity. When no format is configured, the existing timestamp Run/Load default and `<type>-<targetId>` Debug default remain in effect.
+
+Formats are evaluated once before their identity or output directory is published. Run and Load formats can read `META.SOURCE.type/path` and `EXEC.RUN_STARTED_AT`; they cannot read `EXEC.STARTED_AT`, which is captured separately for each Case or Load iteration. ATT uses the same enclosing start timestamp in the generated Run/Load ID and each runtime Context's `EXEC.RUN_STARTED_AT`. Debug formats can read `META.TARGET.type/id`, `EXEC.STARTED_AT`, and `EXEC.RUN_STARTED_AT`; both timestamps represent the standalone Debug start. Pure identity-format built-ins and `date.sysdate` / `date.systimestamp` are available; external calls, random/sequence functions, filesystem calls, and invocation state are not. The identity being created is unavailable: references such as `${EXEC.RUN_ID}`, `${EXEC.ID}`, `${EXEC.OUTPUT_DIR}`, `${EXEC.VARS}`, or `${EXEC.ACTIONS}` are rejected. Generated values must already be valid single path segments; ATT does not sanitize them. Run/Load and configured or explicit Debug IDs fail on collision. The legacy default Debug ID keeps its timestamp collision suffix.
+
+For example, a package can use timestamped identities with target-specific standalone Debug folders:
+
+```yaml
+execution:
+  runIdFormat: "run-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+  debugIdFormat: "debug-${META.TARGET.type}-${META.TARGET.id}-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+```
+
+Run and Load accept `--run-id <id>` as a literal override. Standalone Debug accepts `--debug-id <id>` as a literal override; it is not evaluated as an expression.
 
 ### Configure report output
 
@@ -258,7 +276,7 @@ Allowed global object properties are:
 | `testcase` | `root`, `x-*` |
 | `run` | `id`, `x-*` |
 | `run.id` | `default`, `timestampFormat`, `x-*` |
-| `execution` | `processOutput`, `x-*` |
+| `execution` | `runIdFormat`, `debugIdFormat`, `processOutput`, `x-*` |
 | `execution.processOutput` | `memoryLimitBytes`, `artifactLimitBytes`, `x-*` |
 | `report` | `mode`, `fileNamePattern`, `columns`, `html`, `junit`, `x-*` |
 | `report.html` | `caseLogInlineLimitBytes`, `x-*` |

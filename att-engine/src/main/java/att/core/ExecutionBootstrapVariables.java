@@ -244,6 +244,8 @@ public final class ExecutionBootstrapVariables {
 
         String root = keyAt(segments, 0);
         String child = keyAt(segments, 1);
+        if ("META".equals(root) && "PACKAGE_ROOT".equals(child))
+            throw validation.invalid("META.PACKAGE_ROOT is no longer exposed; use &{logical/package/resource} for package content and EXEC.OUTPUT_DIR for execution output", field);
         if (("EXEC".equals(root) && "ACTIONS".equals(child))
                 || "ACTIONS".equals(root) || "output".equals(root)
                 || ("CASE".equals(root) && ("ACTIONS".equals(child) || "STAGES".equals(child)))
@@ -269,9 +271,8 @@ public final class ExecutionBootstrapVariables {
                 if (inputMappingMode == InputMappingMode.LOAD
                         && isOneOf(child, "ID", "OUTPUT_DIR")) allowed = false;
             }
-        } else if ("META".equals(root) && isOneOf(child, "PACKAGE_ROOT", "SOURCE", "TARGET", "TEMPLATE")) {
-            allowed = "PACKAGE_ROOT".equals(child) ? segments.size() == 2
-                    : inputMappingMode != InputMappingMode.TESTCASE || !"TEMPLATE".equals(child);
+        } else if ("META".equals(root) && isOneOf(child, "SOURCE", "TARGET", "TEMPLATE")) {
+            allowed = inputMappingMode != InputMappingMode.TESTCASE || !"TEMPLATE".equals(child);
         }
         if (!allowed) throw validation.invalid(inputMappingMode == null
                 ? "Context path '" + path + "' is not an initialized bootstrap root"

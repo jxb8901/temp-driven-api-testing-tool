@@ -44,8 +44,9 @@ public final class FrameworkRunner {
                 }
                 AttService service = new DefaultAttService();
                 DebugResult debug = service.debug(new DebugRequest(root, options.configPath(), options.environment(),
-                        options.outputDirectory(), options.runId(), options.debugTargetType(), options.debugTargetId(),
-                        options.debugInput(), options.unsafeFailureDetails(), cliObserver(options, root)));
+                        options.outputDirectory(), null, options.debugTargetType(), options.debugTargetId(),
+                        options.debugInput(), options.unsafeFailureDetails(), cliObserver(options, root),
+                        options.debugId(), options.variableOverrides()));
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
                     output.put("executionId", debug.executionId()); output.put("status", debug.status()); output.put("exitCode", debug.exitCode());
@@ -74,8 +75,7 @@ public final class FrameworkRunner {
                     CliDiscovery.printLoad(CliDiscovery.load(root, config), options.format());
                     return;
                 }
-                String loadId = att.core.IdentifierValidator.runId(options.runId() == null || options.runId().trim().isEmpty()
-                        ? "load-" + System.currentTimeMillis() : options.runId());
+                String loadId = options.runId();
                 final CliOptions loadOptions = options;
                 att.load.LoadEventListener progress = loadEvent -> {
                     if (loadOptions.quiet() || !loadOptions.verbose()) return;
@@ -421,7 +421,7 @@ public final class FrameworkRunner {
     }
 
     private static void help() {
-        System.out.println("Debug: ./att.sh debug [template|flow|tool <id>] [--config <file>] [--env <name>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--unsafe-failure-details] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
+        System.out.println("Debug: ./att.sh debug [template|flow|tool <id>] [--config <file>] [--env <name>] [--debug-id <id>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--unsafe-failure-details] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
         System.out.println("Debug discovery: ./att.sh debug [--format human|json] lists runnable targets and existing sidecars; discovery does not execute targets.");
         System.out.println("Load: ./att.sh load [<scenario.yaml> | --debug template|flow|tool <id>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--config <file>] [--env <name>] [--run-id <id>] [--users <n>|--arrival-rate <n/s>] [--duration <duration>] [--max-concurrent <n>] [--format human|json]");
         System.out.println("Load discovery: ./att.sh load [--format human|json] lists valid scenarios; load/load.yaml supplies the optional Quick Load policy.");

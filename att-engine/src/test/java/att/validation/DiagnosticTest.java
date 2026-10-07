@@ -43,4 +43,20 @@ class DiagnosticTest {
         assertThrows(IllegalArgumentException.class, () -> new SourceLocation("a", 0, 1, 1, 1, null));
         assertThrows(IllegalArgumentException.class, () -> new SourceLocation("a", 2, 4, 2, 3, null));
     }
+
+    @Test void packageDiagnosticsDoNotExposePhysicalPackageRoot() {
+        java.nio.file.Path root = java.nio.file.Paths.get("/tmp/att-package");
+        String physical = root.resolve("config/helpers/db.yaml").toString();
+        DiagnosticException error = new DiagnosticException(DiagnosticCodes.CONFIG_INVALID, "Invalid helper",
+                "Could not read " + physical, physical, "dbhelpers", null, null, null, null, null, null, null)
+                .withSource(new SourceLocation(physical, 2, 1, 2, 4, "bad: " + physical))
+                .withContext(new DiagnosticContext(physical, "case", null, null, null));
+
+        DiagnosticException safe = error.forPackage(root);
+        assertEquals("$ATT_HOME/config/helpers/db.yaml", safe.file());
+        assertEquals("$ATT_HOME/config/helpers/db.yaml", safe.source().file());
+        assertEquals("$ATT_HOME/config/helpers/db.yaml", safe.context().caseFile());
+        assertFalse(safe.getMessage().contains(root.toString()));
+        assertFalse(safe.source().excerpt().contains(root.toString()));
+    }
 }

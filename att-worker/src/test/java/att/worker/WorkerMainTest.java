@@ -193,9 +193,13 @@ class WorkerMainTest {
             for(Path source:(Iterable<Path>)paths::iterator) { Path dest=root.resolve(source); if(Files.isDirectory(source)) Files.createDirectories(dest); else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING); }
         }
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
-        Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: worker parity\nactions: {show: {type: log, message: worker-parity}}\n").getBytes(StandardCharsets.UTF_8));
-        DebugResult direct=new DefaultAttService().debug(new DebugRequest(root,null,null,null,"api-job","template","SIMPLE",null,false));
-        String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-job","command","debug","packageRoot",root.toString(),"outputDirectory",root.resolve("output-worker").toString(),"target",fields("type","template","id","SIMPLE")));
+        Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: worker parity\nactions: {show: {type: log, message: 'amount=${EXEC.INPUT.amount}|seed=${EXEC.VARS.seed}'}}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/SIMPLE/debug.yaml"),("schemaVersion: att-debug/v1.2\ninputs: {amount: 1}\nvars: {seed: default}\n").getBytes(StandardCharsets.UTF_8));
+        List<String> templateOverrides=java.util.Arrays.asList("input.amount=42","vars.seed=api");
+        Path apiOutput=root.resolve("output-api");
+        DebugResult direct=new DefaultAttService().debug(new DebugRequest(root,null,null,apiOutput,"api-job","template","SIMPLE",null,false,null,null,templateOverrides));
+        assertEquals("api-job", direct.executionId());
+        String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-job","command","debug","packageRoot",root.toString(),"outputDirectory",root.resolve("output-worker").toString(),"runId","worker-job","target",fields("type","template","id","SIMPLE"),"overrides",java.util.Arrays.asList("input.amount=42","vars.seed=worker")));
         Process process=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
         process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8)); process.getOutputStream().close();
         String stdout=read(process.getInputStream()); String stderr=read(process.getErrorStream());
@@ -206,15 +210,19 @@ class WorkerMainTest {
         assertTrue(java.util.Arrays.stream(lines).map(line -> { try { return mapper.readTree(line).get("type").asText(); } catch(Exception error) { throw new IllegalStateException(error); } }).anyMatch("PROGRESS"::equals),stdout);
         assertTrue(java.util.Arrays.stream(lines).map(line -> { try { return mapper.readTree(line).get("type").asText(); } catch(Exception error) { throw new IllegalStateException(error); } }).anyMatch("LOG"::equals),stdout);
         assertEquals("worker-job",terminal.get("jobId").asText());
+        assertEquals("worker-job",terminal.get("result").get("executionId").asText());
         assertEquals(direct.status(),terminal.get("result").get("status").asText());
         assertEquals(direct.exitCode(),terminal.get("result").get("exitCode").asInt());
-        assertEquals(direct.executionId(),terminal.get("result").get("executionId").asText());
+        assertEquals("worker-job",terminal.get("result").get("executionId").asText());
         assertFalse(terminal.get("result").has("jobId"));
         assertTrue(stdout.startsWith("{\"type\":\"STATUS\""),stdout);
-        Process cli=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),"att.FrameworkRunner","debug","template","SIMPLE","--output-dir",root.resolve("output-cli").toString(),"--format","json","--quiet").directory(root.toFile()).start();
+        Process cli=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),"att.FrameworkRunner","debug","template","SIMPLE","--debug-id","cli-job","--output-dir",root.resolve("output-cli").toString(),"--set","input.amount=42","--set","vars.seed=cli","--format","json","--quiet").directory(root.toFile()).start();
         String cliOut=read(cli.getInputStream()); String cliErr=read(cli.getErrorStream()); assertEquals(direct.exitCode(),cli.waitFor(),cliErr+"\\n"+cliOut);
         JsonNode cliResult=mapper.readTree(cliOut); assertEquals(direct.status(),cliResult.get("status").asText()); assertEquals(direct.exitCode(),cliResult.get("exitCode").asInt());
-        assertEquals(direct.executionId(),cliResult.get("executionId").asText());
+        assertEquals("cli-job",cliResult.get("executionId").asText());
+        assertTrue(new String(Files.readAllBytes(apiOutput.resolve("debug/api-job/case.log")), StandardCharsets.UTF_8).contains("amount=42|seed=api"));
+        assertTrue(new String(Files.readAllBytes(root.resolve("output-worker/debug/worker-job/case.log")), StandardCharsets.UTF_8).contains("amount=42|seed=worker"));
+        assertTrue(new String(Files.readAllBytes(root.resolve("output-cli/debug/cli-job/case.log")), StandardCharsets.UTF_8).contains("amount=42|seed=cli"));
         assertEquals(direct.diagnostics().size(),cliResult.get("diagnostics").size());
         DebugResult failedDirect=new DefaultAttService().debug(new DebugRequest(root,null,null,null,null,"template","MISSING",null,false));
         Process failedCli=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",
@@ -228,6 +236,80 @@ class WorkerMainTest {
         assertEquals(failedDirect.diagnostics().get(0).summary(),cliDiagnostic.get("summary").asText());
         assertEquals(failedDirect.diagnostics().get(0).detail(),cliDiagnostic.get("detail").asText());
         assertEquals(failedDirect.diagnostics().get(0).suggestion(),cliDiagnostic.get("suggestion").asText());
+    }
+
+    @Test void debugOverridesReachFlowInputsVarsAndToolArgumentsThroughCliAndWorker() throws Exception {
+        Path root=temp.resolve("debug-overrides-package");
+        Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/flows/debug/echo"));
+        Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase"));
+        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("schemas"))) {
+            for(Path source:(Iterable<Path>)paths::iterator) { Path dest=root.resolve(source); if(Files.isDirectory(source)) Files.createDirectories(dest); else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING); }
+        }
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\n"
+                + "templates: {root: templates}\ntestcase: {root: testcase}\ntools:\n"
+                + "  echo:\n    name: Echo\n    description: Test echo tool\n    command: [echo, '${value}']\n"
+                + "    stdoutFormat: text\n    arguments:\n      value: {name: Value, description: Value, required: true}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(root.resolve("config/tools"));
+        Files.write(root.resolve("config/tools/echo.debug.yaml"),"schemaVersion: att-debug/v1.2\n".getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/flows/debug/echo/flow.yaml"),("schemaVersion: att-flow/v3.4\n"
+                + "id: debug.echo.v1\nname: Debug Echo\ndescription: override flow\nactions:\n"
+                + "  show: {type: log, message: 'flow=${EXEC.INPUT.message}|seed=${EXEC.VARS.seed}'}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/flows/debug/echo/debug.yaml"),("schemaVersion: att-debug/v1.2\n"
+                + "inputs: {message: sidecar}\nvars: {seed: default}\n").getBytes(StandardCharsets.UTF_8));
+
+        List<String> flowOverrides=java.util.Arrays.asList("input.message=flow-input","vars.seed=flow-vars");
+        runDebugAdapterMatrix(root,"flow","debug.echo.v1","flow",flowOverrides,
+                "flow=flow-input|seed=flow-vars");
+        runDebugAdapterMatrix(root,"tool","echo","tool",Collections.singletonList("arg.value=tool-argument"),
+                "tool-argument");
+    }
+
+    private void runDebugAdapterMatrix(Path root,String type,String targetId,String name,List<String> overrides,
+                                       String expectedLog) throws Exception {
+        Path apiOutput=root.resolve("output-"+name+"-api");
+        DebugResult api=new DefaultAttService().debug(new DebugRequest(root,null,null,apiOutput,name+"-api",
+                type,targetId,null,false,null,null,overrides));
+        assertEquals("PASS",api.status(),api.diagnostics().isEmpty()?"":api.diagnostics().get(0).message());
+        assertTrue(debugLog(apiOutput,name+"-api").contains(expectedLog));
+
+        JsonNode worker=runWorkerDebug(root,root.resolve("output-"+name+"-worker"),name+"-worker",type,targetId,overrides);
+        assertEquals("PASS",worker.get("status").asText());
+        assertTrue(debugLog(root.resolve("output-"+name+"-worker"),name+"-worker").contains(expectedLog));
+
+        JsonNode cli=runCliDebug(root,root.resolve("output-"+name+"-cli"),name+"-cli",type,targetId,overrides);
+        assertEquals("PASS",cli.get("status").asText());
+        assertTrue(debugLog(root.resolve("output-"+name+"-cli"),name+"-cli").contains(expectedLog));
+    }
+
+    private JsonNode runWorkerDebug(Path root,Path output,String id,String type,String targetId,List<String> overrides) throws Exception {
+        String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId",id,"command","debug",
+                "packageRoot",root.toString(),"outputDirectory",output.toString(),"runId",id,
+                "target",fields("type",type,"id",targetId),"overrides",overrides));
+        Process process=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",
+                System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
+        process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8)); process.getOutputStream().close();
+        String stdout=read(process.getInputStream()), stderr=read(process.getErrorStream());
+        assertEquals(0,process.waitFor(),stderr+"\n"+stdout);
+        String[] lines=stdout.trim().split("\\R");
+        return mapper.readTree(lines[lines.length-1]).get("result");
+    }
+
+    private JsonNode runCliDebug(Path root,Path output,String id,String type,String targetId,List<String> overrides) throws Exception {
+        List<String> command=new ArrayList<String>();
+        Collections.addAll(command,Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",
+                System.getProperty("java.class.path"),"att.FrameworkRunner","debug",type,targetId,"--debug-id",id,
+                "--output-dir",output.toString(),"--format","json","--quiet");
+        for(String override:overrides) Collections.addAll(command,"--set",override);
+        Process process=new ProcessBuilder(command).directory(root.toFile()).start();
+        String stdout=read(process.getInputStream()), stderr=read(process.getErrorStream());
+        assertEquals(0,process.waitFor(),stderr+"\n"+stdout);
+        return mapper.readTree(stdout);
+    }
+
+    private String debugLog(Path output,String id) throws Exception {
+        return new String(Files.readAllBytes(output.resolve("debug").resolve(id).resolve("case.log")),StandardCharsets.UTF_8);
     }
 
 

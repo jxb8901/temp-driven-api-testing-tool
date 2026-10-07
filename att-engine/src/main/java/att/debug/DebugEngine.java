@@ -144,7 +144,7 @@ public final class DebugEngine {
                 null,null,null,null,"UNSAFE_FAILURE_DETAILS",null,
                 "[ATT WARNING] --unsafe-failure-details is enabled: collector diagnostics may expose local data. Configured secrets remain redacted. Use only with trusted local data.",
                 java.util.Collections.<String,Object>emptyMap()));
-        Path debugDirectory = createDebugDirectory(options, targetType, targetId);
+        Path debugDirectory = createDebugDirectory(options, targetType, targetId, started);
         Path artifacts = debugDirectory.resolve("artifacts");
         Path logPath = debugDirectory.resolve("case.log");
         Path resultPath = debugDirectory.resolve("result.yaml");
@@ -179,7 +179,7 @@ public final class DebugEngine {
             if (options.hasObserver()) {
                 Map<String,Object> eventData=new LinkedHashMap<String,Object>(); eventData.put("event","DEBUG_STARTED");
                 eventData.put("targetType",targetType); eventData.put("targetId",targetId);
-                eventData.put("input",options.debugInput()==null?"auto":options.debugInput().toString());
+                eventData.put("input",options.debugInput()==null?"auto":logicalInputName(options.debugInput()));
                 eventData.put("output",att.core.PathPresentation.displayPath(debugDirectory,projectRoot));
                 options.emitEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.DEBUG,debugDirectory.getFileName().toString(),null,null,null,"START",null,null,eventData));
             }
@@ -213,7 +213,9 @@ public final class DebugEngine {
             new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
                     resolved.flows, input.path, "debug", testCase.caseData(), input.vars, input.testdataDescriptors);
 
-            context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug");
+            context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(),
+                    debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug",
+                    started.toString(), started.toString());
             context.setProject(projectRoot);
             context.setUnsafeFailureDetails(options.unsafeFailureDetails());
             context.setSourceMetadata("debug", input.path, testCase.caseId());
@@ -232,10 +234,10 @@ public final class DebugEngine {
             if (!testdata.selectionEvidence().isEmpty())
                 context.put("CASE.testdataSelections", testdata.selectionEvidence());
             stage = new StageCaseData(stage.key(), stage.templateName(), resolvedStageValues);
-            context.put("CASE.debugInput", input.path.toString());
+            context.put("CASE.debugInput", context.logicalPackageName(input.path));
             Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();
             debugHeader.put("target", target);
-            debugHeader.put("input", input.path.toString());
+            debugHeader.put("input", logicalInputName(input.path));
             debugHeader.put("caseId", testCase.caseId());
             log.append("DEBUG TARGET", debugHeader);
             context.beginStage(stage, resolved.template.name(), resolved.template.directory());
@@ -457,22 +459,43 @@ public final class DebugEngine {
         return (configured.isAbsolute() ? configured : projectRoot.resolve(configured)).toAbsolutePath().normalize();
     }
 
-    private Path createDebugDirectory(ExecutionOptions options, String type, String id) throws Exception {
+    private Path createDebugDirectory(ExecutionOptions options, String type, String id, Instant startedAt) throws Exception {
         Path root = options.outputDirectory() == null ? projectRoot.resolve(config.outputDirectory()) : resolveInput(options.outputDirectory());
         Path debugRoot = root.resolve("debug").normalize();
-        Files.createDirectories(debugRoot);
-        String safe = (type + "-" + id).replaceAll("[^A-Za-z0-9_.-]", "_");
-        safe = IdentifierValidator.runId(safe);
+        boolean explicit = options.runId() != null && !options.runId().trim().isEmpty();
+        boolean configured = !config.run().debugIdFormat().isEmpty();
+        String safe;
+        if (explicit) safe = IdentifierValidator.runId(options.runId());
+        else if (configured) safe = att.core.ExecutionIdentityFormat.debugId(config.run().debugIdFormat(),
+                type + "-" + id, projectRoot, type, id,
+                options.debugInput() == null ? autoInput(type, id) : resolveInput(options.debugInput()), startedAt);
+        else safe = IdentifierValidator.runId((type + "-" + id).replaceAll("[^A-Za-z0-9_.-]", "_"));
         Path result = debugRoot.resolve(safe).normalize();
-        if (Files.exists(result)) result = debugRoot.resolve(safe + "-" + System.currentTimeMillis());
-        Files.createDirectories(result);
+        Files.createDirectories(debugRoot);
+        try {
+            Files.createDirectory(result);
+        } catch (java.nio.file.FileAlreadyExistsException collision) {
+            if (explicit || configured) throw new IllegalArgumentException("Debug ID already exists: " + safe + " (" + result + "). Choose a different --debug-id.");
+            result = debugRoot.resolve(IdentifierValidator.runId(safe + "-" + System.currentTimeMillis()));
+            Files.createDirectory(result);
+        }
         return result;
     }
 
     private String expectedInput(ExecutionOptions options, String type, String id) {
-        if (options.debugInput() != null) return resolveInput(options.debugInput()).toString();
-        try { return autoInput(type, id).toString(); }
+        if (options.debugInput() != null) return logicalInputName(resolveInput(options.debugInput()));
+        try { return logicalInputName(autoInput(type, id)); }
         catch (Exception ignored) { return type + " sidecar for " + id; }
+    }
+
+    private String logicalInputName(Path path) {
+        if (path == null) return null;
+        try {
+            Path root = projectRoot.toRealPath();
+            Path canonical = path.toRealPath();
+            if (canonical.startsWith(root)) return root.relativize(canonical).toString().replace('\\', '/');
+        } catch (Exception ignored) { }
+        return att.core.PathPresentation.displayPath(path, projectRoot);
     }
 
     private ToolConfig findTool(String id) {

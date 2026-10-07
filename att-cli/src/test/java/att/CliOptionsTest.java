@@ -54,6 +54,14 @@ class CliOptionsTest {
         assertThrows(IllegalArgumentException.class, () -> CliOptions.parse(new String[]{"debug", "template", "X", "--all"}));
     }
 
+    @Test void parsesDebugIdentityAsAStandaloneDebugOnlyOption() {
+        CliOptions options = CliOptions.parse(new String[]{"debug", "template", "SIMPLE", "--debug-id", "manual-debug"});
+        assertEquals("manual-debug", options.debugId());
+        assertThrows(IllegalArgumentException.class, () -> CliOptions.parse(new String[]{"run", "--all", "--debug-id", "manual-debug"}));
+        assertThrows(IllegalArgumentException.class, () -> CliOptions.parse(new String[]{"load", "--debug-id", "manual-debug"}));
+        assertThrows(IllegalArgumentException.class, () -> CliOptions.parse(new String[]{"debug", "template", "SIMPLE", "--debug-id", "  "}));
+    }
+
     @Test void unsafeFailureDetailsIsStandaloneDebugOnly() {
         CliOptions debug = CliOptions.parse(new String[]{"debug", "template", "SIMPLE", "--unsafe-failure-details"});
         assertTrue(debug.unsafeFailureDetails());

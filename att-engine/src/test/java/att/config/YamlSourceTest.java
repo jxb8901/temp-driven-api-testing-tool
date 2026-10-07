@@ -47,9 +47,9 @@ class YamlSourceTest {
 
     @Test void invalidToolCallPointsToSpecificCallInsteadOfWholeToolGroup() throws Exception {
         Path group = write("config/tools/db.yaml", "schemaVersion: att-tool-group/v2.9\nid: orders\nname: Orders\ndescription: Query orders\ntools:\n  date:\n    name: Date\n    description: Current date\n    call: \"#{db.orders.scalar(sql='select to_char(d,'yyyymmdd')')}\"\n");
-        Path config = write("config/config.yaml", "schemaVersion: att-config/v2.10\ntoolGroups: [config/tools/db.yaml]\n");
+        Path config = write("config/config.yaml", "schemaVersion: att-config/v2.11\ntoolGroups: [config/tools/db.yaml]\n");
         DiagnosticException error = assertThrows(DiagnosticException.class, () -> new FrameworkConfigLoader().load(config, root));
-        assertEquals(group.toRealPath().toString(), error.file()); assertEquals("tools.date.call", error.field());
+        assertEquals("$ATT_HOME/config/tools/db.yaml", error.file()); assertEquals("tools.date.call", error.field());
         assertEquals(9, error.source().line());
         String sourceLine = Files.readAllLines(group, StandardCharsets.UTF_8).get(8);
         assertEquals(sourceLine.indexOf("yyyymmdd") + 1, error.source().column());
@@ -57,9 +57,9 @@ class YamlSourceTest {
 
     @Test void dbHelperFailureDoesNotBlameGlobalConfig() throws Exception {
         Path helper = write("config/db.yaml", "schemaVersion: att-dbhelper/v2.6\nid: sample\nname: Example\ndescription: Example\nconnection: []\n");
-        Path config = write("config/config.yaml", "schemaVersion: att-config/v2.10\ndbhelpers: [config/db.yaml]\n");
+        Path config = write("config/config.yaml", "schemaVersion: att-config/v2.11\ndbhelpers: [config/db.yaml]\n");
         DiagnosticException error = assertThrows(DiagnosticException.class, () -> new FrameworkConfigLoader().load(config, root));
-        assertEquals(helper.toRealPath().toString(), error.file()); assertNotNull(error.source());
+        assertEquals("$ATT_HOME/config/db.yaml", error.file()); assertNotNull(error.source());
     }
 
     @Test void reloadingChangedFileReplacesOldSourceMarks() throws Exception {

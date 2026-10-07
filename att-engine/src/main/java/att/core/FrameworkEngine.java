@@ -63,14 +63,19 @@ public class FrameworkEngine {
         }
     }
 
+    /** Resolves one Run identity for callers that must validate and execute under the same ID. */
+    public String effectiveRunId(ExecutionOptions options) {
+        return runId(options, options.identitySeed() == null ? Instant.now() : options.identitySeed().startedAt());
+    }
+
     public RunSummary run(ExecutionOptions options, List<att.validation.Diagnostic> validationDiagnostics) throws Exception {
         return run(options, validationDiagnostics, new PerformanceProfile(options.profile()));
     }
 
     public RunSummary run(ExecutionOptions options, List<att.validation.Diagnostic> validationDiagnostics, PerformanceProfile profile) throws Exception {
-        Instant runStarted = Instant.now();
+        Instant runStarted = options.identitySeed() == null ? Instant.now() : options.identitySeed().startedAt();
         long phaseStarted = profile.begin();
-        ExecutionPlan plan = buildPlan(options);
+        ExecutionPlan plan = buildPlan(options, runStarted);
         profile.end("planCompileMs", phaseStarted);
         profile.counter("suites", plan.suites().size());
         long selectedCases = 0; for (ExecutionPlan.Suite suite : plan.suites()) selectedCases += suite.cases().size();
@@ -324,8 +329,8 @@ public class FrameworkEngine {
         return path.isAbsolute() ? path : projectRoot.resolve(path).normalize();
     }
 
-    private ExecutionPlan buildPlan(ExecutionOptions options) throws Exception {
-        String runId = runId(options);
+    private ExecutionPlan buildPlan(ExecutionOptions options, Instant identityStartedAt) throws Exception {
+        String runId = runId(options, identityStartedAt);
         Path outputRoot = options.outputDirectory() == null ? resolve(config.outputDirectory()) : resolve(options.outputDirectory());
         Path finalRunDirectory = IdentifierValidator.strictChild(outputRoot, runId, "Run directory");
         if (Files.exists(finalRunDirectory)) throw new IllegalArgumentException("Run ID already exists: " + runId + " (" + finalRunDirectory + "). Choose a different --run-id.");
@@ -383,10 +388,18 @@ public class FrameworkEngine {
     }
 
     private String runId(ExecutionOptions options) {
+        return runId(options, options.identitySeed() == null ? Instant.now() : options.identitySeed().startedAt());
+    }
+
+    private String runId(ExecutionOptions options, Instant identityStartedAt) {
         if (options.runId() != null && !options.runId().trim().isEmpty()) {
             return IdentifierValidator.runId(options.runId());
         }
-        return IdentifierValidator.runId(DateTimeFormatter.ofPattern(config.run().timestampFormat()).format(LocalDateTime.now()));
+        String fallback = DateTimeFormatter.ofPattern(config.run().timestampFormat()).format(LocalDateTime.now());
+        Path source = !options.suitePaths().isEmpty() ? options.suitePaths().get(0)
+                : options.suiteDirectory() == null ? config.testcasesRoot() : options.suiteDirectory();
+        return ExecutionIdentityFormat.runId(config.run().runIdFormat(), fallback, projectRoot,
+                "testcase", source.isAbsolute() ? source : projectRoot.resolve(source), identityStartedAt);
     }
 
     private List<Path> suites(ExecutionOptions options) throws Exception {

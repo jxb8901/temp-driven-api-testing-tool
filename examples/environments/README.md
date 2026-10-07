@@ -1,6 +1,6 @@
 # ATT environment profile examples
 
-ATT uses `att-config/v2.11` profiles to select resource and testdata descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. The active DBHelper, MQHelper, HTTPHelper, SSHHelper, Tool Group and Testdata schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema-matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
+ATT uses `att-config/v2.12` profiles to select resource and testdata descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. The active DBHelper, MQHelper, HTTPHelper, SSHHelper, Tool Group and Testdata schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema-matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
 
 ## Shared configuration and profile bindings
 
@@ -8,7 +8,7 @@ The package keeps common behavior in one `config/config.yaml`. Each profile may 
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 environment: SIT
 templates: {root: templates}
 testcase: {root: testcase}

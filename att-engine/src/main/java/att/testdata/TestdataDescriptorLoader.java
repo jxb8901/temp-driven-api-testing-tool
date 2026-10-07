@@ -4,6 +4,7 @@ import att.Version;
 import att.config.SchemaSupport;
 import att.config.YamlSupport;
 import att.validation.JsonSchemaVerifier;
+import att.resource.PackageResourceResolver;
 import att.validation.SchemaFiles;
 
 import java.nio.file.Files;
@@ -21,9 +22,11 @@ public final class TestdataDescriptorLoader {
     private static final Pattern SEQUENCE_REFERENCE = Pattern.compile("%\\{([^{}]*)}");
     private static final Pattern FORMAT = Pattern.compile("%d|%0[1-9][0-9]?d");
     private final Path projectRoot;
+    private final PackageResourceResolver packageResources;
 
     public TestdataDescriptorLoader(Path projectRoot) {
-        this.projectRoot = projectRoot.toAbsolutePath().normalize();
+        this.packageResources = new PackageResourceResolver(projectRoot);
+        this.projectRoot = packageResources.packageRoot();
     }
 
     /** Reads only the logical id so ordinary execution can leave unreferenced descriptors inactive. */
@@ -96,12 +99,10 @@ public final class TestdataDescriptorLoader {
     }
 
     private Map<?, ?> readMap(Path file) throws Exception {
-        Path canonicalRoot = projectRoot.toRealPath();
-        Path candidate = file.isAbsolute() ? file.normalize() : canonicalRoot.resolve(file).normalize();
-        Path canonical = candidate.toRealPath();
-        if (!canonical.startsWith(canonicalRoot) || Files.isSymbolicLink(candidate)
-                || !Files.isRegularFile(canonical, LinkOption.NOFOLLOW_LINKS))
+        Path candidate = file.isAbsolute() ? file.normalize() : projectRoot.resolve(file).normalize();
+        if (Files.isSymbolicLink(candidate))
             throw new IllegalArgumentException("Testdata descriptor must be a regular package-contained non-symlink file");
+        Path canonical = packageResources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE).canonicalPath();
         if (!(canonical.getFileName().toString().endsWith(".yaml") || canonical.getFileName().toString().endsWith(".yml")))
             throw new IllegalArgumentException("Testdata descriptor path must end in .yaml or .yml");
         Object loaded = YamlSupport.load(canonical);
@@ -110,7 +111,11 @@ public final class TestdataDescriptorLoader {
     }
 
     private Path canonicalFile(Path file) {
-        try { return (file.isAbsolute() ? file : projectRoot.resolve(file)).toRealPath(); }
+        try {
+            Path candidate = file.isAbsolute() ? file : projectRoot.resolve(file);
+            if (Files.isSymbolicLink(candidate)) throw new IllegalArgumentException("Testdata descriptor cannot be a symbolic link");
+            return packageResources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE).canonicalPath();
+        }
         catch (Exception error) { throw new IllegalArgumentException("Unable to resolve testdata descriptor path"); }
     }
 

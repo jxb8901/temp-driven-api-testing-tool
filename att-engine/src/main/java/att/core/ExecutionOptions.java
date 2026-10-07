@@ -48,6 +48,7 @@ public final class ExecutionOptions {
     private final String loadOverloadPolicy;
     private final List<String> variableOverrides;
     private final ExecutionEventListener observer;
+    private final ExecutionIdentitySeed identitySeed;
 
     public ExecutionOptions(Path configPath, Path suitePath, Path suiteDirectory, Set<String> caseIds, Set<String> tags,
                             Set<String> excludeTags, String runId, boolean rerunFailed, boolean dryRun,
@@ -176,6 +177,46 @@ public final class ExecutionOptions {
         this.loadOverloadPolicy = loadOverloadPolicy;
         this.variableOverrides = Collections.unmodifiableList(new ArrayList<String>(variableOverrides));
         this.observer = observer;
+        this.identitySeed = null;
+    }
+
+    private ExecutionOptions(ExecutionOptions source, ExecutionIdentitySeed identitySeed) {
+        this.command = source.command;
+        this.configPath = source.configPath;
+        this.environment = source.environment;
+        this.suitePaths = new ArrayList<Path>(source.suitePaths);
+        this.suiteDirectory = source.suiteDirectory;
+        this.caseIds = source.caseIds;
+        this.tags = source.tags;
+        this.excludeTags = source.excludeTags;
+        this.runId = source.runId;
+        this.all = source.all;
+        this.rerunFailed = source.rerunFailed;
+        this.dryRun = source.dryRun;
+        this.failFast = source.failFast;
+        this.outputDirectory = source.outputDirectory;
+        this.validationScope = source.validationScope;
+        this.ciOutputs = new LinkedHashSet<String>(source.ciOutputs);
+        this.concurrencyMode = source.concurrencyMode;
+        this.updateSnapshot = source.updateSnapshot;
+        this.profile = source.profile;
+        this.debugTargetType = source.debugTargetType;
+        this.debugTargetId = source.debugTargetId;
+        this.debugInput = source.debugInput;
+        this.unsafeFailureDetails = source.unsafeFailureDetails;
+        this.loadScenario = source.loadScenario;
+        this.loadUsers = source.loadUsers;
+        this.loadArrivalRate = source.loadArrivalRate;
+        this.loadWarmup = source.loadWarmup;
+        this.loadRampUp = source.loadRampUp;
+        this.loadDuration = source.loadDuration;
+        this.loadRampDown = source.loadRampDown;
+        this.loadThinkTime = source.loadThinkTime;
+        this.loadMaxConcurrent = source.loadMaxConcurrent;
+        this.loadOverloadPolicy = source.loadOverloadPolicy;
+        this.variableOverrides = source.variableOverrides;
+        this.observer = source.observer;
+        this.identitySeed = identitySeed;
     }
 
     /** Enables CLI presentation for a typed request while leaving the API default silent. */
@@ -185,7 +226,21 @@ public final class ExecutionOptions {
                 validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId,
                 debugInput, loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration,
                 loadRampDown, loadThinkTime, loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides,
-                unsafeFailureDetails, listener);
+                unsafeFailureDetails, listener).withIdentitySeed(identitySeed);
+    }
+
+    /** Freezes an exact, already validated execution identity for subsequent lifecycle phases. */
+    public ExecutionOptions withRunId(String value) {
+        return new ExecutionOptions(command, configPath, suitePaths, suiteDirectory, caseIds, tags, excludeTags,
+                value, all, rerunFailed, dryRun, failFast, outputDirectory, validationScope, ciOutputs,
+                concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput,
+                loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown,
+                loadThinkTime, loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides,
+                unsafeFailureDetails, observer).withIdentitySeed(identitySeed);
+    }
+
+    public ExecutionOptions withIdentitySeed(ExecutionIdentitySeed value) {
+        return new ExecutionOptions(this, value);
     }
 
     public void emitOutput(String message) {
@@ -237,7 +292,7 @@ public final class ExecutionOptions {
                 outputs == null ? defaultCiOutputs() : outputs, concurrency == null ? "reject" : concurrency,
                 updateSnapshot, profileEnabled, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
                 loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime, loadMaxConcurrent,
-                loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails);
+                loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails).withIdentitySeed(identitySeed);
     }
 
     public String command() { return command; }
@@ -252,6 +307,7 @@ public final class ExecutionOptions {
     public Set<String> tags() { return tags; }
     public Set<String> excludeTags() { return excludeTags; }
     public String runId() { return runId; }
+    public ExecutionIdentitySeed identitySeed() { return identitySeed; }
     public boolean all() { return all; }
     public boolean rerunFailed() { return rerunFailed; }
     public boolean dryRun() { return dryRun; }

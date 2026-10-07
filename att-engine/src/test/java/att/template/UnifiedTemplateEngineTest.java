@@ -159,7 +159,7 @@ class UnifiedTemplateEngineTest {
         assertEquals("logFiles", new ToolCallParser().argumentAt(expression, syntax.offset()));
         assertTrue(syntax.diagnosticDetail().contains("argument=logFiles"));
         assertTrue(syntax.diagnosticDetail().contains("/fpp/log"));
-        assertTrue(syntax.diagnosticDetail().contains("outputPrefix='${CASE.outputDirectory}/CT001'"));
+        assertTrue(syntax.diagnosticDetail().contains("outputPrefix='${EXEC.OUTPUT_DIR}/CT001'"));
         assertTrue(syntax.diagnosticDetail().contains("^"));
 
         att.validation.DiagnosticException diagnostic = att.validation.DiagnosticException.wrap(
@@ -173,10 +173,10 @@ class UnifiedTemplateEngineTest {
         CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2,"payments","payment","sheet","TC001",Collections.<String>emptyList(),new LinkedHashMap<String,Object>(),Collections.emptyMap(),null),tempDir,"RUN-1",tempDir,tempDir.resolve("case.log"));
         UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null);
         assertEquals("Execute payments.payment.TC001; status=${output.status}", engine.renderValidationValues("Execute ${CASE.caseId}; status=${output.status}", context));
-        assertEquals("Directory=${CASE.outputDirectory}", engine.renderValidationValues("Directory=${CASE.outputDirectory}", context));
+        assertEquals("Directory=" + tempDir.toAbsolutePath().normalize(), engine.renderValidationValues("Directory=${EXEC.OUTPUT_DIR}", context));
         assertEquals("${CASE.STAGES.invoke.TEMPLATE.ACTIONS.call.output.result.id}|${ACTIONS.call.output.result.id}|${TOOL.output.result.id}|${DB.orders.query.result.id}|${output.result.id}",
                 engine.renderValidationValues("${CASE.STAGES.invoke.TEMPLATE.ACTIONS.call.output.result.id}|${ACTIONS.call.output.result.id}|${TOOL.output.result.id}|${DB.orders.query.result.id}|${output.result.id}", context));
-        assertEquals("Directory=" + tempDir.toAbsolutePath().normalize(), engine.renderValues("Directory=${CASE.outputDirectory}", context));
+        assertEquals("Directory=" + tempDir.toAbsolutePath().normalize(), engine.renderValues("Directory=${EXEC.OUTPUT_DIR}", context));
         assertThrows(IllegalArgumentException.class, () -> engine.validateValueSyntax("broken ${CASE.caseId"));
     }
 
@@ -331,7 +331,7 @@ class UnifiedTemplateEngineTest {
         CapturingInvoker invoker=new CapturingInvoker(tempDir);
 
         new UnifiedTemplateEngine(invoker).executeCall(
-                "#{capture(path=${CASE.outputDirectory}/invoke.log)}", context,
+                "#{capture(path=${EXEC.OUTPUT_DIR}/invoke.log)}", context,
                 new CaseExecutionLog(tempDir.resolve("path.log")), "path");
 
         assertEquals(tempDir.toAbsolutePath().normalize() + "/invoke.log", invoker.input.get("path"));

@@ -5,6 +5,7 @@ import att.config.SchemaSupport;
 import att.config.YamlSupport;
 import att.template.TemplateAction;
 import att.template.StageTemplate;
+import att.resource.PackageResourceResolver;
 
 import java.io.Reader;
 import java.nio.file.Files;
@@ -35,12 +36,18 @@ public final class FlowRegistry {
     }
 
     public FlowRegistry(Path projectRoot, Path templatesRoot, boolean validateAll) throws Exception {
-        this.projectRoot = att.core.IdentifierValidator.canonicalPath(projectRoot, "package root");
+        PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
+        this.projectRoot = resources.packageRoot();
         this.frozen = false;
         Path templates = templatesRoot.isAbsolute() ? templatesRoot : projectRoot.resolve(templatesRoot);
-        Path canonicalTemplates = att.core.IdentifierValidator.canonicalPath(templates, "templates root");
-        if (!canonicalTemplates.startsWith(this.projectRoot)) throw new IllegalArgumentException("Templates root escapes package root: " + templatesRoot);
-        this.root = canonicalTemplates.resolve("flows").normalize();
+        Path canonicalTemplates = resources.internalCandidate(templates);
+        if (Files.exists(canonicalTemplates)) {
+            canonicalTemplates = resources.fromInternalPath(canonicalTemplates, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
+        }
+        Path flowCandidate = canonicalTemplates.resolve("flows").normalize();
+        this.root = Files.exists(flowCandidate)
+                ? resources.fromInternalPath(flowCandidate, PackageResourceResolver.Kind.DIRECTORY).canonicalPath()
+                : flowCandidate;
         if (Files.exists(root)) {
             if (Files.isSymbolicLink(root) || !Files.isDirectory(root)) throw new IllegalArgumentException("Flow root must be a non-symlink directory: " + root);
             indexDescriptors();

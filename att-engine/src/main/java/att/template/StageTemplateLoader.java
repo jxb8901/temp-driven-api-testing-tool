@@ -6,6 +6,7 @@ import att.config.SchemaSupport;
 
 import org.yaml.snakeyaml.Yaml;
 import att.config.YamlSupport;
+import att.resource.PackageResourceResolver;
 
 import java.io.Reader;
 import java.nio.file.Files;
@@ -51,10 +52,9 @@ public final class StageTemplateLoader {
      */
     public StageTemplateLoader(Path projectRoot, Path templatesRoot, boolean validateAll) throws Exception {
         this.projectRoot = projectRoot;
-        Path canonicalProject = att.core.IdentifierValidator.canonicalPath(projectRoot, "package root");
+        PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
         Path configured = templatesRoot.isAbsolute() ? templatesRoot : projectRoot.resolve(templatesRoot);
-        this.root = att.core.IdentifierValidator.canonicalPath(configured, "templates root");
-        if (!root.startsWith(canonicalProject)) throw new IllegalArgumentException("Templates root escapes package root: " + templatesRoot);
+        this.root = resources.fromInternalPath(configured, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
         index(validateAll);
     }
 
