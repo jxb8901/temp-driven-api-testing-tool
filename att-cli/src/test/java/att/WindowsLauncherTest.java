@@ -2,15 +2,23 @@
 package att;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WindowsLauncherTest {
+    @TempDir Path temp;
+
     @Test void windowsLauncherSupportsPackagedAndSourceTreeModes() throws Exception {
         Path launcher = Paths.get("att.bat");
         assertTrue(Files.isRegularFile(launcher));
@@ -31,4 +39,35 @@ class WindowsLauncherTest {
         assertTrue(source.contains("<include>att.bat</include>"));
         assertTrue(manifest.contains("mainWindows: att.bat"));
     }
+
+    @Test @EnabledOnOs(OS.WINDOWS)
+    void sourceTreeLauncherRunsCommandBackedToolWithoutNativeProcessDependency() throws Exception {
+        Path templates = temp.resolve("templates");
+        Path simple = templates.resolve("SIMPLE");
+        Files.createDirectories(simple);
+        Path config = temp.resolve("config.yaml");
+        Files.write(config, ("schemaVersion: att-config/v2.11\nenvironment: SIT\noutputDirectory: output\n"
+                + "templates: {root: " + yamlQuote(templates) + "}\ntestcase: {root: testcase}\ntools:\n"
+                + "  smoke:\n    name: Launcher smoke\n    description: Verify source-tree Tool execution\n"
+                + "    command: [cmd.exe, /c, echo, launcher-smoke]\n    stdoutFormat: text\n    arguments: {}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(simple.resolve("template.yaml"), ("schemaVersion: att-template/v3.4\nname: SIMPLE\n"
+                + "description: Windows source launcher smoke\nactions:\n  invoke:\n    type: tool\n    call: \"#{smoke()}\"\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(simple.resolve("debug.yaml"), "schemaVersion: att-debug/v1.2\ninputs: {}\n".getBytes(StandardCharsets.UTF_8));
+
+        Path output = temp.resolve("launcher.stdout"), error = temp.resolve("launcher.stderr");
+        Process process = new ProcessBuilder("cmd.exe", "/c", Paths.get("att.bat").toAbsolutePath().toString(),
+                "debug", "template", "SIMPLE", "--config", config.toString(), "--format", "json", "--quiet")
+                .directory(Paths.get("").toAbsolutePath().toFile())
+                .redirectOutput(output.toFile()).redirectError(error.toFile()).start();
+        assertTrue(process.waitFor(90, TimeUnit.SECONDS), "att.bat did not finish the command-backed Tool smoke test");
+        String stdout = new String(Files.readAllBytes(output), StandardCharsets.UTF_8);
+        String stderr = new String(Files.readAllBytes(error), StandardCharsets.UTF_8);
+        assertEquals(0, process.exitValue(), stderr + "\n" + stdout);
+        assertTrue(stdout.contains("PASS") && stdout.contains("launcher-smoke"), stdout + "\n" + stderr);
+        assertFalse(stderr.contains("NoClassDefFoundError"), stderr);
+    }
+
+    private static String yamlQuote(Path path) { return "'" + path.toString().replace("'", "''") + "'"; }
 }

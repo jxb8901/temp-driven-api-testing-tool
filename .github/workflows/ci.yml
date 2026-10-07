@@ -67,7 +67,7 @@ jobs:
           retention-days: 7
 
   windows-worker-process-tree:
-    name: Java 8 Windows Worker process-tree regression
+    name: Java 8 Windows Tool and source-launcher regressions
     runs-on: windows-latest
     timeout-minutes: 15
 
@@ -82,5 +82,5 @@ jobs:
           java-version: '8'
           cache: maven
 
-      - name: Verify Java 8 Windows process-tree cancellation
-        run: mvn -B -ntp -pl att-worker -am "-Dtest=ProcessTreeTerminatorWindowsTest,WorkerMainTest#terminatingWorkerStopsAnActiveCommandBackedTool" "-Dsurefire.failIfNoSpecifiedTests=false" test
+      - name: Verify Java 8 Windows Tool cancellation and source-tree launcher
+        run: mvn -B -ntp -pl att-cli,att-worker -am "-Dtest=ProcessTreeTerminatorWindowsTest,WorkerMainTest#terminatingWorkerStopsAnActiveCommandBackedTool,WindowsLauncherTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
