@@ -52,6 +52,7 @@ jobs:
 
   java-17-server-and-release:
     name: Java 17 / Server and full distribution
+    needs: java-8-compatibility
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 

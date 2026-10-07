@@ -39,7 +39,7 @@ class LoadAcceptanceTest {
         Path closedScenario = writeScenario("closed-cli.yaml",
                 "schemaVersion: att-load/v1.0\n"
                 + "target: {type: tool, id: sample.getAcDate}\n"
-                        + "load: {users: 1, duration: 500ms}\n");
+                        + "load: {users: 1, duration: 25ms}\n");
         Path arrivalScenario = writeScenario("arrival-cli.yaml",
                 "schemaVersion: att-load/v1.0\n"
                         + "target: {type: tool, id: sample.getAcDate}\n"
@@ -121,9 +121,9 @@ class LoadAcceptanceTest {
         Path scenario = writeScenario("profile-cli.yaml",
                 "schemaVersion: att-load/v1.0\n"
                         + "target: {type: tool, id: sample.getAcDate}\n"
-                        + "load: {users: 1, duration: 25ms}\n");
+                        + "load: {users: 1, duration: 5s}\n");
         Path output = temp.resolve("profile-output");
-        runCli(root, scenario, output, "issue17-profile", "--profile", "--think-time", "1s");
+        runCli(root, scenario, output, "issue17-profile", "--profile", "--think-time", "10s");
 
         Path performance = output.resolve("load/issue17-profile/performance.json");
         assertTrue(Files.isRegularFile(performance), "load --profile must write performance.json");
