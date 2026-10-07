@@ -178,7 +178,7 @@ class PackageValidatorTest {
         assertEquals(DiagnosticCodes.SCHEMA_VERSION_OLD, debugError.code());
 
         PackageValidator.ValidationSummary summary = new PackageValidator(tempDir, config)
-                .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
+                .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
         Diagnostic historical = summary.diagnostics.stream()
                 .filter(item -> DiagnosticCodes.SCHEMA_VERSION_OLD.equals(item.code())
                         && item.file() != null && item.file().endsWith("templates/T/debug.yaml"))
@@ -218,7 +218,7 @@ class PackageValidatorTest {
         for (Path sidecar : sidecars.values()) Files.write(sidecar, historical.getBytes("UTF-8"));
 
         PackageValidator.ValidationSummary summary = new PackageValidator(tempDir, config)
-                .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
+                .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
         for (Map.Entry<String, Path> sidecar : sidecars.entrySet()) {
             Diagnostic found = summary.diagnostics.stream()
                     .filter(item -> DiagnosticCodes.SCHEMA_VERSION_OLD.equals(item.code())
@@ -235,13 +235,13 @@ class PackageValidatorTest {
         for (Path sidecar : sidecars.values()) Files.write(sidecar,
                 "schemaVersion: att-debug/v1.2\n".getBytes("UTF-8"));
         PackageValidator.ValidationSummary current = new PackageValidator(tempDir, config)
-                .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
+                .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
         assertFalse(current.diagnostics.stream().anyMatch(item -> DiagnosticCodes.SCHEMA_VERSION_OLD.equals(item.code())
                 && item.file() != null && item.file().replace('\\', '/').contains("debug.yaml")));
 
         Files.delete(sidecars.get("grouped tool"));
         PackageValidator.ValidationSummary optional = new PackageValidator(tempDir, config)
-                .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
+                .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
         assertFalse(optional.diagnostics.stream().anyMatch(item -> item.code().equals(DiagnosticCodes.DEBUG_INVALID)
                 && item.message().contains("config/tools/g.debug.yaml")));
     }
@@ -671,7 +671,7 @@ class PackageValidatorTest {
         Path root = java.nio.file.Paths.get("").toAbsolutePath().normalize();
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
         PackageValidator.ValidationSummary summary = new PackageValidator(root, config, true)
-                .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
+                .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
         List<Diagnostic> warnings = new ArrayList<Diagnostic>();
         for (Diagnostic diagnostic : summary.diagnostics) if (diagnostic.severity() == Diagnostic.Severity.WARNING
                 && diagnostic.message().contains("did not check whether POSIX .sh tools can be launched")) warnings.add(diagnostic);
@@ -1369,7 +1369,7 @@ class PackageValidatorTest {
         PackageValidator validator = new PackageValidator(tempDir,config);
         java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod("suites",att.core.ExecutionOptions.class);
         method.setAccessible(true);
-        @SuppressWarnings("unchecked") List<Path> suites = (List<Path>) method.invoke(validator,att.core.ExecutionOptions.parse(new String[]{"validate","--package"}));
+        @SuppressWarnings("unchecked") List<Path> suites = (List<Path>) method.invoke(validator,att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate","--package"}));
         assertEquals(Collections.singletonList(cases.resolve("sample.xlsx")), suites);
     }
 }

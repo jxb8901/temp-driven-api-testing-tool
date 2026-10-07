@@ -1,0 +1,186 @@
+package att.core;
+
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+
+/** Test-only CLI argument fixture for engine tests that exercise execution semantics. */
+public final class ExecutionOptionsTestSupport {
+    private ExecutionOptionsTestSupport() { }
+
+    public static ExecutionOptions parse(String[] args) {
+        if (args.length == 0 || "--help".equals(args[0]) || "help".equals(args[0])) return empty("help");
+        String command = args[0].startsWith("--") ? "run" : args[0];
+        int start = args[0].startsWith("--") ? 0 : 1;
+        if (!("run".equals(command) || "validate".equals(command) || "snapshot".equals(command) || "docs".equals(command) || "report".equals(command) || "build".equals(command) || "clean".equals(command) || "version".equals(command) || "debug".equals(command) || "load".equals(command))) {
+            throw new IllegalArgumentException("Unknown command: " + command);
+        }
+        String debugTargetType = "";
+        String debugTargetId = "";
+        if ("debug".equals(command)) {
+            if (args.length == 2 && "--help".equals(args[1])) return empty("help");
+            if (args.length == 1 || args[1].startsWith("--")) start = 1;
+            else {
+                if (args.length < 3) throw new IllegalArgumentException("debug requires template|flow|tool and a target id, or no target for discovery");
+                debugTargetType = args[1].toLowerCase(java.util.Locale.ROOT);
+                if (!("template".equals(debugTargetType) || "flow".equals(debugTargetType) || "tool".equals(debugTargetType)))
+                    throw new IllegalArgumentException("debug target must be template, flow, or tool");
+                debugTargetId = args[2];
+                if (debugTargetId.trim().isEmpty()) throw new IllegalArgumentException("debug target id must not be blank");
+                start = 3;
+            }
+        }
+        Path loadScenario = null;
+        if ("load".equals(command)) {
+            if (args.length == 2 && "--help".equals(args[1])) return empty("help");
+            if (args.length == 1) start = 1;
+            else if ("--debug".equals(args[1])) {
+                if (args.length < 4) throw new IllegalArgumentException("load --debug requires template|flow|tool and a target id");
+                debugTargetType = args[2].toLowerCase(java.util.Locale.ROOT);
+                if (!("template".equals(debugTargetType) || "flow".equals(debugTargetType) || "tool".equals(debugTargetType)))
+                    throw new IllegalArgumentException("load --debug target must be template, flow, or tool");
+                debugTargetId = args[3];
+                if (debugTargetId.trim().isEmpty()) throw new IllegalArgumentException("load --debug target id must not be blank");
+                start = 4;
+            } else {
+                if (args.length < 2 || args[1].trim().isEmpty())
+                    throw new IllegalArgumentException("load requires a scenario path, --debug template|flow|tool <id>, or no target for discovery");
+                if (args[1].startsWith("--")) start = 1;
+                else { loadScenario = Paths.get(args[1]); start = 2; }
+            }
+        }
+        Path config = Paths.get("config/config.yaml");
+        String environment = null;
+        List<Path> suites = new ArrayList<Path>();
+        Path suiteDir = null;
+        Set<String> caseIds = new LinkedHashSet<String>();
+        Set<String> tags = new LinkedHashSet<String>();
+        Set<String> excludeTags = new LinkedHashSet<String>();
+        String runId = "";
+        boolean all = false, rerun = false, dry = false, failFast = false, updateSnapshot = false, profile = false;
+        boolean quiet = false, verbose = "run".equals(command) || "debug".equals(command) || "load".equals(command), explicitVerbose = false, packageScope = false, selectedScope = false;
+        String format = "human";
+        String concurrencyMode = "reject";
+        Path output = null;
+        Path debugInput = null;
+        String loadUsers = null, loadArrivalRate = null, loadWarmup = null, loadRampUp = null,
+                loadDuration = null, loadRampDown = null, loadThinkTime = null, loadMaxConcurrent = null,
+                loadOverloadPolicy = null;
+        Set<String> ciOutputs = defaultCiOutputs();
+        List<String> variableOverrides = new ArrayList<String>();
+        boolean unsafeFailureDetails = false;
+        Set<String> seenOptions = new LinkedHashSet<String>();
+        for (int i = start; i < args.length; i++) {
+            String arg = args[i];
+            seenOptions.add(arg);
+            if ("--config".equals(arg)) config = Paths.get(value(args, ++i, arg));
+            else if ("--env".equals(arg)) {
+                environment = value(args, ++i, arg);
+                if (environment.trim().isEmpty()) throw new IllegalArgumentException("--env value must not be blank");
+            }
+            else if ("--suite".equals(arg)) suites.add(Paths.get(value(args, ++i, arg)));
+            else if ("--suite-dir".equals(arg)) suiteDir = Paths.get(value(args, ++i, arg));
+            else if ("--case".equals(arg) || "--case-id".equals(arg)) caseIds.add(value(args, ++i, arg));
+            else if ("--tag".equals(arg)) tags.add(value(args, ++i, arg));
+            else if ("--exclude-tag".equals(arg)) excludeTags.add(value(args, ++i, arg));
+            else if ("--run-id".equals(arg)) runId = value(args, ++i, arg);
+            else if ("--output-dir".equals(arg)) output = Paths.get(value(args, ++i, arg));
+            else if ("--input".equals(arg)) debugInput = Paths.get(value(args, ++i, arg));
+            else if ("--unsafe-failure-details".equals(arg)) unsafeFailureDetails = true;
+            else if ("--set".equals(arg)) variableOverrides.add(value(args, ++i, arg));
+            else if ("--format".equals(arg)) format = value(args, ++i, arg);
+            else if ("--ci-output".equals(arg)) ciOutputs = parseCiOutputs(value(args, ++i, arg));
+            else if ("--queue".equals(arg)) concurrencyMode = "queue";
+            else if ("--parallel".equals(arg)) concurrencyMode = "parallel";
+            else if ("--allow-parallel-runs".equals(arg)) concurrencyMode = "parallel";
+            else if ("--all".equals(arg)) all = true;
+            else if ("--rerun-failed".equals(arg)) rerun = true;
+            else if ("--dry-run".equals(arg)) dry = true;
+            else if ("--fail-fast".equals(arg)) failFast = true;
+            else if ("--update-snapshot".equals(arg)) updateSnapshot = true;
+            else if ("--profile".equals(arg)) profile = true;
+            else if ("--quiet".equals(arg)) quiet = true;
+            else if ("--verbose".equals(arg)) { verbose = true; explicitVerbose = true; }
+            else if ("--users".equals(arg)) loadUsers = value(args, ++i, arg);
+            else if ("--arrival-rate".equals(arg)) loadArrivalRate = value(args, ++i, arg);
+            else if ("--warmup".equals(arg)) loadWarmup = value(args, ++i, arg);
+            else if ("--ramp-up".equals(arg)) loadRampUp = value(args, ++i, arg);
+            else if ("--duration".equals(arg)) loadDuration = value(args, ++i, arg);
+            else if ("--ramp-down".equals(arg)) loadRampDown = value(args, ++i, arg);
+            else if ("--think-time".equals(arg)) loadThinkTime = value(args, ++i, arg);
+            else if ("--max-concurrent".equals(arg)) loadMaxConcurrent = value(args, ++i, arg);
+            else if ("--overload-policy".equals(arg)) loadOverloadPolicy = value(args, ++i, arg);
+            else if ("--package".equals(arg)) packageScope = true;
+            else if ("--selected".equals(arg)) selectedScope = true;
+            else if ("--help".equals(arg)) return empty("help");
+            else throw new IllegalArgumentException("Unsupported option: " + arg);
+        }
+        if ("validate".equals(command)) dry = true;
+        if ("snapshot".equals(command) && !all && suites.isEmpty() && suiteDir == null) all = true;
+        if (packageScope && selectedScope) throw new IllegalArgumentException("--package and --selected are mutually exclusive");
+        if ("debug".equals(command) && (packageScope || selectedScope)) throw new IllegalArgumentException("--package/--selected are not valid for debug");
+        if ("load".equals(command) && loadScenario != null && debugInput != null) throw new IllegalArgumentException("--input is valid only for load --debug");
+        if ("debug".equals(command) && debugTargetType.isEmpty()
+                && seenOptions.stream().anyMatch(option -> !java.util.Arrays.asList("--config", "--env", "--format", "--quiet", "--verbose").contains(option)))
+            throw new IllegalArgumentException("Debug discovery accepts only --config, --env, --format, --quiet, and --verbose");
+        if ("load".equals(command) && loadScenario == null && debugTargetType.isEmpty()
+                && seenOptions.stream().anyMatch(option -> !java.util.Arrays.asList("--config", "--env", "--format", "--quiet", "--verbose").contains(option)))
+            throw new IllegalArgumentException("Load discovery accepts only --config, --env, --format, --quiet, and --verbose");
+        if ((packageScope || selectedScope) && !"validate".equals(command)) throw new IllegalArgumentException("--package/--selected are valid only for validate");
+        String validationScope = "debug".equals(command) ? "debug" : packageScope || ("validate".equals(command) && !selectedScope) ? "package" : "selected";
+        if ("run".equals(command) && !rerun && !all && suites.isEmpty() && suiteDir == null && caseIds.isEmpty() && tags.isEmpty()) {
+            throw new IllegalArgumentException(command + " requires --all, --suite, --case, or --tag");
+        }
+        if ("snapshot".equals(command) && !all && suites.isEmpty() && suiteDir == null) {
+            throw new IllegalArgumentException("snapshot requires --all, --suite, or --suite-dir");
+        }
+        if ("validate".equals(command) && "selected".equals(validationScope) && !all && suites.isEmpty() && suiteDir == null && caseIds.isEmpty() && tags.isEmpty()) throw new IllegalArgumentException("validate --selected requires --all, --suite, --case, or --tag");
+        if (!("human".equals(format) || "json".equals(format))) throw new IllegalArgumentException("--format must be human or json");
+        if (seenOptions.contains("--queue") && (seenOptions.contains("--parallel") || seenOptions.contains("--allow-parallel-runs"))) throw new IllegalArgumentException("--queue and --allow-parallel-runs are mutually exclusive");
+        if (seenOptions.contains("--parallel") && seenOptions.contains("--allow-parallel-runs")) throw new IllegalArgumentException("Use only one of --allow-parallel-runs or its deprecated --parallel alias");
+        if (quiet && explicitVerbose) throw new IllegalArgumentException("--quiet and --verbose cannot be used together");
+        if (quiet) verbose = false;
+        if ("load".equals(command) && loadUsers != null && loadArrivalRate != null)
+            throw new IllegalArgumentException("--users and --arrival-rate are mutually exclusive");
+        validateAllowed(command, seenOptions);
+        CliSetOverrides.validate(variableOverrides);
+        return new ExecutionOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all,
+                rerun, dry, failFast, output, validationScope, ciOutputs, concurrencyMode,
+                updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
+                loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime,
+                loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails);
+    }
+
+    private static void validateAllowed(String command, Set<String> seen) {
+        Set<String> allowed = new LinkedHashSet<String>(java.util.Arrays.asList("--config", "--help"));
+        if ("run".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--run-id", "--output-dir", "--format", "--ci-output", "--queue", "--parallel", "--allow-parallel-runs", "--profile", "--all", "--rerun-failed", "--dry-run", "--fail-fast", "--quiet", "--verbose", "--update-snapshot", "--env"));
+        else if ("validate".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--format", "--all", "--package", "--selected", "--quiet", "--verbose", "--env"));
+        else if ("snapshot".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--all"));
+        else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
+        else if ("build".equals(command)) allowed.add("--output-dir");
+        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--output-dir", "--format", "--quiet", "--verbose", "--env", "--unsafe-failure-details"));
+        else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--format", "--quiet", "--verbose", "--profile", "--output-dir", "--run-id", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy", "--env"));
+        for (String option : seen) if (!allowed.contains(option)) throw new IllegalArgumentException("Option " + option + " is not valid for command " + command);
+    }
+
+    private static ExecutionOptions empty(String command) {
+        return new ExecutionOptions(command, Paths.get("config/config.yaml"), Collections.<Path>emptyList(), null, new LinkedHashSet<String>(),
+                new LinkedHashSet<String>(), new LinkedHashSet<String>(), "", false, false, false, false, null, "selected", defaultCiOutputs(), "reject", false, false);
+    }
+
+    private static String value(String[] args, int index, String option) {
+        if (index >= args.length) throw new IllegalArgumentException("Missing value for " + option);
+        return args[index];
+    }
+    private static Set<String> defaultCiOutputs() { return new LinkedHashSet<String>(java.util.Arrays.asList("junit", "json")); }
+    private static Set<String> parseCiOutputs(String value) {
+        Set<String> result = new LinkedHashSet<String>();
+        for (String item : value.split(",")) { String format = item.trim().toLowerCase(java.util.Locale.ROOT); if (!("junit".equals(format) || "json".equals(format))) throw new IllegalArgumentException("--ci-output supports junit and json"); result.add(format); }
+        if (result.isEmpty()) throw new IllegalArgumentException("--ci-output must not be empty");
+        return result;
+    }
+}

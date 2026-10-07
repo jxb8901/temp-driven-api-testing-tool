@@ -3,7 +3,6 @@ package att;
 
 import att.config.FrameworkConfig;
 import att.config.ToolConfig;
-import att.core.ExecutionOptions;
 import att.debug.DebugEngine;
 import att.flow.FlowRegistry;
 import att.load.LoadScenario;

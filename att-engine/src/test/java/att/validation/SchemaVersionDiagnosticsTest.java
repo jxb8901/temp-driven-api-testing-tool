@@ -57,7 +57,7 @@ class SchemaVersionDiagnosticsTest {
                 Collections.<String, ToolConfig>emptyMap(), null, null);
 
         PackageValidator.ValidationSummary summary = new PackageValidator(root, config)
-                .validate(att.core.ExecutionOptions.parse(new String[]{"validate", "--package"}));
+                .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
         assertTrue(summary.diagnostics.stream().anyMatch(item -> DiagnosticCodes.SCHEMA_VERSION_OLD.equals(item.code())
                 && item.file().endsWith("/testcase/empty.yaml")),
                 summary.diagnostics.stream().map(item -> item.code() + ":" + item.file() + ":" + item.message())

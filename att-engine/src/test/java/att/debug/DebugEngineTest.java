@@ -293,7 +293,7 @@ class DebugEngineTest {
                 new att.testdata.TestdataRegistry(project, config.testdataDescriptors(), Collections.<Path>emptyList()))
                 .resolve(Collections.singletonMap("accountId", "@{accounts.id}"), null, null, null).get("accountId");
         assertEquals("17", String.valueOf(sharedValue), "Run's environment layer remains the shared default");
-        ExecutionOptions loadOptions = ExecutionOptions.parse(new String[]{"load", "--debug", "template", "TESTDATA",
+        ExecutionOptions loadOptions = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", "--debug", "template", "TESTDATA",
                 "--input", input.toString()});
         assertThrows(Exception.class, () -> new DebugEngine(project, config).loadBootstrapInputForLoad(loadOptions));
 
@@ -450,7 +450,7 @@ class DebugEngineTest {
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.singletonMap("slow", slow), null, null);
         DebugEngine engine = new DebugEngine(project, config);
-        ExecutionOptions parsedOptions = ExecutionOptions.parse(new String[]{"debug", "template", "SLOW"});
+        ExecutionOptions parsedOptions = att.core.ExecutionOptionsTestSupport.parse(new String[]{"debug", "template", "SLOW"});
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         PrintStream eventOutput = new PrintStream(bytes, true, "UTF-8");
         java.util.List<att.api.ExecutionEvent> events = new java.util.concurrent.CopyOnWriteArrayList<att.api.ExecutionEvent>();
@@ -516,7 +516,7 @@ class DebugEngineTest {
         String[] args = new String[3 + extra.length];
         args[0] = "debug"; args[1] = type; args[2] = id;
         System.arraycopy(extra, 0, args, 3, extra.length);
-        return new DebugEngine(project, config).run(ExecutionOptions.parse(args));
+        return new DebugEngine(project, config).run(att.core.ExecutionOptionsTestSupport.parse(args));
     }
 
     private FrameworkConfig withTestdata(FrameworkConfig base, Path descriptor) {

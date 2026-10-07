@@ -59,7 +59,7 @@ class RandomThinkTimeScenarioTest {
         assertEquals(ThinkTimePolicy.Type.FIXED, equal.thinkTimePolicy().type());
         assertFalse(equal.thinkTimePolicy().randomized());
 
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", range.toString(), "--think-time", "250ms"});
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", range.toString(), "--think-time", "250ms"});
         LoadScenario overridden = new LoadScenarioLoader(project).load(range, LoadOverrides.from(options));
         assertEquals(ThinkTimePolicy.Type.FIXED, overridden.thinkTimePolicy().type());
         assertEquals(250L, overridden.thinkTimePolicy().minMillis());

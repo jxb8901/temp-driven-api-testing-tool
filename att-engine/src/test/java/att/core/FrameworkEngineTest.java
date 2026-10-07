@@ -56,7 +56,7 @@ class FrameworkEngineTest {
         writeSnapshot(projectRoot.resolve("testcase/payment.xlsx"));
         writeRuntimeSchemas();
 
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--suite",
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"run", "--suite",
                 projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "V3-FLOW"});
         RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).run(options);
 
@@ -74,7 +74,7 @@ class FrameworkEngineTest {
         writeText(projectRoot.resolve("templates/flows/inner/flow.yaml"),
                 "schemaVersion: att-flow/v3.4\nid: common.inner.v1\nname: Inner\ndescription: Inner\nactions:\n"
                         + "  seed: {type: assign, name: seedReference, expression: '#{1 / 0}'}\n");
-        RunSummary failed = new FrameworkEngine(projectRoot, globalConfig()).run(ExecutionOptions.parse(new String[]{
+        RunSummary failed = new FrameworkEngine(projectRoot, globalConfig()).run(att.core.ExecutionOptionsTestSupport.parse(new String[]{
                 "run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "V3-FLOW-ERROR"}));
         assertEquals(1, failed.error());
         Path failedRun = projectRoot.resolve("output/V3-FLOW-ERROR");
@@ -119,7 +119,7 @@ class FrameworkEngineTest {
         writeSnapshot(workbook, config);
         writeRuntimeSchemas();
 
-        RunSummary summary = new FrameworkEngine(projectRoot, config).run(ExecutionOptions.parse(new String[]{
+        RunSummary summary = new FrameworkEngine(projectRoot, config).run(att.core.ExecutionOptionsTestSupport.parse(new String[]{
                 "run", "--suite", workbook.toString(), "--run-id", "RENDER-CASE-LIFETIME"}));
 
         assertEquals(2, summary.passed());
@@ -147,7 +147,7 @@ class FrameworkEngineTest {
         writeSnapshot(workbook, config);
         writeRuntimeSchemas();
 
-        RunSummary recycled = new FrameworkEngine(projectRoot, config).run(ExecutionOptions.parse(new String[]{
+        RunSummary recycled = new FrameworkEngine(projectRoot, config).run(att.core.ExecutionOptionsTestSupport.parse(new String[]{
                 "run", "--suite", workbook.toString(), "--run-id", "TESTDATA-RECYCLE"}));
         assertEquals(3, recycled.passed());
         int[] expectedIndices = {0, 1, 0};
@@ -161,7 +161,7 @@ class FrameworkEngineTest {
 
         writeText(descriptor, testdataDescriptor("error"));
         writeSnapshot(workbook, config);
-        RunSummary exhausted = new FrameworkEngine(projectRoot, config).run(ExecutionOptions.parse(new String[]{
+        RunSummary exhausted = new FrameworkEngine(projectRoot, config).run(att.core.ExecutionOptionsTestSupport.parse(new String[]{
                 "run", "--suite", workbook.toString(), "--run-id", "TESTDATA-EXHAUSTED"}));
         assertEquals(2, exhausted.passed());
         assertEquals(1, exhausted.error());
@@ -182,7 +182,7 @@ class FrameworkEngineTest {
         writeText(projectRoot.resolve("schemas/att-run-v2.1.schema.json"), "{\"type\":\"object\",\"required\":[\"schemaVersion\",\"run\",\"inputs\"]}");
         writeText(projectRoot.resolve("schemas/att-junit-v2.1.xsd"), "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><xs:element name=\"testsuite\"><xs:complexType mixed=\"true\"><xs:sequence><xs:any minOccurs=\"0\" maxOccurs=\"unbounded\" processContents=\"skip\"/></xs:sequence><xs:anyAttribute processContents=\"skip\"/></xs:complexType></xs:element></xs:schema>");
 
-        ExecutionOptions parsedVerboseOptions = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-V2", "--verbose", "--profile"});
+        ExecutionOptions parsedVerboseOptions = att.core.ExecutionOptionsTestSupport.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-V2", "--verbose", "--profile"});
         java.io.ByteArrayOutputStream console = new java.io.ByteArrayOutputStream();
         java.io.PrintStream eventOutput = new java.io.PrintStream(console, true, "UTF-8");
         java.util.List<att.api.ExecutionEvent> events = new java.util.concurrent.CopyOnWriteArrayList<att.api.ExecutionEvent>();
@@ -230,7 +230,7 @@ class FrameworkEngineTest {
         assertTrue(verbose.contains("resource: TOOL"));
         assertTrue(verbose.contains("<Response>"));
 
-        ExecutionOptions defaultOptions = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-DEFAULT"});
+        ExecutionOptions defaultOptions = att.core.ExecutionOptionsTestSupport.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-DEFAULT"});
         java.io.ByteArrayOutputStream defaultConsole = new java.io.ByteArrayOutputStream();
         java.io.PrintStream previous = System.out;
         try {
@@ -241,7 +241,7 @@ class FrameworkEngineTest {
         }
         assertEquals("", defaultConsole.toString("UTF-8"));
 
-        ExecutionOptions noWorkbook = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-NO-WORKBOOK"});
+        ExecutionOptions noWorkbook = att.core.ExecutionOptionsTestSupport.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "TEST-NO-WORKBOOK"});
         new FrameworkEngine(projectRoot, globalConfig("none")).run(noWorkbook);
         assertFalse(Files.exists(projectRoot.resolve("output/TEST-NO-WORKBOOK/workbooks")));
         assertTrue(Files.exists(projectRoot.resolve("output/TEST-NO-WORKBOOK/report/index.html")));
@@ -337,7 +337,7 @@ class FrameworkEngineTest {
         method.setAccessible(true);
         @SuppressWarnings("unchecked")
         java.util.List<Map<String,Object>> inputs = (java.util.List<Map<String,Object>>) method.invoke(engine,
-                ExecutionOptions.parse(new String[]{"run", "--suite", workbook.toString(), "--run-id", "MANIFEST"}));
+                att.core.ExecutionOptionsTestSupport.parse(new String[]{"run", "--suite", workbook.toString(), "--run-id", "MANIFEST"}));
         assertTrue(inputs.stream().anyMatch(item -> "tool-sql".equals(item.get("kind"))
                 && "sql/reference.sql".equals(item.get("path"))), inputs.toString());
     }
@@ -347,7 +347,7 @@ class FrameworkEngineTest {
         writeText(projectRoot.resolve("testcase/payment.yaml"), "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
         writeSnapshot(projectRoot.resolve("testcase/payment.xlsx"));
         Files.createDirectories(projectRoot.resolve("templates"));
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "PLAN-FAIL"});
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"run", "--suite", projectRoot.resolve("testcase/payment.xlsx").toString(), "--run-id", "PLAN-FAIL"});
         assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).run(options));
         assertFalse(Files.exists(projectRoot.resolve("output")));
     }
@@ -361,7 +361,7 @@ class FrameworkEngineTest {
         Path snapshot = projectRoot.resolve("testcase/payment.xml");
         String xml = new String(Files.readAllBytes(snapshot), "UTF-8");
         writeText(snapshot, xml.replace("PAYMENT_INVOKE", "CHANGED_TEMPLATE"));
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--suite", workbook.toString(), "--run-id", "STALE"});
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"run", "--suite", workbook.toString(), "--run-id", "STALE"});
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).run(options));
         assertTrue(error.getMessage().contains("snapshot is stale"), error.getMessage());
         assertTrue(error.getMessage().contains("payment.TC001.stages.invoke.name changed"), error.getMessage());
@@ -376,7 +376,7 @@ class FrameworkEngineTest {
             writeText(projectRoot.resolve("testcase/" + name + ".yaml"), "schemaVersion: att-sidecar/v2.1\nid: duplicate\nexcel:\n  sheet: payment=支付測試案例集\n  caseId: 案例編號\n  tags: 標籤\nstages:\n  - key: invoke\n    template: 執行模板\n    required: true\n");
             writeSnapshot(projectRoot.resolve("testcase/" + name + ".xlsx"));
         }
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--all", "--run-id", "DUPLICATE-WORKBOOK"});
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"run", "--all", "--run-id", "DUPLICATE-WORKBOOK"});
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> new FrameworkEngine(projectRoot, globalConfig()).run(options));
         assertTrue(error.getMessage().contains("Duplicate workbook id 'duplicate'"), error.getMessage());
         assertFalse(Files.exists(projectRoot.resolve("output")));

@@ -33,7 +33,7 @@ class SnapshotCommandTest {
         writeSuite("one", "ONE"); writeSuite("nested/two", "TWO");
         FrameworkConfig global = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.emptyMap(), null, null);
-        List<Path> all = new SnapshotCommand().generate(projectRoot, global, ExecutionOptions.parse(new String[]{"snapshot"}));
+        List<Path> all = new SnapshotCommand().generate(projectRoot, global, att.core.ExecutionOptionsTestSupport.parse(new String[]{"snapshot"}));
         assertEquals(2, all.size());
         assertTrue(Files.isRegularFile(projectRoot.resolve("testcase/one.xml")));
         assertTrue(Files.isRegularFile(projectRoot.resolve("testcase/nested/two.xml")));
@@ -44,11 +44,11 @@ class SnapshotCommandTest {
             try (OutputStream output = Files.newOutputStream(firstWorkbook)) { value.write(output); }
         }
         new SnapshotCommand().generate(projectRoot, global,
-                ExecutionOptions.parse(new String[]{"snapshot", "--suite", "testcase/one.xlsx"}));
+                att.core.ExecutionOptionsTestSupport.parse(new String[]{"snapshot", "--suite", "testcase/one.xlsx"}));
         assertArrayEquals(beforeStyleChange, Files.readAllBytes(projectRoot.resolve("testcase/one.xml")));
         Files.delete(projectRoot.resolve("testcase/one.xml"));
         List<Path> one = new SnapshotCommand().generate(projectRoot, global,
-                ExecutionOptions.parse(new String[]{"snapshot", "--suite", "testcase/one.xlsx"}));
+                att.core.ExecutionOptionsTestSupport.parse(new String[]{"snapshot", "--suite", "testcase/one.xlsx"}));
         assertEquals(projectRoot.resolve("testcase/one.xml").toRealPath(), one.get(0).toRealPath());
     }
 
@@ -56,7 +56,7 @@ class SnapshotCommandTest {
         writeSuite("one", "ONE");
         FrameworkConfig global = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.emptyMap(), null, null);
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--suite", "testcase/one.xlsx", "--update-snapshot"});
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"run", "--suite", "testcase/one.xlsx", "--update-snapshot"});
         SnapshotCommand command = new SnapshotCommand();
         Path snapshot = projectRoot.resolve("testcase/one.xml");
 
@@ -86,7 +86,7 @@ class SnapshotCommandTest {
         Files.write(projectRoot.resolve("testcase/two.yaml"), "invalid: true\n".getBytes(StandardCharsets.UTF_8));
         FrameworkConfig global = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.emptyMap(), null, null);
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"run", "--all", "--update-snapshot"});
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"run", "--all", "--update-snapshot"});
 
         assertThrows(att.validation.DiagnosticException.class, () -> new SnapshotCommand().updateForRun(projectRoot, global, options));
         assertTrue(!Files.exists(projectRoot.resolve("testcase/one.xml")));

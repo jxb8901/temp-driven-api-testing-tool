@@ -3,7 +3,6 @@ package att;
 
 import att.config.FrameworkConfig;
 import att.config.FrameworkConfigLoader;
-import att.core.ExecutionOptions;
 import att.report.PackageDocumentationGenerator;
 import att.report.GeneratedOutputCleaner;
 import att.report.RunArchiveBuilder;
@@ -25,10 +24,10 @@ public final class FrameworkRunner {
     private FrameworkRunner() {}
 
     public static void main(String[] args) throws Exception {
-        ExecutionOptions options = null;
+        CliOptions options = null;
         Path root = Paths.get("").toAbsolutePath();
         try {
-            try { options = ExecutionOptions.parse(args); }
+            try { options = CliOptions.parse(args); }
             catch (IllegalArgumentException e) {
                 throw new att.validation.DiagnosticException(DiagnosticCodes.CLI_INVALID, "Invalid ATT command line",
                         e.getMessage(), null, "argv", null, null, null, null, null,
@@ -77,7 +76,7 @@ public final class FrameworkRunner {
                 }
                 String loadId = att.core.IdentifierValidator.runId(options.runId() == null || options.runId().trim().isEmpty()
                         ? "load-" + System.currentTimeMillis() : options.runId());
-                final ExecutionOptions loadOptions = options;
+                final CliOptions loadOptions = options;
                 att.load.LoadEventListener progress = loadEvent -> {
                     if (loadOptions.quiet() || !loadOptions.verbose()) return;
                     java.io.PrintStream output = "json".equals(loadOptions.format()) ? System.err : System.out;
@@ -250,7 +249,7 @@ public final class FrameworkRunner {
         return att.validation.JsonSupport.write(output);
     }
 
-    private static att.api.ExecutionEventListener cliObserver(final ExecutionOptions options) {
+    private static att.api.ExecutionEventListener cliObserver(final CliOptions options) {
         return event -> {
             if ((options.quiet() && event.type() != att.api.ExecutionEvent.Type.WARNING)
                     || (!options.verbose() && event.type() != att.api.ExecutionEvent.Type.WARNING
@@ -287,7 +286,7 @@ public final class FrameworkRunner {
         return event.message();
     }
 
-    private static FrameworkConfig loadConfig(ExecutionOptions options, Path root) throws Exception {
+    private static FrameworkConfig loadConfig(CliOptions options, Path root) throws Exception {
         try { return new FrameworkConfigLoader().load(options.configPath(), root, options.environment()); }
         catch (att.validation.DiagnosticException e) { throw e; }
         catch (Exception e) {
@@ -325,13 +324,13 @@ public final class FrameworkRunner {
         System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  load      Execute a closed or fixed-arrival-rate load scenario and report metrics\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run, debug, and load stream bounded progress by default; --quiet keeps the final summary; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
     }
 
-    private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options) {
+    private static void printDiagnostics(PackageValidator.ValidationSummary validation, CliOptions options) {
         printDiagnostics(validation, options, System.out, false);
     }
-    private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options, java.io.PrintStream output) {
+    private static void printDiagnostics(PackageValidator.ValidationSummary validation, CliOptions options, java.io.PrintStream output) {
         printDiagnostics(validation, options, output, false);
     }
-    private static void printDiagnostics(PackageValidator.ValidationSummary validation, ExecutionOptions options, java.io.PrintStream output, boolean leadingBlank) {
+    private static void printDiagnostics(PackageValidator.ValidationSummary validation, CliOptions options, java.io.PrintStream output, boolean leadingBlank) {
         if (!"human".equals(options.format())) return;
         java.util.List<att.validation.Diagnostic> visible = new java.util.ArrayList<att.validation.Diagnostic>();
         for (att.validation.Diagnostic diagnostic : validation.diagnostics) {

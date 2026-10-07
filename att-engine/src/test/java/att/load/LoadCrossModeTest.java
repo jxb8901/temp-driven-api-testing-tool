@@ -78,7 +78,7 @@ class LoadCrossModeTest {
         assertEquals(1, runFactory.puts.get());
 
         NoReplyFactory debugFactory = new NoReplyFactory();
-        DebugEngine.Result debug = new DebugEngine(project, config, debugFactory).run(ExecutionOptions.parse(new String[]{
+        DebugEngine.Result debug = new DebugEngine(project, config, debugFactory).run(att.core.ExecutionOptionsTestSupport.parse(new String[]{
                 "debug", "template", "SHARED", "--output-dir", temp.resolve("mq-debug-output").toString(), "--format", "json"}));
         assertEquals(ResultStatus.ERROR, debug.status());
         assertEquals(1, debugFactory.puts.get());
@@ -234,7 +234,7 @@ class LoadCrossModeTest {
         List<att.core.ValidationResult> testcaseResults = execute(project, config, template, flows, testcase, "testcase");
         assertPortableResult(testcase, testcaseResults);
 
-        DebugEngine.Result debug = new DebugEngine(project, config).run(ExecutionOptions.parse(new String[]{
+        DebugEngine.Result debug = new DebugEngine(project, config).run(att.core.ExecutionOptionsTestSupport.parse(new String[]{
                 "debug", "template", "SHARED", "--output-dir", temp.resolve("debug-output").toString(), "--format", "json"}));
         assertEquals(ResultStatus.PASS, debug.status());
         String debugLog = new String(Files.readAllBytes(debug.logPath()), StandardCharsets.UTF_8);
@@ -340,7 +340,7 @@ class LoadCrossModeTest {
                 + "  check:\n    type: log\n    message: 'value=${EXEC.VARS.refNo}|id=${EXEC.VARS.executionId}'\n");
         write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.2\ninputs: {amount: 17}\n"
                 + "vars: {refNo: sidecar, executionId: '${EXEC.ID}', loadUser: '${EXEC.LOAD.USER_ID}'}\n");
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "template", "SHARED",
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", "--debug", "template", "SHARED",
                 "--input", "templates/SHARED/debug.yaml", "--users", "1", "--duration", "1s",
                 "--run-id", "bootstrap-load", "--output-dir", temp.resolve("load-output").toString(),
                 "--set", "vars.refNo=${EXEC.INPUT.amount}"});
@@ -372,7 +372,7 @@ class LoadCrossModeTest {
         Path project = fixture();
         FrameworkConfig config = config();
         write(project, "config/tools/echo.debug.yaml", "schemaVersion: att-debug/v1.2\narguments: {value: sidecar}\n");
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "tool", "echo",
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", "--debug", "tool", "echo",
                 "--users", "1", "--duration", "1s", "--set", "arg.value=typed-load"});
         Map<String, Object> promoted = new DebugEngine(project, config).loadBootstrapInputForLoad(options);
         LoadScenario scenario = new LoadScenarioLoader(project).fromDebugInput((Path) promoted.get("source"),
@@ -398,7 +398,7 @@ class LoadCrossModeTest {
                 java.util.Arrays.asList("/bin/echo", "${value}"), Collections.<String>emptyList(), "txt", arguments, null);
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.singletonMap("group.echo", grouped), null, null);
-        ExecutionOptions options = ExecutionOptions.parse(new String[]{"load", "--debug", "tool", "group.echo",
+        ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", "--debug", "tool", "group.echo",
                 "--users", "1", "--duration", "1s", "--set", "arg.value=typed-load"});
 
         Map<String, Object> promoted = new DebugEngine(project, config).loadBootstrapInputForLoad(options);

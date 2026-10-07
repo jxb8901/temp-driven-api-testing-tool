@@ -53,31 +53,31 @@ class FrameworkRunnerTest {
     }
 
     @Test void verboseIsAnExplicitOutputModeAndConflictsWithQuiet() {
-        att.core.ExecutionOptions defaults = att.core.ExecutionOptions.parse(new String[]{"run", "--all"});
+        CliOptions defaults = CliOptions.parse(new String[]{"run", "--all"});
         assertTrue(defaults.verbose());
         assertFalse(defaults.quiet());
-        att.core.ExecutionOptions verbose = att.core.ExecutionOptions.parse(new String[]{"run", "--all", "--verbose"});
+        CliOptions verbose = CliOptions.parse(new String[]{"run", "--all", "--verbose"});
         assertTrue(verbose.verbose());
         assertFalse(verbose.quiet());
-        att.core.ExecutionOptions quiet = att.core.ExecutionOptions.parse(new String[]{"run", "--all", "--quiet"});
+        CliOptions quiet = CliOptions.parse(new String[]{"run", "--all", "--quiet"});
         assertTrue(quiet.quiet());
         assertFalse(quiet.verbose());
-        assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"run", "--all", "--verbose", "--quiet"}));
-        assertTrue(att.core.ExecutionOptions.parse(new String[]{"debug", "template", "X"}).verbose());
-        assertTrue(att.core.ExecutionOptions.parse(new String[]{"load", "scenario.yaml"}).verbose());
+        assertThrows(IllegalArgumentException.class, () -> CliOptions.parse(new String[]{"run", "--all", "--verbose", "--quiet"}));
+        assertTrue(CliOptions.parse(new String[]{"debug", "template", "X"}).verbose());
+        assertTrue(CliOptions.parse(new String[]{"load", "scenario.yaml"}).verbose());
     }
 
     @Test void snapshotDefaultsToAllWorkbooksAndRejectsRunOnlyOptions() {
-        att.core.ExecutionOptions implicitAll = att.core.ExecutionOptions.parse(new String[]{"snapshot"});
+        CliOptions implicitAll = CliOptions.parse(new String[]{"snapshot"});
         assertEquals("snapshot", implicitAll.command());
         assertTrue(implicitAll.all());
-        assertTrue(att.core.ExecutionOptions.parse(new String[]{"snapshot", "--all"}).all());
-        assertEquals(1, att.core.ExecutionOptions.parse(new String[]{"snapshot", "--suite", "testcase/payment.xlsx"}).suitePaths().size());
-        assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"snapshot", "--all", "--tag", "smoke"}));
-        att.core.ExecutionOptions update = att.core.ExecutionOptions.parse(new String[]{"run", "--all", "--update-snapshot"});
+        assertTrue(CliOptions.parse(new String[]{"snapshot", "--all"}).all());
+        assertEquals(1, CliOptions.parse(new String[]{"snapshot", "--suite", "testcase/payment.xlsx"}).suitePaths().size());
+        assertThrows(IllegalArgumentException.class, () -> CliOptions.parse(new String[]{"snapshot", "--all", "--tag", "smoke"}));
+        CliOptions update = CliOptions.parse(new String[]{"run", "--all", "--update-snapshot"});
         assertTrue(update.updateSnapshot());
-        assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"validate", "--package", "--update-snapshot"}));
-        assertThrows(IllegalArgumentException.class, () -> att.core.ExecutionOptions.parse(new String[]{"snapshot", "--all", "--update-snapshot"}));
+        assertThrows(IllegalArgumentException.class, () -> CliOptions.parse(new String[]{"validate", "--package", "--update-snapshot"}));
+        assertThrows(IllegalArgumentException.class, () -> CliOptions.parse(new String[]{"snapshot", "--all", "--update-snapshot"}));
     }
 
     @Test void typedDiagnosticKeepsRunCodeIndependentFromMessageText() {
@@ -113,9 +113,9 @@ class FrameworkRunnerTest {
                 new att.validation.Diagnostic("ATT-TPL-001", att.validation.Diagnostic.Severity.ERROR,
                         "Missing assertion", "template.yaml", "actions.verify.assert", null, null, null, "VERIFY", "verify", "Add an assertion."));
         att.validation.PackageValidator.ValidationSummary summary = new att.validation.PackageValidator.ValidationSummary("package", 1, 1, 1, 0, diagnostics);
-        att.core.ExecutionOptions options = att.core.ExecutionOptions.parse(new String[]{"validate", "--package"});
+        CliOptions options = CliOptions.parse(new String[]{"validate", "--package"});
         java.lang.reflect.Method method = FrameworkRunner.class.getDeclaredMethod("printDiagnostics",
-                att.validation.PackageValidator.ValidationSummary.class, att.core.ExecutionOptions.class, PrintStream.class, boolean.class);
+                att.validation.PackageValidator.ValidationSummary.class, CliOptions.class, PrintStream.class, boolean.class);
         method.setAccessible(true);
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         method.invoke(null, summary, options, new PrintStream(bytes), true);
@@ -136,9 +136,9 @@ class FrameworkRunnerTest {
                 new att.validation.Diagnostic("ATT-INFO-001", att.validation.Diagnostic.Severity.INFO,
                         "Optional dependency", "template.yaml", "actions.call", null, null, null, "PAYMENT", "call", "No action required."));
         att.validation.PackageValidator.ValidationSummary summary = new att.validation.PackageValidator.ValidationSummary("package", 1, 1, 1, 0, diagnostics);
-        att.core.ExecutionOptions options = att.core.ExecutionOptions.parse(new String[]{"validate", "--package", "--quiet"});
+        CliOptions options = CliOptions.parse(new String[]{"validate", "--package", "--quiet"});
         java.lang.reflect.Method method = FrameworkRunner.class.getDeclaredMethod("printDiagnostics",
-                att.validation.PackageValidator.ValidationSummary.class, att.core.ExecutionOptions.class, PrintStream.class, boolean.class);
+                att.validation.PackageValidator.ValidationSummary.class, CliOptions.class, PrintStream.class, boolean.class);
         method.setAccessible(true);
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         method.invoke(null, summary, options, new PrintStream(bytes), false);

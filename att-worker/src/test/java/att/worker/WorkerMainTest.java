@@ -76,12 +76,12 @@ class WorkerMainTest {
                 sawProgress="PROGRESS".equals(mapper.readTree(line).get("type").asText());
             } else Thread.sleep(25L);
         }
-        assertTrue(sawProgress,"Worker never entered its active operation before termination");
         process.destroy();
         if(!process.waitFor(3,java.util.concurrent.TimeUnit.SECONDS)) {
             process.destroyForcibly();
             assertTrue(process.waitFor(3,java.util.concurrent.TimeUnit.SECONDS),"Worker process could not be forcibly stopped");
         }
+        assertTrue(sawProgress,"Worker never entered its active operation before termination");
         assertArrayEquals(originalConfig,Files.readAllBytes(config));
         assertArrayEquals(originalTemplate,Files.readAllBytes(template));
         assertArrayEquals(originalScenario,Files.readAllBytes(scenario));
