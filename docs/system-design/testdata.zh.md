@@ -1,6 +1,6 @@
 # Testdata registry 與 input mapping
 
-本頁說明 issue #63 的 runtime boundary。Public descriptor 契約為 `att-testdata/v1.0`；Environment selection 屬於 `att-config/v2.11`，Load policy 屬於 `att-load/v1.6`。
+本頁說明 issue #63 的 runtime boundary。Public descriptor 契約為 `att-testdata/v1.0`；Environment selection 屬於 `att-config/v2.12`，Load policy 屬於 `att-load/v1.6`。
 
 ## Registry layers 與啟用時機
 

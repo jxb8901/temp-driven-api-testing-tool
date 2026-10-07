@@ -63,6 +63,9 @@ public class FrameworkEngine {
         }
     }
 
+    /** Resolves one Run identity for callers that must validate and execute under the same ID. */
+    public String effectiveRunId(ExecutionOptions options) { return runId(options); }
+
     public RunSummary run(ExecutionOptions options, List<att.validation.Diagnostic> validationDiagnostics) throws Exception {
         return run(options, validationDiagnostics, new PerformanceProfile(options.profile()));
     }
@@ -386,7 +389,11 @@ public class FrameworkEngine {
         if (options.runId() != null && !options.runId().trim().isEmpty()) {
             return IdentifierValidator.runId(options.runId());
         }
-        return IdentifierValidator.runId(DateTimeFormatter.ofPattern(config.run().timestampFormat()).format(LocalDateTime.now()));
+        String fallback = DateTimeFormatter.ofPattern(config.run().timestampFormat()).format(LocalDateTime.now());
+        Path source = !options.suitePaths().isEmpty() ? options.suitePaths().get(0)
+                : options.suiteDirectory() == null ? config.testcasesRoot() : options.suiteDirectory();
+        return ExecutionIdentityFormat.runId(config.run().runIdFormat(), fallback, projectRoot,
+                "testcase", source.isAbsolute() ? source : projectRoot.resolve(source));
     }
 
     private List<Path> suites(ExecutionOptions options) throws Exception {

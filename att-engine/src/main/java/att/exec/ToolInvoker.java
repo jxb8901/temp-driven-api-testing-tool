@@ -193,9 +193,13 @@ public class ToolInvoker {
             evidence.put("id", id); evidence.put("type", "tool"); evidence.put("name", toolName);
             evidence.put("status", "ERROR"); evidence.put("category", "IO_ERROR"); evidence.put("message", redactSsh(e.getMessage(), target));
             evidence.put("logicalArgv", logicalArgv); evidence.put("argv", argv);
+            evidence.put("command", printableCommand(argv)); evidence.put("timeoutMs", timeoutMs);
+            evidence.put("durationMs", Duration.between(started, Instant.now()).toMillis());
             if (tool.grouped()) { evidence.put("groupId", tool.groupId()); evidence.put("toolKey", tool.localKey()); }
             if (target != null) { evidence.put("sshDestination", target.destination()); evidence.put("sshPort", target.port()); evidence.put("sshTransport", sshTransport); }
             if (helper != null) { evidence.put("sshHelper", helper.id()); evidence.put("instance", instance); evidence.put("host", target.host()); evidence.put("selectionStrategy", strategy); evidence.put("selectionSource", tool.sshSelectionStrategy().isEmpty() ? "helper" : "toolGroup"); evidence.put("startedAt", started.toString()); evidence.put("endedAt", Instant.now().toString()); evidence.put("durationMs", Duration.between(started, Instant.now()).toMillis()); }
+            try { if (log != null) log.appendToolInvocation("ACTION " + id, safeLogInvocation(evidence, tool, resolvedInput, log)); }
+            catch (Exception ignored) { }
             throw new ToolExecutionException("IO_ERROR", "Tool I/O failed: " + toolName + ": " + redactSsh(e.getMessage(), target), evidence, null, e);
         } catch (RuntimeException e) {
             InternalExceptionLogger.logIfInternal(log, target == null ? "tool.processStart" : "ssh.execute", e,
@@ -267,6 +271,7 @@ public class ToolInvoker {
         invocation.put("command", command);
         invocation.put("logicalArgv", logicalArgv);
         invocation.put("argv", argv);
+        if (tool.grouped()) { invocation.put("groupId", tool.groupId()); invocation.put("toolKey", tool.localKey()); }
         if (helper != null) {
             invocation.put("sshHelper", helper.id()); invocation.put("instance", instance);
             invocation.put("host", target.host()); invocation.put("selectionStrategy", strategy);
@@ -323,10 +328,11 @@ public class ToolInvoker {
             toolNode.put(tool.groupId(), groupNode);
         } else toolNode.put(toolName, toolInvocation);
         invocation.put("TOOL", toolNode);
+        Map<String, Object> safeInvocation = safeLogInvocation(invocation, tool, resolvedInput, log);
         appendProcessOutput(log, id, commandResult, invocation, target);
-        if (recordAction) {
-            context.addAction(id, invocation);
-            try { if (log != null) log.appendToolInvocation("ACTION " + id, invocation); }
+        if (recordAction) context.addAction(id, invocation);
+        if (!recordAction && !context.hasActiveActionEvidenceSink()) {
+            try { if (log != null) log.appendToolInvocation("ACTION " + id, safeInvocation); }
             catch (Exception error) { invocation.put("evidenceError", "tool action log append failed: " + error.getMessage()); }
         }
 
@@ -335,7 +341,7 @@ public class ToolInvoker {
         }
         if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse Tool stdoutFormat " + tool.resultFormat() + " for " + toolName + ": " + redactSsh(parseFailure.getMessage(), target), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
         return new ToolInvocationResult(toolName, id, parsed, invocation, true,
-                ActionExecutionResult.evidence("tool", toolInvocation));
+                ActionExecutionResult.evidence("tool", safeLogInvocation(toolInvocation, tool, resolvedInput, log)));
         } finally {
             String cleanupWarning = cleanupCapture(commandResult);
             if (cleanupWarning != null && invocation != null) {
@@ -469,6 +475,7 @@ public class ToolInvoker {
         evidence.put("sshHelper", helper.id()); evidence.put("selectionStrategy", strategy);
         evidence.put("selectionSource", tool.sshSelectionStrategy().isEmpty() ? "helper" : "toolGroup");
         evidence.put("instances", instances); evidence.put("logicalArgv", logicalArgv);
+        evidence.put("argv", logicalArgv); evidence.put("command", printableCommand(logicalArgv));
         evidence.put("timeoutMs", timeoutMs); evidence.put("durationMs", Duration.between(started, Instant.now()).toMillis());
         evidence.put("status", passed ? "PASS" : timedOut ? "TIMEOUT" : "ERROR");
         if (tool.grouped()) { evidence.put("groupId", tool.groupId()); evidence.put("toolKey", tool.localKey()); }
@@ -492,9 +499,9 @@ public class ToolInvoker {
             group.put(tool.localKey(), evidence); toolNode.put(tool.groupId(), group);
         } else toolNode.put(toolName, evidence);
         invocation.put("TOOL", toolNode);
-        if (recordAction) {
-            context.addAction(id, invocation);
-            try { if (log != null) log.appendToolInvocation("ACTION " + id, invocation); }
+        if (recordAction) context.addAction(id, invocation);
+        if (!recordAction && !context.hasActiveActionEvidenceSink()) {
+            try { if (log != null) log.appendToolInvocation("ACTION " + id, safeLogInvocation(invocation, tool, input, log)); }
             catch (Exception error) { invocation.put("evidenceError", "tool action log append failed: " + error.getMessage()); }
         }
         if (!passed) throw new ToolExecutionException(timedOut ? "TIMEOUT" : "SSH_FANOUT",
@@ -508,6 +515,99 @@ public class ToolInvoker {
         String redacted = message;
         for (String path : sshIdentityPaths(target)) redacted = redacted.replace(path, "[REDACTED_SECRET]");
         return redacted;
+    }
+
+    /** Builds a Case-log-only execution projection with sensitive Tool arguments redacted. */
+    private Map<String, Object> safeLogInvocation(Map<String, Object> invocation, ToolConfig tool,
+                                                   Map<String, Object> input, CaseExecutionLog log) {
+        Map<String, Object> safe = new LinkedHashMap<String, Object>(invocation);
+        java.util.List<String> secrets = new ArrayList<String>();
+        if (input != null) collectSensitiveValues(input, secrets);
+        for (ToolArgumentConfig argument : tool.arguments().values())
+            if (sensitiveName(argument.key()) && input != null && input.containsKey(argument.key()))
+                collectValues(input.get(argument.key()), secrets);
+        secrets.sort((left, right) -> Integer.compare(right.length(), left.length()));
+        if (log != null) log.registerSecretRedactions(secrets);
+        if (input != null) safe.put("input", redactSensitiveTree(input, secrets));
+        for (String key : new String[]{"logicalArgv", "argv"}) {
+            Object value = invocation.get(key);
+            if (value instanceof List) safe.put(key, redactArgv((List<?>) value, secrets));
+        }
+        Object command = invocation.get("command");
+        if (command instanceof String) safe.put("command", redact(String.valueOf(command), secrets));
+        for (String key : new String[]{"resolvedCommand", "executedCommand"}) {
+            Object value = invocation.get(key);
+            if (value instanceof String) safe.put(key, redact(String.valueOf(value), secrets));
+        }
+        return safe;
+    }
+
+    private List<String> redactArgv(List<?> values, List<String> secrets) {
+        List<String> result = new ArrayList<String>();
+        boolean redactNext = false;
+        for (Object item : values) {
+            String value = item == null ? "" : String.valueOf(item);
+            if (redactNext) {
+                result.add("[REDACTED_SECRET]");
+                redactNext = false;
+            } else {
+                int equals = value.indexOf('=');
+                String flag = equals < 0 ? value : value.substring(0, equals);
+                if (sensitiveName(flag)) {
+                    if (equals < 0) { result.add(value); redactNext = true; }
+                    else result.add(flag + "=[REDACTED_SECRET]");
+                } else result.add(redact(value, secrets));
+            }
+        }
+        return result;
+    }
+
+    private Object redactSensitiveTree(Object value, List<String> secrets) {
+        if (value instanceof Map) {
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                result.put(key, sensitiveName(key) ? "[REDACTED_SECRET]" : redactSensitiveTree(entry.getValue(), secrets));
+            }
+            return result;
+        }
+        if (value instanceof Iterable) {
+            List<Object> result = new ArrayList<Object>();
+            for (Object item : (Iterable<?>) value) result.add(redactSensitiveTree(item, secrets));
+            return result;
+        }
+        if (value instanceof String) return redact((String) value, secrets);
+        return value;
+    }
+
+    private void collectSensitiveValues(Map<String, Object> values, List<String> result) {
+        for (Map.Entry<String, Object> entry : values.entrySet())
+            if (sensitiveName(entry.getKey())) collectValues(entry.getValue(), result);
+    }
+
+    private void collectValues(Object value, List<String> result) {
+        if (value == null) return;
+        if (value instanceof Iterable) {
+            for (Object item : (Iterable<?>) value) collectValues(item, result);
+        } else if (!(value instanceof Map) && !(value instanceof byte[])) {
+            String text = String.valueOf(value);
+            if (!text.isEmpty() && !result.contains(text)) result.add(text);
+        }
+    }
+
+    private String redact(String value, List<String> secrets) {
+        String result = value;
+        for (String secret : secrets) if (secret != null && !secret.isEmpty())
+            result = result.replace(secret, "[REDACTED_SECRET]");
+        return result;
+    }
+
+    private boolean sensitiveName(String value) {
+        if (value == null) return false;
+        String key = value.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        return key.contains("password") || key.contains("passwd") || key.contains("token")
+                || key.contains("secret") || key.contains("credential") || key.contains("apikey")
+                || key.contains("privatekey") || key.contains("accesskey");
     }
 
     private List<String> sshIdentityPaths(SshConfig target) {

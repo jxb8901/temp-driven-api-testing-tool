@@ -1107,6 +1107,9 @@ public final class CaseRuntimeContext {
         if (!actionEvidenceSinks.isEmpty()) actionEvidenceSinks.pop();
     }
 
+    /** Whether a surrounding Action will publish this Tool's retained attempt evidence. */
+    public boolean hasActiveActionEvidenceSink() { return !actionEvidenceSinks.isEmpty(); }
+
     public int nextToolSequence(String ignored) { return ++toolSequence; }
     public String nextInvocationId(String base) { return base + "_" + String.format("%03d", nextToolSequence(base)); }
     public String nextDbInvocationId(String instance) { return instance + "_" + String.format("%03d", ++dbSequence); }

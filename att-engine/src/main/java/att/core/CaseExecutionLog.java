@@ -176,9 +176,9 @@ public class CaseExecutionLog implements AutoCloseable {
             text.append('\n');
         } else {
             Object serializable = serializable(data, new IdentityHashMap<Object, Object>(), new IdentityHashMap<Object, Boolean>(),
-                    false, false, knownRemotePaths);
-            text.append(containsMultilineString(serializable)
-                    ? renderHumanYaml(serializable, 0) : yaml.dump(serializable));
+                    false, false, false, knownRemotePaths);
+            text.append(containsMultilineString(serializable) || containsHumanTextField(serializable, "")
+                    ? renderHumanYaml(serializable, 0, "") : yaml.dump(serializable));
             appendRecordSeparator(text);
         }
         write(text.toString());
@@ -190,9 +190,10 @@ public class CaseExecutionLog implements AutoCloseable {
         String value = content == null ? "" : content;
         StringBuilder text = new StringBuilder();
         text.append("[").append(section).append("]\n");
+        String safeValue = redactSecrets(value);
         text.append(diagnosticSection(section)
-                ? PathPresentation.displayDiagnosticText(redactSecrets(value), projectRoot,
-                        java.util.Collections.<String>emptySet()) : value);
+                ? PathPresentation.displayDiagnosticText(safeValue, projectRoot,
+                        java.util.Collections.<String>emptySet()) : safeValue);
         if (!endsInLineBreak(value)) text.append('\n');
         else if (endsInLoneCarriageReturn(value)) text.append("\r\n");
         text.append('\n');
@@ -213,7 +214,11 @@ public class CaseExecutionLog implements AutoCloseable {
         boolean endedWithNewline = false;
         char lastCharacter = 0;
         int longestRedaction = 0;
+        List<String> effectiveRedactions = new ArrayList<String>(secretRedactions);
         if (redactions != null) for (String token : redactions)
+            if (token != null && !token.isEmpty() && !effectiveRedactions.contains(token)) effectiveRedactions.add(token);
+        effectiveRedactions.sort((left, right) -> Integer.compare(right.length(), left.length()));
+        if (!effectiveRedactions.isEmpty()) for (String token : effectiveRedactions)
             if (token != null) longestRedaction = Math.max(longestRedaction, token.length());
         StringBuilder pending = longestRedaction == 0 ? null : new StringBuilder();
         char[] buffer = new char[8192];
@@ -227,7 +232,7 @@ public class CaseExecutionLog implements AutoCloseable {
                     chunk.append(value);
                 }
                 if (chunk.length() > 0) {
-                    writeRedactedChunk(chunk.toString(), pending, redactions, longestRedaction);
+                    writeRedactedChunk(chunk.toString(), pending, effectiveRedactions, longestRedaction);
                     char last = chunk.charAt(chunk.length() - 1);
                     lastCharacter = last;
                     endedWithNewline = last == '\n' || last == '\r';
@@ -354,17 +359,21 @@ public class CaseExecutionLog implements AutoCloseable {
     }
 
     /** Renders nested values for people while leaving multiline String characters intact. */
-    private String renderHumanYaml(Object value, int indent) {
+    private String renderHumanYaml(Object value, int indent, String parentPath) {
         StringBuilder out = new StringBuilder();
         if (value instanceof Map) {
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
                 indent(out, indent);
                 out.append(yamlScalar(String.valueOf(entry.getKey()))).append(':');
                 Object child = entry.getValue();
+                String childPath = parentPath.isEmpty() ? String.valueOf(entry.getKey())
+                        : parentPath + "." + entry.getKey();
                 if (isEmptyContainer(child)) {
                     out.append(' ').append(child instanceof Map ? "{}" : "[]").append('\n');
                 } else if (isContainer(child)) {
-                    out.append('\n').append(renderHumanYaml(child, indent + 2));
+                    out.append('\n').append(renderHumanYaml(child, indent + 2, childPath));
+                } else if (child instanceof String && isHumanTextField(childPath)) {
+                    out.append(' ').append(renderBlock((String) child, indent + 2));
                 } else if (child instanceof String && hasLineBreak((String) child)) {
                     out.append(' ').append(renderBlock((String) child, indent + 2));
                 } else {
@@ -376,7 +385,7 @@ public class CaseExecutionLog implements AutoCloseable {
                 indent(out, indent);
                 out.append('-');
                 if (isEmptyContainer(child)) out.append(' ').append(child instanceof Map ? "{}" : "[]").append('\n');
-                else if (isContainer(child)) out.append('\n').append(renderHumanYaml(child, indent + 2));
+                else if (isContainer(child)) out.append('\n').append(renderHumanYaml(child, indent + 2, parentPath));
                 else if (child instanceof String && hasLineBreak((String) child)) out.append(' ').append(renderBlock((String) child, indent + 2));
                 else out.append(' ').append(yamlScalar(child)).append('\n');
             }
@@ -384,12 +393,34 @@ public class CaseExecutionLog implements AutoCloseable {
             int length = java.lang.reflect.Array.getLength(value);
             List<Object> values = new ArrayList<Object>(length);
             for (int index = 0; index < length; index++) values.add(java.lang.reflect.Array.get(value, index));
-            return renderHumanYaml(values, indent);
+            return renderHumanYaml(values, indent, parentPath);
         } else {
             indent(out, indent);
             out.append(yamlScalar(value)).append('\n');
         }
         return out.toString();
+    }
+
+    private boolean containsHumanTextField(Object value, String parentPath) {
+        if (value instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                String path = parentPath.isEmpty() ? key : parentPath + "." + key;
+                if (isHumanTextField(path) || containsHumanTextField(entry.getValue(), path)) return true;
+            }
+        } else if (value instanceof Iterable) {
+            for (Object item : (Iterable<?>) value) if (containsHumanTextField(item, parentPath)) return true;
+        }
+        return false;
+    }
+
+    private boolean isHumanTextField(String path) {
+        if (path == null) return false;
+        String lower = path.toLowerCase(java.util.Locale.ROOT);
+        String field = lower.substring(lower.lastIndexOf('.') + 1);
+        if ("command".equals(field) || "resolvedcommand".equals(field) || "executedcommand".equals(field)) return true;
+        if ("message".equals(field) || "summary".equals(field) || "detail".equals(field)) return true;
+        return ("expression".equals(field) || "rendered".equals(field)) && lower.contains("assertion.");
     }
 
     private String renderBlock(String value, int contentIndent) {
@@ -499,9 +530,9 @@ public class CaseExecutionLog implements AutoCloseable {
 
     private Map<String, Object> compactAttempt(Map<String, Object> attempt) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        copyIfPresent(attempt, result, "attempt", "id", "status", "durationMs", "input", "logicalArgv");
-        Object logical = attempt.get("logicalArgv"), executed = attempt.get("argv");
-        if (executed != null && !executed.equals(logical)) result.put("argv", executed);
+        copyIfPresent(attempt, result, "attempt", "id", "groupId", "toolKey", "status", "durationMs",
+                "input", "command", "resolvedCommand", "executedCommand", "logicalArgv", "argv",
+                "timeoutMs", "exitCode");
         Object parsed = presentationValue(attempt.get("output")), stdout = attempt.get("stdout");
         if (!(parsed instanceof String) || stdout == null || !String.valueOf(parsed).equals(String.valueOf(stdout).trim())) {
             if (attempt.containsKey("output")) result.put("output", parsed);
@@ -588,16 +619,18 @@ public class CaseExecutionLog implements AutoCloseable {
     /** Converts represented runtime values to evidence maps and applies the configured YAML alias policy. */
     private Object serializable(Object value, IdentityHashMap<Object, Object> copies,
                                 IdentityHashMap<Object, Boolean> active, boolean preserveText,
-                                boolean diagnosticText, Set<String> remotePaths) {
+                                boolean diagnosticText, boolean executionIdentity, Set<String> remotePaths) {
         if (value == null) return null;
         if (value instanceof Path) {
             String raw = value.toString();
             String redacted = redactSecrets(raw);
             if (!raw.equals(redacted)) return redacted;
-            return preserveText ? raw : PathPresentation.displayPath((Path) value, projectRoot);
+            return executionIdentity ? PathPresentation.displayText(redacted, projectRoot)
+                    : preserveText ? raw : PathPresentation.displayPath((Path) value, projectRoot);
         }
         if (value instanceof String) {
             String redacted = redactSecrets((String) value);
+            if (executionIdentity) return PathPresentation.displayText(redacted, projectRoot);
             if (preserveText) return redacted;
             return diagnosticText
                     ? PathPresentation.displayDiagnosticText(redacted, projectRoot, remotePaths)
@@ -613,11 +646,13 @@ public class CaseExecutionLog implements AutoCloseable {
                 Map<Object, Object> copy = new LinkedHashMap<Object, Object>();
                 if (yamlAnchors) copies.put(value, copy);
                 for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-                    Object key = serializable(entry.getKey(), copies, active, false, false, remotePaths);
+                    Object key = serializable(entry.getKey(), copies, active, false, false, false, remotePaths);
                     Object fieldValue = entry.getValue();
                     boolean remoteField = key instanceof String && PathPresentation.isRemoteField((String) key);
                     boolean diagnosticField = key instanceof String && PathPresentation.isDiagnosticField((String) key);
-                    if (key instanceof String && PathPresentation.isLocalPathField((String) key) && fieldValue instanceof String) {
+                    boolean identityField = key instanceof String && isExecutionIdentityField((String) key);
+                    boolean identity = executionIdentity || identityField;
+                    if (!identity && key instanceof String && PathPresentation.isLocalPathField((String) key) && fieldValue instanceof String) {
                         String originalPath = (String) fieldValue;
                         String redactedPath = redactSecrets(originalPath);
                         if (!redactedPath.equals(originalPath)) fieldValue = redactedPath;
@@ -625,23 +660,30 @@ public class CaseExecutionLog implements AutoCloseable {
                             fieldValue = PathPresentation.displayPathText(originalPath, projectRoot);
                     }
                     copy.put(key, serializable(fieldValue, copies, active, preserveText || remoteField,
-                            diagnosticText || diagnosticField, remotePaths));
+                            diagnosticText || diagnosticField, identity, remotePaths));
                 }
                 return copy;
             }
             ArrayList<Object> copy = new ArrayList<Object>();
             if (yamlAnchors) copies.put(value, copy);
             if (value instanceof Iterable) {
-                for (Object item : (Iterable<?>) value) copy.add(serializable(item, copies, active, preserveText, diagnosticText, remotePaths));
+                for (Object item : (Iterable<?>) value) copy.add(serializable(item, copies, active, preserveText, diagnosticText, executionIdentity, remotePaths));
             } else {
                 int length = java.lang.reflect.Array.getLength(value);
                 for (int index = 0; index < length; index++)
-                    copy.add(serializable(java.lang.reflect.Array.get(value, index), copies, active, preserveText, diagnosticText, remotePaths));
+                    copy.add(serializable(java.lang.reflect.Array.get(value, index), copies, active, preserveText, diagnosticText, executionIdentity, remotePaths));
             }
             return copy;
         } finally {
             active.remove(value);
         }
+    }
+
+    private boolean isExecutionIdentityField(String field) {
+        if (field == null) return false;
+        String key = field.toLowerCase(java.util.Locale.ROOT);
+        return "command".equals(key) || "resolvedcommand".equals(key) || "executedcommand".equals(key)
+                || "logicalargv".equals(key) || "argv".equals(key);
     }
 
     private Set<String> knownSshRemotePaths(Object value) {

@@ -12,8 +12,9 @@ schemas:
   att-load/v1.0: history/att-load-v1.0.schema.json
   att-load-summary/v1.1: att-load-summary-v1.1.schema.json
   att-load-summary/v1.0: history/att-load-summary-v1.0.schema.json
+  att-config/v2.11: history/att-config-v2.11.schema.json
   att-config/v2.10: history/att-config-v2.10.schema.json
-  globalConfig: att-config-v2.11.schema.json
+  globalConfig: att-config-v2.12.schema.json
   previousGlobalConfig: history/att-config-v2.8.schema.json
   previousGlobalConfigV27: history/att-config-v2.7.schema.json
   legacyGlobalConfigV26: history/att-config-v2.6.schema.json

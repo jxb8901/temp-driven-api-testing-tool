@@ -188,6 +188,16 @@ public final class ExecutionOptions {
                 unsafeFailureDetails, listener);
     }
 
+    /** Freezes an exact, already validated execution identity for subsequent lifecycle phases. */
+    public ExecutionOptions withRunId(String value) {
+        return new ExecutionOptions(command, configPath, suitePaths, suiteDirectory, caseIds, tags, excludeTags,
+                value, all, rerunFailed, dryRun, failFast, outputDirectory, validationScope, ciOutputs,
+                concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput,
+                loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown,
+                loadThinkTime, loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides,
+                unsafeFailureDetails, observer);
+    }
+
     public void emitOutput(String message) {
         if (observer != null) observer.onEvent(ExecutionEvent.log(message));
     }

@@ -4,7 +4,7 @@
 
 | Artifact | 現行 schema |
 |---|---|
-| Global configuration | att-config/v2.11 |
+| Global configuration | att-config/v2.12 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
 | MQHelper | att-mqhelper/v1.2 |

@@ -15,7 +15,7 @@ schemas:
   att-load/v1.6: att-load-v1.6.schema.json
   att-load/v1.5: history/att-load-v1.5.schema.json
   att-load/v1.4: history/att-load-v1.4.schema.json
-  globalConfig: att-config-v2.11.schema.json
+  globalConfig: att-config-v2.12.schema.json
   att-testdata/v1.0: att-testdata-v1.0.schema.json
 """
 
@@ -25,7 +25,7 @@ class DocumentationContractsTest(unittest.TestCase):
         self.active = active_schemas(CATALOG)
 
     def test_catalog_history_does_not_override_active_version(self):
-        self.assertEqual({"att-load": "1.6", "att-config": "2.11", "att-testdata": "1.0"}, self.active)
+        self.assertEqual({"att-load": "1.6", "att-config": "2.12", "att-testdata": "1.0"}, self.active)
 
     def test_stale_schemas_in_normal_text_examples_and_filenames_fail(self):
         for text in ("schemaVersion: att-load/v1.2", "Load v1.2",
@@ -34,7 +34,7 @@ class DocumentationContractsTest(unittest.TestCase):
                 self.assertTrue(stale_claims(text, self.active, VERSION))
 
     def test_current_schemas_pass(self):
-        self.assertEqual([], stale_claims("ATT 3.8.0; att-load/v1.6; config v2.11; att-testdata/v1.0",
+        self.assertEqual([], stale_claims("ATT 3.8.0; att-load/v1.6; config v2.12; att-testdata/v1.0",
                                           self.active, VERSION))
 
     def test_testdata_mapping_example_is_bootstrap_safe_and_uses_selected_record_paths(self):

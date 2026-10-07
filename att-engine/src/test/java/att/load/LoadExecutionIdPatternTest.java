@@ -169,6 +169,6 @@ class LoadExecutionIdPatternTest {
 
     private void installConfig() throws Exception {
         att.TestSchemas.install(root);
-        Files.write(root.resolve("config.yaml"), "schemaVersion: att-config/v2.10\n".getBytes("UTF-8"));
+        Files.write(root.resolve("config.yaml"), "schemaVersion: att-config/v2.11\n".getBytes("UTF-8"));
     }
 }

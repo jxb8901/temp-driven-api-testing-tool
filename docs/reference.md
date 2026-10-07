@@ -123,6 +123,7 @@ Status: Normative end-user documentation; generated from modular sources
 - [Appendix C — migration notes](#appendix-c-migration-notes)
   - [File arguments and case-log paths](#file-arguments-and-case-log-paths)
   - [Previous release Testdata migration](#previous-release-testdata-migration)
+  - [Execution identity format migration](#execution-identity-format-migration)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
   - [Global configuration migration](#global-configuration-migration)
@@ -951,6 +952,8 @@ Run executes selected authored Testcases from a workbook. Each selected Testcase
 
 ATT loads the effective configuration/environment, verifies canonical workbook snapshots, validates the selected dependency closure, reserves a unique Run ID, then starts a Case execution for each selected Testcase. Stages run in order. Each Stage resolves its selector to a Template; Actions execute in YAML order subject to `runWhen` and `onFailure`.
 
+When `--run-id <id>` is absent, `execution.runIdFormat` can generate the outer Run ID; otherwise the existing `run.id.timestampFormat` default applies. The format is evaluated once during identity initialization, before `EXEC.RUN_ID` or an output path is published. Its allowed values and built-ins are listed in [package-wide configuration](reference/configuration.md#set-package-wide-options). The exact CLI ID takes precedence and is treated as a literal.
+
 Run evidence is written directly below `output/<RunID>/`. The completed run publishes `run.yaml`, Case directories/logs, result workbooks, HTML/CI outputs as configured, and only after completion updates `latest-run.yaml`. A pre-existing Run ID is rejected rather than overwritten. `run --update-snapshot` is the explicit opt-in snapshot refresh path before validation/execution.
 
 Status aggregation preserves severity: ERROR > INVALID > FAIL > PASS > SKIPPED. Process exit code is `0` when the run completes without failing status, `1` for test/assertion failure, `2` for invalid command/configuration/validation, and `3` for runtime/infrastructure error.
@@ -1039,6 +1042,8 @@ output/debug/<debugId>/
 ```
 
 Debug does not create or update normal `latest-run.yaml`. Exit codes are `0` PASS, `1` FAIL, `2` invalid CLI/config/input/validation, and `3` runtime error. It is execution-equivalent at the selected reusable-component boundary, but it is **not** a workbook Case: there is no workbook selection, Stage history or result-workbook lifecycle unless explicitly represented by debug inputs/artifacts.
+
+`execution.debugIdFormat` can set the standalone `<debugId>` using package and target metadata. Use `--debug-id <id>` for an exact literal override. Configured and explicit IDs fail if their output directory already exists; the legacy default `<type>-<targetId>` retains its timestamp suffix on collision. The resolved Debug ID is shared by the directory name, `debugId`, `EXEC.RUN_ID`, and `EXEC.ID`.
 
 #### Debug troubleshooting and MQ payload paths
 
@@ -1359,6 +1364,8 @@ evidence: {mode: failures}
 Copyable examples and field descriptions are maintained in [examples/load/README.md](../examples/load/README.md). Schema migration is documented in [Migration Notes](reference/appendices/migrations.md).
 
 #### Check execution ID fields before use
+
+The outer Load directory uses the same `execution.runIdFormat` policy as Run when `--run-id` is absent. `--run-id` remains an exact literal override for the outer Load identity. This policy is separate from `execution.execIdFormat`, which continues to generate each started iteration's `EXEC.ID`.
 
 Load uses schema att-load/v1.6. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
 
@@ -1986,11 +1993,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.11`. Current packages use config v2.11 and Tool Group v2.9. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.12`. Current packages use config v2.12 and Tool Group v2.9. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 environment: SIT
 toolGroups: [config/tools/application.yaml]
 environments:
@@ -2143,7 +2150,7 @@ This page is the authoritative reading reference for author-authored configurati
 Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as `tools`, environment profiles, Tool `arguments` declarations, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key. This does not disable or rename argument values supplied when invoking a Tool:
 
 ```yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 x-debug-note: "#{missing.tool()}"      # ignored config field
 tools:
   x-temporary: not-a-tool               # ignored Tool entry
@@ -2175,9 +2182,9 @@ Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXE
 
 ### Select an environment profile
 
-`att-config/v2.11` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper, HTTPHelper and testdata descriptor lists as a whole. See the resource pages and [Testdata registry and input mapping](reference/test-authoring.md) for each binding.
+`att-config/v2.12` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper, HTTPHelper and testdata descriptor lists as a whole. See the resource pages and [Testdata registry and input mapping](reference/test-authoring.md) for each binding.
 
-ATT selects an environment through one common `att-config/v2.11` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT selects an environment through one common `att-config/v2.12` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -2196,7 +2203,7 @@ The common config keeps the existing templates, testcase roots, run/execution/re
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
@@ -2285,7 +2292,7 @@ Use profiles when the same test package is promoted across environments and only
 ### Set package-wide options
 
 ```yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2294,6 +2301,8 @@ testcase: {root: testcase}
 templates: {root: templates}
 run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
 execution:
+  runIdFormat: "run-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+  debugIdFormat: "debug-${META.TARGET.type}-${META.TARGET.id}-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
   processOutput: {memoryLimitBytes: 65536, artifactLimitBytes: 104857600}
 report:
   mode: append-to-copy
@@ -2321,7 +2330,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.11`; the previous schema remains compatible. The example uses the active schema. |
+| `schemaVersion` | required | Current: `att-config/v2.12`; the previous schema remains compatible. The example uses the active schema. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -2330,9 +2339,25 @@ environments:
 | `testcase.root` | `testcase` | Non-empty package-relative recursive workbook/sidecar discovery root |
 | `run.id.default` | `timestamp` | Only `timestamp` is supported |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
+| `execution.runIdFormat` | unset | Optional expression for the outer Run and Load ID; exact `--run-id` takes precedence |
+| `execution.debugIdFormat` | unset | Optional expression for standalone Debug ID; exact `--debug-id` takes precedence |
 | `execution.processOutput.memoryLimitBytes` | `65536` | Integer 1024–1048576; in-memory head/tail preview per stdout/stderr stream |
 | `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
+
+`runIdFormat` generates the outer Run ID and, when Load has no exact `--run-id`, the outer Load ID. It does not affect Load's per-iteration `execution.execIdFormat` (`EXEC.ID`). `debugIdFormat` generates the standalone Debug directory identity. When no format is configured, the existing timestamp Run/Load default and `<type>-<targetId>` Debug default remain in effect.
+
+Formats are evaluated once before their identity or output directory is published. Run and Load formats can read `META.PACKAGE_ROOT`, `META.SOURCE.type/path`, `EXEC.STARTED_AT`, and `EXEC.RUN_STARTED_AT`. Debug formats can also read `META.TARGET.type/id`. Pure identity-format built-ins and `date.sysdate` / `date.systimestamp` are available; external calls, random/sequence functions, filesystem calls, and invocation state are not. The identity being created is unavailable: references such as `${EXEC.RUN_ID}`, `${EXEC.ID}`, `${EXEC.OUTPUT_DIR}`, `${EXEC.VARS}`, or `${EXEC.ACTIONS}` are rejected. Generated values must already be valid single path segments; ATT does not sanitize them. Run/Load and configured or explicit Debug IDs fail on collision. The legacy default Debug ID keeps its timestamp collision suffix.
+
+For example, a package can use timestamped identities with target-specific standalone Debug folders:
+
+```yaml
+execution:
+  runIdFormat: "run-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+  debugIdFormat: "debug-${META.TARGET.type}-${META.TARGET.id}-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+```
+
+Run and Load accept `--run-id <id>` as a literal override. Standalone Debug accepts `--debug-id <id>` as a literal override; it is not evaluated as an expression.
 
 #### Configure report output
 
@@ -2370,7 +2395,7 @@ Allowed global object properties are:
 | `testcase` | `root`, `x-*` |
 | `run` | `id`, `x-*` |
 | `run.id` | `default`, `timestampFormat`, `x-*` |
-| `execution` | `processOutput`, `x-*` |
+| `execution` | `runIdFormat`, `debugIdFormat`, `processOutput`, `x-*` |
 | `execution.processOutput` | `memoryLimitBytes`, `artifactLimitBytes`, `x-*` |
 | `report` | `mode`, `fileNamePattern`, `columns`, `html`, `junit`, `x-*` |
 | `report.html` | `caseLogInlineLimitBytes`, `x-*` |
@@ -2548,6 +2573,7 @@ On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not in
 | `./att.sh debug <type> <id> --set input.path=<yaml-value>` | Override a typed `EXEC.INPUT` value; repeatable |
 | `./att.sh debug tool <id> --set arg.name=<yaml-value>` | Override one Tool argument; repeatable |
 | `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | Override Template/Flow bootstrap `EXEC.VARS` before expression evaluation |
+| `./att.sh debug <type> <id> --debug-id <id>` | Set the exact standalone Debug directory identity |
 | `./att.sh debug <type> <id> --unsafe-failure-details` | Opt into expanded collector failure diagnostics for this standalone local Debug run; prints a warning and keeps secret redaction |
 | `./att.sh debug <type> <id> --output-dir <dir>` | Isolate debug output below `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | Emit a compact machine-readable console summary; full evidence remains in `result.yaml` |
@@ -2617,7 +2643,7 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 
 ### Complete option matrix
 
-`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.11` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.12` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
 
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 
@@ -2635,7 +2661,7 @@ Repeatable `--set <input|arg|vars>.<path>=<yaml-value>` applies safe-YAML typed 
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ```
 
-The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id`, `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--set`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them.
+The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id` (outer Run/Load identity), `--debug-id` (standalone Debug identity), `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--set`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them. Both identity options are literal overrides.
 
 ## Results, reports, and evidence
 
@@ -2913,7 +2939,7 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 
 | Artifact | Active schema |
 |---|---|
-| Global configuration | att-config/v2.11 |
+| Global configuration | att-config/v2.12 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
 | MQHelper | att-mqhelper/v1.2 |
@@ -2951,6 +2977,10 @@ Case logs, CLI output, and emitted case evidence display paths under the canonic
 ### Previous release Testdata migration
 
 Change global configuration from `att-config/v2.10` to `att-config/v2.11` and Load scenarios from `att-load/v1.4` to `att-load/v1.5`. The previous schemas remain catalogued under `schemas/history/` for migration diagnostics. `att-testdata/v1.0` is new: add descriptor paths to the selected environment profile's `testdata` list, then use `@{id}` references in Case/Stage, Debug, or Load workload input maps. Load scenarios can add package-relative top-level `testdata` paths as a Load-only overlay. Repeated logical IDs across layers mean a whole descriptor replacement; duplicate IDs inside one layer are invalid. Add an explicit selection policy for every descriptor containing multiple records. Existing packages without testdata references need no new descriptor files.
+
+### Execution identity format migration
+
+`att-config/v2.12` adds execution identity formats; the immediately preceding configuration schema remains supported. To configure outer Run and Load IDs, add `execution.runIdFormat`. To configure standalone Debug directory IDs, add `execution.debugIdFormat`. Existing timestamp Run/Load IDs and `<type>-<targetId>` Debug IDs remain the defaults when these fields are absent. `execution.execIdFormat` remains the Load per-iteration `EXEC.ID` policy. Exact Run/Load IDs use `--run-id`; exact standalone Debug IDs use `--debug-id`.
 
 ATT 3.7.2 introduces `att-load/v1.6`. Existing v1.5 descriptors remain compatible and are normalized at load time. To use a closed-user target mix, change the schema version to v1.6 and replace that workload's `target` with a `mix` list of uniquely named entries, each with a positive integer `weight` and its own target. Mix entries are prevalidated before scheduling; only closed workloads support mixes. Load summaries now use `att-load-summary/v1.1` and include per-mix selection and metric data when applicable. The previous Load and summary schemas remain available as historical definitions.
 

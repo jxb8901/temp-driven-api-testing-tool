@@ -352,6 +352,17 @@ class FrameworkEngineTest {
         assertFalse(Files.exists(projectRoot.resolve("output")));
     }
 
+    @Test void configuredRunIdentityIsFrozenAndExactRunIdWins() {
+        FrameworkConfig config = globalConfig("append-to-copy",
+                new RunConfig("timestamp", "yyyyMMdd-HHmmss", "run-${META.SOURCE.type}", ""));
+        FrameworkEngine engine = new FrameworkEngine(projectRoot, config);
+        ExecutionOptions configured = ExecutionOptionsTestSupport.parse(new String[]{"run", "--all"});
+        assertEquals("run-testcase", engine.effectiveRunId(configured));
+        ExecutionOptions exact = ExecutionOptionsTestSupport.parse(new String[]{"run", "--all", "--run-id", "literal-override"});
+        assertEquals("literal-override", engine.effectiveRunId(exact));
+        assertFalse(Files.exists(projectRoot.resolve("output")));
+    }
+
     @Test void staleSnapshotStopsRunBeforeOutputMutation() throws Exception {
         Path workbook = projectRoot.resolve("testcase/payment.xlsx");
         writeWorkbook(workbook);
@@ -387,6 +398,10 @@ class FrameworkEngineTest {
     }
 
     private FrameworkConfig globalConfig(String reportMode) {
+        return globalConfig(reportMode, new RunConfig("timestamp", "yyyyMMdd-HHmmss"));
+    }
+
+    private FrameworkConfig globalConfig(String reportMode, RunConfig run) {
         Map<String, ToolArgumentConfig> args = new LinkedHashMap<String, ToolArgumentConfig>();
         args.put("caseId", new ToolArgumentConfig("caseId", "Case ID", "Full V2 Case ID", true, ""));
         Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
@@ -395,7 +410,7 @@ class FrameworkEngineTest {
         Map<String, String> report = new LinkedHashMap<String, String>();
         report.put("result", "Test Result");
         return new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 30000,
-                Paths.get("templates"), tools, new ReportConfig(reportMode, "${suiteName}.result.xlsx", report), new RunConfig("timestamp", "yyyyMMdd-HHmmss"));
+                Paths.get("templates"), tools, new ReportConfig(reportMode, "${suiteName}.result.xlsx", report), run);
     }
 
     private FrameworkConfig withTestdata(Path descriptor) {

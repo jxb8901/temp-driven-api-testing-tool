@@ -53,7 +53,7 @@ class SshHelperFeatureTest {
     }
 
     private Path profileConfig() throws IOException {
-        return write("config/config.yaml", "schemaVersion: att-config/v2.10\nenvironment: SIT\n"
+        return write("config/config.yaml", "schemaVersion: att-config/v2.11\nenvironment: SIT\n"
                 + "toolGroups: [config/tools/remote.yaml]\n"
                 + "environments:\n  SIT:\n    sshhelpers: [config/ssh/sit.yaml]\n"
                 + "  UAT:\n    sshhelpers: [config/ssh/uat.yaml]\n");
@@ -224,11 +224,11 @@ class SshHelperFeatureTest {
         write("config/ssh/sit.yaml", descriptor("  - {id: one, host: sit.example}\n", "random"));
         write("config/ssh/uat.yaml", descriptor("  - {id: one, host: uat.example}\n", "random"));
         write("config/ssh/duplicate.yaml", descriptor("  - {id: one, host: other.example}\n", "random").replace("id: application", "id: APPLICATION"));
-        write("config/config.yaml", "schemaVersion: att-config/v2.10\nenvironment: SIT\n"
+        write("config/config.yaml", "schemaVersion: att-config/v2.11\nenvironment: SIT\n"
                 + "toolGroups: [config/tools/remote.yaml]\n"
                 + "environments:\n  SIT:\n    sshhelpers: [config/ssh/sit.yaml, config/ssh/duplicate.yaml]\n");
         assertThrows(Exception.class, () -> new FrameworkConfigLoader().load(config, root, "SIT"));
-        write("config/config.yaml", "schemaVersion: att-config/v2.10\nenvironment: SIT\n"
+        write("config/config.yaml", "schemaVersion: att-config/v2.11\nenvironment: SIT\n"
                 + "toolGroups: [config/tools/remote.yaml]\nsshhelpers: [config/ssh/sit.yaml]\n");
         write("config/ssh/sit.yaml", descriptor("  - {id: one, host: one.example}\n  - {id: two, host: two.example}\n", "random")
                 .replace("selection: {strategy: random}\n", ""));

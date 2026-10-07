@@ -4,7 +4,7 @@
 
 ## 解析與驗證
 
-Config loader 驗證 `att-config/v2.11`，對所選 `environments.<name>` 進行清單級 shallow replacement，載入 `att-sshhelper/v1.0` descriptor，然後以選定 registry 解析 current Tool group 的 `ssh.helper`。Action 層沒有路由狀態。Descriptor loader 以 `LinkedHashMap` 保留清單次序，拒絕不安全／重複路徑與忽略大小寫後重複的 ID，先套用 defaults 再套用 instance override，建立不可變的有效 `SshConfig`。Schema 與語意檢查在外部執行前拒絕未知欄位、缺少有效 host/user、錯誤 port/strategy 和找不到的邏輯綁定。舊 v2.6／v2.2 直接 SSH 路徑維持不變。
+Config loader 驗證 `att-config/v2.12`，對所選 `environments.<name>` 進行清單級 shallow replacement，載入 `att-sshhelper/v1.0` descriptor，然後以選定 registry 解析 current Tool group 的 `ssh.helper`。Action 層沒有路由狀態。Descriptor loader 以 `LinkedHashMap` 保留清單次序，拒絕不安全／重複路徑與忽略大小寫後重複的 ID，先套用 defaults 再套用 instance override，建立不可變的有效 `SshConfig`。Schema 與語意檢查在外部執行前拒絕未知欄位、缺少有效 host/user、錯誤 port/strategy 和找不到的邏輯綁定。舊 v2.6／v2.2 直接 SSH 路徑維持不變。
 
 ```text
 CLI --env -> 有效 config -> SSHHelper registry -> Tool group binding

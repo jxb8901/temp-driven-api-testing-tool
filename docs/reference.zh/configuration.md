@@ -32,7 +32,7 @@ Timeout/Retry precedence 與 eligibility 見 [Reliability](reliability-execution
 在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 `tools`、environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
 
 ```yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 x-debug-note: "#{missing.tool()}"      # 忽略的配置字段
 tools:
   x-temporary: not-a-tool               # 忽略的 Tool 條目
@@ -64,9 +64,9 @@ actions:
 
 ## 選擇 environment profile
 
-`att-config/v2.11` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper 與 testdata descriptor lists。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](test-authoring.md) 見對應頁面。
+`att-config/v2.12` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper 與 testdata descriptor lists。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](test-authoring.md) 見對應頁面。
 
-ATT 使用一份 common `att-config/v2.11` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
+ATT 使用一份 common `att-config/v2.12` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -85,7 +85,7 @@ common config 保留現有 templates、testcase root、run/execution/report 設�
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 environment: SIT                 # default；--env 会覆盖
 templates: {root: templates}
 testcase: {root: testcase}
@@ -177,7 +177,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 以下 configuration example 與 field table 和英文版共用相同 contract；欄位名與 literal values 保留英文。
 
 ```yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -186,6 +186,8 @@ testcase: {root: testcase}
 templates: {root: templates}
 run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
 execution:
+  runIdFormat: "run-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+  debugIdFormat: "debug-${META.TARGET.type}-${META.TARGET.id}-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
   processOutput: {memoryLimitBytes: 65536, artifactLimitBytes: 104857600}
 report:
   mode: append-to-copy
@@ -211,7 +213,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | 現行版本：`att-config/v2.11`；上一版 schema 仍受支援。本例採用現行 schema。 |
+| `schemaVersion` | required | 現行版本：`att-config/v2.12`；上一版 schema 仍受支援。本例採用現行 schema。 |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -220,9 +222,23 @@ environments:
 | `testcase.root` | `testcase` | Non-empty package-relative recursive workbook/sidecar discovery root |
 | `run.id.default` | `timestamp` | Only `timestamp` is supported |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
+| `execution.runIdFormat` | unset | Optional outer Run/Load ID expression; exact `--run-id` wins |
+| `execution.debugIdFormat` | unset | Optional standalone Debug ID expression; exact `--debug-id` wins |
 | `execution.processOutput.memoryLimitBytes` | `65536` | Integer 1024–1048576; in-memory head/tail preview per stdout/stderr stream |
 | `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
+
+`runIdFormat` 會產生外層 Run ID；Load 沒有指定 `--run-id` 時也會使用此 policy。它不會改變 Load 每個 iteration 的 `execution.execIdFormat`（`EXEC.ID`）。`debugIdFormat` 只產生 standalone Debug 目錄 identity。沒有設定時，Run/Load 維持原有 timestamp default，Debug 維持 `<type>-<targetId>` default。
+
+Format 在 identity 發布或建立 output directory 前只求值一次。Run/Load 可讀取 `META.PACKAGE_ROOT`、`META.SOURCE.type/path`、`EXEC.STARTED_AT` 和 `EXEC.RUN_STARTED_AT`；Debug 另可讀取 `META.TARGET.type/id`。可使用純 identity-format built-ins，以及 `date.sysdate` / `date.systimestamp`；不可呼叫外部服務、random/sequence、filesystem 或 invocation state。正在生成的 identity 不可被讀取，例如 `${EXEC.RUN_ID}`、`${EXEC.ID}`、`${EXEC.OUTPUT_DIR}`、`${EXEC.VARS}` 和 `${EXEC.ACTIONS}` 會被拒絕。生成值必須本身是有效的單一路徑段，ATT 不會替它 sanitize。Run/Load 以及明確或配置的 Debug ID 發生 collision 時會 fail；legacy Debug default 仍會加 timestamp suffix。
+
+```yaml
+execution:
+  runIdFormat: "run-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+  debugIdFormat: "debug-${META.TARGET.type}-${META.TARGET.id}-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+```
+
+Run 和 Load 的 `--run-id <id>`，以及 standalone Debug 的 `--debug-id <id>` 都是 literal override，不會再當成 expression 求值。
 
 ### 配置報表輸出
 
@@ -260,7 +276,7 @@ Allowed global object properties are:
 | `testcase` | `root`, `x-*` |
 | `run` | `id`, `x-*` |
 | `run.id` | `default`, `timestampFormat`, `x-*` |
-| `execution` | `processOutput`, `x-*` |
+| `execution` | `runIdFormat`, `debugIdFormat`, `processOutput`, `x-*` |
 | `execution.processOutput` | `memoryLimitBytes`, `artifactLimitBytes`, `x-*` |
 | `report` | `mode`, `fileNamePattern`, `columns`, `html`, `junit`, `x-*` |
 | `report.html` | `caseLogInlineLimitBytes`, `x-*` |

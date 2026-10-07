@@ -693,10 +693,19 @@ class StageTemplateRunnerTest {
         assertEquals("OPERATION_FAILED", context.resolve("ACTIONS.call.output.evidence.collectors.appLog.error.category"));
         assertTrue(String.valueOf(context.resolve("ACTIONS.call.output.evidence.collectors.appLog.error.message")).contains("exitCode=2"));
         assertEquals(Integer.valueOf(2), context.resolve("ACTIONS.call.output.evidence.collectors.appLog.error.exitCode"));
+        String invocation = "ACTIONS.call.output.evidence.collectors.appLog.evidence.tool.invocations[0]";
+        assertEquals("'fake'", context.resolve(invocation + ".command"));
+        assertEquals(Collections.singletonList("fake"), context.resolve(invocation + ".logicalArgv"));
+        assertEquals(Collections.singletonList("fake"), context.resolve(invocation + ".argv"));
+        assertEquals(10000L, ((Number) context.resolve(invocation + ".timeoutMs")).longValue());
+        assertEquals(2, ((Number) context.resolve(invocation + ".exitCode")).intValue());
         assertEquals("missing.log: No such file",
                 context.resolve("ACTIONS.call.output.evidence.collectors.appLog.evidence.tool.invocations[0].stderr"));
         String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
         assertTrue(caseLog.contains("EVIDENCE call attempt=1 collector=appLog"));
+        assertTrue(caseLog.contains("command: |-"), caseLog);
+        assertTrue(caseLog.contains("logicalArgv:"), caseLog);
+        assertTrue(caseLog.contains("timeoutMs: 10000"), caseLog);
         assertTrue(caseLog.contains("missing.log: No such file"));
     }
 
@@ -867,7 +876,11 @@ class StageTemplateRunnerTest {
         assertTrue(timeoutLog.contains("Tool timed out: sample"));
         assertEquals(1, occurrences(timeoutLog, "Tool timed out: sample"));
         assertEquals("TIMEOUT", timeoutContext.resolve("EXEC.ACTIONS.call.output.status"));
-        assertEquals(1, occurrences(timeoutLog, "[ACTION call]"));
+        assertEquals(1, occurrences(timeoutLog, "[ACTION call]"), timeoutLog);
+        assertTrue(timeoutLog.contains("command: |-"), timeoutLog);
+        assertTrue(timeoutLog.contains("logicalArgv:"), timeoutLog);
+        assertTrue(timeoutLog.contains("timeoutMs: 10000"), timeoutLog);
+        assertTrue(timeoutLog.contains("exitCode: -1"), timeoutLog);
         assertFalse(timeoutLog.contains("TOOL:"));
 
         Path caseThree = tempDir.resolve("case3");
@@ -1404,9 +1417,12 @@ class StageTemplateRunnerTest {
                 assertEquals("ERROR", context.resolve(invocation + ".status"));
                 assertEquals(2, context.resolve(invocation + ".exitCode"));
                 assertEquals(Boolean.TRUE, context.resolve(invocation + ".inputOmitted"));
-                for (String field : Arrays.asList("input", "argv", "logicalArgv", "command", "rawOutput", "output")) {
+                for (String field : Arrays.asList("input", "rawOutput", "output")) {
                     assertNull(context.resolve(invocation + "." + field), field);
                 }
+                assertNotNull(context.resolve(invocation + ".argv"));
+                assertNotNull(context.resolve(invocation + ".logicalArgv"));
+                assertNotNull(context.resolve(invocation + ".command"));
                 assertEquals(oversized ? CollectorExceptionEvidence.OMITTED_TEXT : "Denied token [REDACTED_SECRET]",
                         context.resolve(invocation + ".stderr"));
                 assertEquals(oversized ? CollectorExceptionEvidence.OMITTED_TEXT : "[REDACTED_SECRET] [REDACTED_SECRET]",
@@ -1416,7 +1432,7 @@ class StageTemplateRunnerTest {
                 assertTrue(message.contains("exitCode=2"), message);
                 String published = att.validation.JsonSupport.write(context.resolve(path));
                 String caseLog = new String(Files.readAllBytes(caseDir.resolve("case.log")), "UTF-8");
-                assertFalse(published.contains(secret));
+                assertFalse(published.contains(secret), published);
                 assertFalse(caseLog.contains(secret));
                 assertFalse(published.contains(payload));
                 assertFalse(caseLog.contains(payload));

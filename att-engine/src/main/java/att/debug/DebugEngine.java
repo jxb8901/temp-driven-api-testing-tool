@@ -460,12 +460,23 @@ public final class DebugEngine {
     private Path createDebugDirectory(ExecutionOptions options, String type, String id) throws Exception {
         Path root = options.outputDirectory() == null ? projectRoot.resolve(config.outputDirectory()) : resolveInput(options.outputDirectory());
         Path debugRoot = root.resolve("debug").normalize();
-        Files.createDirectories(debugRoot);
-        String safe = (type + "-" + id).replaceAll("[^A-Za-z0-9_.-]", "_");
-        safe = IdentifierValidator.runId(safe);
+        boolean explicit = options.runId() != null && !options.runId().trim().isEmpty();
+        boolean configured = !config.run().debugIdFormat().isEmpty();
+        String safe;
+        if (explicit) safe = IdentifierValidator.runId(options.runId());
+        else if (configured) safe = att.core.ExecutionIdentityFormat.debugId(config.run().debugIdFormat(),
+                type + "-" + id, projectRoot, type, id,
+                options.debugInput() == null ? projectRoot : resolveInput(options.debugInput()));
+        else safe = IdentifierValidator.runId((type + "-" + id).replaceAll("[^A-Za-z0-9_.-]", "_"));
         Path result = debugRoot.resolve(safe).normalize();
-        if (Files.exists(result)) result = debugRoot.resolve(safe + "-" + System.currentTimeMillis());
-        Files.createDirectories(result);
+        Files.createDirectories(debugRoot);
+        try {
+            Files.createDirectory(result);
+        } catch (java.nio.file.FileAlreadyExistsException collision) {
+            if (explicit || configured) throw new IllegalArgumentException("Debug ID already exists: " + safe + " (" + result + "). Choose a different --debug-id.");
+            result = debugRoot.resolve(IdentifierValidator.runId(safe + "-" + System.currentTimeMillis()));
+            Files.createDirectory(result);
+        }
         return result;
     }
 

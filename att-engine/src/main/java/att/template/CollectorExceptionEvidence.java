@@ -28,7 +28,8 @@ final class CollectorExceptionEvidence {
     private static final String[] FIELDS = {
         "id", "type", "name", "implementation", "status", "category", "exitCode",
         "inputOmitted", "inputRedactionLimited", "failureDetailsOmitted", "evidenceTruncated", "messageTruncated", "instancesTruncated", "instanceCount",
-        "durationMs", "timeoutMs", "groupId", "toolKey", "sshHelper", "instance",
+        "durationMs", "timeoutMs", "groupId", "toolKey", "command", "resolvedCommand", "executedCommand",
+        "logicalArgv", "argv", "sshHelper", "instance",
         "host", "sshPort", "sshTransport", "selectionStrategy", "selectionSource",
         "httpHelper", "mqHelper", "dbHelper", "db", "helper", "helperId", "operation", "completionCode", "reasonCode", "reason", "statusCode",
         "method", "url", "urlPathOmitted", "queueManager", "physicalInstance", "port", "channel", "transport",
@@ -135,6 +136,8 @@ final class CollectorExceptionEvidence {
 
     private static Map<String, Object> projectNode(Map<?, ?> source, Redaction redaction) {
         Map<String, Object> evidence = fields(source, FIELDS, redaction);
+        redactArgvPositionsCoveredByCommand(evidence);
+        if (redaction.limited) redactAllArgv(evidence);
         if (redaction.limited) evidence.put("inputRedactionLimited", Boolean.TRUE);
         Object instances = source.get("instances");
         if (instances instanceof Map) {
@@ -168,6 +171,65 @@ final class CollectorExceptionEvidence {
         return evidence;
     }
 
+    private static void redactAllArgv(Map<String, Object> evidence) {
+        for (String field : new String[] {"logicalArgv", "argv"}) {
+            Object value = evidence.get(field);
+            if (!(value instanceof List)) continue;
+            List<String> safe = new ArrayList<String>();
+            for (int index = 0; index < ((List<?>) value).size(); index++) safe.add("[REDACTED_SECRET]");
+            evidence.put(field, safe);
+        }
+    }
+
+    /** A sanitized printable command can identify private argv slots when an upstream projection
+     * already redacted its command string but retained the original argv array. */
+    private static void redactArgvPositionsCoveredByCommand(Map<String, Object> evidence) {
+        Object command = evidence.get("command");
+        if (!(command instanceof String) || !((String) command).contains("[REDACTED_SECRET]")) return;
+        List<String> commandArguments = printableCommandArguments((String) command);
+        if (commandArguments.isEmpty()) return;
+        for (String field : new String[] {"logicalArgv", "argv"}) {
+            Object value = evidence.get(field);
+            if (!(value instanceof List)) continue;
+            List<?> argv = (List<?>) value;
+            if (argv.size() != commandArguments.size()) continue;
+            List<String> safe = new ArrayList<String>(argv.size());
+            for (int index = 0; index < argv.size(); index++) {
+                safe.add("[REDACTED_SECRET]".equals(commandArguments.get(index))
+                        ? "[REDACTED_SECRET]" : String.valueOf(argv.get(index)));
+            }
+            evidence.put(field, safe);
+        }
+    }
+
+    private static List<String> printableCommandArguments(String command) {
+        List<String> result = new ArrayList<String>();
+        int index = 0;
+        while (index < command.length()) {
+            while (index < command.length() && command.charAt(index) == ' ') index++;
+            if (index == command.length()) break;
+            if (command.charAt(index++) != '\'') return Collections.emptyList();
+            StringBuilder value = new StringBuilder();
+            boolean closed = false;
+            while (index < command.length()) {
+                if (command.startsWith("'\\''", index)) {
+                    value.append('\'');
+                    index += 4;
+                } else if (command.charAt(index) == '\'') {
+                    index++;
+                    closed = true;
+                    break;
+                } else {
+                    value.append(command.charAt(index++));
+                }
+            }
+            if (!closed) return Collections.emptyList();
+            result.add(value.toString());
+            if (index < command.length() && command.charAt(index) != ' ') return Collections.emptyList();
+        }
+        return result;
+    }
+
     private static Map<String, Object> errorSummary(Map<?, ?> source, Redaction redaction) {
         Map<String, Object> summary = fields(source, DIAGNOSTIC_FIELDS, redaction);
         if (source.get("cancellation") instanceof Map) {
@@ -179,10 +241,14 @@ final class CollectorExceptionEvidence {
 
     private static Map<String, Object> fields(Map<?, ?> source, String[] names, Redaction redaction) {
         Map<String, Object> target = new LinkedHashMap<String, Object>();
+        boolean hasCommandIdentity = source.containsKey("command") || source.containsKey("resolvedCommand")
+                || source.containsKey("executedCommand") || source.containsKey("logicalArgv");
         for (String field : names) {
             Object value = source.get(field);
             if (value instanceof String) {
-                boolean freeForm = "url".equals(field) || "stdout".equals(field) || "stderr".equals(field) || "error".equals(field) || "cleanupWarning".equals(field)
+                boolean freeForm = "url".equals(field) || "command".equals(field) || "resolvedCommand".equals(field)
+                        || "executedCommand".equals(field) || "stdout".equals(field) || "stderr".equals(field)
+                        || "error".equals(field) || "cleanupWarning".equals(field)
                         || "message".equals(field) || "detail".equals(field) || "hint".equals(field);
                 target.put(field, "url".equals(field) ? httpOrigin((String) value, target)
                         : freeForm ? freeText((String) value, redaction, target, field, truncatedDetails(source)) : bound((String) value));
@@ -190,11 +256,44 @@ final class CollectorExceptionEvidence {
                     target.put(field + "Truncated", Boolean.TRUE);
                     target.put("evidenceTruncated", Boolean.TRUE);
                 }
+            } else if (hasCommandIdentity && ("logicalArgv".equals(field) || "argv".equals(field))
+                    && value instanceof Iterable) {
+                target.put(field, safeArgv((Iterable<?>) value, redaction));
             } else if (value instanceof Number || value instanceof Boolean) {
                 target.put(field, value);
             }
         }
         return target;
+    }
+
+    private static List<String> safeArgv(Iterable<?> arguments, Redaction redaction) {
+        List<String> result = new ArrayList<String>();
+        boolean redactNext = false;
+        for (Object argument : arguments) {
+            if (result.size() >= ARRAY_LIMIT) break;
+            String value = argument == null ? "" : String.valueOf(argument);
+            if (redactNext) {
+                result.add("[REDACTED_SECRET]");
+                redactNext = false;
+                continue;
+            }
+            int equals = value.indexOf('=');
+            String flag = equals < 0 ? value : value.substring(0, equals);
+            String normalized = flag.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+            boolean sensitive = normalized.contains("password") || normalized.contains("passwd")
+                    || normalized.contains("token") || normalized.contains("secret")
+                    || normalized.contains("credential") || normalized.contains("apikey")
+                    || normalized.contains("privatekey") || normalized.contains("accesskey");
+            if (sensitive && equals < 0) {
+                result.add(value);
+                redactNext = true;
+            } else if (sensitive) {
+                result.add(flag + "=[REDACTED_SECRET]");
+            } else {
+                result.add(freeText(value, redaction, new LinkedHashMap<String, Object>(), "argv", false));
+            }
+        }
+        return result;
     }
 
     /** HTTP evidence does not carry resolved request input; only the origin is provably public here. */

@@ -145,7 +145,7 @@ class HttpHelperExecutorTest {
         Files.write(root.resolve("config/httphelpers/uat.yaml"), ("schemaVersion: att-httphelper/v1.1\nid: paymentApi\nbaseUrl: " + url
                 + "/uat\n").getBytes(StandardCharsets.UTF_8));
         Path config = root.resolve("config/config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.10\nenvironment: SIT\nenvironments:\n"
+        Files.write(config, ("schemaVersion: att-config/v2.11\nenvironment: SIT\nenvironments:\n"
                 + "  SIT: {httphelpers: [config/httphelpers/sit.yaml]}\n"
                 + "  UAT: {httphelpers: [config/httphelpers/uat.yaml]}\n").getBytes(StandardCharsets.UTF_8));
         return new FrameworkConfigLoader().load(config, root, "SIT");

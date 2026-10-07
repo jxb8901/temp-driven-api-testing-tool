@@ -30,12 +30,12 @@ class V2ConfigTest {
     @Test
     void acceptsDelimitOnlyOnFinalArgumentAndRejectsArgv() throws Exception {
         Path valid = tempDir.resolve("valid.yaml");
-        Files.write(valid, ("schemaVersion: att-config/v2.10\ntools:\n  grep:\n    name: Grep\n    description: Search log text\n    command: grep ${TOOL.input.keywords}\n    stdoutFormat: text\n    arguments:\n      file:\n        name: File\n        description: Input file\n        required: true\n      keywords:\n        name: Keywords\n        description: Search values\n        required: true\n        delimit: ','\n").getBytes("UTF-8"));
+        Files.write(valid, ("schemaVersion: att-config/v2.11\ntools:\n  grep:\n    name: Grep\n    description: Search log text\n    command: grep ${TOOL.input.keywords}\n    stdoutFormat: text\n    arguments:\n      file:\n        name: File\n        description: Input file\n        required: true\n      keywords:\n        name: Keywords\n        description: Search values\n        required: true\n        delimit: ','\n").getBytes("UTF-8"));
         FrameworkConfig config = new FrameworkConfigLoader().load(valid);
         assertEquals(",", config.tool("grep").arguments().get("keywords").delimit());
 
         Path invalid = tempDir.resolve("invalid.yaml");
-        Files.write(invalid, ("schemaVersion: att-config/v2.10\ntools:\n  old:\n    command: echo\n    argv: [x]\n").getBytes("UTF-8"));
+        Files.write(invalid, ("schemaVersion: att-config/v2.11\ntools:\n  old:\n    command: echo\n    argv: [x]\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalid));
     }
 
@@ -75,11 +75,11 @@ class V2ConfigTest {
     @Test
     void rejectsInvalidEnumeratedAndBooleanConfigurationValues() throws Exception {
         Path invalidTool = tempDir.resolve("invalid-tool.yaml");
-        Files.write(invalidTool, ("schemaVersion: att-config/v2.10\ntools:\n  sample:\n    command: echo ok\n    output: json\n").getBytes("UTF-8"));
+        Files.write(invalidTool, ("schemaVersion: att-config/v2.11\ntools:\n  sample:\n    command: echo ok\n    output: json\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidTool));
 
         Path missingToolMetadata = tempDir.resolve("missing-tool-metadata.yaml");
-        Files.write(missingToolMetadata, ("schemaVersion: att-config/v2.10\ntools:\n  sample:\n    command: echo ok\n").getBytes("UTF-8"));
+        Files.write(missingToolMetadata, ("schemaVersion: att-config/v2.11\ntools:\n  sample:\n    command: echo ok\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missingToolMetadata));
 
         Path workbook = tempDir.resolve("invalid-stage.xlsx");
@@ -91,13 +91,13 @@ class V2ConfigTest {
     }
     @Test void rejectsUnknownFieldsAndIncorrectScalarTypes() throws Exception {
         Path unknown = tempDir.resolve("unknown.yaml");
-        Files.write(unknown, "schemaVersion: att-config/v2.10\ntemplates: {root: templates, typo: true}\n".getBytes("UTF-8"));
+        Files.write(unknown, "schemaVersion: att-config/v2.11\ntemplates: {root: templates, typo: true}\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(unknown));
         Path wrongType = tempDir.resolve("wrong-type.yaml");
-        Files.write(wrongType, "schemaVersion: att-config/v2.10\ntimeoutMs: '120000'\n".getBytes("UTF-8"));
+        Files.write(wrongType, "schemaVersion: att-config/v2.11\ntimeoutMs: '120000'\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(wrongType));
         Path traversal = tempDir.resolve("traversal.yaml");
-        Files.write(traversal, "schemaVersion: att-config/v2.10\noutputDirectory: ../outside\n".getBytes("UTF-8"));
+        Files.write(traversal, "schemaVersion: att-config/v2.11\noutputDirectory: ../outside\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(traversal));
     }
 }

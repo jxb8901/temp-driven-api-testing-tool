@@ -1,6 +1,6 @@
 # Testdata registry and input mapping
 
-This page describes the runtime boundary for issue #63. The public descriptor contract is `att-testdata/v1.0`; environment selection belongs to `att-config/v2.11`, and Load policy belongs to `att-load/v1.6`.
+This page describes the runtime boundary for issue #63. The public descriptor contract is `att-testdata/v1.0`; environment selection belongs to `att-config/v2.12`, and Load policy belongs to `att-load/v1.6`.
 
 ## Registry layers and activation
 

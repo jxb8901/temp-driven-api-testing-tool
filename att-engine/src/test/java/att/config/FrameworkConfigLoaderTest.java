@@ -11,9 +11,19 @@ class FrameworkConfigLoaderTest {
 
     @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
 
+    @Test void loadsRunAndDebugIdentityFormatsFromCurrentConfigSchema() throws Exception {
+        Path config = write("identity-formats.yaml", "schemaVersion: att-config/v2.12\n"
+                + "execution: {runIdFormat: 'run-${META.SOURCE.type}', debugIdFormat: 'debug-${META.TARGET.id}'}\n");
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config, tempDir);
+        assertEquals("run-${META.SOURCE.type}", loaded.run().runIdFormat());
+        assertEquals("debug-${META.TARGET.id}", loaded.run().debugIdFormat());
+        Path whitespace = write("blank-identity-format.yaml", "schemaVersion: att-config/v2.12\nexecution: {runIdFormat: '   '}\n");
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(whitespace, tempDir));
+    }
+
     @Test void ignoresLowercaseXProfilesAndToolsButKeepsTheirCanonicalRequirements() throws Exception {
         Path config = tempDir.resolve("x-config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.10\nenvironment: SIT\n"
+        Files.write(config, ("schemaVersion: att-config/v2.11\nenvironment: SIT\n"
                 + "x-note: [ignored, without, interpretation]\n"
                 + "report: {columns: {x-disabled-column: [not, a, label], result: Status}}\n"
                 + "environments:\n  x-disabled-profile: not-a-profile\n  SIT: {x-disabled-resource-list: [not, paths]}\n"
@@ -32,17 +42,17 @@ class FrameworkConfigLoaderTest {
                 + "tools:\n  x-disabled-tool: not-a-tool\n  active:\n"
                 + "    name: Group Tool\n    description: Active Group Tool\n    call: \"#{upper('ok')}\"\n").getBytes("UTF-8"));
         Path groupConfig = tempDir.resolve("group-config.yaml");
-        Files.write(groupConfig, "schemaVersion: att-config/v2.10\ntoolGroups: [config/x-group.yaml]\n".getBytes("UTF-8"));
+        Files.write(groupConfig, "schemaVersion: att-config/v2.11\ntoolGroups: [config/x-group.yaml]\n".getBytes("UTF-8"));
         assertNotNull(new FrameworkConfigLoader().load(groupConfig, tempDir).tool("sample.active"));
 
-        Path missingVersion = write("x-schema-version.yaml", "x-schemaVersion: att-config/v2.10\n");
+        Path missingVersion = write("x-schema-version.yaml", "x-schemaVersion: att-config/v2.11\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(missingVersion, tempDir));
-        Path uppercase = write("uppercase-prefix.yaml", "schemaVersion: att-config/v2.10\ntools: {X-disabled-tool: not-a-tool}\n");
+        Path uppercase = write("uppercase-prefix.yaml", "schemaVersion: att-config/v2.11\ntools: {X-disabled-tool: not-a-tool}\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(uppercase, tempDir));
     }
 
     @Test void treatsAnEnvironmentMapWithOnlyDisabledProfilesAsAbsent() throws Exception {
-        Path config = write("disabled-profiles-only.yaml", "schemaVersion: att-config/v2.10\n"
+        Path config = write("disabled-profiles-only.yaml", "schemaVersion: att-config/v2.11\n"
                 + "environments: {x-disabled-profile: not-a-profile}\n");
 
         FrameworkConfig loaded = new FrameworkConfigLoader().load(config, tempDir);
@@ -67,7 +77,7 @@ class FrameworkConfigLoaderTest {
         String activeArgument = "    arguments:\n"
                 + "      x-oldCustomerId: not-an-argument-descriptor\n"
                 + "      customerId: {name: Customer ID, description: Active input, required: true}\n";
-        Path globalConfig = write("root-tool-arguments.yaml", "schemaVersion: att-config/v2.10\n"
+        Path globalConfig = write("root-tool-arguments.yaml", "schemaVersion: att-config/v2.11\n"
                 + "tools:\n  rootEcho:\n"
                 + "    name: Root echo\n    description: Root tool with one active argument\n"
                 + "    command: [echo, '${input.customerId}']\n"
@@ -86,11 +96,11 @@ class FrameworkConfigLoaderTest {
                 + activeArgument)
                 .getBytes("UTF-8"));
         Path groupConfig = write("group-tool-arguments.yaml",
-                "schemaVersion: att-config/v2.10\ntoolGroups: [config/tools/argument-group.yaml]\n");
+                "schemaVersion: att-config/v2.11\ntoolGroups: [config/tools/argument-group.yaml]\n");
         FrameworkConfig grouped = new FrameworkConfigLoader().load(groupConfig, tempDir);
         assertEquals(java.util.Collections.singleton("customerId"), grouped.tool("argumentGroup.groupedCall").arguments().keySet());
 
-        Path disabledCommandReference = write("disabled-command-argument-reference.yaml", "schemaVersion: att-config/v2.10\n"
+        Path disabledCommandReference = write("disabled-command-argument-reference.yaml", "schemaVersion: att-config/v2.11\n"
                 + "tools:\n  invalid:\n"
                 + "    name: Invalid command\n    description: References a disabled argument\n"
                 + "    command: [echo, '${input.oldCustomerId}']\n"
@@ -109,7 +119,7 @@ class FrameworkConfigLoaderTest {
                 + activeArgument)
                 .getBytes("UTF-8"));
         Path disabledCallConfig = write("disabled-call-argument-reference-config.yaml",
-                "schemaVersion: att-config/v2.10\ntoolGroups: [config/tools/disabled-call-reference.yaml]\n");
+                "schemaVersion: att-config/v2.11\ntoolGroups: [config/tools/disabled-call-reference.yaml]\n");
         IllegalArgumentException callFailure = assertThrows(IllegalArgumentException.class,
                 () -> new FrameworkConfigLoader().load(disabledCallConfig, tempDir));
         assertTrue(callFailure.getMessage().contains("declared argument"), callFailure.getMessage());
@@ -122,13 +132,13 @@ class FrameworkConfigLoaderTest {
         Files.write(helpers.resolve("one.yaml"), ("schemaVersion: att-dbhelper/v2.6\nid: orders\n" + base).getBytes("UTF-8"));
         Files.write(helpers.resolve("two.yaml"), ("schemaVersion: att-dbhelper/v2.6\nid: Orders\n" + base).getBytes("UTF-8"));
         Path duplicate = tempDir.resolve("config/duplicate.yaml");
-        Files.write(duplicate, ("schemaVersion: att-config/v2.10\ndbhelpers: [config/dbhelpers/one.yaml, config/dbhelpers/two.yaml]\n").getBytes("UTF-8"));
+        Files.write(duplicate, ("schemaVersion: att-config/v2.11\ndbhelpers: [config/dbhelpers/one.yaml, config/dbhelpers/two.yaml]\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(duplicate, tempDir));
 
         Files.write(helpers.resolve("two.yaml"), ("schemaVersion: att-dbhelper/v2.6\nid: audit\n" + base
                 + "statement: {timeoutSeconds: 0}\n").getBytes("UTF-8"));
         Path invalidTimeout = tempDir.resolve("config/invalid-timeout.yaml");
-        Files.write(invalidTimeout, ("schemaVersion: att-config/v2.10\ndbhelpers: [config/dbhelpers/two.yaml]\n").getBytes("UTF-8"));
+        Files.write(invalidTimeout, ("schemaVersion: att-config/v2.11\ndbhelpers: [config/dbhelpers/two.yaml]\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidTimeout, tempDir));
     }
 
@@ -143,7 +153,7 @@ class FrameworkConfigLoaderTest {
                 + "evidence: {sql: hash, x-disabled: invalid, output: {format: json, x-disabled: invalid}}\n"
                 + "pool: {maxSize: 2, x-disabled: invalid}\n").getBytes("UTF-8"));
         Path config = tempDir.resolve("db-extension-config.yaml");
-        Files.write(config, "schemaVersion: att-config/v2.10\ndbhelpers: [config/dbhelpers/extensions.yaml]\n".getBytes("UTF-8"));
+        Files.write(config, "schemaVersion: att-config/v2.11\ndbhelpers: [config/dbhelpers/extensions.yaml]\n".getBytes("UTF-8"));
 
         DbHelperConfig loaded = new FrameworkConfigLoader().load(config, tempDir).dbHelper("extensions");
         assertEquals("retained", loaded.properties().get("x-correlation-id"));
@@ -166,7 +176,7 @@ class FrameworkConfigLoaderTest {
                 "    arguments:\n      id: {name: ID, description: Order ID, required: true}\n" +
                 "      status: {name: Status, description: Order status, required: true}\n").getBytes("UTF-8"));
         Path config = configDirectory.resolve("config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.10\n" +
+        Files.write(config, ("schemaVersion: att-config/v2.11\n" +
                 "dbhelpers: [config/dbhelpers/orders.yaml]\n" +
                 "toolGroups: [config/tools/orders.yaml]\n" +
                 "tools:\n  today:\n    name: Today\n    description: Normalized date\n" +
@@ -185,14 +195,14 @@ class FrameworkConfigLoaderTest {
         assertEquals("values", loaded.dbHelpers().get("orders").evidenceParameters());
 
         Path legacy = tempDir.resolve("legacy-v25-call.yaml");
-        Files.write(legacy, ("schemaVersion: att-config/v2.10\ntools:\n  bad:\n" +
+        Files.write(legacy, ("schemaVersion: att-config/v2.11\ntools:\n  bad:\n" +
                 "    name: Bad\n    description: Bad\n    call: '#{upper(input.value)}'\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(legacy));
     }
 
     @Test void rejectsAmbiguousAndProcessOnlyCallBackedToolFields() throws Exception {
-        String prefix = "schemaVersion: att-config/v2.10\ntools:\n  bad:\n    name: Bad\n    description: Bad\n";
+        String prefix = "schemaVersion: att-config/v2.11\ntools:\n  bad:\n    name: Bad\n    description: Bad\n";
         FrameworkConfig shorthand = new FrameworkConfigLoader().load(write("call-shorthand.yaml",
                 prefix + "    call: '#{upper(${value})}'\n" +
                         "    arguments:\n      value: {name: Value, description: Value, required: true}\n"));
@@ -234,7 +244,7 @@ class FrameworkConfigLoaderTest {
                 "connection: {url: 'jdbc:test:audit', readOnly: true}\n" +
                 "transaction: {scope: statement, onEnd: rollback}\n").getBytes("UTF-8"));
         Path config = configDirectory.resolve("config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.10\n" +
+        Files.write(config, ("schemaVersion: att-config/v2.11\n" +
                 "dbhelpers: [config/dbhelpers/orders.yaml, config/dbhelpers/audit.yaml]\n").getBytes("UTF-8"));
 
         FrameworkConfig loaded = new FrameworkConfigLoader().load(config);
@@ -247,13 +257,13 @@ class FrameworkConfigLoaderTest {
         assertEquals("rollback", loaded.dbHelper("audit").transactionOnEnd());
 
         Path invalid = configDirectory.resolve("invalid.yaml");
-        Files.write(invalid, ("schemaVersion: att-config/v2.10\n" +
+        Files.write(invalid, ("schemaVersion: att-config/v2.11\n" +
                 "dbhelpers: [config/dbhelpers/orders.yaml, config/dbhelpers/orders.yaml]\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalid));
     }
     @Test void validatesBuiltInsInReportAndToolCommandScopes() throws Exception {
         Path valid = tempDir.resolve("expressions.yaml");
-        Files.write(valid, ("schemaVersion: att-config/v2.10\n" +
+        Files.write(valid, ("schemaVersion: att-config/v2.11\n" +
                 "report: {fileNamePattern: \"#{upper(${suiteName})}.result.xlsx\"}\n" +
                 "tools:\n  echo:\n    name: Echo\n    description: Echo\n" +
                 "    command: [echo, \"#{trim(${input.value})}\"]\n" +
@@ -263,33 +273,33 @@ class FrameworkConfigLoaderTest {
         assertEquals("#{upper(${suiteName})}.result.xlsx", config.report().fileNamePattern());
 
         Path invalidReport = tempDir.resolve("invalid-report-expression.yaml");
-        Files.write(invalidReport, "schemaVersion: att-config/v2.10\nreport: {fileNamePattern: \"${suiteName}-#{external()}.xlsx\"}\n".getBytes("UTF-8"));
+        Files.write(invalidReport, "schemaVersion: att-config/v2.11\nreport: {fileNamePattern: \"${suiteName}-#{external()}.xlsx\"}\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidReport));
 
         Path bareReport = tempDir.resolve("bare-report-expression.yaml");
-        Files.write(bareReport, "schemaVersion: att-config/v2.10\nreport: {fileNamePattern: \"#{upper(suiteName)}-${suiteName}.xlsx\"}\n".getBytes("UTF-8"));
+        Files.write(bareReport, "schemaVersion: att-config/v2.11\nreport: {fileNamePattern: \"#{upper(suiteName)}-${suiteName}.xlsx\"}\n".getBytes("UTF-8"));
         IllegalArgumentException bareReportError = assertThrows(IllegalArgumentException.class,
                 () -> new FrameworkConfigLoader().load(bareReport));
         assertTrue(bareReportError.getMessage().contains("${suiteName}"));
 
         Path incompatibleReport = tempDir.resolve("uppercase-report-expression.yaml");
-        Files.write(incompatibleReport, "schemaVersion: att-config/v2.10\nreport: {fileNamePattern: \"${SUITE_NAME}.result.xlsx\"}\n".getBytes("UTF-8"));
+        Files.write(incompatibleReport, "schemaVersion: att-config/v2.11\nreport: {fileNamePattern: \"${SUITE_NAME}.result.xlsx\"}\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(incompatibleReport));
 
         Path invalidCommand = tempDir.resolve("invalid-command-expression.yaml");
-        Files.write(invalidCommand, ("schemaVersion: att-config/v2.10\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +
+        Files.write(invalidCommand, ("schemaVersion: att-config/v2.11\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +
                 "    command: [echo, \"#{external(${value})}\"]\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidCommand));
 
         Path invalidScopedPath = tempDir.resolve("invalid-command-scope.yaml");
-        Files.write(invalidScopedPath, ("schemaVersion: att-config/v2.10\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +
+        Files.write(invalidScopedPath, ("schemaVersion: att-config/v2.11\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +
                 "    command: [echo, \"#{upper(${input.missing})}\"]\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(invalidScopedPath));
 
         Path bareArray = tempDir.resolve("bare-command-array.yaml");
-        Files.write(bareArray, ("schemaVersion: att-config/v2.10\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +
+        Files.write(bareArray, ("schemaVersion: att-config/v2.11\ntools:\n  echo:\n    name: Echo\n    description: Echo\n" +
                 "    command: [echo, \"#{concat(value=[input.value])}\"]\n" +
                 "    arguments:\n      value: {name: Value, description: Value, required: true}\n").getBytes("UTF-8"));
         IllegalArgumentException bareArrayError = assertThrows(IllegalArgumentException.class,
@@ -298,24 +308,24 @@ class FrameworkConfigLoaderTest {
     }
 
     @Test void loadsV2AndRejectsGlobalStages() throws Exception {
-        Path ok=tempDir.resolve("ok.yaml"); Files.write(ok,"schemaVersion: att-config/v2.10\noutputDirectory: out\ntools: {}\n".getBytes("UTF-8"));
+        Path ok=tempDir.resolve("ok.yaml"); Files.write(ok,"schemaVersion: att-config/v2.11\noutputDirectory: out\ntools: {}\n".getBytes("UTF-8"));
         assertEquals(Paths.get("out"),new FrameworkConfigLoader().load(ok).outputDirectory());
         assertEquals(10000, new FrameworkConfigLoader().load(ok).timeoutMs());
-        Path rooted=tempDir.resolve("rooted.yaml"); Files.write(rooted,"schemaVersion: att-config/v2.10\ntestcase: {root: cases/nested}\ncaseLog: {yamlAnchors: true}\ntimeoutMs: 3600000\n".getBytes("UTF-8"));
+        Path rooted=tempDir.resolve("rooted.yaml"); Files.write(rooted,"schemaVersion: att-config/v2.11\ntestcase: {root: cases/nested}\ncaseLog: {yamlAnchors: true}\ntimeoutMs: 3600000\n".getBytes("UTF-8"));
         FrameworkConfig rootedConfig = new FrameworkConfigLoader().load(rooted);
         assertEquals(Paths.get("cases/nested"), rootedConfig.testcasesRoot());
         assertEquals(3600000, rootedConfig.timeoutMs());
         assertTrue(rootedConfig.caseLogYamlAnchors());
         assertFalse(new FrameworkConfigLoader().load(ok).caseLogYamlAnchors());
-        Path excessive=tempDir.resolve("excessive.yaml"); Files.write(excessive,"schemaVersion: att-config/v2.10\ntimeoutMs: 3600001\n".getBytes("UTF-8"));
+        Path excessive=tempDir.resolve("excessive.yaml"); Files.write(excessive,"schemaVersion: att-config/v2.11\ntimeoutMs: 3600001\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class,()->new FrameworkConfigLoader().load(excessive));
-        Path mismatch=tempDir.resolve("mismatch.yaml"); Files.write(mismatch,("schemaVersion: att-config/v2.10\ntools:\n  find:\n    name: 顯示 名稱 !\n    description: test\n    command: 'echo ${KeyWords}'\n    stdoutFormat: text\n    arguments:\n      keywords: {name: 關鍵 字詞 !, description: test, required: true}\n").getBytes("UTF-8"));
+        Path mismatch=tempDir.resolve("mismatch.yaml"); Files.write(mismatch,("schemaVersion: att-config/v2.11\ntools:\n  find:\n    name: 顯示 名稱 !\n    description: test\n    command: 'echo ${KeyWords}'\n    stdoutFormat: text\n    arguments:\n      keywords: {name: 關鍵 字詞 !, description: test, required: true}\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class,()->new FrameworkConfigLoader().load(mismatch));
-        Path direct=tempDir.resolve("direct.yaml"); Files.write(direct,("schemaVersion: att-config/v2.10\ntools:\n  find:\n    name: 顯示 名稱 !\n    description: test\n    command: 'echo ${keywords} ${input.keywords}'\n    stdoutFormat: text\n    arguments:\n      keywords: {name: 關鍵 字詞 !, description: test, required: true}\n").getBytes("UTF-8"));
+        Path direct=tempDir.resolve("direct.yaml"); Files.write(direct,("schemaVersion: att-config/v2.11\ntools:\n  find:\n    name: 顯示 名稱 !\n    description: test\n    command: 'echo ${keywords} ${input.keywords}'\n    stdoutFormat: text\n    arguments:\n      keywords: {name: 關鍵 字詞 !, description: test, required: true}\n").getBytes("UTF-8"));
         ToolConfig legacyScalar = new FrameworkConfigLoader().load(direct).tool("find");
         assertEquals("顯示 名稱 !", legacyScalar.name());
         assertEquals(java.util.Arrays.asList("echo", "${keywords}", "${input.keywords}"), legacyScalar.commandArgv());
-        Path hiddenContext=tempDir.resolve("hidden-context.yaml"); Files.write(hiddenContext,("schemaVersion: att-config/v2.10\ntools:\n  find:\n    name: Find\n    description: test\n    command: 'echo ${CASE.caseId}'\n    arguments: {}\n").getBytes("UTF-8"));
+        Path hiddenContext=tempDir.resolve("hidden-context.yaml"); Files.write(hiddenContext,("schemaVersion: att-config/v2.11\ntools:\n  find:\n    name: Find\n    description: test\n    command: 'echo ${CASE.caseId}'\n    arguments: {}\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class,()->new FrameworkConfigLoader().load(hiddenContext));
         Path bad=tempDir.resolve("bad.yaml"); Files.write(bad,"stages: []\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class,()->new FrameworkConfigLoader().load(bad));
@@ -335,7 +345,7 @@ class FrameworkConfigLoaderTest {
         Files.write(configDirectory.resolve("tools/logs.yaml"), ("schemaVersion: att-tool-group/v2.9\n" +
                 "id: logs\nname: Logs\ndescription: Log tools\n" +
                 "tools:\n  tail:\n    name: Tail\n    description: Tail logs\n    command: [./tools/tail.sh]\n    stdoutFormat: text\n").getBytes("UTF-8"));
-        Files.write(configDirectory.resolve("config.yaml"), ("schemaVersion: att-config/v2.10\n" +
+        Files.write(configDirectory.resolve("config.yaml"), ("schemaVersion: att-config/v2.11\n" +
                 "toolGroups: [config/tools/database.yaml, config/tools/logs.yaml]\n" +
                 "ssh: {host: global.example, user: runner}\n" +
                 "tools:\n  echo:\n    name: Echo\n    description: Echo value\n" +
@@ -358,7 +368,7 @@ class FrameworkConfigLoaderTest {
     }
 
     @Test void rejectsInvalidArgNameDefinitions() throws Exception {
-        String prefix = "schemaVersion: att-config/v2.10\ntools:\n  sample:\n    name: Sample\n    description: Sample\n";
+        String prefix = "schemaVersion: att-config/v2.11\ntools:\n  sample:\n    name: Sample\n    description: Sample\n";
         Path embedded = tempDir.resolve("embedded.yaml");
         Files.write(embedded, (prefix + "    command: [echo, 'value=${value}']\n    arguments:\n      value: {name: Value, description: Value, required: false, argName: --value}\n").getBytes("UTF-8"));
         assertTrue(assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(embedded)).getMessage() != null);
@@ -378,7 +388,7 @@ class FrameworkConfigLoaderTest {
 
     @Test void reportsToolConfigurationCodeFileFieldAndRepairHint() throws Exception {
         Path config = tempDir.resolve("bad-tool.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.10\n" +
+        Files.write(config, ("schemaVersion: att-config/v2.11\n" +
                 "tools:\n  sample:\n    name: Sample\n    description: Sample\n" +
                 "    command: [echo, '${missing}']\n" +
                 "    stdoutFormat: text\n" +
@@ -396,7 +406,7 @@ class FrameworkConfigLoaderTest {
 
     @Test void loadsMultipleDelimitedArgumentsAndArgNameModes() throws Exception {
         Path config = tempDir.resolve("multiple-delimited.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.10\n" +
+        Files.write(config, ("schemaVersion: att-config/v2.11\n" +
                 "tools:\n  capture:\n    name: Capture\n    description: Capture lists\n" +
                 "    command: [capture, '${keywords}', '${types}']\n" +
                 "    stdoutFormat: text\n" +
@@ -413,14 +423,14 @@ class FrameworkConfigLoaderTest {
     }
 
     @Test void v26RejectsLegacyDelimitAndReservedQualifiedBuiltInNames() throws Exception {
-        Path delimiter = write("v26-delimit.yaml", "schemaVersion: att-config/v2.10\ntools:\n  capture:\n    name: Capture\n    description: Capture\n    command: [capture, '${values}']\n    arguments:\n      values: {name: Values, description: Values, required: true, delimit: ','}\n");
+        Path delimiter = write("v26-delimit.yaml", "schemaVersion: att-config/v2.11\ntools:\n  capture:\n    name: Capture\n    description: Capture\n    command: [capture, '${values}']\n    arguments:\n      values: {name: Values, description: Values, required: true, delimit: ','}\n");
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(delimiter));
 
         Path configDirectory = tempDir.resolve("config");
         Files.createDirectories(configDirectory.resolve("tools"));
         Files.write(configDirectory.resolve("tools/str.yaml"), ("schemaVersion: att-tool-group/v2.9\nid: str\nname: Strings\ndescription: Strings\ntools:\n  custom:\n    name: Custom\n    description: Reserved package\n    command: [echo]\n").getBytes("UTF-8"));
         Path reserved = configDirectory.resolve("reserved-qualified.yaml");
-        Files.write(reserved, "schemaVersion: att-config/v2.10\ntoolGroups: [config/tools/str.yaml]\n".getBytes("UTF-8"));
+        Files.write(reserved, "schemaVersion: att-config/v2.11\ntoolGroups: [config/tools/str.yaml]\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(reserved));
     }
 
@@ -430,19 +440,19 @@ class FrameworkConfigLoaderTest {
         Files.write(configDirectory.resolve("tools/one.yaml"), group.getBytes("UTF-8"));
         Files.write(configDirectory.resolve("tools/two.yaml"), group.getBytes("UTF-8"));
         Path duplicate = configDirectory.resolve("duplicate.yaml");
-        Files.write(duplicate, "schemaVersion: att-config/v2.10\ntoolGroups: [config/tools/one.yaml, config/tools/two.yaml]\n".getBytes("UTF-8"));
+        Files.write(duplicate, "schemaVersion: att-config/v2.11\ntoolGroups: [config/tools/one.yaml, config/tools/two.yaml]\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(duplicate));
         Path unsafe = configDirectory.resolve("unsafe.yaml");
-        Files.write(unsafe, "schemaVersion: att-config/v2.10\ntoolGroups: [../outside.yaml]\n".getBytes("UTF-8"));
+        Files.write(unsafe, "schemaVersion: att-config/v2.11\ntoolGroups: [../outside.yaml]\n".getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(unsafe));
         Path reserved = configDirectory.resolve("reserved.yaml");
-        Files.write(reserved, ("schemaVersion: att-config/v2.10\ntools:\n  nvl:\n    name: NVL\n    description: reserved\n    command: [echo]\n").getBytes("UTF-8"));
+        Files.write(reserved, ("schemaVersion: att-config/v2.11\ntools:\n  nvl:\n    name: NVL\n    description: reserved\n    command: [echo]\n").getBytes("UTF-8"));
         assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(reserved));
     }
 
     @Test void loadsPerformanceHardeningLimitsAndWorkbookDisableMode() throws Exception {
         Path config = tempDir.resolve("performance.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.10\n" +
+        Files.write(config, ("schemaVersion: att-config/v2.11\n" +
                 "execution:\n  processOutput: {memoryLimitBytes: 4096, artifactLimitBytes: 8192}\n" +
                 "report:\n  mode: none\n  html: {caseLogInlineLimitBytes: 2048}\n  junit: {caseLogEmbedThresholdBytes: 1024}\n").getBytes("UTF-8"));
         FrameworkConfig loaded = new FrameworkConfigLoader().load(config);
@@ -450,7 +460,7 @@ class FrameworkConfigLoaderTest {
         assertEquals(8192, loaded.processOutput().artifactLimitBytes());
         assertEquals("none", loaded.report().mode());
         assertEquals(2048, loaded.report().htmlCaseLogInlineLimitBytes());
-        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("bad-performance.yaml", "schemaVersion: att-config/v2.10\nexecution: {processOutput: {memoryLimitBytes: 4096, artifactLimitBytes: 2048}}\n")));
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(write("bad-performance.yaml", "schemaVersion: att-config/v2.11\nexecution: {processOutput: {memoryLimitBytes: 4096, artifactLimitBytes: 2048}}\n")));
     }
 
     private Path write(String name, String content) throws Exception { Path file = tempDir.resolve(name); Files.write(file, content.getBytes("UTF-8")); return file; }

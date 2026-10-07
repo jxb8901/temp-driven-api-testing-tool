@@ -123,6 +123,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
 - [Appendix C — migration notes](#appendix-c-migration-notes)
   - [File arguments 與 case log paths](#file-arguments-與-case-log-paths)
   - [Previous release Testdata migration](#previous-release-testdata-migration)
+  - [Execution identity format migration](#execution-identity-format-migration)
   - [Load mix migration](#load-mix-migration)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
@@ -933,6 +934,8 @@ Run 會執行 Workbook 中經選擇的 authored Testcase。每個選中的 Testc
 
 ATT 先載入 effective configuration/environment、驗證 canonical workbook snapshot 和 selected dependency closure、保留唯一 Run ID，然後為每個選中的 Testcase 啟動一次 Case execution。Stages 依序執行。每個 Stage selector 都會解析為 Template；Action 按 YAML 順序執行，並受 `runWhen` / `onFailure` 控制。
 
+沒有 `--run-id <id>` 時，可使用 `execution.runIdFormat` 產生外層 Run ID；否則沿用 `run.id.timestampFormat` default。Format 在發布 `EXEC.RUN_ID` 或 output path 前只初始化一次。可用 Context 與 built-ins 見[package-wide configuration](reference.zh/configuration.md#設定-package-wide-options)。CLI ID 是優先級最高的 literal override。
+
 Run evidence 直接寫到 `output/<RunID>/`。完成後才發布 `run.yaml`、Case directories/logs、結果 workbook、HTML/CI output，並更新 `latest-run.yaml`。已存在的 Run ID 會被拒絕，不會覆寫。`run --update-snapshot` 是執行前明確授權更新 snapshot 的唯一流程。
 
 Status aggregation 的嚴重度為 ERROR > INVALID > FAIL > PASS > SKIPPED。Process exit code：`0` 表示沒有失敗狀態、`1` 表示測試/assertion failure、`2` 表示 command/configuration/validation 無效、`3` 表示 runtime/infrastructure error。
@@ -1019,6 +1022,8 @@ output/debug/<debugId>/
 ├── result.yaml
 └── artifacts/
 ```
+
+`execution.debugIdFormat` 可使用 package 與 target metadata 設定 standalone `<debugId>`；`--debug-id <id>` 可指定 exact literal。明確或配置的 ID 若目錄已存在會 fail；legacy `<type>-<targetId>` default 仍會加 timestamp suffix。解析後的 Debug ID 同時用於目錄名、`debugId`、`EXEC.RUN_ID` 和 `EXEC.ID`。
 
 Debug 不建立或更新普通 `latest-run.yaml`。Exit code：`0` PASS、`1` FAIL、`2` CLI/config/input/validation 無效、`3` runtime error。它在 selected reusable-component 邊界上與正常執行等價，但**不是** workbook Case：除非 debug input/artifact 明確提供，否則沒有 workbook selection、Stage history 或 result-workbook lifecycle。
 
@@ -1367,6 +1372,8 @@ evidence: {mode: failures}
 可複製範例與欄位說明見 [examples/load/README.md](../examples/load/README.md)；schema migration 見 [Migration Notes](reference.zh/appendices/migrations.md)。
 
 #### 檢查 execution ID 可用欄位
+
+沒有 `--run-id` 時，Load 外層目錄使用與 Run 相同的 `execution.runIdFormat`。`--run-id` 仍是外層 Load identity 的 literal override。此 policy 與 `execution.execIdFormat` 分開；後者仍只產生每個 started iteration 的 `EXEC.ID`。
 
 Load 使用 att-load/v1.6。設定 execution.execIdFormat 時，ATT 在每個 iteration initialization 使用一般 ${...} / #{...} engine 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及 output path 發布後評估。
 
@@ -1942,11 +1949,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-在 `att-config/v2.11` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.11 與 Tool Group v2.9。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
+在 `att-config/v2.12` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.12 與 Tool Group v2.9。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 environment: SIT
 toolGroups: [config/tools/application.yaml]
 environments:
@@ -2099,7 +2106,7 @@ Timeout/Retry precedence 與 eligibility 見 [Reliability](reference.zh/reliabil
 在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 `tools`、environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
 
 ```yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 x-debug-note: "#{missing.tool()}"      # 忽略的配置字段
 tools:
   x-temporary: not-a-tool               # 忽略的 Tool 條目
@@ -2131,9 +2138,9 @@ actions:
 
 ### 選擇 environment profile
 
-`att-config/v2.11` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper 與 testdata descriptor lists。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md) 見對應頁面。
+`att-config/v2.12` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper 與 testdata descriptor lists。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md) 見對應頁面。
 
-ATT 使用一份 common `att-config/v2.11` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
+ATT 使用一份 common `att-config/v2.12` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -2152,7 +2159,7 @@ common config 保留現有 templates、testcase root、run/execution/report 設�
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 environment: SIT                 # default；--env 会覆盖
 templates: {root: templates}
 testcase: {root: testcase}
@@ -2244,7 +2251,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 以下 configuration example 與 field table 和英文版共用相同 contract；欄位名與 literal values 保留英文。
 
 ```yaml
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2253,6 +2260,8 @@ testcase: {root: testcase}
 templates: {root: templates}
 run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
 execution:
+  runIdFormat: "run-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+  debugIdFormat: "debug-${META.TARGET.type}-${META.TARGET.id}-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
   processOutput: {memoryLimitBytes: 65536, artifactLimitBytes: 104857600}
 report:
   mode: append-to-copy
@@ -2278,7 +2287,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | 現行版本：`att-config/v2.11`；上一版 schema 仍受支援。本例採用現行 schema。 |
+| `schemaVersion` | required | 現行版本：`att-config/v2.12`；上一版 schema 仍受支援。本例採用現行 schema。 |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -2287,9 +2296,23 @@ environments:
 | `testcase.root` | `testcase` | Non-empty package-relative recursive workbook/sidecar discovery root |
 | `run.id.default` | `timestamp` | Only `timestamp` is supported |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
+| `execution.runIdFormat` | unset | Optional outer Run/Load ID expression; exact `--run-id` wins |
+| `execution.debugIdFormat` | unset | Optional standalone Debug ID expression; exact `--debug-id` wins |
 | `execution.processOutput.memoryLimitBytes` | `65536` | Integer 1024–1048576; in-memory head/tail preview per stdout/stderr stream |
 | `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
+
+`runIdFormat` 會產生外層 Run ID；Load 沒有指定 `--run-id` 時也會使用此 policy。它不會改變 Load 每個 iteration 的 `execution.execIdFormat`（`EXEC.ID`）。`debugIdFormat` 只產生 standalone Debug 目錄 identity。沒有設定時，Run/Load 維持原有 timestamp default，Debug 維持 `<type>-<targetId>` default。
+
+Format 在 identity 發布或建立 output directory 前只求值一次。Run/Load 可讀取 `META.PACKAGE_ROOT`、`META.SOURCE.type/path`、`EXEC.STARTED_AT` 和 `EXEC.RUN_STARTED_AT`；Debug 另可讀取 `META.TARGET.type/id`。可使用純 identity-format built-ins，以及 `date.sysdate` / `date.systimestamp`；不可呼叫外部服務、random/sequence、filesystem 或 invocation state。正在生成的 identity 不可被讀取，例如 `${EXEC.RUN_ID}`、`${EXEC.ID}`、`${EXEC.OUTPUT_DIR}`、`${EXEC.VARS}` 和 `${EXEC.ACTIONS}` 會被拒絕。生成值必須本身是有效的單一路徑段，ATT 不會替它 sanitize。Run/Load 以及明確或配置的 Debug ID 發生 collision 時會 fail；legacy Debug default 仍會加 timestamp suffix。
+
+```yaml
+execution:
+  runIdFormat: "run-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+  debugIdFormat: "debug-${META.TARGET.type}-${META.TARGET.id}-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
+```
+
+Run 和 Load 的 `--run-id <id>`，以及 standalone Debug 的 `--debug-id <id>` 都是 literal override，不會再當成 expression 求值。
 
 #### 配置報表輸出
 
@@ -2327,7 +2350,7 @@ Allowed global object properties are:
 | `testcase` | `root`, `x-*` |
 | `run` | `id`, `x-*` |
 | `run.id` | `default`, `timestampFormat`, `x-*` |
-| `execution` | `processOutput`, `x-*` |
+| `execution` | `runIdFormat`, `debugIdFormat`, `processOutput`, `x-*` |
 | `execution.processOutput` | `memoryLimitBytes`, `artifactLimitBytes`, `x-*` |
 | `report` | `mode`, `fileNamePattern`, `columns`, `html`, `junit`, `x-*` |
 | `report.html` | `caseLogInlineLimitBytes`, `x-*` |
@@ -2482,6 +2505,7 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 | `./att.sh debug <type> <id> --set input.path=<yaml-value>` | 覆蓋 typed `EXEC.INPUT` 值；可重復使用 |
 | `./att.sh debug tool <id> --set arg.name=<yaml-value>` | 覆蓋一個 Tool argument；可重復使用 |
 | `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | 在 expression evaluation 前覆蓋 Template/Flow bootstrap `EXEC.VARS` |
+| `./att.sh debug <type> <id> --debug-id <id>` | 指定 standalone Debug 的 exact directory identity |
 | `./att.sh debug <type> <id> --unsafe-failure-details` | 為此次 standalone local Debug 展開 collector failure diagnostics；會先警告並保留 secret redaction |
 | `./att.sh debug <type> <id> --output-dir <dir>` | 將 debug 輸出隔離到 `<dir>/debug/<debugId>/` |
 | `./att.sh debug <type> <id> --format json` | 輸出緊湊機器可讀摘要；完整證據仍在 `result.yaml` |
@@ -2530,7 +2554,7 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 
 ### 完整 CLI option matrix
 
-`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.11` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
+`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.12` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
 
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 
@@ -2569,7 +2593,7 @@ evidence: {mode: failures}
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ```
 
-完整 workload override 為 `--users`、`--arrival-rate`、`--warmup`、`--ramp-up`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`；`--think-time` 只適用 closed-VU。其餘 selection/output 選項仍受各 command 約束：`--suite`、`--suite-dir`、`--case`/`--case-id`、`--tag`、`--exclude-tag`、`--all`、`--run-id`、`--output-dir`、`--format`、`--quiet`、`--verbose`、`--ci-output`、`--dry-run`、`--fail-fast`、`--rerun-failed`、`--update-snapshot`、`--package`、`--selected`、`--input`、`--set`、`--queue`、`--parallel`、`--allow-parallel-runs`、`--profile`、`--config`、`--env` 和 `--help` 只在對應 command contract 允許時有效。
+完整 workload override 為 `--users`、`--arrival-rate`、`--warmup`、`--ramp-up`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`；`--think-time` 只適用 closed-VU。其餘 selection/output 選項仍受各 command 約束：`--suite`、`--suite-dir`、`--case`/`--case-id`、`--tag`、`--exclude-tag`、`--all`、`--run-id`（Run/Load identity）、`--debug-id`（standalone Debug identity）、`--output-dir`、`--format`、`--quiet`、`--verbose`、`--ci-output`、`--dry-run`、`--fail-fast`、`--rerun-failed`、`--update-snapshot`、`--package`、`--selected`、`--input`、`--set`、`--queue`、`--parallel`、`--allow-parallel-runs`、`--profile`、`--config`、`--env` 和 `--help` 只在對應 command contract 允許時有效。
 
 ## 結果、報告與 evidence
 
@@ -2837,7 +2861,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 
 | Artifact | 現行 schema |
 |---|---|
-| Global configuration | att-config/v2.11 |
+| Global configuration | att-config/v2.12 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
 | MQHelper | att-mqhelper/v1.2 |
@@ -2875,6 +2899,10 @@ Case log、CLI output 和輸出的 case evidence 會將 canonical package root �
 ### Previous release Testdata migration
 
 將 global configuration 從 `att-config/v2.10` 升至 `att-config/v2.11`，並將 Load scenario 從 `att-load/v1.4` 升至 `att-load/v1.5`。舊 schema 仍登錄於 `schemas/history/`，供 migration diagnostics 使用。`att-testdata/v1.0` 是新增契約：在選定的 environment profile `testdata` list 加入 descriptor path，再於 Case/Stage、Debug 或 Load workload input map 使用 `@{id}`。Load scenario 可在頂層加入 package-relative `testdata` paths，形成僅適用於該次 Load 的 overlay。不同 layer 的同名 ID 會完整取代 descriptor；同一 layer 內的重複 ID 無效。多筆 records 的 descriptor 必須有明確 selection policy。沒有 testdata reference 的既有 package 不需要新增 descriptor。
+
+### Execution identity format migration
+
+`att-config/v2.12` 新增 execution identity formats；前一版 configuration schema 仍受支援。可用 `execution.runIdFormat` 設定 Run 和 Load 的外層 ID，並用 `execution.debugIdFormat` 設定 standalone Debug directory ID。未設定時仍使用既有 timestamp Run/Load ID 及 `<type>-<targetId>` Debug ID。`execution.execIdFormat` 仍只控制 Load 每次 iteration 的 `EXEC.ID`。Run/Load 的明確 ID 使用 `--run-id`；standalone Debug 的明確 ID 使用 `--debug-id`。
 
 Load workload `testdata.<id>` 設定控制 `scope`，並可選擇整份覆蓋 descriptor 的 `selection` policy。Scope 預設為 `iteration`；`user` 只適用 closed-VU workload。請明確選擇 `error`、`recycle` 或 `stop` exhaustion。Selection metadata 會記錄，但不包含 record value。
 
