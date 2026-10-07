@@ -5,7 +5,7 @@ modules:
   - att-engine/   reusable execution engine and typed API
   - att-cli/      command-line adapter
   - att-worker/   one-job JSON protocol adapter
-  - att-server/   empty placeholder for future ATT Server work
+  - att-server/   Java 17+ Jakarta Servlet WAR for the ATT Server control plane
   - att-dist/     release packaging
 contents:
   - att-engine/src/

@@ -8,7 +8,7 @@ template-driven-api-testing-tool/
 |-- att-engine/   reusable execution/domain implementation and typed API
 |-- att-cli/       argv parsing, terminal presentation, exit-code adapter
 |-- att-worker/    structured one-job process adapter over att-engine
-|-- att-server/    empty reserved module for future ATT Server work
+|-- att-server/    Java 17+ Jakarta Servlet control plane WAR
 `-- att-dist/      binary/source distribution assembly
 ```
 
@@ -18,20 +18,20 @@ template-driven-api-testing-tool/
 
 `att-worker` accepts one JSON request using protocol `att-worker/v1`, calls `AttService` directly, emits JSON Lines events, and exits after that single result. It does not start the CLI or parse terminal text. The protocol reserves `STATUS`, `LOG`, `PROGRESS`, `DIAGNOSTIC`, and `RESULT` event names. Stdout is exclusively the protocol stream; failures after request intake are returned as structured diagnostic and result events. External process termination remains the Worker cancellation boundary. See [worker-protocol.md](worker-protocol.md) for the internal request/event contract and launch form.
 
-`att-server` is intentionally empty. It reserves a module boundary only; ATT Server, REST endpoints, persistence, scheduling, authentication, and job management are not implemented or advertised.
+`att-server` is the single-node HTTP control plane. It reads a container-authenticated Servlet Principal, maps configured package IDs to validated canonical roots, persists bounded job metadata in H2 under `SERVER_DATA_DIR`, and starts one `att-worker` process per job. It exposes the `/api/v1` REST and SSE surfaces. Tomcat owns HTTP/TLS/authentication; ATT does not implement passwords, token validation, or ATT-specific RBAC. `att-server` compiles for Java 17, while the CLI, Engine, and Worker retain their Java 8 compiler targets. Deployment details are in [ATT Server deployment and API](../server-deployment.md).
 
-`att-dist` is packaging-only. Its Maven assembly consumes the JAR already built by `att-cli`, adds runtime dependencies plus the existing package assets, and produces both `att-<version>.tar.gz` and `att-<version>-src.tar.gz`. Release packaging no longer recompiles application sources through a separate raw `javac` path.
+`att-dist` is packaging-only. Its Maven assembly consumes the JAR built by `att-cli`, the Server WAR, runtime dependencies, and existing package assets. It produces `att-<version>.tar.gz` and `att-<version>-src.tar.gz`. Release packaging no longer recompiles application sources through a separate raw `javac` path.
 
 ## Java compatibility is module-specific
 
 The current CLI remains Java 8-compatible. The parent defines the CLI-specific `att.cli.java=8` value, and `att-cli/pom.xml` explicitly applies it to the compiler. The parent does not define repository-wide `maven.compiler.source` or `maven.compiler.target` values.
 
-The empty `att-server` module intentionally declares no compiler baseline in #162. A future Server issue can choose Java 17, Java 21, or another justified runtime independently without requiring the current CLI to move off Java 8. #162 reserves that option; it does not choose or implement the Server Java version.
+The Server declares its Java 17 minimum independently. This does not raise the CLI, Engine, or Worker baseline.
 
 Root runtime assets remain unchanged: `config/`, `templates/`, `tools/`, `testcase/`, `sql/`, `schemas/`, `docs/`, and `examples/`. PACKAGE_ROOT semantics and CLI discovery therefore remain unchanged.
 
 ## Developer and release flow
 
-Run `mvn clean verify` from the repository root. The reactor tests `att-engine`, `att-cli`, and `att-worker`, packages the empty `att-server` JAR, and executes `att-dist` assembly. The binary contains the Worker JAR alongside its engine/runtime dependencies; no user-facing Worker launcher is added. `build.sh` remains the supported release entry point; it regenerates documentation, runs the reactor release gate, validates the source-tree launcher, smoke-tests the assembled binary with `version`, `help`, `debug`, `load`, and `validate --package`, and copies binary/source archives to `dist/releases/`.
+Run `mvn clean verify` from the repository root. The reactor tests `att-engine`, `att-cli`, `att-worker`, and `att-server`, packages the Server WAR, and executes `att-dist` assembly. The binary contains the CLI and Server WAR. `build.sh` remains the CLI release entry point; it regenerates documentation, runs the reactor gate, validates the source-tree launcher, smoke-tests the assembled CLI with `version`, `help`, `debug`, `load`, and `validate --package`, and copies binary/source archives to `dist/releases/`.
 
 Source-tree launchers still execute from the repository root and use both `att-cli/target/classes` and `att-engine/target/classes`.

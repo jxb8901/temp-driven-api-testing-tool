@@ -3,13 +3,14 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <parent><groupId>att</groupId><artifactId>template-driven-api-testing-tool</artifactId><version>3.8.0</version><relativePath>../pom.xml</relativePath></parent>
+    <parent><groupId>att</groupId><artifactId>template-driven-api-testing-tool</artifactId><version>4.0.0</version><relativePath>../pom.xml</relativePath></parent>
     <artifactId>att-dist</artifactId>
     <packaging>pom</packaging>
     <name>ATT Distribution</name>
     <dependencies>
         <dependency><groupId>att</groupId><artifactId>att-cli</artifactId><version>${project.version}</version><scope>runtime</scope></dependency>
         <dependency><groupId>att</groupId><artifactId>att-worker</artifactId><version>${project.version}</version><scope>runtime</scope></dependency>
+        <dependency><groupId>att</groupId><artifactId>att-server</artifactId><version>${project.version}</version><type>war</type><scope>runtime</scope></dependency>
     </dependencies>
     <build><plugins><plugin>
         <groupId>org.apache.maven.plugins</groupId><artifactId>maven-assembly-plugin</artifactId>

@@ -1,7 +1,7 @@
-# ATT v3.8.0 reference manual
+# ATT v4.0.0 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 3.8.0
+Version: 4.0.0
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -2875,7 +2875,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.8.0",
+  "attVersion": "4.0.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2914,11 +2914,11 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release/source archives, and verifies the packaged launcher. It requires Java/Maven plus Python 3 and Pandoc for Reference generation.
+`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release/source archives, and verifies the packaged launcher. It requires Java/Maven plus Python 3 and Pandoc for Reference generation. The 4.0.0 binary also contains `server/att-server-4.0.0.war` for external Tomcat 10.1+ on Java 17+.
 
 ### Runtime dependencies
 
-Java 8+ is the runtime baseline. ATT does not bundle JDBC drivers; place required driver/dependency jars in `lib/`. IBM MQ is optional: the default build remains usable without MQ client classes, while MQ deployments package the supported IBM client jar/profile.
+The CLI, Engine, and Worker remain Java 8-compatible. The ATT Server WAR requires Java 17+ and external Tomcat 10.1+. ATT does not bundle JDBC drivers for CLI integrations; place required driver/dependency jars in `lib/`. IBM MQ is optional: the default CLI build remains usable without MQ client classes, while MQ deployments package the supported IBM client jar/profile.
 
 ### Documentation operations
 

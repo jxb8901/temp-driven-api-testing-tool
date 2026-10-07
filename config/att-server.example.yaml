@@ -1,0 +1,21 @@
+# Copy to a protected deployment path and set -Datt.server.config=/etc/att/server.yaml.
+server:
+  dataDir: /var/lib/att-server
+  # Optional. Defaults to the Java runtime hosting Tomcat.
+  # javaExecutable: /usr/lib/jvm/java-17/bin/java
+  maxRequestBytes: 1048576
+  maxEventsPerJob: 10000
+  maxArtifacts: 1000
+
+workers:
+  maxConcurrent: 8
+  queuedLimit: 100
+  maxConcurrentLoad: 2
+  gracefulStopMs: 10000
+
+packages:
+  allowedRoots:
+    - /srv/att/packages
+  entries:
+    payments: /srv/att/packages/payments
+    treasury: /srv/att/packages/treasury

@@ -36,6 +36,7 @@ Minimal offline workflow:
 | Understand `${...}` and `#{...}` | [Expressions](reference/expressions.md) |
 | Diagnose FAIL, ERROR, or INVALID | [Validation and Troubleshooting](reference/validation-diagnostics.md) |
 | Integrate ATT with CI or package a release | [CI, Packaging, and Operations](reference/ci-packaging-operations.md) |
+| Deploy the API control plane | [ATT Server deployment and API](server-deployment.md) · [中文](server-deployment.zh.md) |
 
 ## Documentation types and language
 
@@ -54,6 +55,8 @@ docs/
 ├── README.md                 # canonical documentation landing page
 ├── quick-start.md            # current English tutorial
 ├── quick-start.zh.md         # current 繁體中文 tutorial
+├── server-deployment.md      # ATT Server API and Tomcat deployment
+├── server-deployment.zh.md   # ATT Server API 與 Tomcat 部署
 ├── reference.md              # generated combined English Reference
 ├── reference.html            # generated combined English Reference
 ├── reference.zh.md           # generated combined 繁體中文 Reference

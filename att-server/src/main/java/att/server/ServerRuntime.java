@@ -1,0 +1,193 @@
+package att.server;
+
+import att.worker.WorkerRequest;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Pattern;
+
+/** Owns the single-node job plane and its bounded Worker/SSE executors. */
+final class ServerRuntime implements AutoCloseable {
+    static final ObjectMapper JSON=new ObjectMapper().configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,false);
+    static final Pattern JOB_ID=Pattern.compile("J[0-9A-F]{16}");
+    final ServerConfig config;
+    final JobStore store;
+    final ThreadPoolExecutor workers,streams;
+    final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
+    private final AtomicLong completed=new AtomicLong();
+    private final java.util.concurrent.Semaphore loadSlots;
+    private final WorkerProcessLauncher processLauncher;
+    private volatile String webInfLibs;
+    ServerRuntime(ServerConfig config,String webInfLibs) throws Exception {
+        this(config,webInfLibs,ProcessBuilder::start);
+    }
+    ServerRuntime(ServerConfig config,String webInfLibs,WorkerProcessLauncher processLauncher) throws Exception {
+        if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
+        this.config=config;this.webInfLibs=webInfLibs;this.processLauncher=processLauncher;this.store=new JobStore(config);this.loadSlots=new java.util.concurrent.Semaphore(config.maxConcurrentLoad);
+        java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
+        workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+        streams=new ThreadPoolExecutor(4,32,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(64),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+        recover();
+    }
+    private void recover() throws Exception {
+        for(Map<String,Object> stale:store.staleWorkers()) {
+            try {
+                long pid=((Number)stale.get("pid")).longValue();ProcessHandle.of(pid).ifPresent(handle->{
+                    String expected=(String)stale.get("start");String actual=handle.info().startInstant().map(Instant::toString).orElse("");
+                    String command=handle.info().commandLine().orElse("");
+                    if(expected!=null&&expected.equals(actual)&&command.contains("att.worker.WorkerMain"))handle.destroyForcibly();
+                });
+            } catch(Exception ignored) { }
+        }
+        for(String id:store.staleJobIds()) {
+            store.interruptStale(id);
+            Path journal=config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl");
+            JobEvents events=new JobEvents(journal,config.maxEventsPerJob);
+            events.append("diagnostic",Map.of("code","ATT-SERVER-INTERRUPTED","summary","Job was interrupted by Server restart and was not rerun"));
+            events.append("result",Map.of("jobId",id,"status","ERROR"));
+        }
+    }
+    Map<String,Object> submit(String command,JsonNode input,String principal) throws Exception {
+        if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
+        String packageId=required(input,"packageId");Path root=config.packages.get(packageId);
+        if(root==null)throw new IllegalArgumentException("Unknown packageId");
+        WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
+        request.protocolVersion="att-worker/v1";request.command=command;request.packageRoot=root.toString();
+        request.outputDirectory=null;request.config=safeRelative(request.config,"config");request.environment=safeText(request.environment,128,"environment");
+        request.runId=safeText(request.runId,128,"runId");request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");
+        request.scenario=safeRelative(request.scenario,"scenario");request.debugInput=safeRelative(request.debugInput,"debugInput");
+        request.unsafeFailureDetails=false;
+        request.suites=safePaths(request.suites,"suites");
+        validatePackagePath(root,request.config,"config");validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
+        validatePackagePath(root,request.scenario,"scenario");validatePackagePath(root,request.debugInput,"debugInput");
+        if(request.suites!=null)for(String suite:request.suites)validatePackagePath(root,suite,"suites");
+        if("debug".equals(command))validateTarget(request.target);
+        if("load".equals(command)&&request.target!=null)validateTarget(request.target);
+        String id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();
+        request.jobId=id;
+        Path jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));
+        JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob);
+        Job job=new Job(id,command,packageId,principal,request,events);
+        String summary=JSON.writeValueAsString(Map.of("command",command,"packageId",packageId));
+        store.insert(job,summary);jobs.put(id,job);
+        append(job,"status",Map.of("jobId",id,"status","QUEUED"));
+        FutureTask<Void> task=new FutureTask<>(()->{execute(job,jobPath);return null;});
+        tasks.put(id,task);
+        try { workers.execute(task); }
+        catch(java.util.concurrent.RejectedExecutionException full) {
+            tasks.remove(id);job.diagnosticJson=JSON.writeValueAsString(Map.of("code","ATT-SERVER-CAPACITY-EXCEEDED","summary","Worker capacity is full"));
+            append(job,"diagnostic",JSON.readValue(job.diagnosticJson,Map.class));finish(job,"ERROR",75);
+            store.audit(principal,"SUBMIT",id,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full");
+        }
+        store.audit(principal,"SUBMIT",id,packageId,"ACCEPTED");
+        return job.view();
+    }
+    private void execute(Job job,Path jobPath) {
+        boolean load=false;
+        try {
+            if("load".equals(job.command)){loadSlots.acquire();load=true;}
+            Process process;
+            synchronized(job) {
+                // Publish the process while holding the same lock used by cancel(). A
+                // cancellation that wins before launch prevents the Worker from starting;
+                // one that follows launch always sees and terminates that exact process.
+                if(job.terminal())return;
+                transition(job,"PREPARING");
+                Path libs=webInfLibs==null?null:Paths.get(webInfLibs);
+                if(libs==null||!Files.isDirectory(libs))throw new IllegalStateException("Tomcat must deploy the WAR as an exploded application so WEB-INF/lib is available to the Worker launcher");
+                job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
+                String cp=libs.resolve("*").toString();
+                ProcessBuilder builder=new ProcessBuilder(config.javaExecutable.toString(),"-cp",cp,"att.worker.WorkerMain");
+                builder.directory(config.packages.get(job.packageId).toFile());
+                process=processLauncher.start(builder);job.process=process;job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");
+            }
+            Thread stderr=new Thread(()->{try(var in=process.getErrorStream()){byte[] buf=new byte[8192];while(in.read(buf)>=0){/* drain; protocol and safe diagnostics use stdout */}}catch(Exception ignored){}});stderr.setDaemon(true);stderr.start();
+            try(var out=process.getOutputStream()){out.write(JSON.writeValueAsBytes(job.request));out.write('\n');out.flush();}
+            try(BufferedReader reader=new BufferedReader(new InputStreamReader(process.getInputStream(),StandardCharsets.UTF_8))){String line;while((line=readBoundedLine(reader,1024*1024))!=null){if("\u0000OVERSIZED".equals(line)){append(job,"diagnostic",Map.of("code","ATT-SERVER-WORKER-EVENT-TOO-LARGE","summary","Worker event exceeded the protocol limit"));continue;}handleWorkerEvent(job,line);}}
+            int exit=process.waitFor();job.exitCode=exit;
+            if(!job.resultReceived&&!job.terminal()){job.diagnosticJson=JSON.writeValueAsString(Map.of("code","ATT-SERVER-WORKER-EXITED","summary","Worker exited before delivering a terminal result","exitCode",exit));append(job,"diagnostic",JSON.readValue(job.diagnosticJson,Map.class));finish(job,"ERROR",exit==0?3:exit);}
+            else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
+        } catch(InterruptedException e){Thread.currentThread().interrupt();stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
+          catch(Exception e){stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
+        finally {if(job.process==null||!job.process.isAlive())job.process=null;tasks.remove(job.id);if(load)loadSlots.release();completed.incrementAndGet();}
+    }
+    private void stopAfterFailure(Job job) {
+        Process process=job.process;
+        if(process==null||!process.isAlive())return;
+        terminateTree(process);
+        try {if(!process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS)){forceTree(process);process.waitFor();}}
+        catch(InterruptedException interrupted){Thread.currentThread().interrupt();forceTree(process);}
+    }
+    private void handleWorkerEvent(Job job,String line) throws Exception {
+        JsonNode event=JSON.readTree(line);if(event==null||!event.isObject())return;
+        String type=event.path("type").asText("").toUpperCase();Map<String,Object> data=JSON.convertValue(event,Map.class);data.remove("type");data.remove("jobId");
+        switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
+            case "PROGRESS"->append(job,"progress",data);case "LOG"->append(job,"log",data);case "DIAGNOSTIC"->{job.diagnosticJson=JSON.writeValueAsString(data);store.update(job);append(job,"diagnostic",data);}
+            case "RESULT"->{String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);JsonNode result=event.get("result");job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;finish(job,normalizeTerminal(status),code);}
+            default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
+    }
+    private String normalizeTerminal(String s){return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(s)?s:"ERROR";}
+    void cancel(String id,String principal) throws Exception {
+        Job j=jobs.get(id);if(j==null)throw new NotFoundException();
+        synchronized(j){if(j.terminal())return;append(j,"status",Map.of("jobId",id,"status","CANCEL_REQUESTED"));
+            Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){task.cancel(false);workers.remove(task);}finish(j,"CANCELLED",143);}
+            else {terminateTree(p);try{if(!p.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS)){forceTree(p);p.waitFor();}}catch(InterruptedException e){Thread.currentThread().interrupt();forceTree(p);}finish(j,"CANCELLED",143);}}
+        store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");
+    }
+    Job job(String id){if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Job j=jobs.get(id);if(j==null)throw new NotFoundException();return j;}
+    Map<String,Object> jobRecord(String id) throws Exception {Job j=jobs.get(id);if(j!=null)return j.view();if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();record.remove("resultJson");record.remove("diagnosticJson");return record;}
+    Map<String,Object> resultRecord(String id) throws Exception {Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();Map<String,Object> out=new LinkedHashMap<>();out.put("job",jobRecord(id));out.put("result",record.get("resultJson")==null?null:JSON.readTree((String)record.get("resultJson")));out.put("diagnostic",record.get("diagnosticJson")==null?null:JSON.readTree((String)record.get("diagnosticJson")));return out;}
+    List<Map<String,Object>> packages(){List<Map<String,Object>> out=new ArrayList<>();config.packages.forEach((id,path)->out.add(Map.of("packageId",id,"name",path.getFileName().toString())));return out;}
+    Map<String,Object> packageView(String id){Path root=config.packages.get(id);if(root==null)throw new NotFoundException();return Map.of("packageId",id,"name",root.getFileName().toString());}
+    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());return m;}
+    Path artifact(Job job,String requested) throws Exception {
+        if(requested==null||requested.isBlank())throw new IllegalArgumentException("artifact path is required");
+        Path base=config.dataDir.resolve("jobs").resolve(job.id).resolve("output").toRealPath();Path relative=Paths.get(requested);
+        if(relative.isAbsolute())throw new IllegalArgumentException("Artifact path must be relative to job output");
+        Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base)||!Files.exists(candidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new NotFoundException();
+        Path walk=base;for(Path part:base.relativize(candidate)){walk=walk.resolve(part);if(Files.isSymbolicLink(walk))throw new NotFoundException();}
+        Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;
+    }
+    private synchronized void transition(Job j,String next) throws Exception {synchronized(j){if(j.terminal())return;j.status=next;if("RUNNING".equals(next))j.startedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",next));}}
+    private synchronized void finish(Job j,String status,int code) throws Exception {synchronized(j){if(j.terminal())return;j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",status));Map<String,Object> result=new LinkedHashMap<>();result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);result.put("result",j.resultJson==null?null:JSON.readTree(j.resultJson));append(j,"result",result);}}
+    private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
+    private void append(Job j,String type,Map<String,?> data) throws Exception {j.events.append(type,data);}
+    private static String required(JsonNode node,String name){JsonNode v=node.get(name);if(v==null||!v.isTextual()||v.asText().isBlank())throw new IllegalArgumentException(name+" is required");return v.asText();}
+    private static String safeText(String s,int max,String name){if(s!=null&&(s.length()>max||s.contains("\n")||s.contains("\r")))throw new IllegalArgumentException("Invalid "+name);return s;}
+    private static String safeRelative(String s,String name){if(s==null||s.isBlank())return null;Path p=Paths.get(s);if(p.isAbsolute()||p.normalize().startsWith("..")||s.indexOf('\0')>=0)throw new IllegalArgumentException(name+" must stay inside PACKAGE_ROOT");return p.normalize().toString();}
+    private static List<String> safePaths(List<String> paths,String name){if(paths==null)return null;List<String> out=new ArrayList<>();for(String p:paths){if(p==null)throw new IllegalArgumentException(name+" entries must be non-empty paths");out.add(safeRelative(p,name));}return out;}
+    private static void validatePackagePath(Path root,String relative,String name) throws Exception {if(relative==null)return;Path base=root.toRealPath();Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base))throw new IllegalArgumentException(name+" escapes PACKAGE_ROOT");Path existing=candidate;while(existing!=null&&!Files.exists(existing))existing=existing.getParent();if(existing!=null&&!existing.toRealPath().startsWith(base))throw new IllegalArgumentException(name+" resolves outside PACKAGE_ROOT");}
+    private static void validateTarget(Map<String,Object> target){if(target==null)throw new IllegalArgumentException("target is required");Object type=target.get("type"),id=target.get("id");if(!(type instanceof String)||!(id instanceof String))throw new IllegalArgumentException("target.type and target.id are required");}
+    private static String safeMessage(Exception e){String m=e.getMessage();return m==null?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
+    private static String readBoundedLine(BufferedReader reader,int limit) throws java.io.IOException {StringBuilder line=new StringBuilder();boolean oversized=false;int c;while((c=reader.read())!=-1){if(c=='\n')break;if(c=='\r')continue;if(line.length()<limit)line.append((char)c);else oversized=true;}if(c==-1&&line.isEmpty()&&!oversized)return null;return oversized?"\u0000OVERSIZED":line.toString();}
+    JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob):active.events;}
+    boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
+    Path artifact(String id,String requested) throws Exception {Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();Job j=jobs.get(id);if(j!=null)return artifact(j,requested);Path base=config.dataDir.resolve("jobs").resolve(id).resolve("output").toRealPath();Path relative=Paths.get(requested);if(relative.isAbsolute())throw new IllegalArgumentException("Artifact path must be relative to job output");Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base)||!Files.exists(candidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new NotFoundException();Path walk=base;for(Path part:base.relativize(candidate)){walk=walk.resolve(part);if(Files.isSymbolicLink(walk))throw new NotFoundException();}Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;}
+    @Override public void close(){for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
+    private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
+    @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
+    static final class QueueFullException extends RuntimeException {QueueFullException(String m){super(m);}}
+    static final class NotFoundException extends RuntimeException {}
+}

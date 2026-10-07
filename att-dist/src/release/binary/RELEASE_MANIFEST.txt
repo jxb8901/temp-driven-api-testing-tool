@@ -1,12 +1,13 @@
 name: att-${project.version}
 main: att.sh
 mainWindows: att.bat
-java: JDK 8+ runtime
+java: CLI/Engine/Worker require JDK 8+; ATT Server WAR requires JDK 17+ and external Tomcat 10.1+
 contents:
   - att.sh
   - att.bat
   - lib/att-${project.version}.jar
   - lib/att-worker-${project.version}.jar
+  - server/att-server-${project.version}.war
   - lib/
   - config/
   - templates/

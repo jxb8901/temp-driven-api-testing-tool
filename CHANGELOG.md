@@ -1,5 +1,11 @@
 # Changelog
 
+# ATT 4.0.0 - 2026-10-07
+
+- Implement ATT Server v1 as a Java 17 Jakarta Servlet WAR for external Tomcat 10.1+ (#165).
+- Add container Principal consumption, a read-only configured Package Registry, bounded Worker jobs, persistent control-plane metadata, cancellation, and retained SSE events.
+- Include the Server WAR in the binary distribution while preserving Java 8 compatibility for CLI, Engine, and Worker.
+
 ## 3.8.0 - 2026-10-06
 
 - Add a package resource resolver with deterministic package-root and descriptor-relative lookup, and remove package filesystem paths from the author Context (#170).

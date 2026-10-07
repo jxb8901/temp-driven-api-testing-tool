@@ -48,10 +48,11 @@ class MultiModuleLayoutTest {
         assertTrue(worker.contains("<artifactId>att-cli</artifactId><version>${project.version}</version><scope>test</scope>"), worker);
 
         String server = read(root.resolve("att-server/pom.xml"));
-        assertFalse(server.contains("<source>"), server);
-        assertFalse(server.contains("<target>"), server);
+        assertTrue(server.contains("<packaging>war</packaging>"), server);
+        assertTrue(server.contains("<release>17</release>"), server);
+        assertTrue(server.contains("jakarta.servlet-api"), server);
         String lower = server.toLowerCase(java.util.Locale.ROOT);
-        for (String forbidden : Arrays.asList("spring", "jetty", "netty", "servermain", "worker", "websocket"))
+        for (String forbidden : Arrays.asList("spring", "jetty", "netty", "servermain", "websocket"))
             assertFalse(lower.contains(forbidden), server);
     }
 
@@ -60,9 +61,11 @@ class MultiModuleLayoutTest {
         String binary = read(root.resolve("att-dist/src/assembly/binary.xml"));
         assertTrue(binary.contains("<include>att:att-cli</include>"), binary);
         assertTrue(binary.contains("att-${project.version}.jar"), binary);
+        assertTrue(binary.contains("att-server-${project.version}.war"), binary);
         String source = read(root.resolve("att-dist/src/assembly/source.xml"));
         assertTrue(source.contains("<include>att-engine/**</include>"), source);
         assertTrue(source.contains("<include>att-worker/**</include>"), source);
+        assertTrue(source.contains("<include>att-server/**</include>"), source);
 
         String build = read(root.resolve("build.sh"));
         assertFalse(build.contains("javac "), build);
