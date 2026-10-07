@@ -120,13 +120,14 @@ public final class SuiteConfigResolver {
     }
 
     private Path sidecarPath(Path suitePath) {
-        Path workbook = packageResources.fromInternalPath(suitePath, PackageResourceResolver.Kind.FILE).canonicalPath();
+        Path workbook = packageResources.internalCandidate(suitePath);
+        if (Files.exists(workbook)) workbook = packageResources.fromInternalPath(workbook, PackageResourceResolver.Kind.FILE).canonicalPath();
         String file = workbook.getFileName().toString();
         String yaml = file.replaceFirst("(?i)\\.xlsx$", ".yaml");
         Path sidecar = workbook.resolveSibling(yaml);
         return Files.exists(sidecar)
                 ? packageResources.fromInternalPath(sidecar, PackageResourceResolver.Kind.FILE).canonicalPath()
-                : sidecar;
+                : packageResources.internalCandidate(sidecar);
     }
 
     @SuppressWarnings("unchecked")

@@ -40,7 +40,10 @@ public final class FlowRegistry {
         this.projectRoot = resources.packageRoot();
         this.frozen = false;
         Path templates = templatesRoot.isAbsolute() ? templatesRoot : projectRoot.resolve(templatesRoot);
-        Path canonicalTemplates = resources.fromInternalPath(templates, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
+        Path canonicalTemplates = resources.internalCandidate(templates);
+        if (Files.exists(canonicalTemplates)) {
+            canonicalTemplates = resources.fromInternalPath(canonicalTemplates, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
+        }
         Path flowCandidate = canonicalTemplates.resolve("flows").normalize();
         this.root = Files.exists(flowCandidate)
                 ? resources.fromInternalPath(flowCandidate, PackageResourceResolver.Kind.DIRECTORY).canonicalPath()

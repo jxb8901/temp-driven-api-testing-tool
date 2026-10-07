@@ -96,6 +96,34 @@ public final class PackageResourceResolver {
         }
     }
 
+    /**
+     * Normalizes a trusted internal candidate that may not exist yet. Existing ancestors are
+     * canonicalized so a symlink cannot make a future sidecar or optional directory escape.
+     */
+    public Path internalCandidate(Path path) {
+        if (path == null) throw new IllegalArgumentException("Internal package path is required");
+        Path normalized = path.toAbsolutePath().normalize();
+        Path ancestor = normalized;
+        while (ancestor != null && !Files.exists(ancestor, LinkOption.NOFOLLOW_LINKS)) ancestor = ancestor.getParent();
+        if (ancestor == null) throw unsafe(logicalNameOrName(normalized));
+        try {
+            Path canonicalAncestor = ancestor.toRealPath();
+            if (!canonicalAncestor.startsWith(packageRoot)) throw unsafe(logicalNameOrName(normalized));
+            Path candidate = canonicalAncestor.resolve(ancestor.relativize(normalized)).normalize();
+            if (!candidate.startsWith(packageRoot)) throw unsafe(logicalNameOrName(normalized));
+            if (Files.exists(normalized, LinkOption.NOFOLLOW_LINKS)) {
+                Path canonical = normalized.toRealPath();
+                if (!canonical.startsWith(packageRoot)) throw unsafe(logicalNameOrName(normalized));
+                return canonical;
+            }
+            return candidate;
+        } catch (IllegalArgumentException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IllegalArgumentException("Unable to resolve internal package path", error);
+        }
+    }
+
     private String logicalNameOrName(Path path) {
         Path normalized = path.toAbsolutePath().normalize();
         return normalized.startsWith(packageRoot) ? logicalName(packageRoot.relativize(normalized)) : "<outside-package>";
