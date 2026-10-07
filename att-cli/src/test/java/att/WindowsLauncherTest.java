@@ -41,7 +41,9 @@ class WindowsLauncherTest {
     @Test @EnabledOnOs(OS.WINDOWS)
     void sourceTreeLauncherRunsCommandBackedToolWithoutNativeProcessDependency() throws Exception {
         Path packageRoot = Paths.get("").toAbsolutePath();
-        Path temp = Files.createTempDirectory(packageRoot.resolve("target"), "windows-launcher-smoke-" + UUID.randomUUID() + "-");
+        Path targetDirectory = packageRoot.resolve("target");
+        Files.createDirectories(targetDirectory);
+        Path temp = Files.createTempDirectory(targetDirectory, "windows-launcher-smoke-" + UUID.randomUUID() + "-");
         Path templates = temp.resolve("templates");
         Path simple = templates.resolve("SIMPLE");
         Files.createDirectories(simple);
