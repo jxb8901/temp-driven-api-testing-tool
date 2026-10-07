@@ -73,11 +73,11 @@ public final class DefaultAttService implements AttService {
                 for(int i=0;i<visible.size();i++) {
                     Map<String,Object> diagnostic = new LinkedHashMap<String,Object>();
                     diagnostic.put("diagnostic", visible.get(i).toMap());
-                    emitCliProgress(request.observer(), request.runId(), "VALIDATION_DIAGNOSTIC", null, diagnostic);
+                    emitExecutionEvent(request.observer(), request.runId(), "VALIDATION_DIAGNOSTIC", null, diagnostic);
                 }
             }
-            emitCliProgress(request.observer(), request.runId(), "RUN_SELECTION_SUMMARY", "Cases selected", progress);
-            emitCliProgress(request.observer(), request.runId(), "RUN_EXECUTION_START", "Executing cases (verbose Case-log mirroring enabled)", Collections.<String,Object>emptyMap());
+            emitExecutionEvent(request.observer(), request.runId(), "RUN_SELECTION_SUMMARY", "Cases selected", progress);
+            emitExecutionEvent(request.observer(), request.runId(), "RUN_EXECUTION_START", "Executing cases", Collections.<String,Object>emptyMap());
         }
         RunSummary result=engine.run(opts,validation.diagnostics,profile);
         Map<String,Object> summary=new LinkedHashMap<String,Object>(); summary.put("total",result.total()); summary.put("passed",result.passed()); summary.put("failed",result.failed()); summary.put("error",result.error()); summary.put("skipped",result.skipped()); summary.put("invalid",result.invalid());
@@ -157,7 +157,7 @@ public final class DefaultAttService implements AttService {
         return new LoadResult(id,result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),paths("report",OperationResult.display(report,request.packageRoot()),"outputDirectory",OperationResult.display(runDir,request.packageRoot())),result.toMap());
     }
     private static long elapsed(long started) { return Math.max(0L,(System.nanoTime()-started)/1000000L); }
-    private static void emitCliProgress(ExecutionEventListener observer, String runId, String event, String message, Map<String,Object> data) {
+    private static void emitExecutionEvent(ExecutionEventListener observer, String runId, String event, String message, Map<String,Object> data) {
         if (observer == null) return;
         Map<String,Object> attributes = new LinkedHashMap<String,Object>(data);
         attributes.put("event", event);

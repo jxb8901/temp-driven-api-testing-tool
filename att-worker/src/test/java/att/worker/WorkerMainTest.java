@@ -287,6 +287,10 @@ class WorkerMainTest {
         assertEquals(1,directEvents.stream().filter(event->"RUN_VALIDATION_SUMMARY".equals(event.data().get("event"))).count());
         assertEquals(0,directEvents.stream().filter(event->event.type()==ExecutionEvent.Type.LOG
                 && "RUN_VALIDATION_SUMMARY".equals(event.data().get("event"))).count());
+        List<ExecutionEvent> executionStarts=directEvents.stream()
+                .filter(event->"RUN_EXECUTION_START".equals(event.data().get("event"))).collect(java.util.stream.Collectors.toList());
+        assertEquals(1,executionStarts.size());
+        assertEquals("Executing cases",executionStarts.get(0).message());
         String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-run-job","command","run","packageRoot",root.toString(),"runId","worker-run","suites",Collections.singletonList("testcase/quick_start.xlsx")));
         Process worker=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
         worker.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8)); worker.getOutputStream().close();
