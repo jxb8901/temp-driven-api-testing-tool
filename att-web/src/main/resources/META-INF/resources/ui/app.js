@@ -13,6 +13,7 @@
   let source = null;
   let lastEventId = 0;
   let artifactRequestSequence = 0;
+  let homeRequestSequence = 0;
   let cancelRequested = false;
   let versionPromise = null;
   let navigation = 0;
@@ -77,9 +78,10 @@
     }).catch(error => { if (generation === navigation) { text(byId('connection'), 'Unavailable'); message(error.message); } });
   }
   async function loadHome(generation = navigation) {
+    const requestSequence = ++homeRequestSequence;
     try {
       const [packages, jobs] = await Promise.all([request('packages'), request('jobs')]);
-      if (generation !== navigation) return;
+      if (requestSequence !== homeRequestSequence || generation !== navigation) return;
       byId('connection').textContent = 'Connected';
       const packageList = byId('packages'); packageList.replaceChildren();
       listItems(packages).forEach(item => { const li = document.createElement('li'); li.append(link(`#/packages/${encodeURIComponent(item.packageId)}`, item.packageId)); packageList.append(li); });
@@ -90,7 +92,9 @@
         tbody.append(row);
       });
     } catch (error) {
-      if (generation === navigation) { byId('connection').textContent = 'Unavailable'; message(error.message); }
+      if (requestSequence === homeRequestSequence && generation === navigation) {
+        byId('connection').textContent = 'Unavailable'; message(error.message);
+      }
     }
   }
   async function showPackage(id, generation) {
