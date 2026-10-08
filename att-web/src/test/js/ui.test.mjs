@@ -12,7 +12,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
   }
 }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false } = {}) {
+function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
@@ -24,6 +24,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(node => node !== this); }
     get firstElementChild() { return this.children[0]; }
     querySelector(selector) { return selector === 'button[type="submit"]' ? this.submitButton : null; }
+    reset() { this.formValues = []; }
   }
   const elements = new Map();
   const node = id => {
@@ -39,7 +40,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   const window = { listeners: {}, confirm: () => confirmCancel,
     addEventListener(name, listener) { this.listeners[name] = listener; }
   };
-  const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [];
+  const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [];
   const state = { jobStatus: 'RUNNING' };
   let rejectHome;
   const delayedHome = new Promise((_, reject) => { rejectHome = reject; });
@@ -56,6 +57,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     calls.push({ path, options });
     if (deferSubmit && options.method === 'POST') return new Promise((resolve, reject) => pendingSubmissions.push({ resolve, reject }));
     if (deferCancel && options.method === 'DELETE') return new Promise((resolve, reject) => pendingCancellations.push({ resolve, reject }));
+    if (deferArtifacts && /^jobs\\/[^/]+\\/artifacts$/.test(path)) return new Promise(resolve => pendingArtifacts.push(resolve));
     if (deferHome && (path === 'packages' || path === 'jobs')) return delayedHome;
     if (postForbidden && path === 'jobs/run' && options.method === 'POST') {
       return { ok: false, status: 403, headers: { get: () => 'application/json' },
@@ -82,10 +84,11 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     constructor(form) { return new Map(form.formValues || []); }
   }
   vm.runInNewContext(script, { document, location, window, fetch, EventSource, URL, Headers, FormData, console }, { filename: 'app.js' });
-  return { node, location, window, calls, streams, state, pendingSubmissions, pendingCancellations,
+  return { node, location, window, calls, streams, state, pendingSubmissions, pendingCancellations, pendingArtifacts,
     resolveSubmission: (index, response) => pendingSubmissions[index].resolve(response),
     rejectSubmission: (index, error) => pendingSubmissions[index].reject(error),
     resolveCancellation: (index, response) => pendingCancellations[index].resolve(response),
+    resolveArtifacts: (index, response) => pendingArtifacts[index](response),
     rejectCancellation: (index, error) => pendingCancellations[index].reject(error),
     failHome: error => rejectHome(error) };
 }
@@ -236,6 +239,52 @@ test('pending submission locks only its package across navigation', async () => 
   assert.equal(ui.node('job-title').textContent, 'Job J_B');
   assert.equal(ui.node('message').textContent, '');
 });
+
+
+test('switching packages clears form values but same-package refresh preserves them', async () => {
+  const ui = boot({ hash: '#/packages/A' });
+  await waitFor(() => ui.node('package-title').textContent === 'A', 'package A form');
+  const form = ui.node('submit-form');
+  form.formValues = [
+    ['command', 'run'], ['environment', 'SIT'], ['config', 'a/config.yaml'],
+    ['suites', 'suite-a'], ['tags', 'package-a'], ['overrides', 'vars.mode=A']
+  ];
+
+  ui.window.listeners.hashchange();
+  await waitFor(() => ui.node('package-title').textContent === 'A', 'same-package refresh');
+  assert.deepEqual(form.formValues, [
+    ['command', 'run'], ['environment', 'SIT'], ['config', 'a/config.yaml'],
+    ['suites', 'suite-a'], ['tags', 'package-a'], ['overrides', 'vars.mode=A']
+  ]);
+
+  ui.location.hash = '#/packages/B';
+  ui.window.listeners.hashchange();
+  await waitFor(() => ui.node('package-title').textContent === 'B', 'package B form');
+  assert.deepEqual(form.formValues, []);
+  form.formValues = [['command', 'run']];
+  await form.listeners.submit({ preventDefault() {}, currentTarget: form });
+  const post = ui.calls.find(call => call.path === 'jobs/run' && call.options.method === 'POST');
+  const payload = JSON.parse(post.options.body);
+  assert.equal(payload.packageId, 'B');
+  for (const field of ['environment', 'config', 'suites', 'tags', 'overrides']) assert.equal(Object.hasOwn(payload, field), false);
+});
+
+test('job SSE receives progress while artifact discovery is still pending', async () => {
+  const ui = boot({ hash: '#/jobs/J1', deferArtifacts: true });
+  await waitFor(() => ui.streams.length === 1 && ui.pendingArtifacts.length === 1, 'SSE and pending artifact lookup');
+  const stream = ui.streams[0];
+  assert.equal(stream.closed, false);
+  stream.emit('progress', { completed: 3, total: 8 }, 1);
+  assert.match(ui.node('progress').textContent, /"completed": 3/);
+
+  ui.resolveArtifacts(0, {
+    ok: true, status: 200, headers: { get: () => 'application/json' },
+    json: async () => ({ items: [{ path: 'report/index.html', size: 42 }] })
+  });
+  await waitFor(() => ui.node('artifacts').children.length === 1, 'artifact listing');
+  assert.match(ui.node('artifacts').children[0].textContent, /report\/index\.html/);
+});
+
 
 test('bounds and deduplicates event history, then closes terminal SSE', async () => {
   const ui = boot({ hash: '#/jobs/J1' });
