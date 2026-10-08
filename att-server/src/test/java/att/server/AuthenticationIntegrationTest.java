@@ -28,6 +28,13 @@ class AuthenticationIntegrationTest {
             String basic="Basic "+Base64.getEncoder().encodeToString("att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));assertEquals(200,request(port,basic));
             assertEquals(200,get(port,"/att/ui/index.html",basic));
             assertEquals(200,get(port,"/att/ui/app.js",basic));
+            // Exercise the real public API behind the authenticated browser console.
+            String jobId=submitJob(port,basic);
+            assertEquals(200,get(port,"/att/api/v1/jobs/"+jobId,basic));
+            assertEquals(200,get(port,"/att/api/v1/jobs/"+jobId+"/artifacts",basic));
+            assertRetainedSseEvent(port,basic,jobId);
+            assertEquals(200,cancelJob(port,basic,jobId));
+            assertEquals(200,get(port,"/att/api/v1/jobs/"+jobId+"/result",basic));
             assertEquals(415,post(port,basic,"application/x-www-form-urlencoded",null));
             assertEquals(403,post(port,basic,"application/json","https://attacker.example"));
         } finally {tomcat.stop();tomcat.destroy();restore(old);}
@@ -54,6 +61,34 @@ class AuthenticationIntegrationTest {
             }
         }
         return app;
+    }
+
+    private static String submitJob(int port,String authorization)throws Exception {
+        HttpURLConnection c=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/run").openConnection();
+        c.setConnectTimeout(3000);c.setReadTimeout(5000);
+        c.setRequestMethod("POST");c.setDoOutput(true);
+        c.setRequestProperty("Authorization",authorization);
+        c.setRequestProperty("Content-Type","application/json");
+        try(var out=c.getOutputStream()) {out.write("{\"packageId\":\"p\",\"all\":true}".getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+        assertEquals(202,c.getResponseCode());
+        String json=new String(c.getInputStream().readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);
+        c.disconnect();
+        String id=ServerRuntime.JSON.readTree(json).path("jobId").asText();
+        assertTrue(id.matches("J[0-9A-F]{16}"));
+        return id;
+    }
+    private static void assertRetainedSseEvent(int port,String authorization,String id)throws Exception {
+        HttpURLConnection c=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();
+        c.setReadTimeout(5000);c.setRequestProperty("Authorization",authorization);
+        assertEquals(200,c.getResponseCode());assertTrue(c.getHeaderField("Content-Type").startsWith("text/event-stream"));
+        try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(c.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
+            assertTrue(reader.readLine().startsWith("id: "),"SSE must replay retained job events");
+        } finally {c.disconnect();}
+    }
+    private static int cancelJob(int port,String authorization,String id)throws Exception {
+        HttpURLConnection c=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id).openConnection();
+        c.setRequestMethod("DELETE");c.setRequestProperty("Authorization",authorization);c.setReadTimeout(5000);
+        try{return c.getResponseCode();}finally{c.disconnect();}
     }
     private static int post(int port,String authorization,String contentType,String origin)throws Exception {
         try(java.net.Socket socket=new java.net.Socket("127.0.0.1",port)) {socket.setSoTimeout(3000);java.io.OutputStream out=socket.getOutputStream();String body="{}";StringBuilder request=new StringBuilder("POST /att/api/v1/jobs/run HTTP/1.1\r\nHost: 127.0.0.1:").append(port).append("\r\nConnection: close\r\nAuthorization: ").append(authorization).append("\r\nContent-Type: ").append(contentType).append("\r\nContent-Length: ").append(body.length()).append("\r\n");if(origin!=null)request.append("Origin: ").append(origin).append("\r\n");request.append("\r\n").append(body);out.write(request.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));out.flush();String status=new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(),java.nio.charset.StandardCharsets.UTF_8)).readLine();return Integer.parseInt(status.split(" ")[1]);}
