@@ -191,6 +191,52 @@ test('late submission success or failure cannot change a different route', async
   }
 });
 
+
+test('pending submission locks only its package across navigation', async () => {
+  const ui = boot({ hash: '#/packages/A', deferSubmit: true });
+  const form = ui.node('submit-form');
+  await waitFor(() => ui.node('package-title').textContent === 'A', 'package A form');
+  form.formValues = [['command', 'run']];
+  const pendingA = form.listeners.submit({ preventDefault() {}, currentTarget: form });
+  await waitFor(() => ui.pendingSubmissions.length === 1, 'package A submission');
+  assert.equal(form.submitButton.disabled, true);
+
+  ui.location.hash = '#/packages/B';
+  ui.window.listeners.hashchange();
+  await waitFor(() => ui.node('package-title').textContent === 'B', 'package B form');
+  assert.equal(form.submitButton.disabled, false);
+
+  ui.location.hash = '#/packages/A';
+  ui.window.listeners.hashchange();
+  await waitFor(() => ui.node('package-title').textContent === 'A', 'return to package A');
+  assert.equal(form.submitButton.disabled, true);
+
+  ui.location.hash = '#/packages/B';
+  ui.window.listeners.hashchange();
+  await waitFor(() => ui.node('package-title').textContent === 'B', 'return to package B');
+  assert.equal(form.submitButton.disabled, false);
+  const pendingB = form.listeners.submit({ preventDefault() {}, currentTarget: form });
+  await waitFor(() => ui.pendingSubmissions.length === 2, 'package B submission');
+  assert.deepEqual(ui.calls.filter(call => call.options.method === 'POST').map(call => JSON.parse(call.options.body).packageId), ['A', 'B']);
+
+  ui.resolveSubmission(1, {
+    ok: true, status: 202, headers: { get: () => 'application/json' },
+    json: async () => ({ jobId: 'J_B' })
+  });
+  await pendingB;
+  ui.window.listeners.hashchange();
+  await waitFor(() => ui.streams.length === 1 && ui.node('job-title').textContent === 'Job J_B', 'package B job view');
+
+  ui.resolveSubmission(0, {
+    ok: true, status: 202, headers: { get: () => 'application/json' },
+    json: async () => ({ jobId: 'J_A' })
+  });
+  await pendingA;
+  assert.equal(ui.location.hash, '#/jobs/J_B');
+  assert.equal(ui.node('job-title').textContent, 'Job J_B');
+  assert.equal(ui.node('message').textContent, '');
+});
+
 test('bounds and deduplicates event history, then closes terminal SSE', async () => {
   const ui = boot({ hash: '#/jobs/J1' });
   await waitFor(() => ui.streams.length === 1, 'initial job event stream');
