@@ -43,7 +43,7 @@
   function link(href, label) { const node = el('a', label); node.href = href; return node; }
   function safeData(value, key = '') {
     if (/^(packageRoot|outputDirectory|serverDataDir|physicalPath|absolutePath)$/i.test(key)) return '[path hidden]';
-    if (typeof value === 'string') return value.replace(/(?:[A-Za-z]:\\|\\\\|\/)(?:[^\s"']+[\\/])*[^\s"']*/g, '[path hidden]');
+    if (typeof value === 'string') return value.replace(/(^|[\s("'=])((?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/][^\\/\s]+[\\/]|\/)[^\s"'<>|]*)/g, '$1[path hidden]');
     if (Array.isArray(value)) return value.map(item => safeData(item));
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, child]) => [name, safeData(child, name)]));
     return value;
