@@ -4,7 +4,13 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const script = readFileSync(new URL('../../main/resources/META-INF/resources/ui/app.js', import.meta.url), 'utf8');
-const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+async function waitFor(predicate, description, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${description}`);
+    await new Promise(resolve => setImmediate(resolve));
+  }
+}
 
 function boot({ hash = '', version = '1', confirmCancel = true } = {}) {
   class Element {
@@ -67,14 +73,14 @@ function boot({ hash = '', version = '1', confirmCancel = true } = {}) {
 
 test('rejects an incompatible API before accessing packages', async () => {
   const ui = boot({ version: '2' });
-  await settle();
+  await waitFor(() => ui.node('message').textContent.includes('Incompatible ATT Server API version'), 'API version rejection');
   assert.match(ui.node('message').textContent, /Incompatible ATT Server API version/);
   assert.deepEqual(ui.calls.map(call => call.path), ['version']);
 });
 
 test('submits logical package DTOs with a non-root Tomcat context', async () => {
   const ui = boot({ hash: '#/packages/payments' });
-  await settle();
+  await waitFor(() => ui.node('package-title').textContent === 'payments', 'package form');
   const form = ui.node('submit-form');
   form.formValues = [['command', 'run'], ['environment', 'SIT'], ['tags', 'smoke, regression'], ['all', 'on']];
   await form.listeners.submit({ preventDefault() {}, currentTarget: form });
@@ -88,7 +94,7 @@ test('submits logical package DTOs with a non-root Tomcat context', async () => 
 
 test('bounds and deduplicates event history, then closes terminal SSE', async () => {
   const ui = boot({ hash: '#/jobs/J1' });
-  await settle();
+  await waitFor(() => ui.streams.length === 1, 'initial job event stream');
   assert.equal(ui.streams.length, 1);
   const stream = ui.streams[0];
   assert.equal(stream.url, '/tools/att/api/v1/jobs/J1/events');
@@ -101,7 +107,7 @@ test('bounds and deduplicates event history, then closes terminal SSE', async ()
   ui.state.jobStatus = 'PASS';
   stream.emit('status', { status: 'PASS' }, 602);
   stream.emit('result', { status: 'PASS' }, 603);
-  await settle();
+  await waitFor(() => stream.closed && ui.node('result').textContent.includes('PASS'), 'terminal job result');
   assert.equal(stream.closed, true);
   assert.match(ui.node('stream-state').textContent, /completed/);
   assert.match(ui.node('result').textContent, /PASS/);
@@ -118,7 +124,7 @@ test('Debug, Load and Validate forms preserve the public job DTO', async () => {
   ];
   for (const item of cases) {
     const ui = boot({ hash: '#/packages/payments' });
-    await settle();
+    await waitFor(() => ui.node('package-title').textContent === 'payments', 'package form');
     const form = ui.node('submit-form');
     form.formValues = [['command',item.command], ...item.fields];
     await form.listeners.submit({ preventDefault() {}, currentTarget: form });
@@ -133,11 +139,11 @@ test('Debug, Load and Validate forms preserve the public job DTO', async () => {
 
 test('leaving a job closes its stream and does not cancel the job', async () => {
   const ui = boot({ hash: '#/jobs/J1' });
-  await settle();
+  await waitFor(() => ui.streams.length === 1, 'first job event stream');
   const first = ui.streams[0];
   ui.location.hash = '#/jobs/J2';
   ui.window.listeners.hashchange();
-  await settle();
+  await waitFor(() => ui.streams.length === 2 && ui.node('job-title').textContent === 'Job J2', 'second job event stream');
   assert.equal(first.closed, true);
   assert.equal(ui.streams.length, 2);
   assert.equal(ui.node('job-title').textContent, 'Job J2');
@@ -146,7 +152,7 @@ test('leaving a job closes its stream and does not cancel the job', async () => 
 
 test('cancellation waits for the Server to confirm a terminal status', async () => {
   const ui = boot({ hash: '#/jobs/J1' });
-  await settle();
+  await waitFor(() => ui.streams.length === 1, 'job event stream before cancellation');
   await ui.node('cancel-job').listeners.click();
   assert.equal(ui.calls.filter(call => call.options.method === 'DELETE').length, 1);
   assert.equal(ui.node('cancel-job').disabled, true);
