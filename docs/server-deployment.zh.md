@@ -40,7 +40,18 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 Tomcat 負責驗證請求。WAR 會為 package、job API 及 metrics 設定 HTTP BASIC authentication，並要求容器角色 `ATT_USER`；請在 Tomcat Realm 將指定用戶加入此角色。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、job、result、event 及 artifact API 均要求 Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
 
-改變狀態的請求必須使用 `application/json`；如請求帶有 `Origin`，必須與請求來源相同。v1 所有 `ATT_USER` 已驗證 Principal 具有相同權限。在刻意隔離的網絡中，可設定 `server.authenticationRequired: false` 接受匿名 API 請求；這會略過所有 API 操作的驗證，不應用於不受信任的網絡。ATT Server 不會實作密碼、JWT/OIDC 驗證、LDAP 驗證、登入流程或 ATT 專用 RBAC。請勿在 API payload 或 package 檔案中放置憑證。
+改變狀態的請求必須使用 `application/json`；如請求帶有 `Origin`，必須與請求來源相同。若 TLS 在反向代理終止，請設定 Tomcat `RemoteIpValve`，由代理的 forwarded headers 還原 Servlet scheme、host 及 port。`internalProxies` 只可列出實際代理位址，並確保代理會先移除用戶提交的 `Forwarded`/`X-Forwarded-*` headers，再加入自身的值。請依代理實際使用的 header 名稱及受信任位址調整設定：
+
+```xml
+<Valve className="org.apache.catalina.valves.RemoteIpValve"
+       internalProxies="10\\.20\\.0\\.12"
+       remoteIpHeader="X-Forwarded-For"
+       protocolHeader="X-Forwarded-Proto"
+       hostHeader="X-Forwarded-Host"
+       portHeader="X-Forwarded-Port" />
+```
+
+v1 所有 `ATT_USER` 已驗證 Principal 具有相同權限.在刻意隔離的網絡中，可設定 `server.authenticationRequired: false` 接受匿名 API 請求；這會略過所有 API 操作的驗證，不應用於不受信任的網絡。ATT Server 不會實作密碼、JWT/OIDC 驗證、LDAP 驗證、登入流程或 ATT 專用 RBAC。請勿在 API payload 或 package 檔案中放置憑證。
 
 內建瀏覽器主控台位於 `<context path>/ui/`，使用與 API 相同的 Tomcat HTTP Basic 驗證及 `ATT_USER` 權限。詳見 [ATT Server Web UI](reference.zh/att-server-web-ui.md)。
 
