@@ -39,6 +39,8 @@ Server state is stored in `dataDir/db/`. Each job uses `dataDir/jobs/<jobId>/` f
 
 Tomcat authenticates requests. ATT Server reads `HttpServletRequest.getUserPrincipal()` and requires a Principal on package, job, result, event, and artifact endpoints. Health and version may be anonymous. The principal name is stored with job and audit metadata and is not sent to the Worker or exposed in ATT expression Context.
 
+The bundled browser console is served at `<context path>/ui/` and is protected by the same Principal requirement. See [ATT Server Web UI](att-server-web-ui.md) for its workflow and browser security behavior.
+
 All authenticated principals have the same permissions in v1. ATT Server does not implement passwords, JWT/OIDC validation, LDAP authentication, login flows, or ATT-specific RBAC. Do not put credentials in API payloads or package files.
 
 ## REST API

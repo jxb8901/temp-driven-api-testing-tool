@@ -6,6 +6,7 @@ modules:
   - att-cli/      command-line adapter
   - att-worker/   one-job JSON protocol adapter
   - att-server/   Java 17+ Jakarta Servlet WAR for the ATT Server control plane
+  - att-web/      Static browser console packaged in the ATT Server WAR
   - att-dist/     release packaging
 contents:
   - att-engine/src/

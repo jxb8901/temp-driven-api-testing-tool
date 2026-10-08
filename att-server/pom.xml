@@ -10,6 +10,7 @@
     <description>Single-node ATT control plane for external Jakarta Servlet containers.</description>
     <dependencies>
         <dependency><groupId>att</groupId><artifactId>att-server-api</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>att</groupId><artifactId>att-web</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>att</groupId><artifactId>att-worker</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
         <dependency><groupId>org.yaml</groupId><artifactId>snakeyaml</artifactId></dependency>

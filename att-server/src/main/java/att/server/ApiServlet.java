@@ -15,6 +15,8 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.security.Principal;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -51,6 +53,8 @@ public final class ApiServlet extends HttpServlet {
     @Override protected void doPost(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req);String principal=principal(req);
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+        if(!sameOrigin(req)){error(res,403,"ATT-SERVER-ORIGIN-REJECTED","Cross-origin state changes are not allowed",requestId);return;}
+        if(!"application/json".equalsIgnoreCase(req.getContentType()==null?"":req.getContentType().split(";",2)[0].trim())){error(res,415,"ATT-SERVER-JSON-REQUIRED","Content-Type application/json is required",requestId);return;}
         String command=path.startsWith("/jobs/")?path.substring("/jobs/".length()):"";
         if(!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try {
@@ -66,12 +70,13 @@ public final class ApiServlet extends HttpServlet {
     @Override protected void doDelete(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req),principal=principal(req);
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+        if(!sameOrigin(req)){error(res,403,"ATT-SERVER-ORIGIN-REJECTED","Cross-origin state changes are not allowed",requestId);return;}
         if(!path.matches("/jobs/[^/]+")){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try{String id=segment(path,2);runtime.cancel(id,principal);json(res,200,Map.of("jobId",id,"status",runtime.job(id).status,"requestId",requestId));}
         catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
         catch(Exception e){error(res,500,"ATT-SERVER-CANCEL-FAILED","The job could not be cancelled",requestId);}
     }
-    @Override protected void doPut(HttpServletRequest req,HttpServletResponse res) throws IOException {error(res,405,"ATT-SERVER-METHOD-NOT-ALLOWED","Package administration is read-only in v1",requestId(req,res));}
+    @Override protected void doPut(HttpServletRequest req,HttpServletResponse res) throws IOException {String id=requestId(req,res);if(!sameOrigin(req)){error(res,403,"ATT-SERVER-ORIGIN-REJECTED","Cross-origin state changes are not allowed",id);return;}error(res,405,"ATT-SERVER-METHOD-NOT-ALLOWED","Package administration is read-only in v1",id);}
 
     private void sse(HttpServletRequest req,HttpServletResponse res,String jobId) throws IOException {
         String last=req.getHeader("Last-Event-ID");long cursor=0;
@@ -103,7 +108,17 @@ public final class ApiServlet extends HttpServlet {
         return items;
     }
     private void sendArtifact(HttpServletResponse response,Path file)throws IOException {
-        String name=file.getFileName().toString().replaceAll("[\r\n\"]","_");response.setContentType(getServletContext().getMimeType(name)==null?"application/octet-stream":getServletContext().getMimeType(name));response.setHeader("Content-Disposition","attachment; filename=\""+name+"\"");response.setContentLengthLong(Files.size(file));Files.copy(file,response.getOutputStream());
+        String name=file.getFileName().toString().replaceAll("[\r\n\"]","_");response.setHeader("X-Content-Type-Options","nosniff");response.setContentType(getServletContext().getMimeType(name)==null?"application/octet-stream":getServletContext().getMimeType(name));response.setHeader("Content-Disposition","attachment; filename=\""+name+"\"");response.setContentLengthLong(Files.size(file));Files.copy(file,response.getOutputStream());
+    }
+    private static boolean sameOrigin(HttpServletRequest req) {
+        String origin=req.getHeader("Origin");if(origin==null||origin.isBlank())return true;
+        try {
+            URI uri=new URI(origin);if(uri.getHost()==null||uri.getUserInfo()!=null||uri.getPath()!=null&&!uri.getPath().isEmpty()||uri.getQuery()!=null||uri.getFragment()!=null)return false;
+            String scheme=req.getScheme();if(!uri.getScheme().equalsIgnoreCase(scheme)||!uri.getHost().equalsIgnoreCase(req.getServerName()))return false;
+            int requestPort=req.getServerPort();if(requestPort<0)requestPort="https".equalsIgnoreCase(scheme)?443:80;
+            int originPort=uri.getPort();if(originPort<0)originPort="https".equalsIgnoreCase(uri.getScheme())?443:80;
+            return requestPort==originPort;
+        } catch(URISyntaxException|NullPointerException invalid){return false;}
     }
     private static String path(HttpServletRequest r){String p=r.getPathInfo();return p==null||p.isEmpty()?"/":p;}
     private static String segment(String path,int index){String[] parts=path.split("/");return parts.length>index?parts[index]:"";}

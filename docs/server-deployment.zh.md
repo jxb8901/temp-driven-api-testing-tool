@@ -39,6 +39,8 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 Tomcat 負責驗證請求。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、job、result、event 及 artifact API 均要求 Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
 
+內建瀏覽器主控台位於 `<context path>/ui/`，並使用相同的 Principal 驗證要求。工作流程與瀏覽器安全行為請參閱 [ATT Server Web UI](reference.zh/att-server-web-ui.md)。
+
 v1 所有已驗證 Principal 具有相同權限。ATT Server 不會實作密碼、JWT/OIDC 驗證、LDAP 驗證、登入流程或 ATT 專用 RBAC。請勿在 API payload 或 package 檔案中放置憑證。
 
 ## REST API
