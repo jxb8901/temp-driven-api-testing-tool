@@ -8,6 +8,7 @@
   const boundedEvents = 500;
   const boundedEventText = 200000;
   let selectedPackage = '';
+  let formPackage = '';
   let activeJob = '';
   let source = null;
   let lastEventId = 0;
@@ -60,6 +61,10 @@
     byId('job-view').hidden = parts[0] !== 'jobs' || !parts[1];
     message('');
     selectedPackage = parts[0] === 'packages' ? (parts[1] || '') : '';
+    if (selectedPackage && selectedPackage !== formPackage) {
+      byId('submit-form').reset();
+      formPackage = selectedPackage;
+    }
     activeJob = parts[0] === 'jobs' ? (parts[1] || '') : '';
     const submitButton = byId('submit-form').querySelector('button[type="submit"]');
     if (submitButton) submitButton.disabled = selectedPackage !== '' && submitting.has(selectedPackage);
@@ -165,14 +170,13 @@
     lastEventId = 0; cancelRequested = false; text(byId('cancel-state'), '');
     const loaded = await refreshJob(id, generation);
     if (!loaded || generation !== navigation || activeJob !== id) return;
-    await loadArtifacts(id, generation);
-    if (generation !== navigation || activeJob !== id) return;
     source = new EventSource(api + `jobs/${encodeURIComponent(id)}/events`);
-    source.onopen = () => { if (generation === navigation) text(byId('stream-state'), 'Live updates connected.'); };
-    source.onerror = () => { if (generation === navigation) text(byId('stream-state'), 'Connection interrupted. The browser will reconnect automatically.'); };
+    source.onopen = () => { if (generation === navigation && activeJob === id) text(byId('stream-state'), 'Live updates connected.'); };
+    source.onerror = () => { if (generation === navigation && activeJob === id) text(byId('stream-state'), 'Connection interrupted. The browser will reconnect automatically.'); };
     ['status','progress','log','diagnostic','result'].forEach(type => source.addEventListener(type, event => {
       if (generation === navigation && activeJob === id) appendEvent(type, event, id, generation);
     }));
+    loadArtifacts(id, generation);
   }
   async function refreshJob(id, generation = navigation) {
     let loaded = false;
