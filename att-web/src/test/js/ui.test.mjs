@@ -12,7 +12,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
   }
 }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false } = {}) {
+function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
@@ -40,7 +40,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   const window = { listeners: {}, confirm: () => confirmCancel,
     addEventListener(name, listener) { this.listeners[name] = listener; }
   };
-  const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [];
+  const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [], pendingHomeJobs = [];
   const state = { jobStatus: 'RUNNING' };
   let rejectHome;
   const delayedHome = new Promise((_, reject) => { rejectHome = reject; });
@@ -58,6 +58,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     if (deferSubmit && options.method === 'POST') return new Promise((resolve, reject) => pendingSubmissions.push({ resolve, reject }));
     if (deferCancel && options.method === 'DELETE') return new Promise((resolve, reject) => pendingCancellations.push({ resolve, reject }));
     if (deferArtifacts && /^jobs\/[^/]+\/artifacts$/.test(path)) return new Promise(resolve => pendingArtifacts.push(resolve));
+    if (deferJobLists && path === 'jobs' && !options.method) return new Promise((resolve, reject) => pendingHomeJobs.push({ resolve, reject }));
     if (deferHome && (path === 'packages' || path === 'jobs')) return delayedHome;
     if (postForbidden && path === 'jobs/run' && options.method === 'POST') {
       return { ok: false, status: 403, headers: { get: () => 'application/json' },
@@ -84,11 +85,12 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     constructor(form) { return new Map(form.formValues || []); }
   }
   vm.runInNewContext(script, { document, location, window, fetch, EventSource, URL, Headers, FormData, console }, { filename: 'app.js' });
-  return { node, location, window, calls, streams, state, pendingSubmissions, pendingCancellations, pendingArtifacts,
+  return { node, location, window, calls, streams, state, pendingSubmissions, pendingCancellations, pendingArtifacts, pendingHomeJobs,
     resolveSubmission: (index, response) => pendingSubmissions[index].resolve(response),
     rejectSubmission: (index, error) => pendingSubmissions[index].reject(error),
     resolveCancellation: (index, response) => pendingCancellations[index].resolve(response),
     resolveArtifacts: (index, response) => pendingArtifacts[index](response),
+    resolveHomeJobList: (index, response) => pendingHomeJobs[index].resolve(response),
     rejectCancellation: (index, error) => pendingCancellations[index].reject(error),
     failHome: error => rejectHome(error) };
 }
@@ -424,6 +426,26 @@ test('does not start SSE when the initial job lookup fails', async () => {
   assert.equal(ui.streams.length, 0);
   assert.deepEqual(ui.calls.map(call => call.path), ['version', 'jobs/nonexistent']);
 });
+
+test('a late Home jobs snapshot cannot overwrite a newer refresh', async () => {
+  const ui = boot({ deferJobLists: true });
+  await waitFor(() => ui.pendingHomeJobs.length === 1, 'initial Home jobs request');
+
+  const refresh = ui.node('refresh-jobs').listeners.click();
+  await waitFor(() => ui.pendingHomeJobs.length === 2, 'newer Home jobs request');
+  const response = status => ({
+    ok: true, status: 200, headers: { get: () => 'application/json' },
+    json: async () => ({ items: [{ jobId: 'J1', packageId: 'payments', command: 'run', status, createdAt: 'now' }] })
+  });
+  ui.resolveHomeJobList(1, response('PASS'));
+  await refresh;
+  assert.equal(ui.node('jobs').children[0].children[3].textContent, 'PASS');
+
+  ui.resolveHomeJobList(0, response('RUNNING'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.node('jobs').children[0].children[3].textContent, 'PASS');
+});
+
 test('late home failure cannot overwrite an active job view', async () => {
   const ui = boot({ deferHome: true });
   await waitFor(() => ui.calls.some(call => call.path === 'packages')
