@@ -175,7 +175,7 @@
       listItems(data).forEach(item => {
         const li = document.createElement('li');
         const path = String(item.path);
-        li.append(link(`${api}jobs/${encodeURIComponent(id)}/artifacts/${path.split('/').map(encodeURIComponent).join('/')}`, `${safeData(path)} (${item.size} bytes)`));
+        li.append(link(`${api}jobs/${encodeURIComponent(id)}/artifacts/${path.split('/').map(encodeURIComponent).join('/')}`, `${path} (${item.size} bytes)`));
         list.append(li);
       });
     } catch (error) { if (generation === navigation && activeJob === id) message(error.message); }
