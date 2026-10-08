@@ -53,7 +53,7 @@ class AuthenticationIntegrationTest {
     private Tomcat start(Path users,Path app) throws Exception {return start(users,app,false);}
     private Tomcat start(Path users,Path app,boolean trustedProxy) throws Exception {
         Tomcat tomcat=new Tomcat();tomcat.setBaseDir(temp.resolve("tomcat-"+System.nanoTime()).toString());tomcat.setPort(0);tomcat.getConnector();MemoryRealm realm=new MemoryRealm();realm.setPathname(users.toString());tomcat.getEngine().setRealm(realm);
-        if(trustedProxy){RemoteIpValve valve=new RemoteIpValve();valve.setInternalProxies("127\\\\.0\\\\.0\\\\.1");valve.setRemoteIpHeader("X-Forwarded-For");valve.setProtocolHeader("X-Forwarded-Proto");valve.setHostHeader("X-Forwarded-Host");valve.setPortHeader("X-Forwarded-Port");tomcat.getEngine().getPipeline().addValve(valve);}
+        if(trustedProxy){RemoteIpValve valve=new RemoteIpValve();valve.setInternalProxies("127\\.0\\.0\\.1");valve.setRemoteIpHeader("X-Forwarded-For");valve.setProtocolHeader("X-Forwarded-Proto");valve.setHostHeader("X-Forwarded-Host");valve.setPortHeader("X-Forwarded-Port");tomcat.getEngine().getPipeline().addValve(valve);}
         tomcat.addWebapp("/att",app.toString());tomcat.start();return tomcat;
     }
     private Path appDirectory(String name)throws Exception {
