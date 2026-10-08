@@ -112,9 +112,9 @@ class ServerRuntimeTest {
         Files.writeString(driverSource,"package oracle.jdbc; public final class OracleDriver { }");Path driverClasses=Files.createDirectory(temp.resolve("driver-classes"));
         Path probeSource=Files.createDirectories(temp.resolve("probe-src/probe")).resolve("WorkerProbe.java");
         List<Map<String,Object>> workerEvents=List.of(
-                Map.of("type","DIAGNOSTIC","code","TEST","message","password=synthetic-diagnostic-secret"),
-                Map.of("type","PROGRESS","message","token=synthetic-progress-secret"),
-                Map.of("type","LOG","headers",Map.of("Authorization","Basic synthetic-basic-marker","Proxy-Authorization","Bearer synthetic-proxy-marker")),
+                Map.of("type","DIAGNOSTIC","code","TEST","message","password=synthetic-diagnostic-secret; Cookie: synthetic-cookie-text-marker"),
+                Map.of("type","PROGRESS","message","token=synthetic-progress-secret; Authorization: Bearer synthetic-jwt-marker"),
+                Map.of("type","LOG","message","Authorization: Basic synthetic-basic-text-marker","headers",Map.of("Authorization","Basic synthetic-basic-marker","Proxy-Authorization","Bearer synthetic-proxy-marker","Cookie","synthetic-cookie-marker","Set-Cookie","synthetic-set-cookie-marker")),
                 Map.of("type","RESULT","status","PASS","exitCode",0,"result",Map.of("driver","__DRIVER__","message","password=synthetic-result-secret","headers",Map.of("Authorization","Bearer synthetic-result-marker")))
         );
         List<String> encodedEventList=new java.util.ArrayList<>();for(Map<String,Object> event:workerEvents)encodedEventList.add("\""+java.util.Base64.getEncoder().encodeToString(ServerRuntime.JSON.writeValueAsBytes(event))+"\"");String encodedEvents=String.join(",",encodedEventList);
