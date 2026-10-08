@@ -14,7 +14,7 @@
   let cancelRequested = false;
   let versionPromise = null;
   let navigation = 0;
-  let submitting = false;
+  const submitting = new Set();
 
   async function request(path, options = {}) {
     const headers = new Headers(options.headers || {});
@@ -61,6 +61,8 @@
     message('');
     selectedPackage = parts[0] === 'packages' ? (parts[1] || '') : '';
     activeJob = parts[0] === 'jobs' ? (parts[1] || '') : '';
+    const submitButton = byId('submit-form').querySelector('button[type="submit"]');
+    if (submitButton) submitButton.disabled = selectedPackage !== '' && submitting.has(selectedPackage);
     ensureCompatible().then(() => {
       if (generation !== navigation) return;
       if (selectedPackage) showPackage(selectedPackage, generation);
@@ -96,14 +98,15 @@
   function commaList(value) { const items = value.split(',').map(part => part.trim()).filter(Boolean); return items.length ? items : undefined; }
   byId('submit-form').addEventListener('submit', async event => {
     event.preventDefault();
-    if (submitting) return;
+    const generation = navigation; const packageId = selectedPackage;
+    if (submitting.has(packageId)) return;
     const form = event.currentTarget;
     const values = new FormData(form); const command = values.get('command');
     if (command === 'debug') {
       const type = String(values.get('targetType') || '').trim(); const id = String(values.get('targetId') || '').trim();
       if (!type || !id) { message('Debug requires a target type and target ID.'); return; }
     }
-    submitting = true;
+    submitting.add(packageId);
     const submitButton = form.querySelector('button[type="submit"]');
     if (submitButton) submitButton.disabled = true;
     const body = { packageId: selectedPackage };
@@ -123,14 +126,16 @@
     }
     const overrides = String(values.get('overrides') || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     if (overrides.length) body.overrides = overrides;
-    const generation = navigation; const packageId = selectedPackage;
     try {
       const accepted = await request(`jobs/${command}`, { method: 'POST', body: JSON.stringify(body) });
       if (generation === navigation && selectedPackage === packageId)
         location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
     } catch (error) {
       if (generation === navigation && selectedPackage === packageId) message(error.message);
-    } finally { submitting = false; if (submitButton) submitButton.disabled = false; }
+    } finally {
+      submitting.delete(packageId);
+      if (submitButton && selectedPackage === packageId) submitButton.disabled = submitting.has(packageId);
+    }
   });
   function appendEvent(type, event, jobId, generation) {
     const id = Number(event.lastEventId || 0);
