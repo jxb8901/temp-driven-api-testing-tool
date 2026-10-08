@@ -12,7 +12,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
   }
 }
 
-function boot({ hash = '', version = '1', confirmCancel = true } = {}) {
+function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
@@ -51,6 +51,10 @@ function boot({ hash = '', version = '1', confirmCancel = true } = {}) {
   async function fetch(url, options = {}) {
     const path = String(url).split('/api/v1/')[1];
     calls.push({ path, options });
+    if (jobMissing && path === 'jobs/nonexistent') {
+      return { ok: false, status: 404, headers: { get: () => 'application/json' },
+        json: async () => ({ error: { summary: 'Job not found' } }) };
+    }
     let result;
     if (path === 'version') result = { apiVersion: version };
     else if (path === 'packages') result = { items: [{ packageId: 'payments' }] };
@@ -168,4 +172,10 @@ test('preserves logical resource paths in diagnostics while hiding absolute path
   const rendered = ui.node('events').children[0].textContent;
   assert.match(rendered, /config\/templates\/payment\.yaml/);
   assert.doesNotMatch(rendered, /\/srv\/att\/jobs/);
+});
+test('does not start SSE when the initial job lookup fails', async () => {
+  const ui = boot({ hash: '#/jobs/nonexistent', jobMissing: true });
+  await waitFor(() => ui.node('message').textContent.includes('Job not found'), 'job lookup error');
+  assert.equal(ui.streams.length, 0);
+  assert.deepEqual(ui.calls.map(call => call.path), ['version', 'jobs/nonexistent']);
 });
