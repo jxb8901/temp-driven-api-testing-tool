@@ -12,6 +12,8 @@
   let source = null;
   let lastEventId = 0;
   let cancelRequested = false;
+  let versionPromise = null;
+  let navigation = 0;
 
   async function request(path, options = {}) {
     const headers = new Headers(options.headers || {});
@@ -27,6 +29,15 @@
     if (!type.includes('json')) throw new Error('The Server returned an incompatible response.');
     return data;
   }
+  function ensureCompatible() {
+    if (!versionPromise) {
+      versionPromise = request('version').then(info => {
+        if (String(info.apiVersion) !== '1') throw new Error('Incompatible ATT Server API version; this Web UI requires /api/v1.');
+        text(byId('connection'), 'Connected');
+      }).catch(error => { versionPromise = null; throw error; });
+    }
+    return versionPromise;
+  }
   function listItems(data) { return Array.isArray(data.items) ? data.items : []; }
   function el(tag, value) { const node = document.createElement(tag); text(node, value); return node; }
   function link(href, label) { const node = el('a', label); node.href = href; return node; }
@@ -39,15 +50,21 @@
   }
   function closeStream() { if (source) source.close(); source = null; }
   function route() {
+    const generation = ++navigation;
     const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
     closeStream();
     byId('home').hidden = parts.length > 0;
     byId('package-view').hidden = parts[0] !== 'packages' || !parts[1];
     byId('job-view').hidden = parts[0] !== 'jobs' || !parts[1];
     message('');
-    if (parts[0] === 'packages' && parts[1]) { selectedPackage = parts[1]; showPackage(parts[1]); }
-    else if (parts[0] === 'jobs' && parts[1]) { activeJob = parts[1]; showJob(parts[1]); }
-    else { selectedPackage = ''; activeJob = ''; loadHome(); }
+    selectedPackage = parts[0] === 'packages' ? (parts[1] || '') : '';
+    activeJob = parts[0] === 'jobs' ? (parts[1] || '') : '';
+    ensureCompatible().then(() => {
+      if (generation !== navigation) return;
+      if (selectedPackage) showPackage(selectedPackage, generation);
+      else if (activeJob) showJob(activeJob, generation);
+      else loadHome();
+    }).catch(error => { if (generation === navigation) { text(byId('connection'), 'Unavailable'); message(error.message); } });
   }
   async function loadHome() {
     try {
@@ -63,12 +80,13 @@
       });
     } catch (error) { byId('connection').textContent = 'Unavailable'; message(error.message); }
   }
-  async function showPackage(id) {
+  async function showPackage(id, generation) {
     try {
       const item = await request(`packages/${encodeURIComponent(id)}`);
+      if (generation !== navigation) return;
       text(byId('package-title'), item.packageId || id);
       byId('submit-form').elements.packageId?.remove();
-    } catch (error) { message(error.message); }
+    } catch (error) { if (generation === navigation) message(error.message); }
   }
   function commaList(value) { const items = value.split(',').map(part => part.trim()).filter(Boolean); return items.length ? items : undefined; }
   byId('submit-form').addEventListener('submit', async event => {
@@ -93,7 +111,7 @@
     try { const accepted = await request(`jobs/${command}`, { method: 'POST', body: JSON.stringify(body) }); location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`; }
     catch (error) { message(error.message); }
   });
-  function appendEvent(type, event) {
+  function appendEvent(type, event, jobId, generation) {
     const id = Number(event.lastEventId || 0);
     if (id && id <= lastEventId) return;
     if (id) lastEventId = id;
@@ -105,36 +123,60 @@
     const list = byId('events'); list.append(item);
     let size = Array.from(list.children).reduce((sum, node) => sum + Number(node.dataset.length || 0), 0);
     while (list.children.length > boundedEvents || size > boundedEventText) { size -= Number(list.firstElementChild.dataset.length || 0); list.firstElementChild.remove(); }
-    if (type === 'status' && terminal.has(payload.status)) { refreshJob(activeJob); loadArtifacts(activeJob); }
+    if (type === 'progress') text(byId('progress'), JSON.stringify(safeData(payload), null, 2));
+    if (type === 'status' && terminal.has(payload.status)) { refreshJob(jobId, generation); loadArtifacts(jobId, generation); }
+    if (type === 'result') {
+      closeStream();
+      text(byId('stream-state'), 'Job completed; event stream closed.');
+      refreshJob(jobId, generation);
+      loadArtifacts(jobId, generation);
+    }
   }
-  async function showJob(id) {
+  async function showJob(id, generation) {
     text(byId('job-title'), `Job ${id}`); text(byId('stream-state'), 'Loading job…');
-    byId('events').replaceChildren(); byId('artifacts').replaceChildren(); text(byId('result'), ''); lastEventId = 0; cancelRequested = false; text(byId('cancel-state'), '');
-    await refreshJob(id); await loadArtifacts(id);
-    if (!activeJob) return;
+    byId('events').replaceChildren(); byId('artifacts').replaceChildren();
+    text(byId('progress'), ''); text(byId('result'), '');
+    lastEventId = 0; cancelRequested = false; text(byId('cancel-state'), '');
+    await refreshJob(id, generation);
+    if (generation !== navigation || activeJob !== id) return;
+    await loadArtifacts(id, generation);
+    if (generation !== navigation || activeJob !== id) return;
     source = new EventSource(api + `jobs/${encodeURIComponent(id)}/events`);
-    source.onopen = () => text(byId('stream-state'), 'Live updates connected.');
-    source.onerror = () => text(byId('stream-state'), 'Connection interrupted. The browser will reconnect automatically.');
-    ['status','progress','log','diagnostic','result'].forEach(type => source.addEventListener(type, event => appendEvent(type, event)));
+    source.onopen = () => { if (generation === navigation) text(byId('stream-state'), 'Live updates connected.'); };
+    source.onerror = () => { if (generation === navigation) text(byId('stream-state'), 'Connection interrupted. The browser will reconnect automatically.'); };
+    ['status','progress','log','diagnostic','result'].forEach(type => source.addEventListener(type, event => {
+      if (generation === navigation && activeJob === id) appendEvent(type, event, id, generation);
+    }));
   }
-  async function refreshJob(id) {
+  async function refreshJob(id, generation = navigation) {
     try {
       const job = await request(`jobs/${encodeURIComponent(id)}`);
+      if (generation !== navigation || activeJob !== id) return;
       const summary = byId('job-summary'); summary.replaceChildren();
-      [['Package',job.packageId],['Command',job.command],['Principal',job.principal],['Status',job.status],['Created',job.createdAt],['Started',job.startedAt],['Finished',job.finishedAt]].forEach(([label,value]) => { if (value) { summary.append(el('dt',label),el('dd',value)); } });
+      [['Package',job.packageId],['Command',job.command],['Principal',job.principal],['Status',job.status],['Created',job.createdAt],['Started',job.startedAt],['Finished',job.finishedAt]].forEach(([label,value]) => {
+        if (value) summary.append(el('dt',label),el('dd',value));
+      });
       byId('cancel-job').disabled = terminal.has(job.status) || cancelRequested;
       byId('cancel-area').hidden = terminal.has(job.status);
       if (terminal.has(job.status)) {
         const result = await request(`jobs/${encodeURIComponent(id)}/result`);
-        text(byId('result'), JSON.stringify(safeData({ status: job.status, result: result.result, diagnostic: result.diagnostic }), null, 2));
+        if (generation === navigation && activeJob === id)
+          text(byId('result'), JSON.stringify(safeData({ status: job.status, result: result.result, diagnostic: result.diagnostic }), null, 2));
       }
-    } catch (error) { message(error.message); }
+    } catch (error) { if (generation === navigation && activeJob === id) message(error.message); }
   }
-  async function loadArtifacts(id) {
+  async function loadArtifacts(id, generation = navigation) {
     try {
-      const data = await request(`jobs/${encodeURIComponent(id)}/artifacts`); const list = byId('artifacts'); list.replaceChildren();
-      listItems(data).forEach(item => { const li = document.createElement('li'); li.append(link(`${api}jobs/${encodeURIComponent(id)}/artifacts/${String(item.path).split('/').map(encodeURIComponent).join('/')}`, `${item.path} (${item.size} bytes)`)); list.append(li); });
-    } catch (error) { message(error.message); }
+      const data = await request(`jobs/${encodeURIComponent(id)}/artifacts`);
+      if (generation !== navigation || activeJob !== id) return;
+      const list = byId('artifacts'); list.replaceChildren();
+      listItems(data).forEach(item => {
+        const li = document.createElement('li');
+        const path = String(item.path);
+        li.append(link(`${api}jobs/${encodeURIComponent(id)}/artifacts/${path.split('/').map(encodeURIComponent).join('/')}`, `${safeData(path)} (${item.size} bytes)`));
+        list.append(li);
+      });
+    } catch (error) { if (generation === navigation && activeJob === id) message(error.message); }
   }
   byId('cancel-job').addEventListener('click', async () => {
     if (!activeJob || !window.confirm(`Cancel job ${activeJob}?`)) return;
