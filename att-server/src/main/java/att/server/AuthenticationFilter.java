@@ -20,7 +20,7 @@ public final class AuthenticationFilter implements Filter {
         Object runtimeValue=req.getServletContext().getAttribute(ServerBootstrap.RUNTIME);ServerRuntime runtime=runtimeValue instanceof ServerRuntime?(ServerRuntime)runtimeValue:null;
         if(publicRead||runtime!=null&&!runtime.config.authenticationRequired){chain.doFilter(request,response);return;}
         Principal principal=req.getUserPrincipal();
-        if(principal==null)try{req.authenticate(res);principal=req.getUserPrincipal();}catch(Exception rejected){principal=null;}
+        if(principal==null){req.authenticate(res);principal=req.getUserPrincipal();}
         if(principal!=null){chain.doFilter(request,response);return;}
         if(runtime!=null)try{runtime.store.audit("anonymous","AUTH_REJECT",null,null,"MISSING_PRINCIPAL");}catch(Exception ignored){}
         // A failed authenticate() call leaves the response to the container. It may

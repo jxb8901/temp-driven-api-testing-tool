@@ -3,6 +3,7 @@ package att.server;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletContext;
 import jakarta.servlet.ServletOutputStream;
+import jakarta.servlet.ServletException;
 import jakarta.servlet.WriteListener;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -29,6 +30,16 @@ class AuthenticationFilterTest {
         FilterChain chain=(req,res)->chained[0]=true;
         new AuthenticationFilter().doFilter(request,response,chain);
         assertEquals(302,status[0]);assertEquals("container login response",body.toString(StandardCharsets.UTF_8));assertFalse(chained[0]);
+    }
+    @Test void propagatesContainerAuthenticationFailureWithoutInventingAResponse() {
+        boolean[] statusWritten={false},chained={false};ByteArrayOutputStream body=new ByteArrayOutputStream();
+        HttpServletResponse response=(HttpServletResponse)Proxy.newProxyInstance(getClass().getClassLoader(),new Class<?>[]{HttpServletResponse.class},(proxy,method,args)->switch(method.getName()){
+            case "setStatus"->{statusWritten[0]=true;yield null;}case "getOutputStream"->new ServletOutputStream(){@Override public void write(int value){body.write(value);}@Override public boolean isReady(){return true;}@Override public void setWriteListener(WriteListener listener){}};case "toString"->"response";default->defaultValue(method.getReturnType());});
+        ServletContext context=(ServletContext)Proxy.newProxyInstance(getClass().getClassLoader(),new Class<?>[]{ServletContext.class},(proxy,method,args)->switch(method.getName()){case "getAttribute"->null;case "toString"->"context";default->defaultValue(method.getReturnType());});
+        HttpServletRequest request=(HttpServletRequest)Proxy.newProxyInstance(getClass().getClassLoader(),new Class<?>[]{HttpServletRequest.class},(proxy,method,args)->switch(method.getName()){
+            case "getPathInfo"->"/packages";case "getMethod"->"GET";case "getServletContext"->context;case "getUserPrincipal"->(Principal)null;case "authenticate"->throw new ServletException("Realm unavailable");case "toString"->"request";default->defaultValue(method.getReturnType());});
+        ServletException failure=assertThrows(ServletException.class,()->new AuthenticationFilter().doFilter(request,response,(req,res)->chained[0]=true));
+        assertEquals("Realm unavailable",failure.getMessage());assertFalse(statusWritten[0]);assertEquals(0,body.size());assertFalse(chained[0]);
     }
     private static Object defaultValue(Class<?> type){if(!type.isPrimitive())return null;if(type==boolean.class)return false;if(type==int.class)return 0;if(type==long.class)return 0L;return null;}
 }
