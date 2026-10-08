@@ -14,6 +14,7 @@
   let cancelRequested = false;
   let versionPromise = null;
   let navigation = 0;
+  let submitting = false;
 
   async function request(path, options = {}) {
     const headers = new Headers(options.headers || {});
@@ -94,7 +95,12 @@
   function commaList(value) { const items = value.split(',').map(part => part.trim()).filter(Boolean); return items.length ? items : undefined; }
   byId('submit-form').addEventListener('submit', async event => {
     event.preventDefault();
-    const form = event.currentTarget; const values = new FormData(form); const command = values.get('command');
+    if (submitting) return;
+    submitting = true;
+    const form = event.currentTarget;
+    const submitButton = form.querySelector('button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
+    const values = new FormData(form); const command = values.get('command');
     const body = { packageId: selectedPackage };
     ['environment','config','runId','debugId','suiteDirectory','debugInput','validationScope','scenario'].forEach(key => { const value = String(values.get(key) || '').trim(); if (value) body[key] = value; });
     ['suites','tags','excludeTags','caseIds'].forEach(key => { const value = commaList(String(values.get(key) || '')); if (value) body[key] = value; });
@@ -115,6 +121,7 @@
     if (overrides.length) body.overrides = overrides;
     try { const accepted = await request(`jobs/${command}`, { method: 'POST', body: JSON.stringify(body) }); location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`; }
     catch (error) { message(error.message); }
+    finally { submitting = false; if (submitButton) submitButton.disabled = false; }
   });
   function appendEvent(type, event, jobId, generation) {
     const id = Number(event.lastEventId || 0);
@@ -194,10 +201,18 @@
     } catch (error) { if (generation === navigation && activeJob === id) message(error.message); }
   }
   byId('cancel-job').addEventListener('click', async () => {
-    if (!activeJob || !window.confirm(`Cancel job ${activeJob}?`)) return;
+    const jobId = activeJob;
+    const generation = navigation;
+    if (!jobId || !window.confirm(`Cancel job ${jobId}?`)) return;
     cancelRequested = true; byId('cancel-job').disabled = true; text(byId('cancel-state'), 'Cancellation requested; waiting for Server confirmation.');
-    try { await request(`jobs/${encodeURIComponent(activeJob)}`, { method:'DELETE' }); await refreshJob(activeJob); }
-    catch (error) { cancelRequested = false; byId('cancel-job').disabled = false; message(error.message); }
+    try {
+      await request(`jobs/${encodeURIComponent(jobId)}`, { method:'DELETE' });
+      if (generation !== navigation || activeJob !== jobId) return;
+      await refreshJob(jobId, generation);
+    } catch (error) {
+      if (generation !== navigation || activeJob !== jobId) return;
+      cancelRequested = false; byId('cancel-job').disabled = false; message(error.message);
+    }
   });
   byId('refresh-jobs').addEventListener('click', () => loadHome());
   window.addEventListener('hashchange', route);
