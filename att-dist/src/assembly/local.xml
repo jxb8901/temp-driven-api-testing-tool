@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <assembly xmlns="http://maven.apache.org/ASSEMBLY/2.2.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 https://maven.apache.org/xsd/assembly-2.2.0.xsd">
-    <id>binary</id><formats><format>tar.gz</format></formats><includeBaseDirectory>true</includeBaseDirectory><baseDirectory>att-${project.version}</baseDirectory>
+    <id>local</id><formats><format>tar.gz</format></formats><includeBaseDirectory>true</includeBaseDirectory><baseDirectory>att-${project.version}-local</baseDirectory>
     <files>
-        <file><source>${project.basedir}/../att-server/target/att-server-${project.version}.war</source><outputDirectory>server</outputDirectory><destName>att-server-${project.version}.war</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/../att.sh</source><outputDirectory>/</outputDirectory><destName>att.sh</destName><fileMode>0755</fileMode></file>
         <file><source>${project.basedir}/../att.bat</source><outputDirectory>/</outputDirectory><destName>att.bat</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/../README.md</source><outputDirectory>/</outputDirectory><destName>README.md</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/../CHANGELOG.md</source><outputDirectory>/</outputDirectory><destName>CHANGELOG.md</destName><fileMode>0644</fileMode></file>
-        <file><source>${project.basedir}/src/release/binary/RELEASE_MANIFEST.txt</source><outputDirectory>/</outputDirectory><destName>RELEASE_MANIFEST.txt</destName><fileMode>0644</fileMode><filtered>true</filtered></file>
+        <file><source>${project.basedir}/src/release/local/RELEASE_MANIFEST.txt</source><outputDirectory>/</outputDirectory><destName>RELEASE_MANIFEST.txt</destName><fileMode>0644</fileMode><filtered>true</filtered></file>
     </files>
     <fileSets>
         <fileSet><directory>${project.basedir}/../config</directory><outputDirectory>config</outputDirectory></fileSet>

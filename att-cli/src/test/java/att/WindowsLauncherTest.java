@@ -29,9 +29,9 @@ class WindowsLauncherTest {
     }
 
     @Test void releaseAssemblyPackagesWindowsLauncher() throws Exception {
-        String binary = new String(Files.readAllBytes(Paths.get("att-dist/src/assembly/binary.xml")), StandardCharsets.UTF_8);
+        String binary = new String(Files.readAllBytes(Paths.get("att-dist/src/assembly/local.xml")), StandardCharsets.UTF_8);
         String source = new String(Files.readAllBytes(Paths.get("att-dist/src/assembly/source.xml")), StandardCharsets.UTF_8);
-        String manifest = new String(Files.readAllBytes(Paths.get("att-dist/src/release/binary/RELEASE_MANIFEST.txt")), StandardCharsets.UTF_8);
+        String manifest = new String(Files.readAllBytes(Paths.get("att-dist/src/release/local/RELEASE_MANIFEST.txt")), StandardCharsets.UTF_8);
         assertTrue(binary.contains("<source>${project.basedir}/../att.bat</source>"));
         assertTrue(binary.contains("<destName>att.bat</destName>"));
         assertTrue(source.contains("<include>att.bat</include>"));

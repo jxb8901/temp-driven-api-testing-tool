@@ -111,4 +111,4 @@ Artifact paths are relative to the job output directory. Absolute paths, travers
 
 ## Distribution and compatibility
 
-The 4.0.0 binary release includes `server/att-server-4.0.0.war`; the existing CLI remains available through `att.sh` and `att.bat`. Tomcat provides the HTTP listener and Servlet API. The Server requires Java 17; the CLI, Engine, and Worker continue to target Java 8.
+The Server binary is distributed separately as `att-4.0.0-server.tar.gz`, containing `server/att-server-4.0.0.war` and the deployment guides. The local CLI is in `att-4.0.0-local.tar.gz` with its runtime libraries. Keeping these archives separate avoids duplicating the WAR's bundled libraries in the local package. Tomcat provides the HTTP listener and Servlet API. The Server requires Java 17; the CLI, Engine, and Worker continue to target Java 8.

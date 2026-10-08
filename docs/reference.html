@@ -6789,11 +6789,14 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb99-1"><a href="#
 <span id="cb99-3"><a href="#cb99-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
 <span id="cb99-4"><a href="#cb99-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p><code>build.sh</code> runs the release gate, regenerates the modular
-Reference Manual, builds the application jar and release/source
-archives, and verifies the packaged launcher. It requires Java/Maven
-plus Python 3 and Pandoc for Reference generation. The 4.0.0 binary also
-contains <code>server/att-server-4.0.0.war</code> for external Tomcat
-10.1+ on Java 17+.</p>
+Reference Manual, builds the application jar and release archives, and
+smoke-tests the extracted local package. It requires Java/Maven plus
+Python 3 and Pandoc for Reference generation. It outputs
+<code>att-4.0.0-local.tar.gz</code> for the CLI,
+<code>att-4.0.0-server.tar.gz</code> for the WAR and deployment guides,
+and <code>att-4.0.0-src.tar.gz</code> for source. Each binary archive
+must be smaller than 25 MB. The local package no longer includes the WAR
+or its duplicate runtime libraries.</p>
 <h3 id="runtime-dependencies">Runtime dependencies</h3>
 <p>The CLI, Engine, and Worker remain Java 8-compatible. The ATT Server
 WAR requires Java 17+ and external Tomcat 10.1+. ATT does not bundle

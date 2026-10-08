@@ -67,10 +67,13 @@ class MultiModuleLayoutTest {
 
     @Test void releasePackagingContainsCliEngineAndWorkerDependencies() throws Exception {
         Path root = Paths.get("").toAbsolutePath().normalize();
-        String binary = read(root.resolve("att-dist/src/assembly/binary.xml"));
-        assertTrue(binary.contains("<include>att:att-cli</include>"), binary);
-        assertTrue(binary.contains("att-${project.version}.jar"), binary);
-        assertTrue(binary.contains("att-server-${project.version}.war"), binary);
+        String local = read(root.resolve("att-dist/src/assembly/local.xml"));
+        assertTrue(local.contains("<include>att:att-cli</include>"), local);
+        assertTrue(local.contains("att-${project.version}.jar"), local);
+        assertFalse(local.contains("att-server-${project.version}.war"), local);
+        String serverAssembly = read(root.resolve("att-dist/src/assembly/server.xml"));
+        assertTrue(serverAssembly.contains("att-server-${project.version}.war"), serverAssembly);
+        assertTrue(serverAssembly.contains("docs/server-deployment.md"), serverAssembly);
         String source = read(root.resolve("att-dist/src/assembly/source.xml"));
         assertTrue(source.contains("<include>att-engine/**</include>"), source);
         assertTrue(source.contains("<include>att-worker/**</include>"), source);
@@ -81,10 +84,12 @@ class MultiModuleLayoutTest {
         String build = read(root.resolve("build.sh"));
         assertFalse(build.contains("javac "), build);
         assertFalse(build.contains("jar cf "), build);
-        assertTrue(build.contains("att-dist/target/$PACKAGE_NAME.tar.gz"), build);
-        int outputDir = build.indexOf("mkdir -p \"$PACKAGE_DIR/output\"");
-        int finalRepack = build.indexOf("tar --no-xattrs -czf \"$BINARY_ARCHIVE\" \"$PACKAGE_NAME\"");
-        int finalExtract = build.indexOf("tar -xzf \"$BINARY_ARCHIVE\" -C \"$RELEASE_WORK\"", finalRepack);
+        assertTrue(build.contains("att-dist/target/$LOCAL_PACKAGE_NAME.tar.gz"), build);
+        assertTrue(build.contains("att-dist/target/$SERVER_PACKAGE_NAME.tar.gz"), build);
+        assertTrue(build.contains("MAX_BINARY_PACKAGE_BYTES=25000000"), build);
+        int outputDir = build.indexOf("mkdir -p \"$LOCAL_PACKAGE_DIR/output\"");
+        int finalRepack = build.indexOf("tar --no-xattrs -czf \"$LOCAL_ARCHIVE\" \"$LOCAL_PACKAGE_NAME\"");
+        int finalExtract = build.indexOf("tar -xzf \"$LOCAL_ARCHIVE\" -C \"$LOCAL_WORK\"", finalRepack);
         int smoke = build.indexOf("./att.sh version | grep -Fx");
         assertTrue(outputDir >= 0 && finalRepack > outputDir && finalExtract > finalRepack && smoke > finalExtract, build);
         String launcher=read(root.resolve("att.sh"));

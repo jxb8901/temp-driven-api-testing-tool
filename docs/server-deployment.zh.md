@@ -111,4 +111,4 @@ Artifact 路徑必須相對於工作輸出目錄。絕對路徑、目錄 travers
 
 ## 發行與相容性
 
-4.0.0 binary release 在 `server/att-server-4.0.0.war` 提供 WAR；現有 CLI 仍可透過 `att.sh` 及 `att.bat` 使用。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
+Server binary 會以獨立的 `att-4.0.0-server.tar.gz` 發佈，內含 `server/att-server-4.0.0.war` 及部署指南。Local CLI 位於 `att-4.0.0-local.tar.gz`，並包含其 runtime library。兩個 archive 分開後，local package 不會再重複附帶 WAR 內的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。

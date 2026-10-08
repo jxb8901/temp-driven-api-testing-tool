@@ -6160,10 +6160,12 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb94-1"><a href="#
 <span id="cb94-3"><a href="#cb94-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/validate_reference_content.py</span>
 <span id="cb94-4"><a href="#cb94-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> validate <span class="at">--package</span></span></code></pre></div>
 <p><code>build.sh</code> 會執行 release gate、重新生成 modular Reference
-Manual、建立 application jar 與 release/source archive，並驗證 packaged
-launcher。Reference generation 另外需要 Python 3 與 Pandoc。4.0.0 binary
-亦包含供外部 Tomcat 10.1+、Java 17+ 部署的
-<code>server/att-server-4.0.0.war</code>。</p>
+Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的
+local package。Reference generation 另外需要 Python 3 與
+Pandoc。它會輸出供 CLI 使用的 <code>att-4.0.0-local.tar.gz</code>、包含
+WAR 和部署指南的 <code>att-4.0.0-server.tar.gz</code>，以及 source
+archive <code>att-4.0.0-src.tar.gz</code>。每個 binary archive 均須小於
+25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。</p>
 <h3 id="runtime-dependencies">Runtime dependencies</h3>
 <p>CLI、Engine 及 Worker 仍相容 Java 8。ATT Server WAR 需要 Java 17+
 及外部 Tomcat 10.1+。ATT 不內置 CLI integration 所需的 JDBC driver；請將

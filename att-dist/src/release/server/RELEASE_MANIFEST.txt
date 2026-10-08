@@ -1,0 +1,9 @@
+name: att-${project.version}-server
+main: server/att-server-${project.version}.war
+java: ATT Server requires JDK 17+ and external Tomcat 10.1+
+contents:
+  - server/att-server-${project.version}.war
+  - docs/server-deployment.md
+  - docs/server-deployment.zh.md
+  - docs/att-server-web-ui.md
+  - docs/att-server-web-ui.zh.md

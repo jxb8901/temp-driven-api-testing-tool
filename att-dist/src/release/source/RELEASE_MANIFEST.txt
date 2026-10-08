@@ -7,7 +7,7 @@ modules:
   - att-worker/   one-job JSON protocol adapter
   - att-server/   Java 17+ Jakarta Servlet WAR for the ATT Server control plane
   - att-web/      Static browser console packaged in the ATT Server WAR
-  - att-dist/     release packaging
+  - att-dist/     local, Server, and source release packaging
 contents:
   - att-engine/src/
   - att-engine/pom.xml
@@ -31,3 +31,8 @@ contents:
   - att.sh
   - att.bat
   - build.sh
+
+binary archives:
+  - att-${project.version}-local.tar.gz
+  - att-${project.version}-server.tar.gz
+  - Each binary archive is smaller than 25 MB.
