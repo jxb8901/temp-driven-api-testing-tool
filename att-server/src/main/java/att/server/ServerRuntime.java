@@ -154,10 +154,10 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void handleWorkerEvent(Job job,String line) throws Exception {
         JsonNode event=JSON.readTree(line);if(event==null||!event.isObject())return;
-        String type=event.path("type").asText("").toUpperCase();Map<String,Object> data=JSON.convertValue(event,Map.class);data.remove("type");data.remove("jobId");
+        String type=event.path("type").asText("").toUpperCase();Map<String,Object> data=JSON.convertValue(event,Map.class);data.remove("type");data.remove("jobId");Map<String,Object> safe=att.worker.internal.DiagnosticSanitizer.sanitize(data);
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
-            case "PROGRESS"->append(job,"progress",data);case "LOG"->append(job,"log",data);case "DIAGNOSTIC"->{Map<String,Object> safe=att.worker.internal.DiagnosticSanitizer.sanitize(data);job.diagnosticJson=JSON.writeValueAsString(safe);store.update(job);append(job,"diagnostic",safe);}
-            case "RESULT"->{String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);JsonNode result=event.get("result");job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;finish(job,normalizeTerminal(status),code);}
+            case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{job.diagnosticJson=JSON.writeValueAsString(safe);store.update(job);append(job,"diagnostic",safe);}
+            case "RESULT"->{String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);Object result=safe.get("result");job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;finish(job,normalizeTerminal(status),code);}
             default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
     }
     private String normalizeTerminal(String s){return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(s)?s:"ERROR";}
@@ -199,7 +199,7 @@ final class ServerRuntime implements AutoCloseable {
     private static void validateTarget(Map<String,Object> target){if(target==null)throw new IllegalArgumentException("target is required");Object type=target.get("type"),id=target.get("id");if(!(type instanceof String)||!(id instanceof String))throw new IllegalArgumentException("target.type and target.id are required");}
     Object publicEventData(String id,Object data) throws Exception {return publicJson(id,JSON.writeValueAsString(data));}
     private JsonNode publicJson(String id,String json) throws Exception {
-        JsonNode node=JSON.readTree(json);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
+        JsonNode node=JSON.readTree(json);Object safe=att.worker.internal.DiagnosticSanitizer.sanitizeValue(JSON.convertValue(node,Object.class));node=JSON.valueToTree(safe);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
         Path packageRoot=null;Job active=jobs.get(id);if(active!=null)packageRoot=config.packages.get(active.packageId);else {Map<String,Object> row=store.get(id);if(row!=null)packageRoot=config.packages.get(String.valueOf(row.get("packageId")));}
         return sanitize(node,output,packageRoot);
     }
