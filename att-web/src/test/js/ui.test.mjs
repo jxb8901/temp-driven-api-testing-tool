@@ -107,6 +107,22 @@ test('submits logical package DTOs with a non-root Tomcat context', async () => 
 });
 
 
+
+test('a rejected Debug form can be corrected and submitted', async () => {
+  const ui = boot({ hash: '#/packages/payments' });
+  await waitFor(() => ui.node('package-title').textContent === 'payments', 'package form');
+  const form = ui.node('submit-form');
+  form.formValues = [['command', 'debug']];
+  await form.listeners.submit({ preventDefault() {}, currentTarget: form });
+  assert.match(ui.node('message').textContent, /Debug requires a target type and target ID/);
+  assert.equal(form.submitButton.disabled, false);
+
+  form.formValues = [['command', 'run']];
+  await form.listeners.submit({ preventDefault() {}, currentTarget: form });
+  assert.ok(ui.calls.some(call => call.path === 'jobs/run' && call.options.method === 'POST'));
+  assert.equal(ui.location.hash, '#/jobs/J1');
+});
+
 test('ignores duplicate submissions while a job request is pending', async () => {
   const ui = boot({ hash: '#/packages/payments', deferSubmit: true });
   await waitFor(() => ui.node('package-title').textContent === 'payments', 'package form');
