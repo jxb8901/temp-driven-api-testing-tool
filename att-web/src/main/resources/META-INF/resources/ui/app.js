@@ -63,12 +63,13 @@
       if (generation !== navigation) return;
       if (selectedPackage) showPackage(selectedPackage, generation);
       else if (activeJob) showJob(activeJob, generation);
-      else loadHome();
+      else loadHome(generation);
     }).catch(error => { if (generation === navigation) { text(byId('connection'), 'Unavailable'); message(error.message); } });
   }
-  async function loadHome() {
+  async function loadHome(generation = navigation) {
     try {
       const [packages, jobs] = await Promise.all([request('packages'), request('jobs')]);
+      if (generation !== navigation) return;
       byId('connection').textContent = 'Connected';
       const packageList = byId('packages'); packageList.replaceChildren();
       listItems(packages).forEach(item => { const li = document.createElement('li'); li.append(link(`#/packages/${encodeURIComponent(item.packageId)}`, item.packageId)); packageList.append(li); });
@@ -78,7 +79,9 @@
         [job.jobId, job.packageId, job.command, job.status, job.createdAt].forEach((value, i) => { const cell = document.createElement('td'); if (i === 0) cell.append(link(`#/jobs/${encodeURIComponent(job.jobId)}`, value)); else text(cell, value); row.append(cell); });
         tbody.append(row);
       });
-    } catch (error) { byId('connection').textContent = 'Unavailable'; message(error.message); }
+    } catch (error) {
+      if (generation === navigation) { byId('connection').textContent = 'Unavailable'; message(error.message); }
+    }
   }
   async function showPackage(id, generation) {
     try {
@@ -196,7 +199,7 @@
     try { await request(`jobs/${encodeURIComponent(activeJob)}`, { method:'DELETE' }); await refreshJob(activeJob); }
     catch (error) { cancelRequested = false; byId('cancel-job').disabled = false; message(error.message); }
   });
-  byId('refresh-jobs').addEventListener('click', loadHome);
+  byId('refresh-jobs').addEventListener('click', () => loadHome());
   window.addEventListener('hashchange', route);
   route();
 })();
