@@ -196,13 +196,12 @@
       byId('cancel-job').disabled = terminal.has(job.status) || cancelRequested;
       byId('cancel-area').hidden = terminal.has(job.status);
       if (terminal.has(job.status)) {
-        try {
-          const result = await request(`jobs/${encodeURIComponent(id)}/result`);
+        request(`jobs/${encodeURIComponent(id)}/result`).then(result => {
           if (generation === navigation && activeJob === id)
             text(byId('result'), JSON.stringify(safeData({ status: job.status, result: result.result, diagnostic: result.diagnostic }), null, 2));
-        } catch (error) {
+        }).catch(error => {
           if (generation === navigation && activeJob === id) message(error.message);
-        }
+        });
       }
       return true;
     } catch (error) {
