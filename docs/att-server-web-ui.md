@@ -6,6 +6,8 @@ The console lists configured logical package IDs and recent persisted jobs. Sele
 
 The browser uses only the public same-origin `/api/v1` REST and SSE contract. REST requests and native `EventSource` use the browser's container-managed authentication. SSE reconnects use the browser's standard `Last-Event-ID` behavior; refreshing a job view reloads job state and retained events from the Server. Closing the browser tab does not cancel the job. Cancellation requires confirmation and the UI waits for the Server's terminal status.
 
+The UI checks the Server API version before loading job data. Terminal SSE results close the browser event stream rather than reconnecting to completed jobs; live progress is shown separately from bounded event history. The authenticated static UI and API share one Tomcat security boundary.
+
 The console is delivered as static `att-web` JAR resources under `META-INF/resources/ui/` and packaged in the Server WAR. Relative URLs support non-root Tomcat context paths without a separate frontend service or runtime Node.js dependency. The Server applies a same-origin content security policy and rejects state-changing browser requests with an unexpected `Origin`; no credentialed CORS policy is needed. Browser-rendered API text is inserted as text, and the event list is bounded to 500 entries.
 
 The first release provides text-based inputs for fields without public discovery endpoints. Server validation remains authoritative; browser-side validation and filtering are not authorization boundaries.

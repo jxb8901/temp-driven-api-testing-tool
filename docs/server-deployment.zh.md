@@ -42,6 +42,8 @@ Tomcat 負責驗證請求。WAR 會為 package、job API 及 metrics 設定 HTTP
 
 改變狀態的請求必須使用 `application/json`；如請求帶有 `Origin`，必須與請求來源相同。v1 所有 `ATT_USER` 已驗證 Principal 具有相同權限。在刻意隔離的網絡中，可設定 `server.authenticationRequired: false` 接受匿名 API 請求；這會略過所有 API 操作的驗證，不應用於不受信任的網絡。ATT Server 不會實作密碼、JWT/OIDC 驗證、LDAP 驗證、登入流程或 ATT 專用 RBAC。請勿在 API payload 或 package 檔案中放置憑證。
 
+內建瀏覽器主控台位於 `<context path>/ui/`，使用與 API 相同的 Tomcat HTTP Basic 驗證及 `ATT_USER` 權限。詳見 [ATT Server Web UI](reference.zh/att-server-web-ui.md)。
+
 ## REST API
 
 所有 endpoint 位於 `/api/v1`。除 SSE stream 及 artifact 下載外，請求與回應均使用 JSON。

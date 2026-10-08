@@ -42,6 +42,8 @@ Tomcat authenticates requests. ATT Server reads `HttpServletRequest.getUserPrinc
 
 State-changing requests require `application/json`; requests carrying an `Origin` must match the request origin. All authenticated principals in `ATT_USER` have the same permissions in v1. For an intentionally isolated network, set `server.authenticationRequired: false` to accept anonymous API requests; this bypasses authentication for every API operation and should not be used on an untrusted network. ATT Server does not implement passwords, JWT/OIDC validation, LDAP authentication, login flows, or ATT-specific RBAC. Do not put credentials in API payloads or package files.
 
+The bundled browser console is served at `<context path>/ui/` and uses the same container-managed HTTP Basic authentication and `ATT_USER` authorization policy as the API. See [ATT Server Web UI](att-server-web-ui.md).
+
 ## REST API
 
 All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint is an SSE stream or artifact download.
