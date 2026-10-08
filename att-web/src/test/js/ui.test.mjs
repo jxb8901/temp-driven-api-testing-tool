@@ -12,17 +12,18 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
   }
 }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false } = {}) {
+function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
-      this.textContent = ''; this.hidden = false; this.disabled = false;
+      this.textContent = ''; this.hidden = false; this.disabled = false; this.submitButton = { disabled: false };
     }
     addEventListener(name, listener) { this.listeners[name] = listener; }
     append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
     replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(node => node !== this); }
     get firstElementChild() { return this.children[0]; }
+    querySelector(selector) { return selector === 'button[type="submit"]' ? this.submitButton : null; }
   }
   const elements = new Map();
   const node = id => {
@@ -38,7 +39,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   const window = { listeners: {}, confirm: () => confirmCancel,
     addEventListener(name, listener) { this.listeners[name] = listener; }
   };
-  const calls = [], streams = [];
+  const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [];
   const state = { jobStatus: 'RUNNING' };
   let rejectHome;
   const delayedHome = new Promise((_, reject) => { rejectHome = reject; });
@@ -53,6 +54,8 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   async function fetch(url, options = {}) {
     const path = String(url).split('/api/v1/')[1];
     calls.push({ path, options });
+    if (deferSubmit && options.method === 'POST') return new Promise(resolve => pendingSubmissions.push(resolve));
+    if (deferCancel && options.method === 'DELETE') return new Promise((resolve, reject) => pendingCancellations.push({ resolve, reject }));
     if (deferHome && (path === 'packages' || path === 'jobs')) return delayedHome;
     if (jobMissing && path === 'jobs/nonexistent') {
       return { ok: false, status: 404, headers: { get: () => 'application/json' },
@@ -75,7 +78,11 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     constructor(form) { return new Map(form.formValues || []); }
   }
   vm.runInNewContext(script, { document, location, window, fetch, EventSource, URL, Headers, FormData, console }, { filename: 'app.js' });
-  return { node, location, window, calls, streams, state, failHome: error => rejectHome(error) };
+  return { node, location, window, calls, streams, state, pendingSubmissions, pendingCancellations,
+    resolveSubmission: (index, response) => pendingSubmissions[index](response),
+    resolveCancellation: (index, response) => pendingCancellations[index].resolve(response),
+    rejectCancellation: (index, error) => pendingCancellations[index].reject(error),
+    failHome: error => rejectHome(error) };
 }
 
 test('rejects an incompatible API before accessing packages', async () => {
@@ -98,6 +105,28 @@ test('submits logical package DTOs with a non-root Tomcat context', async () => 
   });
   assert.equal(ui.location.hash, '#/jobs/J1');
 });
+
+
+test('ignores duplicate submissions while a job request is pending', async () => {
+  const ui = boot({ hash: '#/packages/payments', deferSubmit: true });
+  await waitFor(() => ui.node('package-title').textContent === 'payments', 'package form');
+  const form = ui.node('submit-form');
+  form.formValues = [['command', 'run']];
+  const event = { preventDefault() {}, currentTarget: form };
+  const first = form.listeners.submit(event);
+  const second = form.listeners.submit(event);
+  assert.equal(ui.pendingSubmissions.length, 1);
+  assert.equal(ui.calls.filter(call => call.path === 'jobs/run' && call.options.method === 'POST').length, 1);
+  assert.equal(form.submitButton.disabled, true);
+  ui.resolveSubmission(0, {
+    ok: true, status: 202, headers: { get: () => 'application/json' },
+    json: async () => ({ jobId: 'J_PENDING' })
+  });
+  await Promise.all([first, second]);
+  assert.equal(form.submitButton.disabled, false);
+  assert.equal(ui.location.hash, '#/jobs/J_PENDING');
+});
+
 
 test('bounds and deduplicates event history, then closes terminal SSE', async () => {
   const ui = boot({ hash: '#/jobs/J1' });
@@ -166,6 +195,38 @@ test('cancellation waits for the Server to confirm a terminal status', async () 
   assert.match(ui.node('cancel-state').textContent, /waiting for Server confirmation/);
   assert.equal(ui.node('cancel-area').hidden, false);
 });
+
+test('a late cancellation failure for a previous job cannot change the current job controls', async () => {
+  const ui = boot({ hash: '#/jobs/J1', deferCancel: true });
+  await waitFor(() => ui.streams.length === 1, 'first job stream');
+  const cancelFirst = ui.node('cancel-job').listeners.click();
+  await waitFor(() => ui.pendingCancellations.length === 1, 'first cancellation request');
+
+  ui.location.hash = '#/jobs/J2';
+  ui.window.listeners.hashchange();
+  await waitFor(() => ui.streams.length === 2 && ui.node('job-title').textContent === 'Job J2', 'second job view');
+  const cancelSecond = ui.node('cancel-job').listeners.click();
+  await waitFor(() => ui.pendingCancellations.length === 2, 'second cancellation request');
+  assert.equal(ui.node('cancel-job').disabled, true);
+  assert.match(ui.node('cancel-state').textContent, /waiting for Server confirmation/);
+
+  ui.rejectCancellation(0, new Error('J1 cancellation failed late'));
+  await cancelFirst;
+  assert.equal(ui.node('cancel-job').disabled, true);
+  assert.match(ui.node('cancel-state').textContent, /waiting for Server confirmation/);
+  assert.equal(ui.node('message').textContent, '');
+
+  ui.resolveCancellation(1, {
+    ok: true, status: 200, headers: { get: () => 'application/json' },
+    json: async () => ({ status: 'CANCEL_REQUESTED' })
+  });
+  await cancelSecond;
+  assert.deepEqual(ui.calls.filter(call => call.options.method === 'DELETE').map(call => call.path), ['jobs/J1', 'jobs/J2']);
+  assert.equal(ui.node('cancel-job').disabled, true);
+  assert.match(ui.node('cancel-state').textContent, /waiting for Server confirmation/);
+});
+
+
 test('preserves logical resource paths in diagnostics while hiding absolute paths', async () => {
   const ui = boot({ hash: '#/jobs/J1' });
   await waitFor(() => ui.streams.length === 1, 'job event stream for diagnostic');
