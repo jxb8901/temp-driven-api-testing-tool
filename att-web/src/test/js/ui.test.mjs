@@ -159,3 +159,13 @@ test('cancellation waits for the Server to confirm a terminal status', async () 
   assert.match(ui.node('cancel-state').textContent, /waiting for Server confirmation/);
   assert.equal(ui.node('cancel-area').hidden, false);
 });
+test('preserves logical resource paths in diagnostics while hiding absolute paths', async () => {
+  const ui = boot({ hash: '#/jobs/J1' });
+  await waitFor(() => ui.streams.length === 1, 'job event stream for diagnostic');
+  ui.streams[0].emit('diagnostic', {
+    message: 'Missing resource config/templates/payment.yaml; output /srv/att/jobs/J1/report.html'
+  }, 1);
+  const rendered = ui.node('events').children[0].textContent;
+  assert.match(rendered, /config\/templates\/payment\.yaml/);
+  assert.doesNotMatch(rendered, /\/srv\/att\/jobs/);
+});
