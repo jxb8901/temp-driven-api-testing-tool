@@ -139,8 +139,8 @@
     byId('events').replaceChildren(); byId('artifacts').replaceChildren();
     text(byId('progress'), ''); text(byId('result'), '');
     lastEventId = 0; cancelRequested = false; text(byId('cancel-state'), '');
-    await refreshJob(id, generation);
-    if (generation !== navigation || activeJob !== id) return;
+    const loaded = await refreshJob(id, generation);
+    if (!loaded || generation !== navigation || activeJob !== id) return;
     await loadArtifacts(id, generation);
     if (generation !== navigation || activeJob !== id) return;
     source = new EventSource(api + `jobs/${encodeURIComponent(id)}/events`);
@@ -151,9 +151,11 @@
     }));
   }
   async function refreshJob(id, generation = navigation) {
+    let loaded = false;
     try {
       const job = await request(`jobs/${encodeURIComponent(id)}`);
-      if (generation !== navigation || activeJob !== id) return;
+      if (generation !== navigation || activeJob !== id) return false;
+      loaded = true;
       const summary = byId('job-summary'); summary.replaceChildren();
       [['Package',job.packageId],['Command',job.command],['Principal',job.principal],['Status',job.status],['Created',job.createdAt],['Started',job.startedAt],['Finished',job.finishedAt]].forEach(([label,value]) => {
         if (value) summary.append(el('dt',label),el('dd',value));
@@ -161,11 +163,19 @@
       byId('cancel-job').disabled = terminal.has(job.status) || cancelRequested;
       byId('cancel-area').hidden = terminal.has(job.status);
       if (terminal.has(job.status)) {
-        const result = await request(`jobs/${encodeURIComponent(id)}/result`);
-        if (generation === navigation && activeJob === id)
-          text(byId('result'), JSON.stringify(safeData({ status: job.status, result: result.result, diagnostic: result.diagnostic }), null, 2));
+        try {
+          const result = await request(`jobs/${encodeURIComponent(id)}/result`);
+          if (generation === navigation && activeJob === id)
+            text(byId('result'), JSON.stringify(safeData({ status: job.status, result: result.result, diagnostic: result.diagnostic }), null, 2));
+        } catch (error) {
+          if (generation === navigation && activeJob === id) message(error.message);
+        }
       }
-    } catch (error) { if (generation === navigation && activeJob === id) message(error.message); }
+      return true;
+    } catch (error) {
+      if (generation === navigation && activeJob === id) message(error.message);
+      return loaded;
+    }
   }
   async function loadArtifacts(id, generation = navigation) {
     try {
