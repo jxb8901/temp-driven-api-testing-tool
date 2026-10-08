@@ -11,6 +11,7 @@
     <modules>
         <module>att-engine</module>
         <module>att-server-api</module>
+        <module>att-web</module>
         <module>att-remote</module>
         <module>att-cli</module>
         <module>att-worker</module>
