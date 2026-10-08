@@ -22,15 +22,17 @@ public final class ServerConfig {
     public final boolean authenticationRequired;
     public final Map<String, Path> packages;
     public final List<Path> allowedRoots;
+    public final List<Path> workerLibraryDirs;
 
     private ServerConfig(Path dataDir, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages, List<Path> allowedRoots) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs) {
         this.dataDir=dataDir; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;
         this.packages=Collections.unmodifiableMap(new LinkedHashMap<>(packages));
         this.allowedRoots=List.copyOf(allowedRoots);
+        this.workerLibraryDirs=List.copyOf(workerLibraryDirs);
     }
 
     public static ServerConfig load(Path file) throws Exception {
@@ -52,6 +54,7 @@ public final class ServerConfig {
         java=java.toAbsolutePath().normalize();
         if (!Files.isRegularFile(java) || !Files.isExecutable(java)) throw new IllegalArgumentException("server.javaExecutable must be an executable Java runtime");
         List<?> roots=list(packagesNode.get("allowedRoots"),"packages.allowedRoots");
+        List<?> libraryDirs=workers.get("libraryDirs")==null?List.of():list(workers.get("libraryDirs"),"workers.libraryDirs");
         Map<?,?> entries=map(packagesNode.get("entries"),"packages.entries");
         java.util.ArrayList<Path> allowed=new java.util.ArrayList<>();
         for(Object r:roots) allowed.add(canonicalRequired(string(r,"packages.allowedRoots entry"),"packages.allowedRoots entry",true));
@@ -66,6 +69,8 @@ public final class ServerConfig {
             resolved.put(id,packageRoot);
         }
         if(resolved.isEmpty()) throw new IllegalArgumentException("packages.entries must define at least one package ID");
+        java.util.ArrayList<Path> workerLibraries=new java.util.ArrayList<>();
+        for(Object entry:libraryDirs){Path library=canonicalRequired(string(entry,"workers.libraryDirs entry"),"workers.libraryDirs entry",true);if(!Files.isReadable(library))throw new IllegalArgumentException("workers.libraryDirs entry must be readable: "+library);workerLibraries.add(library);}
         int max=intValue(workers,"maxConcurrent",8,1,256), queue=intValue(workers,"queuedLimit",100,0,100000),
             load=intValue(workers,"maxConcurrentLoad",2,1,256), stop=intValue(workers,"gracefulStopMs",10000,0,300000);
         int retention=intValue(server,"jobRetentionDays",30,1,3650);
@@ -78,7 +83,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,java,max,queue,load,stop,retention,request,events,artifacts,authenticationRequired,resolved,allowed);
+        return new ServerConfig(realData,java,max,queue,load,stop,retention,request,events,artifacts,authenticationRequired,resolved,allowed,workerLibraries);
     }
 
     public static Path configPath() {

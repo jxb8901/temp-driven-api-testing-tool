@@ -6021,7 +6021,9 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb90-1"><a href="#
 <span id="cb90-5"><a href="#cb90-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit load payments <span class="at">--scenario</span> load/payment.yaml <span class="at">--users</span> 2 <span class="at">--duration</span> 30s</span>
 <span id="cb90-6"><a href="#cb90-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit artifacts J0123456789ABCDEF <span class="at">--download</span> ./results</span></code></pre></div>
 <p>The <code>--server</code> value selects an entry from
-<code>~/.att/servers.yaml</code>. <code>ATT_SERVER</code> overrides the
+<code>~/.att/servers.yaml</code>; set <code>ATT_REMOTE_CONFIG</code> to
+select another profile file. <code>ATT_SERVER_CONFIG</code> is reserved
+for Server deployment YAML. <code>ATT_SERVER</code> overrides the
 default profile URL; an explicit <code>--server</code> profile takes
 precedence. Remote package, suite, config, scenario, and Debug input
 values are logical names relative to the Server package. Absolute client

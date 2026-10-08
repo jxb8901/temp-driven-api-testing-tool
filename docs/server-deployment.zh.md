@@ -10,11 +10,11 @@ ATT Server 4.0.0 提供單節點控制平面，讓用戶透過版本化 REST API
 4. 在 Tomcat Java 選項設定 `-Datt.server.config=/etc/att/server.yaml`。若沒有系統屬性，亦可使用 `ATT_SERVER_CONFIG` 環境變數。
 5. 將 `att-server-4.0.0.war` 部署至 Tomcat 10.1+。請保持 Tomcat 的 `unpackWARs` 啟用，讓 Server 可從 `WEB-INF/lib` 啟動 Worker。
 
-Tomcat 負責監聽器、TLS、存取記錄及驗證。請設定 Realm、SSO 整合、用戶端憑證或其他容器支援的機制。若設定、Java 基線或 package mapping 無效，Server 會在啟動時失敗。
+Tomcat 負責監聽器、TLS、存取記錄及驗證。請設定 Realm、SSO 整合、用戶端憑證或其他容器支援的機制；驗證失敗時，Server 會保留容器回傳的 challenge 或 redirect。若設定、Java 基線或 package mapping 無效，Server 會在啟動時失敗。
 
 ## 設定
 
-`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission 及優雅停止逾時。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。
+`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission 及優雅停止逾時。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。
 
 ```yaml
 server:
@@ -27,6 +27,9 @@ workers:
   # 已接納的 Load 工作上限，包括佇列中及執行中的工作。
   maxConcurrentLoad: 2
   gracefulStopMs: 10000
+  # 選填的額外 Worker dependency JAR 目錄。
+  libraryDirs:
+    - /opt/att/worker-libs
 packages:
   allowedRoots:
     - /srv/att/packages
@@ -34,13 +37,13 @@ packages:
     payments: /srv/att/packages/payments
 ```
 
-`dataDir` 必須是絕對路徑。啟動時，allowed root 及 package root 必須已存在。系統會將 package 路徑 canonicalize；若 symlink 指向 allowed root 以外，便會拒絕。Client 提交 `packageId`，不能指定 package 路徑、輸出路徑、Worker 執行檔或 classpath。v1 不提供 package 註冊或修改 API。
+`dataDir` 必須是絕對路徑。啟動時，allowed root、package root 及 Worker library directory 必須已存在。系統會將 package 路徑 canonicalize；若 symlink 指向 allowed root 以外，便會拒絕。Client 提交 `packageId`，不能指定 package 路徑、輸出路徑、Worker 執行檔或 classpath。v1 不提供 package 註冊或修改 API。
 
 Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` 保存有上限的事件日誌及執行輸出。Server 重啟後會將舊的排隊或執行中工作標記為 `ERROR`，診斷碼為 `ATT-SERVER-INTERRUPTED`，不會重新執行。
 
 ## 驗證與身份
 
-Tomcat 負責驗證請求。WAR 透過容器 Realm 在 package、job API 及 metrics 使用 HTTP BASIC authentication。v1 所有已驗證的 Servlet Principal 具有相同 API 權限，不要求 `ATT_USER` 角色，也沒有 ATT 專用 RBAC。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、job、result、event 及 artifact API 均要求 Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
+Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authentication mechanism。v1 所有已驗證的 Servlet Principal 具有相同 API 權限，不要求 `ATT_USER` 角色，也沒有 ATT 專用 RBAC。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。驗證失敗時，Server 保留 container response，包括 BASIC challenge 或 FORM/SSO redirect。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、job、result、event 及 artifact API 均要求 Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
 
 改變狀態的請求必須使用 `application/json`；如請求帶有 `Origin`，必須與請求來源相同。在刻意隔離的網絡中，可設定 `server.authenticationRequired: false` 接受匿名 API 請求；這會略過所有 API 操作的驗證，不應用於不受信任的網絡。ATT Server 不會實作密碼、JWT/OIDC 驗證、LDAP 驗證或登入流程。請勿在 API payload 或 package 檔案中放置憑證。
 
@@ -85,7 +88,7 @@ data: {"jobId":"J...","status":"RUNNING"}
 
 ```
 
-重新連線時傳送 `Last-Event-ID`，系統會重播 ID 較大的保留事件。較舊事件若已超出日誌保留上限，stream 會從仍保留的事件繼續。閒置時會傳送 `: keepalive` 註解，送出終端結果後會關閉。觀察端斷線不會取消工作。每個觀察端使用獨立的單一項目通知佇列，stream executor 亦設有上限。Worker 事件讀取器不會同步等待用戶端寫入。
+重新連線時傳送 `Last-Event-ID`，系統會重播 ID 較大的保留事件。較舊事件若已超出日誌保留上限，stream 會從仍保留的事件繼續。閒置時會傳送 `: keepalive` 註解，送出終端結果後會關閉。觀察端斷線不會取消工作。最多 32 個 observer 會透過 direct handoff 各自取得 stream thread；超出容量的請求會在 stream 啟動前回傳 HTTP 503。每個觀察端使用獨立的單一項目通知佇列。Worker 事件讀取器不會同步等待用戶端寫入。
 
 ## 取消與復原
 

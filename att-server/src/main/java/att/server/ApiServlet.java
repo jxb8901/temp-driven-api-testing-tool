@@ -82,11 +82,17 @@ public final class ApiServlet extends HttpServlet {
         String last=req.getHeader("Last-Event-ID");long cursor=0;
         if(last!=null&&!last.isBlank())try{cursor=Long.parseLong(last);}catch(NumberFormatException e){error(res,400,"ATT-SERVER-INVALID-LAST-EVENT-ID","Last-Event-ID must be a non-negative integer",requestId(req,res));return;}
         if(cursor<0){error(res,400,"ATT-SERVER-INVALID-LAST-EVENT-ID","Last-Event-ID must be a non-negative integer",requestId(req,res));return;}
-        if(runtime.streams.getQueue().remainingCapacity()==0){error(res,503,"ATT-SERVER-STREAM-CAPACITY","SSE observer capacity is full",requestId(req,res));return;}
-        final long start=cursor;res.setStatus(200);res.setCharacterEncoding("UTF-8");res.setContentType("text/event-stream");res.setHeader("Cache-Control","no-cache, no-transform");res.setHeader("X-Accel-Buffering","no");
         JobEvents events;try{events=runtime.events(jobId);}catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId(req,res));return;}catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The event journal is unavailable",requestId(req,res));return;}
-        AsyncContext async=req.startAsync();async.setTimeout(0);
-        try{runtime.streams.execute(()->stream(async,jobId,events,start));}catch(RejectedExecutionException full){async.complete();}
+        if(!runtime.streamSlots.tryAcquire()){error(res,503,"ATT-SERVER-STREAM-CAPACITY","SSE observer capacity is full",requestId(req,res));return;}
+        boolean handedOff=false;
+        try {
+            AsyncContext async=req.startAsync();async.setTimeout(0);final long start=cursor;
+            res.setStatus(200);res.setCharacterEncoding("UTF-8");res.setContentType("text/event-stream");res.setHeader("Cache-Control","no-cache, no-transform");res.setHeader("X-Accel-Buffering","no");
+            runtime.streams.execute(()->{try{stream(async,jobId,events,start);}finally{runtime.streamSlots.release();}});handedOff=true;
+        } catch(RejectedExecutionException full) {
+            if(!res.isCommitted()){res.resetBuffer();error(res,503,"ATT-SERVER-STREAM-CAPACITY","SSE observer capacity is full",requestId(req,res));}
+            if(req.isAsyncStarted())req.getAsyncContext().complete();
+        } finally {if(!handedOff)runtime.streamSlots.release();}
     }
     private void stream(AsyncContext async,String jobId,JobEvents journal,long cursor){
         long lastWrite=System.nanoTime();java.util.concurrent.ArrayBlockingQueue<Boolean> wakeup=new java.util.concurrent.ArrayBlockingQueue<>(1);

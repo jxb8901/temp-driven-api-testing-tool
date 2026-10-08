@@ -2614,7 +2614,7 @@ Remote commands use the public ATT Server `/api/v1` contract. Existing commands 
 ./att.sh remote --server sit artifacts J0123456789ABCDEF --download ./results
 ```
 
-The `--server` value selects an entry from `~/.att/servers.yaml`. `ATT_SERVER` overrides the default profile URL; an explicit `--server` profile takes precedence. Remote package, suite, config, scenario, and Debug input values are logical names relative to the Server package. Absolute client paths and `--output-dir` are not sent.
+The `--server` value selects an entry from `~/.att/servers.yaml`; set `ATT_REMOTE_CONFIG` to select another profile file. `ATT_SERVER_CONFIG` is reserved for Server deployment YAML. `ATT_SERVER` overrides the default profile URL; an explicit `--server` profile takes precedence. Remote package, suite, config, scenario, and Debug input values are logical names relative to the Server package. Absolute client paths and `--output-dir` are not sent.
 
 The profile can store a URL, Basic-auth username, and the name of a CI secret environment variable. It cannot store a password. If `passwordEnv` is absent, the CLI prompts without echo when a terminal is available. Basic authentication requires HTTPS; normal TLS certificate and hostname checks stay enabled.
 

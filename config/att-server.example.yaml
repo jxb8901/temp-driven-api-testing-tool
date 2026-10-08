@@ -17,6 +17,8 @@ workers:
   # Maximum admitted Load jobs (queued or executing); excess submissions receive HTTP 429.
   maxConcurrentLoad: 2
   gracefulStopMs: 10000
+  # Optional directories containing external JDBC, MQ, or other Worker dependency JARs.
+  libraryDirs: []
 
 packages:
   allowedRoots:

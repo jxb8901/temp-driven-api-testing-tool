@@ -25,7 +25,7 @@ servers:
       passwordEnv: ATT_CI_PASSWORD
 ```
 
-Inject the named environment variable from your CI secret store. For interactive use, omit `passwordEnv`; the CLI prompts for a password without echoing it. Set `ATT_SERVER_CONFIG` to use another profile file.
+Inject the named environment variable from your CI secret store. For interactive use, omit `passwordEnv`; the CLI prompts for a password without echoing it. Set `ATT_REMOTE_CONFIG` to use another profile file. `ATT_SERVER_CONFIG` is reserved for the Server deployment YAML.
 
 Select a profile with `--server`. `ATT_SERVER` can override the default profile URL. An explicit `--server` profile takes precedence over `ATT_SERVER`; otherwise the precedence is `ATT_SERVER` URL, then the configured default profile. The profile still supplies authentication settings when `ATT_SERVER` overrides its URL.
 

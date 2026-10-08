@@ -32,6 +32,7 @@ import java.util.regex.Pattern;
 final class ServerRuntime implements AutoCloseable {
     static final ObjectMapper JSON=new ObjectMapper().configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,false);
     static final Pattern JOB_ID=Pattern.compile("J[0-9A-F]{16}");
+    static final int MAX_STREAM_OBSERVERS=32;
     final ServerConfig config;
     final JobStore store;
     final ThreadPoolExecutor workers,streams;
@@ -40,6 +41,7 @@ final class ServerRuntime implements AutoCloseable {
     private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
     private final AtomicLong completed=new AtomicLong();
     private final Semaphore loadSlots,admissionSlots;
+    final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
     private final ScheduledExecutorService retention;
     private final WorkerProcessLauncher processLauncher;
     private volatile String webInfLibs;
@@ -51,7 +53,7 @@ final class ServerRuntime implements AutoCloseable {
         this.config=config;this.webInfLibs=webInfLibs;this.processLauncher=processLauncher;this.store=new JobStore(config);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
-        streams=new ThreadPoolExecutor(4,32,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(64),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+        streams=new ThreadPoolExecutor(0,MAX_STREAM_OBSERVERS,30,TimeUnit.SECONDS,new SynchronousQueue<>(),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
         recover();cleanupExpiredJobsSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
     }
@@ -126,7 +128,9 @@ final class ServerRuntime implements AutoCloseable {
                 Path libs=webInfLibs==null?null:Paths.get(webInfLibs);
                 if(libs==null||!Files.isDirectory(libs))throw new IllegalStateException("Tomcat must deploy the WAR as an exploded application so WEB-INF/lib is available to the Worker launcher");
                 job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
-                String cp=libs.resolve("*").toString();
+                List<String> classpathEntries=new ArrayList<>();classpathEntries.add(libs.resolve("*").toString());
+                for(Path libraryDir:config.workerLibraryDirs)classpathEntries.add(libraryDir.resolve("*").toString());
+                String cp=String.join(java.io.File.pathSeparator,classpathEntries);
                 ProcessBuilder builder=new ProcessBuilder(config.javaExecutable.toString(),"-cp",cp,"att.worker.WorkerMain");
                 builder.directory(config.packages.get(job.packageId).toFile());
                 process=processLauncher.start(builder);job.process=process;job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");
