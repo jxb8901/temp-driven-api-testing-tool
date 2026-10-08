@@ -93,10 +93,12 @@
     event.preventDefault();
     const form = event.currentTarget; const values = new FormData(form); const command = values.get('command');
     const body = { packageId: selectedPackage };
-    ['environment','config','runId','debugInput','validationScope','scenario'].forEach(key => { const value = String(values.get(key) || '').trim(); if (value) body[key] = value; });
+    ['environment','config','runId','debugId','suiteDirectory','debugInput','validationScope','scenario'].forEach(key => { const value = String(values.get(key) || '').trim(); if (value) body[key] = value; });
     ['suites','tags','excludeTags','caseIds'].forEach(key => { const value = commaList(String(values.get(key) || '')); if (value) body[key] = value; });
     if (values.has('all')) body.all = true;
     if (values.has('dryRun')) body.dryRun = true;
+    if (values.has('rerunFailed')) body.rerunFailed = true;
+    if (values.has('failFast')) body.failFast = true;
     if (command === 'debug' || command === 'load') {
       const type = String(values.get('targetType') || '').trim(); const id = String(values.get('targetId') || '').trim();
       if (type && id) body.target = { type, id };

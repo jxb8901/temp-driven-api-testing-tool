@@ -26,6 +26,8 @@
         <label>Environment <input name="environment" maxlength="128"></label>
         <label>Config (logical package path) <input name="config"></label>
         <label>Run ID <input name="runId" maxlength="128"></label>
+        <label>Debug ID <input name="debugId" maxlength="128"></label>
+        <label>Suite directory (logical package path) <input name="suiteDirectory"></label>
         <label>Suites (comma separated logical paths) <input name="suites"></label>
         <label>Tags (comma separated) <input name="tags"></label>
         <label>Exclude tags (comma separated) <input name="excludeTags"></label>
@@ -49,6 +51,8 @@
         <label>Overrides (one key=value per line) <textarea name="overrides" rows="3"></textarea></label>
         <label><input type="checkbox" name="all"> Select all cases</label>
         <label><input type="checkbox" name="dryRun"> Dry run</label>
+        <label><input type="checkbox" name="rerunFailed"> Rerun failed</label>
+        <label><input type="checkbox" name="failFast"> Fail fast</label>
         <button type="submit">Submit job</button>
       </form>
     </section>

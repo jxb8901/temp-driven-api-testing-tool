@@ -107,6 +107,30 @@ test('bounds and deduplicates event history, then closes terminal SSE', async ()
   assert.match(ui.node('result').textContent, /PASS/);
 });
 
+test('Debug, Load and Validate forms preserve the public job DTO', async () => {
+  const cases = [
+    { command: 'debug', fields: [['debugId','D7'],['targetType','flow'],['targetId','PAYMENT.submit'],['overrides','vars.Channel=WEB']],
+      verify: p => { assert.equal(p.debugId, 'D7'); assert.deepEqual(p.target, {type:'flow',id:'PAYMENT.submit'}); assert.deepEqual(p.overrides,['vars.Channel=WEB']); } },
+    { command: 'load', fields: [['targetType','flow'],['targetId','LOAD.test'],['users','4'],['duration','PT1M']],
+      verify: p => { assert.deepEqual(p.target,{type:'flow',id:'LOAD.test'}); assert.deepEqual(p.load,{users:'4',duration:'PT1M'}); } },
+    { command: 'validate', fields: [['validationScope','all']],
+      verify: p => assert.equal(p.validationScope,'all') }
+  ];
+  for (const item of cases) {
+    const ui = boot({ hash: '#/packages/payments' });
+    await settle();
+    const form = ui.node('submit-form');
+    form.formValues = [['command',item.command], ...item.fields];
+    await form.listeners.submit({ preventDefault() {}, currentTarget: form });
+    const post = ui.calls.find(call => call.path === 'jobs/' + item.command);
+    assert.ok(post);
+    const payload = JSON.parse(post.options.body);
+    assert.equal(payload.packageId,'payments');
+    assert.equal(Object.hasOwn(payload,'packageRoot'),false);
+    item.verify(payload);
+  }
+});
+
 test('leaving a job closes its stream and does not cancel the job', async () => {
   const ui = boot({ hash: '#/jobs/J1' });
   await settle();
