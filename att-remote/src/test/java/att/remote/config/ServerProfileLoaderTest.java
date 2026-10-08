@@ -30,6 +30,7 @@ class ServerProfileLoaderTest {
     }
     @Test void remoteProfilePathUsesDedicatedEnvironmentVariable() {
         Path serverConfig=temp.resolve("att-server.yaml"),remoteConfig=temp.resolve("remote-servers.yaml");
-        assertEquals(remoteConfig.toAbsolutePath().normalize(),ServerProfileLoader.profilePath(java.util.Map.of("ATT_SERVER_CONFIG",serverConfig.toString(),"ATT_REMOTE_CONFIG",remoteConfig.toString())));
+        java.util.Map<String,String> environment=new java.util.HashMap<>();environment.put("ATT_SERVER_CONFIG",serverConfig.toString());environment.put("ATT_REMOTE_CONFIG",remoteConfig.toString());
+        assertEquals(remoteConfig.toAbsolutePath().normalize(),ServerProfileLoader.profilePath(environment));
     }
 }
