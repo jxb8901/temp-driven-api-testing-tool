@@ -17,16 +17,16 @@ import java.util.Map;
 public final class ServerConfig {
     public final Path dataDir;
     public final Path javaExecutable;
-    public final int maxConcurrent, queuedLimit, maxConcurrentLoad, gracefulStopMs;
+    public final int maxConcurrent, queuedLimit, maxConcurrentLoad, gracefulStopMs, jobRetentionDays;
     public final int maxRequestBytes, maxEventsPerJob, maxArtifacts;
     public final boolean authenticationRequired;
     public final Map<String, Path> packages;
 
     private ServerConfig(Path dataDir, Path javaExecutable, int maxConcurrent, int queuedLimit,
-                         int maxConcurrentLoad, int gracefulStopMs, int maxRequestBytes,
+                         int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays, int maxRequestBytes,
                          int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages) {
         this.dataDir=dataDir; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
-        this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;
+        this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;
         this.packages=Collections.unmodifiableMap(new LinkedHashMap<>(packages));
     }
@@ -66,6 +66,7 @@ public final class ServerConfig {
         if(resolved.isEmpty()) throw new IllegalArgumentException("packages.entries must define at least one package ID");
         int max=intValue(workers,"maxConcurrent",8,1,256), queue=intValue(workers,"queuedLimit",100,0,100000),
             load=intValue(workers,"maxConcurrentLoad",2,1,256), stop=intValue(workers,"gracefulStopMs",10000,0,300000);
+        int retention=intValue(server,"jobRetentionDays",30,1,3650);
         int request=intValue(server,"maxRequestBytes",1048576,1024,16777216), events=intValue(server,"maxEventsPerJob",10000,100,1000000),
             artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
         Files.createDirectories(data);
@@ -75,7 +76,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,java,max,queue,load,stop,request,events,artifacts,authenticationRequired,resolved);
+        return new ServerConfig(realData,java,max,queue,load,stop,retention,request,events,artifacts,authenticationRequired,resolved);
     }
 
     public static Path configPath() {

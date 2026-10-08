@@ -34,13 +34,40 @@ class RemoteCommandTest {
         assertEquals(0,code);assertEquals(Arrays.asList(null,"2"),client.cursors);assertEquals(0,client.posts);
     }
 
+    @Test void retriesTransientSseConnectionFailures() throws Exception {
+        MockClient client=new MockClient(){int failures=1;
+            @Override public HttpURLConnection openEvents(String path,String lastId)throws RemoteException {
+                if(failures-->0){cursors.add(lastId);throw RemoteException.retryableTransport("connection reset",new java.io.IOException("connection reset"));}
+                return super.openEvents(path,lastId);
+            }
+        };
+        assertEquals(0,RemoteCommand.follow(client,JOB,"json"));
+        assertEquals(Arrays.asList(null,null,"2"),client.cursors);
+    }
+
+    @Test void doesNotRetryAuthenticationOrProtocolFailures() throws Exception {
+        int[] attempts={0};MockClient client=new MockClient(){
+            @Override public HttpURLConnection openEvents(String path,String lastId)throws RemoteException {attempts[0]++;throw new RemoteException("ATT Server rejected authentication (HTTP 401)");}
+        };
+        RemoteException failure=assertThrows(RemoteException.class,()->RemoteCommand.follow(client,JOB,"human"));
+        assertTrue(failure.getMessage().contains("authentication"));assertEquals(1,attempts[0]);
+    }
+
+    @Test void attachedSubmissionFailureIncludesAcceptedJobIdAndRecoveryCommands() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public HttpURLConnection openEvents(String path,String lastId)throws RemoteException {throw new RemoteException("invalid SSE response");}
+        };
+        RemoteException failure=assertThrows(RemoteException.class,()->RemoteCommand.submit(client,Arrays.asList("run","payments"),"human","run"));
+        assertTrue(failure.getMessage().contains(JOB));assertTrue(failure.getMessage().contains("att remote watch "+JOB));assertTrue(failure.getMessage().contains("att remote result "+JOB));
+    }
+
     @Test void rejectsClientFilesystemPathsBeforePosting() throws Exception {
         MockClient client=new MockClient();
         assertThrows(IllegalArgumentException.class,()->RemoteCommand.submit(client,Arrays.asList("run","payments","--suite","../secret.xlsx","--detach"),"human","run"));
         assertEquals(0,client.posts);
     }
 
-    private static final class MockClient extends RemoteHttpClient {
+    private static class MockClient extends RemoteHttpClient {
         JsonNode lastBody;final java.util.ArrayList<JsonNode> requests=new java.util.ArrayList<JsonNode>();final java.util.ArrayList<String> cursors=new java.util.ArrayList<String>();
         int posts,eventOpens,jobReads;MockClient()throws RemoteException{super(new ServerProfile("mock","https://example.invalid",null,null,false),null);}
         @Override public JsonNode post(String path,JsonNode body)throws RemoteException {posts++;lastBody=body;requests.add(body.deepCopy());return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");}

@@ -10,19 +10,21 @@ ATT Server 4.0.0 provides a single-node control plane for submitting ATT Run, De
 4. Set `-Datt.server.config=/etc/att/server.yaml` in Tomcat's Java options. The `ATT_SERVER_CONFIG` environment variable is also accepted when the system property is absent.
 5. Deploy `att-server-4.0.0.war` to Tomcat 10.1+. Keep Tomcat's `unpackWARs` enabled so the Server can launch the Worker from `WEB-INF/lib`.
 
-Tomcat owns listeners, TLS, access logs, and authentication. The WAR configures HTTP BASIC authentication for package and job APIs and metrics, mapped to the container role `ATT_USER`; configure a Tomcat Realm with the intended users assigned to that role. Health and version remain public. Terminate TLS before exposing BASIC credentials. The Server fails startup when its configuration, Java baseline, or package mappings are invalid.
+Tomcat owns listeners, TLS, access logs, and authentication. The WAR uses the container Realm for HTTP BASIC authentication on package and job APIs and metrics. Any authenticated Servlet Principal has the same API permissions in v1; no `ATT_USER` role assignment or ATT-specific RBAC is required. Health and version remain public. Terminate TLS before exposing BASIC credentials. The Server fails startup when its configuration, Java baseline, or package mappings are invalid.
 
 ## Configuration
 
-`server.dataDir` stores H2 control-plane metadata and job output. Worker concurrency, queue size, Load concurrency, and graceful stop timeout are bounded by `workers`. The `packages` registry is read-only and maps stable package IDs to canonical roots beneath `allowedRoots`.
+`server.dataDir` stores H2 control-plane metadata and job output. Worker concurrency, queue size, Load admission, and graceful stop timeout are bounded by `workers`. Rejected submissions are discarded before they create durable job records. Terminal job metadata, journals, and artifacts are retained for `server.jobRetentionDays` (default 30, allowed range 1–3650); expired jobs are cleaned at startup and hourly, while active jobs are preserved. `workers.maxConcurrentLoad` bounds admitted Load jobs, including queued jobs, so waiting Loads do not occupy general Worker threads. Excess Load or overall-capacity submissions receive HTTP 429. The `packages` registry is read-only and maps stable package IDs to canonical roots beneath `allowedRoots`.
 
 ```yaml
 server:
   dataDir: /var/lib/att-server
   authenticationRequired: true
+  jobRetentionDays: 30
 workers:
   maxConcurrent: 8
   queuedLimit: 100
+  # Maximum admitted Load jobs, queued or executing.
   maxConcurrentLoad: 2
   gracefulStopMs: 10000
 packages:
@@ -40,7 +42,7 @@ Server state is stored in `dataDir/db/`. Each job uses `dataDir/jobs/<jobId>/` f
 
 Tomcat authenticates requests. ATT Server reads `HttpServletRequest.getUserPrincipal()` and requires a Principal on package, job, result, event, and artifact endpoints. Health and version may be anonymous. The principal name is stored with job and audit metadata and is not sent to the Worker or exposed in ATT expression Context.
 
-State-changing requests require `application/json`; requests carrying an `Origin` must match the request origin. All authenticated principals in `ATT_USER` have the same permissions in v1. For an intentionally isolated network, set `server.authenticationRequired: false` to accept anonymous API requests; this bypasses authentication for every API operation and should not be used on an untrusted network. ATT Server does not implement passwords, JWT/OIDC validation, LDAP authentication, login flows, or ATT-specific RBAC. Do not put credentials in API payloads or package files.
+State-changing requests require `application/json`; requests carrying an `Origin` must match the request origin. All authenticated Servlet Principals have the same permissions in v1; ATT does not require a particular container role or provide ATT-specific RBAC. For an intentionally isolated network, set `server.authenticationRequired: false` to accept anonymous API requests; this bypasses authentication for every API operation and should not be used on an untrusted network. ATT Server does not implement passwords, JWT/OIDC validation, LDAP authentication, or login flows. Do not put credentials in API payloads or package files.
 
 ## REST API
 

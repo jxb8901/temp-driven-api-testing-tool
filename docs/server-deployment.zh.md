@@ -14,15 +14,17 @@ Tomcat 負責監聽器、TLS、存取記錄及驗證。請設定 Realm、SSO 整
 
 ## 設定
 
-`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load 並行數及優雅停止逾時。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。
+`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission 及優雅停止逾時。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。
 
 ```yaml
 server:
   dataDir: /var/lib/att-server
   authenticationRequired: true
+  jobRetentionDays: 30
 workers:
   maxConcurrent: 8
   queuedLimit: 100
+  # 已接納的 Load 工作上限，包括佇列中及執行中的工作。
   maxConcurrentLoad: 2
   gracefulStopMs: 10000
 packages:
@@ -38,9 +40,9 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 ## 驗證與身份
 
-Tomcat 負責驗證請求。WAR 會為 package、job API 及 metrics 設定 HTTP BASIC authentication，並要求容器角色 `ATT_USER`；請在 Tomcat Realm 將指定用戶加入此角色。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、job、result、event 及 artifact API 均要求 Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
+Tomcat 負責驗證請求。WAR 透過容器 Realm 在 package、job API 及 metrics 使用 HTTP BASIC authentication。v1 所有已驗證的 Servlet Principal 具有相同 API 權限，不要求 `ATT_USER` 角色，也沒有 ATT 專用 RBAC。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、job、result、event 及 artifact API 均要求 Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
 
-改變狀態的請求必須使用 `application/json`；如請求帶有 `Origin`，必須與請求來源相同。v1 所有 `ATT_USER` 已驗證 Principal 具有相同權限。在刻意隔離的網絡中，可設定 `server.authenticationRequired: false` 接受匿名 API 請求；這會略過所有 API 操作的驗證，不應用於不受信任的網絡。ATT Server 不會實作密碼、JWT/OIDC 驗證、LDAP 驗證、登入流程或 ATT 專用 RBAC。請勿在 API payload 或 package 檔案中放置憑證。
+改變狀態的請求必須使用 `application/json`；如請求帶有 `Origin`，必須與請求來源相同。在刻意隔離的網絡中，可設定 `server.authenticationRequired: false` 接受匿名 API 請求；這會略過所有 API 操作的驗證，不應用於不受信任的網絡。ATT Server 不會實作密碼、JWT/OIDC 驗證、LDAP 驗證或登入流程。請勿在 API payload 或 package 檔案中放置憑證。
 
 ## REST API
 

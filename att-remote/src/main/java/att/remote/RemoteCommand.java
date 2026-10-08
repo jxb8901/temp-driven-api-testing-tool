@@ -131,7 +131,11 @@ public final class RemoteCommand {
         JsonNode accepted=c.post("/jobs/"+operation,body);
         String id=accepted.path("jobId").asText("");if(!id.matches("J[A-F0-9]{16}"))throw new RemoteException("ATT Server accepted a job without a valid job ID");
         if(detached){if("json".equals(f)){ObjectNode result=RemoteHttpClient.JSON.createObjectNode();result.put("jobId",id);result.put("status",accepted.path("status").asText("QUEUED"));System.out.println(result.toString());}else System.out.println(id);return 0;}
-        return follow(c,id,f);
+        return followAccepted(c,id,f);
+    }
+    static int followAccepted(RemoteHttpClient c,String id,String format)throws RemoteException {
+        try{return follow(c,id,format);}
+        catch(Exception failure){String detail=safe(failure);throw new RemoteException("Job "+id+" was accepted, but following it failed: "+detail+". Recover with `att remote watch "+id+"` or `att remote result "+id+"`.",failure);}
     }
     static int follow(RemoteHttpClient c,String id,String format)throws Exception {
         JsonNode current=c.get("/jobs/"+id);ApiStatus status=parseStatus(current.path("status").asText(null));
@@ -150,7 +154,7 @@ public final class RemoteCommand {
                         if(("status".equals(event.event)||"result".equals(event.event))&&data.has("status")){ApiStatus candidate=parseStatus(data.path("status").asText(null));if(candidate.isTerminal())status=candidate;}
                     }
                     if(!status.isTerminal()){JsonNode confirmed=c.get("/jobs/"+id);ApiStatus canonical=parseStatus(confirmed.path("status").asText(null));if(canonical.isTerminal())status=canonical;else throw new java.io.IOException("SSE closed before terminal status");}
-                } catch(RemoteException e){if(!transientHttp(e)||++retries>5)throw e;pause(retries);}catch(Exception e){if(status.isTerminal())break;if(++retries>5)throw new RemoteException("ATT Server event stream disconnected repeatedly before a terminal result");pause(retries);}
+                } catch(RemoteException e){if(!e.isRetryableTransport()||++retries>5)throw e;pause(retries);}catch(Exception e){if(status.isTerminal())break;if(++retries>5)throw new RemoteException("ATT Server event stream disconnected repeatedly before a terminal result",e);pause(retries);}
                 finally {if(connection!=null)connection.disconnect();}
             }
         }
@@ -193,7 +197,6 @@ public final class RemoteCommand {
     private static String logicalPath(String value,String label){Path path=Paths.get(value);if(path.isAbsolute()||path.normalize().startsWith("..")||value.indexOf('\0')>=0||value.indexOf('\\')>=0)throw new IllegalArgumentException(label+" must be a package-relative logical path");return path.normalize().toString();}
     private static String age(String value){try{long seconds=Math.max(0,java.time.Duration.between(java.time.Instant.parse(value),java.time.Instant.now()).getSeconds());if(seconds<60)return seconds+"s";if(seconds<3600)return (seconds/60)+"m";if(seconds<86400)return (seconds/3600)+"h";return (seconds/86400)+"d";}catch(Exception ignored){return "unknown";}}
     private static ApiStatus parseStatus(String value)throws RemoteException{try{return ApiStatus.parse(value);}catch(IllegalArgumentException e){throw new RemoteException(e.getMessage());}}
-    private static boolean transientHttp(RemoteException e){String m=e.getMessage();return m!=null&&m.matches("(?s).*HTTP 5[0-9][0-9].*");}
     private static void pause(int retries)throws RemoteException{try{Thread.sleep(Math.min(250L<<retries,4000L));}catch(InterruptedException x){Thread.currentThread().interrupt();throw new RemoteException("Interrupted while reconnecting to ATT Server");}}
     private static String jobId(List<String>a,int index){if(a.size()!=index+1||!a.get(index).matches("J[A-F0-9]{16}"))throw new IllegalArgumentException("A valid job ID is required");return a.get(index);}
     private static String segment(String value){try{return java.net.URLEncoder.encode(value,"UTF-8").replace("+","%20");}catch(java.io.UnsupportedEncodingException impossible){throw new IllegalStateException(impossible);}}

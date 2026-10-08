@@ -32,6 +32,7 @@ public class RemoteHttpClient {
             c=connection(path); c.setRequestMethod("GET"); c.setRequestProperty("Accept","text/event-stream");
             if(lastId!=null)c.setRequestProperty("Last-Event-ID",lastId); c.connect(); check(c);returned=true;return c;
         } catch(RemoteException e) { throw e; }
+        catch(IOException e) { throw RemoteException.retryableTransport("Unable to connect to ATT Server events endpoint",e); }
         catch(Exception e) { throw new RemoteException("Unable to connect to ATT Server events endpoint",e); }
         finally { if(!returned&&c!=null)c.disconnect(); }
     }
@@ -48,13 +49,18 @@ public class RemoteHttpClient {
     }
     static void publishNoReplace(java.nio.file.Path temporary,java.nio.file.Path target)throws IOException {java.nio.file.Files.move(temporary,target);}
     private JsonNode json(String method,String path,JsonNode body,String accept) throws RemoteException {
-        HttpURLConnection c=null;
+        HttpURLConnection c=null;byte[] bytes;
         try {
             c=connection(path); c.setRequestMethod(method); c.setRequestProperty("Accept",accept==null?"application/json":accept);
-            if(body!=null){c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json; charset=utf-8");byte[] bytes=JSON.writeValueAsBytes(body);if(bytes.length>1024*1024)throw new RemoteException("ATT Remote request exceeds the 1 MiB limit");try(java.io.OutputStream out=c.getOutputStream()){out.write(bytes);}}
-            c.connect();check(c); byte[] bytes;try(InputStream in=c.getInputStream()){bytes=readBounded(in,RESPONSE_LIMIT);}
-            JsonNode value=JSON.readTree(bytes); if(value==null||!value.isObject())throw new RemoteException("ATT Server returned malformed JSON");return value;
-        } catch(RemoteException e){throw e;}catch(Exception e){throw new RemoteException("ATT Server request failed: "+safeMessage(e),e);}finally{if(c!=null)c.disconnect();}
+            if(body!=null){c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json; charset=utf-8");byte[] requestBytes=JSON.writeValueAsBytes(body);if(requestBytes.length>1024*1024)throw new RemoteException("ATT Remote request exceeds the 1 MiB limit");try(java.io.OutputStream out=c.getOutputStream()){out.write(requestBytes);}}
+            c.connect();check(c);try(InputStream in=c.getInputStream()){bytes=readBounded(in,RESPONSE_LIMIT);}
+        } catch(RemoteException e){throw e;}
+          catch(IOException e){String message="ATT Server request failed: "+safeMessage(e);if("GET".equals(method))throw RemoteException.retryableTransport(message,e);throw new RemoteException(message,e);}
+          catch(Exception e){throw new RemoteException("ATT Server request failed: "+safeMessage(e),e);}
+          finally{if(c!=null)c.disconnect();}
+        try {JsonNode value=JSON.readTree(bytes);if(value==null||!value.isObject())throw new RemoteException("ATT Server returned malformed JSON");return value;}
+        catch(RemoteException e){throw e;}
+        catch(Exception e){throw new RemoteException("ATT Server returned malformed JSON",e);}
     }
     private HttpURLConnection connection(String path) throws RemoteException {
         try {
@@ -67,7 +73,9 @@ public class RemoteHttpClient {
         int status=c.getResponseCode();if(status>=200&&status<300)return;
         String detail="";InputStream err=c.getErrorStream();if(err!=null)try{JsonNode node=JSON.readTree(readBounded(err,64*1024));JsonNode e=node.path("error");detail=e.path("summary").asText("");if(detail.isEmpty())detail=e.path("detail").asText("");}catch(Exception ignored){}
         if(status==401||status==403)throw new RemoteException("ATT Server rejected authentication (HTTP "+status+")");
-        throw new RemoteException("ATT Server returned HTTP "+status+(detail.isEmpty()?"":": "+detail),status==400?2:4);
+        String message="ATT Server returned HTTP "+status+(detail.isEmpty()?"":": "+detail);
+        if(status>=500||status==408||status==429)throw RemoteException.retryableHttp(message,status==400?2:4);
+        throw new RemoteException(message,status==400?2:4);
     }
     private static byte[] readBounded(InputStream in,int max)throws IOException,RemoteException{ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] b=new byte[8192];int n;while((n=in.read(b))!=-1){if(out.size()+n>max)throw new RemoteException("ATT Server response exceeded the configured size limit");out.write(b,0,n);}return out.toByteArray();}
     private static void copyBounded(InputStream in,java.io.OutputStream out,long max)throws IOException,RemoteException{byte[] b=new byte[8192];long total=0;int n;while((n=in.read(b))!=-1){total+=n;if(total>1024L*1024*1024)throw new RemoteException("Artifact exceeded the 1 GiB limit");out.write(b,0,n);}}

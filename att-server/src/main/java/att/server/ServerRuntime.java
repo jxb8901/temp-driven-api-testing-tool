@@ -20,6 +20,8 @@ import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -35,8 +37,10 @@ final class ServerRuntime implements AutoCloseable {
     final ThreadPoolExecutor workers,streams;
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
     private final AtomicLong completed=new AtomicLong();
-    private final java.util.concurrent.Semaphore loadSlots;
+    private final Semaphore loadSlots,admissionSlots;
+    private final ScheduledExecutorService retention;
     private final WorkerProcessLauncher processLauncher;
     private volatile String webInfLibs;
     ServerRuntime(ServerConfig config,String webInfLibs) throws Exception {
@@ -44,11 +48,12 @@ final class ServerRuntime implements AutoCloseable {
     }
     ServerRuntime(ServerConfig config,String webInfLibs,WorkerProcessLauncher processLauncher) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.webInfLibs=webInfLibs;this.processLauncher=processLauncher;this.store=new JobStore(config);this.loadSlots=new java.util.concurrent.Semaphore(config.maxConcurrentLoad);
+        this.config=config;this.webInfLibs=webInfLibs;this.processLauncher=processLauncher;this.store=new JobStore(config);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         streams=new ThreadPoolExecutor(4,32,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(64),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
-        recover();
+        retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
+        recover();cleanupExpiredJobsSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
     }
     private void recover() throws Exception {
         for(Map<String,Object> stale:store.staleWorkers()) {
@@ -84,29 +89,31 @@ final class ServerRuntime implements AutoCloseable {
         if(request.suites!=null)for(String suite:request.suites)validatePackagePath(root,suite,"suites");
         if("debug".equals(command))validateTarget(request.target);
         if("load".equals(command)&&request.target!=null)validateTarget(request.target);
-        String id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();
-        request.jobId=id;
-        Path jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));
-        JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob);
-        Job job=new Job(id,command,packageId,principal,request,events);
-        String summary=JSON.writeValueAsString(Map.of("command",command,"packageId",packageId));
-        store.insert(job,summary);jobs.put(id,job);
-        append(job,"status",Map.of("jobId",id,"status","QUEUED"));
-        FutureTask<Void> task=new FutureTask<>(()->{execute(job,jobPath);return null;});
-        tasks.put(id,task);
-        try { workers.execute(task); }
-        catch(java.util.concurrent.RejectedExecutionException full) {
-            tasks.remove(id);job.diagnosticJson=JSON.writeValueAsString(Map.of("code","ATT-SERVER-CAPACITY-EXCEEDED","summary","Worker capacity is full"));
-            append(job,"diagnostic",JSON.readValue(job.diagnosticJson,Map.class));finish(job,"ERROR",75);
-            jobs.remove(id,job);store.audit(principal,"SUBMIT",id,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full");
-        }
-        store.audit(principal,"SUBMIT",id,packageId,"ACCEPTED");
-        return job.view();
-    }
-    private void execute(Job job,Path jobPath) {
-        boolean load=false;
+        boolean loadAdmission="load".equals(command);
+        if(loadAdmission&&!loadSlots.tryAcquire()){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
+        if(!admissionSlots.tryAcquire()){if(loadAdmission)loadSlots.release();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
+        AdmissionLease lease=new AdmissionLease(admissionSlots,loadAdmission?loadSlots:null);
+        String id=null;Path jobPath=null;boolean persisted=false,handedOff=false;
         try {
-            if("load".equals(job.command)){loadSlots.acquire();load=true;}
+            id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
+            jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
+            JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob);
+            Job job=new Job(id,command,packageId,principal,request,events);String summary=JSON.writeValueAsString(Map.of("command",command,"packageId",packageId));
+            store.insert(job,summary);persisted=true;jobs.put(id,job);append(job,"status",Map.of("jobId",id,"status","QUEUED"));
+            FutureTask<Void> task=new FutureTask<>(()->{execute(job,activeJobPath,lease);return null;});tasks.put(id,task);leases.put(id,lease);
+            try { workers.execute(task); }
+            catch(java.util.concurrent.RejectedExecutionException full){throw new QueueFullException("Worker capacity is full; retry after a job completes");}
+            handedOff=true;
+            try{store.audit(principal,"SUBMIT",id,packageId,"ACCEPTED");}catch(Exception auditFailure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to persist accepted job audit record");}
+            return job.view();
+        } catch(Exception failure) {
+            if(!handedOff){if(id!=null){FutureTask<Void> task=tasks.remove(id);if(task!=null)task.cancel(false);jobs.remove(id);leases.remove(id);if(persisted)try{store.deleteJob(id);}catch(Exception ignored){}if(jobPath!=null)try{deleteTree(jobPath);}catch(Exception ignored){}}
+                lease.release();if(failure instanceof QueueFullException)try{store.audit(principal,"SUBMIT",id,packageId,"REJECTED_QUEUE_FULL");}catch(Exception ignored){} }
+            throw failure;
+        }
+    }
+    private void execute(Job job,Path jobPath,AdmissionLease lease) {
+        try {
             Process process;
             synchronized(job) {
                 // Publish the process while holding the same lock used by cancel(). A
@@ -130,7 +137,7 @@ final class ServerRuntime implements AutoCloseable {
             else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
         } catch(InterruptedException e){Thread.currentThread().interrupt();stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
           catch(Exception e){stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
-        finally {if(job.process==null||!job.process.isAlive())job.process=null;tasks.remove(job.id);if(job.terminal())jobs.remove(job.id,job);if(load)loadSlots.release();completed.incrementAndGet();}
+        finally {if(job.process==null||!job.process.isAlive())job.process=null;tasks.remove(job.id);leases.remove(job.id);if(job.terminal())jobs.remove(job.id,job);lease.release();completed.incrementAndGet();}
     }
     private void stopAfterFailure(Job job) {
         Process process=job.process;
@@ -151,7 +158,7 @@ final class ServerRuntime implements AutoCloseable {
     String cancel(String id,String principal) throws Exception {
         Job j=jobs.get(id);if(j==null){Map<String,Object> stored=store.get(id);if(stored==null||!JOB_ID.matcher(id).matches())throw new NotFoundException();return String.valueOf(stored.get("status"));}
         synchronized(j){if(j.terminal())return j.status;append(j,"status",Map.of("jobId",id,"status","CANCEL_REQUESTED"));
-            Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){task.cancel(false);workers.remove(task);}finish(j,"CANCELLED",143);jobs.remove(id,j);}
+            Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){boolean cancelled=task.cancel(false);workers.remove(task);if(cancelled){AdmissionLease lease=leases.remove(id);if(lease!=null)lease.release();}}finish(j,"CANCELLED",143);jobs.remove(id,j);}
             else {terminateTree(p);try{if(!p.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS)){forceTree(p);p.waitFor();}}catch(InterruptedException e){Thread.currentThread().interrupt();forceTree(p);}finish(j,"CANCELLED",143);}}
         store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");return j.status;
     }
@@ -198,10 +205,28 @@ final class ServerRuntime implements AutoCloseable {
     JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob):active.events;}
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
     Path artifact(String id,String requested) throws Exception {Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();Job j=jobs.get(id);if(j!=null)return artifact(j,requested);Path base=config.dataDir.resolve("jobs").resolve(id).resolve("output").toRealPath();Path relative=Paths.get(requested);if(relative.isAbsolute())throw new IllegalArgumentException("Artifact path must be relative to job output");Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base)||!Files.exists(candidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new NotFoundException();Path walk=base;for(Path part:base.relativize(candidate)){walk=walk.resolve(part);if(Files.isSymbolicLink(walk))throw new NotFoundException();}Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;}
-    @Override public void close(){for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    void cleanupExpiredJobs() throws Exception {
+        Instant cutoff=Instant.now().minus(java.time.Duration.ofDays(config.jobRetentionDays));
+        for(String id:store.expiredJobIds(cutoff))if(!jobs.containsKey(id))try{
+            deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);
+        }catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to remove expired ATT Server job "+id+": "+safeMessage(failure));}
+    }
+    private void cleanupExpiredJobsSafely(){try{cleanupExpiredJobs();}catch(Exception e){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to clean expired ATT Server jobs: "+safeMessage(e));}}
+    private static void deleteTree(Path root)throws java.io.IOException {
+        if(!Files.exists(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))return;
+        try(java.util.stream.Stream<Path> paths=Files.walk(root)){
+            for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
+        }
+    }
+    @Override public void close(){retention.shutdownNow();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
+    private static final class AdmissionLease {
+        private final Semaphore admission,load;private final java.util.concurrent.atomic.AtomicBoolean released=new java.util.concurrent.atomic.AtomicBoolean();
+        AdmissionLease(Semaphore admission,Semaphore load){this.admission=admission;this.load=load;}
+        void release(){if(released.compareAndSet(false,true)){admission.release();if(load!=null)load.release();}}
+    }
     static final class QueueFullException extends RuntimeException {QueueFullException(String m){super(m);}}
     static final class NotFoundException extends RuntimeException {}
 }
