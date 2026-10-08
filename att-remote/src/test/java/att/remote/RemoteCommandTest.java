@@ -45,6 +45,32 @@ class RemoteCommandTest {
         assertEquals(Arrays.asList(null,null,"2"),client.cursors);
     }
 
+    @Test void replaysEventsForAlreadyCompletedJobs() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if(path.equals("/jobs/"+JOB))return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","PASS");
+                return super.get(path);
+            }
+        };
+        assertEquals(0,RemoteCommand.follow(client,JOB,"json"));assertEquals(1,client.eventOpens);
+    }
+
+    @Test void intermittentSseFailuresResetRetryBudgetAfterEvents() throws Exception {
+        MockClient client=new MockClient(){int opens=0;
+            @Override public HttpURLConnection openEvents(String path,String lastId)throws RemoteException {
+                opens++;eventOpens++;
+                if(opens>=2&&opens<=5||opens>=7&&opens<=10)throw RemoteException.retryableTransport("connection reset",new java.io.IOException("connection reset"));
+                String event=opens==11?"event: result\ndata: {\"jobId\":\""+JOB+"\",\"status\":\"PASS\"}\n\n":"event: progress\ndata: {\"message\":\"connected\"}\n\n";
+                try{return new StreamConnection(event);}catch(Exception e){throw new RemoteException("mock stream setup failed",e);}
+            }
+            @Override public JsonNode get(String path)throws RemoteException {
+                if(path.equals("/jobs/"+JOB))return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");
+                return super.get(path);
+            }
+        };
+        assertEquals(0,RemoteCommand.follow(client,JOB,"json"));assertEquals(11,client.eventOpens);
+    }
+
     @Test void doesNotRetryAuthenticationOrProtocolFailures() throws Exception {
         int[] attempts={0};MockClient client=new MockClient(){
             @Override public HttpURLConnection openEvents(String path,String lastId)throws RemoteException {attempts[0]++;throw new RemoteException("ATT Server rejected authentication (HTTP 401)");}

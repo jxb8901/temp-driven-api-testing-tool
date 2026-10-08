@@ -139,9 +139,8 @@ public final class RemoteCommand {
     }
     static int follow(RemoteHttpClient c,String id,String format)throws Exception {
         JsonNode current=c.get("/jobs/"+id);ApiStatus status=parseStatus(current.path("status").asText(null));
-        if(!status.isTerminal()){
             String cursor=null;int retries=0;
-            while(!status.isTerminal()) {
+            while(true) {
                 HttpURLConnection connection=null;
                 try {
                     connection=c.openEvents("/jobs/"+id+"/events",cursor);
@@ -150,14 +149,15 @@ public final class RemoteCommand {
                         if(event.id!=null){long sequence;try{sequence=Long.parseLong(event.id);}catch(NumberFormatException e){throw new RemoteException("ATT Server returned an invalid SSE event ID");}if(cursor!=null&&sequence<=Long.parseLong(cursor))continue;cursor=event.id;}
                         JsonNode data;try{data=RemoteHttpClient.JSON.readTree(event.data);}catch(Exception e){throw new RemoteException("ATT Server returned malformed SSE event data");}
                         if(data==null||!data.isObject())throw new RemoteException("ATT Server returned malformed SSE event data");
+                        retries=0;
                         RemoteRenderer.event(format,id,event.event,data);
                         if(("status".equals(event.event)||"result".equals(event.event))&&data.has("status")){ApiStatus candidate=parseStatus(data.path("status").asText(null));if(candidate.isTerminal())status=candidate;}
                     }
                     if(!status.isTerminal()){JsonNode confirmed=c.get("/jobs/"+id);ApiStatus canonical=parseStatus(confirmed.path("status").asText(null));if(canonical.isTerminal())status=canonical;else throw new java.io.IOException("SSE closed before terminal status");}
+                    if(status.isTerminal())break;
                 } catch(RemoteException e){if(!e.isRetryableTransport()||++retries>5)throw e;pause(retries);}catch(Exception e){if(status.isTerminal())break;if(++retries>5)throw new RemoteException("ATT Server event stream disconnected repeatedly before a terminal result",e);pause(retries);}
                 finally {if(connection!=null)connection.disconnect();}
             }
-        }
         JsonNode value=c.get("/jobs/"+id+"/result");return renderResult(value,format);
     }
     private static int renderResult(JsonNode value,String format)throws Exception {
