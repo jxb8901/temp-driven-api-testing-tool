@@ -45,7 +45,20 @@ Server state is stored in `dataDir/db/`. Each job uses `dataDir/jobs/<jobId>/` f
 
 Tomcat authenticates requests. ATT Server reads `HttpServletRequest.getUserPrincipal()` and requires a Principal on package, job, result, event, and artifact endpoints. Health and version may be anonymous. The principal name is stored with job and audit metadata and is not sent to the Worker or exposed in ATT expression Context.
 
-State-changing requests require `application/json`; requests carrying an `Origin` must match the request origin. All authenticated Servlet Principals have the same permissions in v1; ATT does not require a particular container role or provide ATT-specific RBAC. For an intentionally isolated network, set `server.authenticationRequired: false` to accept anonymous API requests; this bypasses authentication for every API operation and should not be used on an untrusted network. ATT Server does not implement passwords, JWT/OIDC validation, LDAP authentication, or login flows. The Servlet container owns authentication challenges and redirects. Do not put credentials in API payloads or package files.
+State-changing requests require `application/json`; requests carrying an `Origin` must match the request origin. Behind a TLS-terminating proxy, configure Tomcat's `RemoteIpValve` to derive the Servlet scheme, host, and port from the proxy's forwarded headers. Set `internalProxies` to only the actual proxy addresses, and ensure the proxy removes client-supplied `Forwarded`/`X-Forwarded-*` headers before adding its own. For example, adapt these header names and trusted addresses to the proxy:
+
+```xml
+<Valve className="org.apache.catalina.valves.RemoteIpValve"
+       internalProxies="10\\.20\\.0\\.12"
+       remoteIpHeader="X-Forwarded-For"
+       protocolHeader="X-Forwarded-Proto"
+       hostHeader="X-Forwarded-Host"
+       portHeader="X-Forwarded-Port" />
+```
+
+All authenticated Servlet Principals have the same permissions in v1; ATT does not require a particular container role or provide ATT-specific RBAC. For an intentionally isolated network, set `server.authenticationRequired: false` to accept anonymous API requests; this bypasses authentication for every API operation and should not be used on an untrusted network. ATT Server does not implement passwords, JWT/OIDC validation, LDAP authentication, or login flows. The Servlet container owns authentication challenges and redirects. Do not put credentials in API payloads or package files.
+
+The bundled browser console is served at `<context path>/ui/` and uses the same container-managed authentication policy as the API. See [ATT Server Web UI](att-server-web-ui.md).
 
 ## REST API
 

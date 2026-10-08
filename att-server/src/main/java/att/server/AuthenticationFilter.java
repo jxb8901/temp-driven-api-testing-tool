@@ -12,7 +12,7 @@ import java.io.IOException;
 import java.security.Principal;
 
 /** Consumes container-authenticated Principals and supports explicit anonymous mode. */
-@WebFilter(urlPatterns="/api/v1/*",asyncSupported=true)
+@WebFilter(urlPatterns={"/api/v1/*","/ui/*"},asyncSupported=true)
 public final class AuthenticationFilter implements Filter {
     @Override public void doFilter(ServletRequest request,ServletResponse response,FilterChain chain) throws IOException,ServletException {
         HttpServletRequest req=(HttpServletRequest)request;HttpServletResponse res=(HttpServletResponse)response;

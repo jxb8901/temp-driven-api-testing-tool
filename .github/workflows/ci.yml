@@ -6,9 +6,6 @@ on:
       - master
       - load
   pull_request:
-    branches:
-      - master
-      - load
   workflow_dispatch:
 
 permissions:
@@ -76,6 +73,11 @@ jobs:
           echo 'caa7e0410f9e2cb1da2eb8db13cc97b5548fe455985e2c944e3929d22f99bcdc  '"$RUNNER_TEMP/pandoc.deb" | sha256sum --check
           sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
           pandoc --version | head -n 1 | grep -Fx 'pandoc 3.1.3'
+
+      - name: Verify ATT Web UI JavaScript
+        run: |
+          node --check att-web/src/main/resources/META-INF/resources/ui/app.js
+          node --test att-web/src/test/js/*.test.mjs
 
       - name: Verify
         run: mvn -B -ntp clean verify

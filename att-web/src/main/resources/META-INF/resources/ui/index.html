@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'">
+  <title>ATT Server</title>
+  <link rel="stylesheet" href="app.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header><a href="#/" class="brand">ATT Server</a><span id="connection" role="status">Connecting…</span></header>
+  <main>
+    <p id="message" role="status" aria-live="polite"></p>
+    <section id="home">
+      <h1>Packages</h1>
+      <div class="columns">
+        <section><h2>Configured packages</h2><ul id="packages" class="package-list"></ul></section>
+        <section><h2>Recent jobs</h2><button id="refresh-jobs" type="button">Refresh jobs</button><div class="table-wrap"><table><thead><tr><th>Job</th><th>Package</th><th>Command</th><th>Status</th><th>Created</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
+      </div>
+    </section>
+    <section id="package-view" hidden>
+      <p><a href="#/">← Packages</a></p><h1 id="package-title"></h1>
+      <form id="submit-form">
+        <label>Command <select name="command"><option>run</option><option>debug</option><option>load</option><option>validate</option></select></label>
+        <label>Environment <input name="environment" maxlength="128"></label>
+        <label>Config (logical package path) <input name="config"></label>
+        <label>Run ID <input name="runId" maxlength="128"></label>
+        <label>Debug ID <input name="debugId" maxlength="128"></label>
+        <label>Suite directory (logical package path) <input name="suiteDirectory"></label>
+        <label>Suites (comma separated logical paths) <input name="suites"></label>
+        <label>Tags (comma separated) <input name="tags"></label>
+        <label>Exclude tags (comma separated) <input name="excludeTags"></label>
+        <label>Case IDs (comma separated) <input name="caseIds"></label>
+        <label>Target type <input name="targetType" placeholder="flow"></label>
+        <label>Target ID <input name="targetId"></label>
+        <label>Debug input (logical package path) <input name="debugInput"></label>
+        <label>Validation scope <input name="validationScope"></label>
+        <label>Load scenario (logical package path) <input name="scenario"></label>
+        <fieldset><legend>Load options</legend>
+          <label>Users <input name="users" inputmode="numeric"></label>
+          <label>Arrival rate <input name="arrivalRate"></label>
+          <label>Warmup <input name="warmup" placeholder="PT0S"></label>
+          <label>Ramp up <input name="rampUp" placeholder="PT0S"></label>
+          <label>Duration <input name="duration" placeholder="PT1M"></label>
+          <label>Ramp down <input name="rampDown" placeholder="PT0S"></label>
+          <label>Think time <input name="thinkTime"></label>
+          <label>Max concurrent <input name="maxConcurrent" inputmode="numeric"></label>
+          <label>Overload policy <input name="overloadPolicy"></label>
+        </fieldset>
+        <label>Overrides (one key=value per line) <textarea name="overrides" rows="3"></textarea></label>
+        <label><input type="checkbox" name="all"> Select all cases</label>
+        <label><input type="checkbox" name="dryRun"> Dry run</label>
+        <label><input type="checkbox" name="rerunFailed"> Rerun failed</label>
+        <label><input type="checkbox" name="failFast"> Fail fast</label>
+        <button type="submit">Submit job</button>
+      </form>
+    </section>
+    <section id="job-view" hidden>
+      <p><a href="#/">← Packages and jobs</a></p><h1 id="job-title"></h1>
+      <dl id="job-summary" class="summary"></dl>
+      <div id="cancel-area"><button id="cancel-job" type="button">Cancel job</button><span id="cancel-state" role="status"></span></div>
+      <h2>Result and diagnostics</h2><pre id="result"></pre>
+      <h2>Artifacts</h2><ul id="artifacts"></ul>
+      <h2>Progress</h2><pre id="progress" role="status"></pre>
+      <h2>Live events</h2><p id="stream-state" role="status"></p><ol id="events" class="events" aria-live="polite"></ol>
+    </section>
+  </main>
+  <footer>ATT Web UI uses the public /api/v1 REST and SSE API. Sign in through the configured Tomcat authentication.</footer>
+</body>
+</html>
