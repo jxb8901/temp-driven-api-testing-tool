@@ -1,6 +1,7 @@
 package att.worker;
 
 import att.api.*;
+import att.worker.internal.DiagnosticSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonParser;
@@ -63,7 +64,7 @@ public final class WorkerMain {
             int exit=3; String status="ERROR";
             if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
-            emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message==null?"ATT operation failed":message));
+            emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message)));
             emit(WorkerEvent.Type.RESULT,fields("status",status,"exitCode",exit,"result",fields("executionId",null,"status",status,"exitCode",exit)));
             return exit;
         }

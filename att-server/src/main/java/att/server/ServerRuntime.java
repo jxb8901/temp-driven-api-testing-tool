@@ -156,7 +156,7 @@ final class ServerRuntime implements AutoCloseable {
         JsonNode event=JSON.readTree(line);if(event==null||!event.isObject())return;
         String type=event.path("type").asText("").toUpperCase();Map<String,Object> data=JSON.convertValue(event,Map.class);data.remove("type");data.remove("jobId");
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
-            case "PROGRESS"->append(job,"progress",data);case "LOG"->append(job,"log",data);case "DIAGNOSTIC"->{job.diagnosticJson=JSON.writeValueAsString(data);store.update(job);append(job,"diagnostic",data);}
+            case "PROGRESS"->append(job,"progress",data);case "LOG"->append(job,"log",data);case "DIAGNOSTIC"->{Map<String,Object> safe=att.worker.internal.DiagnosticSanitizer.sanitize(data);job.diagnosticJson=JSON.writeValueAsString(safe);store.update(job);append(job,"diagnostic",safe);}
             case "RESULT"->{String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);JsonNode result=event.get("result");job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;finish(job,normalizeTerminal(status),code);}
             default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
     }
@@ -211,7 +211,7 @@ final class ServerRuntime implements AutoCloseable {
         return node.deepCopy();
     }
     private static String replacePathPrefix(String value,String prefix,String logical){if(value.equals(prefix))return logical+":";String separator=java.io.File.separator;value=value.replace(prefix+separator,logical+":");if("\\".equals(separator))value=value.replace(prefix+"/",logical+":");else value=value.replace(prefix+"\\",logical+":");return value;}
-    private static String safeMessage(Exception e){String m=e.getMessage();return m==null?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
+    private static String safeMessage(Exception e){String m=att.worker.internal.DiagnosticSanitizer.redactText(e.getMessage());return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
     private static String readBoundedLine(BufferedReader reader,int limit) throws java.io.IOException {StringBuilder line=new StringBuilder();boolean oversized=false;int c;while((c=reader.read())!=-1){if(c=='\n')break;if(c=='\r')continue;if(line.length()<limit)line.append((char)c);else oversized=true;}if(c==-1&&line.isEmpty()&&!oversized)return null;return oversized?"\u0000OVERSIZED":line.toString();}
     JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob):active.events;}
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
