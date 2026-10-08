@@ -96,11 +96,15 @@
   byId('submit-form').addEventListener('submit', async event => {
     event.preventDefault();
     if (submitting) return;
-    submitting = true;
     const form = event.currentTarget;
+    const values = new FormData(form); const command = values.get('command');
+    if (command === 'debug') {
+      const type = String(values.get('targetType') || '').trim(); const id = String(values.get('targetId') || '').trim();
+      if (!type || !id) { message('Debug requires a target type and target ID.'); return; }
+    }
+    submitting = true;
     const submitButton = form.querySelector('button[type="submit"]');
     if (submitButton) submitButton.disabled = true;
-    const values = new FormData(form); const command = values.get('command');
     const body = { packageId: selectedPackage };
     ['environment','config','runId','debugId','suiteDirectory','debugInput','validationScope','scenario'].forEach(key => { const value = String(values.get(key) || '').trim(); if (value) body[key] = value; });
     ['suites','tags','excludeTags','caseIds'].forEach(key => { const value = commaList(String(values.get(key) || '')); if (value) body[key] = value; });
@@ -116,7 +120,6 @@
       const load = {}; ['users','arrivalRate','warmup','rampUp','duration','rampDown','thinkTime','maxConcurrent','overloadPolicy'].forEach(key => { const value = String(values.get(key) || '').trim(); if (value) load[key] = value; });
       if (Object.keys(load).length) body.load = load;
     }
-    if (command === 'debug' && !body.target) { message('Debug requires a target type and target ID.'); return; }
     const overrides = String(values.get('overrides') || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     if (overrides.length) body.overrides = overrides;
     try { const accepted = await request(`jobs/${command}`, { method: 'POST', body: JSON.stringify(body) }); location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`; }
