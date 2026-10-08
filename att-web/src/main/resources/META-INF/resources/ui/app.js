@@ -12,6 +12,7 @@
   let activeJob = '';
   let source = null;
   let lastEventId = 0;
+  let artifactRequestSequence = 0;
   let cancelRequested = false;
   let versionPromise = null;
   let navigation = 0;
@@ -206,9 +207,10 @@
     }
   }
   async function loadArtifacts(id, generation = navigation) {
+    const requestSequence = ++artifactRequestSequence;
     try {
       const data = await request(`jobs/${encodeURIComponent(id)}/artifacts`);
-      if (generation !== navigation || activeJob !== id) return;
+      if (requestSequence !== artifactRequestSequence || generation !== navigation || activeJob !== id) return;
       const list = byId('artifacts'); list.replaceChildren();
       listItems(data).forEach(item => {
         const li = document.createElement('li');
@@ -216,7 +218,9 @@
         li.append(link(`${api}jobs/${encodeURIComponent(id)}/artifacts/${path.split('/').map(encodeURIComponent).join('/')}`, `${path} (${item.size} bytes)`));
         list.append(li);
       });
-    } catch (error) { if (generation === navigation && activeJob === id) message(error.message); }
+    } catch (error) {
+      if (requestSequence === artifactRequestSequence && generation === navigation && activeJob === id) message(error.message);
+    }
   }
   byId('cancel-job').addEventListener('click', async () => {
     const jobId = activeJob;
