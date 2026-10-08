@@ -29,7 +29,7 @@ Inject the named environment variable from your CI secret store. For interactive
 
 Select a profile with `--server`. `ATT_SERVER` can override the default profile URL. An explicit `--server` profile takes precedence over `ATT_SERVER`; otherwise the precedence is `ATT_SERVER` URL, then the configured default profile. The profile still supplies authentication settings when `ATT_SERVER` overrides its URL.
 
-Basic authentication works only over HTTPS. The client uses the JVM's default TLS trust and hostname verification. It has no insecure TLS switch. Health and version checks happen before each operation; the Server must declare API version `1`.
+Use `--no-auth` to bypass the profile credentials and password prompt when the Server explicitly allows anonymous access. Basic authentication works only over HTTPS. The client uses the JVM's default TLS trust and hostname verification. It has no insecure TLS switch. Health and version checks happen before each operation; the Server must declare API version `1`.
 
 ## Discover packages
 

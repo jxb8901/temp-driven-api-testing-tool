@@ -29,7 +29,7 @@ servers:
 
 使用 `--server` 選擇 profile。`ATT_SERVER` 可覆蓋 default profile URL。明確的 `--server` profile 優先；否則依序採用 `ATT_SERVER` URL，再採用設定檔的 default profile。若 `ATT_SERVER` 覆蓋 URL，authentication settings 仍取自 profile。
 
-Basic authentication 只可透過 HTTPS 使用。Client 採用 JVM 預設 TLS trust 及 hostname verification，沒有 insecure TLS 選項。每項操作開始前均會檢查 health/version；Server 必須宣告 API version `1`。
+若 Server 明確允許匿名存取，可使用 `--no-auth` 略過 profile credentials 及 password prompt。Basic authentication 只可透過 HTTPS 使用。Client 採用 JVM 預設 TLS trust 及 hostname verification，沒有 insecure TLS 選項。每項操作開始前均會檢查 health/version；Server 必須宣告 API version `1`。
 
 ## 發現 package
 

@@ -17,6 +17,11 @@ class ServerProfileLoaderTest {
         ServerProfile explicit=ServerProfileLoader.resolve("uat","https://override.example.com",file);
         assertEquals("https://uat.example.com",explicit.url);
     }
+    @Test void noAuthAllowsHttpProfileWithoutReadingConfiguredBasicCredentials() throws Exception {
+        Path file=temp.resolve("anonymous.yaml");Files.write(file,("default: local\nservers:\n  local:\n    url: http://localhost:8080\n    auth:\n      type: basic\n      username: configured-user\n      passwordEnv: LOCAL_SECRET\n").getBytes("UTF-8"));
+        assertThrows(RemoteException.class,()->ServerProfileLoader.resolve(null,null,file));
+        ServerProfile anonymous=ServerProfileLoader.resolve(null,null,file,true);assertEquals("http://localhost:8080",anonymous.url);assertEquals("configured-user",anonymous.username);
+    }
     @Test void rejectsStoredPasswordsAndBasicOverHttp() throws Exception {
         Path password=temp.resolve("password.yaml");Files.write(password,("default: ci\nservers:\n  ci:\n    url: https://ci.example.com\n    auth:\n      type: basic\n      username: ci\n      password: unsafe\n").getBytes("UTF-8"));
         assertThrows(RemoteException.class,()->ServerProfileLoader.resolve(null,null,password));

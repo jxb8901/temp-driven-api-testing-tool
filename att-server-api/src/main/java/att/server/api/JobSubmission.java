@@ -9,6 +9,7 @@ public final class JobSubmission {
     public String config;
     public String environment;
     public String runId;
+    public String debugId;
     public Map<String,Object> target;
     public String scenario;
     public List<String> suites;

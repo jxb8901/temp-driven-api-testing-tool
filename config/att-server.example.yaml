@@ -1,6 +1,8 @@
 # Copy to a protected deployment path and set -Datt.server.config=/etc/att/server.yaml.
 server:
   dataDir: /var/lib/att-server
+  # Disable only on an isolated network that permits anonymous API access.
+  authenticationRequired: true
   # Optional. Defaults to the Java runtime hosting Tomcat.
   # javaExecutable: /usr/lib/jvm/java-17/bin/java
   maxRequestBytes: 1048576

@@ -30,8 +30,8 @@ public final class RemoteCommand {
         try {
             RemoteOptions options=RemoteOptions.parse(args);format=options.format;
             if(options.command.isEmpty()||"help".equals(options.command.get(0))){help();return 0;}
-            ServerProfile profile=ServerProfileLoader.resolve(options.server);
-            Credentials credentials=password(profile);
+            ServerProfile profile=ServerProfileLoader.resolve(options.server,System.getenv("ATT_SERVER"),ServerProfileLoader.profilePath(),options.noAuth);
+            Credentials credentials=options.noAuth?new Credentials(null,null):password(profile);
             RemoteHttpClient client=new RemoteHttpClient(profile,credentials.password,credentials.username);
             JsonNode version=client.get("/version");
             if(!version.path("apiVersion").isTextual()||!ServerApi.VERSION.equals(version.path("apiVersion").asText()))throw new RemoteException("ATT Server API is missing or unsupported; client supports API v"+ServerApi.VERSION);
@@ -103,6 +103,7 @@ public final class RemoteCommand {
             else if("--config".equals(key))body.put("config",logicalPath(value,key));
             else if("--suite-dir".equals(key))body.put("suiteDirectory",logicalPath(value,key));
             else if("--run-id".equals(key))body.put("runId",value);
+            else if("--debug-id".equals(key)&&"debug".equals(operation))body.put("debugId",value);
             else if("--input".equals(key))body.put("debugInput",logicalPath(value,key));
             else if("--set".equals(key))overrides.add(value);
             else if("--scenario".equals(key))scenario=logicalPath(value,key);
@@ -146,9 +147,9 @@ public final class RemoteCommand {
                         JsonNode data;try{data=RemoteHttpClient.JSON.readTree(event.data);}catch(Exception e){throw new RemoteException("ATT Server returned malformed SSE event data");}
                         if(data==null||!data.isObject())throw new RemoteException("ATT Server returned malformed SSE event data");
                         RemoteRenderer.event(format,id,event.event,data);
-                        if(data.has("status")){ApiStatus candidate=parseStatus(data.path("status").asText(null));if(candidate.isTerminal())status=candidate;}
+                        if(("status".equals(event.event)||"result".equals(event.event))&&data.has("status")){ApiStatus candidate=parseStatus(data.path("status").asText(null));if(candidate.isTerminal())status=candidate;}
                     }
-                    if(!status.isTerminal())throw new java.io.IOException("SSE closed before terminal status");
+                    if(!status.isTerminal()){JsonNode confirmed=c.get("/jobs/"+id);ApiStatus canonical=parseStatus(confirmed.path("status").asText(null));if(canonical.isTerminal())status=canonical;else throw new java.io.IOException("SSE closed before terminal status");}
                 } catch(RemoteException e){if(!transientHttp(e)||++retries>5)throw e;pause(retries);}catch(Exception e){if(status.isTerminal())break;if(++retries>5)throw new RemoteException("ATT Server event stream disconnected repeatedly before a terminal result");pause(retries);}
                 finally {if(connection!=null)connection.disconnect();}
             }
@@ -198,5 +199,5 @@ public final class RemoteCommand {
     private static String segment(String value){try{return java.net.URLEncoder.encode(value,"UTF-8").replace("+","%20");}catch(java.io.UnsupportedEncodingException impossible){throw new IllegalStateException(impossible);}}
     private static int fail(String message,int code,String format){String safe=message==null?"Remote command failed":message.replaceAll("(?i)(password|authorization)\\s*[:=]\\s*[^ ,]+","$1=[REDACTED_SECRET]");if("json".equals(format)){ObjectNode out=RemoteHttpClient.JSON.createObjectNode();out.put("error",safe);out.put("exitCode",code);System.err.println(out.toString());}else System.err.println("ATT Remote: "+safe);return code;}
     private static String safe(Exception e){String m=e.getMessage();return m==null?e.getClass().getSimpleName():m;}
-    private static void help(){System.out.println("Usage: att remote [--server <profile>] [--format human|json] <command>\nCommands: ping, version, packages, package <id>, run|debug|load|validate <packageId>, jobs, job|watch|result|cancel <jobId>, artifacts <jobId>, artifact <jobId> <name> --download <directory>\nSet ATT_SERVER to override the configured default profile URL.");}
+    private static void help(){System.out.println("Usage: att remote [--server <profile>] [--format human|json] [--no-auth] <command>\nCommands: ping, version, packages, package <id>, run|debug|load|validate <packageId>, jobs, job|watch|result|cancel <jobId>, artifacts <jobId>, artifact <jobId> <name> --download <directory>\nSet ATT_SERVER to override the configured default profile URL.");}
 }

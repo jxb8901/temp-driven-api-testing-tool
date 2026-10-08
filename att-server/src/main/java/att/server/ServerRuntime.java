@@ -75,7 +75,7 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
         request.protocolVersion="att-worker/v1";request.command=command;request.packageRoot=root.toString();
         request.outputDirectory=null;request.config=safeRelative(request.config,"config");request.environment=safeText(request.environment,128,"environment");
-        request.runId=safeText(request.runId,128,"runId");request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");
+        request.runId=safeText(request.runId,128,"runId");request.debugId=safeText(request.debugId,128,"debugId");request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");
         request.scenario=safeRelative(request.scenario,"scenario");request.debugInput=safeRelative(request.debugInput,"debugInput");
         request.unsafeFailureDetails=false;
         request.suites=safePaths(request.suites,"suites");
@@ -98,7 +98,7 @@ final class ServerRuntime implements AutoCloseable {
         catch(java.util.concurrent.RejectedExecutionException full) {
             tasks.remove(id);job.diagnosticJson=JSON.writeValueAsString(Map.of("code","ATT-SERVER-CAPACITY-EXCEEDED","summary","Worker capacity is full"));
             append(job,"diagnostic",JSON.readValue(job.diagnosticJson,Map.class));finish(job,"ERROR",75);
-            store.audit(principal,"SUBMIT",id,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full");
+            jobs.remove(id,job);store.audit(principal,"SUBMIT",id,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full");
         }
         store.audit(principal,"SUBMIT",id,packageId,"ACCEPTED");
         return job.view();
@@ -130,7 +130,7 @@ final class ServerRuntime implements AutoCloseable {
             else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
         } catch(InterruptedException e){Thread.currentThread().interrupt();stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
           catch(Exception e){stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
-        finally {if(job.process==null||!job.process.isAlive())job.process=null;tasks.remove(job.id);if(load)loadSlots.release();completed.incrementAndGet();}
+        finally {if(job.process==null||!job.process.isAlive())job.process=null;tasks.remove(job.id);if(job.terminal())jobs.remove(job.id,job);if(load)loadSlots.release();completed.incrementAndGet();}
     }
     private void stopAfterFailure(Job job) {
         Process process=job.process;
@@ -148,16 +148,16 @@ final class ServerRuntime implements AutoCloseable {
             default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
     }
     private String normalizeTerminal(String s){return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(s)?s:"ERROR";}
-    void cancel(String id,String principal) throws Exception {
-        Job j=jobs.get(id);if(j==null)throw new NotFoundException();
-        synchronized(j){if(j.terminal())return;append(j,"status",Map.of("jobId",id,"status","CANCEL_REQUESTED"));
-            Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){task.cancel(false);workers.remove(task);}finish(j,"CANCELLED",143);}
+    String cancel(String id,String principal) throws Exception {
+        Job j=jobs.get(id);if(j==null){Map<String,Object> stored=store.get(id);if(stored==null||!JOB_ID.matcher(id).matches())throw new NotFoundException();return String.valueOf(stored.get("status"));}
+        synchronized(j){if(j.terminal())return j.status;append(j,"status",Map.of("jobId",id,"status","CANCEL_REQUESTED"));
+            Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){task.cancel(false);workers.remove(task);}finish(j,"CANCELLED",143);jobs.remove(id,j);}
             else {terminateTree(p);try{if(!p.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS)){forceTree(p);p.waitFor();}}catch(InterruptedException e){Thread.currentThread().interrupt();forceTree(p);}finish(j,"CANCELLED",143);}}
-        store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");
+        store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");return j.status;
     }
     Job job(String id){if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Job j=jobs.get(id);if(j==null)throw new NotFoundException();return j;}
     Map<String,Object> jobRecord(String id) throws Exception {Job j=jobs.get(id);if(j!=null)return j.view();if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();record.remove("resultJson");record.remove("diagnosticJson");return record;}
-    Map<String,Object> resultRecord(String id) throws Exception {Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();Map<String,Object> out=new LinkedHashMap<>();out.put("job",jobRecord(id));out.put("result",record.get("resultJson")==null?null:JSON.readTree((String)record.get("resultJson")));out.put("diagnostic",record.get("diagnosticJson")==null?null:JSON.readTree((String)record.get("diagnosticJson")));return out;}
+    Map<String,Object> resultRecord(String id) throws Exception {Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();Map<String,Object> out=new LinkedHashMap<>();out.put("job",jobRecord(id));out.put("result",record.get("resultJson")==null?null:publicJson(id,(String)record.get("resultJson")));out.put("diagnostic",record.get("diagnosticJson")==null?null:publicJson(id,(String)record.get("diagnosticJson")));return out;}
     List<Map<String,Object>> packages(){List<Map<String,Object>> out=new ArrayList<>();config.packages.forEach((id,path)->out.add(Map.of("packageId",id,"name",path.getFileName().toString())));return out;}
     Map<String,Object> packageView(String id){Path root=config.packages.get(id);if(root==null)throw new NotFoundException();return Map.of("packageId",id,"name",root.getFileName().toString());}
     Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());return m;}
@@ -169,8 +169,8 @@ final class ServerRuntime implements AutoCloseable {
         Path walk=base;for(Path part:base.relativize(candidate)){walk=walk.resolve(part);if(Files.isSymbolicLink(walk))throw new NotFoundException();}
         Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;
     }
-    private synchronized void transition(Job j,String next) throws Exception {synchronized(j){if(j.terminal())return;j.status=next;if("RUNNING".equals(next))j.startedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",next));}}
-    private synchronized void finish(Job j,String status,int code) throws Exception {synchronized(j){if(j.terminal())return;j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",status));Map<String,Object> result=new LinkedHashMap<>();result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);result.put("result",j.resultJson==null?null:JSON.readTree(j.resultJson));append(j,"result",result);}}
+    private void transition(Job j,String next) throws Exception {synchronized(j){if(j.terminal())return;j.status=next;if("RUNNING".equals(next))j.startedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",next));}}
+    void finish(Job j,String status,int code) throws Exception {synchronized(j){if(j.terminal())return;j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",status));Map<String,Object> result=new LinkedHashMap<>();result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);result.put("result",j.resultJson==null?null:publicJson(j.id,j.resultJson));append(j,"result",result);}}
     private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
     private void append(Job j,String type,Map<String,?> data) throws Exception {j.events.append(type,data);}
     private static String required(JsonNode node,String name){JsonNode v=node.get(name);if(v==null||!v.isTextual()||v.asText().isBlank())throw new IllegalArgumentException(name+" is required");return v.asText();}
@@ -179,6 +179,20 @@ final class ServerRuntime implements AutoCloseable {
     private static List<String> safePaths(List<String> paths,String name){if(paths==null)return null;List<String> out=new ArrayList<>();for(String p:paths){if(p==null)throw new IllegalArgumentException(name+" entries must be non-empty paths");out.add(safeRelative(p,name));}return out;}
     private static void validatePackagePath(Path root,String relative,String name) throws Exception {if(relative==null)return;Path base=root.toRealPath();Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base))throw new IllegalArgumentException(name+" escapes PACKAGE_ROOT");Path existing=candidate;while(existing!=null&&!Files.exists(existing))existing=existing.getParent();if(existing!=null&&!existing.toRealPath().startsWith(base))throw new IllegalArgumentException(name+" resolves outside PACKAGE_ROOT");}
     private static void validateTarget(Map<String,Object> target){if(target==null)throw new IllegalArgumentException("target is required");Object type=target.get("type"),id=target.get("id");if(!(type instanceof String)||!(id instanceof String))throw new IllegalArgumentException("target.type and target.id are required");}
+    Object publicEventData(String id,Object data) throws Exception {return publicJson(id,JSON.writeValueAsString(data));}
+    private JsonNode publicJson(String id,String json) throws Exception {
+        JsonNode node=JSON.readTree(json);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
+        Path packageRoot=null;Job active=jobs.get(id);if(active!=null)packageRoot=config.packages.get(active.packageId);else {Map<String,Object> row=store.get(id);if(row!=null)packageRoot=config.packages.get(String.valueOf(row.get("packageId")));}
+        return sanitize(node,output,packageRoot);
+    }
+    private JsonNode sanitize(JsonNode node,Path output,Path packageRoot) {
+        if(node==null)return null;
+        if(node.isTextual()) {String value=node.asText();String outputPrefix=output.toString();value=replacePathPrefix(value,outputPrefix,"artifact");if(packageRoot!=null)value=replacePathPrefix(value,packageRoot.toString(),"package");return JSON.getNodeFactory().textNode(value);}
+        if(node.isObject()){com.fasterxml.jackson.databind.node.ObjectNode copy=JSON.createObjectNode();node.fields().forEachRemaining(e->copy.set(e.getKey(),sanitize(e.getValue(),output,packageRoot)));return copy;}
+        if(node.isArray()){com.fasterxml.jackson.databind.node.ArrayNode copy=JSON.createArrayNode();for(JsonNode item:node)copy.add(sanitize(item,output,packageRoot));return copy;}
+        return node.deepCopy();
+    }
+    private static String replacePathPrefix(String value,String prefix,String logical){if(value.equals(prefix))return logical+":";String separator=java.io.File.separator;value=value.replace(prefix+separator,logical+":");if("\\".equals(separator))value=value.replace(prefix+"/",logical+":");else value=value.replace(prefix+"\\",logical+":");return value;}
     private static String safeMessage(Exception e){String m=e.getMessage();return m==null?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
     private static String readBoundedLine(BufferedReader reader,int limit) throws java.io.IOException {StringBuilder line=new StringBuilder();boolean oversized=false;int c;while((c=reader.read())!=-1){if(c=='\n')break;if(c=='\r')continue;if(line.length()<limit)line.append((char)c);else oversized=true;}if(c==-1&&line.isEmpty()&&!oversized)return null;return oversized?"\u0000OVERSIZED":line.toString();}
     JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob):active.events;}

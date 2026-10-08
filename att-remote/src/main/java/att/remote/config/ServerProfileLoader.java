@@ -15,10 +15,11 @@ public final class ServerProfileLoader {
     private ServerProfileLoader() { }
     @SuppressWarnings("unchecked")
     public static ServerProfile resolve(String selected) throws RemoteException {
-        return resolve(selected,System.getenv("ATT_SERVER"),profilePath());
+        return resolve(selected,System.getenv("ATT_SERVER"),profilePath(),false);
     }
     @SuppressWarnings("unchecked")
-    public static ServerProfile resolve(String selected,String envUrl,Path file) throws RemoteException {
+    public static ServerProfile resolve(String selected,String envUrl,Path file) throws RemoteException {return resolve(selected,envUrl,file,false);}
+    public static ServerProfile resolve(String selected,String envUrl,Path file,boolean noAuth) throws RemoteException {
         Map<String,Object> root=null;
         if(Files.exists(file)) {
             try(InputStream input=Files.newInputStream(file)) {
@@ -57,11 +58,11 @@ public final class ServerProfileLoader {
             java.net.URI uri=new java.net.URI(url);
             if(uri.getHost()==null || !("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme())) || uri.getUserInfo()!=null || uri.getQuery()!=null || uri.getFragment()!=null)
                 throw new RemoteException("ATT_SERVER must be an HTTP(S) base URL without credentials, query, or fragment");
-            if((basic || username!=null || passwordEnv!=null) && !"https".equalsIgnoreCase(uri.getScheme())) throw new RemoteException("Basic authentication requires HTTPS");
+            if(!noAuth&&(basic || username!=null || passwordEnv!=null) && !"https".equalsIgnoreCase(uri.getScheme())) throw new RemoteException("Basic authentication requires HTTPS");
         } catch(java.net.URISyntaxException e) { throw new RemoteException("Invalid ATT Server URL"); }
         return new ServerProfile(name,url.replaceAll("/+$",""),username,passwordEnv,basic);
     }
-    private static Path profilePath() {
+    public static Path profilePath() {
         String configured=System.getenv("ATT_SERVER_CONFIG");
         if(configured!=null && !configured.trim().isEmpty()) return Paths.get(configured).toAbsolutePath().normalize();
         return Paths.get(System.getProperty("user.home"),".att","servers.yaml");

@@ -20,8 +20,8 @@ class RemoteCommandTest {
         MockClient client=new MockClient();
         RemoteCommand.submit(client,Arrays.asList("run","payments","--suite","smoke.xlsx","--tag","smoke","--env","SIT","--detach"),"human","run");
         JsonNode run=client.lastBody;assertEquals("payments",run.path("packageId").asText());assertEquals("smoke.xlsx",run.path("suites").get(0).asText());assertEquals("SIT",run.path("environment").asText());
-        RemoteCommand.submit(client,Arrays.asList("debug","payments","flow","PAYMENT.submit","--set","vars.Channel=WEB","--detach"),"human","debug");
-        JsonNode debug=client.lastBody;assertEquals("flow",debug.path("target").path("type").asText());assertEquals("PAYMENT.submit",debug.path("target").path("id").asText());
+        RemoteCommand.submit(client,Arrays.asList("debug","payments","flow","PAYMENT.submit","--set","vars.Channel=WEB","--debug-id","dbg-explicit-7","--detach"),"human","debug");
+        JsonNode debug=client.lastBody;assertEquals("flow",debug.path("target").path("type").asText());assertEquals("PAYMENT.submit",debug.path("target").path("id").asText());assertEquals("dbg-explicit-7",debug.path("debugId").asText());
         RemoteCommand.submit(client,Arrays.asList("load","payments","load/payment.yaml","--users","2","--duration","30s","--detach"),"human","load");
         JsonNode load=client.lastBody;assertEquals("load/payment.yaml",load.path("scenario").asText());assertEquals("2",load.path("load").path("users").asText());
         RemoteCommand.submit(client,Arrays.asList("validate","payments","--selected","--suite","smoke.xlsx","--detach"),"human","validate");
@@ -31,7 +31,7 @@ class RemoteCommandTest {
 
     @Test void resumesEventsWithLastIdAndNeverResubmitsJob() throws Exception {
         MockClient client=new MockClient();int code=RemoteCommand.follow(client,JOB,"json");
-        assertEquals(0,code);assertEquals(Arrays.asList(null,"1"),client.cursors);assertEquals(0,client.posts);
+        assertEquals(0,code);assertEquals(Arrays.asList(null,"2"),client.cursors);assertEquals(0,client.posts);
     }
 
     @Test void rejectsClientFilesystemPathsBeforePosting() throws Exception {
@@ -42,16 +42,17 @@ class RemoteCommandTest {
 
     private static final class MockClient extends RemoteHttpClient {
         JsonNode lastBody;final java.util.ArrayList<JsonNode> requests=new java.util.ArrayList<JsonNode>();final java.util.ArrayList<String> cursors=new java.util.ArrayList<String>();
-        int posts,eventOpens;MockClient()throws RemoteException{super(new ServerProfile("mock","https://example.invalid",null,null,false),null);}
+        int posts,eventOpens,jobReads;MockClient()throws RemoteException{super(new ServerProfile("mock","https://example.invalid",null,null,false),null);}
         @Override public JsonNode post(String path,JsonNode body)throws RemoteException {posts++;lastBody=body;requests.add(body.deepCopy());return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");}
         @Override public JsonNode get(String path)throws RemoteException {
             if(path.endsWith("/result")){ObjectNode result=RemoteHttpClient.JSON.createObjectNode();result.set("job",RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","PASS").put("exitCode",0));result.set("result",RemoteHttpClient.JSON.createObjectNode().put("status","PASS").put("exitCode",0));return result;}
+            if(path.equals("/jobs/"+JOB)&&++jobReads>2)return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","PASS");
             return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");
         }
         @Override public HttpURLConnection openEvents(String path,String lastId)throws RemoteException {
             cursors.add(lastId);eventOpens++;String body=eventOpens==1?
-                    "id: 1\nevent: status\ndata: {\"status\":\"RUNNING\"}\n\n":
-                    "id: 2\nevent: result\ndata: {\"jobId\":\""+JOB+"\",\"status\":\"PASS\",\"exitCode\":0}\n\n";
+                    "id: 1\nevent: status\ndata: {\"status\":\"RUNNING\"}\n\nid: 2\nevent: progress\ndata: {\"status\":\"VALIDATION_PASS\"}\n\n":
+                    "id: 3\nevent: result\ndata: {\"jobId\":\""+JOB+"\",\"status\":\"PASS\",\"exitCode\":0}\n\n";
             try{return new StreamConnection(body);}catch(Exception e){throw new RemoteException("mock stream setup failed",e);}
         }
     }

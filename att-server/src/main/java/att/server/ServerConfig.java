@@ -19,14 +19,15 @@ public final class ServerConfig {
     public final Path javaExecutable;
     public final int maxConcurrent, queuedLimit, maxConcurrentLoad, gracefulStopMs;
     public final int maxRequestBytes, maxEventsPerJob, maxArtifacts;
+    public final boolean authenticationRequired;
     public final Map<String, Path> packages;
 
     private ServerConfig(Path dataDir, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, Map<String, Path> packages) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages) {
         this.dataDir=dataDir; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;
-        this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;
+        this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;
         this.packages=Collections.unmodifiableMap(new LinkedHashMap<>(packages));
     }
 
@@ -66,7 +67,7 @@ public final class ServerConfig {
         int max=intValue(workers,"maxConcurrent",8,1,256), queue=intValue(workers,"queuedLimit",100,0,100000),
             load=intValue(workers,"maxConcurrentLoad",2,1,256), stop=intValue(workers,"gracefulStopMs",10000,0,300000);
         int request=intValue(server,"maxRequestBytes",1048576,1024,16777216), events=intValue(server,"maxEventsPerJob",10000,100,1000000),
-            artifacts=intValue(server,"maxArtifacts",1000,1,100000);
+            artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
         Files.createDirectories(data);
         Path realData=data.toRealPath();
         String attHome=System.getProperty("att.home");if(attHome==null||attHome.isBlank())attHome=System.getenv("ATT_HOME");
@@ -74,7 +75,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,java,max,queue,load,stop,request,events,artifacts,resolved);
+        return new ServerConfig(realData,java,max,queue,load,stop,request,events,artifacts,authenticationRequired,resolved);
     }
 
     public static Path configPath() {
@@ -89,6 +90,7 @@ public final class ServerConfig {
         Path real=path.toRealPath(); if(directory&&!Files.isDirectory(real)) throw new IllegalArgumentException(field+" must be a directory: "+path); return real;
     }
     private static void privateDirectory(Path path){try{Files.createDirectories(path);Files.setPosixFilePermissions(path,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));}catch(UnsupportedOperationException ignored){}catch(Exception e){throw new IllegalStateException("Unable to secure ATT Server data directory",e);}}
+    private static boolean boolValue(Map<?,?> map,String key,boolean fallback){Object value=map.get(key);if(value==null)return fallback;if(!(value instanceof Boolean))throw new IllegalArgumentException(key+" must be true or false");return (Boolean)value;}
     private static int intValue(Map<?,?> map,String key,int fallback,int min,int max) {
         Object v=map.get(key); if(v==null)return fallback; if(!(v instanceof Number n)) throw new IllegalArgumentException(key+" must be an integer");
         int value=n.intValue(); if(value<min||value>max) throw new IllegalArgumentException(key+" must be between "+min+" and "+max); return value;

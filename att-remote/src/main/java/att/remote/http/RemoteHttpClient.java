@@ -36,10 +36,17 @@ public class RemoteHttpClient {
         finally { if(!returned&&c!=null)c.disconnect(); }
     }
     public void download(String path,java.nio.file.Path target) throws RemoteException, IOException {
-        HttpURLConnection c=null;
-        try { c=connection(path);c.setRequestMethod("GET");c.connect();check(c);try(InputStream in=c.getInputStream();java.io.OutputStream out=java.nio.file.Files.newOutputStream(target,java.nio.file.StandardOpenOption.CREATE_NEW,java.nio.file.StandardOpenOption.WRITE)){copyBounded(in,out,Long.MAX_VALUE);} }
-        catch(RemoteException e){java.nio.file.Files.deleteIfExists(target);throw e;}catch(IOException e){java.nio.file.Files.deleteIfExists(target);throw e;}finally{if(c!=null)c.disconnect();}
+        HttpURLConnection c=null;java.nio.file.Path temp=null;
+        try {
+            java.nio.file.Path absolute=target.toAbsolutePath().normalize();java.nio.file.Path parent=absolute.getParent();
+            if(parent==null)throw new IOException("Artifact target has no parent directory");
+            temp=java.nio.file.Files.createTempFile(parent,".att-download-",".part");
+            c=connection(path);c.setRequestMethod("GET");c.connect();check(c);
+            try(InputStream in=c.getInputStream();java.io.OutputStream out=java.nio.file.Files.newOutputStream(temp,java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,java.nio.file.StandardOpenOption.WRITE)){copyBounded(in,out,Long.MAX_VALUE);}
+            publishNoReplace(temp,absolute);temp=null;
+        } catch(RemoteException e){throw e;} finally {if(c!=null)c.disconnect();if(temp!=null)java.nio.file.Files.deleteIfExists(temp);}
     }
+    static void publishNoReplace(java.nio.file.Path temporary,java.nio.file.Path target)throws IOException {java.nio.file.Files.move(temporary,target);}
     private JsonNode json(String method,String path,JsonNode body,String accept) throws RemoteException {
         HttpURLConnection c=null;
         try {
@@ -51,7 +58,7 @@ public class RemoteHttpClient {
     }
     private HttpURLConnection connection(String path) throws RemoteException {
         try {
-            URL url=new URL(apiBase+path); HttpURLConnection c=(HttpURLConnection)url.openConnection();c.setConnectTimeout(10000);c.setReadTimeout(30000);c.setUseCaches(false);
+            URL url=new URL(apiBase+path); HttpURLConnection c=(HttpURLConnection)url.openConnection();c.setConnectTimeout(10000);c.setReadTimeout(60000);c.setUseCaches(false);
             if(username!=null) { if(password==null)throw new RemoteException("Basic credentials are missing");String token=Base64.getEncoder().encodeToString((username+":"+password).getBytes(StandardCharsets.UTF_8));c.setRequestProperty("Authorization","Basic "+token); }
             c.setRequestProperty("User-Agent","ATT-Remote/4.0.0");return c;
         } catch(RemoteException e){throw e;} catch(Exception e){throw new RemoteException("Invalid ATT Server request URL",e);}

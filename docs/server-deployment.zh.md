@@ -19,6 +19,7 @@ Tomcat 負責監聽器、TLS、存取記錄及驗證。請設定 Realm、SSO 整
 ```yaml
 server:
   dataDir: /var/lib/att-server
+  authenticationRequired: true
 workers:
   maxConcurrent: 8
   queuedLimit: 100
@@ -37,9 +38,9 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 ## 驗證與身份
 
-Tomcat 負責驗證請求。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、job、result、event 及 artifact API 均要求 Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
+Tomcat 負責驗證請求。WAR 會為 package、job API 及 metrics 設定 HTTP BASIC authentication，並要求容器角色 `ATT_USER`；請在 Tomcat Realm 將指定用戶加入此角色。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、job、result、event 及 artifact API 均要求 Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
 
-v1 所有已驗證 Principal 具有相同權限。ATT Server 不會實作密碼、JWT/OIDC 驗證、LDAP 驗證、登入流程或 ATT 專用 RBAC。請勿在 API payload 或 package 檔案中放置憑證。
+改變狀態的請求必須使用 `application/json`；如請求帶有 `Origin`，必須與請求來源相同。v1 所有 `ATT_USER` 已驗證 Principal 具有相同權限。在刻意隔離的網絡中，可設定 `server.authenticationRequired: false` 接受匿名 API 請求；這會略過所有 API 操作的驗證，不應用於不受信任的網絡。ATT Server 不會實作密碼、JWT/OIDC 驗證、LDAP 驗證、登入流程或 ATT 專用 RBAC。請勿在 API payload 或 package 檔案中放置憑證。
 
 ## REST API
 

@@ -54,6 +54,8 @@ public final class ApiServlet extends HttpServlet {
         String command=path.startsWith("/jobs/")?path.substring("/jobs/".length()):"";
         if(!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try {
+            if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
+            if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
             byte[] body=req.getInputStream().readNBytes(runtime.config.maxRequestBytes+1);
             if(body.length>runtime.config.maxRequestBytes){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Request body exceeds the configured size limit",requestId);return;}
             JsonNode input=ServerRuntime.JSON.readTree(body);
@@ -67,7 +69,8 @@ public final class ApiServlet extends HttpServlet {
         String requestId=requestId(req,res),path=path(req),principal=principal(req);
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(!path.matches("/jobs/[^/]+")){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
-        try{String id=segment(path,2);runtime.cancel(id,principal);json(res,200,Map.of("jobId",id,"status",runtime.job(id).status,"requestId",requestId));}
+        if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+        try{String id=segment(path,2);String status=runtime.cancel(id,principal);json(res,200,Map.of("jobId",id,"status",status,"requestId",requestId));}
         catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
         catch(Exception e){error(res,500,"ATT-SERVER-CANCEL-FAILED","The job could not be cancelled",requestId);}
     }
@@ -90,10 +93,10 @@ public final class ApiServlet extends HttpServlet {
             while(true){
                 wakeup.poll(15,TimeUnit.SECONDS);
                 List<Map<String,Object>> events=journal.after(cursor,100);
-                for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(event.get("data"))+"\n\n");out.flush();if(out.checkError())return;cursor=id;lastWrite=System.nanoTime();}
+                for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(runtime.publicEventData(jobId,event.get("data")))+"\n\n");out.flush();if(out.checkError())return;cursor=id;lastWrite=System.nanoTime();}
                 if(runtime.terminal(jobId)&&!journal.hasMore(cursor))break;
                 if(journal.hasMore(cursor))wakeup.offer(Boolean.TRUE);
-                if(System.nanoTime()-lastWrite>TimeUnit.SECONDS.toNanos(20)){out.print(": keepalive\n\n");out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
+                if(System.nanoTime()-lastWrite>TimeUnit.SECONDS.toNanos(15)){out.print(": keepalive\n\n");out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
             }
         }catch(Exception ignored){}finally{try{subscription.close();}catch(Exception ignored){}async.complete();}
     }
@@ -105,9 +108,11 @@ public final class ApiServlet extends HttpServlet {
     private void sendArtifact(HttpServletResponse response,Path file)throws IOException {
         String name=file.getFileName().toString().replaceAll("[\r\n\"]","_");response.setContentType(getServletContext().getMimeType(name)==null?"application/octet-stream":getServletContext().getMimeType(name));response.setHeader("Content-Disposition","attachment; filename=\""+name+"\"");response.setContentLengthLong(Files.size(file));Files.copy(file,response.getOutputStream());
     }
+    private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}
+    private static boolean sameOrigin(HttpServletRequest req){String origin=req.getHeader("Origin");if(origin==null)return true;if("null".equalsIgnoreCase(origin.trim()))return false;try{java.net.URI parsed=java.net.URI.create(origin);if(parsed.getHost()==null||parsed.getUserInfo()!=null||parsed.getRawPath()!=null&&!parsed.getRawPath().isEmpty()||parsed.getRawQuery()!=null||parsed.getFragment()!=null)return false;String scheme=req.getScheme().toLowerCase(java.util.Locale.ROOT),originScheme=parsed.getScheme().toLowerCase(java.util.Locale.ROOT);int requestPort=req.getServerPort(),originPort=parsed.getPort()<0?("https".equals(originScheme)?443:80):parsed.getPort();int effectiveRequest=requestPort<0?("https".equals(scheme)?443:80):requestPort;return scheme.equals(originScheme)&&req.getServerName().equalsIgnoreCase(parsed.getHost())&&effectiveRequest==originPort;}catch(Exception invalid){return false;}}
     private static String path(HttpServletRequest r){String p=r.getPathInfo();return p==null||p.isEmpty()?"/":p;}
     private static String segment(String path,int index){String[] parts=path.split("/");return parts.length>index?parts[index]:"";}
-    static String principal(HttpServletRequest req){Principal p=req.getUserPrincipal();if(p==null)return null;String name=p.getName();if(name==null||name.isBlank()||name.length()>256)return null;for(int i=0;i<name.length();i++)if(Character.isISOControl(name.charAt(i)))return null;return name.trim();}
+    static String principal(HttpServletRequest req){Principal p=req.getUserPrincipal();if(p==null){Object value=req.getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(value instanceof ServerRuntime runtime&&!runtime.config.authenticationRequired)return "anonymous";return null;}String name=p.getName();if(name==null||name.isBlank()||name.length()>256)return null;for(int i=0;i<name.length();i++)if(Character.isISOControl(name.charAt(i)))return null;return name.trim();}
     private static String requestId(HttpServletRequest req,HttpServletResponse res){String value=req.getHeader("X-Request-ID");if(value==null||!value.matches("[A-Za-z0-9._-]{1,80}"))value=UUID.randomUUID().toString();res.setHeader("X-Request-ID",value);return value;}
     private static void json(HttpServletResponse res,int status,Object body)throws IOException{res.setStatus(status);res.setCharacterEncoding("UTF-8");res.setContentType("application/json");ServerRuntime.JSON.writeValue(res.getOutputStream(),body);}
     private static void error(HttpServletResponse res,int status,String code,String summary,String requestId)throws IOException{Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);json(res,status,Map.of("error",e));}
