@@ -282,7 +282,7 @@ test('job SSE receives progress while artifact discovery is still pending', asyn
     json: async () => ({ items: [{ path: 'report/index.html', size: 42 }] })
   });
   await waitFor(() => ui.node('artifacts').children.length === 1, 'artifact listing');
-  assert.match(ui.node('artifacts').children[0].textContent, /report\/index\.html/);
+  assert.match(ui.node('artifacts').children[0].children[0].textContent, /report\/index\.html/);
 });
 
 
