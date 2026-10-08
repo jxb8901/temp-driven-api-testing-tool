@@ -1,0 +1,131 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+
+const script = readFileSync(new URL('../../main/resources/META-INF/resources/ui/app.js', import.meta.url), 'utf8');
+const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+
+function boot({ hash = '', version = '1', confirmCancel = true } = {}) {
+  class Element {
+    constructor() {
+      this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
+      this.textContent = ''; this.hidden = false; this.disabled = false;
+    }
+    addEventListener(name, listener) { this.listeners[name] = listener; }
+    append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
+    replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+    remove() { if (this.parent) this.parent.children = this.parent.children.filter(node => node !== this); }
+    get firstElementChild() { return this.children[0]; }
+  }
+  const elements = new Map();
+  const node = id => {
+    if (!elements.has(id)) elements.set(id, new Element());
+    return elements.get(id);
+  };
+  const document = {
+    baseURI: 'https://example.test/tools/att/ui/',
+    getElementById: node,
+    createElement: () => new Element()
+  };
+  const location = { hash };
+  const window = { listeners: {}, confirm: () => confirmCancel,
+    addEventListener(name, listener) { this.listeners[name] = listener; }
+  };
+  const calls = [], streams = [];
+  const state = { jobStatus: 'RUNNING' };
+  class EventSource {
+    constructor(url) { this.url = url; this.listeners = {}; this.closed = false; streams.push(this); }
+    addEventListener(type, listener) { this.listeners[type] = listener; }
+    close() { this.closed = true; }
+    emit(type, data, id) {
+      if (this.listeners[type]) this.listeners[type]({ data: JSON.stringify(data), lastEventId: String(id) });
+    }
+  }
+  async function fetch(url, options = {}) {
+    const path = String(url).split('/api/v1/')[1];
+    calls.push({ path, options });
+    let result;
+    if (path === 'version') result = { apiVersion: version };
+    else if (path === 'packages') result = { items: [{ packageId: 'payments' }] };
+    else if (path.startsWith('packages/')) result = { packageId: path.substring(9) };
+    else if (path === 'jobs') result = { items: [] };
+    else if (/^jobs\/(run|debug|load|validate)$/.test(path) && options.method === 'POST') result = { jobId: 'J1' };
+    else if (/^jobs\/[^/]+\/artifacts$/.test(path)) result = { items: [] };
+    else if (/^jobs\/[^/]+\/result$/.test(path)) result = { result: { passed: 1 }, diagnostic: null };
+    else if (/^jobs\/[^/]+$/.test(path) && options.method === 'DELETE') result = { status: 'CANCEL_REQUESTED' };
+    else if (/^jobs\/[^/]+$/.test(path)) result = { jobId: path.split('/')[1], status: state.jobStatus, packageId: 'payments', command: 'run' };
+    else throw Error('Unexpected fetch path ' + path);
+    return { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => result };
+  }
+  class FormData {
+    constructor(form) { return new Map(form.formValues || []); }
+  }
+  vm.runInNewContext(script, { document, location, window, fetch, EventSource, URL, Headers, FormData, console }, { filename: 'app.js' });
+  return { node, location, window, calls, streams, state };
+}
+
+test('rejects an incompatible API before accessing packages', async () => {
+  const ui = boot({ version: '2' });
+  await settle();
+  assert.match(ui.node('message').textContent, /Incompatible ATT Server API version/);
+  assert.deepEqual(ui.calls.map(call => call.path), ['version']);
+});
+
+test('submits logical package DTOs with a non-root Tomcat context', async () => {
+  const ui = boot({ hash: '#/packages/payments' });
+  await settle();
+  const form = ui.node('submit-form');
+  form.formValues = [['command', 'run'], ['environment', 'SIT'], ['tags', 'smoke, regression'], ['all', 'on']];
+  await form.listeners.submit({ preventDefault() {}, currentTarget: form });
+  const posted = ui.calls.find(call => call.path === 'jobs/run');
+  assert.ok(posted);
+  assert.deepEqual(JSON.parse(posted.options.body), {
+    packageId: 'payments', environment: 'SIT', tags: ['smoke', 'regression'], all: true
+  });
+  assert.equal(ui.location.hash, '#/jobs/J1');
+});
+
+test('bounds and deduplicates event history, then closes terminal SSE', async () => {
+  const ui = boot({ hash: '#/jobs/J1' });
+  await settle();
+  assert.equal(ui.streams.length, 1);
+  const stream = ui.streams[0];
+  assert.equal(stream.url, '/tools/att/api/v1/jobs/J1/events');
+  for (let i = 1; i <= 600; i++) stream.emit('log', { message: 'entry ' + i }, i);
+  assert.equal(ui.node('events').children.length, 500);
+  stream.emit('log', { message: 'duplicate event' }, 600);
+  assert.equal(ui.node('events').children.length, 500);
+  stream.emit('progress', { completed: 17, total: 25 }, 601);
+  assert.match(ui.node('progress').textContent, /"completed": 17/);
+  ui.state.jobStatus = 'PASS';
+  stream.emit('status', { status: 'PASS' }, 602);
+  stream.emit('result', { status: 'PASS' }, 603);
+  await settle();
+  assert.equal(stream.closed, true);
+  assert.match(ui.node('stream-state').textContent, /completed/);
+  assert.match(ui.node('result').textContent, /PASS/);
+});
+
+test('leaving a job closes its stream and does not cancel the job', async () => {
+  const ui = boot({ hash: '#/jobs/J1' });
+  await settle();
+  const first = ui.streams[0];
+  ui.location.hash = '#/jobs/J2';
+  ui.window.listeners.hashchange();
+  await settle();
+  assert.equal(first.closed, true);
+  assert.equal(ui.streams.length, 2);
+  assert.equal(ui.node('job-title').textContent, 'Job J2');
+  assert.equal(ui.calls.filter(call => call.options.method === 'DELETE').length, 0);
+});
+
+test('cancellation waits for the Server to confirm a terminal status', async () => {
+  const ui = boot({ hash: '#/jobs/J1' });
+  await settle();
+  await ui.node('cancel-job').listeners.click();
+  assert.equal(ui.calls.filter(call => call.options.method === 'DELETE').length, 1);
+  assert.equal(ui.node('cancel-job').disabled, true);
+  assert.match(ui.node('cancel-state').textContent, /waiting for Server confirmation/);
+  assert.equal(ui.node('cancel-area').hidden, false);
+});
