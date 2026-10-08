@@ -286,6 +286,29 @@ test('job SSE receives progress while artifact discovery is still pending', asyn
 });
 
 
+
+test('a late initial artifact response cannot replace the terminal report list', async () => {
+  const ui = boot({ hash: '#/jobs/J1', deferArtifacts: true });
+  await waitFor(() => ui.streams.length === 1 && ui.pendingArtifacts.length === 1, 'initial artifact request');
+  ui.streams[0].emit('result', { status: 'PASS' }, 1);
+  await waitFor(() => ui.pendingArtifacts.length === 2, 'terminal artifact refresh');
+
+  ui.resolveArtifacts(1, {
+    ok: true, status: 200, headers: { get: () => 'application/json' },
+    json: async () => ({ items: [{ path: 'reports/final.html', size: 128 }] })
+  });
+  await waitFor(() => ui.node('artifacts').children.length === 1, 'terminal report listing');
+  assert.match(ui.node('artifacts').children[0].children[0].textContent, /reports\/final\.html/);
+
+  ui.resolveArtifacts(0, {
+    ok: true, status: 200, headers: { get: () => 'application/json' },
+    json: async () => ({ items: [] })
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.node('artifacts').children.length, 1);
+  assert.match(ui.node('artifacts').children[0].children[0].textContent, /reports\/final\.html/);
+});
+
 test('bounds and deduplicates event history, then closes terminal SSE', async () => {
   const ui = boot({ hash: '#/jobs/J1' });
   await waitFor(() => ui.streams.length === 1, 'initial job event stream');
