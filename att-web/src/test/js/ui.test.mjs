@@ -12,7 +12,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
   }
 }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false } = {}) {
+function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
@@ -40,6 +40,8 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   };
   const calls = [], streams = [];
   const state = { jobStatus: 'RUNNING' };
+  let rejectHome;
+  const delayedHome = new Promise((_, reject) => { rejectHome = reject; });
   class EventSource {
     constructor(url) { this.url = url; this.listeners = {}; this.closed = false; streams.push(this); }
     addEventListener(type, listener) { this.listeners[type] = listener; }
@@ -51,6 +53,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   async function fetch(url, options = {}) {
     const path = String(url).split('/api/v1/')[1];
     calls.push({ path, options });
+    if (deferHome && (path === 'packages' || path === 'jobs')) return delayedHome;
     if (jobMissing && path === 'jobs/nonexistent') {
       return { ok: false, status: 404, headers: { get: () => 'application/json' },
         json: async () => ({ error: { summary: 'Job not found' } }) };
@@ -72,7 +75,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     constructor(form) { return new Map(form.formValues || []); }
   }
   vm.runInNewContext(script, { document, location, window, fetch, EventSource, URL, Headers, FormData, console }, { filename: 'app.js' });
-  return { node, location, window, calls, streams, state };
+  return { node, location, window, calls, streams, state, failHome: error => rejectHome(error) };
 }
 
 test('rejects an incompatible API before accessing packages', async () => {
@@ -178,4 +181,17 @@ test('does not start SSE when the initial job lookup fails', async () => {
   await waitFor(() => ui.node('message').textContent.includes('Job not found'), 'job lookup error');
   assert.equal(ui.streams.length, 0);
   assert.deepEqual(ui.calls.map(call => call.path), ['version', 'jobs/nonexistent']);
+});
+test('late home failure cannot overwrite an active job view', async () => {
+  const ui = boot({ deferHome: true });
+  await waitFor(() => ui.calls.some(call => call.path === 'packages')
+    && ui.calls.some(call => call.path === 'jobs'), 'home requests');
+  ui.location.hash = '#/jobs/J1';
+  ui.window.listeners.hashchange();
+  await waitFor(() => ui.streams.length === 1, 'active job stream');
+  ui.failHome(new Error('late home request failed'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.node('connection').textContent, 'Connected');
+  assert.equal(ui.node('message').textContent, '');
+  assert.equal(ui.streams.length, 1);
 });
