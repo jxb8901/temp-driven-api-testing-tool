@@ -24,7 +24,8 @@
     const data = type.includes('json') ? await response.json() : null;
     if (!response.ok) {
       const error = data && data.error;
-      if (response.status === 401 || response.status === 403) throw new Error('Authentication is required or access was denied by Tomcat.');
+      if (response.status === 401) throw new Error('Authentication is required or access was denied by Tomcat.');
+      if (response.status === 403 && !type.includes('json')) throw new Error('Authentication is required or access was denied by Tomcat.');
       throw new Error(error && (error.summary || error.code) || `Server request failed (${response.status}).`);
     }
     if (!type.includes('json')) throw new Error('The Server returned an incompatible response.');
