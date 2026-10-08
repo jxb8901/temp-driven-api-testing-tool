@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 /** Small Java 8 HTTP transport. Uses JVM TLS verification and never logs credentials. */
-public final class RemoteHttpClient {
+public class RemoteHttpClient {
     public static final ObjectMapper JSON=new ObjectMapper();
     private static final int RESPONSE_LIMIT=8*1024*1024;
     private final String apiBase, username, password;

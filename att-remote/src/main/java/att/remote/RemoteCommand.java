@@ -77,7 +77,7 @@ public final class RemoteCommand {
         String id=jobId(a,1);JsonNode value=c.delete("/jobs/"+id);if("json".equals(f))System.out.println(value.toString());else System.out.println("Cancellation requested for "+id+" ("+value.path("status").asText()+")");return 0;
     }
     private static int watch(RemoteHttpClient c,List<String>a,String f)throws Exception {return follow(c,jobId(a,1),f);}
-    private static int submit(RemoteHttpClient c,List<String>a,String f,String operation)throws Exception {
+    static int submit(RemoteHttpClient c,List<String>a,String f,String operation)throws Exception {
         if(a.size()<2)throw new IllegalArgumentException("Usage: att remote "+operation+" <packageId> [ATT options]");String packageId=a.get(1);if(packageId.trim().isEmpty()||packageId.contains("/"))throw new IllegalArgumentException("packageId must be a logical Server package ID");
         ObjectNode body=RemoteHttpClient.JSON.createObjectNode();body.put("packageId",packageId);boolean detached=false;String debugType=null,debugId=null,scenario=null;
         ArrayNode suites=body.putArray("suites"),caseIds=body.putArray("caseIds"),tags=body.putArray("tags"),exclude=body.putArray("excludeTags"),overrides=body.putArray("overrides");ObjectNode load=body.putObject("load");
@@ -132,7 +132,7 @@ public final class RemoteCommand {
         if(detached){if("json".equals(f)){ObjectNode result=RemoteHttpClient.JSON.createObjectNode();result.put("jobId",id);result.put("status",accepted.path("status").asText("QUEUED"));System.out.println(result.toString());}else System.out.println(id);return 0;}
         return follow(c,id,f);
     }
-    private static int follow(RemoteHttpClient c,String id,String format)throws Exception {
+    static int follow(RemoteHttpClient c,String id,String format)throws Exception {
         JsonNode current=c.get("/jobs/"+id);ApiStatus status=parseStatus(current.path("status").asText(null));
         if(!status.isTerminal()){
             String cursor=null;int retries=0;
@@ -169,7 +169,11 @@ public final class RemoteCommand {
         return 0;
     }
     private static int artifact(RemoteHttpClient c,List<String>a)throws Exception {
-        if(a.size()!=5||!"--download".equals(a.get(3)))throw new IllegalArgumentException("Usage: att remote artifact <jobId> <logicalName> --download <directory>");Path saved=ArtifactDownloader.download(c,jobId(a,1),a.get(2),Paths.get(a.get(4)));System.out.println("Downloaded: "+saved);return 0;
+        if(a.size()!=5||!"--download".equals(a.get(3)))throw new IllegalArgumentException("Usage: att remote artifact <jobId> <logicalName> --download <directory>");
+        String id=jobId(a,1),name=a.get(2);JsonNode items=c.get("/jobs/"+id+"/artifacts").path("items");boolean listed=false;
+        for(JsonNode item:items)if(name.equals(item.path("path").asText())){listed=true;break;}
+        if(!listed)throw new RemoteException("Artifact name is not present in the Server's logical artifact list");
+        Path saved=ArtifactDownloader.download(c,id,name,Paths.get(a.get(4)));System.out.println("Downloaded: "+saved);return 0;
     }
     private static Credentials password(ServerProfile profile)throws RemoteException {
         if(!profile.basicAuth)return new Credentials(profile.username,null);
