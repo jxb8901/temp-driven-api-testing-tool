@@ -32,7 +32,7 @@ public final class DiagnosticSanitizer {
         matcher.appendTail(safe);return safe.toString();
     }
 
-    private static Object sanitizeValue(Object value) {
+    public static Object sanitizeValue(Object value) {
         if(value instanceof Map<?,?>)return sanitize((Map<?,?>)value);
         if(value instanceof Iterable<?>) {
             List<Object> safe=new ArrayList<Object>();for(Object item:(Iterable<?>)value)safe.add(sanitizeValue(item));return safe;
@@ -44,6 +44,7 @@ public final class DiagnosticSanitizer {
     private static boolean sensitiveName(String value) {
         String key=value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]","");
         return key.contains("password")||key.contains("passwd")||key.contains("token")||key.contains("secret")
-                ||key.contains("credential")||key.contains("apikey")||key.contains("privatekey")||key.contains("accesskey");
+                ||key.contains("credential")||key.contains("apikey")||key.contains("privatekey")||key.contains("accesskey")
+                ||key.contains("authorization");
     }
 }

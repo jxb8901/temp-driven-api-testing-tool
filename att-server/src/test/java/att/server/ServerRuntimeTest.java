@@ -111,7 +111,29 @@ class ServerRuntimeTest {
         Path driverSource=Files.createDirectories(temp.resolve("driver-src/oracle/jdbc")).resolve("OracleDriver.java");
         Files.writeString(driverSource,"package oracle.jdbc; public final class OracleDriver { }");Path driverClasses=Files.createDirectory(temp.resolve("driver-classes"));
         Path probeSource=Files.createDirectories(temp.resolve("probe-src/probe")).resolve("WorkerProbe.java");
-        Files.writeString(probeSource,"package probe; public final class WorkerProbe { public static void main(String[] args) { try { new java.io.BufferedReader(new java.io.InputStreamReader(System.in)).readLine(); Class<?> d=Class.forName(\"oracle.jdbc.OracleDriver\"); System.out.println(\"{\\\"type\\\":\\\"DIAGNOSTIC\\\",\\\"code\\\":\\\"TEST\\\",\\\"message\\\":\\\"authentication failed: password=synthetic-secret\\\"}\"); System.out.println(\"{\\\"type\\\":\\\"RESULT\\\",\\\"status\\\":\\\"PASS\\\",\\\"exitCode\\\":0,\\\"result\\\":{\\\"driver\\\":\\\"\"+d.getName()+\"\\\"}}\"); } catch(Throwable t) { System.out.println(\"{\\\"type\\\":\\\"RESULT\\\",\\\"status\\\":\\\"ERROR\\\",\\\"exitCode\\\":3}\"); } } }");
+        List<Map<String,Object>> workerEvents=List.of(
+                Map.of("type","DIAGNOSTIC","code","TEST","message","password=synthetic-diagnostic-secret"),
+                Map.of("type","PROGRESS","message","token=synthetic-progress-secret"),
+                Map.of("type","LOG","headers",Map.of("Authorization","Basic synthetic-basic-marker","Proxy-Authorization","Bearer synthetic-proxy-marker")),
+                Map.of("type","RESULT","status","PASS","exitCode",0,"result",Map.of("driver","__DRIVER__","message","password=synthetic-result-secret","headers",Map.of("Authorization","Bearer synthetic-result-marker")))
+        );
+        List<String> encodedEventList=new java.util.ArrayList<>();for(Map<String,Object> event:workerEvents)encodedEventList.add("\""+java.util.Base64.getEncoder().encodeToString(ServerRuntime.JSON.writeValueAsBytes(event))+"\"");String encodedEvents=String.join(",",encodedEventList);
+        Files.writeString(probeSource,"""
+                package probe;
+                public final class WorkerProbe {
+                    public static void main(String[] args) {
+                        try {
+                            new java.io.BufferedReader(new java.io.InputStreamReader(System.in)).readLine();
+                            Class<?> d=Class.forName("oracle.jdbc.OracleDriver");
+                            String[] events={%s};
+                            for(String event:events) {
+                                String json=new String(java.util.Base64.getDecoder().decode(event),java.nio.charset.StandardCharsets.UTF_8);
+                                System.out.println(json.replace("__DRIVER__",d.getName()));
+                            }
+                        } catch(Throwable t) { System.out.println("{\\\"type\\\":\\\"RESULT\\\",\\\"status\\\":\\\"ERROR\\\",\\\"exitCode\\\":3}"); }
+                    }
+                }
+                """.formatted(encodedEvents));
         Path probeClasses=Files.createDirectory(temp.resolve("probe-classes"));javax.tools.JavaCompiler compiler=javax.tools.ToolProvider.getSystemJavaCompiler();assertNotNull(compiler,"Tests require a JDK compiler");
         assertEquals(0,compiler.run(null,null,null,"-d",driverClasses.toString(),driverSource.toString()));assertEquals(0,compiler.run(null,null,null,"-d",probeClasses.toString(),probeSource.toString()));
         addModuleJar(externalLibraries,"oracle-driver",driverClasses);addModuleJar(webLibs,"worker-probe",probeClasses);
@@ -127,7 +149,8 @@ class ServerRuntimeTest {
             while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(result.get("status"))&&System.nanoTime()<deadline){Thread.sleep(10);result=runtime.jobRecord(id);}
             assertEquals("PASS",result.get("status"),"Worker subprocess must load the class contained only in the separately supplied driver JAR: job="+result+" result="+runtime.resultRecord(id));
             String publicResult=ServerRuntime.JSON.valueToTree(runtime.resultRecord(id)).toString();
-            assertTrue(publicResult.contains("oracle.jdbc.OracleDriver"));assertFalse(publicResult.contains("synthetic-secret"));assertTrue(publicResult.contains("[REDACTED_SECRET]"));
+            String publicEvents=runtime.events(id).after(0).toString();String published=publicResult+publicEvents;
+            assertTrue(publicResult.contains("oracle.jdbc.OracleDriver"));assertFalse(published.contains("synthetic-"));assertTrue(published.contains("[REDACTED_SECRET]"));
         } finally {runtime.close();}
     }
 
