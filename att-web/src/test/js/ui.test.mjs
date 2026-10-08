@@ -57,7 +57,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     calls.push({ path, options });
     if (deferSubmit && options.method === 'POST') return new Promise((resolve, reject) => pendingSubmissions.push({ resolve, reject }));
     if (deferCancel && options.method === 'DELETE') return new Promise((resolve, reject) => pendingCancellations.push({ resolve, reject }));
-    if (deferArtifacts && /^jobs\\/[^/]+\\/artifacts$/.test(path)) return new Promise(resolve => pendingArtifacts.push(resolve));
+    if (deferArtifacts && /^jobs\/[^/]+\/artifacts$/.test(path)) return new Promise(resolve => pendingArtifacts.push(resolve));
     if (deferHome && (path === 'packages' || path === 'jobs')) return delayedHome;
     if (postForbidden && path === 'jobs/run' && options.method === 'POST') {
       return { ok: false, status: 403, headers: { get: () => 'application/json' },
