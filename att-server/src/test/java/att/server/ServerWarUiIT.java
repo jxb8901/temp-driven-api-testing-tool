@@ -24,10 +24,11 @@ class ServerWarUiIT {
         Path users = Files.writeString(temp.resolve("tomcat-users.xml"),
                 "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
         Path packages = Files.createDirectories(temp.resolve("packages"));
+        Path dummyPackage = Files.createDirectories(packages.resolve("dummy"));
         Path config = Files.writeString(temp.resolve("server.yaml"),
                 "server:\n  dataDir: " + temp.resolve("data") + "\n  authenticationRequired: true\n"
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"
-                        + "packages:\n  allowedRoots:\n    - " + packages + "\n  entries: {}\n");
+                        + "packages:\n  allowedRoots:\n    - " + packages + "\n  entries:\n    dummy: " + dummyPackage + "\n");
         String oldConfig = System.getProperty("att.server.config");
         System.setProperty("att.server.config", config.toString());
 
