@@ -46,6 +46,8 @@ class ServerWarUiIT {
             assertEquals(401, get(port, "/tools/att/ui/index.html", null));
             String auth = "Basic " + Base64.getEncoder().encodeToString(
                     "att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertJobDeepLink(port, auth);
+
             for (String asset : new String[]{"index.html", "app.js", "app.css"}) {
                 HttpURLConnection connection = open(port, "/tools/att/ui/" + asset, auth);
                 try {
@@ -66,6 +68,24 @@ class ServerWarUiIT {
             try { tomcat.stop(); } finally { tomcat.destroy(); }
             if (oldConfig == null) System.clearProperty("att.server.config");
             else System.setProperty("att.server.config", oldConfig);
+        }
+    }
+
+
+    private static void assertJobDeepLink(int port, String authorization) throws Exception {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            assertEquals(401, get(port, "/tools/att/ui/jobs/J10045", null),
+                    "Deep links must use the same container authentication as the UI");
+            HttpURLConnection route = open(port, "/tools/att/ui/jobs/J10045", authorization);
+            route.setInstanceFollowRedirects(false);
+            try {
+                assertEquals(302, route.getResponseCode());
+                assertEquals("/tools/att/ui/index.html#/jobs/J10045", route.getHeaderField("Location"));
+            } finally {
+                route.disconnect();
+            }
+            assertEquals(200, get(port, "/tools/att/ui/index.html", authorization),
+                    "Reopening the canonical job route must load the UI shell");
         }
     }
 
