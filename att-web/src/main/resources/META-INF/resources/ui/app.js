@@ -122,9 +122,14 @@
     }
     const overrides = String(values.get('overrides') || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     if (overrides.length) body.overrides = overrides;
-    try { const accepted = await request(`jobs/${command}`, { method: 'POST', body: JSON.stringify(body) }); location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`; }
-    catch (error) { message(error.message); }
-    finally { submitting = false; if (submitButton) submitButton.disabled = false; }
+    const generation = navigation; const packageId = selectedPackage;
+    try {
+      const accepted = await request(`jobs/${command}`, { method: 'POST', body: JSON.stringify(body) });
+      if (generation === navigation && selectedPackage === packageId)
+        location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
+    } catch (error) {
+      if (generation === navigation && selectedPackage === packageId) message(error.message);
+    } finally { submitting = false; if (submitButton) submitButton.disabled = false; }
   });
   function appendEvent(type, event, jobId, generation) {
     const id = Number(event.lastEventId || 0);
