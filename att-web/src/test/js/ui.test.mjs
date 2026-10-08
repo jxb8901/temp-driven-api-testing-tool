@@ -12,7 +12,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
   }
 }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false } = {}) {
+function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
@@ -57,6 +57,10 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     if (deferSubmit && options.method === 'POST') return new Promise((resolve, reject) => pendingSubmissions.push({ resolve, reject }));
     if (deferCancel && options.method === 'DELETE') return new Promise((resolve, reject) => pendingCancellations.push({ resolve, reject }));
     if (deferHome && (path === 'packages' || path === 'jobs')) return delayedHome;
+    if (postForbidden && path === 'jobs/run' && options.method === 'POST') {
+      return { ok: false, status: 403, headers: { get: () => 'application/json' },
+        json: async () => ({ error: { code: 'ATT-SERVER-CROSS-ORIGIN-REQUEST', summary: 'State-changing requests must use the same origin.' } }) };
+    }
     if (jobMissing && path === 'jobs/nonexistent') {
       return { ok: false, status: 404, headers: { get: () => 'application/json' },
         json: async () => ({ error: { summary: 'Job not found' } }) };
@@ -107,6 +111,18 @@ test('submits logical package DTOs with a non-root Tomcat context', async () => 
   assert.equal(ui.location.hash, '#/jobs/J1');
 });
 
+
+
+
+test('shows the public API summary for a JSON 403 submission error', async () => {
+  const ui = boot({ hash: '#/packages/payments', postForbidden: true });
+  await waitFor(() => ui.node('package-title').textContent === 'payments', 'package form');
+  const form = ui.node('submit-form');
+  form.formValues = [['command', 'run']];
+  await form.listeners.submit({ preventDefault() {}, currentTarget: form });
+  assert.equal(ui.node('message').textContent, 'State-changing requests must use the same origin.');
+  assert.doesNotMatch(ui.node('message').textContent, /Authentication is required/);
+});
 
 
 test('a rejected Debug form can be corrected and submitted', async () => {
