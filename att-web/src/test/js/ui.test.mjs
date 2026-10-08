@@ -12,7 +12,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
   }
 }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false } = {}) {
+function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, jobStatus = 'RUNNING', artifactItems = [] } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
@@ -40,8 +40,8 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   const window = { listeners: {}, confirm: () => confirmCancel,
     addEventListener(name, listener) { this.listeners[name] = listener; }
   };
-  const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [], pendingHomeJobs = [];
-  const state = { jobStatus: 'RUNNING' };
+  const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [], pendingHomeJobs = [], pendingResults = [];
+  const state = { jobStatus };
   let rejectHome;
   const delayedHome = new Promise((_, reject) => { rejectHome = reject; });
   class EventSource {
@@ -59,6 +59,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     if (deferCancel && options.method === 'DELETE') return new Promise((resolve, reject) => pendingCancellations.push({ resolve, reject }));
     if (deferArtifacts && /^jobs\/[^/]+\/artifacts$/.test(path)) return new Promise(resolve => pendingArtifacts.push(resolve));
     if (deferJobLists && path === 'jobs' && !options.method) return new Promise((resolve, reject) => pendingHomeJobs.push({ resolve, reject }));
+    if (deferResult && /^jobs\\/[^/]+\\/result$/.test(path)) return new Promise(resolve => pendingResults.push(resolve));
     if (deferHome && (path === 'packages' || path === 'jobs')) return delayedHome;
     if (postForbidden && path === 'jobs/run' && options.method === 'POST') {
       return { ok: false, status: 403, headers: { get: () => 'application/json' },
@@ -74,7 +75,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     else if (path.startsWith('packages/')) result = { packageId: path.substring(9) };
     else if (path === 'jobs') result = { items: [] };
     else if (/^jobs\/(run|debug|load|validate)$/.test(path) && options.method === 'POST') result = { jobId: 'J1' };
-    else if (/^jobs\/[^/]+\/artifacts$/.test(path)) result = { items: [] };
+    else if (/^jobs\/[^/]+\/artifacts$/.test(path)) result = { items: artifactItems };
     else if (/^jobs\/[^/]+\/result$/.test(path)) result = { result: { passed: 1 }, diagnostic: null };
     else if (/^jobs\/[^/]+$/.test(path) && options.method === 'DELETE') result = { status: 'CANCEL_REQUESTED' };
     else if (/^jobs\/[^/]+$/.test(path)) result = { jobId: path.split('/')[1], status: state.jobStatus, packageId: 'payments', command: 'run' };
@@ -85,12 +86,13 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     constructor(form) { return new Map(form.formValues || []); }
   }
   vm.runInNewContext(script, { document, location, window, fetch, EventSource, URL, Headers, FormData, console }, { filename: 'app.js' });
-  return { node, location, window, calls, streams, state, pendingSubmissions, pendingCancellations, pendingArtifacts, pendingHomeJobs,
+  return { node, location, window, calls, streams, state, pendingSubmissions, pendingCancellations, pendingArtifacts, pendingHomeJobs, pendingResults,
     resolveSubmission: (index, response) => pendingSubmissions[index].resolve(response),
     rejectSubmission: (index, error) => pendingSubmissions[index].reject(error),
     resolveCancellation: (index, response) => pendingCancellations[index].resolve(response),
     resolveArtifacts: (index, response) => pendingArtifacts[index](response),
     resolveHomeJobList: (index, response) => pendingHomeJobs[index].resolve(response),
+    resolveResult: (index, response) => pendingResults[index](response),
     rejectCancellation: (index, error) => pendingCancellations[index].reject(error),
     failHome: error => rejectHome(error) };
 }
@@ -309,6 +311,26 @@ test('a late initial artifact response cannot replace the terminal report list',
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(ui.node('artifacts').children.length, 1);
   assert.match(ui.node('artifacts').children[0].children[0].textContent, /reports\/final\.html/);
+});
+
+
+test('terminal job SSE and artifacts load before a deferred result response', async () => {
+  const ui = boot({
+    hash: '#/jobs/J1', jobStatus: 'PASS', deferResult: true,
+    artifactItems: [{ path: 'report.html', size: 12 }]
+  });
+  await waitFor(() => ui.pendingResults.length === 1, 'deferred terminal result');
+  await waitFor(() => ui.streams.length === 1 && ui.node('artifacts').children.length === 1,
+    'terminal SSE and artifact list');
+  assert.equal(ui.node('result').textContent, '');
+  assert.ok(ui.calls.some(call => call.path === 'jobs/J1/events' || call.path === 'jobs/J1/artifacts'));
+
+  ui.resolveResult(0, {
+    ok: true, status: 200, headers: { get: () => 'application/json' },
+    json: async () => ({ result: { passed: 1 }, diagnostic: null })
+  });
+  await waitFor(() => ui.node('result').textContent.includes('PASS'), 'terminal result');
+  assert.match(ui.node('artifacts').children[0].children[0].textContent, /report\.html/);
 });
 
 test('bounds and deduplicates event history, then closes terminal SSE', async () => {
