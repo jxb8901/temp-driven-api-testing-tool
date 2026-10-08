@@ -11,6 +11,8 @@ import java.util.regex.Pattern;
 /** Secret-safe projection for diagnostic text crossing the Worker protocol. */
 public final class DiagnosticSanitizer {
     private static final String REDACTED="[REDACTED_SECRET]";
+    private static final Pattern SENSITIVE_HEADER=Pattern.compile(
+            "(?i)(\\b(?:proxy[-_]?authorization|authorization|set-cookie|cookie)\\b\\s*[:=]\\s*)[^\\r\\n]*");
     private static final Pattern SENSITIVE_ASSIGNMENT=Pattern.compile(
             "(?i)(\\b(?:password|passwd|token|secret|api[-_]?key|authorization|credential|private[-_]?key|access[-_]?key|identityfile|truststorepassword)\\b\\s*[=:]\\s*)(\\\"[^\\\"]*\\\"|'[^']*'|[^\\s,;&]+)");
 
@@ -27,7 +29,10 @@ public final class DiagnosticSanitizer {
 
     public static String redactText(String value) {
         if(value==null)return "";
-        Matcher matcher=SENSITIVE_ASSIGNMENT.matcher(value);StringBuffer safe=new StringBuffer();
+        Matcher headerMatcher=SENSITIVE_HEADER.matcher(value);StringBuffer headerSafe=new StringBuffer();
+        while(headerMatcher.find())headerMatcher.appendReplacement(headerSafe,Matcher.quoteReplacement(headerMatcher.group(1)+REDACTED));
+        headerMatcher.appendTail(headerSafe);
+        Matcher matcher=SENSITIVE_ASSIGNMENT.matcher(headerSafe.toString());StringBuffer safe=new StringBuffer();
         while(matcher.find())matcher.appendReplacement(safe,Matcher.quoteReplacement(matcher.group(1)+REDACTED));
         matcher.appendTail(safe);return safe.toString();
     }
@@ -45,6 +50,6 @@ public final class DiagnosticSanitizer {
         String key=value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]","");
         return key.contains("password")||key.contains("passwd")||key.contains("token")||key.contains("secret")
                 ||key.contains("credential")||key.contains("apikey")||key.contains("privatekey")||key.contains("accesskey")
-                ||key.contains("authorization");
+                ||key.contains("authorization")||key.contains("cookie");
     }
 }
