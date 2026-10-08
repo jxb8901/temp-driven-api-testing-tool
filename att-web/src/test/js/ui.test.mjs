@@ -54,7 +54,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   async function fetch(url, options = {}) {
     const path = String(url).split('/api/v1/')[1];
     calls.push({ path, options });
-    if (deferSubmit && options.method === 'POST') return new Promise(resolve => pendingSubmissions.push(resolve));
+    if (deferSubmit && options.method === 'POST') return new Promise((resolve, reject) => pendingSubmissions.push({ resolve, reject }));
     if (deferCancel && options.method === 'DELETE') return new Promise((resolve, reject) => pendingCancellations.push({ resolve, reject }));
     if (deferHome && (path === 'packages' || path === 'jobs')) return delayedHome;
     if (jobMissing && path === 'jobs/nonexistent') {
@@ -79,7 +79,8 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   }
   vm.runInNewContext(script, { document, location, window, fetch, EventSource, URL, Headers, FormData, console }, { filename: 'app.js' });
   return { node, location, window, calls, streams, state, pendingSubmissions, pendingCancellations,
-    resolveSubmission: (index, response) => pendingSubmissions[index](response),
+    resolveSubmission: (index, response) => pendingSubmissions[index].resolve(response),
+    rejectSubmission: (index, error) => pendingSubmissions[index].reject(error),
     resolveCancellation: (index, response) => pendingCancellations[index].resolve(response),
     rejectCancellation: (index, error) => pendingCancellations[index].reject(error),
     failHome: error => rejectHome(error) };
@@ -143,6 +144,36 @@ test('ignores duplicate submissions while a job request is pending', async () =>
   assert.equal(ui.location.hash, '#/jobs/J_PENDING');
 });
 
+
+
+test('late submission success or failure cannot change a different route', async () => {
+  for (const outcome of ['success', 'failure']) {
+    const ui = boot({ hash: '#/packages/A', deferSubmit: true });
+    await waitFor(() => ui.node('package-title').textContent === 'A', 'package A form');
+    const form = ui.node('submit-form');
+    form.formValues = [['command', 'run']];
+    const pending = form.listeners.submit({ preventDefault() {}, currentTarget: form });
+    await waitFor(() => ui.pendingSubmissions.length === 1, 'package A submission');
+
+    ui.location.hash = '#/packages/B';
+    ui.window.listeners.hashchange();
+    await waitFor(() => ui.node('package-title').textContent === 'B', 'package B form');
+    ui.node('message').textContent = 'B view message';
+
+    if (outcome === 'success') {
+      ui.resolveSubmission(0, {
+        ok: true, status: 202, headers: { get: () => 'application/json' },
+        json: async () => ({ jobId: 'J_STALE' })
+      });
+    } else {
+      ui.rejectSubmission(0, new Error('A submission failed late'));
+    }
+    await pending;
+    assert.equal(ui.location.hash, '#/packages/B');
+    assert.equal(ui.node('message').textContent, 'B view message');
+    assert.equal(form.submitButton.disabled, false);
+  }
+});
 
 test('bounds and deduplicates event history, then closes terminal SSE', async () => {
   const ui = boot({ hash: '#/jobs/J1' });
