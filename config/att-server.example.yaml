@@ -8,12 +8,17 @@ server:
   maxRequestBytes: 1048576
   maxEventsPerJob: 10000
   maxArtifacts: 1000
+  # Terminal job metadata, event journals, and artifacts are removed after this many days.
+  jobRetentionDays: 30
 
 workers:
   maxConcurrent: 8
   queuedLimit: 100
+  # Maximum admitted Load jobs (queued or executing); excess submissions receive HTTP 429.
   maxConcurrentLoad: 2
   gracefulStopMs: 10000
+  # Optional directories containing external JDBC, MQ, or other Worker dependency JARs.
+  libraryDirs: []
 
 packages:
   allowedRoots:

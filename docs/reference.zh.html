@@ -5503,8 +5503,10 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb85-1"><a href="#
 <span id="cb85-5"><a href="#cb85-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit load payments <span class="at">--scenario</span> load/payment.yaml <span class="at">--users</span> 2 <span class="at">--duration</span> 30s</span>
 <span id="cb85-6"><a href="#cb85-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit artifacts J0123456789ABCDEF <span class="at">--download</span> ./results</span></code></pre></div>
 <p><code>--server</code> 選擇 <code>~/.att/servers.yaml</code> 中的
-profile。<code>ATT_SERVER</code> 會覆蓋 default profile 的
-URL；明確指定的 <code>--server</code> profile 優先。Remote
+profile；設定 <code>ATT_REMOTE_CONFIG</code> 可使用其他 profile
+檔案。<code>ATT_SERVER_CONFIG</code> 保留給 Server deployment
+YAML。<code>ATT_SERVER</code> 會覆蓋 default profile 的 URL；明確指定的
+<code>--server</code> profile 優先。Remote
 package、suite、config、scenario 及 Debug input 必須是 Server package
 的相對邏輯名稱。CLI 不會傳送本機絕對路徑或
 <code>--output-dir</code>。</p>

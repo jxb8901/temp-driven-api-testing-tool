@@ -91,9 +91,49 @@ class ServerRuntimeTest {
         } finally {runtime.close();}
     }
 
+    @Test void rejectsPackageRootReplacedBySymlinkAfterServerInitialization() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),"Uses POSIX symlink behavior");
+        Path allowed=Files.createDirectory(temp.resolve("symlink-allowed"));Path outside=Files.createDirectory(temp.resolve("symlink-outside"));
+        Path pkg=Files.createDirectory(allowed.resolve("package"));Path yaml=temp.resolve("symlink-server.yaml");
+        Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("symlink-data")+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("symlink-libs")).toString());
+        try {
+            Files.move(pkg,allowed.resolve("package-original"));Files.createSymbolicLink(pkg,outside);
+            JsonNode request=ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}");
+            IllegalArgumentException rejected=assertThrows(IllegalArgumentException.class,()->runtime.submit("validate",request,"test"));
+            assertTrue(rejected.getMessage().contains("original allowed root"));assertTrue(runtime.store.list(100).isEmpty());
+        } finally {runtime.close();}
+    }
+
+    @Test void workerCanLoadDriverFromSeparatelyConfiguredLibraryJar() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("external-driver-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));
+        Path externalLibraries=Files.createDirectory(temp.resolve("external-worker-libraries"));Path webLibs=Files.createDirectory(temp.resolve("external-worker-web-libs"));
+        Path driverSource=Files.createDirectories(temp.resolve("driver-src/oracle/jdbc")).resolve("OracleDriver.java");
+        Files.writeString(driverSource,"package oracle.jdbc; public final class OracleDriver { }");Path driverClasses=Files.createDirectory(temp.resolve("driver-classes"));
+        Path probeSource=Files.createDirectories(temp.resolve("probe-src/probe")).resolve("WorkerProbe.java");
+        Files.writeString(probeSource,"package probe; public final class WorkerProbe { public static void main(String[] args) { try { new java.io.BufferedReader(new java.io.InputStreamReader(System.in)).readLine(); Class<?> d=Class.forName(\"oracle.jdbc.OracleDriver\"); System.out.println(\"{\\\"type\\\":\\\"RESULT\\\",\\\"status\\\":\\\"PASS\\\",\\\"exitCode\\\":0,\\\"result\\\":{\\\"driver\\\":\\\"\"+d.getName()+\"\\\"}}\"); } catch(Throwable t) { System.out.println(\"{\\\"type\\\":\\\"RESULT\\\",\\\"status\\\":\\\"ERROR\\\",\\\"exitCode\\\":3}\"); } } }");
+        Path probeClasses=Files.createDirectory(temp.resolve("probe-classes"));javax.tools.JavaCompiler compiler=javax.tools.ToolProvider.getSystemJavaCompiler();assertNotNull(compiler,"Tests require a JDK compiler");
+        assertEquals(0,compiler.run(null,null,null,"-d",driverClasses.toString(),driverSource.toString()));assertEquals(0,compiler.run(null,null,null,"-d",probeClasses.toString(),probeSource.toString()));
+        addModuleJar(externalLibraries,"oracle-driver",driverClasses);addModuleJar(webLibs,"worker-probe",probeClasses);
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");Path yaml=temp.resolve("external-driver-server.yaml");
+        Files.writeString(yaml,"server:\n  dataDir: "+yaml(temp.resolve("external-driver-data"))+"\n  javaExecutable: "+yaml(java)+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n  libraryDirs:\n    - "+yaml(externalLibraries)+"\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),webLibs.toString(),builder->{
+            assertTrue(builder.command().get(2).contains(externalLibraries.resolve("*").toString()),"Configured external library wildcard must be on the Worker classpath");
+            builder.command().set(3,"probe.WorkerProbe");return builder.start();
+        });
+        try {
+            Map<String,Object> submitted=runtime.submit("validate",ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}"),"test");String id=(String)submitted.get("jobId");
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);Map<String,Object> result=runtime.jobRecord(id);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(result.get("status"))&&System.nanoTime()<deadline){Thread.sleep(10);result=runtime.jobRecord(id);}
+            assertEquals("PASS",result.get("status"),"Worker subprocess must load the class contained only in the separately supplied driver JAR: job="+result+" result="+runtime.resultRecord(id));
+            assertTrue(String.valueOf(runtime.resultRecord(id).get("result")).contains("oracle.jdbc.OracleDriver"));
+        } finally {runtime.close();}
+    }
+
     private static void addModuleJar(Path lib,String name,Path classes)throws Exception {
         Path target=lib.resolve(name+".jar");try(OutputStream file=Files.newOutputStream(target);JarOutputStream jar=new JarOutputStream(file);var paths=Files.walk(classes)) {
             paths.filter(Files::isRegularFile).forEach(path->{try{jar.putNextEntry(new JarEntry(classes.relativize(path).toString().replace('\\','/')));Files.copy(path,jar);jar.closeEntry();}catch(Exception e){throw new IllegalStateException(e);}});
         }
     }
+    private static String yaml(Path path){return "'"+path.toAbsolutePath().toString().replace("'","''")+"'";}
 }

@@ -28,4 +28,9 @@ class ServerProfileLoaderTest {
         Path http=temp.resolve("http.yaml");Files.write(http,("default: ci\nservers:\n  ci:\n    url: http://ci.example.com\n    auth:\n      type: basic\n      username: ci\n").getBytes("UTF-8"));
         assertThrows(RemoteException.class,()->ServerProfileLoader.resolve(null,null,http));
     }
+    @Test void remoteProfilePathUsesDedicatedEnvironmentVariable() {
+        Path serverConfig=temp.resolve("att-server.yaml"),remoteConfig=temp.resolve("remote-servers.yaml");
+        java.util.Map<String,String> environment=new java.util.HashMap<>();environment.put("ATT_SERVER_CONFIG",serverConfig.toString());environment.put("ATT_REMOTE_CONFIG",remoteConfig.toString());
+        assertEquals(remoteConfig.toAbsolutePath().normalize(),ServerProfileLoader.profilePath(environment));
+    }
 }

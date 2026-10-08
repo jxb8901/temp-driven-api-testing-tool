@@ -10,21 +10,26 @@ ATT Server 4.0.0 provides a single-node control plane for submitting ATT Run, De
 4. Set `-Datt.server.config=/etc/att/server.yaml` in Tomcat's Java options. The `ATT_SERVER_CONFIG` environment variable is also accepted when the system property is absent.
 5. Deploy `att-server-4.0.0.war` to Tomcat 10.1+. Keep Tomcat's `unpackWARs` enabled so the Server can launch the Worker from `WEB-INF/lib`.
 
-Tomcat owns listeners, TLS, access logs, and authentication. The WAR configures HTTP BASIC authentication for package and job APIs and metrics, mapped to the container role `ATT_USER`; configure a Tomcat Realm with the intended users assigned to that role. Health and version remain public. Terminate TLS before exposing BASIC credentials. The Server fails startup when its configuration, Java baseline, or package mappings are invalid.
+Tomcat owns listeners, TLS, access logs, and authentication. The WAR uses the Servlet container's configured authentication mechanism on package and job APIs and metrics, and preserves the container's challenge or redirect when authentication fails. Any authenticated Servlet Principal has the same API permissions in v1; no `ATT_USER` role assignment or ATT-specific RBAC is required. Health and version remain public. Terminate TLS before exposing BASIC credentials. The Server fails startup when its configuration, Java baseline, or package mappings are invalid.
 
 ## Configuration
 
-`server.dataDir` stores H2 control-plane metadata and job output. Worker concurrency, queue size, Load concurrency, and graceful stop timeout are bounded by `workers`. The `packages` registry is read-only and maps stable package IDs to canonical roots beneath `allowedRoots`.
+`server.dataDir` stores H2 control-plane metadata and job output. Worker concurrency, queue size, Load admission, and graceful stop timeout are bounded by `workers`. Rejected submissions are discarded before they create durable job records. Terminal job metadata, journals, and artifacts are retained for `server.jobRetentionDays` (default 30, allowed range 1–3650); expired jobs are cleaned at startup and hourly, while active jobs are preserved. `workers.maxConcurrentLoad` bounds admitted Load jobs, including queued jobs, so waiting Loads do not occupy general Worker threads. Excess Load or overall-capacity submissions receive HTTP 429. `workers.libraryDirs` optionally lists absolute, existing, readable directories whose JARs are added to the Worker subprocess classpath for external JDBC, MQ, or other dependencies; configure only trusted server-owned directories. The `packages` registry is read-only and maps stable package IDs to canonical roots beneath `allowedRoots`.
 
 ```yaml
 server:
   dataDir: /var/lib/att-server
   authenticationRequired: true
+  jobRetentionDays: 30
 workers:
   maxConcurrent: 8
   queuedLimit: 100
+  # Maximum admitted Load jobs, queued or executing.
   maxConcurrentLoad: 2
   gracefulStopMs: 10000
+  # Optional external Worker dependency JAR directories.
+  libraryDirs:
+    - /opt/att/worker-libs
 packages:
   allowedRoots:
     - /srv/att/packages
@@ -32,7 +37,7 @@ packages:
     payments: /srv/att/packages/payments
 ```
 
-`dataDir` must be absolute. Package roots and allowed roots must exist at startup. Package paths are canonicalized; symlinks that resolve outside an allowed root are rejected. Clients submit `packageId`; they cannot select a package path, output path, Worker executable, or classpath. Package registration and mutation endpoints are not available in v1.
+`dataDir` must be absolute. Package roots, allowed roots, and configured Worker library directories must exist at startup. Package paths are canonicalized; symlinks that resolve outside an allowed root are rejected. Clients submit `packageId`; they cannot select a package path, output path, Worker executable, or classpath. Package registration and mutation endpoints are not available in v1.
 
 Server state is stored in `dataDir/db/`. Each job uses `dataDir/jobs/<jobId>/` for its bounded event journal and execution output. A restarted Server marks old queued or active jobs `ERROR` with `ATT-SERVER-INTERRUPTED`; it does not rerun them.
 
@@ -51,9 +56,9 @@ State-changing requests require `application/json`; requests carrying an `Origin
        portHeader="X-Forwarded-Port" />
 ```
 
-All authenticated principals in `ATT_USER` have the same permissions in v1. For an intentionally isolated network, set `server.authenticationRequired: false` to accept anonymous API requests; this bypasses authentication for every API operation and should not be used on an untrusted network. ATT Server does not implement passwords, JWT/OIDC validation, LDAP authentication, login flows, or ATT-specific RBAC. Do not put credentials in API payloads or package files.
+All authenticated Servlet Principals have the same permissions in v1; ATT does not require a particular container role or provide ATT-specific RBAC. For an intentionally isolated network, set `server.authenticationRequired: false` to accept anonymous API requests; this bypasses authentication for every API operation and should not be used on an untrusted network. ATT Server does not implement passwords, JWT/OIDC validation, LDAP authentication, or login flows. The Servlet container owns authentication challenges and redirects. Do not put credentials in API payloads or package files.
 
-The bundled browser console is served at `<context path>/ui/` and uses the same container-managed HTTP Basic authentication and `ATT_USER` authorization policy as the API. See [ATT Server Web UI](att-server-web-ui.md).
+The bundled browser console is served at `<context path>/ui/` and uses the same container-managed authentication policy as the API. See [ATT Server Web UI](att-server-web-ui.md).
 
 ## REST API
 
@@ -96,7 +101,7 @@ data: {"jobId":"J...","status":"RUNNING"}
 
 ```
 
-Send `Last-Event-ID` after reconnecting to replay retained events with greater IDs. If older events have expired from the bounded journal, the stream resumes with events still retained. The stream sends `: keepalive` comments while idle and closes after it delivers the terminal result. A disconnected observer does not cancel the job. Each observer has its own one-entry notification queue, and the stream executor is also bounded. Client writes happen outside the Worker event reader.
+Send `Last-Event-ID` after reconnecting to replay retained events with greater IDs. If older events have expired from the bounded journal, the stream resumes with events still retained. The stream sends `: keepalive` comments while idle and closes after it delivers the terminal result. A disconnected observer does not cancel the job. Up to 32 observers receive dedicated stream threads through direct handoff; excess observers are rejected with HTTP 503 before a stream starts. Each observer has its own one-entry notification queue. Client writes happen outside the Worker event reader.
 
 ## Cancellation and recovery
 

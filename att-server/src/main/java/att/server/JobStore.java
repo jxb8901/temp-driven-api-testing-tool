@@ -49,6 +49,16 @@ final class JobStore implements AutoCloseable {
         try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT job_id FROM jobs WHERE status IN ('QUEUED','PREPARING','RUNNING')")) { while(r.next())ids.add(r.getString(1)); }
         return ids;
     }
+    synchronized List<String> expiredJobIds(Instant before) throws Exception {
+        List<String> ids=new ArrayList<>();
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM jobs WHERE status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at < ? ORDER BY finished_at LIMIT 500")) {
+            p.setString(1,before.toString());try(ResultSet r=p.executeQuery()){while(r.next())ids.add(r.getString(1));}
+        }
+        return ids;
+    }
+    synchronized void deleteJob(String id) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM jobs WHERE job_id=?")){p.setString(1,id);p.executeUpdate();}
+    }
     synchronized List<java.util.Map<String,Object>> staleWorkers() throws Exception {
         List<java.util.Map<String,Object>> rows=new ArrayList<>();
         try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT job_id,worker_pid,worker_start_time FROM jobs WHERE status IN ('QUEUED','PREPARING','RUNNING') AND worker_pid IS NOT NULL")) {while(r.next()){var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("pid",r.getLong(2));m.put("start",r.getString(3));rows.add(m);}}

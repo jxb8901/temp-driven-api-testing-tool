@@ -2,6 +2,7 @@ package att.server;
 
 import att.Version;
 import att.server.api.ServerApi;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.servlet.AsyncContext;
 import jakarta.servlet.ServletException;
@@ -58,10 +59,11 @@ public final class ApiServlet extends HttpServlet {
             if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
             byte[] body=req.getInputStream().readNBytes(runtime.config.maxRequestBytes+1);
             if(body.length>runtime.config.maxRequestBytes){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Request body exceeds the configured size limit",requestId);return;}
-            JsonNode input=ServerRuntime.JSON.readTree(body);
+            JsonNode input;
+            try{input=ServerRuntime.JSON.readTree(body);}catch(JsonProcessingException malformed){error(res,400,"ATT-SERVER-INVALID-REQUEST","Request body is not valid JSON",requestId);return;}
             if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
             Map<String,Object> job=runtime.submit(command,input,principal);job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);
-        } catch(ServerRuntime.QueueFullException e){error(res,429,"ATT-SERVER-CAPACITY-EXCEEDED","Worker capacity is full; retry after a job completes",requestId);}
+        } catch(ServerRuntime.QueueFullException e){error(res,429,"ATT-SERVER-CAPACITY-EXCEEDED",e.getMessage(),requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The request could not be completed",requestId);getServletContext().log("ATT Server submission failed id="+requestId,e);}
     }
@@ -80,11 +82,17 @@ public final class ApiServlet extends HttpServlet {
         String last=req.getHeader("Last-Event-ID");long cursor=0;
         if(last!=null&&!last.isBlank())try{cursor=Long.parseLong(last);}catch(NumberFormatException e){error(res,400,"ATT-SERVER-INVALID-LAST-EVENT-ID","Last-Event-ID must be a non-negative integer",requestId(req,res));return;}
         if(cursor<0){error(res,400,"ATT-SERVER-INVALID-LAST-EVENT-ID","Last-Event-ID must be a non-negative integer",requestId(req,res));return;}
-        if(runtime.streams.getQueue().remainingCapacity()==0){error(res,503,"ATT-SERVER-STREAM-CAPACITY","SSE observer capacity is full",requestId(req,res));return;}
-        final long start=cursor;res.setStatus(200);res.setCharacterEncoding("UTF-8");res.setContentType("text/event-stream");res.setHeader("Cache-Control","no-cache, no-transform");res.setHeader("X-Accel-Buffering","no");
         JobEvents events;try{events=runtime.events(jobId);}catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId(req,res));return;}catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The event journal is unavailable",requestId(req,res));return;}
-        AsyncContext async=req.startAsync();async.setTimeout(0);
-        try{runtime.streams.execute(()->stream(async,jobId,events,start));}catch(RejectedExecutionException full){async.complete();}
+        if(!runtime.streamSlots.tryAcquire()){error(res,503,"ATT-SERVER-STREAM-CAPACITY","SSE observer capacity is full",requestId(req,res));return;}
+        boolean handedOff=false;
+        try {
+            AsyncContext async=req.startAsync();async.setTimeout(0);final long start=cursor;
+            res.setStatus(200);res.setCharacterEncoding("UTF-8");res.setContentType("text/event-stream");res.setHeader("Cache-Control","no-cache, no-transform");res.setHeader("X-Accel-Buffering","no");
+            runtime.streams.execute(()->{try{stream(async,jobId,events,start);}finally{runtime.streamSlots.release();}});handedOff=true;
+        } catch(RejectedExecutionException full) {
+            if(!res.isCommitted()){res.resetBuffer();error(res,503,"ATT-SERVER-STREAM-CAPACITY","SSE observer capacity is full",requestId(req,res));}
+            if(req.isAsyncStarted())req.getAsyncContext().complete();
+        } finally {if(!handedOff)runtime.streamSlots.release();}
     }
     private void stream(AsyncContext async,String jobId,JobEvents journal,long cursor){
         long lastWrite=System.nanoTime();java.util.concurrent.ArrayBlockingQueue<Boolean> wakeup=new java.util.concurrent.ArrayBlockingQueue<>(1);
@@ -118,3 +126,4 @@ public final class ApiServlet extends HttpServlet {
     private static void error(HttpServletResponse res,int status,String code,String summary,String requestId)throws IOException{Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);json(res,status,Map.of("error",e));}
     private static String safeDetail(IllegalArgumentException e){String m=e.getMessage();return m==null?"Invalid request":m.length()>300?m.substring(0,300):m;}
 }
+

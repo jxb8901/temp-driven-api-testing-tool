@@ -63,7 +63,10 @@ public final class ServerProfileLoader {
         return new ServerProfile(name,url.replaceAll("/+$",""),username,passwordEnv,basic);
     }
     public static Path profilePath() {
-        String configured=System.getenv("ATT_SERVER_CONFIG");
+        return profilePath(System.getenv());
+    }
+    static Path profilePath(Map<String,String> environment) {
+        String configured=environment.get("ATT_REMOTE_CONFIG");
         if(configured!=null && !configured.trim().isEmpty()) return Paths.get(configured).toAbsolutePath().normalize();
         return Paths.get(System.getProperty("user.home"),".att","servers.yaml");
     }

@@ -118,7 +118,7 @@ Remote command 使用 ATT Server 公開的 `/api/v1` contract。現有 `run`、`
 ./att.sh remote --server sit artifacts J0123456789ABCDEF --download ./results
 ```
 
-`--server` 選擇 `~/.att/servers.yaml` 中的 profile。`ATT_SERVER` 會覆蓋 default profile 的 URL；明確指定的 `--server` profile 優先。Remote package、suite、config、scenario 及 Debug input 必須是 Server package 的相對邏輯名稱。CLI 不會傳送本機絕對路徑或 `--output-dir`。
+`--server` 選擇 `~/.att/servers.yaml` 中的 profile；設定 `ATT_REMOTE_CONFIG` 可使用其他 profile 檔案。`ATT_SERVER_CONFIG` 保留給 Server deployment YAML。`ATT_SERVER` 會覆蓋 default profile 的 URL；明確指定的 `--server` profile 優先。Remote package、suite、config、scenario 及 Debug input 必須是 Server package 的相對邏輯名稱。CLI 不會傳送本機絕對路徑或 `--output-dir`。
 
 Profile 可保存 URL、Basic Auth username 及 CI secret 環境變數名稱，但不能保存 password。若沒有設定 `passwordEnv`，CLI 會在有 terminal 時隱藏輸入 password。Basic authentication 必須使用 HTTPS；TLS certificate 及 hostname 檢查維持啟用。
 

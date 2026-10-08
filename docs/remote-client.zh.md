@@ -25,7 +25,7 @@ servers:
       passwordEnv: ATT_CI_PASSWORD
 ```
 
-請由 CI secret store 注入指定的環境變數。互動使用時，可省略 `passwordEnv`；CLI 會隱藏 password 輸入。設定 `ATT_SERVER_CONFIG` 可使用其他 profile 檔案。
+請由 CI secret store 注入指定的環境變數。互動使用時，可省略 `passwordEnv`；CLI 會隱藏 password 輸入。設定 `ATT_REMOTE_CONFIG` 可使用其他 profile 檔案。`ATT_SERVER_CONFIG` 保留給 Server deployment YAML 使用。
 
 使用 `--server` 選擇 profile。`ATT_SERVER` 可覆蓋 default profile URL。明確的 `--server` profile 優先；否則依序採用 `ATT_SERVER` URL，再採用設定檔的 default profile。若 `ATT_SERVER` 覆蓋 URL，authentication settings 仍取自 profile。
 
