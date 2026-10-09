@@ -1,0 +1,28 @@
+# Copy to a protected deployment path and set -Datt.server.config=/etc/att/server.yaml.
+server:
+  dataDir: /var/lib/att-server
+  # Disable only on an isolated network that permits anonymous API access.
+  authenticationRequired: true
+  # Optional. Defaults to the Java runtime hosting Tomcat.
+  # javaExecutable: /usr/lib/jvm/java-17/bin/java
+  maxRequestBytes: 1048576
+  maxEventsPerJob: 10000
+  maxArtifacts: 1000
+  # Terminal job metadata, event journals, and artifacts are removed after this many days.
+  jobRetentionDays: 30
+
+workers:
+  maxConcurrent: 8
+  queuedLimit: 100
+  # Maximum admitted Load jobs (queued or executing); excess submissions receive HTTP 429.
+  maxConcurrentLoad: 2
+  gracefulStopMs: 10000
+  # Optional directories containing external JDBC, MQ, or other Worker dependency JARs.
+  libraryDirs: []
+
+packages:
+  allowedRoots:
+    - /srv/att/packages
+  entries:
+    payments: /srv/att/packages/payments
+    treasury: /srv/att/packages/treasury

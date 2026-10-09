@@ -1,0 +1,120 @@
+package att.remote;
+
+import att.remote.config.ServerProfile;
+import att.remote.http.RemoteHttpClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.ByteArrayInputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class RemoteCommandTest {
+    private static final String JOB="J0123456789ABCDEF";
+
+    @Test void serializesRunDebugLoadAndValidateAsLogicalPackageRequests() throws Exception {
+        MockClient client=new MockClient();
+        RemoteCommand.submit(client,Arrays.asList("run","payments","--suite","smoke.xlsx","--tag","smoke","--env","SIT","--detach"),"human","run");
+        JsonNode run=client.lastBody;assertEquals("payments",run.path("packageId").asText());assertEquals("smoke.xlsx",run.path("suites").get(0).asText());assertEquals("SIT",run.path("environment").asText());
+        RemoteCommand.submit(client,Arrays.asList("debug","payments","flow","PAYMENT.submit","--set","vars.Channel=WEB","--debug-id","dbg-explicit-7","--detach"),"human","debug");
+        JsonNode debug=client.lastBody;assertEquals("flow",debug.path("target").path("type").asText());assertEquals("PAYMENT.submit",debug.path("target").path("id").asText());assertEquals("dbg-explicit-7",debug.path("debugId").asText());
+        RemoteCommand.submit(client,Arrays.asList("load","payments","load/payment.yaml","--users","2","--duration","30s","--detach"),"human","load");
+        JsonNode load=client.lastBody;assertEquals("load/payment.yaml",load.path("scenario").asText());assertEquals("2",load.path("load").path("users").asText());
+        RemoteCommand.submit(client,Arrays.asList("validate","payments","--selected","--suite","smoke.xlsx","--detach"),"human","validate");
+        JsonNode validate=client.lastBody;assertEquals("selected",validate.path("validationScope").asText());
+        for(JsonNode request:client.requests){assertFalse(request.has("packageRoot"));assertFalse(request.has("outputDirectory"));assertFalse(request.has("SERVER_DATA_DIR"));}
+    }
+
+    @Test void resumesEventsWithLastIdAndNeverResubmitsJob() throws Exception {
+        MockClient client=new MockClient();int code=RemoteCommand.follow(client,JOB,"json");
+        assertEquals(0,code);assertEquals(Arrays.asList(null,"2"),client.cursors);assertEquals(0,client.posts);
+    }
+
+    @Test void retriesTransientSseConnectionFailures() throws Exception {
+        MockClient client=new MockClient(){int failures=1;
+            @Override public HttpURLConnection openEvents(String path,String lastId)throws RemoteException {
+                if(failures-->0){cursors.add(lastId);throw RemoteException.retryableTransport("connection reset",new java.io.IOException("connection reset"));}
+                return super.openEvents(path,lastId);
+            }
+        };
+        assertEquals(0,RemoteCommand.follow(client,JOB,"json"));
+        assertEquals(Arrays.asList(null,null,"2"),client.cursors);
+    }
+
+    @Test void replaysEventsForAlreadyCompletedJobs() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if(path.equals("/jobs/"+JOB))return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","PASS");
+                return super.get(path);
+            }
+        };
+        assertEquals(0,RemoteCommand.follow(client,JOB,"json"));assertEquals(1,client.eventOpens);
+    }
+
+    @Test void intermittentSseFailuresResetRetryBudgetAfterEvents() throws Exception {
+        MockClient client=new MockClient(){int opens=0;
+            @Override public HttpURLConnection openEvents(String path,String lastId)throws RemoteException {
+                opens++;eventOpens++;
+                if(opens>=2&&opens<=5||opens>=7&&opens<=10)throw RemoteException.retryableTransport("connection reset",new java.io.IOException("connection reset"));
+                String event=opens==11?"event: result\ndata: {\"jobId\":\""+JOB+"\",\"status\":\"PASS\"}\n\n":"event: progress\ndata: {\"message\":\"connected\"}\n\n";
+                try{return new StreamConnection(event);}catch(Exception e){throw new RemoteException("mock stream setup failed",e);}
+            }
+            @Override public JsonNode get(String path)throws RemoteException {
+                if(path.equals("/jobs/"+JOB))return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");
+                return super.get(path);
+            }
+        };
+        assertEquals(0,RemoteCommand.follow(client,JOB,"json"));assertEquals(11,client.eventOpens);
+    }
+
+    @Test void doesNotRetryAuthenticationOrProtocolFailures() throws Exception {
+        int[] attempts={0};MockClient client=new MockClient(){
+            @Override public HttpURLConnection openEvents(String path,String lastId)throws RemoteException {attempts[0]++;throw new RemoteException("ATT Server rejected authentication (HTTP 401)");}
+        };
+        RemoteException failure=assertThrows(RemoteException.class,()->RemoteCommand.follow(client,JOB,"human"));
+        assertTrue(failure.getMessage().contains("authentication"));assertEquals(1,attempts[0]);
+    }
+
+    @Test void attachedSubmissionFailureIncludesAcceptedJobIdAndRecoveryCommands() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public HttpURLConnection openEvents(String path,String lastId)throws RemoteException {throw new RemoteException("invalid SSE response");}
+        };
+        RemoteException failure=assertThrows(RemoteException.class,()->RemoteCommand.submit(client,Arrays.asList("run","payments"),"human","run"));
+        assertTrue(failure.getMessage().contains(JOB));assertTrue(failure.getMessage().contains("att remote watch "+JOB));assertTrue(failure.getMessage().contains("att remote result "+JOB));
+    }
+
+    @Test void rejectsClientFilesystemPathsBeforePosting() throws Exception {
+        MockClient client=new MockClient();
+        assertThrows(IllegalArgumentException.class,()->RemoteCommand.submit(client,Arrays.asList("run","payments","--suite","../secret.xlsx","--detach"),"human","run"));
+        assertEquals(0,client.posts);
+    }
+
+    private static class MockClient extends RemoteHttpClient {
+        JsonNode lastBody;final java.util.ArrayList<JsonNode> requests=new java.util.ArrayList<JsonNode>();final java.util.ArrayList<String> cursors=new java.util.ArrayList<String>();
+        int posts,eventOpens,jobReads;MockClient()throws RemoteException{super(new ServerProfile("mock","https://example.invalid",null,null,false),null);}
+        @Override public JsonNode post(String path,JsonNode body)throws RemoteException {posts++;lastBody=body;requests.add(body.deepCopy());return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");}
+        @Override public JsonNode get(String path)throws RemoteException {
+            if(path.endsWith("/result")){ObjectNode result=RemoteHttpClient.JSON.createObjectNode();result.set("job",RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","PASS").put("exitCode",0));result.set("result",RemoteHttpClient.JSON.createObjectNode().put("status","PASS").put("exitCode",0));return result;}
+            if(path.equals("/jobs/"+JOB)&&++jobReads>2)return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","PASS");
+            return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");
+        }
+        @Override public HttpURLConnection openEvents(String path,String lastId)throws RemoteException {
+            cursors.add(lastId);eventOpens++;String body=eventOpens==1?
+                    "id: 1\nevent: status\ndata: {\"status\":\"RUNNING\"}\n\nid: 2\nevent: progress\ndata: {\"status\":\"VALIDATION_PASS\"}\n\n":
+                    "id: 3\nevent: result\ndata: {\"jobId\":\""+JOB+"\",\"status\":\"PASS\",\"exitCode\":0}\n\n";
+            try{return new StreamConnection(body);}catch(Exception e){throw new RemoteException("mock stream setup failed",e);}
+        }
+    }
+    private static final class StreamConnection extends HttpURLConnection {
+        private final byte[] body;StreamConnection(String body)throws Exception{super(new URL("http://localhost/events"));this.body=body.getBytes(StandardCharsets.UTF_8);}
+        @Override public void disconnect(){}
+        @Override public boolean usingProxy(){return false;}
+        @Override public void connect(){}
+        @Override public int getResponseCode(){return 200;}
+        @Override public java.io.InputStream getInputStream(){return new ByteArrayInputStream(body);}
+    }
+}

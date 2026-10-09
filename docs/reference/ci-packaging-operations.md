@@ -11,11 +11,11 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release/source archives, and verifies the packaged launcher. It requires Java/Maven plus Python 3 and Pandoc for Reference generation.
+`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven plus Python 3 and Pandoc for Reference generation. It outputs `att-4.0.0-local.tar.gz` for the CLI, `att-4.0.0-server.tar.gz` for the WAR and deployment guides, and `att-4.0.0-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
 
 ## Runtime dependencies
 
-Java 8+ is the runtime baseline. ATT does not bundle JDBC drivers; place required driver/dependency jars in `lib/`. IBM MQ is optional: the default build remains usable without MQ client classes, while MQ deployments package the supported IBM client jar/profile.
+The CLI, Engine, and Worker remain Java 8-compatible. The ATT Server WAR requires Java 17+ and external Tomcat 10.1+. ATT does not bundle JDBC drivers for CLI integrations; place required driver/dependency jars in `lib/`. IBM MQ is optional: the default CLI build remains usable without MQ client classes, while MQ deployments package the supported IBM client jar/profile.
 
 ## Documentation operations
 

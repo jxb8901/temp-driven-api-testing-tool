@@ -13,6 +13,7 @@ public final class WorkerRequest {
     public String environment;
     public String outputDirectory;
     public String runId;
+    public String debugId;
     public Map<String,Object> target;
     public String scenario;
     public List<String> suites;

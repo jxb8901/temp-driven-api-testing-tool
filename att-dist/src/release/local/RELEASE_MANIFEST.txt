@@ -1,7 +1,7 @@
-name: att-${project.version}
+name: att-${project.version}-local
 main: att.sh
 mainWindows: att.bat
-java: JDK 8+ runtime
+java: CLI/Engine/Worker require JDK 8+
 contents:
   - att.sh
   - att.bat

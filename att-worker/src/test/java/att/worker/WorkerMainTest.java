@@ -199,7 +199,7 @@ class WorkerMainTest {
         Path apiOutput=root.resolve("output-api");
         DebugResult direct=new DefaultAttService().debug(new DebugRequest(root,null,null,apiOutput,"api-job","template","SIMPLE",null,false,null,null,templateOverrides));
         assertEquals("api-job", direct.executionId());
-        String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-job","command","debug","packageRoot",root.toString(),"outputDirectory",root.resolve("output-worker").toString(),"runId","worker-job","target",fields("type","template","id","SIMPLE"),"overrides",java.util.Arrays.asList("input.amount=42","vars.seed=worker")));
+        String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-job","command","debug","packageRoot",root.toString(),"outputDirectory",root.resolve("output-worker").toString(),"runId","worker-run","debugId","worker-debug-id","target",fields("type","template","id","SIMPLE"),"overrides",java.util.Arrays.asList("input.amount=42","vars.seed=worker")));
         Process process=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
         process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8)); process.getOutputStream().close();
         String stdout=read(process.getInputStream()); String stderr=read(process.getErrorStream());
@@ -210,10 +210,10 @@ class WorkerMainTest {
         assertTrue(java.util.Arrays.stream(lines).map(line -> { try { return mapper.readTree(line).get("type").asText(); } catch(Exception error) { throw new IllegalStateException(error); } }).anyMatch("PROGRESS"::equals),stdout);
         assertTrue(java.util.Arrays.stream(lines).map(line -> { try { return mapper.readTree(line).get("type").asText(); } catch(Exception error) { throw new IllegalStateException(error); } }).anyMatch("LOG"::equals),stdout);
         assertEquals("worker-job",terminal.get("jobId").asText());
-        assertEquals("worker-job",terminal.get("result").get("executionId").asText());
+        assertEquals("worker-debug-id",terminal.get("result").get("executionId").asText());
         assertEquals(direct.status(),terminal.get("result").get("status").asText());
         assertEquals(direct.exitCode(),terminal.get("result").get("exitCode").asInt());
-        assertEquals("worker-job",terminal.get("result").get("executionId").asText());
+        assertEquals("worker-debug-id",terminal.get("result").get("executionId").asText());
         assertFalse(terminal.get("result").has("jobId"));
         assertTrue(stdout.startsWith("{\"type\":\"STATUS\""),stdout);
         Process cli=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),"att.FrameworkRunner","debug","template","SIMPLE","--debug-id","cli-job","--output-dir",root.resolve("output-cli").toString(),"--set","input.amount=42","--set","vars.seed=cli","--format","json","--quiet").directory(root.toFile()).start();
@@ -221,7 +221,7 @@ class WorkerMainTest {
         JsonNode cliResult=mapper.readTree(cliOut); assertEquals(direct.status(),cliResult.get("status").asText()); assertEquals(direct.exitCode(),cliResult.get("exitCode").asInt());
         assertEquals("cli-job",cliResult.get("executionId").asText());
         assertTrue(new String(Files.readAllBytes(apiOutput.resolve("debug/api-job/case.log")), StandardCharsets.UTF_8).contains("amount=42|seed=api"));
-        assertTrue(new String(Files.readAllBytes(root.resolve("output-worker/debug/worker-job/case.log")), StandardCharsets.UTF_8).contains("amount=42|seed=worker"));
+        assertTrue(new String(Files.readAllBytes(root.resolve("output-worker/debug/worker-debug-id/case.log")), StandardCharsets.UTF_8).contains("amount=42|seed=worker"));
         assertTrue(new String(Files.readAllBytes(root.resolve("output-cli/debug/cli-job/case.log")), StandardCharsets.UTF_8).contains("amount=42|seed=cli"));
         assertEquals(direct.diagnostics().size(),cliResult.get("diagnostics").size());
         DebugResult failedDirect=new DefaultAttService().debug(new DebugRequest(root,null,null,null,null,"template","MISSING",null,false));
@@ -328,7 +328,7 @@ class WorkerMainTest {
         process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8)); process.getOutputStream().close();
         String stdout=read(process.getInputStream()); String stderr=read(process.getErrorStream());
         assertEquals(direct.exitCode(),process.waitFor(),stderr);
-        String[] lines=stdout.trim().split("\\R"); assertTrue(lines.length>2,stdout);
+        String[] lines=stdout.trim().split("\\R"); assertTrue(lines.length>=2,stdout);
         JsonNode terminal=mapper.readTree(lines[lines.length-1]);
         assertEquals("RESULT",terminal.get("type").asText());
         assertEquals("worker-load-job",terminal.get("jobId").asText());

@@ -1,7 +1,7 @@
-# ATT v3.8.0 使用手冊與參考
+# ATT v4.0.0 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 3.8.0
+Version: 4.0.0
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -91,6 +91,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
   - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
+  - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
   - [Typed overrides and quick Load](#typed-overrides-and-quick-load)
   - [Debug input 與 output](#debug-input-與-output)
   - [退出碼](#退出碼)
@@ -2442,6 +2443,7 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 | `report` | 為已完成 run 重新生成報表 | 否 |
 | `build` | 歸檔最新已完成 run | 否 |
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
+| `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
 ### 按任務查閱語法、option 和範例
 
@@ -2530,6 +2532,29 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 | `./att.sh docs` | 生成 `build/docs/index.html` |
 | `./att.sh build` | 在 `build/` 中歸檔最新完成 run |
 | `./att.sh clean` | 刪除文檔化生成輸出 |
+
+### 透過 CLI 使用 ATT Server
+
+Remote command 使用 ATT Server 公開的 `/api/v1` contract。現有 `run`、`debug`、`load` 及 `validate` 命令仍在本機執行，只有明確加入 `remote` 才會連接 Server。
+
+```sh
+./att.sh remote --server sit packages
+./att.sh remote --server sit run payments --suite testcase/smoke.xlsx --env SIT --tag smoke
+./att.sh remote --server ci run payments --all --detach
+./att.sh remote --server sit watch J0123456789ABCDEF
+./att.sh remote --server sit load payments --scenario load/payment.yaml --users 2 --duration 30s
+./att.sh remote --server sit artifacts J0123456789ABCDEF --download ./results
+```
+
+`--server` 選擇 `~/.att/servers.yaml` 中的 profile；設定 `ATT_REMOTE_CONFIG` 可使用其他 profile 檔案。`ATT_SERVER_CONFIG` 保留給 Server deployment YAML。`ATT_SERVER` 會覆蓋 default profile 的 URL；明確指定的 `--server` profile 優先。Remote package、suite、config、scenario 及 Debug input 必須是 Server package 的相對邏輯名稱。CLI 不會傳送本機絕對路徑或 `--output-dir`。
+
+Profile 可保存 URL、Basic Auth username 及 CI secret 環境變數名稱，但不能保存 password。若沒有設定 `passwordEnv`，CLI 會在有 terminal 時隱藏輸入 password。Basic authentication 必須使用 HTTPS；TLS certificate 及 hostname 檢查維持啟用。
+
+Attached Run、Debug、Load 及 Validate 只提交一次工作，透過 SSE 追蹤進度，以 `Last-Event-ID` 重新連線，再取得 canonical result。`--detach` 會輸出已接受工作 ID 並結束。使用 `jobs`、`job`、`watch`、`result`、`artifacts`、`artifact` 或 `cancel` 管理已保留的工作。Artifact 只會下載到所選本機目錄，不會覆寫現有檔案。
+
+Remote exit code：PASS/成功為 `0`、ATT FAIL 為 `1`、INVALID 為 `2`、ATT ERROR/CANCELLED 為 `3`；若連線、驗證或 protocol 問題令 client 無法取得可信結果，則為 `4`。Profile、options、reconnect 及 troubleshooting 見 [ATT Remote client](remote-client.zh.md)。
+
+Remote-only option 為 `--server <profile>`、`--detach`、`--download <directory>` 及 `--scenario <package-relative-path>`。`--format human|json` 及已記錄的 ATT selection、environment、Debug、Load option，會在符合 remote job contract 時使用。Remote command list 見上述指南。
 
 
 ### Typed overrides and quick Load
@@ -2797,7 +2822,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "3.8.0",
+  "attVersion": "4.0.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2836,11 +2861,11 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 與 release/source archive，並驗證 packaged launcher。Reference generation 另外需要 Python 3 與 Pandoc。
+`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.0.0-local.tar.gz`、包含 WAR 和部署指南的 `att-4.0.0-server.tar.gz`，以及 source archive `att-4.0.0-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
 
 ### Runtime dependencies
 
-Java 8+ 是 runtime baseline。ATT 不內置 JDBC driver；需要的 driver/dependency jar 放入 `lib/`。IBM MQ 是 optional integration：default build 在沒有 MQ client class 時仍可使用；MQ deployment 需 package 支援的 IBM client jar/profile。
+CLI、Engine 及 Worker 仍相容 Java 8。ATT Server WAR 需要 Java 17+ 及外部 Tomcat 10.1+。ATT 不內置 CLI integration 所需的 JDBC driver；請將 driver/dependency jar 放入 `lib/`。IBM MQ 是 optional integration：default CLI build 在沒有 MQ client class 時仍可使用；MQ deployment 需 package 支援的 IBM client jar/profile。
 
 ### Documentation operations
 

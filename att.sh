@@ -17,7 +17,7 @@ if [ -n "$APP_JAR" ]; then
 fi
 CLI_DIR="$ROOT_DIR/att-cli"
 ENGINE_DIR="$ROOT_DIR/att-engine"
-CP="$CLI_DIR/target/classes:$CLI_DIR/target/test-classes:$ENGINE_DIR/target/classes"
+CP="$CLI_DIR/target/classes:$CLI_DIR/target/test-classes:$ENGINE_DIR/target/classes:$ROOT_DIR/att-remote/target/classes:$ROOT_DIR/att-server-api/target/classes"
 for jar in \
   "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1.jar \
   "$HOME"/.m2/repository/org/apache/httpcomponents/httpclient/4.5.13/httpclient-4.5.13.jar \
@@ -48,17 +48,22 @@ for jar in "$ROOT_DIR"/lib/*.jar; do [ -f "$jar" ] || continue; CP="$CP:$jar"; d
 NEEDS_BUILD=false
 BUILD_MARKER="$CLI_DIR/target/classes/att-build.properties"
 ENGINE_BUILD_MARKER="$ENGINE_DIR/target/classes/att-build.properties"
-if [ "${ATT_FORCE_JAVAC:-false}" = true ] || [ ! -f "$BUILD_MARKER" ] || [ ! -f "$ENGINE_BUILD_MARKER" ]; then NEEDS_BUILD=true
+REMOTE_BUILD_MARKER="$ROOT_DIR/att-remote/target/classes/att/remote/RemoteCommand.class"
+API_BUILD_MARKER="$ROOT_DIR/att-server-api/target/classes/att/server/api/ServerApi.class"
+if [ "${ATT_FORCE_JAVAC:-false}" = true ] || [ ! -f "$BUILD_MARKER" ] || [ ! -f "$ENGINE_BUILD_MARKER" ] || [ ! -f "$REMOTE_BUILD_MARKER" ] || [ ! -f "$API_BUILD_MARKER" ]; then NEEDS_BUILD=true
 elif find "$CLI_DIR/src/main/java" "$ENGINE_DIR/src/main/java" -name '*.java' -newer "$BUILD_MARKER" -print -quit | grep -q .; then NEEDS_BUILD=true
-elif find "$ENGINE_DIR/src/main/java" -name '*.java' -newer "$ENGINE_BUILD_MARKER" -print -quit | grep -q .; then NEEDS_BUILD=true; fi
+elif find "$ENGINE_DIR/src/main/java" -name '*.java' -newer "$ENGINE_BUILD_MARKER" -print -quit | grep -q .; then NEEDS_BUILD=true
+elif find "$ROOT_DIR/att-remote/src/main/java" "$ROOT_DIR/att-server-api/src/main/java" -name '*.java' -newer "$REMOTE_BUILD_MARKER" -print -quit | grep -q .; then NEEDS_BUILD=true; fi
 if [ "$NEEDS_BUILD" = true ]; then
   echo "Compiling ATT sources..."
   if [ "${ATT_FORCE_JAVAC:-false}" != true ] && command -v mvn >/dev/null 2>&1; then
     (cd "$ROOT_DIR" && mvn -q -DskipTests -T 1C -pl att-cli -am compile)
   elif command -v javac >/dev/null 2>&1; then
     ENGINE_CLASSES="$ENGINE_DIR/target/classes"; CLI_CLASSES="$CLI_DIR/target/classes"
+    API_CLASSES="$ROOT_DIR/att-server-api/target/classes"; REMOTE_CLASSES="$ROOT_DIR/att-remote/target/classes"
     ENGINE_SOURCES="$ENGINE_DIR/target/sources.list"; CLI_SOURCES="$CLI_DIR/target/sources.list"
-    mkdir -p "$ENGINE_CLASSES" "$CLI_CLASSES"
+    API_SOURCES="$ROOT_DIR/att-server-api/target/sources.list"; REMOTE_SOURCES="$ROOT_DIR/att-remote/target/sources.list"
+    mkdir -p "$ENGINE_CLASSES" "$CLI_CLASSES" "$API_CLASSES" "$REMOTE_CLASSES"
     find "$ENGINE_DIR/src/main/java" -name '*.java' > "$ENGINE_SOURCES"
     if [ ! -s "$ENGINE_SOURCES" ]; then echo "No engine Java sources found to compile." >&2; exit 2; fi
     javac -source 8 -target 8 -cp "$CP" -d "$ENGINE_CLASSES" @"$ENGINE_SOURCES"
@@ -72,10 +77,15 @@ if [ "$NEEDS_BUILD" = true ]; then
       mv "$ENGINE_CLASSES/att-build.properties.tmp" "$ENGINE_CLASSES/att-build.properties"
     fi
     touch "$ENGINE_BUILD_MARKER"
+    find "$ROOT_DIR/att-server-api/src/main/java" -name '*.java' > "$API_SOURCES"
+    javac -source 8 -target 8 -cp "$CP" -d "$API_CLASSES" @"$API_SOURCES"
+    find "$ROOT_DIR/att-remote/src/main/java" -name '*.java' > "$REMOTE_SOURCES"
+    javac -source 8 -target 8 -cp "$API_CLASSES:$CP" -d "$REMOTE_CLASSES" @"$REMOTE_SOURCES"
+    touch "$API_BUILD_MARKER" "$REMOTE_BUILD_MARKER"
     cp "$ENGINE_BUILD_MARKER" "$BUILD_MARKER"
     find "$CLI_DIR/src/main/java" -name '*.java' > "$CLI_SOURCES"
     if [ ! -s "$CLI_SOURCES" ]; then echo "No CLI Java sources found to compile." >&2; exit 2; fi
-    javac -source 8 -target 8 -cp "$ENGINE_CLASSES:$CP" -d "$CLI_CLASSES" @"$CLI_SOURCES"
+    javac -source 8 -target 8 -cp "$ENGINE_CLASSES:$API_CLASSES:$REMOTE_CLASSES:$CP" -d "$CLI_CLASSES" @"$CLI_SOURCES"
     touch "$BUILD_MARKER"
   else echo "Neither Maven nor javac is available. Build a release package first." >&2; exit 2; fi
 fi

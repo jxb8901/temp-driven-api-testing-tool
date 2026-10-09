@@ -1,4 +1,4 @@
-# ATT 3.8.0 - Automated Testing Tool
+# ATT 4.0.0 - Automated Testing Tool
 
 ATT is an offline, template-driven API and integration test runner for SIT/UAT. Excel rows define Testcases; Stages select Templates; Templates execute ordered Actions; reusable Flows and configured Resources keep implementation logic out of test data.
 
@@ -37,6 +37,13 @@ Useful peer-mode commands after the basic Run workflow is familiar:
 ./att.sh load examples/load/arrival-smoke.yaml --format json
 ```
 
+To submit work to ATT Server, use the thin `att remote` adapter. Configure a Server profile first; local commands remain offline and do not require Server connectivity. See the [ATT Remote client guide](docs/remote-client.md) and [中文指南](docs/remote-client.zh.md).
+
+```sh
+./att.sh remote --server sit packages
+./att.sh remote --server sit run payments --suite testcase/payment.xlsx --tag smoke
+```
+
 Windows uses the same commands through `att.bat`.
 
 ## Documentation
@@ -62,12 +69,16 @@ The repository is a minimal Maven reactor while the runtime/package root stays c
 
 ```text
 pom.xml       parent / aggregator
-att-cli/      current ATT application, all existing Java packages and tests
-att-server/   empty placeholder reserved for future ATT Server work
+att-engine/   local Run, Debug, Load, validation, and execution contracts
+att-server-api/ Java 8 public REST/SSE contract shared by Server and client
+att-remote/   Java 8 Server REST/SSE client used by `att remote`
+att-cli/      existing ATT command line and local command adapter
+att-worker/   one-job process adapter for ATT Server
+att-server/   Java 17+ Jakarta Servlet WAR for the ATT Server control plane
 att-dist/     binary/source release assembly
 ```
 
-**ATT Server is not implemented yet.** The `att-server` module contains no server framework, API, worker, persistence, scheduler, authentication, or alternate entry point. Existing execution remains in `att-cli`, with `att.FrameworkRunner` as the application entry point. Java compatibility is module-specific: `att-cli` explicitly remains Java 8-compatible, while the parent does not impose Java 8 bytecode on every module, so a future Server issue can independently choose a newer Java baseline. See [Multi-module build layout](docs/system-design/multi-module-build.md).
+ATT Server is a single-node REST/SSE control plane deployed as a WAR to external Tomcat 10.1+ on Java 17+. Tomcat owns authentication; Server consumes the Servlet Principal and launches isolated Worker processes. `att remote` uses the public API, SSE replay, and canonical job results. See [ATT Server deployment and API](docs/server-deployment.md). CLI, Engine, Worker, Remote, and Server API modules remain Java 8-compatible. See [Multi-module build layout](docs/system-design/multi-module-build.md).
 
 ## Core package layout
 
@@ -80,7 +91,7 @@ schemas/      published ATT schemas
 output/       run/debug/load evidence and reports
 ```
 
-ATT 3.8.0 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.6`. Current schemas live under `schemas/`; previous and older definitions are historical references under `schemas/history/`, not current runtime contracts.
+ATT 4.0.0 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.6`. Current schemas live under `schemas/`; previous and older definitions are historical references under `schemas/history/`, not current runtime contracts.
 
 ## Build and validation
 
@@ -91,4 +102,4 @@ python3 tools/validate_reference_content.py
 ./build.sh
 ```
 
-`mvn clean verify` runs the full reactor: it tests `att-cli`, builds the empty `att-server` placeholder, and assembles binary/source releases through `att-dist`. `build.sh` remains the compatibility/release entry point: it regenerates the Reference Manual, runs the reactor gate, and smoke-tests the assembled distribution. Release packaging consumes the Maven-built `att-cli` JAR rather than recompiling Java sources separately. Java 8+ remains the runtime baseline for the current CLI/distribution; #162 deliberately does not choose the future Server Java baseline. JDBC drivers are supplied in `lib/`; IBM MQ remains an optional runtime integration.
+`mvn clean verify` runs the full reactor: it tests the Engine, Server API, Remote, CLI, Worker, and Server modules, packages the Server WAR, and assembles separate local, Server, and source releases through `att-dist`. `build.sh` remains the release entry point, smoke-tests the extracted local package, and verifies that both binary archives are smaller than 25 MB. The local package contains the CLI and its runtime libraries; the Server package contains the WAR and deployment guides without a second copy of those libraries. The Server WAR requires Java 17 and external Tomcat 10.1+; CLI, Engine, Worker, Remote, and Server API remain Java 8-compatible. JDBC drivers are supplied in `lib/`; IBM MQ remains an optional runtime integration.

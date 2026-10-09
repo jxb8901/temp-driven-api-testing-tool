@@ -1,6 +1,7 @@
 package att.worker;
 
 import att.api.*;
+import att.worker.internal.DiagnosticSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonParser;
@@ -63,7 +64,7 @@ public final class WorkerMain {
             int exit=3; String status="ERROR";
             if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
-            emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message==null?"ATT operation failed":message));
+            emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message)));
             emit(WorkerEvent.Type.RESULT,fields("status",status,"exitCode",exit,"result",fields("executionId",null,"status",status,"exitCode",exit)));
             return exit;
         }
@@ -74,7 +75,7 @@ public final class WorkerMain {
         Path config=path(r.config); Path output=path(r.outputDirectory);
         AttService service=new DefaultAttService();
         if("run".equals(r.command)) return service.run(new RunRequest(root,config,r.environment,output,r.runId,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),bool(r.rerunFailed),bool(r.dryRun),bool(r.failFast),null,"reject",false,event -> emitExecution(event)));
-        if("debug".equals(r.command)) { Map<String,Object> t=requiredTarget(r); return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),null,r.overrides)); }
+        if("debug".equals(r.command)) { Map<String,Object> t=requiredTarget(r); return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides)); }
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
             att.load.LoadEventListener observer = event -> { try { emit(WorkerEvent.Type.PROGRESS, event.toMap(root)); } catch(Exception error) { throw new IllegalStateException(error); } };
             return service.load(new LoadRequest(root,config,r.environment,output,r.runId,path(r.scenario),optionalText(t,"type"),optionalText(t,"id"),l.get("users"),l.get("arrivalRate"),l.get("warmup"),l.get("rampUp"),l.get("duration"),l.get("rampDown"),l.get("thinkTime"),l.get("maxConcurrent"),l.get("overloadPolicy"),r.overrides,observer)); }

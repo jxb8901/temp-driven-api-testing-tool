@@ -15,6 +15,7 @@
 | `report` | Regenerate reports for a completed run | No |
 | `build` | Archive the latest completed run | No |
 | `clean` | Remove documented ATT-generated output | No |
+| `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
 ## Find syntax, options, and examples by task
 
@@ -106,6 +107,29 @@ On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not in
 | `./att.sh docs` | Generate `build/docs/index.html` |
 | `./att.sh build` | Archive latest completed run in `build/` |
 | `./att.sh clean` | Remove documented generated outputs |
+
+## Use ATT Server from the CLI
+
+Remote commands use the public ATT Server `/api/v1` contract. Existing commands such as `run`, `debug`, `load`, and `validate` remain local unless you explicitly add `remote`.
+
+```sh
+./att.sh remote --server sit packages
+./att.sh remote --server sit run payments --suite testcase/smoke.xlsx --env SIT --tag smoke
+./att.sh remote --server ci run payments --all --detach
+./att.sh remote --server sit watch J0123456789ABCDEF
+./att.sh remote --server sit load payments --scenario load/payment.yaml --users 2 --duration 30s
+./att.sh remote --server sit artifacts J0123456789ABCDEF --download ./results
+```
+
+The `--server` value selects an entry from `~/.att/servers.yaml`; set `ATT_REMOTE_CONFIG` to select another profile file. `ATT_SERVER_CONFIG` is reserved for Server deployment YAML. `ATT_SERVER` overrides the default profile URL; an explicit `--server` profile takes precedence. Remote package, suite, config, scenario, and Debug input values are logical names relative to the Server package. Absolute client paths and `--output-dir` are not sent.
+
+The profile can store a URL, Basic-auth username, and the name of a CI secret environment variable. It cannot store a password. If `passwordEnv` is absent, the CLI prompts without echo when a terminal is available. Basic authentication requires HTTPS; normal TLS certificate and hostname checks stay enabled.
+
+Attached Run, Debug, Load, and Validate commands submit once, follow SSE, reconnect with `Last-Event-ID`, then retrieve the canonical result. `--detach` prints the accepted job ID and exits. Use `jobs`, `job`, `watch`, `result`, `artifacts`, `artifact`, or `cancel` to work with retained jobs. Artifacts download under the selected local directory and never overwrite an existing file.
+
+Remote exit codes are `0` for PASS/success, `1` for ATT FAIL, `2` for INVALID, `3` for ATT ERROR/CANCELLED, and `4` when the client cannot establish a trustworthy result because of connection, authentication, or protocol failure. See [ATT Remote client](../remote-client.md) for profiles, command options, reconnect behavior, and troubleshooting.
+
+Remote-only options are `--server <profile>`, `--detach`, `--download <directory>`, and `--scenario <package-relative-path>`. `--format human|json` and the documented ATT selection, environment, Debug, and Load options are accepted where they map to the remote job contract. See the linked guide for the remote command list.
 
 
 Options are command-specific. Unknown commands/options and missing option values are errors. `--package` and `--selected` are mutually exclusive. Selected validation and run require an explicit selection.
