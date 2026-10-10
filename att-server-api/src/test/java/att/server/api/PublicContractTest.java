@@ -2,6 +2,8 @@ package att.server.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PublicContractTest {
@@ -38,7 +40,8 @@ class PublicContractTest {
         assertEquals("/api/v1/packages/{packageId}/configuration/effective",ServerApi.PACKAGE_CONFIGURATION_EFFECTIVE);
         assertEquals("/api/v1/packages/{packageId}/configuration/compare",ServerApi.PACKAGE_CONFIGURATION_COMPARE);
         ConfigurationInspection.Response response=new ConfigurationInspection.Response();response.view="effective";response.state="ready";response.environment="SIT";
-        response.globals=java.util.Collections.<String,Object>singletonMap("timeoutMs",java.util.Map.of("state","visible","value",5000));
+        Map<String,Object> timeoutView=new LinkedHashMap<>();timeoutView.put("state","visible");timeoutView.put("value",5000);
+        response.globals=java.util.Collections.<String,Object>singletonMap("timeoutMs",timeoutView);
         response.diagnostics=java.util.Collections.emptyList();
         com.fasterxml.jackson.databind.JsonNode json=new ObjectMapper().readTree(new ObjectMapper().writeValueAsBytes(response));
         assertEquals("effective",json.path("view").asText());assertEquals("visible",json.path("globals").path("timeoutMs").path("state").asText());
