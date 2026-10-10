@@ -57,7 +57,8 @@ class ServerRuntimeTest {
     }
 
     private static void assertLimit(ServerConfig.InlineLoad limits,List<Map<String,Object>> workloads,String message) {
-        IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerRuntime.validateInlineLoadLimits(limits,inlineScenario(workloads)));
+        ServerRuntime.InlineLoadLimitException error=assertThrows(ServerRuntime.InlineLoadLimitException.class,
+                ()->ServerRuntime.validateInlineLoadLimits(limits,inlineScenario(workloads)));
         assertTrue(error.getMessage().contains(message),error.getMessage());
     }
     private static Map<String,Object> inlineScenario(List<Map<String,Object>> workloads) {return Map.of("schemaVersion","att-load/v1.6","workloads",workloads);}

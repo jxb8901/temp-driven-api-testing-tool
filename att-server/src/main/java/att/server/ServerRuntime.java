@@ -623,7 +623,7 @@ final class ServerRuntime implements AutoCloseable {
             throw new IllegalArgumentException("Validated Load scenario must contain workloads");
         List<?> workloads=(List<?>)rawWorkloads;
         if(workloads.size()>limits.maxWorkloads)
-            throw new IllegalArgumentException("Scenario exceeds server.inlineLoad.maxWorkloads");
+            throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxWorkloads");
         long totalUsers=0L,totalTargets=0L,totalArrivalConcurrency=0L;
         double totalArrivalRate=0.0;
         long maximumEnvelopeMs=0L;
@@ -645,11 +645,11 @@ final class ServerRuntime implements AutoCloseable {
             } else {
                 double arrivalRate=validatedRatePerSecond(load.get("arrivalRate"));
                 if(arrivalRate>limits.maxAggregateArrivalRatePerSecond-totalArrivalRate)
-                    throw new IllegalArgumentException("Scenario exceeds server.inlineLoad.maxAggregateArrivalRatePerSecond");
+                    throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxAggregateArrivalRatePerSecond");
                 totalArrivalRate+=arrivalRate;
                 long concurrent=validatedCount(load.get("maxConcurrent"),"maxConcurrent");
                 if(concurrent>limits.maxConcurrentPerWorkload)
-                    throw new IllegalArgumentException("Workload exceeds server.inlineLoad.maxConcurrentPerWorkload");
+                    throw new InlineLoadLimitException("Workload exceeds server.inlineLoad.maxConcurrentPerWorkload");
                 totalArrivalConcurrency=addWithinLimit(totalArrivalConcurrency,concurrent,limits.maxTotalConcurrent,
                         "Scenario exceeds server.inlineLoad.maxTotalConcurrent");
             }
@@ -657,10 +657,10 @@ final class ServerRuntime implements AutoCloseable {
             maximumEnvelopeMs=Math.max(maximumEnvelopeMs,envelope);
         }
         if(maximumEnvelopeMs>TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds))
-            throw new IllegalArgumentException("Scenario exceeds server.inlineLoad.maxDurationSeconds");
+            throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxDurationSeconds");
     }
     private static long addWithinLimit(long total,long value,long maximum,String message) {
-        if(value<0||total>maximum-value)throw new IllegalArgumentException(message);
+        if(value<0||total>maximum-value)throw new InlineLoadLimitException(message);
         return total+value;
     }
     private static long validatedCount(Object value,String field) {
@@ -1024,6 +1024,9 @@ final class ServerRuntime implements AutoCloseable {
     static final class StaleDraftException extends RuntimeException {}
     static final class DraftCapacityException extends RuntimeException {}
     static final class InlineLoadDisabledException extends RuntimeException {}
+    static final class InlineLoadLimitException extends IllegalArgumentException {
+        InlineLoadLimitException(String message){super(message);}
+    }
     static final class DraftValidationException extends IllegalArgumentException {
         final List<Map<String,Object>> diagnostics;
         DraftValidationException(List<Map<String,Object>> diagnostics) {
