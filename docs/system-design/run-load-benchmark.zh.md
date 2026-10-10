@@ -2,7 +2,7 @@
 
 `tools/benchmark_run_load_workloads.py` 以產生的 20-case workbook 測量 4.0.1 CLI 的新程序 Run 路徑，並以 loopback HTTP fixture 測量 Load generator。每個 Load 條件使用固定 arrival rate 及一種 evidence policy（`metrics`、`failures` 或 `samples`）。Harness 會將程序啟動與首個輸出時間、Run case 數量與輸出大小、Load throughput／latency／scheduler metrics、generator CPU／heap／GC／thread metrics、resource pool observations 及原始重複樣本記錄為 JSON。
 
-Fixture 只回傳固定 JSON response，並非外部 system under test。其 HTTP helper 設定為 `maxConnections: 256` 及 `maxConnectionsPerRoute: 256`；這些是 benchmark override，並非產品預設值。請參閱 [HTTPHelper pool 預設值及 sizing](../reference/resources/httphelper.md)、[DBHelper pool 預設值](../reference/resources/dbhelper.md)、[MQHelper pool 預設值](../reference/resources/mqhelper.md)，以及 [Load generator telemetry 與 PayloadCache 上限](load-telemetry.zh.md)。
+Fixture 只回傳固定 JSON response，並非外部 system under test。其 HTTP helper 設定為 `maxConnections: 256` 及 `maxConnectionsPerRoute: 256`；這些是 benchmark override，並非產品預設值。Listening backlog 會在 bind/listen 前透過 server subclass 設定；報告會記錄設定值及根據 OS 的 effective estimate。請參閱 [HTTPHelper pool 預設值及 sizing](../reference/resources/httphelper.md)、[DBHelper pool 預設值](../reference/resources/dbhelper.md)、[MQHelper pool 預設值](../reference/resources/mqhelper.md)，以及 [Load generator telemetry 與 PayloadCache 上限](load-telemetry.zh.md)。
 
 ## 重現方式
 
@@ -18,13 +18,15 @@ python3 tools/benchmark_run_load_workloads.py \
   --rates 100,500,1000 \
   --evidence-modes metrics,failures,samples \
   --duration 5s --load-warmup 1s --max-concurrent 256 --max-samples 10 \
-  --runs 3 --warmups 1 \
+  --runs 3 --warmups 1 --timeout-seconds 300 \
   --output target/run-load-benchmark-4.0.1.json
 ```
 
-Runner 只使用 Python standard library，會建立臨時 minimal ATT package、產生並 snapshot workbook，並啟動只監聽 loopback 的 HTTP server。它不會連接外部網絡。若 Load run 出現 runtime errors，報告仍會保留其 exit status 及 metrics；`failures` evidence run 亦會包含最多三個保留的 case log 範例。解讀結果時不可刪除出錯的 run。
+Runner 只使用 Python standard library，會建立臨時 minimal ATT package、產生並 snapshot workbook，並啟動只監聽 loopback 的 HTTP server。它不會連接外部網絡。每次 launcher invocation 都有可設定 deadline（`--timeout-seconds`，預設 300 秒）；逾時會終止 process group/tree，並在報告保留 timeout record 及 output tail。Timeout samples 不會納入 latency summary。若 Load run 出現 runtime errors，報告仍會保留其 exit status 及 metrics；`failures` evidence run 亦會包含最多三個保留的 case log 範例。解讀結果時不可刪除出錯的 run。
 
 已提交的 [4.0.1 報告](baselines/issue-177-run-load-4.0.1.json)包含 package tree hash、source revision、作業系統、硬件、logical CPU 數、Python／JVM 版本、benchmark 設定、原始樣本、每個 helper 的 HTTP pool snapshot 及跨 run 摘要。Whole-process p95 使用三個測量樣本的 nearest-rank，因此等於三次觀察中的最大值。每次 Load run 的 p95／p99 則取自 ATT bounded latency reservoir。這些結果是本機 baseline，並非可移植的效能門檻。
+
+[2026-10-10 backlog follow-up](baselines/issue-177-run-load-high-rate-followup-2026-10-10.json) 以 500/s 和 1,000/s 重跑：一次 warmup、兩次 2 秒測量；backlog 設定為 256（OS 回報 `somaxconn` 128，estimated effective backlog 為 128）。四次測量均 PASS，runtime errors 為零。本機解壓 package 沒有提供 source revision，因此報告記錄 binary tree hash 及 `sourceRevision: unknown`；此短測量只作探索性 evidence，不取代已提交的 baseline。
 
 ## 已記錄的 4.0.1 結果
 

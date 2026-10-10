@@ -2,7 +2,7 @@
 
 `tools/benchmark_run_load_workloads.py` measures the 4.0.1 CLI's fresh-process Run path with a generated 20-case workbook and the Load generator against a loopback HTTP fixture. Each Load condition exercises a fixed arrival rate and one evidence policy (`metrics`, `failures`, or `samples`). The harness records process startup/first-output time, Run case counts and output size, Load throughput/latency/scheduler metrics, generator CPU/heap/GC/thread metrics, resource-pool observations, and raw repetitions as JSON.
 
-The fixture returns a fixed JSON response and is not an external system under test. Its HTTP helper is configured with `maxConnections: 256` and `maxConnectionsPerRoute: 256`; those are benchmark overrides, not product defaults. See [HTTPHelper pool defaults and sizing](../reference/resources/httphelper.md), [DBHelper pool defaults](../reference/resources/dbhelper.md), [MQHelper pool defaults](../reference/resources/mqhelper.md), and [Load generator telemetry and PayloadCache bounds](load-telemetry.md).
+The fixture returns a fixed JSON response and is not an external system under test. Its HTTP helper is configured with `maxConnections: 256` and `maxConnectionsPerRoute: 256`; those are benchmark overrides, not product defaults. The listening backlog is set on a server subclass before bind/listen and the report records the configured backlog plus an OS-based effective estimate. See [HTTPHelper pool defaults and sizing](../reference/resources/httphelper.md), [DBHelper pool defaults](../reference/resources/dbhelper.md), [MQHelper pool defaults](../reference/resources/mqhelper.md), and [Load generator telemetry and PayloadCache bounds](load-telemetry.md).
 
 ## Reproduce
 
@@ -18,13 +18,15 @@ python3 tools/benchmark_run_load_workloads.py \
   --rates 100,500,1000 \
   --evidence-modes metrics,failures,samples \
   --duration 5s --load-warmup 1s --max-concurrent 256 --max-samples 10 \
-  --runs 3 --warmups 1 \
+  --runs 3 --warmups 1 --timeout-seconds 300 \
   --output target/run-load-benchmark-4.0.1.json
 ```
 
-The runner uses Python's standard library, makes a temporary minimal ATT package, generates and snapshots the workbook, and starts a loopback-only HTTP server. It does not make external network requests. A Load run with runtime errors remains in the report with its exit status and metrics; failure-evidence runs also include up to three retained case-log examples. Do not discard errored runs when interpreting the results.
+The runner uses Python's standard library, makes a temporary minimal ATT package, generates and snapshots the workbook, and starts a loopback-only HTTP server. It does not make external network requests. Every launcher invocation has a configurable deadline (`--timeout-seconds`, default 300); expiry terminates the process group/tree and retains a timeout record and output tail in the report. Timed-out samples are excluded from latency summaries. A Load run with runtime errors remains in the report with its exit status and metrics; failure-evidence runs also include up to three retained case-log examples. Do not discard errored runs when interpreting the results.
 
 The checked-in [4.0.1 report](baselines/issue-177-run-load-4.0.1.json) records the package tree hash, source revision, operating system, hardware, logical CPU count, Python/JVM versions, benchmark settings, raw samples, per-helper HTTP pool snapshots and across-run summaries. Whole-process p95 uses nearest-rank over three measured samples, so it is the maximum of those three observations. Each Load run's p95/p99 comes from ATT's bounded latency reservoir. Treat these results as a local baseline, not a portable performance target.
+
+The [2026-10-10 backlog follow-up](baselines/issue-177-run-load-high-rate-followup-2026-10-10.json) reran 500/s and 1,000/s with one warmup, two 2-second measured runs, and a configured backlog of 256 (OS-reported `somaxconn` 128; estimated effective backlog 128). All four measured runs passed with zero runtime errors. The local extracted package did not provide a source revision, so the report records its binary tree hash and `sourceRevision: unknown`; treat this short rerun as exploratory evidence rather than a replacement for the checked-in baseline.
 
 ## Recorded results for 4.0.1
 
