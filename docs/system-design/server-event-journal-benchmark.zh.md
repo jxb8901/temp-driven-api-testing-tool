@@ -2,6 +2,8 @@
 
 `JobEventsPerformanceBenchmark` 是可選的本機基準測試，用於量度 Server 日誌路徑。測試使用 1、4 或 8 個並行工作日誌，量度合成事件的追加延遲與吞吐量、首個事件時間、游標重播、保留檔案大小、程序 CPU 時間、Worker 執行緒已配置的位元組（JVM 支援時）及抽樣 Heap 使用量，並將機器、JVM 資訊與每次執行的原始數據寫入 JSON。
 
+H2 metadata connection 和 status polling 數據請看 [Server JobStore 基準測試](server-job-store-benchmark.zh.md)。
+
 基準測試不會啟動 Worker、Tomcat、SSE socket 或被測系統。數據只反映日誌路徑，不代表端到端工作延遲或 Worker 阻塞情況。`writerAllocatedBytes` 只包括追加執行緒配置，不包括壓縮執行緒；`processCpuMs` 包括追加及壓縮工作。`heapUsedBeforeBytes` 和 `heapUsedAfterBytes` 是兩個時間點的抽樣，不是 Heap 峰值。在建立穩定的機器專屬基線之前，不設定固定回歸門檻。
 
 ## 擷取及比較基線

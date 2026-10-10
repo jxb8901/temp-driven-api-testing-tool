@@ -70,14 +70,16 @@ final class JobStore implements AutoCloseable {
             p.setString(1,Instant.now().toString());p.setString(2,"{\"code\":\"ATT-SERVER-INTERRUPTED\",\"summary\":\"Job was interrupted by Server restart and was not rerun\"}");p.setString(3,id);p.executeUpdate();
         }
     }
-    synchronized long count(String status) throws Exception { try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT COUNT(*) FROM jobs WHERE status=?")){p.setString(1,status);try(ResultSet r=p.executeQuery()){r.next();return r.getLong(1);}} }
+    // Status-count polling owns its connection and result data; do not serialize it on the JobStore writer monitor.
+    long count(String status) throws Exception { try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT COUNT(*) FROM jobs WHERE status=?")){p.setString(1,status);try(ResultSet r=p.executeQuery()){r.next();return r.getLong(1);}} }
     synchronized List<java.util.Map<String,Object>> list(int limit) throws Exception {
         List<java.util.Map<String,Object>> out=new ArrayList<>();
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,result_json,diagnostic_json FROM jobs ORDER BY created_at DESC LIMIT ?")) {
             p.setInt(1,limit);try(ResultSet r=p.executeQuery()){while(r.next()){var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));out.add(m);}}
         } return out;
     }
-    synchronized java.util.Map<String,Object> get(String id) throws Exception {
+    // Job reads own their connection and result data; allow API polling alongside writes.
+    java.util.Map<String,Object> get(String id) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json FROM jobs WHERE job_id=?")) {
             p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next())return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));return m;}}
     }
