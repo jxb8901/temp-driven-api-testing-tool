@@ -12,7 +12,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
   }
 }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, jobStatus = 'RUNNING', artifactItems = [] } = {}) {
+function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [] } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
@@ -41,7 +41,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     addEventListener(name, listener) { this.listeners[name] = listener; }
   };
   const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [], pendingHomeJobs = [], pendingResults = [];
-  const state = { jobStatus };
+  const state = { jobStatus, resourcePage: 0 };
   let rejectHome;
   const delayedHome = new Promise((_, reject) => { rejectHome = reject; });
   class EventSource {
@@ -72,6 +72,11 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     let result;
     if (path === 'version') result = { apiVersion: version };
     else if (path === 'packages') result = { items: [{ packageId: 'payments' }] };
+    else if (/^packages\/[^/]+\/resources\?/.test(path)) result = resourcePages.length
+      ? resourcePages[Math.min(state.resourcePage++, resourcePages.length - 1)]
+      : { items: resourceItems, total: resourceItems.length, nextCursor: null };
+    else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+\/source$/.test(path)) result = { available: true, text: '<img src=x onerror=alert(1)>', format: 'yaml' };
+    else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+$/.test(path)) result = { resource: resourceItems[0], definition: { action: 'log' }, diagnostics: [] };
     else if (path.startsWith('packages/')) result = { packageId: path.substring(9) };
     else if (path === 'jobs') result = { items: [] };
     else if (/^jobs\/(run|debug|load|validate)$/.test(path) && options.method === 'POST') result = { jobId: 'J1' };
@@ -116,6 +121,65 @@ test('submits logical package DTOs with a non-root Tomcat context', async () => 
     packageId: 'payments', environment: 'SIT', tags: ['smoke', 'regression'], all: true
   });
   assert.equal(ui.location.hash, '#/jobs/J1');
+});
+
+test('explores package resources and renders source as text', async () => {
+  const resource = { resourceId: 'template.dGVzdA', type: 'template', logicalId: 'TEST', name: 'Test template', description: 'Read only', sourceAvailable: true, state: 'ready', references: [], referencedBy: [] };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [resource] });
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'package resource index');
+  const row = ui.node('resource-list').children[0];
+  await row.children[0].listeners.click();
+  assert.equal(ui.node('resource-title').textContent, 'Test template · template');
+  assert.equal(ui.node('resource-metadata').textContent, '{\n  "logicalId": "TEST",\n  "tags": [],\n  "provenance": {}\n}');
+  assert.equal(ui.node('resource-definition').textContent, '{\n  "action": "log"\n}');
+  await ui.node('show-resource-source').listeners.click();
+  assert.equal(ui.node('resource-source').textContent, '<img src=x onerror=alert(1)>');
+  assert.ok(ui.calls.some(call => call.path.endsWith('/source')));
+  assert.equal(ui.node('resource-source').innerHTML, undefined);
+});
+
+test('shows invalid and source-unavailable resource states in the detail view', async () => {
+  const resource = { resourceId: 'flow.invalid', type: 'flow', logicalId: 'PAYMENT.flow.v1', name: 'Payment flow', description: '', sourceAvailable: false, state: 'invalid', diagnostics: [{ code: 'ATT-RESOURCE-FLOW-INVALID', summary: 'Flow definition is invalid' }] };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [resource] });
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'package resource index');
+  await ui.node('resource-list').children[0].children[0].listeners.click();
+  assert.equal(ui.node('resource-state').textContent, 'Invalid resource: Flow definition is invalid');
+  assert.equal(ui.node('resource-source-status').textContent, 'Source is not available for this resource.');
+  assert.equal(ui.node('show-resource-source').hidden, true);
+});
+
+test('shows safe index diagnostics when some package resources cannot be indexed', async () => {
+  const ui = boot({ hash: '#/packages/payments', resourcePages: [{ items: [], total: 0, nextCursor: null, diagnostics: [{ code: 'ATT-RESOURCE-INDEX-WARNING', summary: 'Some resources could not be indexed' }] }] });
+  await waitFor(() => ui.node('resource-count').textContent.includes('Some resources could not be indexed'), 'resource index diagnostics');
+});
+
+test('loads additional package resource pages with the opaque cursor', async () => {
+  const first = { resourceId: 'template.first', type: 'template', name: 'First', sourceAvailable: false, state: 'ready' };
+  const second = { resourceId: 'flow.second', type: 'flow', name: 'Second', sourceAvailable: false, state: 'ready' };
+  const ui = boot({ hash: '#/packages/payments', resourcePages: [
+    { items: [first], total: 2, nextCursor: 'opaque.cursor' },
+    { items: [second], total: 2, nextCursor: null }
+  ] });
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 2'), 'first resource page');
+  assert.equal(ui.node('load-more-resources').hidden, false);
+  ui.node('load-more-resources').listeners.click();
+  ui.node('load-more-resources').listeners.click();
+  await waitFor(() => ui.node('resource-count').textContent.includes('2 of 2'), 'second resource page');
+  assert.equal(ui.node('resource-list').children.length, 2);
+  const requests = ui.calls.filter(call => /^packages\/payments\/resources\?/.test(call.path));
+  assert.equal(requests.length, 2, 'Repeated clicks must not fetch and append the same cursor twice');
+  assert.match(requests[1].path, /cursor=opaque\.cursor/);
+});
+
+test('runs only the selected Case from its package-relative suite', async () => {
+  const resource = { resourceId: 'case.Y2FzZQ', type: 'case', logicalId: 'PAYMENTS.01', name: 'Payment case', sourceAvailable: false, state: 'ready', provenance: { suite: 'testcase/payments.xlsx' }, references: [], referencedBy: [] };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [resource] });
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'package resource index');
+  await ui.node('resource-list').children[0].children[0].listeners.click();
+  await ui.node('run-resource-case').listeners.click();
+  const post = ui.calls.find(call => call.path === 'jobs/run' && call.options.method === 'POST');
+  assert.ok(post);
+  assert.deepEqual(JSON.parse(post.options.body), { packageId: 'payments', suites: ['testcase/payments.xlsx'], caseIds: ['PAYMENTS.01'] });
 });
 
 

@@ -1,6 +1,6 @@
 # ATT Web UI inspection and inline job contracts
 
-Status: Issue #176 P0 design for review. This document defines the additive public API and execution boundary that later implementation PRs will follow. It does not claim these endpoints are implemented.
+Status: Issue #176 P0 contract baseline. P1 implements authenticated package resource discovery, safe projections, encrypted pagination, and the Package Resource Explorer. Configuration views, drafts, resource-scoped Debug, Quick Load, and Advanced Load remain follow-up phases.
 
 ## Purpose and scope
 
@@ -20,7 +20,7 @@ This design preserves the existing package-relative job API and CLI behavior. It
 
 ## API boundary
 
-The following routes are the proposed public v1 contract. Exact DTOs belong in `att-server-api`; the REST layer must not deserialize new UI requests directly into `att-worker.WorkerRequest`.
+The routes below define the public v1 contract. P1 implements the first three resource discovery routes and typed response DTOs in `att-server-api`; the `debug-form` route and configuration, draft, and inline-job routes remain future work. The REST layer must not deserialize new UI requests directly into `att-worker.WorkerRequest`.
 
 ### Resource discovery
 
@@ -31,11 +31,11 @@ GET /api/v1/packages/{packageId}/resources/{kind}/{resourceId}/source
 GET /api/v1/packages/{packageId}/resources/{kind}/{resourceId}/debug-form?environment=SIT
 ```
 
-List responses carry a package revision, typed resource summaries, safe relationship references, and an optional continuation cursor. Cursors are bound to the package and revision. The default page size is 50; the maximum is 100. A refresh obtains a new revision and invalidates older cursors and drafts.
+List responses carry typed resource summaries, safe relationship references, and an optional encrypted continuation cursor. A cursor is bound to the authenticated principal, package, filters, offset, and private package revision digest. The digest is encrypted inside the cursor and never returned as a response field. The default page size is 50; the maximum is 100. If package content changes between pages, the Server rejects the stale cursor and the Explorer can refresh the list.
 
 Details expose only fields supported by the resource type. Case details retain logical suite, group, Case ID, row or sheet provenance, tags, and mapped input/expected-value metadata. Template, Flow, and Tool details expose their parsed definitions and resolvable references. Unresolved references are diagnostics. Only Case details provide Run. Only Template, Flow, and Tool details provide Debug and Quick Load.
 
-Source responses are generated from a parsed, allowlisted projection. They are not arbitrary file reads. A Tool script is available only when a server-side package/resource policy explicitly permits that logical script. Binary-only or unapproved source is reported as unavailable. A source response is limited to 64 KiB; a detail response is limited to 256 KiB; larger content is unavailable with a size-limit state. The opaque package revision changes when the private package-content digest changes; the digest is never returned.
+Source responses are generated from a parsed, redacted projection. They are not arbitrary file reads. A Tool script is available only when its exact package-relative path appears in the server-side `server.inspection.safeTextSources` allowlist. Binary-only or unapproved source is reported as unavailable. A source response is limited to 64 KiB; a detail response is limited to 256 KiB; larger content is unavailable with a size-limit state. The private package-content digest is used to detect stale cursors and is never returned.
 
 ### Configuration inspection
 
@@ -142,7 +142,35 @@ Redaction runs before JSON or YAML serialization. Errors contain stable codes an
 
 ## Resource isolation, bounds, and admission
 
-Resource discovery is delegated to one-shot inspector Worker processes through a bounded dispatcher, not performed on Tomcat request threads. The inspector is read-only and does not invoke Tools. Initial `server.inspection` defaults are `maxConcurrent: 2`, `queuedLimit: 16`, `timeoutMs: 30000`, `heapMaxMb: 512`, `maxResponseBytes: 262144`, and `maxSourceBytes: 65536`. These bounds do not inherit the general job queue limits. Timeout or output-limit violations terminate the inspector Worker. The inspector reuses `PackageResourceResolver` for package confinement and rejects traversal and external symlinks. Results are lazy and paginated.
+Resource discovery runs in a bounded pool of long-lived inspector Worker processes, not on Tomcat request threads. Each Worker handles one request at a time and retains at most two package indexes. Initial index construction scans configured package resources; subsequent page, detail, and source requests reuse the snapshot. Package file events and watcher overflow invalidate cached indexes, and authoritative draft revision checks build a fresh snapshot before approval. The inspector is read-only and does not invoke Tools. Initial `server.inspection` defaults are `maxConcurrent: 2`, `queuedLimit: 16`, `timeoutMs: 30000`, `heapMaxMb: 512`, `maxResponseBytes: 262144`, and `maxSourceBytes: 65536`. These bounds do not inherit the general job queue limits. Timeout or output-limit violations terminate the inspector Worker; the next request starts a replacement. The inspector reuses `PackageResourceResolver` for package confinement and rejects traversal and external symlinks. Responses are paginated.
+
+The opt-in `att.server.PackageResourceInspectionPerformanceBenchmark` exercises this cache on a generated package with five Excel workbooks (300 Cases each) and 200 Templates. It records cold index construction and warm Case/Template first-page, page-N, detail, and Tool-source latency through the persistent Worker; it excludes HTTP and Tomcat overhead. Run it from the repository root:
+
+```sh
+mvn -B -ntp -pl att-server -am \
+  -Dtest=PackageResourceInspectionPerformanceBenchmark \
+  -Dsurefire.failIfNoSpecifiedTests=false \
+  -Datt.server.inspection.benchmark.warmups=1 \
+  -Datt.server.inspection.benchmark.runs=5 \
+  -Datt.server.inspection.benchmark.pageSize=50 \
+  -Datt.server.inspection.benchmark.revision="$(git rev-parse HEAD)" \
+  -Datt.server.inspection.benchmark.output=target/issue-176-resource-discovery-large.json \
+  test
+```
+
+The [4.1.0 capture](baselines/issue-176-resource-discovery-large-4.1.0.json) was collected on an 8-core Apple Silicon Mac, macOS 26.1, and OpenJDK 26.0.1. It recorded 1,142.5 ms for the cold index build. Warm-request p50 latencies were:
+
+| Scenario | p50 (ms) | p95 (ms) |
+| --- | ---: | ---: |
+| Case first page | 14.9 | 17.3 |
+| Case page N | 9.3 | 10.7 |
+| Case detail | 0.9 | 1.1 |
+| Template first page | 7.4 | 10.2 |
+| Template page N | 8.6 | 10.8 |
+| Template detail | 1.3 | 1.5 |
+| Tool source | 2.0 | 2.0 |
+
+The report preserves raw samples and package size. With five measured runs, p95 is the highest observed sample and is not a stable distribution estimate; timing results are descriptive, not portable pass/fail thresholds.
 
 New inspection and draft endpoints always require a Servlet Principal, even when a deployment enables anonymous access for the legacy API. Unknown packages and resources return the same not-found shape. New DTOs reject unknown fields and ambiguous combinations. Existing requests remain backward compatible.
 
@@ -157,9 +185,12 @@ New endpoints use the existing `error` envelope and stable codes:
 | 400 | `ATT-SERVER-INVALID-REQUEST` | Invalid JSON, unknown field, invalid logical ID, schema error, or semantic error |
 | 401 | `ATT-SERVER-AUTHENTICATION-REQUIRED` | No authenticated Servlet Principal |
 | 404 | `ATT-SERVER-NOT-FOUND` | Package, resource, or draft is unavailable |
-| 409 | `ATT-SERVER-DRAFT-STALE` | Resource closure changed after preview |
+| 409 | `ATT-RESOURCE-CURSOR-STALE` | Package content changed while listing resources |
 | 413 | `ATT-SERVER-REQUEST-TOO-LARGE` | Request body exceeds its configured size limit |
-| 429 | `ATT-SERVER-CAPACITY-EXCEEDED` | Inspection, draft, Worker, or Load admission limit reached |
+| 413 | `ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE` | Projected inspection response exceeds its configured size limit |
+| 429 | `ATT-SERVER-CAPACITY-EXCEEDED` | Normal job admission limit reached |
+| 503 | `ATT-SERVER-INSPECTION-CAPACITY` | Bounded inspection queue is full |
+| 504 | `ATT-SERVER-INSPECTION-TIMEOUT` | Inspector Worker exceeded its time limit |
 
 Validation failures include structured field diagnostics with logical resource IDs. They never include source lines or physical paths. An oversized projected source is returned as unavailable with a size-limit state, not as a partial file. New request bodies also use the existing `maxRequestBytes` cap.
 

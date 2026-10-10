@@ -11,10 +11,17 @@ form { max-width:42rem; display:grid; gap:.8rem; } form label { display:grid; ga
 form label:has([type=checkbox]) { display:flex; align-items:center; }
 .table-wrap { overflow-x:auto; } table { width:100%; border-collapse:collapse; margin-top:.5rem; } th, td { text-align:left; padding:.45rem; border-bottom:1px solid #cbd5e1; }
 .summary { display:grid; grid-template-columns:max-content 1fr; gap:.2rem 1rem; } .summary dt { font-weight:700; } .summary dd { margin:0; }
+.resource-filters { display:flex; align-items:center; flex-wrap:wrap; gap:.45rem; } .resource-filters input { min-width:14rem; padding:.4rem; }
+.resource-columns { display:grid; grid-template-columns:minmax(14rem,.65fr) minmax(20rem,1.35fr); gap:1rem; }
+.resource-list { list-style:none; padding:0; margin:.5rem 0; } .resource-list li { border-bottom:1px solid #cbd5e1; padding:.35rem 0; }
+.resource-list button { width:100%; text-align:left; border:0; background:transparent; color:inherit; padding:.4rem; }
+.resource-list button[aria-current="true"] { outline:2px solid #075985; }
+.resource-relations { display:grid; grid-template-columns:1fr 1fr; gap:1rem; } .resource-relations ul { padding-left:1.2rem; }
+article#resource-detail { min-width:0; } article#resource-detail pre { max-height:26rem; overflow:auto; }
 pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:1rem; background:#e8eef4; border-radius:.4rem; }
 .events { max-height:22rem; overflow:auto; padding:.5rem 2rem; background:#e8eef4; } .events li { padding:.2rem 0; overflow-wrap:anywhere; }
 footer { max-width:72rem; margin:2rem auto; padding:0 1rem; color:#52606d; }
 #message:empty { display:none; } #message:not(:empty) { padding:.6rem; background:#fff3cd; border-left:4px solid #b7791f; }
 [hidden] { display:none !important; }
-@media (max-width: 720px) { .columns { grid-template-columns:1fr; } main { margin-top:1rem; } }
+@media (max-width: 720px) { .columns, .resource-columns, .resource-relations { grid-template-columns:1fr; } main { margin-top:1rem; } }
 @media (prefers-color-scheme: dark) { body { background:#111827; color:#e5e7eb; } a { color:#7dd3fc; } pre,.events { background:#1f2937; } th,td,.package-list li { border-color:#4b5563; } footer { color:#9ca3af; } }
