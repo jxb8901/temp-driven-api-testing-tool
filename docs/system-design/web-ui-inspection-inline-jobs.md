@@ -158,7 +158,19 @@ mvn -B -ntp -pl att-server -am \
   test
 ```
 
-The report preserves raw samples and package size. Timing results are descriptive and are not portable pass/fail thresholds.
+The [4.1.0 capture](baselines/issue-176-resource-discovery-large-4.1.0.json) was collected on an 8-core Apple Silicon Mac, macOS 26.1, and OpenJDK 26.0.1. It recorded 1,142.5 ms for the cold index build. Warm-request p50 latencies were:
+
+| Scenario | p50 (ms) | p95 (ms) |
+| --- | ---: | ---: |
+| Case first page | 14.9 | 17.3 |
+| Case page N | 9.3 | 10.7 |
+| Case detail | 0.9 | 1.1 |
+| Template first page | 7.4 | 10.2 |
+| Template page N | 8.6 | 10.8 |
+| Template detail | 1.3 | 1.5 |
+| Tool source | 2.0 | 2.0 |
+
+The report preserves raw samples and package size. With five measured runs, p95 is the highest observed sample and is not a stable distribution estimate; timing results are descriptive, not portable pass/fail thresholds.
 
 New inspection and draft endpoints always require a Servlet Principal, even when a deployment enables anonymous access for the legacy API. Unknown packages and resources return the same not-found shape. New DTOs reject unknown fields and ambiguous combinations. Existing requests remain backward compatible.
 
