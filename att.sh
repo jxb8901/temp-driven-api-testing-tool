@@ -31,7 +31,7 @@ done
 if [ -n "$MISSING_CLASSES" ]; then
   echo "ATT source checkout is missing required prebuilt classes:$MISSING_CLASSES" >&2
   echo "Build explicitly with: mvn -DskipTests -pl att-cli -am compile" >&2
-  echo "Or create a release package with: ./build.sh" >&2
+  echo "Or use the local package produced by the release build." >&2
   exit 2
 fi
 CP="$CLI_DIR/target/classes:$ENGINE_DIR/target/classes:$REMOTE_DIR/target/classes:$API_DIR/target/classes"
