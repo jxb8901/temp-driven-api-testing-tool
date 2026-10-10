@@ -21,6 +21,13 @@
   let resourceCursor = null;
   let resourceItems = [];
   let activeResource = null;
+  let debugDefaults = null;
+  let debugTarget = null;
+  let debugFormSequence = 0;
+  let debugDraft = null;
+  let debugDraftFingerprint = '';
+  let debugPreviewPending = null;
+  let debugPreviewPendingFingerprint = '';
   let cancelRequested = false;
   let versionPromise = null;
   let navigation = 0;
@@ -36,7 +43,11 @@
       const error = data && data.error;
       if (response.status === 401) throw new Error('Authentication is required or access was denied by Tomcat.');
       if (response.status === 403 && !type.includes('json')) throw new Error('Authentication is required or access was denied by Tomcat.');
-      throw new Error(error && (error.summary || error.code) || `Server request failed (${response.status}).`);
+      const failure = new Error(error && (error.summary || error.code) || `Server request failed (${response.status}).`);
+      failure.status = response.status;
+      failure.code = error && error.code;
+      failure.diagnostics = Array.isArray(data && data.diagnostics) ? data.diagnostics : [];
+      throw failure;
     }
     if (!type.includes('json')) throw new Error('The Server returned an incompatible response.');
     return data;
@@ -187,6 +198,13 @@
   function resourcePath(packageId, resource) {
     return `packages/${encodeURIComponent(packageId)}/resources/${encodeURIComponent(resource.type)}/${encodeURIComponent(resource.resourceId)}`;
   }
+  function clearDebugForm() {
+    debugFormSequence++; debugDefaults = null; debugTarget = null;
+    debugDraft = null; debugDraftFingerprint = '';
+    debugPreviewPending = null; debugPreviewPendingFingerprint = '';
+    byId('resource-debug').hidden = true; byId('debug-form-editor').hidden = true;
+    text(byId('debug-form-status'), ''); text(byId('debug-preview'), '');
+  }
   function renderResourceList() {
     const list = byId('resource-list'); list.replaceChildren();
     resourceItems.forEach(item => {
@@ -203,6 +221,7 @@
       resourcePageSequence++; resourceCursor = null; resourceItems = []; activeResource = null;
       resourceDetailSequence++; resourceLoadPending = false;
       byId('resource-list').replaceChildren(); byId('resource-detail').hidden = true;
+      clearDebugForm();
       byId('load-more-resources').hidden = true; byId('load-more-resources').disabled = false;
       text(byId('resource-count'), 'Loading package resources…');
     }
@@ -278,9 +297,122 @@
       text(byId('resource-source-status'), sourceAvailable ? 'Safe source is available.' : 'Source is not available for this resource.');
       byId('show-resource-source').hidden = !sourceAvailable;
       byId('run-resource-case').hidden = activeResource.type !== 'case' || activeResource.state === 'invalid';
+      byId('debug-resource').hidden = !['template','flow','tool'].includes(activeResource.type) || activeResource.state === 'invalid';
+      clearDebugForm();
       byId('resource-source-heading').hidden = true; byId('resource-source').hidden = true; text(byId('resource-source'), '');
       byId('resource-detail').hidden = false;
     } catch (error) { if (selection === resourceDetailSequence && generation === navigation) message(error.message); }
+  }
+  async function loadDebugForm() {
+    const item = activeResource, packageId = selectedPackage, generation = navigation;
+    if (!item || !packageId || !['template','flow','tool'].includes(item.type)) return;
+    const sequence = ++debugFormSequence;
+    debugDefaults = null; debugTarget = null;
+    byId('resource-debug').hidden = false; byId('debug-form-editor').hidden = true;
+    text(byId('debug-form-status'), 'Loading safe Debug defaults…'); text(byId('debug-preview'), '');
+    try {
+      const environment = String(byId('submit-form').elements.environment.value || '').trim();
+      const suffix = environment ? `?environment=${encodeURIComponent(environment)}` : '';
+      const data = await request(`${resourcePath(packageId,item)}/debug-form${suffix}`);
+      if (sequence !== debugFormSequence || generation !== navigation || activeResource !== item || selectedPackage !== packageId) return;
+      debugDefaults = JSON.parse(JSON.stringify(data.input || {}));
+      debugTarget = data.target || { type: item.type, id: item.logicalId };
+      const tool = item.type === 'tool';
+      byId('debug-inputs-label').hidden = false;
+      byId('debug-vars-label').hidden = tool;
+      byId('debug-arguments-label').hidden = !tool;
+      resetDebugForm();
+      byId('debug-form-editor').hidden = false;
+      text(byId('debug-form-status'), data.redacted ? 'Defaults loaded. Sensitive fields are hidden in the form and preview.' : 'Defaults loaded from the package sidecar, or generated as empty defaults.');
+    } catch (error) {
+      if (sequence === debugFormSequence && generation === navigation && activeResource === item) {
+        text(byId('debug-form-status'), `Debug defaults are unavailable. ${debugValidationMessage(error)}`); message(error.message);
+      }
+    }
+  }
+  function resetDebugForm() {
+    if (!debugDefaults) return;
+    debugDraft = null; debugDraftFingerprint = '';
+    byId('debug-inputs').value = JSON.stringify(debugDefaults.inputs || {}, null, 2);
+    byId('debug-vars').value = JSON.stringify(debugDefaults.vars || {}, null, 2);
+    byId('debug-arguments').value = JSON.stringify(debugDefaults.arguments || {}, null, 2);
+    text(byId('debug-preview'), '');
+  }
+  function debugValidationMessage(error) {
+    const diagnostics = Array.isArray(error && error.diagnostics) ? error.diagnostics : [];
+    const details = diagnostics.map(item => [item.resourceId, item.field, item.summary].filter(Boolean).join(' · ')).filter(Boolean);
+    return details.length ? details.join('; ') : error.message;
+  }
+  function parseDebugObject(id, label) {
+    let value;
+    try { value = JSON.parse(String(byId(id).value || '{}')); }
+    catch (_) { throw new Error(`${label} must be a JSON object.`); }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be a JSON object.`);
+    return value;
+  }
+  function currentDebugInput() {
+    if (!debugDefaults || !debugTarget) throw new Error('Open Debug from a selected Template, Flow, or Tool first.');
+    const input = JSON.parse(JSON.stringify(debugDefaults));
+    if (debugTarget.type === 'tool') {
+      delete input.vars; delete input.tools;
+      input.inputs = parseDebugObject('debug-inputs','Inputs');
+      input.arguments = parseDebugObject('debug-arguments','Tool arguments');
+    } else {
+      delete input.arguments; delete input.tools;
+      input.inputs = parseDebugObject('debug-inputs','Inputs');
+      input.vars = parseDebugObject('debug-vars','Variables');
+    }
+    return input;
+  }
+  async function previewDebugDraft() {
+    const item = activeResource, packageId = selectedPackage, generation = navigation;
+    if (!item || !packageId || !debugTarget) throw new Error('Open Debug from a selected resource detail first.');
+    const body = { packageId, target: debugTarget, input: currentDebugInput() };
+    const environment = String(byId('submit-form').elements.environment.value || '').trim();
+    if (environment) body.environment = environment;
+    const fingerprint = JSON.stringify(body);
+    if (debugDraft && debugDraftFingerprint === fingerprint) {
+      text(byId('debug-preview'), debugDraft.previewYaml || JSON.stringify(debugDraft.preview || {}, null, 2));
+      text(byId('debug-form-status'), debugDraft.redacted ? 'Validation passed. The preview hides sensitive fields.' : 'Validation passed.');
+      return debugDraft;
+    }
+    if (debugPreviewPending && debugPreviewPendingFingerprint === fingerprint) return debugPreviewPending;
+    const pending = (async () => {
+      text(byId('debug-form-status'), 'Validating the effective Debug input…');
+      const draft = await request('drafts/debug', { method: 'POST', body: JSON.stringify(body) });
+      if (generation !== navigation || selectedPackage !== packageId || activeResource !== item) return null;
+      const currentBody = { packageId, target: debugTarget, input: currentDebugInput() };
+      const currentEnvironment = String(byId('submit-form').elements.environment.value || '').trim();
+      if (currentEnvironment) currentBody.environment = currentEnvironment;
+      if (JSON.stringify(currentBody) !== fingerprint) return null;
+      debugDraft = draft; debugDraftFingerprint = fingerprint;
+      text(byId('debug-preview'), draft.previewYaml || JSON.stringify(draft.preview || {}, null, 2));
+      text(byId('debug-form-status'), draft.redacted ? 'Validation passed. The preview hides sensitive fields.' : 'Validation passed.');
+      return draft;
+    })();
+    debugPreviewPending = pending; debugPreviewPendingFingerprint = fingerprint;
+    try { return await pending; }
+    finally {
+      if (debugPreviewPending === pending) {
+        debugPreviewPending = null; debugPreviewPendingFingerprint = '';
+      }
+    }
+  }
+  async function runDebugDraft() {
+    const packageId = selectedPackage, generation = navigation;
+    if (!packageId || submitting.has(packageId)) return;
+    submitting.add(packageId); byId('submit-debug-form').disabled = true;
+    try {
+      const draft = await previewDebugDraft();
+      if (!draft || generation !== navigation || selectedPackage !== packageId) return;
+      const accepted = await request('jobs/debug', { method: 'POST', body: JSON.stringify({ packageId, draftId: draft.draftId }) });
+      debugDraft = null; debugDraftFingerprint = '';
+      if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
+    } catch (error) {
+      if (generation === navigation && selectedPackage === packageId) { text(byId('debug-form-status'), `Debug was not submitted. ${debugValidationMessage(error)}`); message(error.message); }
+    } finally {
+      submitting.delete(packageId); if (selectedPackage === packageId) byId('submit-debug-form').disabled = false;
+    }
   }
   async function showResourceSource() {
     const item = activeResource, packageId = selectedPackage, generation = navigation;
@@ -321,7 +453,7 @@
     const submitButton = form.querySelector('button[type="submit"]');
     if (submitButton) submitButton.disabled = true;
     const body = { packageId: selectedPackage };
-    ['environment','config','runId','debugId','suiteDirectory','debugInput','validationScope','scenario'].forEach(key => { const value = String(values.get(key) || '').trim(); if (value) body[key] = value; });
+    ['environment','config','runId','debugId','suiteDirectory','validationScope','scenario'].forEach(key => { const value = String(values.get(key) || '').trim(); if (value) body[key] = value; });
     ['suites','tags','excludeTags','caseIds'].forEach(key => { const value = commaList(String(values.get(key) || '')); if (value) body[key] = value; });
     if (values.has('all')) body.all = true;
     if (values.has('dryRun')) body.dryRun = true;
@@ -445,6 +577,20 @@
   byId('load-more-resources').addEventListener('click', () => { if (selectedPackage && resourceCursor) loadResources(selectedPackage, false); });
   byId('show-resource-source').addEventListener('click', showResourceSource);
   byId('run-resource-case').addEventListener('click', runResourceCase);
+  byId('debug-resource').addEventListener('click', loadDebugForm);
+  byId('reset-debug-form').addEventListener('click', resetDebugForm);
+  ['debug-inputs','debug-vars','debug-arguments'].forEach(id => byId(id).addEventListener('input', () => {
+    debugDraft = null; debugDraftFingerprint = ''; text(byId('debug-preview'), '');
+    text(byId('debug-form-status'), 'Input changed. Validate it before starting Debug.');
+  }));
+  byId('submit-form').elements.environment.addEventListener('input', () => {
+    debugDraft = null; debugDraftFingerprint = ''; text(byId('debug-preview'), '');
+  });
+  byId('preview-debug-form').addEventListener('click', async () => {
+    try { await previewDebugDraft(); }
+    catch (error) { text(byId('debug-form-status'), `Debug input is invalid. ${debugValidationMessage(error)}`); message(error.message); }
+  });
+  byId('submit-debug-form').addEventListener('click', runDebugDraft);
   byId('show-declared-configuration').addEventListener('click', () => { if (selectedPackage) loadDeclaredConfiguration(selectedPackage); });
   byId('show-effective-configuration').addEventListener('click', showEffectiveConfiguration);
   byId('compare-configuration').addEventListener('click', compareConfiguration);

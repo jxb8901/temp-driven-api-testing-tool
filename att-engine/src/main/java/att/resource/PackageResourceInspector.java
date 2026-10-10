@@ -13,6 +13,7 @@ import att.flow.FlowRegistry;
 import att.template.StageTemplate;
 import att.template.StageTemplateLoader;
 import att.template.TemplateAction;
+import att.debug.DebugEngine;
 import att.config.YamlSupport;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -223,14 +224,107 @@ public final class PackageResourceInspector {
         indexFlows(index, config, templatesRoot);
         indexTools(index, config);
         indexCases(index, config);
+        indexDebugSidecars(index, config);
         resolveReferences(index);
-        index.revisionDigest = digestFiles(index.files);
+        index.revisionDigest = digestFiles(index.files, index.debugSidecars);
         Collections.sort(index.ordered, new Comparator<Resource>() {
             @Override public int compare(Resource left, Resource right) {
                 return left.resourceId.compareTo(right.resourceId);
             }
         });
         return index;
+    }
+
+    /** Returns a safe, fixed-target Debug form projection and its private package revision. */
+    public Map<String, Object> inspectDebugForm(String type, String resourceId, String expectedRevisionDigest) throws Exception {
+        Index index = index();
+        requireExpectedRevision(index, expectedRevisionDigest);
+        Resource resource = index.byId.get(resourceId);
+        if (resource == null || !debuggable(resource.type) || !resource.type.equals(type) || !"ready".equals(resource.state))
+            throw new ResourceNotFoundException();
+        DebugEngine engine = new DebugEngine(packageRoot, frameworkConfig());
+        Map<String, Object> projection = engine.projectDiscoverableInput(resource.type, resource.logicalId);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("resource", summary(resource, index));
+        result.put("target", target(resource));
+        result.put("input", projection.get("input"));
+        result.put("redacted", projection.get("redacted"));
+        result.put("revisionDigest", index.revisionDigest);
+        return bounded(result);
+    }
+
+    /** Validates typed inline Debug values against a resolvable logical target. */
+    public Map<String, Object> validateDebugInput(String type, String logicalId,
+                                                  Map<String, Object> input) throws Exception {
+        if (!debuggable(type) || logicalId == null || logicalId.trim().isEmpty() || logicalId.length() > 512)
+            throw new ResourceNotFoundException();
+        Index index = index();
+        Resource resource = index.resolve(type, logicalId);
+        if (resource == null || !"ready".equals(resource.state)) throw new ResourceNotFoundException();
+        DebugEngine engine = new DebugEngine(packageRoot, frameworkConfig());
+        Map<String, Object> projection = engine.validateInlineInput(type, resource.logicalId, input);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("resource", summary(resource, index));
+        result.put("target", target(resource));
+        result.put("input", projection.get("input"));
+        result.put("redacted", projection.get("redacted"));
+        result.put("normalizedInput", projection.get("normalizedInput"));
+        result.put("revisionDigest", index.revisionDigest);
+        return bounded(result);
+    }
+
+    /** Checks a Server-issued draft revision without returning the digest to the caller. */
+    public void verifyRevision(String expectedRevisionDigest) throws Exception {
+        requireExpectedRevision(index(), expectedRevisionDigest);
+    }
+
+    private void requireExpectedRevision(Index index, String expectedRevisionDigest) {
+        if (expectedRevisionDigest != null && !expectedRevisionDigest.equals(index.revisionDigest))
+            throw new StaleResourceCursorException();
+    }
+
+    private FrameworkConfig frameworkConfig() throws Exception {
+        Path file = configPath.isAbsolute() ? configPath : packageRoot.resolve(configPath);
+        file = resources.fromInternalPath(file, PackageResourceResolver.Kind.FILE).canonicalPath();
+        return new FrameworkConfigLoader().load(file, packageRoot, environment);
+    }
+
+    private static boolean debuggable(String type) {
+        return "template".equals(type) || "flow".equals(type) || "tool".equals(type);
+    }
+
+    private Map<String, Object> target(Resource resource) {
+        Map<String, Object> target = new LinkedHashMap<String, Object>();
+        target.put("type", resource.type);
+        target.put("id", scrub(resource.logicalId));
+        return target;
+    }
+
+    private void indexDebugSidecars(Index index, FrameworkConfig config) {
+        for (Resource resource : index.ordered) {
+            if ("template".equals(resource.type) || "flow".equals(resource.type)) {
+                if (resource.yamlSource != null) indexDebugSidecar(index, resource.yamlSource.getParent().resolve("debug.yaml"));
+            } else if ("tool".equals(resource.type)) {
+                ToolConfig tool = config.tools().get(resource.logicalId);
+                if (tool == null) continue;
+                String group = tool.groupId().isEmpty() ? tool.localKey() : tool.groupId();
+                indexDebugSidecar(index, packageRoot.resolve("config/tools").resolve(group + ".debug.yaml"));
+            }
+        }
+    }
+
+    private void indexDebugSidecar(Index index, Path file) {
+        Path candidate = file.toAbsolutePath().normalize();
+        if (!candidate.startsWith(packageRoot)) return;
+        String logicalName = packageRoot.relativize(candidate).toString().replace('\\', '/');
+        try {
+            PackageResourceResolver.PackageResource resource = resources.fromInternalPath(file, PackageResourceResolver.Kind.FILE);
+            index.files.add(resource.canonicalPath());
+            logicalName = resource.logicalName();
+            index.debugSidecars.put(logicalName, resource.canonicalPath());
+        } catch (Exception ignored) {
+            index.debugSidecars.put(logicalName, null);
+        }
     }
 
     private void indexTemplates(Index index, FrameworkConfig config, Path templatesRoot) {
@@ -620,7 +714,7 @@ public final class PackageResourceInspector {
         return workbook.resolveSibling(name);
     }
 
-    private String digestFiles(Set<Path> files) throws Exception {
+    private String digestFiles(Set<Path> files, Map<String, Path> debugSidecars) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         List<Path> ordered = new ArrayList<Path>(files);
         Collections.sort(ordered);
@@ -640,6 +734,14 @@ public final class PackageResourceInspector {
                     digest.update(buffer, 0, read);
                 }
             }
+            digest.update((byte) 0xff);
+        }
+        for (Map.Entry<String, Path> sidecar : debugSidecars.entrySet()) {
+            digest.update(utf8("debug-sidecar"));
+            digest.update((byte) 0);
+            digest.update(utf8(sidecar.getKey()));
+            digest.update((byte) 0);
+            digest.update((byte) (sidecar.getValue() == null ? 0 : 1));
             digest.update((byte) 0xff);
         }
         return hex(digest.digest());
@@ -708,6 +810,7 @@ public final class PackageResourceInspector {
         final List<Resource> ordered = new ArrayList<Resource>();
         final List<Map<String, Object>> diagnostics = new ArrayList<Map<String, Object>>();
         final Set<Path> files = new TreeSet<Path>();
+        final Map<String, Path> debugSidecars = new TreeMap<String, Path>();
         String revisionDigest;
 
         void add(Resource resource) {

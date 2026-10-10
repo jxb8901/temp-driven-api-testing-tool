@@ -77,7 +77,7 @@ public final class DebugEngine {
     /** Validates one discovery candidate without creating output or executing a resource call. */
     public Path validateDiscoverableTarget(String type, String id) throws Exception {
         ExecutionOptions options = targetOptions("debug", type, id);
-        Path sidecar = autoInput(type, id);
+        Path sidecar = safeAutoInput(type, id);
         DebugInput input;
         if (Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar)) input = loadInput(options, type, id);
         else {
@@ -85,6 +85,34 @@ public final class DebugEngine {
             empty.put("schemaVersion", Version.DEBUG_SCHEMA);
             input = new DebugInput(sidecar, empty, type, id, config);
         }
+        validateTargetInput(type, id, input);
+        return Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar) ? sidecar : null;
+    }
+
+    /** Returns typed, redacted defaults for the selected Template, Flow, or Tool. */
+    public Map<String, Object> projectDiscoverableInput(String type, String id) throws Exception {
+        ExecutionOptions options = targetOptions("debug", type, id);
+        Path sidecar = safeAutoInput(type, id);
+        DebugInput input;
+        if (Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar)) input = loadInput(options, type, id);
+        else {
+            Map<String, Object> empty = new LinkedHashMap<String, Object>();
+            empty.put("schemaVersion", Version.DEBUG_SCHEMA);
+            input = new DebugInput(sidecar, empty, type, id, config);
+        }
+        return projectInput(input, type, id);
+    }
+
+    /** Validates and safely projects a complete inline Debug input for a fixed logical target. */
+    public Map<String, Object> validateInlineInput(String type, String id, Map<String, Object> values) throws Exception {
+        if (values == null) throw new IllegalArgumentException("Debug input is required");
+        ExecutionOptions options = targetOptions("debug", type, id).withInlineDebugInput(values);
+        DebugInput input = loadInput(options, type, id);
+        validateTargetInput(type, id, input);
+        return projectInput(input, type, id);
+    }
+
+    private void validateTargetInput(String type, String id, DebugInput input) throws Exception {
         ResolvedTarget resolved = resolveTarget(type, id, input);
         StageCaseData stage = input.stage(resolved.template.name());
         TestCase testCase = syntheticCase(type, id, input, stage);
@@ -96,7 +124,80 @@ public final class DebugEngine {
         }
         new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
                 resolved.flows, input.path, "debug", input.inputs, input.vars, input.testdataDescriptors);
-        return Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar) ? sidecar : null;
+    }
+
+    private Map<String, Object> projectInput(DebugInput input, String type, String id) {
+        Map<String, Object> projected = new LinkedHashMap<String, Object>(input.root);
+        projected.put("schemaVersion", Version.DEBUG_SCHEMA);
+        projected.put("inputs", input.inputs);
+        if ("tool".equals(type)) {
+            projected.remove("vars");
+            projected.remove("tools");
+            projected.put("arguments", input.arguments);
+        } else {
+            projected.remove("arguments");
+            projected.remove("tools");
+            projected.put("vars", input.vars);
+        }
+        boolean[] redacted = new boolean[] { false };
+        Object safe = safeFormValue(projected, null, redacted);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("input", safe);
+        result.put("redacted", Boolean.valueOf(redacted[0]));
+        result.put("target", targetTypeAndId(type, id));
+        result.put("normalizedInput", projected);
+        return result;
+    }
+
+    private Map<String, Object> targetTypeAndId(String type, String id) {
+        Map<String, Object> target = new LinkedHashMap<String, Object>();
+        target.put("type", type);
+        target.put("id", id);
+        return target;
+    }
+
+    private Object safeFormValue(Object value, String key, boolean[] redacted) {
+        if (key != null && sensitiveFormKey(key)) { redacted[0] = true; return "[REDACTED]"; }
+        if (value instanceof Map) {
+            Map<String, Object> safe = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                String childKey = String.valueOf(entry.getKey());
+                safe.put(childKey, safeFormValue(entry.getValue(), childKey, redacted));
+            }
+            return safe;
+        }
+        if (value instanceof Iterable) {
+            List<Object> safe = new ArrayList<Object>();
+            for (Object item : (Iterable<?>) value) safe.add(safeFormValue(item, null, redacted));
+            return safe;
+        }
+        if (value instanceof String) {
+            String safe = scrubFormText((String) value);
+            if (!safe.equals(value)) { redacted[0] = true; return "[REDACTED]"; }
+            return safe;
+        }
+        return value;
+    }
+
+    private static boolean sensitiveFormKey(String key) {
+        String normalized = key.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        return normalized.contains("password") || normalized.contains("passwd") || normalized.contains("token")
+                || normalized.contains("secret") || normalized.contains("credential") || normalized.equals("authorization")
+                || normalized.contains("apikey") || normalized.contains("accesskey") || normalized.contains("clientid")
+                || normalized.contains("username") || normalized.contains("privatekey") || normalized.contains("identityfile")
+                || normalized.equals("jdbcurl") || normalized.contains("cookie") || normalized.equals("headers")
+                || normalized.equals("header") || normalized.equals("url") || normalized.equals("host")
+                || normalized.equals("hostname") || normalized.equals("port") || normalized.equals("endpoint")
+                || normalized.equals("queue") || normalized.equals("channel") || normalized.equals("address");
+    }
+
+    private String scrubFormText(String value) {
+        if (value == null) return null;
+        String safe = value.replace(projectRoot.toString(), "[package]");
+        safe = java.util.regex.Pattern.compile("(?i)\\b(Bearer|Basic)\\s+[A-Za-z0-9+/=_-]+").matcher(safe).replaceAll("$1 [REDACTED]");
+        safe = java.util.regex.Pattern.compile("(?i)(password|passwd|token|secret|authorization|api[_-]?key|client[_-]?secret)\\s*([:=])\\s*(['\\\"]?)[^\\s,'\\\";}]+").matcher(safe).replaceAll("$1$2[REDACTED]");
+        safe = java.util.regex.Pattern.compile("(?i)(https?://)[^/@\\s:]+:[^/@\\s]+@").matcher(safe).replaceAll("$1[REDACTED]@");
+        return att.core.PathPresentation.displayDiagnosticText(safe, projectRoot);
     }
 
     /** Returns the exact optional sidecar path used by Debug auto-discovery. */
@@ -185,7 +286,7 @@ public final class DebugEngine {
             if (options.hasObserver()) {
                 Map<String,Object> eventData=new LinkedHashMap<String,Object>(); eventData.put("event","DEBUG_STARTED");
                 eventData.put("targetType",targetType); eventData.put("targetId",targetId);
-                eventData.put("input",options.debugInput()==null?"auto":logicalInputName(options.debugInput()));
+                eventData.put("input",options.inlineDebugInput()!=null?"inline":options.debugInput()==null?"auto":logicalInputName(options.debugInput()));
                 eventData.put("output",att.core.PathPresentation.displayPath(debugDirectory,projectRoot));
                 options.emitEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.DEBUG,debugDirectory.getFileName().toString(),null,null,null,"START",null,null,eventData));
             }
@@ -200,7 +301,7 @@ public final class DebugEngine {
             long inputLoadPhase = performanceProfile == null ? 0L : performanceProfile.begin();
             try { input = loadInput(options, targetType, targetId); }
             finally { if (performanceProfile != null) performanceProfile.end("debugInputLoadMs", inputLoadPhase); }
-            result.put("input", att.core.PathPresentation.displayPath(input.path, projectRoot));
+            result.put("input", options.inlineDebugInput()!=null?"inline":att.core.PathPresentation.displayPath(input.path, projectRoot));
             long targetResolvePhase = performanceProfile == null ? 0L : performanceProfile.begin();
             ResolvedTarget resolved;
             try { resolved = resolveTarget(targetType, targetId, input); }
@@ -216,7 +317,7 @@ public final class DebugEngine {
             if (options.hasObserver()) {
                 Map<String,Object> eventData=new LinkedHashMap<String,Object>(); eventData.put("event","DEBUG_INPUT_RESOLVED");
                 eventData.put("targetType",targetType); eventData.put("targetId",targetId);
-                eventData.put("resolved",att.core.PathPresentation.displayPath(input.path,projectRoot));
+                eventData.put("resolved",options.inlineDebugInput()!=null?"inline":att.core.PathPresentation.displayPath(input.path,projectRoot));
                 options.emitEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.DEBUG,debugDirectory.getFileName().toString(),
                         testCase.caseId(),null,null,"INPUT_RESOLVED",null,null,eventData));
             }
@@ -234,7 +335,7 @@ public final class DebugEngine {
                         started.toString(), started.toString());
                 context.setProject(projectRoot);
                 context.setUnsafeFailureDetails(options.unsafeFailureDetails());
-                context.setSourceMetadata("debug", input.path, testCase.caseId());
+                context.setSourceMetadata("debug", options.inlineDebugInput() == null ? input.path : null, testCase.caseId());
                 context.setTargetMetadata(targetType, targetId);
                 context.setTemplateMetadata(resolved.template.name(), resolved.template.directory());
                 context.put("CASE.environment", config.environment());
@@ -250,10 +351,11 @@ public final class DebugEngine {
                 if (!testdata.selectionEvidence().isEmpty())
                     context.put("CASE.testdataSelections", testdata.selectionEvidence());
                 stage = new StageCaseData(stage.key(), stage.templateName(), resolvedStageValues);
-                context.put("CASE.debugInput", context.logicalPackageName(input.path));
+                context.put("CASE.debugInput", options.inlineDebugInput() == null
+                        ? context.logicalPackageName(input.path) : "inline");
                 Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();
                 debugHeader.put("target", target);
-                debugHeader.put("input", logicalInputName(input.path));
+                debugHeader.put("input", options.inlineDebugInput() == null ? logicalInputName(input.path) : "inline");
                 debugHeader.put("caseId", testCase.caseId());
                 log.append("DEBUG TARGET", debugHeader);
                 context.beginStage(stage, resolved.template.name(), resolved.template.directory());
@@ -285,7 +387,7 @@ public final class DebugEngine {
             context.finishStage(status.name(), Duration.between(started, Instant.now()).toMillis());
             stageFinished = true;
         } catch (DiagnosticException e) {
-            diagnostic = e.withDetail("Debug input: " + (input == null ? expectedInput(options, targetType, targetId) : input.path));
+            diagnostic = e.withDetail("Debug input: " + debugInputDetail(options, input, targetType, targetId));
             status = ResultStatus.INVALID;
             exitCode = 2;
             if (context != null) context.put("CASE.status", status.name());
@@ -296,7 +398,7 @@ public final class DebugEngine {
                     ? new DiagnosticException(DiagnosticCodes.DEBUG_INVALID, "Invalid debug target", e.getMessage(),
                     null, "debug", null, null, null, targetId, null,
                     "Correct the target, sidecar schema, or selected dependency input.", e)
-                    : typed).withDetail("Debug input: " + (input == null ? expectedInput(options, targetType, targetId) : input.path));
+                    : typed).withDetail("Debug input: " + debugInputDetail(options, input, targetType, targetId));
             status = ResultStatus.INVALID;
             exitCode = 2;
             if (context != null) context.put("CASE.status", status.name());
@@ -305,7 +407,7 @@ public final class DebugEngine {
             diagnostic = new DiagnosticException(DiagnosticCodes.RUN_FAILED, "Debug execution failed",
                     e.getMessage(), null, "debug", null, null, null, targetId, null,
                     "Inspect case.log and artifacts; use --quiet to suppress live progress.", e)
-                    .withDetail("Debug input: " + (input == null ? expectedInput(options, targetType, targetId) : input.path));
+                    .withDetail("Debug input: " + debugInputDetail(options, input, targetType, targetId));
             status = ResultStatus.ERROR;
             exitCode = 3;
             if (context != null) context.put("CASE.status", status.name());
@@ -395,13 +497,35 @@ public final class DebugEngine {
 
     private DebugInput loadInput(ExecutionOptions options, String type, String id,
                                  att.core.ExecutionBootstrapVariables.Scope bootstrapScope) throws Exception {
-        Path path = options.debugInput() == null ? autoInput(type, id) : resolveInput(options.debugInput());
-        if (!Files.isRegularFile(path) || Files.isSymbolicLink(path))
+        Path path = options.debugInput() == null ? safeAutoInput(type, id) : resolveInput(options.debugInput());
+        boolean inline = options.inlineDebugInput() != null;
+        if (!inline && (!Files.isRegularFile(path) || Files.isSymbolicLink(path)))
             throw debugError("Debug input file does not exist: " + path, "Create the sidecar file or pass --input <path>.");
         try {
-            Object loaded = YamlSupport.load(path);
-            if (!(loaded instanceof Map)) throw debugError("Debug input must be a YAML map: " + path, "Use schemaVersion: " + Version.DEBUG_SCHEMA + ".");
-            Map<String, Object> map = objectMap((Map<?, ?>) loaded);
+            Map<String, Object> map;
+            if (inline) {
+                map = objectMap(options.inlineDebugInput());
+                Path sidecar = safeAutoInput(type, id);
+                if (Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar)) {
+                    Object defaults = YamlSupport.load(sidecar);
+                    if (defaults instanceof Map) {
+                        Map<String, Object> defaultValues = objectMap((Map<?, ?>) defaults);
+                        if ("tool".equals(type)) {
+                            DebugInput defaultInput = new DebugInput(sidecar, defaultValues, type, id, config);
+                            defaultValues.put("arguments", defaultInput.arguments);
+                            defaultValues.remove("tools");
+                        }
+                        map = restoreRedactedDefaults(defaultValues, map);
+                    }
+                }
+                if (!"tool".equals(type) && (!DebugInput.map(map.get("arguments")).isEmpty()
+                        || !DebugInput.map(map.get("tools")).isEmpty()))
+                    throw debugError("Tool arguments are supported only for Tool targets", "Use inputs and vars for Template or Flow Debug.");
+            } else {
+                Object loaded = YamlSupport.load(path);
+                if (!(loaded instanceof Map)) throw debugError("Debug input must be a YAML map: " + path, "Use schemaVersion: " + Version.DEBUG_SCHEMA + ".");
+                map = objectMap((Map<?, ?>) loaded);
+            }
             Object declaredVersion = map.get("schemaVersion");
             String schemaVersion = declaredVersion == null ? "" : String.valueOf(declaredVersion);
             Path schema = att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion);
@@ -470,6 +594,40 @@ public final class DebugEngine {
         return Collections.unmodifiableList(result);
     }
 
+    private Map<String, Object> restoreRedactedDefaults(Map<String, Object> defaults,
+                                                         Map<String, Object> submitted) {
+        Map<String, Object> restored = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : submitted.entrySet())
+            restored.put(entry.getKey(), restoreRedactedValue(defaults.get(entry.getKey()), entry.getValue(), entry.getKey()));
+        return restored;
+    }
+
+    private Object restoreRedactedValue(Object defaultValue, Object submitted, String key) {
+        if ("[REDACTED]".equals(submitted)) return defaultValue;
+        if (submitted instanceof Map) {
+            Map<String, Object> defaultMap = defaultValue instanceof Map
+                    ? objectMap((Map<?, ?>) defaultValue) : Collections.<String, Object>emptyMap();
+            Map<String, Object> restored = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) submitted).entrySet()) {
+                String child = String.valueOf(entry.getKey());
+                restored.put(child, restoreRedactedValue(defaultMap.get(child), entry.getValue(), child));
+            }
+            return restored;
+        }
+        if (submitted instanceof List) {
+            List<Object> defaults = defaultValue instanceof List ? (List<Object>) defaultValue : Collections.emptyList();
+            List<Object> restored = new ArrayList<Object>();
+            int index = 0;
+            for (Object item : (List<?>) submitted) {
+                Object fallback = index < defaults.size() ? defaults.get(index) : null;
+                restored.add(restoreRedactedValue(fallback, item, key));
+                index++;
+            }
+            return restored;
+        }
+        return submitted;
+    }
+
     private Path autoInput(String type, String id) throws Exception {
         if ("template".equals(type)) {
             StageTemplate template = new StageTemplateLoader(projectRoot, config.templatesRoot(), false).loadSelected(id);
@@ -486,6 +644,18 @@ public final class DebugEngine {
         return projectRoot.resolve("config/tools").resolve(group + ".debug.yaml");
     }
 
+    private Path safeAutoInput(String type, String id) throws Exception {
+        Path candidate = autoInput(type, id).toAbsolutePath().normalize();
+        if (Files.isSymbolicLink(candidate))
+            throw debugError("Debug input sidecar must not be a symbolic link", "Use a regular package-local debug.yaml file.");
+        try {
+            return new att.resource.PackageResourceResolver(projectRoot).internalCandidate(candidate);
+        } catch (IllegalArgumentException unsafe) {
+            throw debugError("Debug input sidecar is outside the package root or unavailable",
+                    "Keep the target sidecar inside the package and avoid external symbolic links.");
+        }
+    }
+
     private Path resolveInput(Path configured) {
         return (configured.isAbsolute() ? configured : projectRoot.resolve(configured)).toAbsolutePath().normalize();
     }
@@ -499,7 +669,8 @@ public final class DebugEngine {
         if (explicit) safe = IdentifierValidator.runId(options.runId());
         else if (configured) safe = att.core.ExecutionIdentityFormat.debugId(config.run().debugIdFormat(),
                 type + "-" + id, projectRoot, type, id,
-                options.debugInput() == null ? autoInput(type, id) : resolveInput(options.debugInput()), startedAt);
+                options.inlineDebugInput() != null ? null
+                        : options.debugInput() == null ? safeAutoInput(type, id) : resolveInput(options.debugInput()), startedAt);
         else safe = IdentifierValidator.runId((type + "-" + id).replaceAll("[^A-Za-z0-9_.-]", "_"));
         Path result = debugRoot.resolve(safe).normalize();
         Files.createDirectories(debugRoot);
@@ -514,9 +685,15 @@ public final class DebugEngine {
     }
 
     private String expectedInput(ExecutionOptions options, String type, String id) {
+        if (options.inlineDebugInput() != null) return "inline Debug input";
         if (options.debugInput() != null) return logicalInputName(resolveInput(options.debugInput()));
-        try { return logicalInputName(autoInput(type, id)); }
+        try { return logicalInputName(safeAutoInput(type, id)); }
         catch (Exception ignored) { return type + " sidecar for " + id; }
+    }
+
+    private String debugInputDetail(ExecutionOptions options, DebugInput input, String type, String id) {
+        if (options.inlineDebugInput() != null) return "inline Debug input";
+        return input == null ? expectedInput(options, type, id) : String.valueOf(input.path);
     }
 
     private String logicalInputName(Path path) {
@@ -657,13 +834,14 @@ public final class DebugEngine {
     }
 
     private static final class DebugInput {
-        private final Path path; private final Map<String, Object> caseValues; private final Map<String, Object> inputs; private final Map<String, Object> vars; private final Map<String, Object> arguments; private final Map<String, Object> stageValues; private final String stageKey; private final List<Path> testdataDescriptors;
+        private final Path path; private final Map<String, Object> root; private final Map<String, Object> caseValues; private final Map<String, Object> inputs; private final Map<String, Object> vars; private final Map<String, Object> arguments; private final Map<String, Object> stageValues; private final String stageKey; private final List<Path> testdataDescriptors;
         private DebugInput(Path path, Map<String, Object> root, String type, String id, FrameworkConfig config) {
             this(path, root, type, id, config, Collections.<Path>emptyList(), null);
         }
         private DebugInput(Path path, Map<String, Object> root, String type, String id, FrameworkConfig config,
                            List<Path> testdataDescriptors, Map<String, Object> effectiveToolArguments) {
             this.path = path;
+            this.root = map(root);
             this.caseValues = map(root.get("case"));
             this.inputs = map(root.get("inputs"));
             this.vars = map(root.get("vars"));

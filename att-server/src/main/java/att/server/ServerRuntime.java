@@ -1,8 +1,11 @@
 package att.server;
 
 import att.worker.WorkerRequest;
+import att.Version;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.Yaml;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -40,6 +43,9 @@ import java.util.regex.Pattern;
 final class ServerRuntime implements AutoCloseable {
     static final ObjectMapper JSON=new ObjectMapper().configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,false);
     static final Pattern JOB_ID=Pattern.compile("J[0-9A-F]{16}");
+    static final Pattern DRAFT_ID=Pattern.compile("D[0-9A-F]{32}");
+    static final int MAX_ACTIVE_DRAFTS=128, MAX_DRAFTS_PER_PRINCIPAL=16;
+    static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
     final ServerConfig config;
     final JobStore store;
@@ -53,6 +59,8 @@ final class ServerRuntime implements AutoCloseable {
     private final ScheduledExecutorService retention;
     private final WorkerProcessLauncher processLauncher;
     private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
+    private final Object draftLock=new Object();
+    private final ConcurrentHashMap<String,DebugDraft> debugDrafts=new ConcurrentHashMap<>();
     private final byte[] cursorKey=new byte[32];
     private final SecureRandom cursorRandom=new SecureRandom();
     private volatile String webInfLibs;
@@ -69,7 +77,9 @@ final class ServerRuntime implements AutoCloseable {
         java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=config.inspection.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.inspection.queuedLimit);
         inspectors=new ThreadPoolExecutor(config.inspection.maxConcurrent,config.inspection.maxConcurrent,0,TimeUnit.MILLISECONDS,inspectionQueue,r->{Thread t=new Thread(r,"att-server-inspector");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
-        recover();cleanupExpiredJobsSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
+        recover();cleanupExpiredJobsSafely();
+        retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
+        retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
     }
     private void recover() throws Exception {
         for(Map<String,Object> stale:store.staleWorkers()) {
@@ -90,8 +100,13 @@ final class ServerRuntime implements AutoCloseable {
         }
     }
     Map<String,Object> submit(String command,JsonNode input,String principal) throws Exception {
+        return submit(command,input,principal,false);
+    }
+    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft) throws Exception {
         long requestReceivedNanos=System.nanoTime();
         if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
+        if(!serverIssuedDraft&&(input.has("draftId")||input.has("inlineDebugInput")||input.has("expectedRevisionDigest")||input.has("draftResourceId")))
+            throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
         String packageId=required(input,"packageId");Path root=config.packages.get(packageId);
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
         validatePackageRoot(root);
@@ -134,6 +149,13 @@ final class ServerRuntime implements AutoCloseable {
     private void execute(Job job,Path jobPath,AdmissionLease lease) {
         job.workerStartedNanos=System.nanoTime();
         try {
+            if(job.request.expectedRevisionDigest!=null) {
+                try { verifyDraftRevision(job.packageId,job.request); }
+                catch(StaleDraftException changed) {
+                    finishQuietly(job,"INVALID",2,"ATT-SERVER-DRAFT-STALE","Package content changed after preview; rebuild the Debug draft");
+                    return;
+                }
+            }
             Process process;
             synchronized(job) {
                 // Publish the process while holding the same lock used by cancel(). A
@@ -218,6 +240,143 @@ final class ServerRuntime implements AutoCloseable {
         }
         return result;
     }
+    Map<String,Object> inspectDebugForm(String packageId,String type,String resourceId,String environment,String principal) throws Exception {
+        Map<String,Object> result=inspectDebugFormInternal(packageId,type,resourceId,environment,principal,null);
+        result.remove("revisionDigest");
+        return result;
+    }
+    private Map<String,Object> inspectDebugFormInternal(String packageId,String type,String resourceId,String environment,
+                                                        String principal,String expectedRevision) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        if(resourceId==null||resourceId.isBlank()||resourceId.length()>512)throw new IllegalArgumentException("resourceId is invalid");
+        if(environment!=null)environment=inspectionEnvironment(environment,"environment");
+        WorkerRequest request=inspectionRequest(packageId,root,environment);
+        request.inspectionAction="debug-form";request.inspectionType=type;request.inspectionResourceId=resourceId;request.expectedRevisionDigest=expectedRevision;
+        return executeInspection(root,request);
+    }
+    Map<String,Object> createDebugDraft(JsonNode input,String principal) throws Exception {
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        if(!config.inspection.enabled)throw new NotFoundException();
+        requireObject(input,"A JSON object is required");
+        requireOnlyFields(input,"packageId","environment","target","input");
+        String packageId=required(input,"packageId");Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
+        JsonNode targetNode=input.get("target");requireObject(targetNode,"target must be a JSON object");requireOnlyFields(targetNode,"type","id");
+        String type=required(targetNode,"type"),logicalId=required(targetNode,"id");
+        if(!List.of("template","flow","tool").contains(type)||logicalId.length()>512||containsControl(logicalId))
+            throw new IllegalArgumentException("target is invalid");
+        JsonNode inputNode=input.get("input");requireObject(inputNode,"input must be a JSON object");
+        Map<String,Object> submitted=JSON.convertValue(inputNode,Map.class);
+        if(!submitted.containsKey("schemaVersion"))submitted.put("schemaVersion",Version.DEBUG_SCHEMA);
+        WorkerRequest request=inspectionRequest(packageId,root,environment);
+        request.inspectionAction="debug-input";request.inspectionType=type;request.inspectionTargetId=logicalId;
+        request.inlineDebugInput=submitted;
+        Map<String,Object> inspected=executeInspection(root,request);
+        Object rawNormalized=inspected.remove("normalizedInput");
+        Object rawDigest=inspected.remove("revisionDigest");
+        if(!(rawNormalized instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}"))
+            throw new IllegalStateException("Debug validation Worker returned an invalid response");
+        @SuppressWarnings("unchecked") Map<String,Object> normalized=(Map<String,Object>)JSON.convertValue(rawNormalized,Map.class);
+        Object rawResource=inspected.get("resource"),rawTarget=inspected.get("target");
+        if(!(rawResource instanceof Map)||!(rawTarget instanceof Map))throw new IllegalStateException("Debug validation Worker returned an invalid target");
+        @SuppressWarnings("unchecked") Map<String,Object> resource=(Map<String,Object>)rawResource;
+        String resourceId=String.valueOf(resource.get("resourceId"));
+        @SuppressWarnings("unchecked") Map<String,Object> resolvedTarget=(Map<String,Object>)rawTarget;
+        String resolvedType=String.valueOf(resolvedTarget.get("type")),resolvedId=String.valueOf(resolvedTarget.get("id"));
+        DebugDraft draft=new DebugDraft("D"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,
+                environment,resolvedType,resolvedId,resourceId,(String)rawDigest,normalized,inspected,
+                Instant.now().plusMillis(DRAFT_TTL_MILLIS));
+        synchronized(draftLock) {
+            expireDrafts();
+            if(debugDrafts.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
+            long owned=debugDrafts.values().stream().filter(value->value.principal.equals(principal)).count();
+            if(owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
+            debugDrafts.put(draft.id,draft);
+        }
+        return debugDraftView(draft);
+    }
+    Map<String,Object> getDebugDraft(String id,String principal) {
+        if(id==null||!DRAFT_ID.matcher(id).matches())throw new NotFoundException();
+        synchronized(draftLock) {
+            expireDrafts();DebugDraft draft=debugDrafts.get(id);
+            if(draft==null||!draft.principal.equals(principal))throw new NotFoundException();
+            return debugDraftView(draft);
+        }
+    }
+    Map<String,Object> submitDebugDraft(JsonNode body,String principal) throws Exception {
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId");
+        String packageId=required(body,"packageId"),draftId=required(body,"draftId");
+        DebugDraft draft;
+        synchronized(draftLock) {
+            expireDrafts();draft=debugDrafts.get(draftId);
+            if(draft==null||!draft.principal.equals(principal)||!draft.packageId.equals(packageId))throw new NotFoundException();
+            synchronized(draft){if(draft.submitting)throw new IllegalArgumentException("Debug draft submission is already in progress");draft.submitting=true;}
+        }
+        boolean submitted=false;
+        try {
+            verifyDraftRevision(draft);
+            requireLiveDraft(draft);
+            com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
+            internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
+            internal.set("target",JSON.valueToTree(Map.of("type",draft.targetType,"id",draft.targetId)));
+            internal.set("inlineDebugInput",JSON.valueToTree(draft.input));
+            internal.put("expectedRevisionDigest",draft.revisionDigest);internal.put("draftResourceId",draft.resourceId);
+            internal.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(draft.packageId)));
+            internal.put("maxSourceBytes",config.inspection.maxSourceBytes);internal.put("maxResponseBytes",config.inspection.maxResponseBytes);
+            requireLiveDraft(draft);
+            Map<String,Object> accepted=submit("debug",internal,principal,true);
+            debugDrafts.remove(draft.id,draft);submitted=true;return accepted;
+        } catch(StaleDraftException stale) {
+            debugDrafts.remove(draft.id,draft);throw stale;
+        } catch(StaleCursorException|NotFoundException stale) {
+            debugDrafts.remove(draft.id,draft);throw new StaleDraftException();
+        } finally {
+            if(!submitted)synchronized(draft){draft.submitting=false;}
+        }
+    }
+    private void verifyDraftRevision(DebugDraft draft) throws Exception {
+        try { inspectDebugFormInternal(draft.packageId,draft.targetType,draft.resourceId,draft.environment,draft.principal,draft.revisionDigest); }
+        catch(StaleCursorException|NotFoundException changed){throw new StaleDraftException();}
+    }
+    private void requireLiveDraft(DebugDraft draft) {
+        if(!draft.expiresAt.isAfter(Instant.now()))throw new StaleDraftException();
+    }
+    private void verifyDraftRevision(String packageId,WorkerRequest request) throws Exception {
+        if(request.expectedRevisionDigest==null)return;
+        DebugDraft draft=new DebugDraft("", "", packageId, request.environment,
+                String.valueOf(request.target.get("type")),String.valueOf(request.target.get("id")),request.draftResourceId,
+                request.expectedRevisionDigest,Collections.<String,Object>emptyMap(),Collections.<String,Object>emptyMap(),Instant.now());
+        verifyDraftRevision(draft);
+    }
+    private WorkerRequest inspectionRequest(String packageId,Path root,String environment) {
+        WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";
+        request.packageRoot=root.toString();request.config="config/config.yaml";request.environment=environment;
+        request.maxResponseBytes=config.inspection.maxResponseBytes;request.maxSourceBytes=config.inspection.maxSourceBytes;
+        request.safeTextSources=config.inspection.safeTextSources(packageId);
+        return request;
+    }
+    private Map<String,Object> debugDraftView(DebugDraft draft) {
+        Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
+        view.put("environment",draft.environment);view.put("target",Map.of("type",draft.targetType,"id",draft.targetId));
+        view.put("preview",draft.preview.get("input"));view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));
+        try {DumperOptions options=new DumperOptions();options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);options.setPrettyFlow(true);options.setWidth(120);view.put("previewYaml",new Yaml(options).dump(draft.preview.get("input")));}catch(Exception ignored){view.put("previewYaml","{}");}
+        view.put("diagnostics",Collections.emptyList());view.put("expiresAt",draft.expiresAt.toString());return view;
+    }
+    private void expireDrafts() {Instant now=Instant.now();debugDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));}
+    private void expireDraftsSafely() {synchronized(draftLock){expireDrafts();}}
+    private static void requireObject(JsonNode value,String message) {if(value==null||!value.isObject())throw new IllegalArgumentException(message);}
+    private static void requireOnlyFields(JsonNode object,String... allowed) {
+        java.util.Set<String> names=new java.util.HashSet<>(java.util.Arrays.asList(allowed));
+        java.util.Iterator<String> fields=object.fieldNames();while(fields.hasNext())if(!names.contains(fields.next()))throw new IllegalArgumentException("Unknown request field");
+    }
+    private static String optionalText(JsonNode object,String name) {
+        JsonNode value=object.get(name);if(value==null||value.isNull())return null;
+        if(!value.isTextual()||value.asText().isBlank())throw new IllegalArgumentException(name+" must be a non-empty string");
+        String text=value.asText();if(text.length()>128||containsControl(text))throw new IllegalArgumentException(name+" is invalid");return text.trim();
+    }
     Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
@@ -246,6 +405,25 @@ final class ServerRuntime implements AutoCloseable {
         String workerError=(String)envelope.get("errorCode");
         if("ATT-RESOURCE-NOT-FOUND".equals(workerError))throw new NotFoundException();
         if("ATT-RESOURCE-CURSOR-STALE".equals(workerError))throw new StaleCursorException();
+        boolean debugInspection="debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction);
+        if(debugInspection&&("WORKER_REQUEST_INVALID".equals(workerError)
+                ||workerError!=null&&workerError.startsWith("ATT-DEBUG")
+                ||envelope.get("diagnostics") instanceof List&&!((List<?>)envelope.get("diagnostics")).isEmpty())) {
+            Object rawDiagnostics=envelope.get("diagnostics");
+            List<Map<String,Object>> diagnostics=new ArrayList<Map<String,Object>>();
+            if(rawDiagnostics instanceof List)for(Object raw:(List<?>)rawDiagnostics)if(raw instanceof Map) {
+                @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
+                Map<String,Object> safe=new LinkedHashMap<String,Object>();
+                for(String key:List.of("code","summary","field","resourceId")) {
+                    Object item=value.get(key);
+                    if(item instanceof String)safe.put(key,att.worker.internal.DiagnosticSanitizer.redactText((String)item));
+                }
+                if(!safe.isEmpty())diagnostics.add(safe);
+            }
+            if(diagnostics.isEmpty())diagnostics.add(Map.of("code",workerError,"summary","Debug input failed schema or target validation",
+                    "resourceId",request.inspectionTargetId==null?request.inspectionResourceId:request.inspectionTargetId));
+            throw new DebugValidationException(diagnostics);
+        }
         if("ATT-RESOURCE-RESPONSE-TOO-LARGE".equals(workerError))throw new InspectionResponseTooLargeException();
         if("ATT-RESOURCE-LIMIT".equals(workerError))throw new InspectionCapacityException();
         if(workerError!=null)throw new IllegalStateException("Package inspection Worker failed: "+workerError);
@@ -271,13 +449,13 @@ final class ServerRuntime implements AutoCloseable {
             Thread watchdog=new Thread(()->{try{if(!active.waitFor(config.inspection.timeoutMs,TimeUnit.MILLISECONDS)){timedOut.set(true);forceTree(active);}}catch(InterruptedException ignored){Thread.currentThread().interrupt();}},"att-server-inspector-watchdog");watchdog.setDaemon(true);watchdog.start();
             Thread stderr=new Thread(()->{try(var in=active.getErrorStream()){byte[] buffer=new byte[8192];while(in.read(buffer)>=0){}}catch(Exception ignored){}});stderr.setDaemon(true);stderr.start();
             try(var out=process.getOutputStream()){out.write(JSON.writeValueAsBytes(request));out.write('\n');out.flush();}
-            JsonNode result=null;String errorCode=null;long total=0;
+            JsonNode result=null;String errorCode=null;Map<String,Object> workerDiagnostic=null;long total=0;
             try(BufferedReader reader=new BufferedReader(new InputStreamReader(process.getInputStream(),StandardCharsets.UTF_8))){
                 String line;while((line=readBoundedLine(reader,config.inspection.maxResponseBytes))!=null){
                     if("\u0000OVERSIZED".equals(line))throw new InspectionResponseTooLargeException();
                     total+=line.getBytes(StandardCharsets.UTF_8).length+1L;if(total>config.inspection.maxResponseBytes)throw new InspectionResponseTooLargeException();
                     JsonNode event=JSON.readTree(line);if(event==null||!event.isObject())continue;String kind=event.path("type").asText("");
-                    if("DIAGNOSTIC".equalsIgnoreCase(kind))errorCode=event.path("code").asText(null);
+                    if("DIAGNOSTIC".equalsIgnoreCase(kind)) {errorCode=event.path("code").asText(null);workerDiagnostic=JSON.convertValue(event,Map.class);}
                     if("RESULT".equalsIgnoreCase(kind))result=event;
                 }
             }
@@ -285,7 +463,17 @@ final class ServerRuntime implements AutoCloseable {
             if(timedOut.get())throw new InspectionTimeoutException();
             if(result==null||exit!=0&&errorCode==null)throw new IllegalStateException("Package inspection Worker did not complete successfully");
             Map<String,Object> response=new LinkedHashMap<>();
-            if(errorCode!=null) {response.put("errorCode",errorCode);return response;}
+            if(errorCode!=null) {
+                response.put("errorCode",errorCode);
+                if(workerDiagnostic!=null&&workerDiagnostic.get("summary") instanceof String) {
+                    Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();
+                    for(String key:List.of("code","summary","field","resourceId")) {
+                        Object value=workerDiagnostic.get(key);if(value instanceof String)diagnostic.put(key,value);
+                    }
+                    response.put("diagnostics",Collections.singletonList(diagnostic));
+                }
+                return response;
+            }
             JsonNode inspection=result.path("result").path("summary").path("inspection");if(!inspection.isObject())throw new IllegalStateException("Package inspection Worker returned no inspection data");
             response.put("inspection",JSON.convertValue(inspection,Map.class));return response;
         } catch(InterruptedException interrupted){if(process!=null&&process.isAlive())forceTree(process);Thread.currentThread().interrupt();throw interrupted;}
@@ -381,7 +569,7 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){retention.shutdownNow();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){retention.shutdownNow();synchronized(draftLock){debugDrafts.clear();}for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
@@ -396,5 +584,44 @@ final class ServerRuntime implements AutoCloseable {
     static final class InspectionTimeoutException extends RuntimeException {}
     static final class InspectionResponseTooLargeException extends RuntimeException {}
     static final class StaleCursorException extends RuntimeException {}
+    static final class StaleDraftException extends RuntimeException {}
+    static final class DraftCapacityException extends RuntimeException {}
+    static final class DebugValidationException extends IllegalArgumentException {
+        final List<Map<String,Object>> diagnostics;
+        DebugValidationException(List<Map<String,Object>> diagnostics) {
+            super("Debug input failed schema or target validation");
+            List<Map<String,Object>> copy=new ArrayList<Map<String,Object>>();
+            for(Map<String,Object> diagnostic:diagnostics)copy.add(Collections.unmodifiableMap(new LinkedHashMap<String,Object>(diagnostic)));
+            this.diagnostics=Collections.unmodifiableList(copy);
+        }
+    }
+    private static final class DebugDraft {
+        final String id,principal,packageId,environment,targetType,targetId,resourceId,revisionDigest;
+        final Map<String,Object> input,preview;
+        final Instant expiresAt;
+        boolean submitting;
+        DebugDraft(String id,String principal,String packageId,String environment,String targetType,String targetId,
+                   String resourceId,String revisionDigest,Map<String,Object> input,Map<String,Object> preview,Instant expiresAt) {
+            this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
+            this.targetType=targetType;this.targetId=targetId;this.resourceId=resourceId;this.revisionDigest=revisionDigest;
+            this.input=deepMap(input);this.preview=deepMap(preview);this.expiresAt=expiresAt;
+        }
+    }
+    private static Map<String,Object> deepMap(Map<String,Object> source) {
+        Map<String,Object> copy=new LinkedHashMap<>();
+        if(source!=null)for(Map.Entry<String,Object> entry:source.entrySet())copy.put(entry.getKey(),deepValue(entry.getValue()));
+        return Collections.unmodifiableMap(copy);
+    }
+    private static Object deepValue(Object value) {
+        if(value instanceof Map) {
+            Map<String,Object> copy=new LinkedHashMap<>();
+            for(Map.Entry<?,?> entry:((Map<?,?>)value).entrySet())copy.put(String.valueOf(entry.getKey()),deepValue(entry.getValue()));
+            return Collections.unmodifiableMap(copy);
+        }
+        if(value instanceof List) {
+            List<Object> copy=new ArrayList<>();for(Object item:(List<?>)value)copy.add(deepValue(item));return Collections.unmodifiableList(copy);
+        }
+        return value;
+    }
     private static final class Cursor {final int offset;final String revision;Cursor(int offset,String revision){this.offset=offset;this.revision=revision;}}
 }

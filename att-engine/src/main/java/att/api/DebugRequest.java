@@ -4,12 +4,15 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 
 /** Typed single-target Debug execution intent. */
 public final class DebugRequest extends AttRequest {
     private final String targetType, targetId, debugId; private final Path input; private final boolean unsafeFailureDetails, profile;
     private final ExecutionEventListener observer;
     private final List<String> overrides;
+    private final Map<String, Object> inlineInput;
     private final DebugStartupMetrics startupMetrics;
     public DebugRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory, String runId,
                         String targetType, String targetId, Path input, boolean unsafeFailureDetails) {
@@ -38,6 +41,13 @@ public final class DebugRequest extends AttRequest {
                         String targetType, String targetId, Path input, boolean unsafeFailureDetails,
                         ExecutionEventListener observer, String debugId, List<String> overrides,
                         boolean profile, DebugStartupMetrics startupMetrics) {
+        this(packageRoot, configPath, environment, outputDirectory, runId, targetType, targetId, input,
+                unsafeFailureDetails, observer, debugId, overrides, profile, startupMetrics, null);
+    }
+    public DebugRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory, String runId,
+                        String targetType, String targetId, Path input, boolean unsafeFailureDetails,
+                        ExecutionEventListener observer, String debugId, List<String> overrides,
+                        boolean profile, DebugStartupMetrics startupMetrics, Map<String, Object> inlineInput) {
         super(packageRoot, configPath, environment, outputDirectory, runId);
         this.targetType = required(targetType, "targetType"); this.targetId = required(targetId, "targetId");
         this.input = input; this.unsafeFailureDetails = unsafeFailureDetails;
@@ -47,6 +57,25 @@ public final class DebugRequest extends AttRequest {
         this.startupMetrics = startupMetrics;
         this.overrides = Collections.unmodifiableList(new ArrayList<String>(
                 overrides == null ? Collections.<String>emptyList() : overrides));
+        this.inlineInput = inlineInput == null ? null : immutableMap(inlineInput);
+    }
+    private static Map<String, Object> immutableMap(Map<String, Object> source) {
+        Map<String, Object> copy = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : source.entrySet()) copy.put(entry.getKey(), immutableValue(entry.getValue()));
+        return Collections.unmodifiableMap(copy);
+    }
+    private static Object immutableValue(Object value) {
+        if (value instanceof Map) {
+            Map<String, Object> copy = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) copy.put(String.valueOf(entry.getKey()), immutableValue(entry.getValue()));
+            return Collections.unmodifiableMap(copy);
+        }
+        if (value instanceof List) {
+            List<Object> copy = new ArrayList<Object>();
+            for (Object item : (List<?>) value) copy.add(immutableValue(item));
+            return Collections.unmodifiableList(copy);
+        }
+        return value;
     }
     private static String required(String value, String label) { if (value == null || value.trim().isEmpty()) throw new IllegalArgumentException(label + " is required"); return value; }
     public String targetType() { return targetType; } public String targetId() { return targetId; } public Path input() { return input; } public boolean unsafeFailureDetails() { return unsafeFailureDetails; }
@@ -55,4 +84,5 @@ public final class DebugRequest extends AttRequest {
     public DebugStartupMetrics startupMetrics() { return startupMetrics; }
     public ExecutionEventListener observer() { return observer; }
     public List<String> overrides() { return overrides; }
+    public Map<String, Object> inlineInput() { return inlineInput; }
 }
