@@ -260,6 +260,65 @@ class PackageResourceInspectorTest {
                 ()->inspector.inspect("list","template",null,null,1,1,revision));
     }
 
+    @Test void reusesTheBoundedIndexAndInvalidatesItWhenPackageFilesChange() throws Exception {
+        Path root=packageWithTemplate("cached-index", "PAYMENT", "description: first");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,true);
+        try {
+            Map<String,Object> first=inspector.inspect("list","template",null,null,0,1);
+            String revision=String.valueOf(first.get("revisionDigest"));
+            String resourceId=String.valueOf(((List<Map<String,Object>>)first.get("items")).get(0).get("resourceId"));
+            inspector.inspect("detail","template",resourceId,null,0,1);
+            inspector.inspect("source","template",resourceId,null,0,1);
+            Map<String,Object> debugForm=inspector.inspectDebugForm("template",resourceId,revision);
+            @SuppressWarnings("unchecked") Map<String,Object> debugInput=(Map<String,Object>)debugForm.get("input");
+            inspector.validateDebugInput("template","PAYMENT",debugInput);
+            assertEquals(1,inspector.indexBuildCount(),
+                    "page, detail, source, Debug form, and draft validation should share one parsed package index");
+
+            long version=inspector.packageChangeVersion();
+            writeUtf8(root.resolve("templates/PAYMENT/template.yaml"),templateYaml("PAYMENT","description: changed"));
+            assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
+                    ()->inspector.verifyRevision(revision));
+            assertEquals(2,inspector.indexBuildCount(),
+                    "authoritative revision checks must rebuild content even when the cached snapshot appears current");
+            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+            while(inspector.packageChangeVersion()==version&&System.nanoTime()<deadline)Thread.sleep(20);
+            assertNotEquals(version,inspector.packageChangeVersion(),"package file changes should invalidate the watched snapshot");
+            assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
+                    ()->inspector.inspect("list","template",null,null,1,1,revision));
+            assertTrue(inspector.indexBuildCount()>=2,
+                    "the cached package index must have been rebuilt before rejecting the stale cursor");
+        } finally { inspector.close(); }
+    }
+
+    @Test void reusesOneIndexAcrossPagedAndSelectedLookupsForALargePackage() throws Exception {
+        Path root=packageWithCaseWorkbook("large-cached-index",500);
+        for(int i=1;i<200;i++) {
+            String name=String.format(java.util.Locale.ROOT,"TEMPLATE_%03d",i);
+            Path descriptor=Files.createDirectories(root.resolve("templates").resolve(name)).resolve("template.yaml");
+            writeUtf8(descriptor,templateYaml(name,"description: representative large package"));
+        }
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,true);
+        try {
+            @SuppressWarnings("unchecked") Map<String,Object> first=inspector.inspect("list","template",null,null,0,50);
+            @SuppressWarnings("unchecked") Map<String,Object> pageN=inspector.inspect("list","template",null,null,50,50);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> templates=(List<Map<String,Object>>)first.get("items");
+            String resourceId=String.valueOf(templates.get(0).get("resourceId"));
+            inspector.inspect("detail","template",resourceId,null,0,1);
+            inspector.inspect("source","template",resourceId,null,0,1);
+            @SuppressWarnings("unchecked") Map<String,Object> cases=inspector.inspect("list","case",null,null,450,50);
+            assertEquals(200,first.get("total"));
+            assertEquals(200,pageN.get("total"));
+            assertEquals(500,cases.get("total"));
+            assertEquals(50,((List<?>)pageN.get("items")).size());
+            assertEquals(50,((List<?>)cases.get("items")).size());
+            assertEquals(1,inspector.indexBuildCount(),
+                    "first page, page N, detail, source, and case pagination should reuse one large package index");
+        } finally { inspector.close(); }
+    }
+
     @Test void enforcesTheSerializedPageResponseLimit() throws Exception {
         Path root=packageWithTemplate("bounded-response", "ITEM0", "description: item");
         for(int i=1;i<16;i++) {
