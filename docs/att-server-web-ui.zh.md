@@ -4,7 +4,7 @@ ATT Server 在 `<Tomcat context path>/ui/` 提供靜態瀏覽器主控台，例�
 
 主控台會列出已設定的邏輯套件 ID 與近期持久化工作。選擇套件後可提交 Run、Debug、Load 或 Validate，接著開啟工作以追蹤進度、檢視終端結果與安全診斷、取消執行中的工作，或下載邏輯 artifact。套件資源欄位使用相對於所選套件的邏輯路徑。UI 不接受或顯示 `PACKAGE_ROOT` 或 Server 儲存路徑。Artifact 以附件下載；UI 不會呈現 artifact HTML。 工作深層連結（例如 `/ui/jobs/J10045`）會轉址至標準 hash route，並透過公開 API 與 SSE 重新載入工作狀態。
 
-Package Resource Explorer 會按 package-scoped 邏輯資源 ID 列出已設定的 Case、Template、Flow 及 Tool，並支援類型與文字篩選、加密續頁 cursor、資源詳細資料、安全關聯及唯讀 source 檢視。YAML 會以解析及遮蔽後的投影回傳；只有 `server.inspection.safeTextSources` 列出的 package 相對路徑才會顯示 Tool script 文字。Case 詳細資料可使用現有 job API 執行 Run。Explorer 不會瀏覽任意檔案、不會執行 Tool，也不會修改 package 內容。若分頁期間 package 有變更，Server 會拒絕過期 cursor，UI 可重新整理清單。
+Package Resource Explorer 會按 package-scoped 邏輯資源 ID 列出已設定的 Case、Template、Flow 及 Tool，並支援類型與文字篩選、加密續頁 cursor、資源詳細資料及安全關聯。只有 `server.inspection.safeTextSources` 列出的 package 相對路徑才會提供 source；YAML 會以遞迴結構投影回傳並隱藏自由文字值，Tool script 文字則會遮蔽。Case 詳細資料會顯示身份及 Stage/Template 中繼資料，並隱藏 workbook 業務值。反向關聯最多內嵌 100 筆，並同時回傳準確數量及 `referencedByHasMore`。Explorer 不會瀏覽任意檔案、不會執行 Tool，也不會修改 package 內容。若分頁期間 package 有變更，Server 會拒絕過期 cursor，UI 可重新整理清單。
 
 Configuration Explorer 會顯示已宣告設定、所選 environment 經 Engine 解析後的設定，以及兩個 profile 的欄位比較。它使用 package 正常的 `FrameworkConfigLoader` 選擇規則，不會連接 DB、MQ、HTTP 或 SSH。可能洩露憑證或網絡拓撲的值會標示為 hidden；Server 不會比較 hidden 值。Explorer 顯示安全的 helper 與 Tool metadata、environment 來源、profile 繼承或替換狀態，以及 Testdata descriptor metadata，但不會顯示 records 或未限制的 YAML。公開 endpoint 詳情見 [ATT Server 部署與 API](server-deployment.zh.md)。
 
