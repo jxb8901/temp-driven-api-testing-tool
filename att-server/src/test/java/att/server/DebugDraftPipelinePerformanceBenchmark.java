@@ -10,6 +10,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -67,6 +68,8 @@ class DebugDraftPipelinePerformanceBenchmark {
 
             Map<String, Object> report = new LinkedHashMap<>();
             report.put("schemaVersion", "att-server-debug-draft-pipeline-benchmark/v1");
+            report.put("measuredAtUtc", Instant.now().toString());
+            report.put("sourceRevision", System.getProperty("att.server.benchmark.debugDraft.revision", "unspecified"));
             report.put("runtime", Map.of("attVersion", att.Version.PRODUCT,
                     "javaVersion", System.getProperty("java.version"),
                     "os", System.getProperty("os.name"),
