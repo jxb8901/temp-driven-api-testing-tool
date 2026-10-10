@@ -271,6 +271,7 @@ class WindowsLauncherTest {
         ProcessBuilder builder = new ProcessBuilder(command).directory(root.toFile())
                 .redirectOutput(stdout.toFile()).redirectError(stderr.toFile());
         builder.environment().put("PATH", path.toString() + ";" + system32);
+        builder.environment().put("M2_REPO", Paths.get(System.getProperty("user.home"), ".m2", "repository").toString());
         builder.environment().put("ATT_BUILD_TOOL_LOG", buildToolLog.toString());
         builder.environment().put("ORDERS_DB_USERNAME", "att-validation-placeholder");
         builder.environment().put("ORDERS_DB_PASSWORD", "att-validation-placeholder");
