@@ -165,6 +165,9 @@ class WorkerMainTest {
         for(String line:lines) { JsonNode node=mapper.readTree(line); assertTrue(node.isObject(),line); assertEquals("J-invalid",node.get("jobId").asText()); types.add(node.get("type").asText()); }
         assertEquals(java.util.Arrays.asList("STATUS","DIAGNOSTIC","RESULT"),types);
         for(String line:lines) assertTrue(line.startsWith("{"),line);
+        JsonNode result=mapper.readTree(lines[lines.length-1]);
+        assertTrue(result.path("workerMetrics").path("heapMaxBytes").asLong()>0,result.toString());
+        assertTrue(result.path("workerMetrics").path("sampleCount").asLong()>0,result.toString());
     }
 
     @Test void malformedEmptyTruncatedAndMultipleRequestsHaveStructuredTerminalFailure() throws Exception {
