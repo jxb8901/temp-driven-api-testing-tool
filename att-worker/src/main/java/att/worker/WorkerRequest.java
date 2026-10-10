@@ -30,4 +30,14 @@ public final class WorkerRequest {
     public Boolean unsafeFailureDetails;
     public Map<String,String> load;
     public List<String> overrides;
+    public String inspectionAction;
+    public String inspectionType;
+    public String inspectionResourceId;
+    public String inspectionQuery;
+    public Integer inspectionOffset;
+    public Integer inspectionLimit;
+    public String expectedRevisionDigest;
+    public List<String> safeTextSources;
+    public Integer maxSourceBytes;
+    public Integer maxResponseBytes;
 }

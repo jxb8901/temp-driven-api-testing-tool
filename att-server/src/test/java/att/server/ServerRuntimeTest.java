@@ -39,6 +39,36 @@ class ServerRuntimeTest {
             assertEquals("debug",record.get("command"));
         } finally {runtime.close();}
     }
+
+    @Test void listsPackageResourcesThroughTheBoundedInspectorWorkerAndSignsPaginationCursors() throws Exception {
+        Path packageRoot=Path.of("").toRealPath();Path allowed=packageRoot;
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path configFile=temp.resolve("inspection-runtime-server.yaml");
+        Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("inspection-runtime-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
+        ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("inspection-WEB-INF-lib"));
+        addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
+            Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
+                Path target=libs.resolve(candidate.getFileName());try{Files.createSymbolicLink(target,candidate);}catch(Exception unsupported){Files.copy(candidate,target);}
+            }
+        }
+        ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{
+            builder.environment().put("ORDERS_DB_USERNAME","inspection-test");builder.environment().put("ORDERS_DB_PASSWORD","inspection-test");
+            builder.environment().put("PAYMENT_MQ_USERNAME","inspection-test");builder.environment().put("PAYMENT_MQ_PASSWORD","inspection-test");
+            return builder.start();
+        });
+        try {
+            Map<String,Object> first=runtime.inspectResource("p","list","template",null,null,1,null,"alice");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> firstItems=(List<Map<String,Object>>)first.get("items");
+            assertEquals(1,firstItems.size());assertNotNull(first.get("nextCursor"));
+            Map<String,Object> second=runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor")),"alice");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> secondItems=(List<Map<String,Object>>)second.get("items");
+            assertEquals(1,secondItems.size());assertNotEquals(firstItems.get(0).get("resourceId"),secondItems.get(0).get("resourceId"));
+            assertThrows(IllegalArgumentException.class,()->runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor"))+"x","alice"));
+            assertThrows(IllegalArgumentException.class,()->runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor")),"bob"));
+        } finally {runtime.close();}
+    }
     @Test void cancellationCannotSlipBetweenWorkerLaunchAndProcessPublication() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),"Uses a POSIX test launcher");
         Path allowed=Files.createDirectory(temp.resolve("cancel-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));

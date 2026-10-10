@@ -1,0 +1,180 @@
+package att.resource;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class PackageResourceInspectorTest {
+    @TempDir Path temp;
+    private PackageResourceInspector inspector() throws Exception {
+        Path root=Paths.get("").toRealPath();
+        assertTrue(Files.isRegularFile(root.resolve("config/config.yaml")),"Tests run from the repository root");
+        return new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+    }
+
+    @Test void listsConfiguredPackageResourcesWithLogicalIdsAndReferences() throws Exception {
+        Map<String,Object> page=inspector().inspect("list",null,null,null,0,100);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
+        assertFalse(items.isEmpty());
+        List<String> types=items.stream().map(item->String.valueOf(item.get("type"))).distinct().collect(Collectors.toList());
+        assertTrue(types.contains("template"));
+        assertTrue(types.contains("flow"));
+        assertTrue(types.contains("tool"));
+        assertTrue(types.contains("case"));
+        Map<String,Object> testCase=items.stream().filter(item->"case".equals(item.get("type"))).findFirst().get();
+        @SuppressWarnings("unchecked") Map<String,Object> provenance=(Map<String,Object>)testCase.get("provenance");
+        assertNotNull(provenance.get("suite"));assertNotNull(provenance.get("groupId"));
+        assertNotNull(provenance.get("sheet"));assertTrue(provenance.get("rowNumber") instanceof Number);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> references=(List<Map<String,Object>>)testCase.get("references");
+        assertFalse(references.isEmpty(),"Case stages should resolve to their referenced Templates");
+        for(Map<String,Object> item:items) {
+            assertTrue(String.valueOf(item.get("resourceId")).matches("[A-Za-z0-9._-]+"));
+            assertFalse(item.toString().contains(Paths.get("").toAbsolutePath().toString()));
+        }
+    }
+
+    @Test void returnsSafeTemplateProjectionAndEnforcesRevisionBoundPagination() throws Exception {
+        PackageResourceInspector inspector=inspector();
+        @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspect("list","template",null,null,0,1);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
+        assertEquals(1,items.size());
+        String resourceId=String.valueOf(items.get(0).get("resourceId"));
+        Map<String,Object> detail=inspector.inspect("detail","template",resourceId,null,0,1);
+        assertTrue(detail.containsKey("definition"));
+        Map<String,Object> source=inspector.inspect("source","template",resourceId,null,0,1);
+        assertEquals(Boolean.TRUE,source.get("available"));
+        assertFalse(String.valueOf(source.get("text")).contains(Paths.get("").toAbsolutePath().toString()));
+        assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
+                ()->inspector.inspect("list","template",null,null,1,1,"stale-revision"));
+    }
+
+    @Test void neverReadsToolSourceWithoutAnExplicitServerAllowlist() throws Exception {
+        PackageResourceInspector inspector=inspector();
+        @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspect("list","tool",null,null,0,100);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
+        assertFalse(items.isEmpty());
+        for(Map<String,Object> item:items)assertEquals(Boolean.FALSE,item.get("sourceAvailable"));
+    }
+
+    @Test void readsToolScriptOnlyWhenItsPackageRelativePathIsAllowlisted() throws Exception {
+        Path root=Paths.get("").toRealPath();
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.singletonList("tools/tool_group_dispatch.sh"),65536,262144);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,100).get("items");
+        Map<String,Object> permitted=items.stream().filter(item->Boolean.TRUE.equals(item.get("sourceAvailable"))).findFirst().get();
+        Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(permitted.get("resourceId")),null,0,1);
+        assertEquals(Boolean.TRUE,source.get("available"));assertEquals("text",source.get("format"));
+        assertEquals("tools/tool_group_dispatch.sh",source.get("logicalPath"));
+        assertFalse(String.valueOf(source.get("text")).contains(root.toString()));
+    }
+
+    @Test void redactsSecretsAndExternalPathsFromProjectedTemplateSource() throws Exception {
+        Path root=Files.createDirectories(temp.resolve("package"));
+        Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates/SECRET"));Files.createDirectories(root.resolve("testcase"));
+        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        writeUtf8(root.resolve("templates/SECRET/template.yaml"),"schemaVersion: att-template/v3.6\nname: SECRET\n"
+                +"description: 'password=top-secret; Bearer abc123; https://user:pass@example.com; /outside/private'\n"
+                +"actions:\n  note:\n    type: log\n    message: safe\n");
+        att.TestSchemas.install(root);
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        assertEquals(1,items.size());
+        Map<String,Object> source=inspector.inspect("source","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
+        assertEquals(Boolean.TRUE,source.get("available"));assertEquals(Boolean.TRUE,source.get("redacted"));
+        String text=String.valueOf(source.get("text"));
+        assertFalse(text.contains("top-secret"));assertFalse(text.contains("abc123"));assertFalse(text.contains("user:pass"));
+        assertFalse(text.contains("/outside/private"));assertFalse(text.contains(root.toString()));
+    }
+
+    @Test void rejectsTraversalAndDoesNotReadAnExternalSymlinkedTemplate() throws Exception {
+        Path root=packageWithTemplate("contained", "SAFE", "description: safe");
+        Path outside=writeUtf8(temp.resolve("outside-template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: EXTERNAL\ndescription: outside-secret\nactions:\n  note:\n    type: log\n    message: hidden\n");
+        Path linked=Files.createDirectories(root.resolve("templates/ESCAPE")).resolve("template.yaml");
+        try { Files.createSymbolicLink(linked, outside); }
+        catch (UnsupportedOperationException | java.io.IOException | SecurityException unavailable) {
+            org.junit.jupiter.api.Assumptions.abort("Symbolic links are unavailable in this test environment");
+        }
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        Map<String,Object> page=inspector.inspect("list","template",null,null,0,100);
+        assertFalse(page.toString().contains("outside-secret"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
+        assertEquals(1,items.size(),"The external symlink must not become a package Template");
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspect("source","template","../../outside-template.yaml",null,0,1));
+    }
+
+    @Test void reportsOversizedSourceAsUnavailableWithoutReturningPartialContent() throws Exception {
+        Path root=packageWithTemplate("oversized", "LARGE", "description: '"+repeat('x',1024)+"'");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),256,4096);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        assertEquals(1,items.size());
+        Map<String,Object> source=inspector.inspect("source","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
+        assertEquals(Boolean.FALSE,source.get("available"));assertEquals("size-limit",source.get("reason"));
+        assertFalse(source.containsKey("text"),"Oversized YAML must not be returned partially");
+    }
+
+    @Test void rejectsPaginationAfterAResourceDescriptorChanges() throws Exception {
+        Path root=packageWithTemplate("stale", "PAYMENT", "description: first");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        Map<String,Object> page=inspector.inspect("list","template",null,null,0,1);
+        String revision=String.valueOf(page.get("revisionDigest"));
+        writeUtf8(root.resolve("templates/PAYMENT/template.yaml"),templateYaml("PAYMENT", "description: changed"));
+        assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
+                ()->inspector.inspect("list","template",null,null,1,1,revision));
+    }
+
+    @Test void enforcesTheSerializedPageResponseLimit() throws Exception {
+        Path root=packageWithTemplate("bounded-response", "ITEM0", "description: item");
+        for(int i=1;i<16;i++) {
+            Path directory=Files.createDirectories(root.resolve("templates/ITEM"+i));
+            writeUtf8(directory.resolve("template.yaml"),templateYaml("ITEM"+i,"description: item"));
+        }
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),256,1024);
+        assertThrows(PackageResourceInspector.ResponseTooLargeException.class,
+                ()->inspector.inspect("list","template",null,null,0,100));
+    }
+
+    @Test void returnsSafeDiagnosticsWhenOneConfiguredResourceRootCannotBeInspected() throws Exception {
+        Path root=packageWithTemplate("missing-case-root", "PAYMENT", "description: item");
+        Files.delete(root.resolve("testcase"));
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        Map<String,Object> page=inspector.inspect("list","case",null,null,0,10);
+        assertTrue(page.toString().contains("ATT-RESOURCE-CASE-ROOT-UNAVAILABLE"));
+        assertFalse(page.toString().contains(root.toString()));
+    }
+
+    private Path packageWithTemplate(String directory,String name,String extraField) throws Exception {
+        Path root=Files.createDirectories(temp.resolve(directory));
+        Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates"));Files.createDirectories(root.resolve("testcase"));
+        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        Path template=Files.createDirectories(root.resolve("templates").resolve(name)).resolve("template.yaml");
+        writeUtf8(template,templateYaml(name,extraField));
+        att.TestSchemas.install(root);
+        return root;
+    }
+
+    private static String templateYaml(String name,String extraField) {
+        return "schemaVersion: att-template/v3.6\nname: "+name+"\n"+extraField+"\nactions:\n  note:\n    type: log\n    message: safe\n";
+    }
+
+    private static Path writeUtf8(Path path,String text) throws Exception {
+        return Files.write(path,text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String repeat(char value,int count) {
+        StringBuilder result=new StringBuilder(count);
+        for(int i=0;i<count;i++)result.append(value);
+        return result.toString();
+    }
+}

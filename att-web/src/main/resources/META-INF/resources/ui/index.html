@@ -21,6 +21,28 @@
     </section>
     <section id="package-view" hidden>
       <p><a href="#/">← Packages</a></p><h1 id="package-title"></h1>
+      <section id="resource-explorer" aria-labelledby="resource-heading">
+        <h2 id="resource-heading">Package resources</h2>
+        <div class="resource-filters">
+          <label for="resource-search">Search resources</label><input id="resource-search" type="search" maxlength="200">
+          <label for="resource-type">Type</label><select id="resource-type"><option value="">All</option><option value="case">Cases</option><option value="template">Templates</option><option value="flow">Flows</option><option value="tool">Tools</option></select>
+          <button id="search-resources" type="button">Search</button><button id="refresh-resources" type="button">Refresh</button>
+        </div>
+        <p id="resource-count" role="status" aria-live="polite"></p>
+        <div class="resource-columns">
+          <div><ul id="resource-list" class="resource-list"></ul><button id="load-more-resources" type="button" hidden>Load more</button></div>
+          <article id="resource-detail" hidden>
+            <h3 id="resource-title"></h3><p id="resource-description"></p>
+            <p id="resource-state" role="status"></p><p id="resource-source-status" role="status"></p>
+            <button id="show-resource-source" type="button" hidden>View safe source</button>
+            <button id="run-resource-case" type="button" hidden>Run this Case</button>
+            <h4>Identity and provenance</h4><pre id="resource-metadata"></pre>
+            <h4>Definition</h4><pre id="resource-definition"></pre>
+            <div class="resource-relations"><section><h4>References</h4><ul id="resource-references"></ul></section><section><h4>Referenced by</h4><ul id="resource-referenced-by"></ul></section></div>
+            <h4 id="resource-source-heading" hidden>Safe source projection</h4><pre id="resource-source" hidden></pre>
+          </article>
+        </div>
+      </section>
       <form id="submit-form">
         <label>Command <select name="command"><option>run</option><option>debug</option><option>load</option><option>validate</option></select></label>
         <label>Environment <input name="environment" maxlength="128"></label>

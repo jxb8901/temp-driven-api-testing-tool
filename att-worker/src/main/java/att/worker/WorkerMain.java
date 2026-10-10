@@ -1,6 +1,7 @@
 package att.worker;
 
 import att.api.*;
+import att.resource.PackageResourceInspector;
 import att.worker.internal.DiagnosticSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -63,6 +64,10 @@ public final class WorkerMain {
             String code="WORKER_EXECUTION_FAILED", message=error.getMessage();
             int exit=3; String status="ERROR";
             if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
+            else if(error instanceof PackageResourceInspector.ResourceNotFoundException) { code="ATT-RESOURCE-NOT-FOUND"; message="Package resource was not found"; }
+            else if(error instanceof PackageResourceInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package resource response exceeded the configured limit"; }
+            else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured limit"; }
+            else if(error instanceof PackageResourceInspector.StaleResourceCursorException) { code="ATT-RESOURCE-CURSOR-STALE"; message="The package resources changed; refresh the Explorer"; }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
             emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message)));
             emit(WorkerEvent.Type.RESULT,fields("status",status,"exitCode",exit,"result",fields("executionId",null,"status",status,"exitCode",exit)));
@@ -81,6 +86,18 @@ public final class WorkerMain {
             return service.load(new LoadRequest(root,config,r.environment,output,r.runId,path(r.scenario),optionalText(t,"type"),optionalText(t,"id"),l.get("users"),l.get("arrivalRate"),l.get("warmup"),l.get("rampUp"),l.get("duration"),l.get("rampDown"),l.get("thinkTime"),l.get("maxConcurrent"),l.get("overloadPolicy"),r.overrides,observer)); }
         if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),r.validationScope));
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
+        if("inspect".equals(r.command)) {
+            PackageResourceInspector inspector = new PackageResourceInspector(root, config, r.environment,
+                    r.safeTextSources, r.maxSourceBytes == null ? 65536 : r.maxSourceBytes,
+                    r.maxResponseBytes == null ? 262144 : r.maxResponseBytes);
+            Map<String,Object> inspected = inspector.inspect(r.inspectionAction, r.inspectionType,
+                    r.inspectionResourceId, r.inspectionQuery,
+                    r.inspectionOffset == null ? 0 : r.inspectionOffset,
+                    r.inspectionLimit == null ? 50 : r.inspectionLimit,
+                    r.expectedRevisionDigest);
+            return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                    Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+        }
         throw new IllegalArgumentException("Unsupported Worker command: "+r.command);
     }
     private Map<String,Object> requiredTarget(WorkerRequest r) { if(r.target==null)throw new IllegalArgumentException("target is required"); return r.target; }

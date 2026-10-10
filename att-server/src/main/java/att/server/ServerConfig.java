@@ -23,16 +23,18 @@ public final class ServerConfig {
     public final Map<String, Path> packages;
     public final List<Path> allowedRoots;
     public final List<Path> workerLibraryDirs;
+    public final Inspection inspection;
 
     private ServerConfig(Path dataDir, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection) {
         this.dataDir=dataDir; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;
         this.packages=Collections.unmodifiableMap(new LinkedHashMap<>(packages));
         this.allowedRoots=List.copyOf(allowedRoots);
         this.workerLibraryDirs=List.copyOf(workerLibraryDirs);
+        this.inspection=inspection;
     }
 
     public static ServerConfig load(Path file) throws Exception {
@@ -76,6 +78,7 @@ public final class ServerConfig {
         int retention=intValue(server,"jobRetentionDays",30,1,3650);
         int request=intValue(server,"maxRequestBytes",1048576,1024,16777216), events=intValue(server,"maxEventsPerJob",10000,100,1000000),
             artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
+        Inspection inspection=inspection(server.get("inspection"),resolved);
         Files.createDirectories(data);
         Path realData=data.toRealPath();
         String attHome=System.getProperty("att.home");if(attHome==null||attHome.isBlank())attHome=System.getenv("ATT_HOME");
@@ -83,7 +86,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,java,max,queue,load,stop,retention,request,events,artifacts,authenticationRequired,resolved,allowed,workerLibraries);
+        return new ServerConfig(realData,java,max,queue,load,stop,retention,request,events,artifacts,authenticationRequired,resolved,allowed,workerLibraries,inspection);
     }
 
     public static Path configPath() {
@@ -106,4 +109,55 @@ public final class ServerConfig {
     private static String string(Object v,String field){ if(!(v instanceof String s)||s.isBlank()) throw new IllegalArgumentException(field+" is required"); return s.trim(); }
     private static Map<?,?> map(Object v,String field){ if(!(v instanceof Map<?,?> m)) throw new IllegalArgumentException(field+" must be a mapping"); return m; }
     private static List<?> list(Object v,String field){ if(!(v instanceof List<?> l)) throw new IllegalArgumentException(field+" must be a list"); return l; }
+
+    private static Inspection inspection(Object raw,Map<String,Path> packages) throws Exception {
+        Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.inspection");
+        boolean enabled=boolValue(values,"enabled",true);
+        int concurrent=intValue(values,"maxConcurrent",2,1,16);
+        int queued=intValue(values,"queuedLimit",16,0,1024);
+        int timeout=intValue(values,"timeoutMs",30000,100,300000);
+        int heap=intValue(values,"heapMaxMb",512,64,4096);
+        int response=intValue(values,"maxResponseBytes",262144,1024,1048576);
+        int source=intValue(values,"maxSourceBytes",65536,256,262144);
+        if(source>=response)throw new IllegalArgumentException("server.inspection.maxSourceBytes must be less than maxResponseBytes");
+        Map<?,?> rawSources=values.get("safeTextSources")==null?Collections.emptyMap():map(values.get("safeTextSources"),"server.inspection.safeTextSources");
+        Map<String,List<String>> safeSources=new LinkedHashMap<>();
+        for(Map.Entry<?,?> entry:rawSources.entrySet()) {
+            String packageId=string(entry.getKey(),"server.inspection.safeTextSources package ID");
+            Path packageRoot=packages.get(packageId);
+            if(packageRoot==null)throw new IllegalArgumentException("server.inspection.safeTextSources references an unknown package: "+packageId);
+            List<?> paths=list(entry.getValue(),"server.inspection.safeTextSources."+packageId);
+            java.util.ArrayList<String> checked=new java.util.ArrayList<>();
+            java.util.HashSet<String> unique=new java.util.HashSet<>();
+            for(Object value:paths) {
+                String authored=string(value,"server.inspection.safeTextSources entry");
+                Path relative=Paths.get(authored);
+                if(relative.isAbsolute()||authored.indexOf('\\')>=0||authored.indexOf('\0')>=0||!relative.normalize().equals(relative)||relative.startsWith(".."))
+                    throw new IllegalArgumentException("Inspection source paths must be normalized package-relative paths");
+                String logical=relative.toString().replace('\\','/');
+                String lower=logical.toLowerCase(java.util.Locale.ROOT);
+                if(!(lower.endsWith(".sh")||lower.endsWith(".bash")||lower.endsWith(".py")||lower.endsWith(".js")||lower.endsWith(".ts")||lower.endsWith(".sql")||lower.endsWith(".groovy")||lower.endsWith(".rb")||lower.endsWith(".pl")||lower.endsWith(".ps1")||lower.endsWith(".bat")||lower.endsWith(".cmd")||lower.endsWith(".txt")))
+                    throw new IllegalArgumentException("Inspection source allowlist accepts text script files only");
+                Path candidate=packageRoot.resolve(relative).normalize();
+                if(!candidate.startsWith(packageRoot)||!Files.isRegularFile(candidate))throw new IllegalArgumentException("Inspection source must be an existing regular file inside its package");
+                Path canonical=candidate.toRealPath();
+                if(!canonical.startsWith(packageRoot))throw new IllegalArgumentException("Inspection source resolves outside its package");
+                if(!unique.add(logical))throw new IllegalArgumentException("Duplicate inspection source path: "+logical);
+                checked.add(logical);
+            }
+            safeSources.put(packageId,List.copyOf(checked));
+        }
+        return new Inspection(enabled,concurrent,queued,timeout,heap,response,source,safeSources);
+    }
+
+    public static final class Inspection {
+        public final boolean enabled;
+        public final int maxConcurrent,queuedLimit,timeoutMs,heapMaxMb,maxResponseBytes,maxSourceBytes;
+        public final Map<String,List<String>> safeTextSources;
+        private Inspection(boolean enabled,int maxConcurrent,int queuedLimit,int timeoutMs,int heapMaxMb,int maxResponseBytes,int maxSourceBytes,Map<String,List<String>> safeTextSources) {
+            this.enabled=enabled;this.maxConcurrent=maxConcurrent;this.queuedLimit=queuedLimit;this.timeoutMs=timeoutMs;this.heapMaxMb=heapMaxMb;this.maxResponseBytes=maxResponseBytes;this.maxSourceBytes=maxSourceBytes;
+            this.safeTextSources=Collections.unmodifiableMap(new LinkedHashMap<>(safeTextSources));
+        }
+        public List<String> safeTextSources(String packageId) { return safeTextSources.getOrDefault(packageId,List.of()); }
+    }
 }

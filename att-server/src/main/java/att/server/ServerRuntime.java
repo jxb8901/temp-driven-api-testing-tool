@@ -11,6 +11,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.security.SecureRandom;
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+import java.util.Base64;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -19,7 +24,10 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.SynchronousQueue;
@@ -28,14 +36,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
-/** Owns the single-node job plane and its bounded Worker/SSE executors. */
+/** Owns the single-node job plane and its bounded Worker, inspector, and SSE executors. */
 final class ServerRuntime implements AutoCloseable {
     static final ObjectMapper JSON=new ObjectMapper().configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,false);
     static final Pattern JOB_ID=Pattern.compile("J[0-9A-F]{16}");
     static final int MAX_STREAM_OBSERVERS=32;
     final ServerConfig config;
     final JobStore store;
-    final ThreadPoolExecutor workers,streams;
+    final ThreadPoolExecutor workers,streams,inspectors;
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
@@ -44,6 +52,9 @@ final class ServerRuntime implements AutoCloseable {
     final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
     private final ScheduledExecutorService retention;
     private final WorkerProcessLauncher processLauncher;
+    private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
+    private final byte[] cursorKey=new byte[32];
+    private final SecureRandom cursorRandom=new SecureRandom();
     private volatile String webInfLibs;
     ServerRuntime(ServerConfig config,String webInfLibs) throws Exception {
         this(config,webInfLibs,ProcessBuilder::start);
@@ -51,9 +62,12 @@ final class ServerRuntime implements AutoCloseable {
     ServerRuntime(ServerConfig config,String webInfLibs,WorkerProcessLauncher processLauncher) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
         this.config=config;this.webInfLibs=webInfLibs;this.processLauncher=processLauncher;this.store=new JobStore(config);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         streams=new ThreadPoolExecutor(0,MAX_STREAM_OBSERVERS,30,TimeUnit.SECONDS,new SynchronousQueue<>(),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+        java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=config.inspection.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.inspection.queuedLimit);
+        inspectors=new ThreadPoolExecutor(config.inspection.maxConcurrent,config.inspection.maxConcurrent,0,TimeUnit.MILLISECONDS,inspectionQueue,r->{Thread t=new Thread(r,"att-server-inspector");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
         recover();cleanupExpiredJobsSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
     }
@@ -173,6 +187,97 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> resultRecord(String id) throws Exception {Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();Map<String,Object> out=new LinkedHashMap<>();out.put("job",jobRecord(id));out.put("result",record.get("resultJson")==null?null:publicJson(id,(String)record.get("resultJson")));out.put("diagnostic",record.get("diagnosticJson")==null?null:publicJson(id,(String)record.get("diagnosticJson")));return out;}
     List<Map<String,Object>> packages(){List<Map<String,Object>> out=new ArrayList<>();config.packages.forEach((id,path)->out.add(Map.of("packageId",id,"name",path.getFileName().toString())));return out;}
     Map<String,Object> packageView(String id){Path root=config.packages.get(id);if(root==null)throw new NotFoundException();return Map.of("packageId",id,"name",root.getFileName().toString());}
+    Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        if(!List.of("list","detail","source").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
+        if(type!=null&&!List.of("case","template","flow","tool").contains(type))throw new IllegalArgumentException("Unsupported resource type");
+        String normalizedQuery=query==null?"":query.trim();if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
+        int limit=requestedLimit==0?att.resource.PackageResourceInspector.DEFAULT_PAGE_SIZE:requestedLimit;
+        if(limit<1||limit>att.resource.PackageResourceInspector.MAX_PAGE_SIZE)throw new IllegalArgumentException("limit must be between 1 and 100");
+        Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,type,normalizedQuery,principal);
+        WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";request.packageRoot=root.toString();request.config="config/config.yaml";
+        request.inspectionAction=action;request.inspectionType=type;request.inspectionResourceId=resourceId;request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
+        request.expectedRevisionDigest=prior==null?null:prior.revision;request.safeTextSources=config.inspection.safeTextSources(packageId);request.maxSourceBytes=config.inspection.maxSourceBytes;request.maxResponseBytes=config.inspection.maxResponseBytes;
+        Future<Map<String,Object>> future;
+        try { future=inspectors.submit(()->runInspectionWorker(root,request)); }
+        catch(RejectedExecutionException full){throw new InspectionCapacityException();}
+        Map<String,Object> envelope;
+        try { envelope=future.get(config.inspection.timeoutMs,TimeUnit.MILLISECONDS); }
+        catch(java.util.concurrent.TimeoutException timeout){future.cancel(true);throw new InspectionTimeoutException();}
+        catch(InterruptedException interrupted){future.cancel(true);Thread.currentThread().interrupt();throw interrupted;}
+        catch(ExecutionException failure){Throwable cause=failure.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IllegalStateException("Package inspection failed",cause);}
+        String workerError=(String)envelope.get("errorCode");
+        if("ATT-RESOURCE-NOT-FOUND".equals(workerError))throw new NotFoundException();
+        if("ATT-RESOURCE-CURSOR-STALE".equals(workerError))throw new StaleCursorException();
+        if("ATT-RESOURCE-RESPONSE-TOO-LARGE".equals(workerError))throw new InspectionResponseTooLargeException();
+        if("ATT-RESOURCE-LIMIT".equals(workerError))throw new InspectionCapacityException();
+        if(workerError!=null)throw new IllegalStateException("Package inspection Worker failed: "+workerError);
+        Object raw=envelope.get("inspection");if(!(raw instanceof Map))throw new IllegalStateException("Package inspection Worker returned an invalid response");
+        @SuppressWarnings("unchecked") Map<String,Object> result=new LinkedHashMap<>((Map<String,Object>)raw);
+        Object revision=result.remove("revisionDigest");
+        if("list".equals(action)) {
+            Object next=result.remove("nextOffset");
+            if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,((Number)next).intValue(),(String)revision,principal));
+            else result.put("nextCursor",null);
+        }
+        return result;
+    }
+    private Map<String,Object> runInspectionWorker(Path root,WorkerRequest request) throws Exception {
+        Process process=null;
+        try {
+            validatePackageRoot(root);Path libs=webInfLibs==null?null:Paths.get(webInfLibs);
+            if(libs==null||!Files.isDirectory(libs))throw new IllegalStateException("Tomcat must deploy the WAR as an exploded application so WEB-INF/lib is available to the Worker launcher");
+            List<String> classpathEntries=new ArrayList<>();classpathEntries.add(libs.resolve("*").toString());for(Path libraryDir:config.workerLibraryDirs)classpathEntries.add(libraryDir.resolve("*").toString());
+            String cp=String.join(java.io.File.pathSeparator,classpathEntries);
+            ProcessBuilder builder=new ProcessBuilder(config.javaExecutable.toString(),"-Xmx"+config.inspection.heapMaxMb+"m","-cp",cp,"att.worker.WorkerMain");builder.directory(root.toFile());
+            process=processLauncher.start(builder);inspectionProcesses.put(process,Boolean.TRUE);
+            java.util.concurrent.atomic.AtomicBoolean timedOut=new java.util.concurrent.atomic.AtomicBoolean();
+            final Process active=process;
+            Thread watchdog=new Thread(()->{try{if(!active.waitFor(config.inspection.timeoutMs,TimeUnit.MILLISECONDS)){timedOut.set(true);forceTree(active);}}catch(InterruptedException ignored){Thread.currentThread().interrupt();}},"att-server-inspector-watchdog");watchdog.setDaemon(true);watchdog.start();
+            Thread stderr=new Thread(()->{try(var in=active.getErrorStream()){byte[] buffer=new byte[8192];while(in.read(buffer)>=0){}}catch(Exception ignored){}});stderr.setDaemon(true);stderr.start();
+            try(var out=process.getOutputStream()){out.write(JSON.writeValueAsBytes(request));out.write('\n');out.flush();}
+            JsonNode result=null;String errorCode=null;long total=0;
+            try(BufferedReader reader=new BufferedReader(new InputStreamReader(process.getInputStream(),StandardCharsets.UTF_8))){
+                String line;while((line=readBoundedLine(reader,config.inspection.maxResponseBytes))!=null){
+                    if("\u0000OVERSIZED".equals(line))throw new InspectionResponseTooLargeException();
+                    total+=line.getBytes(StandardCharsets.UTF_8).length+1L;if(total>config.inspection.maxResponseBytes)throw new InspectionResponseTooLargeException();
+                    JsonNode event=JSON.readTree(line);if(event==null||!event.isObject())continue;String kind=event.path("type").asText("");
+                    if("DIAGNOSTIC".equalsIgnoreCase(kind))errorCode=event.path("code").asText(null);
+                    if("RESULT".equalsIgnoreCase(kind))result=event;
+                }
+            }
+            int exit=process.waitFor();
+            if(timedOut.get())throw new InspectionTimeoutException();
+            if(result==null||exit!=0&&errorCode==null)throw new IllegalStateException("Package inspection Worker did not complete successfully");
+            Map<String,Object> response=new LinkedHashMap<>();
+            if(errorCode!=null) {response.put("errorCode",errorCode);return response;}
+            JsonNode inspection=result.path("result").path("summary").path("inspection");if(!inspection.isObject())throw new IllegalStateException("Package inspection Worker returned no inspection data");
+            response.put("inspection",JSON.convertValue(inspection,Map.class));return response;
+        } catch(InterruptedException interrupted){if(process!=null&&process.isAlive())forceTree(process);Thread.currentThread().interrupt();throw interrupted;}
+        catch(Exception error){if(process!=null&&process.isAlive())forceTree(process);throw error;}
+        finally{if(process!=null){inspectionProcesses.remove(process);if(process.isAlive())forceTree(process);}}
+    }
+    private String encodeCursor(String packageId,String type,String query,int offset,String revision,String principal) throws Exception {
+        Map<String,Object> payload=new LinkedHashMap<>();payload.put("packageId",packageId);payload.put("type",type);payload.put("query",query);payload.put("offset",offset);payload.put("revision",revision);payload.put("principal",principal);
+        byte[] nonce=new byte[12];cursorRandom.nextBytes(nonce);
+        Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
+        byte[] ciphertext=cipher.doFinal(JSON.writeValueAsBytes(payload));byte[] token=new byte[nonce.length+ciphertext.length];
+        System.arraycopy(nonce,0,token,0,nonce.length);System.arraycopy(ciphertext,0,token,nonce.length,ciphertext.length);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(token);
+    }
+    private Cursor decodeCursor(String token,String packageId,String type,String query,String principal) throws Exception {
+        if(token.length()>4096)throw new IllegalArgumentException("cursor is too long");byte[] bytes;
+        try{bytes=Base64.getUrlDecoder().decode(token);}catch(IllegalArgumentException bad){throw new IllegalArgumentException("cursor is invalid");}
+        if(bytes.length<28)throw new IllegalArgumentException("cursor is invalid");
+        byte[] nonce=java.util.Arrays.copyOfRange(bytes,0,12),ciphertext=java.util.Arrays.copyOfRange(bytes,12,bytes.length),payload;
+        try{Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));payload=cipher.doFinal(ciphertext);}
+        catch(Exception bad){throw new IllegalArgumentException("cursor is invalid");}
+        JsonNode value;try{value=JSON.readTree(payload);}catch(Exception bad){throw new IllegalArgumentException("cursor is invalid");}
+        if(!packageId.equals(value.path("packageId").asText())||!java.util.Objects.equals(type,value.path("type").isNull()?null:value.path("type").asText())||!query.equals(value.path("query").asText())||!principal.equals(value.path("principal").asText()))throw new IllegalArgumentException("cursor does not match this resource query");
+        int offset=value.path("offset").asInt(-1);String revision=value.path("revision").asText("");if(offset<1||offset>20000||!revision.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("cursor is invalid");return new Cursor(offset,revision);
+    }
+    private static boolean containsControl(String value){for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))return true;return false;}
     Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());return m;}
     Path artifact(Job job,String requested) throws Exception {
         if(requested==null||requested.isBlank())throw new IllegalArgumentException("artifact path is required");
@@ -229,7 +334,7 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){retention.shutdownNow();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){retention.shutdownNow();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
@@ -240,4 +345,9 @@ final class ServerRuntime implements AutoCloseable {
     }
     static final class QueueFullException extends RuntimeException {QueueFullException(String m){super(m);}}
     static final class NotFoundException extends RuntimeException {}
+    static final class InspectionCapacityException extends RuntimeException {}
+    static final class InspectionTimeoutException extends RuntimeException {}
+    static final class InspectionResponseTooLargeException extends RuntimeException {}
+    static final class StaleCursorException extends RuntimeException {}
+    private static final class Cursor {final int offset;final String revision;Cursor(int offset,String revision){this.offset=offset;this.revision=revision;}}
 }
