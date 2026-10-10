@@ -17,6 +17,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -48,6 +51,72 @@ class DebugEngineTest {
         DebugEngine.Result tool = run(project, config, "tool", "echo");
         assertEquals(ResultStatus.PASS, tool.status());
         assertTrue(new String(Files.readAllBytes(tool.logPath()), StandardCharsets.UTF_8).contains("hello-tool"));
+    }
+
+    @Test void hidesPackageAuthoredDebugValuesAndRestoresOnlyPathBoundMarkers() throws Exception {
+        Path project = fixtureWithoutSidecars();
+        Files.write(project.resolve("templates/SIMPLE/debug.yaml"), ("schemaVersion: att-debug/v1.2\n"
+                + "inputs:\n  value: safe\n  payload:\n    account: 'customer account 123456789'\n"
+                + "    details:\n      message: 'temporary credential is violet-123'\n"
+                + "  values: ['array secret one', '[REDACTED]']\n  overrideValue: original\n"
+                + "vars: {orderId: ORD-PRIVATE-123}\n").getBytes(StandardCharsets.UTF_8));
+        Path tools = Files.createDirectories(project.resolve("config/tools"));
+        Files.write(tools.resolve("echo.debug.yaml"), ("schemaVersion: att-debug/v1.2\n"
+                + "arguments: {value: 'tool argument secret'}\n").getBytes(StandardCharsets.UTF_8));
+        Map<String, ToolArgumentConfig> args = Collections.singletonMap("value",
+                new ToolArgumentConfig("value", "Value", "Value", true, ""));
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.singletonMap("echo",
+                new ToolConfig("echo", "Echo", "Echo", "/bin/echo ${value}", "txt", args)), null, null);
+        DebugEngine engine = new DebugEngine(project, config);
+
+        Map<String, Object> form = engine.projectDiscoverableInput("template", "SIMPLE");
+        String safeForm = form.get("input").toString();
+        assertFalse(safeForm.contains("123456789"));
+        assertFalse(safeForm.contains("violet-123"));
+        assertFalse(safeForm.contains("array secret one"));
+        assertFalse(safeForm.contains("ORD-PRIVATE-123"));
+        @SuppressWarnings("unchecked") Map<String, Object> safeInput = (Map<String, Object>) form.get("input");
+        @SuppressWarnings("unchecked") Map<String, Object> safeInputs = (Map<String, Object>) safeInput.get("inputs");
+        @SuppressWarnings("unchecked") Map<String, Object> safePayload = (Map<String, Object>) safeInputs.get("payload");
+        assertEquals("/inputs/payload/account", ((Map<?, ?>) safePayload.get("account")).get("$attDebugKeepDefault"));
+        @SuppressWarnings("unchecked") List<Object> safeValues = (List<Object>) safeInputs.get("values");
+        assertEquals("/inputs/values/0", ((Map<?, ?>) safeValues.get(0)).get("$attDebugKeepDefault"));
+
+        Map<String, Object> submitted = new LinkedHashMap<>();
+        submitted.put("schemaVersion", "att-debug/v1.2");
+        Map<String, Object> editedInputs = new LinkedHashMap<>();
+        Map<String, Object> editedPayload = new LinkedHashMap<>();
+        editedPayload.put("account", safePayload.get("account"));
+        @SuppressWarnings("unchecked") Map<String, Object> safeDetails = (Map<String, Object>) safePayload.get("details");
+        editedPayload.put("details", Collections.singletonMap("message", safeDetails.get("message")));
+        editedInputs.put("payload", editedPayload);
+        editedInputs.put("values", List.of(safeValues.get(0), "[REDACTED]"));
+        editedInputs.put("overrideValue", "[REDACTED]");
+        editedInputs.put("newLiteral", "[REDACTED]");
+        editedInputs.put("value", "visible override");
+        submitted.put("inputs", editedInputs);
+        submitted.put("vars", Collections.singletonMap("orderId", ((Map<?, ?>) ((Map<?, ?>) safeInput.get("vars")).get("orderId"))));
+
+        Map<String, Object> validated = engine.validateInlineInput("template", "SIMPLE", submitted);
+        @SuppressWarnings("unchecked") Map<String, Object> normalized = (Map<String, Object>) validated.get("normalizedInput");
+        @SuppressWarnings("unchecked") Map<String, Object> normalizedInputs = (Map<String, Object>) normalized.get("inputs");
+        assertEquals("customer account 123456789", ((Map<?, ?>) normalizedInputs.get("payload")).get("account"));
+        assertEquals("[REDACTED]", ((List<?>) normalizedInputs.get("values")).get(1));
+        assertEquals("[REDACTED]", normalizedInputs.get("overrideValue"));
+        assertEquals("[REDACTED]", normalizedInputs.get("newLiteral"));
+        assertFalse(validated.get("input").toString().contains("customer account 123456789"));
+
+        Map<String, Object> invalidMarker = new LinkedHashMap<>(submitted);
+        Map<String, Object> invalidInputs = new LinkedHashMap<>(editedInputs);
+        invalidInputs.put("newLiteral", Collections.singletonMap("$attDebugKeepDefault", "/inputs/newLiteral"));
+        invalidMarker.put("inputs", invalidInputs);
+        assertThrows(IllegalArgumentException.class, () -> engine.validateInlineInput("template", "SIMPLE", invalidMarker));
+
+        Map<String, Object> toolForm = engine.projectDiscoverableInput("tool", "echo");
+        assertFalse(toolForm.get("input").toString().contains("tool argument secret"));
+        @SuppressWarnings("unchecked") Map<String, Object> toolInput = (Map<String, Object>) toolForm.get("input");
+        assertEquals("/arguments/value", ((Map<?, ?>) ((Map<?, ?>) toolInput.get("arguments")).get("value")).get("$attDebugKeepDefault"));
     }
 
     @Test void configuredDebugIdentityIsUsedAndCollisionsFail() throws Exception {

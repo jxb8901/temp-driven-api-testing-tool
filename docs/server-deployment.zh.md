@@ -202,7 +202,7 @@ Quick Load 可從已選取的 Template、Flow 或 Tool 開啟，固定使用該�
 GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT
 ```
 
-表單回應會為 Template/Flow 提供安全的 `inputs`、`vars` 預設值，或為 Tool 提供 `inputs`、`arguments`，並附上已遮蔽的單 workload 預覽。它只讀取目標選填 `debug.yaml` 內的 business 欄位；不會複製 Debug 專用的 `case`、`stage` 及 local `testdata`。若 sidecar 包含 Debug-local Testdata imports，請移到 Load policy，否則 Quick Load 會拒絕。
+表單回應會為 Template/Flow 提供安全的 `inputs`、`vars` 預設值，或為 Tool 提供 `inputs`、`arguments`，並附上已遮蔽的單 workload 預覽。它只讀取目標選填 `debug.yaml` 內的 business 欄位；不會複製 Debug 專用的 `case`、`stage` 及 local `testdata`。若 sidecar 包含 Debug-local Testdata，表單會明確提示這些 imports 已略過。需要的 package-relative descriptor 可另外放入 Load-level `testdata` array，並會按 effective Load scenario 驗證。
 
 Server 會為 `virtualUsers` 讀取 `load/load.visualuser.yaml`，為 `arrivalRate` 讀取 `load/load.arrivalrate.yaml`。這些是 policy-only 的 `att-load/v1.6` descriptor，必須與所選 model 相符。若 model 專用檔案不存在，會使用內建低強度 fallback：一個 Virtual User 執行 10 秒，或每秒 1 次 arrival、執行 10 秒，並設定 `maxConcurrent: 1` 及 `overloadPolicy: drop`。既有 CLI `load/load.yaml` 行為不變。
 
@@ -212,10 +212,10 @@ Server 會為 `virtualUsers` 讀取 `load/load.visualuser.yaml`，為 `arrivalRa
 POST /api/v1/drafts/quick-load
 Content-Type: application/json
 
-{"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"model":"virtualUsers","input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}},"load":{"users":4,"duration":"30s"},"execution":{"thinkTime":"100ms"}}
+{"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"model":"virtualUsers","input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}},"load":{"users":4,"duration":"30s"},"execution":{"thinkTime":"100ms"},"testdata":["testdata/load-accounts.yaml"]}
 ```
 
-`load` 只接受所選 model 支援的 pacing 欄位；`execution` 可包含 closed-workload 的 `thinkTime`。回應會提供綁定 Principal 的不透明 `draftId`（以 `L` 開頭）、安全的 effective YAML 預覽、遮蔽狀態及過期時間。Debug 與 Quick Load drafts 共用每個 Server 最多 128 個、每位 Principal 最多 16 個、有效期 10 分鐘的記憶體限制。
+`load` 只接受所選 model 支援的 pacing 欄位；`execution` 可包含 closed-workload 的 `thinkTime`。可選的 `testdata` array 可指定額外 package-relative Load descriptor paths；這些路徑與 Debug-local imports 分開處理，並會附加於 model policy 既有 descriptors。回應會提供綁定 Principal 的不透明 `draftId`（以 `L` 開頭）、安全的 effective YAML 預覽、遮蔽狀態及過期時間。Debug 與 Quick Load drafts 共用每個 Server 最多 128 個、每位 Principal 最多 16 個、有效期 10 分鐘的記憶體限制。
 
 檢視預覽後，只提交 draft identity：
 
@@ -271,14 +271,16 @@ Server 會驗證完整 scenario 並 resolve 所有 target，不會排程流量�
 ```http
 GET /api/v1/packages/payments/configuration?view=declared
 GET /api/v1/packages/payments/configuration/effective?environment=SIT
+GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&offset=0&limit=50
 GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT
+GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&offset=0&limit=50
 ```
 
-Declared view 會回傳 schema version、安全的 global 欄位、已設定 profile，以及每個設定 section 的 declared/absent 狀態、項目數量和 profile 繼承或替換狀態。Effective view 使用 `FrameworkConfigLoader` 選擇 environment，並回傳安全的 helper、Tool 及 Testdata descriptor metadata。檢查過程不會連接 DB、MQ、HTTP 或 SSH 服務，也不會回傳未限制的設定 YAML 或 Testdata records。
+Declared view 會回傳 schema version、安全的 global 欄位、已設定 profile，以及每個設定 section 的 declared/absent 狀態、項目數量和 profile 繼承或替換狀態。Effective view 使用 `FrameworkConfigLoader` 選擇 environment，並回傳安全的 helper、Tool 及 Testdata descriptor metadata。Root-only package 或使用已設定的預設值時可省略 `environment`。第一個 effective 回應會提供各 section 的數量；按 section ID（`dbhelpers`、`mqhelpers`、`sshhelpers`、`httphelpers`、`tools` 或 `testdata`）要求其項目。Effective section 及 comparison 欄位回應支援 `offset` 與 `limit`（1–100，預設 50），並回傳 `total` 和 `nextOffset` 以供分頁。檢查過程不會連接 DB、MQ、HTTP 或 SSH 服務，也不會回傳未限制的設定 YAML 或 Testdata records。
 
 比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對路徑、憑證、連線 endpoint、網絡拓撲或未限制的 descriptor 內容。
 
-設定回應包含 `view`、`state`、可用時的 `schemaVersion` 及 `diagnostics`。無效設定會以 HTTP 200 回傳 `state: "invalid"` 及穩定診斷碼；格式錯誤的 profile 參數回傳 `400`。未知 package 回傳 `404`，超大回應回傳 `413`，檢查佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。回應大小、佇列和逾時限制與資源探索相同。
+設定回應包含 `view`、`state`、可用時的 `schemaVersion` 及 `diagnostics`。分頁回應亦包含 `section`、`offset`、`limit`、`total` 及 `nextOffset`。無效設定會以 HTTP 200 回傳 `state: "invalid"` 及穩定診斷碼；格式錯誤的 profile 參數回傳 `400`。未知 package 回傳 `404`，超大回應回傳 `413`，檢查佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。回應大小、佇列和逾時限制與資源探索相同。
 
 ## Server-sent events
 

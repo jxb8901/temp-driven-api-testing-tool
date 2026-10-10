@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Clock;
 import java.time.Instant;
 import java.security.SecureRandom;
 import javax.crypto.Cipher;
@@ -60,6 +61,7 @@ final class ServerRuntime implements AutoCloseable {
     final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
     private final ScheduledExecutorService retention;
     private final WorkerProcessLauncher processLauncher;
+    private final Clock clock;
     private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
     private final Object draftLock=new Object();
     private final ConcurrentHashMap<String,DebugDraft> debugDrafts=new ConcurrentHashMap<>();
@@ -72,8 +74,11 @@ final class ServerRuntime implements AutoCloseable {
         this(config,webInfLibs,ProcessBuilder::start);
     }
     ServerRuntime(ServerConfig config,String webInfLibs,WorkerProcessLauncher processLauncher) throws Exception {
+        this(config,webInfLibs,processLauncher,Clock.systemUTC());
+    }
+    ServerRuntime(ServerConfig config,String webInfLibs,WorkerProcessLauncher processLauncher,Clock clock) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.webInfLibs=webInfLibs;this.processLauncher=processLauncher;this.store=new JobStore(config);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.config=config;this.webInfLibs=webInfLibs;this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -154,16 +159,6 @@ final class ServerRuntime implements AutoCloseable {
     private void execute(Job job,Path jobPath,AdmissionLease lease) {
         job.workerStartedNanos=System.nanoTime();
         try {
-            if(job.request.expectedRevisionDigest!=null) {
-                try {
-                    if(job.request.inlineLoadScenario!=null) verifyPackageRevision(job.packageId,job.request.environment,job.request.expectedRevisionDigest);
-                    else verifyDraftRevision(job.packageId,job.request);
-                }
-                catch(StaleDraftException changed) {
-                    finishQuietly(job,"INVALID",2,"ATT-SERVER-DRAFT-STALE","Package content changed after preview; rebuild the draft");
-                    return;
-                }
-            }
             Process process;
             synchronized(job) {
                 // Publish the process while holding the same lock used by cancel(). A
@@ -249,7 +244,7 @@ final class ServerRuntime implements AutoCloseable {
         return result;
     }
     Map<String,Object> inspectDebugForm(String packageId,String type,String resourceId,String environment,String principal) throws Exception {
-        Map<String,Object> result=inspectDebugFormInternal(packageId,type,resourceId,environment,principal,null);
+        Map<String,Object> result=inspectDebugFormInternal(packageId,type,resourceId,environment,principal);
         result.remove("revisionDigest");
         return result;
     }
@@ -275,14 +270,14 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");return result;
     }
     private Map<String,Object> inspectDebugFormInternal(String packageId,String type,String resourceId,String environment,
-                                                        String principal,String expectedRevision) throws Exception {
+                                                        String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(resourceId==null||resourceId.isBlank()||resourceId.length()>512)throw new IllegalArgumentException("resourceId is invalid");
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,environment);
-        request.inspectionAction="debug-form";request.inspectionType=type;request.inspectionResourceId=resourceId;request.expectedRevisionDigest=expectedRevision;
+        request.inspectionAction="debug-form";request.inspectionType=type;request.inspectionResourceId=resourceId;
         return executeInspection(root,request);
     }
     Map<String,Object> createDebugDraft(JsonNode input,String principal) throws Exception {
@@ -316,7 +311,7 @@ final class ServerRuntime implements AutoCloseable {
         String resolvedType=String.valueOf(resolvedTarget.get("type")),resolvedId=String.valueOf(resolvedTarget.get("id"));
         DebugDraft draft=new DebugDraft("D"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,
                 environment,resolvedType,resolvedId,resourceId,(String)rawDigest,normalized,inspected,
-                Instant.now().plusMillis(DRAFT_TTL_MILLIS));
+                clock.instant().plusMillis(DRAFT_TTL_MILLIS));
         synchronized(draftLock) {
             expireDrafts();
             if(debugDrafts.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
@@ -330,7 +325,7 @@ final class ServerRuntime implements AutoCloseable {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         requireObject(input,"A JSON object is required");
-        requireOnlyFields(input,"packageId","environment","target","model","input","load","execution");
+        requireOnlyFields(input,"packageId","environment","target","model","input","load","execution","testdata");
         String packageId=required(input,"packageId");Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         JsonNode targetNode=input.get("target");requireObject(targetNode,"target must be a JSON object");requireOnlyFields(targetNode,"type","id");
@@ -343,9 +338,11 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> business=JSON.convertValue(inputNode,Map.class);
         Map<String,Object> load=objectMap(input.get("load"),"load must be a JSON object");
         Map<String,Object> execution=objectMap(input.get("execution"),"execution must be a JSON object");
+        List<String> testdata=quickLoadTestdata(input.get("testdata"));
         WorkerRequest request=inspectionRequest(packageId,root,environment);
         request.inspectionAction="quick-load-input";request.inspectionType=type;request.inspectionTargetId=logicalId;
         request.loadModel=model;request.inlineLoadInput=business;request.loadOverrides=load;request.workloadExecution=execution;
+        request.quickLoadTestdata=testdata;
         Map<String,Object> inspected=executeInspection(root,request);
         Object rawScenario=inspected.remove("normalizedScenario");
         Object rawDigest=inspected.remove("revisionDigest");
@@ -360,7 +357,7 @@ final class ServerRuntime implements AutoCloseable {
         String resolvedType=String.valueOf(resolvedTarget.get("type")),resolvedId=String.valueOf(resolvedTarget.get("id"));
         QuickLoadDraft draft=new QuickLoadDraft("L"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
                 principal,packageId,environment,resolvedType,resolvedId,resourceId,model,(String)rawDigest,
-                scenario,inspected,Instant.now().plusMillis(DRAFT_TTL_MILLIS));
+                scenario,inspected,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
         synchronized(draftLock) {
             expireDrafts();
             if(debugDrafts.size()+quickLoadDrafts.size()+advancedLoadDrafts.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
@@ -390,7 +387,7 @@ final class ServerRuntime implements AutoCloseable {
         @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
         AdvancedLoadDraftState draft=new AdvancedLoadDraftState("A"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
                 principal,packageId,environment,(String)rawModel,(String)rawDigest,scenario,inspected,
-                Instant.now().plusMillis(DRAFT_TTL_MILLIS));
+                clock.instant().plusMillis(DRAFT_TTL_MILLIS));
         synchronized(draftLock) {
             expireDrafts();
             if(debugDrafts.size()+quickLoadDrafts.size()+advancedLoadDrafts.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
@@ -444,7 +441,6 @@ final class ServerRuntime implements AutoCloseable {
         }
         boolean submitted=false;
         try {
-            verifyDraftRevision(draft);
             requireLiveDraft(draft);
             com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
             internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
@@ -534,10 +530,6 @@ final class ServerRuntime implements AutoCloseable {
         if(ADVANCED_LOAD_DRAFT_ID.matcher(draftId).matches())return submitAdvancedLoadDraft(body,principal);
         throw new NotFoundException();
     }
-    private void verifyDraftRevision(DebugDraft draft) throws Exception {
-        try { inspectDebugFormInternal(draft.packageId,draft.targetType,draft.resourceId,draft.environment,draft.principal,draft.revisionDigest); }
-        catch(StaleCursorException|NotFoundException changed){throw new StaleDraftException();}
-    }
     private void verifyQuickLoadDraftRevision(QuickLoadDraft draft) throws Exception {
         try { verifyPackageRevision(draft.packageId,draft.environment,draft.revisionDigest); }
         catch(StaleCursorException|NotFoundException changed){throw new StaleDraftException();}
@@ -548,17 +540,10 @@ final class ServerRuntime implements AutoCloseable {
         executeInspection(root,request);
     }
     private void requireLiveDraft(DebugDraft draft) {
-        if(!draft.expiresAt.isAfter(Instant.now()))throw new StaleDraftException();
+        if(!draft.expiresAt.isAfter(clock.instant()))throw new StaleDraftException();
     }
     private void requireLiveDraft(Instant expiresAt) {
-        if(!expiresAt.isAfter(Instant.now()))throw new StaleDraftException();
-    }
-    private void verifyDraftRevision(String packageId,WorkerRequest request) throws Exception {
-        if(request.expectedRevisionDigest==null)return;
-        DebugDraft draft=new DebugDraft("", "", packageId, request.environment,
-                String.valueOf(request.target.get("type")),String.valueOf(request.target.get("id")),request.draftResourceId,
-                request.expectedRevisionDigest,Collections.<String,Object>emptyMap(),Collections.<String,Object>emptyMap(),Instant.now());
-        verifyDraftRevision(draft);
+        if(!expiresAt.isAfter(clock.instant()))throw new StaleDraftException();
     }
     private WorkerRequest inspectionRequest(String packageId,Path root,String environment) {
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";
@@ -589,7 +574,7 @@ final class ServerRuntime implements AutoCloseable {
         view.put("expiresAt",draft.expiresAt.toString());return view;
     }
     private void expireDrafts() {
-        Instant now=Instant.now();debugDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
+        Instant now=clock.instant();debugDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
         quickLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
         advancedLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
     }
@@ -610,20 +595,36 @@ final class ServerRuntime implements AutoCloseable {
         @SuppressWarnings("unchecked") Map<String,Object> result=(Map<String,Object>)JSON.convertValue(value,Map.class);
         return result;
     }
+    private static List<String> quickLoadTestdata(JsonNode value) {
+        if(value==null||value.isNull())return Collections.emptyList();
+        if(!value.isArray()||value.size()>64)throw new IllegalArgumentException("testdata must be an array of at most 64 package-relative paths");
+        List<String> paths=new ArrayList<>();
+        for(JsonNode item:value) {
+            if(!item.isTextual()||item.asText().isBlank()||item.asText().length()>512||containsControl(item.asText()))
+                throw new IllegalArgumentException("testdata entries must be non-empty package-relative paths");
+            paths.add(item.asText().trim());
+        }
+        return paths;
+    }
     Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,String principal) throws Exception {
+        return inspectConfiguration(packageId,action,environment,otherEnvironment,null,0,0,principal);
+    }
+    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
+                                            String section,int offset,int limit,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(!List.of("declared","effective","compare").contains(action))throw new IllegalArgumentException("Unsupported configuration inspection action");
         String selected=null,other=null;
-        if("effective".equals(action))selected=inspectionEnvironment(environment,"environment");
+        if("effective".equals(action)&&environment!=null&&!environment.isBlank())selected=inspectionEnvironment(environment,"environment");
         if("compare".equals(action)){
             selected=inspectionEnvironment(environment,"left environment");
             other=inspectionEnvironment(otherEnvironment,"right environment");
             if(selected.equalsIgnoreCase(other))throw new IllegalArgumentException("left and right environments must differ");
         }
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";request.packageRoot=root.toString();request.config="config/config.yaml";
-        request.inspectionAction=action;request.inspectionType="configuration";request.inspectionEnvironment=selected;request.inspectionOtherEnvironment=other;request.maxResponseBytes=config.inspection.maxResponseBytes;
+        request.inspectionAction=action;request.inspectionType="configuration";request.inspectionEnvironment=selected;request.inspectionOtherEnvironment=other;
+        request.inspectionSection=section;request.inspectionOffset=offset;request.inspectionLimit=limit;request.maxResponseBytes=config.inspection.maxResponseBytes;
         return executeInspection(root,request);
     }
     private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {

@@ -92,7 +92,8 @@ Example Quick Load draft request:
   "model": "virtualUsers",
   "input": { "inputs": { "channel": "WEB" }, "vars": {} },
   "load": { "users": 10, "duration": "1m" },
-  "execution": { "thinkTime": "100ms" }
+  "execution": { "thinkTime": "100ms" },
+  "testdata": ["testdata/load-accounts.yaml"]
 }
 ```
 
@@ -102,7 +103,7 @@ Quick Load reads `load/load.visualuser.yaml` or `load/load.arrivalrate.yaml` as 
 
 Debug is available only from a selected Template, Flow, or Tool detail and contains one fixed target. All forms use typed `inputs`; Template and Flow also use `vars`, while Tool uses `arguments` and rejects `vars`. The form reads safe defaults from the package-authored `debug.yaml` when present. When absent, the Server creates valid `att-debug/v1.2` defaults in memory. Sidecars remain unchanged. Expression strings and native scalar, map, and list values are preserved; the browser does not evaluate them.
 
-Quick Load uses one fixed selected target and composes one Workload. It reads `load/load.visualuser.yaml` or `load/load.arrivalrate.yaml` as a read-only package policy when present, otherwise it uses the bundled policy fallback. It does not require a stored Debug input or Load scenario. P4 submits the inline scenario through the existing Load validator, scheduler, event stream, and evidence pipeline.
+Quick Load uses one fixed selected target and composes one Workload. It reads `load/load.visualuser.yaml` or `load/load.arrivalrate.yaml` as a read-only package policy when present, otherwise it uses the bundled policy fallback. It does not require a stored Debug input or Load scenario. P4 submits the inline scenario through the existing Load validator, scheduler, event stream, and evidence pipeline. Debug-local Testdata is omitted with a visible form warning; users can supply additional package-relative Load-level descriptor paths through the separate `testdata` field, which is validated with the model policy's existing descriptors.
 
 Advanced Load selects Virtual Users or Arrival Rate before adding Workloads and locks that model for the scenario. Virtual Users supports single-target and weighted-mix Workloads. Arrival Rate supports multiple single-target Workloads, but cannot mix targets within a workload. All Workloads share one timing envelope. Workload inputs and vars remain defaults; a mix entry replaces matching top-level keys instead of deep merging. Root aggregate thresholds stay distinct from workload thresholds. The UI can initialize target business values from safe `debug.yaml` projections or leave them empty. During draft validation, the Engine restores only `[REDACTED]` business values from that target's package-local sidecar. Debug `case`, `stage`, and local Testdata are excluded. The Server then stores the private normalized scenario and revision digest in its bounded draft store while returning only a safe preview. Submission passes that same immutable scenario through the existing Load validator, scheduler, event stream, and evidence pipeline without writing a scenario file.
 

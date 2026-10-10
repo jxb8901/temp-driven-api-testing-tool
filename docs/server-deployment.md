@@ -202,7 +202,7 @@ Quick Load is available from a selected Template, Flow, or Tool. It uses one fix
 GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT
 ```
 
-The form response includes safe `inputs` and `vars` defaults for Template/Flow targets, or `inputs` and `arguments` for a Tool, plus a redacted one-workload preview. It reads only the business fields from the optional target `debug.yaml`; Debug-only `case`, `stage`, and local `testdata` are not copied. A sidecar with Debug-local Testdata imports is rejected and must move those imports to the Load policy.
+The form response includes safe `inputs` and `vars` defaults for Template/Flow targets, or `inputs` and `arguments` for a Tool, plus a redacted one-workload preview. It reads only the business fields from the optional target `debug.yaml`; Debug-only `case`, `stage`, and local `testdata` are not copied. When a sidecar has Debug-local Testdata, the form reports that those imports were omitted. Supply any needed package-relative descriptors in the separate Load-level `testdata` array; these paths are validated as part of the effective Load scenario.
 
 The Server reads `load/load.visualuser.yaml` for `virtualUsers` and `load/load.arrivalrate.yaml` for `arrivalRate`. These are policy-only `att-load/v1.6` descriptors; the selected policy must match the chosen model. If a model-specific file is absent, a bundled low-intensity fallback is used: one Virtual User for 10 seconds, or 1 arrival per second for 10 seconds with `maxConcurrent: 1` and `overloadPolicy: drop`. Existing CLI `load/load.yaml` behavior is unchanged.
 
@@ -212,10 +212,10 @@ Validate business values and pacing overrides to create an owned draft:
 POST /api/v1/drafts/quick-load
 Content-Type: application/json
 
-{"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"model":"virtualUsers","input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}},"load":{"users":4,"duration":"30s"},"execution":{"thinkTime":"100ms"}}
+{"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"model":"virtualUsers","input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}},"load":{"users":4,"duration":"30s"},"execution":{"thinkTime":"100ms"},"testdata":["testdata/load-accounts.yaml"]}
 ```
 
-`load` accepts only pacing fields supported by the selected model. `execution` accepts the optional closed-workload `thinkTime`. The response returns a principal-bound opaque `draftId` beginning with `L`, the safe effective YAML preview, redaction state, and expiry. Debug and Quick Load drafts share the 128-active-per-Server, 16-per-Principal, 10-minute in-memory limits.
+`load` accepts only pacing fields supported by the selected model. `execution` accepts the optional closed-workload `thinkTime`. `testdata` is an optional array of additional package-relative Load descriptor paths; it is kept separate from Debug-local imports and the model policy's existing descriptors. The response returns a principal-bound opaque `draftId` beginning with `L`, the safe effective YAML preview, redaction state, and expiry. Debug and Quick Load drafts share the 128-active-per-Server, 16-per-Principal, 10-minute in-memory limits.
 
 After reviewing the preview, submit only the draft identity:
 
@@ -271,14 +271,16 @@ Configuration inspection uses the same authenticated, bounded inspection Worker 
 ```http
 GET /api/v1/packages/payments/configuration?view=declared
 GET /api/v1/packages/payments/configuration/effective?environment=SIT
+GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&offset=0&limit=50
 GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT
+GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&offset=0&limit=50
 ```
 
-The declared view returns the schema version, safe global fields, configured profiles, and for each configuration section its declared or absent state, entry count, and profile inheritance or replacement state. Effective views use `FrameworkConfigLoader` to select the environment and return safe helper, Tool, and Testdata descriptor metadata. Inspection never connects to DB, MQ, HTTP, or SSH services. It does not return unrestricted configuration YAML or Testdata records.
+The declared view returns the schema version, safe global fields, configured profiles, and for each configuration section its declared or absent state, entry count, and profile inheritance or replacement state. Effective views use `FrameworkConfigLoader` to select the environment and return safe helper, Tool, and Testdata descriptor metadata. Omit `environment` to inspect a root-only package or use the configured default. The first effective response returns section counts; request a section by its ID (`dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `tools`, or `testdata`) to read its entries. Effective section and comparison field responses accept `offset` and `limit` (1–100; default 50) and return `total` and `nextOffset` for paging. Inspection never connects to DB, MQ, HTTP, or SSH services. It does not return unrestricted configuration YAML or Testdata records.
 
 The comparison reports visible effective fields and their origins. A sensitive field is returned as `state: "hidden"` with `change: "hidden"`; the response does not reveal whether its value is equal or different. Absolute paths, credentials, connection endpoints, network topology, and unrestricted descriptor content are not returned.
 
-Configuration responses include `view`, `state`, `schemaVersion` when available, and `diagnostics`. An invalid configuration returns HTTP 200 with `state: "invalid"` and a stable diagnostic; malformed profile parameters return `400`. Unknown packages return `404`, oversized responses return `413`, a full inspection queue returns `503`, and an inspector timeout returns `504`. The same response-size, queue, and timeout limits used by resource inspection apply.
+Configuration responses include `view`, `state`, `schemaVersion` when available, and `diagnostics`. Paged responses also include `section`, `offset`, `limit`, `total`, and `nextOffset`. An invalid configuration returns HTTP 200 with `state: "invalid"` and a stable diagnostic; malformed profile parameters return `400`. Unknown packages return `404`, oversized responses return `413`, a full inspection queue returns `503`, and an inspector timeout returns `504`. The same response-size, queue, and timeout limits used by resource inspection apply.
 
 ## Server-sent events
 

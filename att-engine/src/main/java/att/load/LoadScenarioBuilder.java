@@ -31,8 +31,19 @@ public final class LoadScenarioBuilder {
                                        Map<String, Object> policy,
                                        Map<String, Object> loadOverrides,
                                        Map<String, Object> workloadExecution) throws Exception {
+        return buildQuickLoad(model, targetType, targetId, businessInput, policy, loadOverrides,
+                workloadExecution, java.util.Collections.<String>emptyList());
+    }
+
+    /** Builds a fixed-target scenario with explicit package-relative Load-level Testdata imports. */
+    public LoadScenario buildQuickLoad(String model, String targetType, String targetId,
+                                       Map<String, Object> businessInput,
+                                       Map<String, Object> policy,
+                                       Map<String, Object> loadOverrides,
+                                       Map<String, Object> workloadExecution,
+                                       List<String> testdata) throws Exception {
         return loader.loadInline(composeQuickLoad(model, targetType, targetId, businessInput,
-                policy, loadOverrides, workloadExecution));
+                policy, loadOverrides, workloadExecution, testdata));
     }
 
     /** Returns the logical one-workload map before parsing it into the immutable Engine model. */
@@ -41,6 +52,17 @@ public final class LoadScenarioBuilder {
                                                 Map<String, Object> policy,
                                                 Map<String, Object> loadOverrides,
                                                 Map<String, Object> workloadExecution) {
+        return composeQuickLoad(model, targetType, targetId, businessInput, policy, loadOverrides,
+                workloadExecution, java.util.Collections.<String>emptyList());
+    }
+
+    /** Returns the logical scenario with explicit package-relative Load-level Testdata imports. */
+    public Map<String, Object> composeQuickLoad(String model, String targetType, String targetId,
+                                                Map<String, Object> businessInput,
+                                                Map<String, Object> policy,
+                                                Map<String, Object> loadOverrides,
+                                                Map<String, Object> workloadExecution,
+                                                List<String> testdata) {
         requireModel(model);
         if (!("template".equals(targetType) || "flow".equals(targetType) || "tool".equals(targetType)))
             throw new IllegalArgumentException("Quick Load target must be a Template, Flow, or Tool");
@@ -48,6 +70,18 @@ public final class LoadScenarioBuilder {
             throw new IllegalArgumentException("Quick Load target ID is invalid");
 
         Map<String, Object> root = copyPolicy(policy);
+        if (testdata != null && !testdata.isEmpty()) {
+            List<Object> combinedTestdata = new ArrayList<Object>();
+            Object existing = root.get("testdata");
+            if (existing instanceof List) combinedTestdata.addAll((List<?>) existing);
+            else if (existing != null) combinedTestdata.add(existing);
+            for (String descriptor : testdata) {
+                if (descriptor == null || descriptor.trim().isEmpty())
+                    throw new IllegalArgumentException("Quick Load Testdata paths must be non-empty strings");
+                combinedTestdata.add(descriptor.trim());
+            }
+            root.put("testdata", combinedTestdata);
+        }
         Map<String, Object> load = map(root.get("load"));
         boolean virtualUsers = load.containsKey("users");
         boolean arrivalRate = load.containsKey("arrivalRate");

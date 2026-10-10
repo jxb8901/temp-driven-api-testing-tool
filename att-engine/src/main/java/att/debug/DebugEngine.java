@@ -43,6 +43,7 @@ import java.util.Map;
 
 /** Runs one real Template, Flow, or Tool outside the Excel testcase loop. */
 public final class DebugEngine {
+    private static final String KEEP_DEFAULT_MARKER = "$attDebugKeepDefault";
     private final Path projectRoot;
     private final FrameworkConfig config;
     private final att.exec.MqTransport.Factory mqTransportFactory;
@@ -117,23 +118,33 @@ public final class DebugEngine {
                                                         Map<String, Object> values) throws Exception {
         if (!"template".equals(type) && !"flow".equals(type) && !"tool".equals(type))
             throw new IllegalArgumentException("Quick Load target must be a Template, Flow, or Tool");
-        Map<String, Object> submitted = values == null ? new LinkedHashMap<String, Object>()
-                : objectMap(values);
-        if (!submitted.containsKey("schemaVersion")) submitted.put("schemaVersion", Version.DEBUG_SCHEMA);
-        ExecutionOptions options = targetOptions("load", type, id).withInlineDebugInput(submitted);
-        DebugInput input = loadInput(options, type, id, att.core.ExecutionBootstrapVariables.Scope.LOAD);
-        if (!input.testdataDescriptors.isEmpty())
-            throw debugError("Debug-local testdata imports cannot be promoted to Quick Load",
-                    "Move the imports to the model-specific Load policy before creating the Quick Load draft.");
+        DebugInput input;
+        if (values == null) {
+            Path sidecar = safeAutoInput(type, id);
+            if (Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar)) {
+                input = loadInput(targetOptions("load", type, id), type, id,
+                        att.core.ExecutionBootstrapVariables.Scope.LOAD);
+            } else {
+                Map<String, Object> empty = new LinkedHashMap<String, Object>();
+                empty.put("schemaVersion", Version.DEBUG_SCHEMA);
+                input = new DebugInput(sidecar, empty, type, id, config);
+            }
+        } else {
+            Map<String, Object> submitted = objectMap(values);
+            if (!submitted.containsKey("schemaVersion")) submitted.put("schemaVersion", Version.DEBUG_SCHEMA);
+            input = loadInput(targetOptions("load", type, id).withInlineDebugInput(submitted), type, id,
+                    att.core.ExecutionBootstrapVariables.Scope.LOAD);
+        }
         Map<String, Object> business = new LinkedHashMap<String, Object>();
         business.put("inputs", input.inputs);
         if ("tool".equals(type)) business.put("arguments", input.arguments);
         else business.put("vars", input.vars);
         Map<String, Object> projection = new LinkedHashMap<String, Object>();
         boolean[] redacted = new boolean[] { false };
-        projection.put("input", safeFormValue(business, null, redacted));
+        projection.put("input", safeFormValue(business, null, "", redacted));
         projection.put("redacted", Boolean.valueOf(redacted[0]));
         projection.put("normalizedInput", business);
+        projection.put("debugLocalTestdataOmitted", Boolean.valueOf(!input.testdataDescriptors.isEmpty()));
         return projection;
     }
 
@@ -141,7 +152,7 @@ public final class DebugEngine {
     public Map<String, Object> projectSafeValue(Object value) {
         boolean[] redacted = new boolean[] { false };
         Map<String, Object> projection = new LinkedHashMap<String, Object>();
-        projection.put("value", safeFormValue(value, null, redacted));
+        projection.put("value", safeFormValue(value, null, "", redacted));
         projection.put("redacted", Boolean.valueOf(redacted[0]));
         return projection;
     }
@@ -174,7 +185,7 @@ public final class DebugEngine {
             projected.put("vars", input.vars);
         }
         boolean[] redacted = new boolean[] { false };
-        Object safe = safeFormValue(projected, null, redacted);
+        Object safe = safeFormValue(projected, null, "", redacted);
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("input", safe);
         result.put("redacted", Boolean.valueOf(redacted[0]));
@@ -190,27 +201,36 @@ public final class DebugEngine {
         return target;
     }
 
-    private Object safeFormValue(Object value, String key, boolean[] redacted) {
-        if (key != null && sensitiveFormKey(key)) { redacted[0] = true; return "[REDACTED]"; }
+    private Object safeFormValue(Object value, String key, String path, boolean[] redacted) {
+        if (key != null && sensitiveFormKey(key)) return keepDefault(path, redacted);
         if (value instanceof Map) {
             Map<String, Object> safe = new LinkedHashMap<String, Object>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
                 String childKey = String.valueOf(entry.getKey());
-                safe.put(childKey, safeFormValue(entry.getValue(), childKey, redacted));
+                safe.put(childKey, safeFormValue(entry.getValue(), childKey, pointer(path, childKey), redacted));
             }
             return safe;
         }
         if (value instanceof Iterable) {
             List<Object> safe = new ArrayList<Object>();
-            for (Object item : (Iterable<?>) value) safe.add(safeFormValue(item, null, redacted));
+            int index = 0;
+            for (Object item : (Iterable<?>) value) safe.add(safeFormValue(item, null, pointer(path, String.valueOf(index++)), redacted));
             return safe;
         }
-        if (value instanceof String) {
-            String safe = scrubFormText((String) value);
-            if (!safe.equals(value)) { redacted[0] = true; return "[REDACTED]"; }
-            return safe;
-        }
+        if (value instanceof String && ("/schemaVersion".equals(path) || ((String) value).isEmpty())) return value;
+        if (value != null) return keepDefault(path, redacted);
         return value;
+    }
+
+    private Map<String, Object> keepDefault(String path, boolean[] redacted) {
+        redacted[0] = true;
+        Map<String, Object> marker = new LinkedHashMap<String, Object>();
+        marker.put(KEEP_DEFAULT_MARKER, path);
+        return marker;
+    }
+
+    private static String pointer(String parent, String component) {
+        return parent + "/" + component.replace("~", "~0").replace("/", "~1");
     }
 
     private static boolean sensitiveFormKey(String key) {
@@ -223,15 +243,6 @@ public final class DebugEngine {
                 || normalized.equals("header") || normalized.equals("url") || normalized.equals("host")
                 || normalized.equals("hostname") || normalized.equals("port") || normalized.equals("endpoint")
                 || normalized.equals("queue") || normalized.equals("channel") || normalized.equals("address");
-    }
-
-    private String scrubFormText(String value) {
-        if (value == null) return null;
-        String safe = value.replace(projectRoot.toString(), "[package]");
-        safe = java.util.regex.Pattern.compile("(?i)\\b(Bearer|Basic)\\s+[A-Za-z0-9+/=_-]+").matcher(safe).replaceAll("$1 [REDACTED]");
-        safe = java.util.regex.Pattern.compile("(?i)(password|passwd|token|secret|authorization|api[_-]?key|client[_-]?secret)\\s*([:=])\\s*(['\\\"]?)[^\\s,'\\\";}]+").matcher(safe).replaceAll("$1$2[REDACTED]");
-        safe = java.util.regex.Pattern.compile("(?i)(https?://)[^/@\\s:]+:[^/@\\s]+@").matcher(safe).replaceAll("$1[REDACTED]@");
-        return att.core.PathPresentation.displayDiagnosticText(safe, projectRoot);
     }
 
     /** Returns the exact optional sidecar path used by Debug auto-discovery. */
@@ -632,19 +643,25 @@ public final class DebugEngine {
                                                          Map<String, Object> submitted) {
         Map<String, Object> restored = new LinkedHashMap<String, Object>();
         for (Map.Entry<String, Object> entry : submitted.entrySet())
-            restored.put(entry.getKey(), restoreRedactedValue(defaults.get(entry.getKey()), entry.getValue(), entry.getKey()));
+            restored.put(entry.getKey(), restoreRedactedValue(defaults.get(entry.getKey()), entry.getValue(), entry.getKey(), pointer("", entry.getKey())));
         return restored;
     }
 
-    private Object restoreRedactedValue(Object defaultValue, Object submitted, String key) {
-        if ("[REDACTED]".equals(submitted)) return defaultValue;
+    private Object restoreRedactedValue(Object defaultValue, Object submitted, String key, String path) {
+        if (submitted instanceof Map && ((Map<?, ?>) submitted).size() == 1
+                && ((Map<?, ?>) submitted).containsKey(KEEP_DEFAULT_MARKER)) {
+            Object markerPath = ((Map<?, ?>) submitted).get(KEEP_DEFAULT_MARKER);
+            if (!path.equals(markerPath) || !redactedByPolicy(defaultValue, key, path))
+                throw new IllegalArgumentException("Debug keep-default marker is invalid");
+            return defaultValue;
+        }
         if (submitted instanceof Map) {
             Map<String, Object> defaultMap = defaultValue instanceof Map
                     ? objectMap((Map<?, ?>) defaultValue) : Collections.<String, Object>emptyMap();
             Map<String, Object> restored = new LinkedHashMap<String, Object>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) submitted).entrySet()) {
                 String child = String.valueOf(entry.getKey());
-                restored.put(child, restoreRedactedValue(defaultMap.get(child), entry.getValue(), child));
+                restored.put(child, restoreRedactedValue(defaultMap.get(child), entry.getValue(), child, pointer(path, child)));
             }
             return restored;
         }
@@ -654,12 +671,19 @@ public final class DebugEngine {
             int index = 0;
             for (Object item : (List<?>) submitted) {
                 Object fallback = index < defaults.size() ? defaults.get(index) : null;
-                restored.add(restoreRedactedValue(fallback, item, key));
+                restored.add(restoreRedactedValue(fallback, item, key, pointer(path, String.valueOf(index))));
                 index++;
             }
             return restored;
         }
         return submitted;
+    }
+
+    private boolean redactedByPolicy(Object value, String key, String path) {
+        if (key != null && sensitiveFormKey(key)) return true;
+        if (value == null) return false;
+        if ("/schemaVersion".equals(path)) return false;
+        return !(value instanceof String && ((String) value).isEmpty());
     }
 
     private Path autoInput(String type, String id) throws Exception {
