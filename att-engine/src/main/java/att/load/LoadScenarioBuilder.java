@@ -102,9 +102,10 @@ public final class LoadScenarioBuilder {
     }
 
     private Map<String, Object> copyPolicy(Map<String, Object> policy) {
-        if (policy == null) throw new IllegalArgumentException("Quick Load policy is required");
+        if (policy == null) throw new IllegalArgumentException("Load policy is required");
         for (String key : policy.keySet())
-            if (!POLICY_FIELDS.contains(key)) throw new IllegalArgumentException("Load policy contains unsupported field: " + key);
+            if (!POLICY_FIELDS.contains(key) && !key.startsWith("x-"))
+                throw new IllegalArgumentException("Load policy contains unsupported field: " + key);
         return LoadIsolation.deepCopyMap(policy);
     }
 

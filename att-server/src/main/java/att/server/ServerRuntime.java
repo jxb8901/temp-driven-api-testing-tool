@@ -45,6 +45,7 @@ final class ServerRuntime implements AutoCloseable {
     static final Pattern JOB_ID=Pattern.compile("J[0-9A-F]{16}");
     static final Pattern DRAFT_ID=Pattern.compile("D[0-9A-F]{32}");
     static final Pattern QUICK_LOAD_DRAFT_ID=Pattern.compile("L[0-9A-F]{32}");
+    static final Pattern ADVANCED_LOAD_DRAFT_ID=Pattern.compile("A[0-9A-F]{32}");
     static final int MAX_ACTIVE_DRAFTS=128, MAX_DRAFTS_PER_PRINCIPAL=16;
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
@@ -63,6 +64,7 @@ final class ServerRuntime implements AutoCloseable {
     private final Object draftLock=new Object();
     private final ConcurrentHashMap<String,DebugDraft> debugDrafts=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,QuickLoadDraft> quickLoadDrafts=new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String,AdvancedLoadDraftState> advancedLoadDrafts=new ConcurrentHashMap<>();
     private final byte[] cursorKey=new byte[32];
     private final SecureRandom cursorRandom=new SecureRandom();
     private volatile String webInfLibs;
@@ -254,13 +256,23 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> inspectQuickLoadForm(String packageId,String type,String resourceId,String model,String environment,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
-        if(!List.of("virtualUsers","arrivalRate").contains(model))throw new IllegalArgumentException("model is invalid");
+        if(!"virtualUsers".equals(model)&&!"arrivalRate".equals(model))throw new IllegalArgumentException("model is invalid");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(resourceId==null||resourceId.isBlank()||resourceId.length()>512)throw new IllegalArgumentException("resourceId is invalid");
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,environment);
         request.inspectionAction="quick-load-form";request.inspectionType=type;request.inspectionResourceId=resourceId;request.loadModel=model;
         Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");result.remove("normalizedScenario");return result;
+    }
+    Map<String,Object> inspectQuickLoadPolicy(String packageId,String model,String environment,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        if(!"virtualUsers".equals(model)&&!"arrivalRate".equals(model))throw new IllegalArgumentException("model is invalid");
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        if(environment!=null)environment=inspectionEnvironment(environment,"environment");
+        WorkerRequest request=inspectionRequest(packageId,root,environment);
+        request.inspectionAction="quick-load-policy";request.loadModel=model;
+        Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");return result;
     }
     private Map<String,Object> inspectDebugFormInternal(String packageId,String type,String resourceId,String environment,
                                                         String principal,String expectedRevision) throws Exception {
@@ -351,13 +363,44 @@ final class ServerRuntime implements AutoCloseable {
                 scenario,inspected,Instant.now().plusMillis(DRAFT_TTL_MILLIS));
         synchronized(draftLock) {
             expireDrafts();
-            if(debugDrafts.size()+quickLoadDrafts.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
+            if(debugDrafts.size()+quickLoadDrafts.size()+advancedLoadDrafts.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
             long owned=debugDrafts.values().stream().filter(value->value.principal.equals(principal)).count()
-                    +quickLoadDrafts.values().stream().filter(value->value.principal.equals(principal)).count();
+                    +quickLoadDrafts.values().stream().filter(value->value.principal.equals(principal)).count()
+                    +advancedLoadDrafts.values().stream().filter(value->value.principal.equals(principal)).count();
             if(owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
             quickLoadDrafts.put(draft.id,draft);
         }
         return quickLoadDraftView(draft);
+    }
+    Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal) throws Exception {
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        if(!config.inspection.enabled)throw new NotFoundException();
+        requireObject(input,"A JSON object is required");requireOnlyFields(input,"packageId","environment","scenario");
+        String packageId=required(input,"packageId");Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
+        JsonNode scenarioNode=input.get("scenario");requireObject(scenarioNode,"scenario must be a JSON object");
+        @SuppressWarnings("unchecked") Map<String,Object> scenarioInput=(Map<String,Object>)JSON.convertValue(scenarioNode,Map.class);
+        WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction="load-scenario";request.inlineLoadScenario=scenarioInput;
+        Map<String,Object> inspected=executeInspection(root,request);
+        Object rawScenario=inspected.remove("normalizedScenario"),rawDigest=inspected.remove("revisionDigest");
+        Object rawModel=inspected.get("model");
+        if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
+                ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel))
+            throw new IllegalStateException("Load validation Worker returned an invalid response");
+        @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
+        AdvancedLoadDraftState draft=new AdvancedLoadDraftState("A"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
+                principal,packageId,environment,(String)rawModel,(String)rawDigest,scenario,inspected,
+                Instant.now().plusMillis(DRAFT_TTL_MILLIS));
+        synchronized(draftLock) {
+            expireDrafts();
+            if(debugDrafts.size()+quickLoadDrafts.size()+advancedLoadDrafts.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
+            long owned=debugDrafts.values().stream().filter(value->value.principal.equals(principal)).count()
+                    +quickLoadDrafts.values().stream().filter(value->value.principal.equals(principal)).count()
+                    +advancedLoadDrafts.values().stream().filter(value->value.principal.equals(principal)).count();
+            if(owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
+            advancedLoadDrafts.put(draft.id,draft);
+        }
+        return advancedLoadDraftView(draft);
     }
     Map<String,Object> getDebugDraft(String id,String principal) {
         if(id==null||!DRAFT_ID.matcher(id).matches())throw new NotFoundException();
@@ -375,9 +418,18 @@ final class ServerRuntime implements AutoCloseable {
             return quickLoadDraftView(draft);
         }
     }
+    Map<String,Object> getAdvancedLoadDraft(String id,String principal) {
+        if(id==null||!ADVANCED_LOAD_DRAFT_ID.matcher(id).matches())throw new NotFoundException();
+        synchronized(draftLock) {
+            expireDrafts();AdvancedLoadDraftState draft=advancedLoadDrafts.get(id);
+            if(draft==null||!draft.principal.equals(principal))throw new NotFoundException();
+            return advancedLoadDraftView(draft);
+        }
+    }
     Map<String,Object> getDraft(String id,String principal) {
         if(DRAFT_ID.matcher(id==null?"":id).matches())return getDebugDraft(id,principal);
         if(QUICK_LOAD_DRAFT_ID.matcher(id==null?"":id).matches())return getQuickLoadDraft(id,principal);
+        if(ADVANCED_LOAD_DRAFT_ID.matcher(id==null?"":id).matches())return getAdvancedLoadDraft(id,principal);
         throw new NotFoundException();
     }
     Map<String,Object> submitDebugDraft(JsonNode body,String principal) throws Exception {
@@ -444,6 +496,44 @@ final class ServerRuntime implements AutoCloseable {
             if(!submitted)synchronized(draft){draft.submitting=false;}
         }
     }
+    Map<String,Object> submitAdvancedLoadDraft(JsonNode body,String principal) throws Exception {
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId");
+        String packageId=required(body,"packageId"),draftId=required(body,"draftId");
+        AdvancedLoadDraftState draft;
+        synchronized(draftLock) {
+            expireDrafts();draft=advancedLoadDrafts.get(draftId);
+            if(draft==null||!draft.principal.equals(principal)||!draft.packageId.equals(packageId))throw new NotFoundException();
+            synchronized(draft){if(draft.submitting)throw new IllegalArgumentException("Draft submission is already in progress");draft.submitting=true;}
+        }
+        boolean submitted=false;
+        try {
+            verifyPackageRevision(draft.packageId,draft.environment,draft.revisionDigest);
+            requireLiveDraft(draft.expiresAt);
+            com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
+            internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
+            internal.put("loadModel",draft.model);internal.set("inlineLoadScenario",JSON.valueToTree(draft.scenario));
+            internal.put("expectedRevisionDigest",draft.revisionDigest);
+            internal.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(draft.packageId)));
+            internal.put("maxSourceBytes",config.inspection.maxSourceBytes);internal.put("maxResponseBytes",config.inspection.maxResponseBytes);
+            requireLiveDraft(draft.expiresAt);
+            Map<String,Object> accepted=submit("load",internal,principal,true);
+            advancedLoadDrafts.remove(draft.id,draft);submitted=true;return accepted;
+        } catch(StaleDraftException stale) {
+            advancedLoadDrafts.remove(draft.id,draft);throw stale;
+        } catch(StaleCursorException|NotFoundException stale) {
+            advancedLoadDrafts.remove(draft.id,draft);throw new StaleDraftException();
+        } finally {
+            if(!submitted)synchronized(draft){draft.submitting=false;}
+        }
+    }
+    Map<String,Object> submitLoadDraft(JsonNode body,String principal) throws Exception {
+        requireObject(body,"A JSON object is required");
+        String draftId=required(body,"draftId");
+        if(QUICK_LOAD_DRAFT_ID.matcher(draftId).matches())return submitQuickLoadDraft(body,principal);
+        if(ADVANCED_LOAD_DRAFT_ID.matcher(draftId).matches())return submitAdvancedLoadDraft(body,principal);
+        throw new NotFoundException();
+    }
     private void verifyDraftRevision(DebugDraft draft) throws Exception {
         try { inspectDebugFormInternal(draft.packageId,draft.targetType,draft.resourceId,draft.environment,draft.principal,draft.revisionDigest); }
         catch(StaleCursorException|NotFoundException changed){throw new StaleDraftException();}
@@ -491,9 +581,17 @@ final class ServerRuntime implements AutoCloseable {
         view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));view.put("diagnostics",Collections.emptyList());
         view.put("expiresAt",draft.expiresAt.toString());return view;
     }
+    private Map<String,Object> advancedLoadDraftView(AdvancedLoadDraftState draft) {
+        Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
+        view.put("environment",draft.environment);view.put("model",draft.model);
+        view.put("preview",draft.preview.get("preview"));view.put("previewYaml",draft.preview.get("previewYaml"));
+        view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));view.put("diagnostics",Collections.emptyList());
+        view.put("expiresAt",draft.expiresAt.toString());return view;
+    }
     private void expireDrafts() {
         Instant now=Instant.now();debugDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
         quickLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
+        advancedLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
     }
     private void expireDraftsSafely() {synchronized(draftLock){expireDrafts();}}
     private static void requireObject(JsonNode value,String message) {if(value==null||!value.isObject())throw new IllegalArgumentException(message);}
@@ -541,7 +639,8 @@ final class ServerRuntime implements AutoCloseable {
         if("ATT-RESOURCE-NOT-FOUND".equals(workerError))throw new NotFoundException();
         if("ATT-RESOURCE-CURSOR-STALE".equals(workerError))throw new StaleCursorException();
         boolean draftInspection="debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
-                ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction);
+                ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
+                ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction);
         if(draftInspection&&("WORKER_REQUEST_INVALID".equals(workerError)
                 ||workerError!=null&&(workerError.startsWith("ATT-DEBUG")||workerError.startsWith("ATT-LOAD"))
                 ||envelope.get("diagnostics") instanceof List&&!((List<?>)envelope.get("diagnostics")).isEmpty())) {
@@ -705,7 +804,7 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){retention.shutdownNow();synchronized(draftLock){debugDrafts.clear();quickLoadDrafts.clear();}for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){retention.shutdownNow();synchronized(draftLock){debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();}for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
@@ -754,6 +853,19 @@ final class ServerRuntime implements AutoCloseable {
             this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
             this.targetType=targetType;this.targetId=targetId;this.resourceId=resourceId;this.model=model;
             this.revisionDigest=revisionDigest;this.scenario=deepMap(scenario);this.preview=deepMap(preview);this.expiresAt=expiresAt;
+        }
+    }
+    private static final class AdvancedLoadDraftState {
+        final String id,principal,packageId,environment,model,revisionDigest;
+        final Map<String,Object> scenario,preview;
+        final Instant expiresAt;
+        boolean submitting;
+        AdvancedLoadDraftState(String id,String principal,String packageId,String environment,String model,
+                               String revisionDigest,Map<String,Object> scenario,Map<String,Object> preview,
+                               Instant expiresAt) {
+            this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
+            this.model=model;this.revisionDigest=revisionDigest;this.scenario=deepMap(scenario);
+            this.preview=deepMap(preview);this.expiresAt=expiresAt;
         }
     }
     private static Map<String,Object> deepMap(Map<String,Object> source) {

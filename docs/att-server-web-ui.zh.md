@@ -10,6 +10,8 @@ Debug 只能從已選取的 Template、Flow 或 Tool 詳細資料開啟。表單
 
 Quick Load 同樣可從這些目標詳細資料開啟。選擇 Virtual Users 或 Arrival Rate，編輯安全的 business inputs、調整 model pacing、驗證並檢視 effective YAML。若存在相符的 `load/load.visualuser.yaml` 或 `load/load.arrivalrate.yaml`，Server 會讀取該 policy；否則使用內建 10 秒低強度 fallback。UI 會在提交流量前要求檢視及確認。Quick Load 只複製 `inputs`、`vars` 或 Tool `arguments`，不會複製 Debug case/stage 欄位或 Debug-local Testdata。Server 會將 draft 綁定至已驗證 Principal 及目前 package revision，並提交與驗證時相同的不可變 scenario。
 
+首頁每個 package 都可開啟 Advanced Load。先選擇 `virtualUsers` 或 `arrivalRate`，再新增 workloads；所有 workload 都使用同一 model。設定共用時間窗口、選填 seed、package-relative Testdata imports、execution defaults、aggregate thresholds 及 evidence policy。你可以新增、複製、排序或移除 workload。每個 workload 有自己的 intensity、target、Testdata policy 及 thresholds。Workload 可使用單一 Template、Flow 或 Tool target；Virtual Users 亦可使用 weighted target mix。每個 Arrival Rate workload 使用一個 target。Target sidecar 預設值只包含安全的 business 欄位；不會複製 Debug `case`、`stage` 或 local Testdata。驗證完整 scenario 並檢視安全 YAML 後，確認即可由 Server 以不可變 draft 交給一般 Load scheduler。只有預覽未遮蔽時才可複製或匯出。
+
 Configuration Explorer 會顯示已宣告設定、所選 environment 經 Engine 解析後的設定，以及兩個 profile 的欄位比較。它使用 package 正常的 `FrameworkConfigLoader` 選擇規則，不會連接 DB、MQ、HTTP 或 SSH。可能洩露憑證或網絡拓撲的值會標示為 hidden；Server 不會比較 hidden 值。Explorer 顯示安全的 helper 與 Tool metadata、environment 來源、profile 繼承或替換狀態，以及 Testdata descriptor metadata，但不會顯示 records 或未限制的 YAML。公開 endpoint 詳情見 [ATT Server 部署與 API](server-deployment.zh.md)。
 
 瀏覽器只使用公開的同源 `/api/v1` REST 與 SSE 契約。REST 請求與原生 `EventSource` 使用瀏覽器管理的容器驗證。SSE 重新連線使用瀏覽器標準 `Last-Event-ID` 行為；重新整理工作頁面時會從 Server 重新載入工作狀態與保留事件。關閉瀏覽器分頁不會取消工作。取消前需要確認，UI 會等候 Server 回報終端狀態。

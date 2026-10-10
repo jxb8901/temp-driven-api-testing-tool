@@ -316,6 +316,121 @@ public final class PackageResourceInspector {
         return bounded(result);
     }
 
+    /** Returns the safe model-specific policy defaults used to initialize Advanced Load. */
+    public Map<String, Object> inspectQuickLoadPolicy(String model) throws Exception {
+        Index index = index();
+        Map<String, Object> policy = new att.load.LoadScenarioLoader(packageRoot).loadQuickLoadPolicy(model);
+        Map<String, Object> projection = new DebugEngine(packageRoot, frameworkConfig()).projectSafeValue(policy);
+        @SuppressWarnings("unchecked") Map<String, Object> safePolicy = (Map<String, Object>) projection.get("value");
+        DumperOptions options = new DumperOptions();
+        options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+        options.setPrettyFlow(true);
+        options.setWidth(120);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("model", model);
+        result.put("policy", safePolicy);
+        result.put("previewYaml", new Yaml(options).dump(safePolicy));
+        result.put("redacted", Boolean.valueOf(Boolean.TRUE.equals(projection.get("redacted"))));
+        result.put("revisionDigest", index.revisionDigest);
+        return bounded(result);
+    }
+
+    /** Validates a full inline Load scenario and every target closure without scheduling traffic. */
+    public Map<String, Object> validateLoadScenario(Map<String, Object> requested) throws Exception {
+        if (requested == null) throw new IllegalArgumentException("Load scenario is required");
+        Index index = index();
+        Map<String, Object> normalizedRequest = att.load.LoadIsolation.deepCopyMap(requested);
+        FrameworkConfig config = frameworkConfig();
+        DebugEngine engine = new DebugEngine(packageRoot, config);
+        restoreAdvancedBusinessDefaults(normalizedRequest, engine);
+        Map<String, Object> policy = new LinkedHashMap<String, Object>(normalizedRequest);
+        Object rawWorkloads = policy.remove("workloads");
+        if (!(rawWorkloads instanceof List)) throw new IllegalArgumentException("workloads must be an array");
+        List<Map<String, Object>> workloads = new ArrayList<Map<String, Object>>();
+        for (Object raw : (List<?>) rawWorkloads) {
+            if (!(raw instanceof Map)) throw new IllegalArgumentException("Every workload must be an object");
+            @SuppressWarnings("unchecked") Map<String, Object> workload = (Map<String, Object>) raw;
+            workloads.add(workload);
+        }
+        Map<String, Object> composed = new att.load.LoadScenarioBuilder(new att.load.LoadScenarioLoader(packageRoot))
+                .composeScenario(policy, workloads);
+        att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(packageRoot).loadInline(composed);
+        att.load.LoadRunCoordinator.resolveAndValidateTargets(packageRoot, config, scenario);
+        Map<String, Object> scenarioMap = scenario.toMap();
+        Map<String, Object> projection = engine.projectSafeValue(scenarioMap);
+        @SuppressWarnings("unchecked") Map<String, Object> safeScenario = (Map<String, Object>) projection.get("value");
+        DumperOptions options = new DumperOptions();
+        options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+        options.setPrettyFlow(true);
+        options.setWidth(120);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("model", scenario.model() == att.load.LoadScenario.Model.CLOSED ? "virtualUsers" : "arrivalRate");
+        result.put("preview", safeScenario);
+        result.put("previewYaml", new Yaml(options).dump(safeScenario));
+        result.put("redacted", Boolean.valueOf(Boolean.TRUE.equals(projection.get("redacted"))));
+        result.put("normalizedScenario", scenarioMap);
+        result.put("revisionDigest", index.revisionDigest);
+        return bounded(result);
+    }
+
+    /** Restores only redacted sidecar defaults while keeping user-entered Load values intact. */
+    private void restoreAdvancedBusinessDefaults(Map<String, Object> scenario, DebugEngine engine) throws Exception {
+        Object rawWorkloads = scenario.get("workloads");
+        if (!(rawWorkloads instanceof List)) return;
+        for (Object rawWorkload : (List<?>) rawWorkloads) {
+            if (!(rawWorkload instanceof Map)) continue;
+            @SuppressWarnings("unchecked") Map<String, Object> workload = (Map<String, Object>) rawWorkload;
+            Object rawMix = workload.get("mix");
+            if (rawMix instanceof List) {
+                for (Object rawEntry : (List<?>) rawMix) {
+                    if (!(rawEntry instanceof Map)) continue;
+                    @SuppressWarnings("unchecked") Map<String, Object> entry = (Map<String, Object>) rawEntry;
+                    if (entry.get("target") instanceof Map) {
+                        @SuppressWarnings("unchecked") Map<String, Object> target = (Map<String, Object>) entry.get("target");
+                        restoreTargetBusinessDefaults(engine, target, entry);
+                    }
+                }
+            } else if (workload.get("target") instanceof Map) {
+                @SuppressWarnings("unchecked") Map<String, Object> target = (Map<String, Object>) workload.get("target");
+                restoreTargetBusinessDefaults(engine, target, workload);
+            }
+        }
+    }
+
+    private void restoreTargetBusinessDefaults(DebugEngine engine, Map<String, Object> target,
+                                               Map<String, Object> businessOwner) throws Exception {
+        Object rawType = target.get("type"), rawId = target.get("id");
+        if (!(rawType instanceof String) || !(rawId instanceof String)) return;
+        String type = (String) rawType, id = (String) rawId;
+        Map<String, Object> submitted = new LinkedHashMap<String, Object>();
+        submitted.put("schemaVersion", att.Version.DEBUG_SCHEMA);
+        submitted.put("inputs", mapValue(businessOwner.get("inputs")));
+        if ("tool".equals(type)) submitted.put("arguments", mapValue(target.get("arguments")));
+        else submitted.put("vars", mapValue(businessOwner.get("vars")));
+        Map<String, Object> projection = engine.projectLoadBusinessInput(type, id, submitted);
+        Object rawNormalized = projection.get("normalizedInput");
+        if (!(rawNormalized instanceof Map)) throw new IllegalStateException("Load sidecar projection returned invalid business values");
+        @SuppressWarnings("unchecked") Map<String, Object> normalized = (Map<String, Object>) rawNormalized;
+        Object inputs = normalized.get("inputs");
+        if (inputs instanceof Map && (!((Map<?, ?>) inputs).isEmpty() || businessOwner.containsKey("inputs")))
+            businessOwner.put("inputs", inputs);
+        if ("tool".equals(type)) {
+            Object arguments = normalized.get("arguments");
+            if (arguments instanceof Map && (!((Map<?, ?>) arguments).isEmpty() || target.containsKey("arguments")))
+                target.put("arguments", arguments);
+        } else {
+            Object vars = normalized.get("vars");
+            if (vars instanceof Map && (!((Map<?, ?>) vars).isEmpty() || businessOwner.containsKey("vars")))
+                businessOwner.put("vars", vars);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> mapValue(Object value) {
+        return value instanceof Map ? new LinkedHashMap<String, Object>((Map<String, Object>) value)
+                : new LinkedHashMap<String, Object>();
+    }
+
     /** Validates typed inline Debug values against a resolvable logical target. */
     public Map<String, Object> validateDebugInput(String type, String logicalId,
                                                   Map<String, Object> input) throws Exception {

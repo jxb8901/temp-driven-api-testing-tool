@@ -3,9 +3,8 @@ package att.server.api;
 import java.util.List;
 import java.util.Map;
 
-/** Safe response for a principal-bound, in-memory Quick Load preview draft. */
-@Deprecated
-public final class QuickLoadDraft {
+/** Safe response for a principal-bound, in-memory Quick or Advanced Load draft. */
+public final class LoadDraft {
     public String draftId;
     public String packageId;
     public String environment;
