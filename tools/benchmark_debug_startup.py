@@ -2,8 +2,10 @@
 """Compare ATT launch and Debug startup for source and binary distributions."""
 
 import argparse
+import hashlib
 import json
 import math
+import os
 import platform
 import queue
 import shutil
@@ -22,9 +24,9 @@ MODULE_CLASSES = ("att-cli", "att-engine", "att-remote", "att-server-api")
 
 class ReadyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        payload = b"benchmark-ready"
+        payload = b'{"status":"ready"}'
         self.send_response(200)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
@@ -95,7 +97,7 @@ def link_or_copy_classes(source, destination):
         shutil.copytree(source, destination)
 
 
-def copy_source_runtime(source, destination):
+def copy_source_runtime(source, destination, packaged_distribution):
     copied = []
     for module in MODULE_CLASSES:
         classes = source / module / "target" / "classes"
@@ -111,16 +113,31 @@ def copy_source_runtime(source, destination):
             copied.append("root")
     if not copied:
         raise RuntimeError("No prebuilt source classes found under {}".format(source))
-    optional_lib = source / "lib"
-    if optional_lib.is_dir():
-        target_lib = destination / "lib"
-        target_lib.mkdir()
-        for jar in optional_lib.glob("*.jar"):
-            if not jar.name.startswith("att-"):
-                shutil.copy2(jar, target_lib / jar.name)
+    source_tree = source / "src" / "main" / "java"
+    if source_tree.is_dir():
+        shutil.copytree(source_tree, destination / "src" / "main" / "java")
+
+    # Source launchers need the same external dependency set as their matching
+    # binary release. Keep ATT jars out so the source-built classes are used.
+    source_lib = source / "lib"
+    packaged_lib = packaged_distribution / "lib"
+    dependencies_by_name = {}
+    for dependency_lib in (packaged_lib, source_lib):
+        if dependency_lib.is_dir():
+            for jar in dependency_lib.glob("*.jar"):
+                if not jar.name.startswith("att-"):
+                    dependencies_by_name[jar.name] = jar
+    dependencies = list(dependencies_by_name.values())
+    if not dependencies:
+        raise RuntimeError("No external dependency jars found in {} or {}".format(
+            source_lib, packaged_lib))
+    target_lib = destination / "lib"
+    target_lib.mkdir()
+    for jar in dependencies:
+        shutil.copy2(jar, target_lib / jar.name)
 
 
-def install_runtime(source, destination, distribution, schemas_dir):
+def install_runtime(source, destination, distribution, schemas_dir, packaged_distribution):
     launcher = "att.bat" if sys.platform == "win32" else "att.sh"
     source_launcher = source / launcher
     if not source_launcher.is_file():
@@ -132,7 +149,7 @@ def install_runtime(source, destination, distribution, schemas_dir):
     shutil.copytree(schemas_dir, destination / "schemas")
 
     if distribution == "source":
-        copy_source_runtime(source, destination)
+        copy_source_runtime(source, destination, packaged_distribution)
     else:
         source_lib = source / "lib"
         if not source_lib.is_dir() or not list(source_lib.glob("att-*.jar")):
@@ -145,8 +162,10 @@ def write_yaml(path, contents):
     path.write_text(contents, encoding="utf-8")
 
 
-def install_fixture(root, schemas_dir, http_port):
+def install_fixture(root, schemas_dir, http_port, baseline):
     shutil.copytree(schemas_dir, root / "schemas", dirs_exist_ok=True)
+    config_version = "2.11" if baseline else "2.12"
+    debug_version = "1.1" if baseline else "1.2"
     (root / "config").mkdir(parents=True)
     (root / "templates" / "NOOP").mkdir(parents=True)
     (root / "templates" / "RESOURCE").mkdir(parents=True)
@@ -157,7 +176,7 @@ def install_fixture(root, schemas_dir, http_port):
     (root / "tools").mkdir()
 
     write_yaml(root / "config" / "config.yaml",
-        "schemaVersion: att-config/v2.11\n"
+        "schemaVersion: att-config/v{}\n".format(config_version) +
         "outputDirectory: output\n"
         "environment: SIT\n"
         "templates: {root: templates}\n"
@@ -168,26 +187,26 @@ def install_fixture(root, schemas_dir, http_port):
 
     directory = root / "templates" / "NOOP"
     write_yaml(directory / "template.yaml",
-        "schemaVersion: att-template/v3.4\nname: NOOP\n"
+        "schemaVersion: att-template/v3.6\nname: NOOP\n"
         "description: no-op startup benchmark\nactions:\n"
         "  ready: {type: log, message: ready}\n")
-    write_yaml(directory / "debug.yaml", "schemaVersion: att-debug/v1.2\n")
+    write_yaml(directory / "debug.yaml", "schemaVersion: att-debug/v{}\n".format(debug_version))
 
     flow_directory = root / "templates" / "flows" / "common" / "benchmark"
     write_yaml(flow_directory / "flow.yaml",
-        "schemaVersion: att-flow/v3.4\nid: common.benchmark.v1\n"
+        "schemaVersion: att-flow/v3.6\nid: common.benchmark.v1\n"
         "name: benchmark\ndescription: representative startup benchmark flow\nactions:\n"
         "  prepare: {type: log, message: flow prepare}\n"
         "  execute: {type: log, message: flow execute}\n"
         "  finish: {type: log, message: flow finish}\n")
-    write_yaml(flow_directory / "debug.yaml", "schemaVersion: att-debug/v1.2\n")
+    write_yaml(flow_directory / "debug.yaml", "schemaVersion: att-debug/v{}\n".format(debug_version))
 
     resource_directory = root / "templates" / "RESOURCE"
     write_yaml(resource_directory / "template.yaml",
-        "schemaVersion: att-template/v3.4\nname: RESOURCE\n"
+        "schemaVersion: att-template/v3.6\nname: RESOURCE\n"
         "description: local HTTP-backed startup benchmark\nactions:\n"
-        "  request: {type: tool, call: \"#{http.benchmark.get(path='/ready', responseFormat='text')}\"}\n")
-    write_yaml(resource_directory / "debug.yaml", "schemaVersion: att-debug/v1.2\n")
+        "  request: {type: tool, call: \"#{http.benchmark.get(path='/ready')}\"}\n")
+    write_yaml(resource_directory / "debug.yaml", "schemaVersion: att-debug/v{}\n".format(debug_version))
     write_yaml(root / "config" / "httphelpers" / "benchmark.yaml",
         "schemaVersion: att-httphelper/v1.1\nid: benchmark\n"
         "name: Local benchmark endpoint\ndescription: local-only timing fixture\n"
@@ -209,7 +228,7 @@ def install_fixture(root, schemas_dir, http_port):
         "  noop:\n    name: Benchmark Tool\n    description: local process startup fixture\n"
         "    command: {}\n    stdoutFormat: text\n    arguments: {{}}\n".format(command))
     write_yaml(root / "config" / "tools" / "benchmark.debug.yaml",
-        "schemaVersion: att-debug/v1.2\n")
+        "schemaVersion: att-debug/v{}\n".format(debug_version))
 
 
 def summarize_metric(values):
@@ -234,6 +253,68 @@ def summarize(samples):
             "totalMs": summarize_metric(total)}
 
 
+def directory_sha256(directory):
+    digest = hashlib.sha256()
+    for path in sorted(path for path in directory.rglob("*") if path.is_file()):
+        digest.update(path.relative_to(directory).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
+def source_runtime_sha256(source):
+    digest = hashlib.sha256()
+    launcher = source / ("att.bat" if sys.platform == "win32" else "att.sh")
+    files = [launcher] if launcher.is_file() else []
+    class_dirs = [source / module / "target" / "classes" for module in MODULE_CLASSES]
+    class_dirs = [directory for directory in class_dirs if directory.is_dir()]
+    if not class_dirs and (source / "target" / "classes").is_dir():
+        class_dirs = [source / "target" / "classes"]
+    for directory in class_dirs:
+        files.extend(path for path in directory.rglob("*") if path.is_file())
+    source_lib = source / "lib"
+    if source_lib.is_dir():
+        files.extend(path for path in source_lib.glob("*.jar") if path.is_file())
+    for path in sorted(set(files)):
+        digest.update(path.relative_to(source).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        with path.open("rb") as source_file:
+            for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
+def source_revision(source, explicit_revision):
+    if explicit_revision:
+        return explicit_revision
+    result = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"],
+                            capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else "unknown"
+
+
+def hardware_details():
+    details = {"model": None, "processor": platform.processor(), "memory": None}
+    if sys.platform != "darwin":
+        return details
+    result = subprocess.run(["system_profiler", "SPHardwareDataType"],
+                            capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        return details
+    values = {}
+    for line in result.stdout.splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            values[key.strip()] = value.strip()
+    model = values.get("Model Name")
+    identifier = values.get("Model Identifier")
+    details["model"] = "{} ({})".format(model, identifier) if model and identifier else model or identifier
+    details["processor"] = values.get("Chip", details["processor"])
+    details["memory"] = values.get("Memory")
+    return details
+
+
 def measure(command, root, identity):
     result = run_command(command, root)
     if result["exitCode"] != 0:
@@ -243,7 +324,11 @@ def measure(command, root, identity):
 
 
 def debug_command(root, target, identity, profile=False):
-    args = ["debug"] + target + ["--debug-id", identity, "--output-dir", "output", "--format", "json"]
+    # ATT 3.7.3 does not support --debug-id. Isolate each invocation with its
+    # own output root so the same command works against both the baseline and
+    # candidate while keeping generated evidence out of later samples.
+    output_root = Path("output") / identity
+    args = ["debug"] + target + ["--output-dir", str(output_root), "--format", "json"]
     if profile:
         args.append("--profile")
     return launcher_command(root, args)
@@ -298,7 +383,12 @@ def run_distribution(label, root, runs, warmups, expected_version):
             identity = "{}-profile".format(case_name)
             profile_sample = measure(debug_command(root, target, identity, profile=True), root,
                                      "{} profile {}".format(label, case_name))
-            profile_path = root / "output" / "debug" / identity / "performance.json"
+            profile_root = root / "output" / identity
+            profile_paths = list(profile_root.rglob("performance.json"))
+            if len(profile_paths) != 1:
+                raise RuntimeError("Expected one profile under {}, found {}".format(
+                    profile_root, len(profile_paths)))
+            profile_path = profile_paths[0]
             report["cases"][case_name]["profileCaptureWallMs"] = round(profile_sample["totalMs"], 3)
             report["cases"][case_name]["profile"] = json.loads(profile_path.read_text(encoding="utf-8"))
     return report
@@ -328,10 +418,10 @@ def compare_pair(baseline, candidate):
 
 def runtime_specs(args):
     return (
-        ("baselineSource", args.baseline_source, "source"),
-        ("baselineBinary", args.baseline_binary, "binary"),
-        ("candidateSource", args.candidate_source, "source"),
-        ("candidateBinary", args.candidate_binary, "binary"),
+        ("baselineSource", args.baseline_source, "source", args.baseline_binary),
+        ("baselineBinary", args.baseline_binary, "binary", args.baseline_binary),
+        ("candidateSource", args.candidate_source, "source", args.candidate_binary),
+        ("candidateBinary", args.candidate_binary, "binary", args.candidate_binary),
     )
 
 
@@ -347,6 +437,8 @@ def main():
                         help="Extracted candidate binary distribution")
     parser.add_argument("--baseline-label", default="3.7.3")
     parser.add_argument("--candidate-label", default="4.0.1")
+    parser.add_argument("--baseline-revision", default=None)
+    parser.add_argument("--candidate-revision", default=None)
     parser.add_argument("--schemas-dir", type=Path, required=True,
                         help="One shared package schemas directory")
     parser.add_argument("--runs", type=int, default=10)
@@ -366,13 +458,15 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix="att-startup-benchmark-") as temporary:
             temp_root = Path(temporary)
-            fixture_root = temp_root / "fixture"
-            fixture_root.mkdir()
-            install_fixture(fixture_root, schemas, http_port)
             measurements = {}
-            for label, source, distribution in runtime_specs(args):
+            for label, source, distribution, packaged_distribution in runtime_specs(args):
+                fixture_root = temp_root / (label + "-fixture")
+                fixture_root.mkdir()
+                install_fixture(fixture_root, schemas, http_port,
+                                baseline=label.startswith("baseline"))
                 install_root = temp_root / label
-                install_runtime(source.resolve(), install_root, distribution, schemas)
+                install_runtime(source.resolve(), install_root, distribution, schemas,
+                                packaged_distribution.resolve())
                 # Each launcher runs from its own temporary package. Copy the identical fixture
                 # files in while retaining that distribution's prebuilt classes or release jars.
                 for relative in ("config", "templates", "tools", "testcase"):
@@ -386,6 +480,7 @@ def main():
         http_server.server_close()
         http_thread.join(timeout=2)
 
+    hardware = hardware_details()
     result = {
         "schemaVersion": "att-debug-startup-benchmark/v1",
         "baseline": {key: value for key, value in measurements.items() if key.startswith("baseline")},
@@ -397,13 +492,30 @@ def main():
         "environment": {
             "platform": platform.platform(),
             "machine": platform.machine(),
-            "processor": platform.processor(),
+            "processor": hardware["processor"],
+            "hardwareModel": hardware["model"],
+            "logicalCpuCount": os.cpu_count(),
+            "memory": hardware["memory"],
             "python": platform.python_version(),
             "javaVersion": subprocess.run(["java", "-version"], capture_output=True, text=True).stderr.strip(),
             "runsPerCondition": args.runs,
             "warmups": args.warmups,
         },
+        "provenance": {
+            "baselineRevision": source_revision(args.baseline_source, args.baseline_revision),
+            "candidateRevision": source_revision(args.candidate_source, args.candidate_revision),
+            "baselineSourceRuntimeSha256": source_runtime_sha256(args.baseline_source),
+            "candidateSourceRuntimeSha256": source_runtime_sha256(args.candidate_source),
+            "baselineBinaryTreeSha256": directory_sha256(args.baseline_binary),
+            "candidateBinaryTreeSha256": directory_sha256(args.candidate_binary),
+        },
         "measurement": {
+            "fixtureSchemaVersions": {
+                "baseline": {"config": "att-config/v2.11", "template": "att-template/v3.6",
+                             "flow": "att-flow/v3.6", "debug": "att-debug/v1.1"},
+                "candidate": {"config": "att-config/v2.12", "template": "att-template/v3.6",
+                              "flow": "att-flow/v3.6", "debug": "att-debug/v1.2"},
+            },
             "cold": "New JVM processes without explicit benchmark warmups; the OS may cache files after the first sample.",
             "warm": "New JVM processes measured after the configured warmup invocations.",
             "firstOutputMs": "Launcher process spawn to the first non-empty stdout or stderr line.",
