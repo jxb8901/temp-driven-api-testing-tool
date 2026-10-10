@@ -160,24 +160,26 @@ final class JobEvents {
         }
         try {
             compactionExecutor.execute(() -> {
-                boolean retry = false;
+                boolean retryOnNextTrigger = false;
                 try {
-                    retry = !compactSnapshot();
+                    retryOnNextTrigger = !compactSnapshot();
                 } catch (Exception failure) {
+                    retryOnNextTrigger = true;
                     java.util.logging.Logger.getLogger(JobEvents.class.getName())
                             .fine("Event journal compaction will be retried after a later event batch");
                 } finally {
                     compactionScheduled.set(false);
                     boolean requestedAgain = compactionAgain.getAndSet(false);
-                    if (retry || requestedAgain) {
-                        compactionAgain.set(false);
+                    // A failed catch-up must wait for a later append threshold. Immediate retries
+                    // can repeatedly serialize the same oversized tail while producers are active.
+                    if (!retryOnNextTrigger && requestedAgain) {
                         scheduleCompaction();
                     }
                 }
             });
         } catch (RejectedExecutionException full) {
             compactionScheduled.set(false);
-            compactionAgain.set(true);
+            compactionAgain.set(false);
         }
     }
 

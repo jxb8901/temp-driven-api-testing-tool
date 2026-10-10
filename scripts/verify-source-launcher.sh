@@ -3,11 +3,15 @@
 set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/att-launcher.XXXXXX")"
-trap 'rm -rf "$TEMP_DIR"' EXIT HUP INT TERM
+SOURCE_DEBUG_FIXTURE=""
+trap 'rm -rf "$TEMP_DIR"; if [ -n "$SOURCE_DEBUG_FIXTURE" ]; then rm -rf "$ROOT_DIR/$SOURCE_DEBUG_FIXTURE"; fi' EXIT HUP INT TERM
 
 JAVA_BIN="$(command -v java)"
 DIRNAME_BIN="$(command -v dirname)"
-VERSION="$(awk -F'[<>]' '/<version>/{ print $3; exit }' "$ROOT_DIR/pom.xml")"
+VERSION="$(awk -F'[<>]' '
+  /<artifactId>template-driven-api-testing-tool<\/artifactId>/ { parent=1; next }
+  parent && /<version>/ { print $3; exit }
+' "$ROOT_DIR/pom.xml")"
 PACKAGE_ARCHIVE="$ROOT_DIR/att-dist/target/att-$VERSION-local.tar.gz"
 PACKAGE_PARENT="$TEMP_DIR/package"
 
@@ -64,6 +68,60 @@ run_commands() {
   run_and_check "$path_dir" "$log_file" "$root/att.sh" remote help
 }
 
+write_debug_fixture() {
+  root="$1"
+  fixture_relative="target/launcher-debug-smoke-$$"
+  fixture="$root/$fixture_relative"
+  mkdir -p "$fixture/templates/SIMPLE"
+  cat > "$fixture/config.yaml" <<EOF
+schemaVersion: att-config/v2.11
+environment: SIT
+outputDirectory: $fixture_relative/output
+templates: {root: $fixture_relative/templates}
+testcase: {root: testcase}
+EOF
+  cat > "$fixture/templates/SIMPLE/template.yaml" <<'EOF'
+schemaVersion: att-template/v3.4
+name: SIMPLE
+description: Source launcher Debug execution smoke.
+actions:
+  record:
+    type: log
+    message: launcher-debug-smoke
+EOF
+  cat > "$fixture/templates/SIMPLE/debug.yaml" <<'EOF'
+schemaVersion: att-debug/v1.2
+inputs: {}
+EOF
+  printf '%s\n' "$fixture_relative"
+}
+
+run_debug() {
+  root="$1"
+  path_dir="$2"
+  log_file="$3"
+  fixture_relative="$4"
+  output="$(PATH="$path_dir" ATT_BUILD_TOOL_LOG="$log_file" \
+    /bin/sh "$root/att.sh" debug template SIMPLE \
+    --config "$fixture_relative/config.yaml" \
+    --input "$fixture_relative/templates/SIMPLE/debug.yaml" --format json --quiet)" || {
+    status=$?
+    echo "Debug launcher failed (exit $status): $root/att.sh debug template SIMPLE" >&2
+    echo "$output" >&2
+    exit 1
+  }
+  if ! printf '%s' "$output" | grep -F 'PASS' >/dev/null; then
+    echo "Debug launcher did not execute the fixture successfully:" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+  if [ -n "$log_file" ] && [ -s "$log_file" ]; then
+    echo "Debug launcher invoked a build tool:" >&2
+    cat "$log_file" >&2
+    exit 1
+  fi
+}
+
 MAVEN_PATH="$TEMP_DIR/path-with-maven"
 NO_MAVEN_PATH="$TEMP_DIR/path-without-maven"
 MAVEN_LOG="$TEMP_DIR/build-tools-with-maven.log"
@@ -85,6 +143,9 @@ done
 
 run_commands "$ROOT_DIR" "$MAVEN_PATH" "$MAVEN_LOG"
 run_commands "$ROOT_DIR" "$NO_MAVEN_PATH" "$NO_MAVEN_LOG"
+SOURCE_DEBUG_FIXTURE="$(write_debug_fixture "$ROOT_DIR")"
+run_debug "$ROOT_DIR" "$MAVEN_PATH" "$MAVEN_LOG" "$SOURCE_DEBUG_FIXTURE"
+run_debug "$ROOT_DIR" "$NO_MAVEN_PATH" "$NO_MAVEN_LOG" "$SOURCE_DEBUG_FIXTURE"
 
 MISSING_ROOT="$TEMP_DIR/missing-source"
 mkdir -p "$MISSING_ROOT/att-cli/target/classes"
@@ -118,5 +179,9 @@ tar -xzf "$PACKAGE_ARCHIVE" -C "$PACKAGE_PARENT"
 PACKAGE_ROOT="$PACKAGE_PARENT/att-$VERSION-local"
 run_commands "$PACKAGE_ROOT" "$MAVEN_PATH" "$MAVEN_LOG"
 run_commands "$PACKAGE_ROOT" "$NO_MAVEN_PATH" "$NO_MAVEN_LOG"
+PACKAGE_DEBUG_FIXTURE="$(write_debug_fixture "$PACKAGE_ROOT")"
+run_debug "$PACKAGE_ROOT" "$MAVEN_PATH" "$MAVEN_LOG" "$PACKAGE_DEBUG_FIXTURE"
+run_debug "$PACKAGE_ROOT" "$NO_MAVEN_PATH" "$MAVEN_LOG" "$PACKAGE_DEBUG_FIXTURE"
+rm -rf "$ROOT_DIR/$SOURCE_DEBUG_FIXTURE"
 
-echo "Source and packaged launchers passed run-only checks with Maven present and absent."
+echo "Source and packaged launchers passed run-only and Debug execution checks with Maven present and absent."
