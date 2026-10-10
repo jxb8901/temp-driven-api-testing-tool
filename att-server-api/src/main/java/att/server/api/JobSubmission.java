@@ -23,6 +23,8 @@ public final class JobSubmission {
     public Boolean failFast;
     public String validationScope;
     public String debugInput;
+    /** Server-issued in-memory Debug draft. */
+    public String draftId;
     public Map<String,String> load;
     public List<String> overrides;
     public JobSubmission() { }

@@ -27,6 +27,7 @@ public final class WorkerRequest {
     public Boolean failFast;
     public String validationScope;
     public String debugInput;
+    public Map<String,Object> inlineDebugInput;
     public Boolean unsafeFailureDetails;
     public Map<String,String> load;
     public List<String> overrides;
@@ -36,6 +37,8 @@ public final class WorkerRequest {
     public String inspectionOtherEnvironment;
     public String inspectionSection;
     public String inspectionResourceId;
+    public String inspectionTargetId;
+    public String draftResourceId;
     public String inspectionQuery;
     public Integer inspectionOffset;
     public Integer inspectionLimit;

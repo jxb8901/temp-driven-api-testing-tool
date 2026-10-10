@@ -58,7 +58,7 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 ## 驗證與身份
 
-Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authentication mechanism。v1 所有已驗證的 Servlet Principal 具有相同 API 權限，不要求 `ATT_USER` 角色，也沒有 ATT 專用 RBAC。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。驗證失敗時，Server 保留 container response，包括 BASIC challenge 或 FORM/SSO redirect。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、資源檢視、job、result、event 及 artifact API 均要求 Principal。即使舊 API 啟用匿名模式，新的資源探索 endpoint 仍要求真實 Servlet Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
+Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authentication mechanism。v1 所有已驗證的 Servlet Principal 具有相同 API 權限，不要求 `ATT_USER` 角色，也沒有 ATT 專用 RBAC。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。驗證失敗時，Server 保留 container response，包括 BASIC challenge 或 FORM/SSO redirect。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、資源檢視、Debug draft、job、result、event 及 artifact API 均要求 Principal。即使舊 API 啟用匿名模式，新的資源探索及 Debug draft endpoint 仍要求真實 Servlet Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
 
 改變狀態的請求必須使用 `application/json`；如請求帶有 `Origin`，必須與請求來源相同。若 TLS 在反向代理終止，請設定 Tomcat `RemoteIpValve`，由代理的 forwarded headers 還原 Servlet scheme、host 及 port。`internalProxies` 只可列出實際代理位址，並確保代理會先移除用戶提交的 `Forwarded`/`X-Forwarded-*` headers，再加入自身的值。請依代理實際使用的 header 名稱及受信任位址調整設定：
 
@@ -87,7 +87,11 @@ Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authenticatio
 | `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | 列出安全的 Case、Template、Flow 及 Tool 投影 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | 讀取單一資源定義及關聯 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已遮蔽的 YAML 投影或允許清單內的 Tool script |
-| `POST` | `/jobs/run`、`/jobs/debug`、`/jobs/load`、`/jobs/validate` | 提交一項工作 |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/debug-form?environment=SIT` | 讀取目標範圍內的安全 Debug 預設值 |
+| `POST` | `/drafts/debug` | 驗證固定目標的 Debug 輸入並建立記憶體 draft |
+| `GET` | `/drafts/{draftId}` | 讀取所屬 Debug draft 的安全預覽 |
+| `POST` | `/jobs/debug` | 提交所屬 Debug draft |
+| `POST` | `/jobs/run`、`/jobs/load`、`/jobs/validate` | 提交 path-based 工作 |
 | `GET` | `/jobs`、`/jobs/{jobId}` | 列出近期工作或讀取狀態 |
 | `GET` | `/jobs/{jobId}/result` | 讀取標準結果及診斷 |
 | `GET` | `/jobs/{jobId}/events` | 接收保留及即時事件 |
@@ -153,6 +157,38 @@ GET /api/v1/packages/payments/resources/template/{resourceId}/source
 詳細回應包含 `resource`、`definition`、`diagnostics` 及 `requestId`。來源回應包含 `resource`、`available`、`format`、`text`、`redacted` 及 `requestId`。來源不可用時，`available` 為 `false`，`reason` 為 `source-unavailable` 或 `size-limit`，而且不會回傳部分內容。找不到目標的關聯會標示 `resolution: "unresolved"`，並附有穩定資源診斷碼。
 
 無效清單參數會回傳 `400`；未知 package/resource 使用相同的 `404` 格式。過期 cursor 回傳 `409`，超大回應回傳 `413`，探索佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。錯誤回應使用既有的 `error.code`、`error.summary` 及 `requestId` 格式，不會包含實體路徑或 parser exception 訊息。
+
+### 目標範圍內的 Debug 與 draft
+
+Debug form 及 draft endpoint 要求真實、已驗證的 Servlet Principal，即使舊 job API 啟用匿名存取亦一樣。請使用 Package Resource Explorer 回傳的資源 ID；Case 不能作為 Debug 目標。
+
+```http
+GET /api/v1/packages/payments/resources/flow/{resourceId}/debug-form?environment=SIT
+```
+
+回應包含所選資源、固定邏輯目標、安全的 `att-debug/v1.2` 輸入預設值、`redacted` 標記及 `requestId`。若 sidecar 不存在，Server 會提供有效的空白預設值。敏感欄位會在回應前遮蔽。
+
+提交 typed input 以建立 Server 簽發的 draft：
+
+```http
+POST /api/v1/drafts/debug
+Content-Type: application/json
+
+{"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}}}
+```
+
+回應包含不透明 `draftId`、安全 YAML 預覽、驗證診斷及過期時間。`GET /api/v1/drafts/{draftId}` 只會向擁有該 draft 的 Principal 回傳相同安全預覽。Draft 僅存於記憶體，最多 10 分鐘；每個 Server 最多 128 個有效 draft，每個 Principal 最多 16 個。Server 重啟會令 draft 失效。Server 不會回傳內部 package revision digest。
+
+提交時只傳 draft identity：
+
+```http
+POST /api/v1/jobs/debug
+Content-Type: application/json
+
+{"packageId":"payments","draftId":"D0123456789ABCDEF0123456789ABCDEF"}
+```
+
+Server 會在提交時及 Worker 啟動前重新檢查 package revision。若在提交時發現變更，會回傳 `409 ATT-SERVER-DRAFT-STALE`；若工作已接受後才發現變更，工作會以該 diagnostic 標記為 `INVALID`。驗證失敗會在頂層 `diagnostics` array 回傳安全的 `code`、`summary`、`field` 及邏輯 `resourceId`；不會包含 source path 或 parser snippet。Worker 會收到與預覽驗證相同的不可變 typed values；inline input 留在記憶體，不會在 package root 下建立檔案。舊有以路徑提交的 Debug request 仍可供相容用戶端使用。
 
 ### Package configuration inspection
 

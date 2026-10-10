@@ -119,6 +119,25 @@ class PackageResourceInspectorTest {
         assertEquals(Boolean.FALSE,source.get("available"));assertEquals("visibility-policy",source.get("reason"));
     }
 
+    @Test void debugFormHidesAuthoredDefaultsAndDoesNotReturnTheNormalizedSidecar() throws Exception {
+        Path root=packageWithTemplate("debug-form-policy", "FORM", "description: safe");
+        writeUtf8(root.resolve("templates/FORM/debug.yaml"), "schemaVersion: att-debug/v1.2\ninputs:\n"
+                + "  payload: {account: 'customer account 123456789', message: 'temporary credential violet-123'}\n"
+                + "  values: ['nested business value']\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        Map<String,Object> form=inspector.inspectDebugForm("template",String.valueOf(items.get(0).get("resourceId")),null);
+        assertFalse(form.containsKey("normalizedInput"));
+        assertFalse(form.toString().contains("123456789"));
+        assertFalse(form.toString().contains("violet-123"));
+        assertFalse(form.toString().contains("nested business value"));
+        @SuppressWarnings("unchecked") Map<String,Object> input=(Map<String,Object>)form.get("input");
+        @SuppressWarnings("unchecked") Map<String,Object> inputs=(Map<String,Object>)input.get("inputs");
+        @SuppressWarnings("unchecked") Map<String,Object> payload=(Map<String,Object>)inputs.get("payload");
+        assertEquals("/inputs/payload/account",((Map<?,?>)payload.get("account")).get("$attDebugKeepDefault"));
+    }
+
     @Test void hidesWorkbookBusinessValuesAndBoundsHighFanInSummaries() throws Exception {
         Path root=packageWithCaseWorkbook("case-data", 125);
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
@@ -189,7 +208,11 @@ class PackageResourceInspectorTest {
             String resourceId=String.valueOf(((List<Map<String,Object>>)first.get("items")).get(0).get("resourceId"));
             inspector.inspect("detail","template",resourceId,null,0,1);
             inspector.inspect("source","template",resourceId,null,0,1);
-            assertEquals(1,inspector.indexBuildCount(),"page, detail, and source should share one parsed package index");
+            Map<String,Object> debugForm=inspector.inspectDebugForm("template",resourceId,revision);
+            @SuppressWarnings("unchecked") Map<String,Object> debugInput=(Map<String,Object>)debugForm.get("input");
+            inspector.validateDebugInput("template","PAYMENT",debugInput);
+            assertEquals(1,inspector.indexBuildCount(),
+                    "page, detail, source, Debug form, and draft validation should share one parsed package index");
 
             long version=inspector.packageChangeVersion();
             writeUtf8(root.resolve("templates/PAYMENT/template.yaml"),templateYaml("PAYMENT","description: changed"));

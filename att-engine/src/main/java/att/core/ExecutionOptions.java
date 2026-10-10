@@ -8,6 +8,8 @@ import java.util.Set;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import att.api.ExecutionEvent;
 import att.api.ExecutionEventListener;
 
@@ -35,6 +37,7 @@ public final class ExecutionOptions {
     private final String debugTargetType;
     private final String debugTargetId;
     private final Path debugInput;
+    private final Map<String, Object> inlineDebugInput;
     private final boolean unsafeFailureDetails;
     private final Path loadScenario;
     private final String loadUsers;
@@ -164,6 +167,7 @@ public final class ExecutionOptions {
         this.debugTargetType = debugTargetType == null ? "" : debugTargetType;
         this.debugTargetId = debugTargetId == null ? "" : debugTargetId;
         this.debugInput = debugInput;
+        this.inlineDebugInput = null;
         this.unsafeFailureDetails = unsafeFailureDetails;
         this.loadScenario = loadScenario;
         this.loadUsers = loadUsers;
@@ -203,6 +207,7 @@ public final class ExecutionOptions {
         this.debugTargetType = source.debugTargetType;
         this.debugTargetId = source.debugTargetId;
         this.debugInput = source.debugInput;
+        this.inlineDebugInput = source.inlineDebugInput;
         this.unsafeFailureDetails = source.unsafeFailureDetails;
         this.loadScenario = source.loadScenario;
         this.loadUsers = source.loadUsers;
@@ -226,7 +231,7 @@ public final class ExecutionOptions {
                 validationScope, ciOutputs, concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId,
                 debugInput, loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration,
                 loadRampDown, loadThinkTime, loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides,
-                unsafeFailureDetails, listener).withIdentitySeed(identitySeed);
+                unsafeFailureDetails, listener).withInlineDebugInput(inlineDebugInput).withIdentitySeed(identitySeed);
     }
 
     /** Freezes an exact, already validated execution identity for subsequent lifecycle phases. */
@@ -236,11 +241,79 @@ public final class ExecutionOptions {
                 concurrencyMode, updateSnapshot, profile, debugTargetType, debugTargetId, debugInput,
                 loadScenario, loadUsers, loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown,
                 loadThinkTime, loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides,
-                unsafeFailureDetails, observer).withIdentitySeed(identitySeed);
+                unsafeFailureDetails, observer).withInlineDebugInput(inlineDebugInput).withIdentitySeed(identitySeed);
     }
 
     public ExecutionOptions withIdentitySeed(ExecutionIdentitySeed value) {
         return new ExecutionOptions(this, value);
+    }
+
+    /** Supplies immutable typed Debug input without introducing a package file. */
+    public ExecutionOptions withInlineDebugInput(Map<String, Object> value) {
+        return new ExecutionOptions(this, value == null ? null : immutableMap(value), identitySeed);
+    }
+
+    private ExecutionOptions(ExecutionOptions source, Map<String, Object> inlineDebugInput,
+                             ExecutionIdentitySeed identitySeed) {
+        this.command = source.command;
+        this.configPath = source.configPath;
+        this.environment = source.environment;
+        this.suitePaths = new ArrayList<Path>(source.suitePaths);
+        this.suiteDirectory = source.suiteDirectory;
+        this.caseIds = source.caseIds;
+        this.tags = source.tags;
+        this.excludeTags = source.excludeTags;
+        this.runId = source.runId;
+        this.all = source.all;
+        this.rerunFailed = source.rerunFailed;
+        this.dryRun = source.dryRun;
+        this.failFast = source.failFast;
+        this.outputDirectory = source.outputDirectory;
+        this.validationScope = source.validationScope;
+        this.ciOutputs = new LinkedHashSet<String>(source.ciOutputs);
+        this.concurrencyMode = source.concurrencyMode;
+        this.updateSnapshot = source.updateSnapshot;
+        this.profile = source.profile;
+        this.debugTargetType = source.debugTargetType;
+        this.debugTargetId = source.debugTargetId;
+        this.debugInput = source.debugInput;
+        this.inlineDebugInput = inlineDebugInput;
+        this.unsafeFailureDetails = source.unsafeFailureDetails;
+        this.loadScenario = source.loadScenario;
+        this.loadUsers = source.loadUsers;
+        this.loadArrivalRate = source.loadArrivalRate;
+        this.loadWarmup = source.loadWarmup;
+        this.loadRampUp = source.loadRampUp;
+        this.loadDuration = source.loadDuration;
+        this.loadRampDown = source.loadRampDown;
+        this.loadThinkTime = source.loadThinkTime;
+        this.loadMaxConcurrent = source.loadMaxConcurrent;
+        this.loadOverloadPolicy = source.loadOverloadPolicy;
+        this.variableOverrides = source.variableOverrides;
+        this.observer = source.observer;
+        this.identitySeed = identitySeed;
+    }
+
+    private static Map<String, Object> immutableMap(Map<String, Object> source) {
+        Map<String, Object> copy = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : source.entrySet())
+            copy.put(entry.getKey(), immutableValue(entry.getValue()));
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private static Object immutableValue(Object value) {
+        if (value instanceof Map) {
+            Map<String, Object> copy = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet())
+                copy.put(String.valueOf(entry.getKey()), immutableValue(entry.getValue()));
+            return Collections.unmodifiableMap(copy);
+        }
+        if (value instanceof List) {
+            List<Object> copy = new ArrayList<Object>();
+            for (Object item : (List<?>) value) copy.add(immutableValue(item));
+            return Collections.unmodifiableList(copy);
+        }
+        return value;
     }
 
     public void emitOutput(String message) {
@@ -292,7 +365,8 @@ public final class ExecutionOptions {
                 outputs == null ? defaultCiOutputs() : outputs, concurrency == null ? "reject" : concurrency,
                 updateSnapshot, profileEnabled, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
                 loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime, loadMaxConcurrent,
-                loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails).withIdentitySeed(identitySeed);
+                loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails)
+                .withInlineDebugInput(inlineDebugInput).withIdentitySeed(identitySeed);
     }
 
     public String command() { return command; }
@@ -321,6 +395,7 @@ public final class ExecutionOptions {
     public String debugTargetType() { return debugTargetType; }
     public String debugTargetId() { return debugTargetId; }
     public Path debugInput() { return debugInput; }
+    public Map<String, Object> inlineDebugInput() { return inlineDebugInput; }
     public boolean unsafeFailureDetails() { return unsafeFailureDetails; }
     public List<String> variableOverrides() { return variableOverrides; }
     public List<String> setOverrides() { return variableOverrides; }

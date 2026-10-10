@@ -37,8 +37,22 @@
             <button id="show-resource-source" type="button" hidden>View safe source</button>
             <button id="resource-configuration-link" type="button" hidden>View Tool configuration</button>
             <button id="run-resource-case" type="button" hidden>Run this Case</button>
+            <button id="debug-resource" type="button" hidden>Debug this target</button>
             <h4>Identity and provenance</h4><pre id="resource-metadata"></pre>
             <h4>Definition</h4><pre id="resource-definition"></pre>
+            <section id="resource-debug" hidden>
+              <h4>Typed Debug input</h4>
+              <p id="debug-form-status" role="status" aria-live="polite"></p>
+              <div id="debug-form-editor" hidden>
+                <label id="debug-inputs-label">Inputs (JSON object)<textarea id="debug-inputs" rows="5" spellcheck="false"></textarea></label>
+                <label id="debug-vars-label">Variables (JSON object)<textarea id="debug-vars" rows="5" spellcheck="false"></textarea></label>
+                <label id="debug-arguments-label" hidden>Tool arguments (JSON object)<textarea id="debug-arguments" rows="5" spellcheck="false"></textarea></label>
+                <button id="reset-debug-form" type="button">Reset defaults</button>
+                <button id="preview-debug-form" type="button">Validate and preview</button>
+                <button id="submit-debug-form" type="button">Start Debug</button>
+                <h5>Safe effective Debug YAML</h5><pre id="debug-preview"></pre>
+              </div>
+            </section>
             <div class="resource-relations"><section><h4>References</h4><ul id="resource-references"></ul></section><section><h4>Referenced by</h4><ul id="resource-referenced-by"></ul></section></div>
             <h4 id="resource-source-heading" hidden>Safe source projection</h4><pre id="resource-source" hidden></pre>
           </article>
@@ -63,7 +77,7 @@
         <div id="configuration-view" aria-live="polite"></div>
       </section>
       <form id="submit-form">
-        <label>Command <select name="command"><option>run</option><option>debug</option><option>load</option><option>validate</option></select></label>
+        <label>Command <select name="command"><option>run</option><option>load</option><option>validate</option></select></label>
         <label>Environment <input name="environment" maxlength="128"></label>
         <label>Config (logical package path) <input name="config"></label>
         <label>Run ID <input name="runId" maxlength="128"></label>
@@ -75,7 +89,6 @@
         <label>Case IDs (comma separated) <input name="caseIds"></label>
         <label>Target type <input name="targetType" placeholder="flow"></label>
         <label>Target ID <input name="targetId"></label>
-        <label>Debug input (logical package path) <input name="debugInput"></label>
         <label>Validation scope <input name="validationScope"></label>
         <label>Load scenario (logical package path) <input name="scenario"></label>
         <fieldset><legend>Load options</legend>
