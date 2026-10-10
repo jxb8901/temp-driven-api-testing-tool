@@ -89,10 +89,12 @@ Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authenticatio
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已遮蔽的 YAML 投影或允許清單內的 Tool script |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/debug-form?environment=SIT` | 讀取目標範圍內的安全 Debug 預設值 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT` | 讀取安全預設值及單 workload Quick Load 預覽 |
+| `GET` | `/packages/{packageId}/load-policy?model=virtualUsers&environment=SIT` | 讀取 Advanced Load 使用的安全 model policy 預設值 |
 | `POST` | `/drafts/debug` | 驗證固定目標的 Debug 輸入並建立記憶體 draft |
 | `POST` | `/drafts/quick-load` | 驗證固定目標的 Quick Load 並建立記憶體 draft |
-| `GET` | `/drafts/{draftId}` | 讀取所屬 Debug 或 Quick Load draft 的安全預覽 |
-| `POST` | `/jobs/debug`、`/jobs/load` | 提交所屬 Debug 或 Quick Load draft |
+| `POST` | `/drafts/load` | 驗證 `att-load/v1.6` scenario 並建立記憶體 draft |
+| `GET` | `/drafts/{draftId}` | 讀取所屬 Debug、Quick Load 或 Advanced Load draft 的安全預覽 |
+| `POST` | `/jobs/debug`、`/jobs/load` | 提交所屬 Debug、Quick Load 或 Advanced Load draft |
 | `POST` | `/jobs/run`、`/jobs/load`、`/jobs/validate` | 提交 path-based 工作 |
 | `GET` | `/jobs`、`/jobs/{jobId}` | 列出近期工作或讀取狀態 |
 | `GET` | `/jobs/{jobId}/result` | 讀取標準結果及診斷 |
@@ -162,7 +164,7 @@ GET /api/v1/packages/payments/resources/template/{resourceId}/source
 
 ### 目標範圍內的 Debug 與 draft
 
-Debug form、Quick Load form 及 draft endpoint 要求真實、已驗證的 Servlet Principal，即使舊 job API 啟用匿名存取亦一樣。請使用 Package Resource Explorer 回傳的資源 ID；Case 不能作為 Debug 或 Quick Load 目標。
+Debug form、Quick Load form、Load policy 及 draft endpoint 要求真實、已驗證的 Servlet Principal，即使舊 job API 啟用匿名存取亦一樣。請使用 Package Resource Explorer 回傳的資源 ID；Case 不能作為 Debug 或 Quick Load 目標。
 
 ```http
 GET /api/v1/packages/payments/resources/flow/{resourceId}/debug-form?environment=SIT
@@ -225,6 +227,42 @@ Content-Type: application/json
 ```
 
 Server 會在 draft 提交時、Worker 啟動前及 Worker 內重新檢查 package revision。若 draft 過期會回傳 `409 ATT-SERVER-DRAFT-STALE`；工作接納後才發現變更，則會標示為 `INVALID` 並附該診斷。Worker 會收到與預覽驗證相同的不可變 scenario；內容只留在記憶體，不會寫入 package。舊有 path-based Load request 仍受支援。
+
+### Advanced Load builder
+
+Advanced Load 會建立包含一個或多個 workload 的完整 `att-load/v1.6` scenario。所有 workload 必須使用同一 `virtualUsers` 或 `arrivalRate` model。Virtual Users workload 可使用單一固定 target 或 weighted `mix`；每個 Arrival Rate workload 使用一個固定 target。Engine 會在 Server 建立 draft 前驗證共用時間窗口、workload intensity、thresholds、Testdata policy 及所有 target。
+
+讀取安全的 model policy 預設值：
+
+```http
+GET /api/v1/packages/payments/load-policy?model=virtualUsers&environment=SIT
+```
+
+回應包含 `model`、已遮蔽的 `policy`、安全的 `previewYaml`、`redacted` 標記及 `requestId`。此唯讀 endpoint 不會建立 draft。
+
+提交完整 scenario 以建立 Server 簽發的 draft：
+
+```http
+POST /api/v1/drafts/load
+Content-Type: application/json
+
+{
+  "packageId": "payments",
+  "environment": "SIT",
+  "scenario": {
+    "schemaVersion": "att-load/v1.6",
+    "load": {"users": 1, "duration": "30s"},
+    "workloads": [
+      {"id": "browse", "target": {"type": "flow", "id": "PAYMENT.browse"}, "load": {"users": 4}},
+      {"id": "submit", "target": {"type": "template", "id": "PAYMENT.submit"}, "load": {"users": 2}}
+    ]
+  }
+}
+```
+
+Server 會驗證完整 scenario 並 resolve 所有 target，不會排程流量。只會從所選 target package-local `debug.yaml` 的 business 欄位還原已遮蔽值；不會複製 Debug `case`、`stage` 或 local Testdata。回應包含以 `A` 開頭的不透明 draft ID、安全 effective YAML 預覽、model、遮蔽標記及過期時間。Advanced Load 與 Debug、Quick Load 共用每個 Server 最多 128 個、每位 Principal 最多 16 個 draft 及 10 分鐘有效期限制。
+
+向 `POST /api/v1/jobs/load` 只提交 package 及 draft ID。Server 會在提交及 Worker 啟動前檢查 package revision，再透過既有 Worker、Engine、scheduler、event 及 evidence 流程傳遞相同的不可變 normalized scenario。若 package revision 已變更，會回傳 `409 ATT-SERVER-DRAFT-STALE`；工作接納後才發現變更，工作會標示為 `INVALID`。若預覽有任何遮蔽欄位，瀏覽器會停用 YAML 複製及匯出。舊有 path-based Load request 仍受支援。
 
 ### Package configuration inspection
 

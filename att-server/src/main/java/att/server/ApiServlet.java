@@ -4,7 +4,8 @@ import att.Version;
 import att.server.api.ConfigurationInspection;
 import att.server.api.DebugDraft;
 import att.server.api.DebugForm;
-import att.server.api.QuickLoadDraft;
+import att.server.api.LoadDraft;
+import att.server.api.LoadPolicyForm;
 import att.server.api.QuickLoadForm;
 import att.server.api.ResourceInspection;
 import att.server.api.ServerApi;
@@ -43,16 +44,19 @@ public final class ApiServlet extends HttpServlet {
             if("/version".equals(path)){json(res,200,Map.of("version",Version.PRODUCT,"apiVersion",ServerApi.VERSION,"buildTime",Version.BUILD_TIME,"gitCommit",Version.GIT_COMMIT,"javaMinimum",17,"requestId",requestId));return;}
             boolean resourceRequest=resourcePath(path);
             boolean configurationRequest=configurationPath(path);
-            boolean draftRequest=path.matches("/drafts/[DL][0-9A-F]{32}");
-            boolean inspectionRequest=resourceRequest||configurationRequest||draftRequest;
+            boolean loadPolicyRequest=loadPolicyPath(path);
+            boolean draftRequest=path.matches("/drafts/[DLA][0-9A-F]{32}");
+            boolean inspectionRequest=resourceRequest||configurationRequest||loadPolicyRequest||draftRequest;
             if(inspectionRequest&&req.getUserPrincipal()==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
             String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
             if("/metrics".equals(path)){Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
             if(resourceRequest){resourceGet(req,res,path,requestId,req.getUserPrincipal().getName());return;}
             if(configurationRequest){configurationGet(req,res,path,requestId,req.getUserPrincipal().getName());return;}
+            if(loadPolicyRequest){loadPolicyGet(req,res,path,requestId,req.getUserPrincipal().getName());return;}
             if(draftRequest){
                 String draftId=segment(path,2);
-                if(draftId.startsWith("L")){QuickLoadDraft response=ServerRuntime.JSON.convertValue(runtime.getQuickLoadDraft(draftId,req.getUserPrincipal().getName()),QuickLoadDraft.class);response.requestId=requestId;json(res,200,response);}
+                if(draftId.startsWith("L")){LoadDraft response=ServerRuntime.JSON.convertValue(runtime.getQuickLoadDraft(draftId,req.getUserPrincipal().getName()),LoadDraft.class);response.requestId=requestId;json(res,200,response);}
+                else if(draftId.startsWith("A")){LoadDraft response=ServerRuntime.JSON.convertValue(runtime.getAdvancedLoadDraft(draftId,req.getUserPrincipal().getName()),LoadDraft.class);response.requestId=requestId;json(res,200,response);}
                 else {DebugDraft response=ServerRuntime.JSON.convertValue(runtime.getDebugDraft(draftId,req.getUserPrincipal().getName()),DebugDraft.class);response.requestId=requestId;json(res,200,response);}
                 return;
             }
@@ -79,10 +83,10 @@ public final class ApiServlet extends HttpServlet {
     @Override protected void doPost(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req);String principal=principal(req);
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
-        boolean createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path);
+        boolean createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path);
         String command=path.startsWith("/jobs/")?path.substring("/jobs/".length()):"";
-        if(!createDebugDraft&&!createQuickLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
-        if((createDebugDraft||createQuickLoadDraft)&&req.getUserPrincipal()==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+        if(!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        if((createDebugDraft||createQuickLoadDraft||createAdvancedLoadDraft)&&req.getUserPrincipal()==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         try {
             if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
             if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
@@ -92,14 +96,15 @@ public final class ApiServlet extends HttpServlet {
             try{input=ServerRuntime.JSON.readTree(body);}catch(JsonProcessingException malformed){error(res,400,"ATT-SERVER-INVALID-REQUEST","Request body is not valid JSON",requestId);return;}
             if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
             if(createDebugDraft){DebugDraft draft=ServerRuntime.JSON.convertValue(runtime.createDebugDraft(input,req.getUserPrincipal().getName()),DebugDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
-            if(createQuickLoadDraft){QuickLoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createQuickLoadDraft(input,req.getUserPrincipal().getName()),QuickLoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
+            if(createQuickLoadDraft){LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createQuickLoadDraft(input,req.getUserPrincipal().getName()),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
+            if(createAdvancedLoadDraft){LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createAdvancedLoadDraft(input,req.getUserPrincipal().getName()),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
             if("debug".equals(command)&&input.has("draftId")){
                 if(req.getUserPrincipal()==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
                 Map<String,Object> job=runtime.submitDebugDraft(input,req.getUserPrincipal().getName());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);return;
             }
             if("load".equals(command)&&input.has("draftId")){
                 if(req.getUserPrincipal()==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
-                Map<String,Object> job=runtime.submitQuickLoadDraft(input,req.getUserPrincipal().getName());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);return;
+                Map<String,Object> job=runtime.submitLoadDraft(input,req.getUserPrincipal().getName());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);return;
             }
             Map<String,Object> job=runtime.submit(command,input,principal);job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);
         } catch(ServerRuntime.QueueFullException e){error(res,429,"ATT-SERVER-CAPACITY-EXCEEDED",e.getMessage(),requestId);}
@@ -229,11 +234,28 @@ public final class ApiServlet extends HttpServlet {
           catch(IllegalArgumentException e){throw e;}
           catch(Exception e){throw new IOException(e);}
     }
+    private void loadPolicyGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
+        String[] parts=path.split("/");
+        try {
+            if(parts.length!=4||!"packages".equals(parts[1])||parts[2].isEmpty()||!"load-policy".equals(parts[3]))
+                throw new ServerRuntime.NotFoundException();
+            Map<String,Object> result=runtime.inspectQuickLoadPolicy(parts[2],req.getParameter("model"),
+                    req.getParameter("environment"),principal);
+            LoadPolicyForm response=ServerRuntime.JSON.convertValue(result,LoadPolicyForm.class);
+            response.requestId=requestId;json(res,200,response);
+        } catch(ServerRuntime.NotFoundException e){throw e;}
+          catch(ServerRuntime.InspectionCapacityException e){throw e;}
+          catch(ServerRuntime.InspectionTimeoutException e){throw e;}
+          catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
+          catch(IllegalArgumentException e){throw e;}
+          catch(Exception e){throw new IOException(e);}
+    }
     private static int parseLimit(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be an integer between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new IllegalArgumentException("limit must be between 1 and 100");return value;}
     private static int parseOffset(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,6}"))throw new IllegalArgumentException("offset must be a non-negative integer");return Integer.parseInt(raw);}
     private static int parseConfigurationLimit(String raw){if(raw==null||raw.isEmpty())return 50;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new IllegalArgumentException("limit must be between 1 and 100");return value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
     private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/configuration(?:/.*)?");}
+    private static boolean loadPolicyPath(String path){return path.matches("/packages/[^/]+/load-policy");}
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}
     private static boolean sameOrigin(HttpServletRequest req){String origin=req.getHeader("Origin");if(origin==null)return true;if("null".equalsIgnoreCase(origin.trim()))return false;try{java.net.URI parsed=java.net.URI.create(origin);if(parsed.getHost()==null||parsed.getUserInfo()!=null||parsed.getRawPath()!=null&&!parsed.getRawPath().isEmpty()||parsed.getRawQuery()!=null||parsed.getFragment()!=null)return false;String scheme=req.getScheme().toLowerCase(java.util.Locale.ROOT),originScheme=parsed.getScheme().toLowerCase(java.util.Locale.ROOT);int requestPort=req.getServerPort(),originPort=parsed.getPort()<0?("https".equals(originScheme)?443:80):parsed.getPort();int effectiveRequest=requestPort<0?("https".equals(scheme)?443:80):requestPort;return scheme.equals(originScheme)&&req.getServerName().equalsIgnoreCase(parsed.getHost())&&effectiveRequest==originPort;}catch(Exception invalid){return false;}}
     private static String path(HttpServletRequest r){String p=r.getPathInfo();return p==null||p.isEmpty()?"/":p;}

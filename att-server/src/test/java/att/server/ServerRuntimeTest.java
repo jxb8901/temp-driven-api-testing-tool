@@ -175,8 +175,15 @@ class ServerRuntimeTest {
         Path allowed=Files.createDirectory(temp.resolve("quick-load-packages"));Path packageRoot=Files.createDirectory(allowed.resolve("p"));
         Path templates=Files.createDirectories(packageRoot.resolve("templates/FORM"));Files.createDirectories(packageRoot.resolve("testcase"));
         Files.createDirectories(packageRoot.resolve("config"));copySchemas(packageRoot);
+        Path toolScript=Files.createDirectories(packageRoot.resolve("tools")).resolve("check-load-inputs.sh");
+        Files.writeString(toolScript,"#!/bin/sh\n[ \"$1\" = CORR-176 ] && [ \"$2\" = ARG-176 ]\n");
+        toolScript.toFile().setExecutable(true);
         Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
-                +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+                +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n"
+                +"tools:\n  echo:\n    name: Echo\n    description: Echo typed Load values\n"
+                +"    command: [./tools/check-load-inputs.sh, \"${input.correlationId}\", \"${value}\"]\n    stdoutFormat: text\n"
+                +"    arguments:\n      correlationId: {name: Correlation ID, description: Correlation ID, required: false}\n"
+                +"      value: {name: Value, description: Value, required: true}\n");
         Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: Quick Load test\nactions:\n"
                 +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");
         Path debugData=Files.createDirectories(packageRoot.resolve("debug-data")).resolve("debug.yaml");
@@ -186,6 +193,9 @@ class ServerRuntimeTest {
         Path debugSidecar=templates.resolve("debug.yaml");
         Files.writeString(debugSidecar,"schemaVersion: att-debug/v1.2\ntestdata: [debug-data/debug.yaml]\ninputs: {value: default}\nvars: {reference: REF001}\n");
         byte[] originalSidecar=Files.readAllBytes(debugSidecar);
+        Path toolSidecar=Files.createDirectories(packageRoot.resolve("config/tools")).resolve("echo.debug.yaml");
+        Files.writeString(toolSidecar,"schemaVersion: att-debug/v1.2\ninputs: {correlationId: CORR-176}\narguments: {value: ARG-176}\n");
+        byte[] originalToolSidecar=Files.readAllBytes(toolSidecar);
         Path loadPolicy=Files.createDirectories(packageRoot.resolve("load")).resolve("load.visualuser.yaml");
         Files.writeString(loadPolicy,"schemaVersion: att-load/v1.6\nload: {users: 1, duration: 1s}\n");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
@@ -227,6 +237,24 @@ class ServerRuntimeTest {
             while(((Number)runtime.counts().get("activeWorkers")).intValue()>0&&System.nanoTime()<releaseDeadline)Thread.sleep(10);
             assertEquals(0,((Number)runtime.counts().get("activeWorkers")).intValue(),"Completed Load jobs must release admission before the stale-draft check");
             assertTrue(Files.exists(loadPolicy));
+
+            Map<String,Object> toolScenario=Map.of("schemaVersion","att-load/v1.6","load",Map.of("users",1,"duration","1s"),
+                    "workloads",List.of(Map.of("id","echo-tool","load",Map.of("users",1),
+                            "target",Map.of("type","tool","id","echo","arguments",Map.of("value",Map.of("$attDebugKeepDefault","/arguments/value"))),
+                            "inputs",Map.of("correlationId",Map.of("$attDebugKeepDefault","/inputs/correlationId")))));
+            com.fasterxml.jackson.databind.node.ObjectNode advancedBody=ServerRuntime.JSON.createObjectNode();advancedBody.put("packageId","p");advancedBody.set("scenario",ServerRuntime.JSON.valueToTree(toolScenario));
+            Map<String,Object> advancedDraft;
+            try { advancedDraft=runtime.createAdvancedLoadDraft(advancedBody,"alice"); }
+            catch(ServerRuntime.DraftValidationException invalid) { throw new AssertionError(invalid.diagnostics.toString(),invalid); }
+            String advancedDraftId=String.valueOf(advancedDraft.get("draftId"));
+            assertEquals(Boolean.TRUE,advancedDraft.get("redacted"));assertFalse(advancedDraft.toString().contains("CORR-176"));assertFalse(advancedDraft.toString().contains("ARG-176"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getAdvancedLoadDraft(advancedDraftId,"bob"));
+            assertArrayEquals(originalToolSidecar,Files.readAllBytes(toolSidecar),"Advanced Load validation must leave Tool sidecars unchanged");
+            Map<String,Object> advancedAccepted=runtime.submitAdvancedLoadDraft(ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"draftId\":\""+advancedDraftId+"\"}"),"alice");
+            String advancedJobId=String.valueOf(advancedAccepted.get("jobId"));long advancedDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);Map<String,Object> advancedRecord=runtime.jobRecord(advancedJobId);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(advancedRecord.get("status"))&&System.nanoTime()<advancedDeadline){Thread.sleep(20);advancedRecord=runtime.jobRecord(advancedJobId);}
+            assertEquals("PASS",advancedRecord.get("status"),"The executable Tool asserts it received both restored values: "+runtime.resultRecord(advancedJobId));
+            assertArrayEquals(originalToolSidecar,Files.readAllBytes(toolSidecar));
             Map<String,Object> stale=runtime.createQuickLoadDraft(body,"alice");
             Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: changed\nactions:\n"
                     +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");

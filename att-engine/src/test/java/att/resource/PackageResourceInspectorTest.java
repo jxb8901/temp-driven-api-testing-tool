@@ -200,6 +200,31 @@ class PackageResourceInspectorTest {
         }
     }
 
+    @Test void advancedLoadRestoresTypedToolInputsAndArgumentsFromTheRedactedSidecar() throws Exception {
+        Path root=packageWithQuickLoadTargets("advanced-load-tool-values");
+        writeUtf8(root.resolve("config/tools/echo.debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {correlationId: CORR-DEFAULT}\narguments: {value: ARG-DEFAULT}\n");
+        Map<String,Object> keepInput=mapOf("$attDebugKeepDefault","/inputs/correlationId");
+        Map<String,Object> keepArgument=mapOf("$attDebugKeepDefault","/arguments/value");
+        Map<String,Object> request=mapOf("schemaVersion","att-load/v1.6","load",mapOf("users",2,"duration","5s"),
+                "workloads",java.util.Arrays.asList(mapOf("id","tool","load",mapOf("users",2),
+                        "target",mapOf("type","tool","id","echo","arguments",mapOf("value",keepArgument)),
+                        "inputs",mapOf("correlationId",keepInput))));
+
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        Map<String,Object> result=inspector.validateLoadScenario(request);
+        @SuppressWarnings("unchecked") Map<String,Object> normalized=(Map<String,Object>)result.get("normalizedScenario");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> workloads=(List<Map<String,Object>>)normalized.get("workloads");
+        Map<String,Object> workload=workloads.get(0);
+        @SuppressWarnings("unchecked") Map<String,Object> inputs=(Map<String,Object>)workload.get("inputs");
+        @SuppressWarnings("unchecked") Map<String,Object> target=(Map<String,Object>)workload.get("target");
+        @SuppressWarnings("unchecked") Map<String,Object> arguments=(Map<String,Object>)target.get("arguments");
+        assertEquals("CORR-DEFAULT",inputs.get("correlationId"));
+        assertEquals("ARG-DEFAULT",arguments.get("value"));
+        assertTrue(result.toString().contains("$attDebugKeepDefault"),"The browser preview keeps a path-bound marker instead of exposing the restored values");
+        assertFalse(String.valueOf(result.get("preview")).contains("CORR-DEFAULT"));
+        assertFalse(String.valueOf(result.get("preview")).contains("ARG-DEFAULT"));
+    }
+
     @Test void hidesWorkbookBusinessValuesAndBoundsHighFanInSummaries() throws Exception {
         Path root=packageWithCaseWorkbook("case-data", 125);
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
