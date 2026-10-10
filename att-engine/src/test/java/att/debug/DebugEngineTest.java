@@ -91,7 +91,7 @@ class DebugEngineTest {
         @SuppressWarnings("unchecked") Map<String, Object> safeDetails = (Map<String, Object>) safePayload.get("details");
         editedPayload.put("details", Collections.singletonMap("message", safeDetails.get("message")));
         editedInputs.put("payload", editedPayload);
-        editedInputs.put("values", List.of(safeValues.get(0), "[REDACTED]"));
+        editedInputs.put("values", java.util.Arrays.asList(safeValues.get(0), "[REDACTED]"));
         editedInputs.put("overrideValue", "[REDACTED]");
         editedInputs.put("newLiteral", "[REDACTED]");
         editedInputs.put("value", "visible override");
