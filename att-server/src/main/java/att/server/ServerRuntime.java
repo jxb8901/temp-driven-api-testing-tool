@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,11 +30,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
 /** Owns the single-node job plane and its bounded Worker, inspector, and SSE executors. */
@@ -51,8 +54,11 @@ final class ServerRuntime implements AutoCloseable {
     private final Semaphore loadSlots,admissionSlots;
     final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
     private final ScheduledExecutorService retention;
+    private final ScheduledExecutorService inspectionWatchdogs;
     private final WorkerProcessLauncher processLauncher;
     private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
+    private final List<InspectionWorker> inspectionWorkerPool=new ArrayList<>();
+    private final AtomicLong inspectionWorkerSelection=new AtomicLong();
     private final byte[] cursorKey=new byte[32];
     private final SecureRandom cursorRandom=new SecureRandom();
     private volatile String webInfLibs;
@@ -68,7 +74,9 @@ final class ServerRuntime implements AutoCloseable {
         streams=new ThreadPoolExecutor(0,MAX_STREAM_OBSERVERS,30,TimeUnit.SECONDS,new SynchronousQueue<>(),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=config.inspection.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.inspection.queuedLimit);
         inspectors=new ThreadPoolExecutor(config.inspection.maxConcurrent,config.inspection.maxConcurrent,0,TimeUnit.MILLISECONDS,inspectionQueue,r->{Thread t=new Thread(r,"att-server-inspector");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+        for(int i=0;i<config.inspection.maxConcurrent;i++)inspectionWorkerPool.add(new InspectionWorker());
         retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
+        inspectionWatchdogs=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-watchdog");t.setDaemon(true);return t;});
         recover();cleanupExpiredJobsSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
     }
     private void recover() throws Exception {
@@ -263,39 +271,122 @@ final class ServerRuntime implements AutoCloseable {
         return value.trim();
     }
     private Map<String,Object> runInspectionWorker(Path root,WorkerRequest request) throws Exception {
-        Process process=null;
-        try {
-            validatePackageRoot(root);Path libs=webInfLibs==null?null:Paths.get(webInfLibs);
-            if(libs==null||!Files.isDirectory(libs))throw new IllegalStateException("Tomcat must deploy the WAR as an exploded application so WEB-INF/lib is available to the Worker launcher");
-            List<String> classpathEntries=new ArrayList<>();classpathEntries.add(libs.resolve("*").toString());for(Path libraryDir:config.workerLibraryDirs)classpathEntries.add(libraryDir.resolve("*").toString());
-            String cp=String.join(java.io.File.pathSeparator,classpathEntries);
-            ProcessBuilder builder=new ProcessBuilder(config.javaExecutable.toString(),"-Xmx"+config.inspection.heapMaxMb+"m","-cp",cp,"att.worker.WorkerMain");builder.directory(root.toFile());
-            process=processLauncher.start(builder);inspectionProcesses.put(process,Boolean.TRUE);
+        InspectionWorker worker=acquireInspectionWorker();
+        try { return worker.request(root,request); }
+        finally { worker.lock.unlock(); }
+    }
+    private InspectionWorker acquireInspectionWorker() throws InterruptedException {
+        int size=inspectionWorkerPool.size();
+        int first=(int)Math.floorMod(inspectionWorkerSelection.getAndIncrement(),(long)size);
+        for(int offset=0;offset<size;offset++) {
+            InspectionWorker worker=inspectionWorkerPool.get((first+offset)%size);
+            if(worker.lock.tryLock())return worker;
+        }
+        InspectionWorker worker=inspectionWorkerPool.get(first);
+        worker.lock.lockInterruptibly();
+        return worker;
+    }
+    private final class InspectionWorker implements AutoCloseable {
+        final ReentrantLock lock=new ReentrantLock();
+        private volatile Process process;
+        private volatile BufferedReader reader;
+        private volatile OutputStream writer;
+
+        Map<String,Object> request(Path root,WorkerRequest request) throws Exception {
+            ensureStarted(root);
             java.util.concurrent.atomic.AtomicBoolean timedOut=new java.util.concurrent.atomic.AtomicBoolean();
-            final Process active=process;
-            Thread watchdog=new Thread(()->{try{if(!active.waitFor(config.inspection.timeoutMs,TimeUnit.MILLISECONDS)){timedOut.set(true);forceTree(active);}}catch(InterruptedException ignored){Thread.currentThread().interrupt();}},"att-server-inspector-watchdog");watchdog.setDaemon(true);watchdog.start();
-            Thread stderr=new Thread(()->{try(var in=active.getErrorStream()){byte[] buffer=new byte[8192];while(in.read(buffer)>=0){}}catch(Exception ignored){}});stderr.setDaemon(true);stderr.start();
-            try(var out=process.getOutputStream()){out.write(JSON.writeValueAsBytes(request));out.write('\n');out.flush();}
-            JsonNode result=null;String errorCode=null;long total=0;
-            try(BufferedReader reader=new BufferedReader(new InputStreamReader(process.getInputStream(),StandardCharsets.UTF_8))){
-                String line;while((line=readBoundedLine(reader,config.inspection.maxResponseBytes))!=null){
+            ScheduledFuture<?> watchdog=inspectionWatchdogs.schedule(()->{
+                timedOut.set(true);
+                kill();
+            },config.inspection.timeoutMs,TimeUnit.MILLISECONDS);
+            try {
+                writer.write(JSON.writeValueAsBytes(request));
+                writer.write('\n');
+                writer.flush();
+                JsonNode result=null;
+                String errorCode=null;
+                long total=0;
+                while(result==null) {
+                    String line=readBoundedLine(reader,config.inspection.maxResponseBytes);
+                    if(line==null)throw new IllegalStateException("Package inspection Worker exited before completing the request");
                     if("\u0000OVERSIZED".equals(line))throw new InspectionResponseTooLargeException();
-                    total+=line.getBytes(StandardCharsets.UTF_8).length+1L;if(total>config.inspection.maxResponseBytes)throw new InspectionResponseTooLargeException();
-                    JsonNode event=JSON.readTree(line);if(event==null||!event.isObject())continue;String kind=event.path("type").asText("");
+                    total+=line.getBytes(StandardCharsets.UTF_8).length+1L;
+                    if(total>config.inspection.maxResponseBytes)throw new InspectionResponseTooLargeException();
+                    JsonNode event=JSON.readTree(line);
+                    if(event==null||!event.isObject())continue;
+                    String eventJob=event.path("jobId").asText(null);
+                    if(eventJob!=null&&!eventJob.equals(request.jobId))
+                        throw new IllegalStateException("Package inspection Worker returned an event for another request");
+                    String kind=event.path("type").asText("");
                     if("DIAGNOSTIC".equalsIgnoreCase(kind))errorCode=event.path("code").asText(null);
                     if("RESULT".equalsIgnoreCase(kind))result=event;
                 }
+                if(timedOut.get())throw new InspectionTimeoutException();
+                if(result.path("exitCode").asInt(3)!=0&&errorCode==null)
+                    throw new IllegalStateException("Package inspection Worker did not complete successfully");
+                Map<String,Object> response=new LinkedHashMap<>();
+                if(errorCode!=null) {response.put("errorCode",errorCode);return response;}
+                JsonNode inspection=result.path("result").path("summary").path("inspection");
+                if(!inspection.isObject())throw new IllegalStateException("Package inspection Worker returned no inspection data");
+                response.put("inspection",JSON.convertValue(inspection,Map.class));
+                return response;
+            } catch(Exception error) {
+                discard();
+                if(timedOut.get())throw new InspectionTimeoutException();
+                throw error;
+            } finally {
+                watchdog.cancel(false);
             }
-            int exit=process.waitFor();
-            if(timedOut.get())throw new InspectionTimeoutException();
-            if(result==null||exit!=0&&errorCode==null)throw new IllegalStateException("Package inspection Worker did not complete successfully");
-            Map<String,Object> response=new LinkedHashMap<>();
-            if(errorCode!=null) {response.put("errorCode",errorCode);return response;}
-            JsonNode inspection=result.path("result").path("summary").path("inspection");if(!inspection.isObject())throw new IllegalStateException("Package inspection Worker returned no inspection data");
-            response.put("inspection",JSON.convertValue(inspection,Map.class));return response;
-        } catch(InterruptedException interrupted){if(process!=null&&process.isAlive())forceTree(process);Thread.currentThread().interrupt();throw interrupted;}
-        catch(Exception error){if(process!=null&&process.isAlive())forceTree(process);throw error;}
-        finally{if(process!=null){inspectionProcesses.remove(process);if(process.isAlive())forceTree(process);}}
+        }
+
+        private void ensureStarted(Path root) throws Exception {
+            Process current=process;
+            if(current!=null&&current.isAlive())return;
+            discard();
+            validatePackageRoot(root);
+            Path libs=webInfLibs==null?null:Paths.get(webInfLibs);
+            if(libs==null||!Files.isDirectory(libs))
+                throw new IllegalStateException("Tomcat must deploy the WAR as an exploded application so WEB-INF/lib is available to the Worker launcher");
+            List<String> classpathEntries=new ArrayList<>();
+            classpathEntries.add(libs.resolve("*").toString());
+            for(Path libraryDir:config.workerLibraryDirs)classpathEntries.add(libraryDir.resolve("*").toString());
+            String cp=String.join(java.io.File.pathSeparator,classpathEntries);
+            ProcessBuilder builder=new ProcessBuilder(config.javaExecutable.toString(),"-Xmx"+config.inspection.heapMaxMb+"m",
+                    "-cp",cp,"att.worker.WorkerMain","--inspection-daemon");
+            builder.directory(root.toFile());
+            Process started=processLauncher.start(builder);
+            process=started;
+            inspectionProcesses.put(started,Boolean.TRUE);
+            writer=started.getOutputStream();
+            reader=new BufferedReader(new InputStreamReader(started.getInputStream(),StandardCharsets.UTF_8));
+            Thread stderr=new Thread(()->{
+                try(java.io.InputStream in=started.getErrorStream()) {
+                    byte[] buffer=new byte[8192];while(in.read(buffer)>=0) { }
+                } catch(Exception ignored) { }
+            },"att-server-inspector-stderr");
+            stderr.setDaemon(true);
+            stderr.start();
+        }
+
+        private void kill() {
+            Process current=process;
+            if(current!=null&&current.isAlive())forceTree(current);
+        }
+
+        private void discard() {
+            Process current=process;
+            process=null;
+            BufferedReader input=reader;reader=null;
+            OutputStream output=writer;writer=null;
+            if(current!=null) {
+                if(current.isAlive())current.destroyForcibly();
+                inspectionProcesses.remove(current);
+            }
+            try { if(input!=null)input.close(); } catch(Exception ignored) { }
+            try { if(output!=null)output.close(); } catch(Exception ignored) { }
+        }
+
+        @Override public void close() { discard(); }
     }
     private String encodeCursor(String packageId,String type,String query,int offset,String revision,String principal) throws Exception {
         Map<String,Object> payload=new LinkedHashMap<>();payload.put("packageId",packageId);payload.put("type",type);payload.put("query",query);payload.put("offset",offset);payload.put("revision",revision);payload.put("principal",principal);
@@ -386,7 +477,7 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){retention.shutdownNow();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){retention.shutdownNow();inspectionWatchdogs.shutdownNow();for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
