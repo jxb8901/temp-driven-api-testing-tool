@@ -16,7 +16,7 @@ Tomcat owns listeners, TLS, access logs, and authentication. The WAR uses the Se
 
 `server.dataDir` stores H2 control-plane metadata and job output. Worker concurrency, queue size, Load admission, graceful stop timeout, and optional per-Worker heap limits are bounded by `workers`. `workers.heapMaxMb` sets `-Xmx` for every Worker (64–65536 MiB); optional `heapInitialMb` sets `-Xms` (32–65536 MiB), requires `heapMaxMb`, and cannot exceed it. Plan the aggregate heap allowance against `maxConcurrent` plus the Server and container memory. Rejected submissions are discarded before they create durable job records. Terminal job metadata, journals, and artifacts are retained for `server.jobRetentionDays` (default 30, allowed range 1–3650); expired jobs are cleaned at startup and hourly, while active jobs are preserved. `workers.maxConcurrentLoad` bounds admitted Load jobs, including queued jobs, so waiting Loads do not occupy general Worker threads. Excess Load or overall-capacity submissions receive HTTP 429. `workers.libraryDirs` optionally lists absolute, existing, readable directories whose JARs are added to the Worker subprocess classpath for external JDBC, MQ, or other dependencies; configure only trusted server-owned directories. The `packages` registry is read-only and maps stable package IDs to canonical roots beneath `allowedRoots`. `server.inspection` separately bounds read-only resource discovery; it uses one-shot Workers and has its own concurrency, queue, timeout, heap, source, and response limits. Tool script text is unavailable unless its package-relative path is listed under `server.inspection.safeTextSources` for that package ID.
 
-Browser-created Quick and Advanced Load drafts have a separate opt-in: `server.inlineLoad.enabled` defaults to `false`. When enabled, the Server enforces the configured workload, target, total Virtual User, aggregate Arrival Rate, per-workload concurrency, and total timing-envelope caps after Engine validation and again before queue admission. The [Server configuration example](#configuration) sets conservative defaults. The duration cap is the sum of warmup, ramp-up, measured duration, and ramp-down; target count includes each fixed target and each VU mix entry. A disabled feature returns `403 ATT-SERVER-INLINE-LOAD-DISABLED`. These limits apply to browser-created drafts; existing path-based Load submissions retain their compatibility behavior and continue to use `workers.maxConcurrentLoad` admission.
+Browser-created Quick and Advanced Load drafts have a separate opt-in: `server.inlineLoad.enabled` defaults to `false`. When enabled, the Server enforces the configured workload, target, total Virtual User, aggregate Arrival Rate, per-workload and aggregate concurrency, and total timing-envelope caps after Engine validation and again before queue admission. The [Server configuration example](#configuration) sets conservative defaults. The duration cap is the sum of warmup, ramp-up, measured duration, and ramp-down; target count includes each fixed target and each VU mix entry. A disabled feature returns `403 ATT-SERVER-INLINE-LOAD-DISABLED`. These limits apply to browser-created drafts; existing path-based Load submissions retain their compatibility behavior and continue to use `workers.maxConcurrentLoad` admission.
 
 ```yaml
 server:
@@ -71,6 +71,7 @@ Inline Load settings use these defaults and hard ranges:
 | `maxTotalUsers` | 100 | 1–100,000 | Sum of Virtual Users across workloads |
 | `maxAggregateArrivalRatePerSecond` | 100 | greater than 0 to 1,000,000 | Sum of arrival rates normalized to requests per second |
 | `maxConcurrentPerWorkload` | 100 | 1–1,000,000 | Each Arrival Rate workload |
+| `maxTotalConcurrent` | 1,000 | 1–1,000,000 | Sum of `maxConcurrent` across Arrival Rate workloads |
 | `maxDurationSeconds` | 3,600 | 1–86,400 | Sum of warmup, ramp-up, duration, and ramp-down |
 
 `dataDir` must be absolute. Package roots, allowed roots, and configured Worker library directories must exist at startup. Package paths are canonicalized; symlinks that resolve outside an allowed root are rejected. Clients submit `packageId`; they cannot select a package path, output path, Worker executable, or classpath. Package registration and mutation endpoints are not available in v1.
@@ -225,7 +226,7 @@ Quick Load is available from a selected Template, Flow, or Tool when `server.inl
 GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT
 ```
 
-The form response includes safe `inputs` and `vars` defaults for Template/Flow targets, or `inputs` and `arguments` for a Tool, plus a redacted one-workload preview. It reads only the business fields from the optional target `debug.yaml`; Debug-only `case`, `stage`, and local `testdata` are not copied. A sidecar with Debug-local Testdata imports is rejected and must move those imports to the Load policy.
+The form response includes safe `inputs` and `vars` defaults for Template/Flow targets, or `inputs` and `arguments` for a Tool, plus a redacted one-workload preview. It reads only the business fields from the optional target `debug.yaml`; Debug-only `case`, `stage`, and local `testdata` are not copied. When a sidecar has Debug-local Testdata, the form reports that those imports were omitted. Supply any needed package-relative descriptors in the separate Load-level `testdata` array; these paths are validated as part of the effective Load scenario.
 
 The Server reads `load/load.visualuser.yaml` for `virtualUsers` and `load/load.arrivalrate.yaml` for `arrivalRate`. These are policy-only `att-load/v1.6` descriptors; the selected policy must match the chosen model. If a model-specific file is absent, a bundled low-intensity fallback is used: one Virtual User for 10 seconds, or 1 arrival per second for 10 seconds with `maxConcurrent: 1` and `overloadPolicy: drop`. Existing CLI `load/load.yaml` behavior is unchanged.
 
@@ -235,10 +236,10 @@ Validate business values and pacing overrides to create an owned draft:
 POST /api/v1/drafts/quick-load
 Content-Type: application/json
 
-{"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"model":"virtualUsers","input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}},"load":{"users":4,"duration":"30s"},"execution":{"thinkTime":"100ms"}}
+{"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"model":"virtualUsers","input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}},"load":{"users":4,"duration":"30s"},"execution":{"thinkTime":"100ms"},"testdata":["testdata/load-accounts.yaml"]}
 ```
 
-`load` accepts only pacing fields supported by the selected model. `execution` accepts the optional closed-workload `thinkTime`. The response returns a principal-bound opaque `draftId` beginning with `L`, the safe effective YAML preview, redaction state, and expiry. Debug and Quick Load drafts share the 128-active-per-Server, 16-per-Principal, 10-minute in-memory limits.
+`load` accepts only pacing fields supported by the selected model. `execution` accepts the optional closed-workload `thinkTime`. `testdata` is an optional array of additional package-relative Load descriptor paths; it is kept separate from Debug-local imports and the model policy's existing descriptors. The response returns a principal-bound opaque `draftId` beginning with `L`, the safe effective YAML preview, redaction state, and expiry. Debug and Quick Load drafts share the 128-active-per-Server, 16-per-Principal, 10-minute in-memory limits.
 
 After reviewing the preview, submit only the draft identity:
 
@@ -294,14 +295,16 @@ Configuration inspection uses the same authenticated, bounded inspection Worker 
 ```http
 GET /api/v1/packages/payments/configuration?view=declared
 GET /api/v1/packages/payments/configuration/effective?environment=SIT
+GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&offset=0&limit=50
 GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT
+GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&offset=0&limit=50
 ```
 
-The declared view returns the schema version, safe global fields, configured profiles, and for each configuration section its declared or absent state, entry count, and profile inheritance or replacement state. Effective views use `FrameworkConfigLoader` to select the environment and return safe helper, Tool, and Testdata descriptor metadata. Inspection never connects to DB, MQ, HTTP, or SSH services. It does not return unrestricted configuration YAML or Testdata records.
+The declared view returns the schema version, safe global fields, configured profiles, and for each configuration section its declared or absent state, entry count, and profile inheritance or replacement state. Effective views use `FrameworkConfigLoader` to select the environment and return safe helper, Tool, and Testdata descriptor metadata. Omit `environment` to inspect a root-only package or use the configured default. The first effective response returns section counts; request a section by its ID (`dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `tools`, or `testdata`) to read its entries. Effective section and comparison field responses accept `offset` and `limit` (1–100; default 50) and return `total` and `nextOffset` for paging. Inspection never connects to DB, MQ, HTTP, or SSH services. It does not return unrestricted configuration YAML or Testdata records.
 
 The comparison reports visible effective fields and their origins. A sensitive field is returned as `state: "hidden"` with `change: "hidden"`; the response does not reveal whether its value is equal or different. Absolute paths, credentials, connection endpoints, network topology, and unrestricted descriptor content are not returned.
 
-Configuration responses include `view`, `state`, `schemaVersion` when available, and `diagnostics`. An invalid configuration returns HTTP 200 with `state: "invalid"` and a stable diagnostic; malformed profile parameters return `400`. Unknown packages return `404`, oversized responses return `413`, a full inspection queue returns `503`, and an inspector timeout returns `504`. The same response-size, queue, and timeout limits used by resource inspection apply.
+Configuration responses include `view`, `state`, `schemaVersion` when available, and `diagnostics`. Paged responses also include `section`, `offset`, `limit`, `total`, and `nextOffset`. An invalid configuration returns HTTP 200 with `state: "invalid"` and a stable diagnostic; malformed profile parameters return `400`. Unknown packages return `404`, oversized responses return `413`, a full inspection queue returns `503`, and an inspector timeout returns `504`. The same response-size, queue, and timeout limits used by resource inspection apply.
 
 ## Server-sent events
 

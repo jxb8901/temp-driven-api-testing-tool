@@ -174,6 +174,42 @@ class LoadScenarioTest {
         assertTrue(missingPolicy.getMessage().contains("Quick Load needs a policy"), missingPolicy.getMessage());
     }
 
+    @Test void quickLoadBuilderKeepsModelsAndTypedTargetValuesSeparateFromDebugTestdata() throws Exception {
+        Path project = project();
+        Files.createDirectories(project.resolve("load"));
+        write(project, "load/load.visualuser.yaml", "schemaVersion: att-load/v1.6\nload: {users: 2, duration: 5s}\n");
+        Files.createDirectories(project.resolve("testdata"));
+        write(project, "testdata/quick-load.yaml", "schemaVersion: att-testdata/v1.0\nid: quickAccounts\nrecords: [{id: 42}]\n");
+        LoadScenarioLoader loader = new LoadScenarioLoader(project);
+        Map<String, Object> usersPolicy = loader.loadQuickLoadPolicy("virtualUsers");
+        assertEquals(2, ((Map<?, ?>) usersPolicy.get("load")).get("users"), "A package policy overrides the VU fallback");
+        Map<String, Object> arrivalPolicy = loader.loadQuickLoadPolicy("arrivalRate");
+        assertEquals("1/s", ((Map<?, ?>) arrivalPolicy.get("load")).get("arrivalRate"), "Missing package policy uses the bundled fallback");
+
+        Map<String, Object> input = Map.of("inputs", Map.of("amount", 7L), "vars", Map.of("reference", "REF001"));
+        LoadScenario template = new LoadScenarioBuilder(loader).buildQuickLoad("virtualUsers", "template", "LOAD_TEMPLATE",
+                input, usersPolicy, Map.of("users", 4), Map.of("thinkTime", "10ms"),
+                List.of("testdata/quick-load.yaml"));
+        assertEquals("template", template.targetType()); assertEquals("LOAD_TEMPLATE", template.targetId());
+        assertEquals(4, template.users()); assertEquals(7L, template.inputs().get("amount"));
+        assertEquals("REF001", template.vars().get("reference"));
+        assertEquals(1, template.testdataDescriptors().size());
+
+        Map<String, Object> toolInput = Map.of("inputs", Map.of("region", "HK"), "arguments", Map.of("limit", 3L));
+        LoadScenario tool = new LoadScenarioBuilder(loader).buildQuickLoad("arrivalRate", "tool", "sample.lookup",
+                toolInput, arrivalPolicy, Map.of("arrivalRate", "2/s"), Map.of(), List.of());
+        assertEquals(LoadScenario.Model.ARRIVAL_RATE, tool.model());
+        assertEquals("2/s", tool.arrivalRate());
+        assertEquals("HK", tool.inputs().get("region"));
+        assertEquals(3L, tool.targetArguments().get("limit"));
+
+        assertThrows(IllegalArgumentException.class, () -> new LoadScenarioBuilder(loader).buildQuickLoad(
+                "virtualUsers", "template", "LOAD_TEMPLATE", input, arrivalPolicy, Map.of(), Map.of(), List.of()));
+        assertThrows(IllegalArgumentException.class, () -> new LoadScenarioBuilder(loader).buildQuickLoad(
+                "arrivalRate", "tool", "sample.lookup", Map.of("vars", Map.of("bad", true)),
+                arrivalPolicy, Map.of(), Map.of(), List.of()));
+    }
+
     @Test void previousV14QuickLoadPolicyIsAcceptedWithoutWorkloads() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("load"));

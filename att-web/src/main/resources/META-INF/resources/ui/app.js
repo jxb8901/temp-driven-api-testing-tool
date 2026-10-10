@@ -17,6 +17,12 @@
   let resourcePageSequence = 0;
   let resourceDetailSequence = 0;
   let configurationRequestSequence = 0;
+  let configurationProfiles = [];
+  let configurationMode = 'declared';
+  let configurationEnvironment = '';
+  let configurationSection = 'globals';
+  let configurationPage = null;
+  let configurationNextOffset = null;
   let resourceLoadPending = false;
   let resourceCursor = null;
   let resourceItems = [];
@@ -31,6 +37,7 @@
   let quickLoadDefaults = null;
   let quickLoadTarget = null;
   let quickLoadPolicyDefaults = null;
+  let quickLoadDebugTestdataOmitted = false;
   let quickLoadFormSequence = 0;
   let quickLoadDraft = null;
   let quickLoadDraftFingerprint = '';
@@ -49,9 +56,10 @@
   let advancedTargetSuggestionSequence = 0;
   const advancedTargetCatalogs = new Map();
   let advancedSubmitting = false;
+  let resourceConfigurationTarget = null;
   let cancelRequested = false;
   let versionPromise = null;
-  let inlineLoadEnabled = true;
+  let inlineLoadEnabled = false;
   let navigation = 0;
   const submitting = new Set();
 
@@ -78,7 +86,7 @@
     if (!versionPromise) {
       versionPromise = request('version').then(info => {
         if (String(info.apiVersion) !== '1') throw new Error('Incompatible ATT Server API version; this Web UI requires /api/v1.');
-        inlineLoadEnabled = info.inlineLoadEnabled !== false;
+        inlineLoadEnabled = info.inlineLoadEnabled === true;
         text(byId('connection'), 'Connected');
       }).catch(error => { versionPromise = null; throw error; });
     }
@@ -180,20 +188,27 @@
     clearAdvancedLoadDraft(); text(byId('advanced-load-preview'), '');
     if (advancedLoadPolicy) text(byId('advanced-load-status'), 'Input changed. Validate the full scenario before starting Load.');
   }
-  async function loadAdvancedLoadPolicy() {
+  async function loadAdvancedLoadPolicy({ preserveScenario = false } = {}) {
     const packageId = selectedPackage, generation = navigation;
     if (!inlineLoadEnabled) {
       text(byId('advanced-load-policy-status'), 'Browser-created Quick and Advanced Load are disabled by Server configuration.'); return;
     }
     const model = String(byId('advanced-load-model').value || '');
     const sequence = ++advancedLoadSequence;
-    advancedLoadModel = model; advancedLoadPolicy = null; clearAdvancedLoadDraft();
-    byId('advanced-load-editor').hidden = true; byId('advanced-load-workloads').replaceChildren();
+    const previousPolicy = advancedLoadPolicy;
+    advancedLoadModel = model;
+    clearAdvancedLoadDraft();
+    if (!preserveScenario) {
+      advancedLoadPolicy = null;
+      byId('advanced-load-editor').hidden = true; byId('advanced-load-workloads').replaceChildren();
+    }
     text(byId('advanced-load-preview'), ''); text(byId('advanced-load-policy-status'), ''); text(byId('advanced-load-status'), '');
     if (!packageId || !['virtualUsers','arrivalRate'].includes(model)) {
       text(byId('advanced-load-policy-status'), 'Choose the scenario model before configuring workloads.'); return;
     }
-    text(byId('advanced-load-policy-status'), 'Loading safe model policy defaults…');
+    text(byId('advanced-load-policy-status'), preserveScenario
+      ? 'Reloading model policy; keeping the configured scenario…'
+      : 'Loading safe model policy defaults…');
     try {
       const params = [`model=${encodeURIComponent(model)}`];
       const environment = String(byId('advanced-load-environment').value || '').trim();
@@ -201,16 +216,31 @@
       const data = await request(`packages/${encodeURIComponent(packageId)}/load-policy?${params.join('&')}`);
       if (sequence !== advancedLoadSequence || generation !== navigation || selectedPackage !== packageId) return;
       if (!data.policy || typeof data.policy !== 'object' || Array.isArray(data.policy)) throw new Error('The Server returned an invalid Load policy.');
+      const rootValues = preserveScenario ? Object.fromEntries([
+        'advanced-load-warmup','advanced-load-ramp-up','advanced-load-duration','advanced-load-ramp-down',
+        'advanced-load-seed','advanced-load-execution','advanced-load-testdata','advanced-load-thresholds','advanced-load-evidence'
+      ].map(id => [id, byId(id).value])) : null;
       advancedLoadPolicy = JSON.parse(JSON.stringify(data.policy));
       setAdvancedLoadControls(advancedLoadPolicy, model);
       byId('advanced-load-editor').hidden = false;
-      addAdvancedWorkload();
-      text(byId('advanced-load-policy-status'), data.redacted
-        ? 'Safe policy defaults loaded. Sensitive values are hidden in the form and preview.'
-        : 'Safe policy defaults loaded from the package or the bundled low-intensity policy.');
+      if (preserveScenario) {
+        for (const [id, value] of Object.entries(rootValues)) byId(id).value = value;
+      } else addAdvancedWorkload();
+      text(byId('advanced-load-policy-status'), preserveScenario
+        ? (data.redacted
+          ? 'Policy reloaded for this environment. The configured scenario is preserved; sensitive defaults remain hidden.'
+          : 'Policy reloaded for this environment. The configured scenario is preserved and ready to validate.')
+        : (data.redacted
+          ? 'Safe policy defaults loaded. Sensitive values are hidden in the form and preview.'
+          : 'Safe policy defaults loaded from the package or the bundled low-intensity policy.'));
     } catch (error) {
       if (sequence === advancedLoadSequence && generation === navigation && selectedPackage === packageId) {
-        text(byId('advanced-load-policy-status'), `Load policy defaults are unavailable. ${debugValidationMessage(error)}`); message(error.message);
+        advancedLoadPolicy = previousPolicy;
+        byId('advanced-load-editor').hidden = !preserveScenario || !previousPolicy;
+        text(byId('advanced-load-policy-status'), preserveScenario
+          ? `The new environment's Load policy is unavailable. Your configured scenario is preserved. ${debugValidationMessage(error)}`
+          : `Load policy defaults are unavailable. ${debugValidationMessage(error)}`);
+        message(error.message);
       }
     }
   }
@@ -315,7 +345,10 @@
   function sidecarBusiness(type, input) {
     const projected = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
     return type === 'tool'
-      ? { arguments: projected.arguments && typeof projected.arguments === 'object' && !Array.isArray(projected.arguments) ? projected.arguments : {} }
+      ? {
+          inputs: projected.inputs && typeof projected.inputs === 'object' && !Array.isArray(projected.inputs) ? projected.inputs : {},
+          arguments: projected.arguments && typeof projected.arguments === 'object' && !Array.isArray(projected.arguments) ? projected.arguments : {}
+        }
       : {
           inputs: projected.inputs && typeof projected.inputs === 'object' && !Array.isArray(projected.inputs) ? projected.inputs : {},
           vars: projected.vars && typeof projected.vars === 'object' && !Array.isArray(projected.vars) ? projected.vars : {}
@@ -356,9 +389,9 @@
   }
   function parseAdvancedBusiness(container, type) {
     const business = parseAdvancedJson(container, 'business', 'Target business values', {});
-    const allowed = type === 'tool' ? ['arguments'] : ['inputs','vars'];
+    const allowed = type === 'tool' ? ['inputs','arguments'] : ['inputs','vars'];
     if (Object.keys(business).some(key => !allowed.includes(key)))
-      throw new Error(type === 'tool' ? 'Tool values support arguments only.' : 'Template and Flow values support inputs and vars only.');
+      throw new Error(type === 'tool' ? 'Tool values support inputs and arguments only.' : 'Template and Flow values support inputs and vars only.');
     for (const key of allowed) if (business[key] != null && (typeof business[key] !== 'object' || Array.isArray(business[key])))
       throw new Error(`${key} must be a JSON object.`);
     return business;
@@ -540,10 +573,35 @@
     const diagnostics = Array.isArray(data && data.diagnostics) ? data.diagnostics : [];
     const detail = diagnostics.map(item => item.summary || item.code || 'Configuration warning').join(' ');
     text(byId('configuration-status'), `${label}: ${state}${detail ? `. ${detail}` : '.'}`);
-    text(byId('configuration-view'), JSON.stringify(safeData(data || {}), null, 2));
+    const view = byId('configuration-view'); view.replaceChildren(); text(view, label);
+    if (data && data.view === 'compare') {
+      configurationMode = 'compare'; configurationPage = data;
+      configurationNextOffset = data.nextOffset == null ? null : Number(data.nextOffset);
+      renderConfigurationComparison(data.fields || []);
+      byId('configuration-section').disabled = true;
+      byId('use-configuration-environment').disabled = true;
+    } else if (data && data.view === 'effective') {
+      configurationMode = 'effective';
+      if (data.section != null) configurationSection = data.section;
+      if (data.section == null && !configurationSection) configurationSection = 'globals';
+      configurationPage = data;
+      configurationNextOffset = data.nextOffset == null ? null : Number(data.nextOffset);
+      configurationEnvironment = String(data.environment || configurationEnvironment || '');
+      if (data.section == null) setConfigurationSections(data.sections || []);
+      byId('configuration-section').disabled = false;
+      byId('use-configuration-environment').disabled = !configurationEnvironment;
+      renderEffectiveConfiguration(data);
+    } else {
+      configurationMode = 'declared'; configurationPage = data; configurationNextOffset = null;
+      byId('configuration-section').disabled = true;
+      byId('use-configuration-environment').disabled = true;
+      renderDeclaredConfiguration(data || {});
+    }
+    byId('load-more-configuration').hidden = configurationNextOffset == null;
   }
   function setConfigurationProfiles(data) {
     const profiles = Array.isArray(data && data.environments) ? data.environments.filter(item => item.state === 'active' && item.name) : [];
+    configurationProfiles = profiles;
     const ids = ['configuration-environment', 'configuration-left', 'configuration-right'];
     ids.forEach(id => {
       const select = byId(id); select.replaceChildren();
@@ -552,8 +610,90 @@
       });
       if (profiles.length) select.value = profiles.find(profile => profile.default)?.name || profiles[0].name;
     });
-    if (profiles.length > 1) byId('configuration-right').value = profiles[1].name;
+    if (!profiles.length) {
+      const option = el('option', 'Package default'); option.value = '';
+      byId('configuration-environment').append(option); byId('configuration-environment').value = '';
+    }
+    const left = String(byId('configuration-left').value || '');
+    const different = profiles.find(profile => profile.name !== left);
+    if (different) byId('configuration-right').value = different.name;
+    updateCompareEnabled();
     return profiles;
+  }
+  function updateCompareEnabled() {
+    const left = String(byId('configuration-left').value || '');
+    const right = String(byId('configuration-right').value || '');
+    byId('compare-configuration').disabled = configurationProfiles.length < 2 || !left || !right || left === right;
+  }
+  function setConfigurationSections(sections) {
+    const select = byId('configuration-section'); select.replaceChildren();
+    const globalOption = el('option', 'Global'); globalOption.value = 'globals'; select.append(globalOption);
+    for (const section of sections) {
+      const option = el('option', section.title || section.id); option.value = section.id; select.append(option);
+    }
+    if (!sections.some(section => section.id === configurationSection)) configurationSection = 'globals';
+    select.value = configurationSection;
+  }
+  function fieldDisplay(field) {
+    if (!field || field.state !== 'visible') return field && field.state || 'unavailable';
+    const origin = field.origin ? ` · ${field.origin}` : '';
+    return `${String(field.value)}${origin}`;
+  }
+  function appendTable(view, headers, rows) {
+    const table = document.createElement('table');
+    const thead = document.createElement('thead'); const headerRow = document.createElement('tr');
+    headers.forEach(header => headerRow.append(el('th', header))); thead.append(headerRow); table.append(thead);
+    const body = document.createElement('tbody');
+    rows.forEach(values => { const row = document.createElement('tr'); values.forEach(value => row.append(el('td', value))); body.append(row); });
+    table.append(body); view.append(table);
+  }
+  function renderDeclaredConfiguration(data) {
+    const view = byId('configuration-view');
+    appendTable(view, ['Section', 'Declared entries', 'Environment state'],
+      (data.sections || []).map(section => [section.title || section.id,
+        String(section.root && section.root.entryCount || 0),
+        (section.profiles || []).map(profile => `${profile.environment}: ${profile.state}`).join(', ')]));
+    const globals = Object.entries(data.globals || {}).map(([name, field]) => [name, fieldDisplay(field)]);
+    appendTable(view, ['Global field', 'Declared value'], globals);
+  }
+  function currentSectionEntries(data) {
+    if (configurationSection === 'globals') return Object.entries(data.globals || {}).map(([name, field]) => ({id:name,fields:{value:field}}));
+    const section = (data.sections || []).find(item => item.id === configurationSection);
+    return section && Array.isArray(section.entries) ? section.entries : [];
+  }
+  function renderEffectiveConfiguration(data) {
+    const view = byId('configuration-view');
+    const entries = currentSectionEntries(data);
+    const query = String(byId('configuration-search').value || '').trim().toLowerCase();
+    const rows = [];
+    if (configurationSection === 'globals') {
+      for (const entry of entries) {
+        const field = entry.fields.value;
+        if (!query || `${entry.id} ${fieldDisplay(field)}`.toLowerCase().includes(query)) rows.push([entry.id, fieldDisplay(field), field && field.state || 'unavailable', field && field.origin || '']);
+      }
+    } else {
+      for (const entry of entries) for (const [name, field] of Object.entries(entry.fields || {})) {
+        const path = `${entry.id}.${name}`;
+        if (!query || `${path} ${fieldDisplay(field)}`.toLowerCase().includes(query)) rows.push([path, fieldDisplay(field), field && field.state || 'unavailable', field && field.origin || entry.origin || '']);
+      }
+    }
+    appendTable(view, ['Field', 'Value', 'State', 'Origin'], rows);
+    const sectionMeta = (data.sections || []).find(item => item.id === configurationSection);
+    if (sectionMeta && sectionMeta.entryCount != null) text(byId('configuration-status'), `${byId('configuration-status').textContent} Showing ${entries.length} of ${sectionMeta.entryCount} entries.`);
+  }
+  function renderConfigurationComparison(fields) {
+    const query = String(byId('configuration-search').value || '').trim().toLowerCase();
+    const rows = fields.filter(item => !query || String(item.path || '').toLowerCase().includes(query)).map(item => [
+      item.path, fieldDisplay(item.left), fieldDisplay(item.right), item.change || 'unavailable'
+    ]);
+    appendTable(byId('configuration-view'), ['Field', 'Left environment', 'Right environment', 'Change'], rows);
+  }
+  function configurationQuery(environment, section, offset) {
+    const params = [];
+    if (environment) params.push(`environment=${encodeURIComponent(environment)}`);
+    if (section) params.push(`section=${encodeURIComponent(section)}`);
+    params.push(`offset=${Number(offset || 0)}`, 'limit=50');
+    return params.join('&');
   }
   async function loadDeclaredConfiguration(packageId, generation = navigation) {
     const sequence = ++configurationRequestSequence;
@@ -573,30 +713,52 @@
   async function showEffectiveConfiguration() {
     const packageId = selectedPackage, generation = navigation;
     const environment = String(byId('configuration-environment').value || '').trim();
-    if (!packageId || !environment) { text(byId('configuration-status'), 'Select a declared environment first.'); return; }
+    if (!packageId || configurationProfiles.length && !environment) { text(byId('configuration-status'), 'Select a declared environment first.'); return; }
     const sequence = ++configurationRequestSequence;
     text(byId('configuration-view'), '');
-    text(byId('configuration-status'), `Loading effective configuration for ${environment}…`);
+    const label = environment ? `Effective configuration for ${environment}` : 'Effective package default configuration';
+    text(byId('configuration-status'), `Loading ${label.toLowerCase()}…`);
     try {
-      const data = await request(`packages/${encodeURIComponent(packageId)}/configuration/effective?environment=${encodeURIComponent(environment)}`);
+      const query = configurationQuery(environment, null, 0);
+      const data = await request(`packages/${encodeURIComponent(packageId)}/configuration/effective?${query}`);
       if (sequence !== configurationRequestSequence || generation !== navigation || selectedPackage !== packageId) return;
-      renderConfiguration(data, `Effective configuration for ${environment}`);
+      configurationEnvironment = String(data.environment || environment || ''); configurationSection = 'globals';
+      renderConfiguration(data, label);
     } catch (error) {
       if (sequence === configurationRequestSequence && generation === navigation && selectedPackage === packageId) {
-        text(byId('configuration-status'), `Effective configuration for ${environment} is unavailable.`); message(error.message);
+        text(byId('configuration-status'), `${label} is unavailable.`); message(error.message);
       }
+    }
+  }
+  async function loadConfigurationSection(section, offset = 0, append = false) {
+    const packageId = selectedPackage, generation = navigation, environment = configurationEnvironment;
+    if (!packageId || !section) return;
+    configurationSection = section;
+    const sequence = ++configurationRequestSequence;
+    try {
+      const query = configurationQuery(environment, section, offset);
+      const data = await request(`packages/${encodeURIComponent(packageId)}/configuration/effective?${query}`);
+      if (sequence !== configurationRequestSequence || generation !== navigation || selectedPackage !== packageId) return;
+      if (append && configurationPage && configurationPage.section === section) {
+        const previous = (configurationPage.sections || []).find(item => item.id === section);
+        const incoming = (data.sections || []).find(item => item.id === section);
+        if (previous && incoming) incoming.entries = (previous.entries || []).concat(incoming.entries || []);
+      }
+      renderConfiguration(data, `Effective configuration for ${environment || 'package default'}`);
+    } catch (error) {
+      if (sequence === configurationRequestSequence && generation === navigation && selectedPackage === packageId) message(error.message);
     }
   }
   async function compareConfiguration() {
     const packageId = selectedPackage, generation = navigation;
     const left = String(byId('configuration-left').value || '').trim();
     const right = String(byId('configuration-right').value || '').trim();
-    if (!packageId || !left || !right) { text(byId('configuration-status'), 'Select two declared environments to compare.'); return; }
+    if (!packageId || !left || !right || left === right || configurationProfiles.length < 2) { text(byId('configuration-status'), 'Select two different declared environments to compare.'); return; }
     const sequence = ++configurationRequestSequence;
     text(byId('configuration-view'), '');
     text(byId('configuration-status'), `Comparing ${left} with ${right}…`);
     try {
-      const query = `left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`;
+      const query = `left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}&offset=0&limit=50`;
       const data = await request(`packages/${encodeURIComponent(packageId)}/configuration/compare?${query}`);
       if (sequence !== configurationRequestSequence || generation !== navigation || selectedPackage !== packageId) return;
       renderConfiguration(data, `Configuration comparison: ${left} and ${right}`);
@@ -605,6 +767,23 @@
         text(byId('configuration-status'), 'Configuration comparison is unavailable.'); message(error.message);
       }
     }
+  }
+  async function loadMoreConfiguration() {
+    if (configurationNextOffset == null || !selectedPackage) return;
+    const offset = configurationNextOffset;
+    if (configurationMode === 'effective') return loadConfigurationSection(configurationSection, offset, true);
+    if (configurationMode !== 'compare') return;
+    const left = String(byId('configuration-left').value || '').trim();
+    const right = String(byId('configuration-right').value || '').trim();
+    const sequence = ++configurationRequestSequence, generation = navigation;
+    try {
+      const query = `left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}&offset=${offset}&limit=50`;
+      const data = await request(`packages/${encodeURIComponent(selectedPackage)}/configuration/compare?${query}`);
+      if (sequence !== configurationRequestSequence || generation !== navigation) return;
+      data.fields = (configurationPage && configurationPage.fields || []).concat(data.fields || []);
+      data.offset = 0;
+      renderConfiguration(data, `Configuration comparison: ${left} and ${right}`);
+    } catch (error) { if (sequence === configurationRequestSequence && generation === navigation) message(error.message); }
   }
   function resourcePath(packageId, resource) {
     return `packages/${encodeURIComponent(packageId)}/resources/${encodeURIComponent(resource.type)}/${encodeURIComponent(resource.resourceId)}`;
@@ -618,11 +797,19 @@
   }
   function clearQuickLoadForm() {
     quickLoadFormSequence++; quickLoadDefaults = null; quickLoadTarget = null; quickLoadPolicyDefaults = null;
+    quickLoadDebugTestdataOmitted = false;
     quickLoadDraft = null; quickLoadDraftFingerprint = '';
     quickLoadPreviewPending = null; quickLoadPreviewPendingFingerprint = '';
     byId('resource-quick-load').hidden = true;
     byId('quick-load-form-editor').hidden = true;
     text(byId('quick-load-form-status'), ''); text(byId('quick-load-preview'), '');
+  }
+  function configurationTarget(resource) {
+    const sections = { tool: 'tools', dbhelper: 'dbhelpers', mqhelper: 'mqhelpers', sshhelper: 'sshhelpers', httphelper: 'httphelpers' };
+    if (resource && resource.type === 'tool') return { section: 'tools', id: resource.logicalId || '', label: 'Tool' };
+    const reference = (resource && Array.isArray(resource.references) ? resource.references : [])
+      .find(item => item && item.resolution === 'resolved' && sections[item.type]);
+    return reference ? { section: sections[reference.type], id: reference.logicalId || '', label: reference.type } : null;
   }
   function renderResourceList() {
     const list = byId('resource-list'); list.replaceChildren();
@@ -697,6 +884,7 @@
       const data = await request(resourcePath(selectedPackage, item));
       if (selection !== resourceDetailSequence || generation !== navigation || !selectedPackage) return;
       activeResource = data.resource || item;
+      resourceConfigurationTarget = configurationTarget(activeResource);
       text(byId('resource-title'), `${activeResource.name || activeResource.logicalId} · ${activeResource.type}`);
       text(byId('resource-description'), activeResource.description || activeResource.state || '');
       const invalid = activeResource.state === 'invalid';
@@ -716,6 +904,8 @@
       const sourceAvailable = activeResource.sourceAvailable === true;
       text(byId('resource-source-status'), sourceAvailable ? 'Safe source is available.' : 'Source is not available for this resource.');
       byId('show-resource-source').hidden = !sourceAvailable;
+      byId('resource-configuration-link').hidden = resourceConfigurationTarget == null;
+      if (resourceConfigurationTarget) text(byId('resource-configuration-link'), `View ${resourceConfigurationTarget.label} configuration`);
       byId('run-resource-case').hidden = activeResource.type !== 'case' || activeResource.state === 'invalid';
       byId('debug-resource').hidden = !['template','flow','tool'].includes(activeResource.type) || activeResource.state === 'invalid';
       byId('quick-load-resource').hidden = !inlineLoadEnabled || !['template','flow','tool'].includes(activeResource.type) || activeResource.state === 'invalid';
@@ -745,7 +935,7 @@
       byId('debug-arguments-label').hidden = !tool;
       resetDebugForm();
       byId('debug-form-editor').hidden = false;
-      text(byId('debug-form-status'), data.redacted ? 'Defaults loaded. Sensitive fields are hidden in the form and preview.' : 'Defaults loaded from the package sidecar, or generated as empty defaults.');
+      text(byId('debug-form-status'), data.redacted ? 'Defaults loaded. Package-authored values are hidden. Keep each $attDebugKeepDefault marker to reuse that value, or replace it with an override.' : 'Defaults loaded from the package sidecar, or generated as empty defaults.');
     } catch (error) {
       if (sequence === debugFormSequence && generation === navigation && activeResource === item) {
         text(byId('debug-form-status'), `Debug defaults are unavailable. ${debugValidationMessage(error)}`); message(error.message);
@@ -793,11 +983,12 @@
     const environment = String(byId('submit-form').elements.environment.value || '').trim();
     if (environment) body.environment = environment;
     const fingerprint = JSON.stringify(body);
-    if (debugDraft && debugDraftFingerprint === fingerprint) {
+    if (debugDraft && debugDraftFingerprint === fingerprint && debugDraftUsable(debugDraft)) {
       text(byId('debug-preview'), debugDraft.previewYaml || JSON.stringify(debugDraft.preview || {}, null, 2));
       text(byId('debug-form-status'), debugDraft.redacted ? 'Validation passed. The preview hides sensitive fields.' : 'Validation passed.');
       return debugDraft;
     }
+    if (debugDraft) { debugDraft = null; debugDraftFingerprint = ''; }
     if (debugPreviewPending && debugPreviewPendingFingerprint === fingerprint) return debugPreviewPending;
     const pending = (async () => {
       text(byId('debug-form-status'), 'Validating the effective Debug input…');
@@ -820,6 +1011,10 @@
       }
     }
   }
+  function debugDraftUsable(draft) {
+    const expires = Date.parse(draft && draft.expiresAt || '');
+    return Number.isFinite(expires) && expires > Date.now() + 15000;
+  }
   async function runDebugDraft() {
     const packageId = selectedPackage, generation = navigation;
     if (!packageId || submitting.has(packageId)) return;
@@ -831,7 +1026,12 @@
       debugDraft = null; debugDraftFingerprint = '';
       if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
     } catch (error) {
-      if (generation === navigation && selectedPackage === packageId) { text(byId('debug-form-status'), `Debug was not submitted. ${debugValidationMessage(error)}`); message(error.message); }
+      if (generation === navigation && selectedPackage === packageId) {
+        const stale = error && (error.status === 404 || error.status === 409 || error.code === 'ATT-SERVER-DRAFT-STALE');
+        if (stale) { debugDraft = null; debugDraftFingerprint = ''; text(byId('debug-form-status'), 'The Debug draft expired or the Server restarted. Validate the current input and start Debug again.'); }
+        else text(byId('debug-form-status'), `Debug was not submitted. ${debugValidationMessage(error)}`);
+        message(error.message);
+      }
     } finally {
       submitting.delete(packageId); if (selectedPackage === packageId) byId('submit-debug-form').disabled = false;
     }
@@ -845,6 +1045,7 @@
     const model = String(byId('quick-load-model').value || 'virtualUsers');
     const sequence = ++quickLoadFormSequence;
     quickLoadDefaults = null; quickLoadTarget = null; quickLoadPolicyDefaults = null;
+    quickLoadDebugTestdataOmitted = false;
     quickLoadDraft = null; quickLoadDraftFingerprint = '';
     byId('resource-quick-load').hidden = false; byId('quick-load-form-editor').hidden = true;
     text(byId('quick-load-form-status'), 'Loading safe business defaults and Load policy…'); text(byId('quick-load-preview'), '');
@@ -856,13 +1057,16 @@
       if (sequence !== quickLoadFormSequence || generation !== navigation || activeResource !== item || selectedPackage !== packageId) return;
       quickLoadDefaults = JSON.parse(JSON.stringify(data.input || {}));
       quickLoadPolicyDefaults = JSON.parse(JSON.stringify(data.preview || {}));
+      quickLoadDebugTestdataOmitted = data.debugLocalTestdataOmitted === true;
       quickLoadTarget = data.target || { type: item.type, id: item.logicalId };
       setQuickLoadControls(quickLoadPolicyDefaults, model);
       resetQuickLoadForm();
       byId('quick-load-form-editor').hidden = false;
-      text(byId('quick-load-form-status'), data.redacted
+      byId('quick-load-testdata').value = JSON.stringify(data.loadTestdata || [], null, 2);
+      text(byId('quick-load-form-status'), (data.redacted
         ? 'Defaults loaded. Sensitive business values are hidden in the form and preview.'
-        : 'Defaults loaded from the target sidecar, or generated as empty inputs with a bundled low-intensity policy.');
+        : 'Defaults loaded from the target sidecar, or generated as empty inputs with a bundled low-intensity policy.')
+        + (quickLoadDebugTestdataOmitted ? ' Debug-local Testdata was omitted; add any imports needed for this Load in the Load-level paths field.' : ''));
     } catch (error) {
       if (sequence === quickLoadFormSequence && generation === navigation && activeResource === item) {
         text(byId('quick-load-form-status'), `Quick Load defaults are unavailable. ${debugValidationMessage(error)}`); message(error.message);
@@ -888,6 +1092,7 @@
     if (!quickLoadDefaults || !quickLoadPolicyDefaults) return;
     quickLoadDraft = null; quickLoadDraftFingerprint = '';
     byId('quick-load-input').value = JSON.stringify(quickLoadDefaults, null, 2);
+    byId('quick-load-testdata').value = '[]';
     setQuickLoadControls(quickLoadPolicyDefaults, String(byId('quick-load-model').value || 'virtualUsers'));
     text(byId('quick-load-preview'), '');
   }
@@ -904,6 +1109,11 @@
     try { input = JSON.parse(String(byId('quick-load-input').value || '{}')); }
     catch (_) { throw new Error('Business inputs and variables must be a JSON object.'); }
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Business inputs and variables must be a JSON object.');
+    let testdata;
+    try { testdata = JSON.parse(String(byId('quick-load-testdata').value || '[]')); }
+    catch (_) { throw new Error('Load-level Testdata paths must be a JSON array.'); }
+    if (!Array.isArray(testdata) || testdata.some(path => typeof path !== 'string' || !path.trim()))
+      throw new Error('Load-level Testdata paths must be an array of non-empty package-relative paths.');
     const model = String(byId('quick-load-model').value || 'virtualUsers');
     const load = {};
     const duration = String(byId('quick-load-duration').value || '').trim();
@@ -927,7 +1137,7 @@
       load.maxConcurrent = maximum;
       load.overloadPolicy = 'drop';
     }
-    const body = { packageId: selectedPackage, target: quickLoadTarget, model, input, load, execution };
+    const body = { packageId: selectedPackage, target: quickLoadTarget, model, input, load, execution, testdata };
     const environment = String(byId('submit-form').elements.environment.value || '').trim();
     if (environment) body.environment = environment;
     return body;
@@ -940,7 +1150,8 @@
     if (quickLoadDraft && quickLoadDraftFingerprint === fingerprint
         && Date.parse(quickLoadDraft.expiresAt || '') > Date.now() + 1000) {
       text(byId('quick-load-preview'), quickLoadDraft.previewYaml || JSON.stringify(quickLoadDraft.preview || {}, null, 2));
-      text(byId('quick-load-form-status'), quickLoadDraft.redacted ? 'Validation passed. The preview hides sensitive fields.' : 'Validation passed.');
+      text(byId('quick-load-form-status'), (quickLoadDraft.redacted ? 'Validation passed. The preview hides sensitive fields.' : 'Validation passed.')
+        + (quickLoadDebugTestdataOmitted ? ' Debug-local Testdata remains omitted; Load-level imports are validated separately.' : ''));
       return quickLoadDraft;
     }
     if (quickLoadPreviewPending && quickLoadPreviewPendingFingerprint === fingerprint) return quickLoadPreviewPending;
@@ -951,7 +1162,8 @@
       if (JSON.stringify(currentQuickLoadBody()) !== fingerprint) return null;
       quickLoadDraft = draft; quickLoadDraftFingerprint = fingerprint;
       text(byId('quick-load-preview'), draft.previewYaml || JSON.stringify(draft.preview || {}, null, 2));
-      text(byId('quick-load-form-status'), draft.redacted ? 'Validation passed. The preview hides sensitive fields.' : 'Validation passed.');
+      text(byId('quick-load-form-status'), (draft.redacted ? 'Validation passed. The preview hides sensitive fields.' : 'Validation passed.')
+        + (quickLoadDebugTestdataOmitted ? ' Debug-local Testdata remains omitted; Load-level imports are validated separately.' : ''));
       return draft;
     })();
     quickLoadPreviewPending = pending; quickLoadPreviewPendingFingerprint = fingerprint;
@@ -1144,12 +1356,23 @@
   byId('refresh-resources').addEventListener('click', () => { if (selectedPackage) loadResources(selectedPackage, true); });
   byId('load-more-resources').addEventListener('click', () => { if (selectedPackage && resourceCursor) loadResources(selectedPackage, false); });
   byId('show-resource-source').addEventListener('click', showResourceSource);
+  byId('resource-configuration-link').addEventListener('click', async () => {
+    const item = activeResource;
+    const target = resourceConfigurationTarget;
+    if (!item || !target) return;
+    byId('configuration-search').value = target.id;
+    await showEffectiveConfiguration();
+    if (configurationMode === 'effective') {
+      byId('configuration-section').value = target.section;
+      await loadConfigurationSection(target.section, 0, false);
+    }
+  });
   byId('run-resource-case').addEventListener('click', runResourceCase);
   byId('debug-resource').addEventListener('click', loadDebugForm);
   byId('quick-load-resource').addEventListener('click', loadQuickLoadForm);
   byId('advanced-load-model').addEventListener('change', loadAdvancedLoadPolicy);
   byId('advanced-load-environment').addEventListener('input', markAdvancedLoadDirty);
-  byId('advanced-load-environment').addEventListener('change', () => { if (advancedLoadModel) loadAdvancedLoadPolicy(); });
+  byId('advanced-load-environment').addEventListener('change', () => { if (advancedLoadModel) loadAdvancedLoadPolicy({ preserveScenario: true }); });
   ['advanced-load-warmup','advanced-load-ramp-up','advanced-load-duration','advanced-load-ramp-down',
     'advanced-load-seed','advanced-load-execution','advanced-load-testdata','advanced-load-thresholds','advanced-load-evidence']
     .forEach(id => byId(id).addEventListener('input', markAdvancedLoadDirty));
@@ -1160,7 +1383,7 @@
     if (event.target.matches('[data-field="targetType"]')) {
       const container = event.target.closest('.advanced-workload, .advanced-mix-entry');
       const business = advancedField(container, 'business');
-      if (business) business.value = event.target.value === 'tool' ? '{\n  "arguments": {}\n}' : '{\n  "inputs": {},\n  "vars": {}\n}';
+      if (business) business.value = event.target.value === 'tool' ? '{\n  "inputs": {},\n  "arguments": {}\n}' : '{\n  "inputs": {},\n  "vars": {}\n}';
       updateAdvancedTargetSuggestions(String(event.target.value || ''));
     }
     markAdvancedLoadDirty();
@@ -1207,7 +1430,7 @@
   byId('quick-load-model').addEventListener('change', loadQuickLoadForm);
   byId('reset-quick-load-form').addEventListener('click', resetQuickLoadForm);
   ['quick-load-users','quick-load-think-time','quick-load-arrival-rate','quick-load-max-concurrent',
-    'quick-load-duration','quick-load-warmup','quick-load-ramp-up','quick-load-ramp-down','quick-load-input'].forEach(id =>
+    'quick-load-duration','quick-load-warmup','quick-load-ramp-up','quick-load-ramp-down','quick-load-input','quick-load-testdata'].forEach(id =>
     byId(id).addEventListener('input', () => {
       quickLoadDraft = null; quickLoadDraftFingerprint = ''; text(byId('quick-load-preview'), '');
       text(byId('quick-load-form-status'), 'Input changed. Validate it before starting Load.');
@@ -1220,6 +1443,32 @@
   byId('show-declared-configuration').addEventListener('click', () => { if (selectedPackage) loadDeclaredConfiguration(selectedPackage); });
   byId('show-effective-configuration').addEventListener('click', showEffectiveConfiguration);
   byId('compare-configuration').addEventListener('click', compareConfiguration);
+  byId('use-configuration-environment').addEventListener('click', () => {
+    const field = byId('submit-form').elements.environment;
+    if (!field || !configurationEnvironment) return;
+    field.value = configurationEnvironment;
+    text(byId('configuration-status'), `Set the Run/Debug/Load environment to ${configurationEnvironment}. No job was submitted.`);
+  });
+  byId('configuration-section').addEventListener('change', () => {
+    const selected = String(byId('configuration-section').value || 'globals');
+    loadConfigurationSection(selected, 0, false);
+  });
+  byId('configuration-left').addEventListener('change', () => {
+    const left = String(byId('configuration-left').value || '');
+    const right = String(byId('configuration-right').value || '');
+    if (left && left === right) {
+      const different = configurationProfiles.find(profile => profile.name !== left);
+      if (different) byId('configuration-right').value = different.name;
+    }
+    updateCompareEnabled();
+  });
+  byId('configuration-right').addEventListener('change', updateCompareEnabled);
+  byId('configuration-search').addEventListener('input', () => {
+    if (!configurationPage) return;
+    if (configurationMode === 'effective') renderConfiguration(configurationPage, `Effective configuration for ${configurationEnvironment || 'package default'}`);
+    else if (configurationMode === 'compare') renderConfiguration(configurationPage, `Configuration comparison: ${configurationPage.leftEnvironment} and ${configurationPage.rightEnvironment}`);
+  });
+  byId('load-more-configuration').addEventListener('click', loadMoreConfiguration);
   byId('refresh-configuration').addEventListener('click', () => { if (selectedPackage) loadDeclaredConfiguration(selectedPackage); });
   byId('refresh-jobs').addEventListener('click', () => loadHome());
   window.addEventListener('hashchange', route);

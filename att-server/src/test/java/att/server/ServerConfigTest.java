@@ -16,7 +16,24 @@ class ServerConfigTest {
         Files.writeString(file,"server:\n  dataDir: "+data+"\n  javaExecutable: "+java+"\nworkers:\n  maxConcurrent: 2\n  queuedLimit: 3\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    payments: "+pkg+"\n");
         ServerConfig config=ServerConfig.load(file);
         assertEquals(pkg.toRealPath(),config.packages.get("payments"));assertTrue(Files.isDirectory(data.resolve("db")));assertTrue(Files.isDirectory(data.resolve("jobs")));
+        assertFalse(config.inlineLoad.enabled);assertEquals(1000,config.inlineLoad.maxTotalConcurrent);
         assertThrows(UnsupportedOperationException.class,()->config.packages.put("other",pkg));
+    }
+
+    @Test void validatesAggregateInlineLoadConcurrencyBound() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("inline-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path valid=temp.resolve("inline-valid.yaml");Files.writeString(valid,"server:\n  dataDir: "+yaml(temp.resolve("inline-valid-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  inlineLoad:\n    enabled: true\n    maxTotalConcurrent: 42\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        ServerConfig loaded=ServerConfig.load(valid);assertTrue(loaded.inlineLoad.enabled);assertEquals(42,loaded.inlineLoad.maxTotalConcurrent);
+        for(String value:List.of("0","1000001")) {
+            Path invalid=temp.resolve("inline-invalid-"+value+".yaml");Files.writeString(invalid,"server:\n  dataDir: "+yaml(temp.resolve("inline-invalid-data-"+value))+"\n  javaExecutable: "+yaml(java)
+                    +"\n  inlineLoad:\n    maxTotalConcurrent: "+value+"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+            assertThrows(IllegalArgumentException.class,()->ServerConfig.load(invalid),"maxTotalConcurrent="+value);
+        }
+        Path unknown=temp.resolve("inline-unknown.yaml");Files.writeString(unknown,"server:\n  dataDir: "+yaml(temp.resolve("inline-unknown-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  inlineLoad:\n    enabled: true\n    maxTotalConcurent: 42\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(unknown));assertTrue(error.getMessage().contains("unknown setting"));
     }
     @Test void rejectsPackageRootsOutsideConfiguredAllowedRoots() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("allowed"));Path outside=Files.createDirectory(temp.resolve("outside"));

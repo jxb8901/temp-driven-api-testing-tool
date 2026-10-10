@@ -33,6 +33,7 @@ public final class WorkerRequest {
     public String loadModel;
     public Map<String,Object> loadOverrides;
     public Map<String,Object> workloadExecution;
+    public List<String> quickLoadTestdata;
     public Boolean unsafeFailureDetails;
     public Map<String,String> load;
     public List<String> overrides;
@@ -40,6 +41,7 @@ public final class WorkerRequest {
     public String inspectionType;
     public String inspectionEnvironment;
     public String inspectionOtherEnvironment;
+    public String inspectionSection;
     public String inspectionResourceId;
     public String inspectionTargetId;
     public String draftResourceId;

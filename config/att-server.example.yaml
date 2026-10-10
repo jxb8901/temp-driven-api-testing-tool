@@ -31,6 +31,7 @@ server:
     maxTotalUsers: 100
     maxAggregateArrivalRatePerSecond: 100
     maxConcurrentPerWorkload: 100
+    maxTotalConcurrent: 1000
     maxDurationSeconds: 3600
 
 workers:

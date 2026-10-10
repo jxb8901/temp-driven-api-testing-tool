@@ -11,26 +11,62 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
     await new Promise(resolve => setImmediate(resolve));
   }
 }
+function allText(node) { return [node.textContent || '', ...(node.children || []).map(allText)].join(' '); }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [] } = {}) {
+function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo = undefined, confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [], debugFormResponse = null, debugDraftResponses = [], debugSubmitErrors = [], quickLoadFormResponse = null, quickLoadDraftResponses = [] } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
-      this.textContent = ''; this.hidden = false; this.disabled = false; this.submitButton = { disabled: false };
+      this.textContent = ''; this.hidden = false; this.disabled = false; this.value = ''; this.options = [];
+      this.submitButton = { disabled: false };
     }
     addEventListener(name, listener) { this.listeners[name] = listener; }
     append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
     replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(node => node !== this); }
     get firstElementChild() { return this.children[0]; }
-    querySelector(selector) { return selector === 'button[type="submit"]' ? this.submitButton : null; }
+    querySelector(selector) {
+      if (selector === 'button[type="submit"]') return this.submitButton;
+      const field = /^\[data-field="([^"]+)"\]$/.exec(selector);
+      if (field) return this.fields && this.fields[field[1]] || null;
+      const role = /^\[data-role="([^"]+)"\]$/.exec(selector);
+      if (role) return this.roles && this.roles[role[1]] || null;
+      return null;
+    }
+    querySelectorAll(selector) {
+      if (selector === '.advanced-workload') return this.children.filter(child => child.className === 'advanced-workload');
+      if (selector === '.advanced-mix-entry') return this.children.filter(child => child.className === 'advanced-mix-entry');
+      if (selector === '[data-field="targetType"]') return this.fields && this.fields.targetType ? [this.fields.targetType] : [];
+      return [];
+    }
     reset() { this.formValues = []; }
   }
+  const makeAdvancedWorkload = () => {
+    const article = new Element(); article.className = 'advanced-workload'; article.fields = {}; article.roles = {};
+    const field = (name, value = '') => { const element = new Element(); element.value = value; article.fields[name] = element; return element; };
+    field('id'); field('structure', 'single').options = [{ value: 'single' }, { value: 'mix' }];
+    field('users', '1'); field('thinkTime'); field('arrivalRate', '1/s'); field('maxConcurrent', '1');
+    field('testdata', '{}'); field('thresholds', '{}'); field('workloadBusiness', '{}');
+    field('targetType', 'template'); field('targetId', 'TEMPLATE'); field('business', '{}');
+    for (const role of ['virtual-users-fields','arrival-rate-fields','single-target','mix-targets','mix-workload-business','mix-entries'])
+      article.roles[role] = new Element();
+    article.cloneNode = () => {
+      const copy = makeAdvancedWorkload();
+      for (const [name, element] of Object.entries(article.fields)) copy.fields[name].value = element.value;
+      return copy;
+    };
+    return article;
+  };
   const elements = new Map();
   const node = id => {
-    if (!elements.has(id)) elements.set(id, new Element());
+    if (!elements.has(id)) {
+      const element = new Element();
+      if (id === 'advanced-workload-template') element.content = { firstElementChild: makeAdvancedWorkload() };
+      elements.set(id, element);
+    }
     return elements.get(id);
   };
+  node('submit-form').elements.environment = Object.assign(new Element(), { value: '' });
   const document = {
     baseURI: 'https://example.test/tools/att/ui/',
     getElementById: node,
@@ -41,7 +77,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     addEventListener(name, listener) { this.listeners[name] = listener; }
   };
   const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [], pendingHomeJobs = [], pendingResults = [], pendingConfigurations = [];
-  const state = { jobStatus, resourcePage: 0 };
+  const state = { jobStatus, resourcePage: 0, debugDraft: 0, debugSubmit: 0, quickLoadDraft: 0, policyRequests: [] };
   let rejectHome;
   const delayedHome = new Promise((_, reject) => { rejectHome = reject; });
   class EventSource {
@@ -71,12 +107,49 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
       return { ok: false, status: 404, headers: { get: () => 'application/json' },
         json: async () => ({ error: { summary: 'Job not found' } }) };
     }
+    if (path === 'jobs/debug' && options.method === 'POST') {
+      const failure = debugSubmitErrors[state.debugSubmit++];
+      if (failure) return { ok: false, status: failure.status, headers: { get: () => 'application/json' },
+        json: async () => ({ error: { code: failure.code || 'ATT-SERVER-DRAFT-STALE', summary: failure.summary || 'Debug draft is no longer available' } }) };
+      return jsonResponse({ jobId: 'J_DEBUG' });
+    }
     let result;
-    if (path === 'version') result = { apiVersion: version };
+    if (path === 'version') result = versionInfo === undefined ? { apiVersion: version, inlineLoadEnabled } : versionInfo;
     else if (path === 'packages') result = { items: [{ packageId: 'payments' }] };
+    else if (/^packages\/[^/]+\/load-policy\?/.test(path)) {
+      state.policyRequests.push(new URLSearchParams(path.split('?')[1]).get('environment'));
+      result = { policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '10s' }, execution: { thinkTime: '1ms' } }, redacted: false };
+    }
     else if (/^packages\/[^/]+\/resources\?/.test(path)) result = resourcePages.length
       ? resourcePages[Math.min(state.resourcePage++, resourcePages.length - 1)]
       : { items: resourceItems, total: resourceItems.length, nextCursor: null };
+    else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+\/debug-form(?:\?|$)/.test(path)) result = debugFormResponse || {
+      input: { schemaVersion: 'att-debug/v1.2', inputs: { payload: { $attDebugKeepDefault: '/inputs/payload' } } },
+      target: { type: 'template', id: 'TEST' }, redacted: true
+    };
+    else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+\/quick-load-form\?/.test(path)) result = quickLoadFormResponse || {
+      input: { inputs: {}, vars: {} }, target: { type: 'template', id: 'TEST' }, model: 'virtualUsers',
+      preview: { load: { users: 1, duration: '10s' }, workloads: [{ execution: {} }] },
+      loadTestdata: [], debugLocalTestdataOmitted: false, redacted: false
+    };
+    else if (path === 'drafts/debug' && options.method === 'POST') {
+      const index = state.debugDraft++;
+      result = debugDraftResponses[Math.min(index, debugDraftResponses.length - 1)] || {
+        draftId: `D${index + 1}`, preview: {}, previewYaml: 'schemaVersion: att-debug/v1.2',
+        redacted: true, expiresAt: new Date(Date.now() + 60000).toISOString()
+      };
+    }
+    else if (path === 'drafts/quick-load' && options.method === 'POST') {
+      const index = state.quickLoadDraft++;
+      result = quickLoadDraftResponses[Math.min(index, quickLoadDraftResponses.length - 1)] || {
+        draftId: `L${index + 1}`, target: { type: 'template', id: 'TEST' }, model: 'virtualUsers', preview: {}, previewYaml: 'schemaVersion: att-load/v1.6',
+        redacted: false, expiresAt: new Date(Date.now() + 60000).toISOString()
+      };
+    }
+    else if (path === 'drafts/load' && options.method === 'POST') result = {
+      draftId: 'A123', preview: { schemaVersion: 'att-load/v1.6' }, previewYaml: 'schemaVersion: att-load/v1.6',
+      redacted: false, expiresAt: new Date(Date.now() + 60000).toISOString()
+    };
     else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+\/source$/.test(path)) result = { available: true, text: '<img src=x onerror=alert(1)>', format: 'yaml' };
     else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+$/.test(path)) result = { resource: resourceItems[0], definition: { action: 'log' }, diagnostics: [] };
     else if (/^packages\/[^/]+\/configuration\/effective\?/.test(path)) result = configuration.effective || {};
@@ -108,11 +181,42 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     failHome: error => rejectHome(error) };
 }
 
+async function openDebugForm(ui, resource) {
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'package resource index');
+  await ui.node('resource-list').children[0].children[0].listeners.click();
+  await ui.node('debug-resource').listeners.click();
+  await waitFor(() => ui.node('debug-form-editor').hidden === false, 'Debug form');
+}
+
+async function openQuickLoadForm(ui) {
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'package resource index');
+  await ui.node('resource-list').children[0].children[0].listeners.click();
+  await ui.node('quick-load-resource').listeners.click();
+  await waitFor(() => ui.node('quick-load-form-editor').hidden === false, 'Quick Load form');
+}
+
 test('rejects an incompatible API before accessing packages', async () => {
   const ui = boot({ version: '2' });
   await waitFor(() => ui.node('message').textContent.includes('Incompatible ATT Server API version'), 'API version rejection');
   assert.match(ui.node('message').textContent, /Incompatible ATT Server API version/);
   assert.deepEqual(ui.calls.map(call => call.path), ['version']);
+});
+
+test('keeps browser-created Load disabled unless the version capability is exactly true', async () => {
+  for (const versionInfo of [
+    { apiVersion: '1' },
+    { apiVersion: '1', inlineLoadEnabled: null },
+    { apiVersion: '1', inlineLoadEnabled: false },
+    { apiVersion: '1', inlineLoadEnabled: true }
+  ]) {
+    const ui = boot({ versionInfo });
+    await waitFor(() => ui.node('packages').children.length === 1, 'home package list');
+    const button = ui.node('packages').children[0].children[2];
+    assert.equal(button.disabled, versionInfo.inlineLoadEnabled !== true);
+  }
+  const direct = boot({ hash: '#/advanced-load/payments', versionInfo: { apiVersion: '1' } });
+  await waitFor(() => direct.node('advanced-load-policy-status').textContent.includes('disabled by Server configuration'), 'disabled direct Advanced Load route');
+  assert.equal(direct.calls.some(call => call.path.includes('load-policy')), false);
 });
 
 test('submits logical package DTOs with a non-root Tomcat context', async () => {
@@ -152,6 +256,121 @@ test('shows invalid and source-unavailable resource states in the detail view', 
   assert.equal(ui.node('resource-state').textContent, 'Invalid resource: Flow definition is invalid');
   assert.equal(ui.node('resource-source-status').textContent, 'Source is not available for this resource.');
   assert.equal(ui.node('show-resource-source').hidden, true);
+});
+
+test('revalidates an expired Debug draft before submission', async () => {
+  const resource = { resourceId: 'template.test', type: 'template', logicalId: 'TEST', name: 'Test', state: 'ready', sourceAvailable: false };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [resource], debugDraftResponses: [
+    { draftId: 'D_EXPIRED', preview: {}, redacted: true, expiresAt: new Date(Date.now() + 5000).toISOString() },
+    { draftId: 'D_FRESH', preview: {}, redacted: true, expiresAt: new Date(Date.now() + 60000).toISOString() }
+  ] });
+  await openDebugForm(ui, resource);
+  await ui.node('preview-debug-form').listeners.click();
+  assert.equal(ui.calls.filter(call => call.path === 'drafts/debug').length, 1);
+  await ui.node('submit-debug-form').listeners.click();
+  await waitFor(() => ui.location.hash === '#/jobs/J_DEBUG', 'Debug job submission');
+  assert.equal(ui.calls.filter(call => call.path === 'drafts/debug').length, 2);
+  const submitted = ui.calls.filter(call => call.path === 'jobs/debug').map(call => JSON.parse(call.options.body));
+  assert.deepEqual(submitted, [{ packageId: 'payments', draftId: 'D_FRESH' }]);
+});
+
+test('clears a server-invalidated Debug draft and offers a fresh validation', async () => {
+  const resource = { resourceId: 'template.test', type: 'template', logicalId: 'TEST', name: 'Test', state: 'ready', sourceAvailable: false };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [resource], debugSubmitErrors: [{ status: 404 }] });
+  await openDebugForm(ui, resource);
+  await ui.node('preview-debug-form').listeners.click();
+  await ui.node('submit-debug-form').listeners.click();
+  await waitFor(() => ui.node('debug-form-status').textContent.includes('Server restarted'), 'stale draft message');
+  assert.equal(ui.calls.filter(call => call.path === 'drafts/debug').length, 1);
+  await ui.node('submit-debug-form').listeners.click();
+  await waitFor(() => ui.location.hash === '#/jobs/J_DEBUG', 'fresh Debug job submission');
+  assert.equal(ui.calls.filter(call => call.path === 'drafts/debug').length, 2);
+});
+
+test('warns when Debug-local Testdata is omitted and submits separate Load imports', async () => {
+  const resource = { resourceId: 'template.form', type: 'template', logicalId: 'FORM', name: 'Form', state: 'ready', sourceAvailable: false };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [resource], quickLoadFormResponse: {
+    input: { inputs: { amount: 7 }, vars: { reference: 'REF001' } }, target: { type: 'template', id: 'FORM' }, model: 'virtualUsers',
+    preview: { load: { users: 1, duration: '10s' }, workloads: [{ execution: {} }] },
+    loadTestdata: [], debugLocalTestdataOmitted: true, redacted: false
+  } });
+  await openQuickLoadForm(ui);
+  assert.match(ui.node('quick-load-form-status').textContent, /Debug-local Testdata was omitted/);
+  ui.node('quick-load-testdata').value = '["testdata/load-accounts.yaml"]';
+  await ui.node('preview-quick-load-form').listeners.click();
+  await waitFor(() => ui.calls.some(call => call.path === 'drafts/quick-load'), 'Quick Load draft validation');
+  const submitted = JSON.parse(ui.calls.find(call => call.path === 'drafts/quick-load').options.body);
+  assert.deepEqual(submitted.testdata, ['testdata/load-accounts.yaml']);
+  assert.deepEqual(submitted.input, { inputs: { amount: 7 }, vars: { reference: 'REF001' } });
+  assert.match(ui.node('quick-load-form-status').textContent, /Debug-local Testdata remains omitted/);
+});
+
+test('revalidates an expired Quick Load draft before asking to start Load', async () => {
+  const resource = { resourceId: 'template.test', type: 'template', logicalId: 'TEST', name: 'Test', state: 'ready', sourceAvailable: false };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [resource], quickLoadDraftResponses: [
+    { draftId: 'L_EXPIRED', target: { type: 'template', id: 'TEST' }, model: 'virtualUsers', preview: {}, redacted: false, expiresAt: new Date(Date.now() - 1000).toISOString() },
+    { draftId: 'L_FRESH', target: { type: 'template', id: 'TEST' }, model: 'virtualUsers', preview: {}, redacted: false, expiresAt: new Date(Date.now() + 60000).toISOString() }
+  ] });
+  await openQuickLoadForm(ui);
+  await ui.node('preview-quick-load-form').listeners.click();
+  await ui.node('submit-quick-load-form').listeners.click();
+  assert.equal(ui.calls.filter(call => call.path === 'drafts/quick-load').length, 2, JSON.stringify(ui.calls.map(call => call.path)));
+  assert.equal(ui.calls.filter(call => call.path === 'jobs/load').length, 1, ui.node('quick-load-form-status').textContent);
+  await waitFor(() => ui.location.hash === '#/jobs/J1', 'Quick Load job submission');
+  assert.deepEqual(JSON.parse(ui.calls.find(call => call.path === 'jobs/load').options.body), { packageId: 'payments', draftId: 'L_FRESH' });
+});
+
+test('preserves configured Advanced Load workloads when the environment policy changes', async () => {
+  const ui = boot({ hash: '#/advanced-load/payments' });
+  await waitFor(() => ui.node('advanced-load-package').textContent === 'payments', 'Advanced Load package');
+  ui.node('advanced-load-model').value = 'virtualUsers';
+  await ui.node('advanced-load-model').listeners.change();
+  const workloads = ui.node('advanced-load-workloads');
+  ui.node('add-advanced-workload').listeners.click();
+  assert.equal(workloads.children.length, 2);
+  workloads.children[0].fields.id.value = 'orders';
+  workloads.children[0].fields.users.value = '7';
+  workloads.children[0].fields.targetId.value = 'ORDER_FORM';
+  workloads.children[1].fields.id.value = 'payments';
+  workloads.children[1].fields.users.value = '3';
+  workloads.children[1].fields.targetType.value = 'flow';
+  workloads.children[1].fields.targetId.value = 'PAYMENT_FLOW';
+  ui.node('advanced-load-duration').value = '45s';
+  ui.node('advanced-load-seed').value = '42';
+
+  ui.node('advanced-load-environment').value = 'UAT';
+  ui.node('advanced-load-environment').listeners.input();
+  ui.node('advanced-load-environment').listeners.change();
+  await waitFor(() => ui.node('advanced-load-policy-status').textContent.includes('Policy reloaded for this environment'), 'UAT policy reload');
+
+  assert.deepEqual(ui.state.policyRequests, [null, 'UAT']);
+  assert.equal(workloads.children.length, 2);
+  assert.deepEqual(workloads.children.map(item => [item.fields.id.value, item.fields.users.value, item.fields.targetType.value, item.fields.targetId.value]), [
+    ['orders', '7', 'template', 'ORDER_FORM'], ['payments', '3', 'flow', 'PAYMENT_FLOW']
+  ]);
+  assert.equal(ui.node('advanced-load-duration').value, '45s');
+  assert.equal(ui.node('advanced-load-seed').value, '42');
+});
+
+test('submits Advanced Load Tool inputs and arguments on their distinct scenario fields', async () => {
+  const ui = boot({ hash: '#/advanced-load/payments' });
+  await waitFor(() => ui.node('advanced-load-package').textContent === 'payments', 'Advanced Load package');
+  ui.node('advanced-load-model').value = 'virtualUsers';
+  await ui.node('advanced-load-model').listeners.change();
+  ui.node('add-advanced-workload').listeners.click();
+  const workload = ui.node('advanced-load-workloads').children[0];
+  workload.fields.targetType.value = 'tool';
+  workload.fields.targetId.value = 'sample.lookup';
+  workload.fields.business.value = JSON.stringify({
+    inputs: { correlationId: 'CORR-176' }, arguments: { limit: 9 }
+  });
+
+  ui.node('validate-advanced-load').listeners.click();
+  await waitFor(() => ui.calls.some(call => call.path === 'drafts/load' && call.options.method === 'POST'), 'Advanced Load draft validation');
+  const submitted = JSON.parse(ui.calls.find(call => call.path === 'drafts/load' && call.options.method === 'POST').options.body);
+  const scenarioWorkload = submitted.scenario.workloads[0];
+  assert.deepEqual(scenarioWorkload.inputs, { correlationId: 'CORR-176' });
+  assert.deepEqual(scenarioWorkload.target.arguments, { limit: 9 });
 });
 
 test('shows safe index diagnostics when some package resources cannot be indexed', async () => {
@@ -206,14 +425,80 @@ test('inspects declared and effective configuration and compares profiles throug
 
   ui.node('show-effective-configuration').listeners.click();
   await waitFor(() => ui.node('configuration-status').textContent.includes('Effective configuration for SIT: ready'), 'effective configuration');
-  assert.ok(ui.node('configuration-view').textContent.includes('"state": "hidden"'));
-  assert.ok(ui.node('configuration-view').textContent.includes('"readOnly"'));
-  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/effective?environment=SIT'));
+  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/effective?environment=SIT&offset=0&limit=50'));
+  ui.node('configuration-section').value = 'dbhelpers';
+  ui.node('configuration-section').listeners.change();
+  await waitFor(() => ui.calls.some(call => call.path.includes('configuration/effective?environment=SIT&section=dbhelpers')), 'selected configuration section');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(allText(ui.node('configuration-view')).includes('hidden'));
+  assert.ok(allText(ui.node('configuration-view')).includes('readOnly'));
+  ui.node('submit-form').elements.environment = { value: '' };
+  ui.node('use-configuration-environment').listeners.click();
+  assert.equal(ui.node('submit-form').elements.environment.value, 'SIT');
+  assert.equal(ui.calls.some(call => call.path === 'jobs/run' && call.options.method === 'POST'), false);
 
   await ui.node('compare-configuration').listeners.click();
   await waitFor(() => ui.node('configuration-status').textContent.includes('Configuration comparison: SIT and UAT: ready'), 'configuration comparison');
-  assert.ok(ui.node('configuration-view').textContent.includes('"change": "hidden"'));
-  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/compare?left=SIT&right=UAT'));
+  assert.ok(allText(ui.node('configuration-view')).includes('hidden'));
+  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/compare?left=SIT&right=UAT&offset=0&limit=50'));
+});
+
+test('defaults comparison selectors to different profiles when the default is not first', async () => {
+  const configuration = { declared: { view: 'declared', state: 'ready', environments: [
+    { name: 'SIT', state: 'active', default: false }, { name: 'UAT', state: 'active', default: true }
+  ], globals: {}, sections: [], diagnostics: [] } };
+  const ui = boot({ hash: '#/packages/payments', configuration });
+  await waitFor(() => ui.node('configuration-status').textContent.includes('Declared configuration: ready'), 'declared profiles');
+  assert.equal(ui.node('configuration-left').value, 'UAT');
+  assert.equal(ui.node('configuration-right').value, 'SIT');
+  assert.equal(ui.node('compare-configuration').disabled, false);
+});
+
+test('supports an unprofiled package default and disables profile comparison', async () => {
+  const configuration = {
+    declared: { view: 'declared', state: 'ready', environments: [], globals: {}, sections: [], diagnostics: [] },
+    effective: { view: 'effective', state: 'ready', environment: 'LOCAL', environments: [], globals: { timeoutMs: { state: 'visible', value: 5000, origin: 'global' } }, sections: [], diagnostics: [] }
+  };
+  const ui = boot({ hash: '#/packages/payments', configuration });
+  await waitFor(() => ui.node('configuration-status').textContent.includes('Declared configuration: ready'), 'unprofiled declaration');
+  assert.equal(ui.node('configuration-environment').children[0].textContent, 'Package default');
+  assert.equal(ui.node('compare-configuration').disabled, true);
+  ui.node('show-effective-configuration').listeners.click();
+  await waitFor(() => ui.node('configuration-status').textContent.includes('Effective package default configuration: ready'), 'unprofiled effective config');
+  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/effective?offset=0&limit=50'));
+  ui.node('submit-form').elements.environment = { value: '' };
+  ui.node('use-configuration-environment').listeners.click();
+  assert.equal(ui.node('submit-form').elements.environment.value, 'LOCAL');
+});
+
+test('links a Tool detail to its grouped configuration section', async () => {
+  const tool = { resourceId: 'tool.c2FtcGxl', type: 'tool', logicalId: 'sample.lookup', name: 'Lookup', sourceAvailable: false, state: 'ready', references: [], referencedBy: [] };
+  const configuration = {
+    declared: { view: 'declared', state: 'ready', environments: [{ name: 'SIT', state: 'active', default: true }], globals: {}, sections: [], diagnostics: [] },
+    effective: { view: 'effective', state: 'ready', environment: 'SIT', globals: {}, sections: [{ id: 'tools', title: 'Tools', entryCount: 1, entries: [{ id: 'sample.lookup', fields: { timeoutMs: { state: 'visible', value: 1000 } } }] }], diagnostics: [] }
+  };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [tool], configuration });
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'Tool resource');
+  await ui.node('resource-list').children[0].children[0].listeners.click();
+  assert.equal(ui.node('resource-configuration-link').hidden, false);
+  ui.node('resource-configuration-link').listeners.click();
+  await waitFor(() => ui.calls.some(call => call.path.includes('configuration/effective?environment=SIT&section=tools')), 'Tool configuration section');
+  assert.equal(ui.node('configuration-search').value, 'sample.lookup');
+});
+
+test('links a resolved helper reference to its configuration section', async () => {
+  const flow = { resourceId: 'flow.bG9n', type: 'flow', logicalId: 'PAYMENT.flow.v1', name: 'Payment flow', sourceAvailable: false, state: 'ready', references: [{ type: 'dbhelper', logicalId: 'orders', resolution: 'resolved' }], referencedBy: [] };
+  const configuration = {
+    declared: { view: 'declared', state: 'ready', environments: [{ name: 'SIT', state: 'active', default: true }], globals: {}, sections: [], diagnostics: [] },
+    effective: { view: 'effective', state: 'ready', environment: 'SIT', globals: {}, sections: [{ id: 'dbhelpers', title: 'DB helpers', entryCount: 1, entries: [{ id: 'orders', fields: { readOnly: { state: 'visible', value: true } } }] }], diagnostics: [] }
+  };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [flow], configuration });
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'Flow resource');
+  await ui.node('resource-list').children[0].children[0].listeners.click();
+  assert.equal(ui.node('resource-configuration-link').hidden, false);
+  ui.node('resource-configuration-link').listeners.click();
+  await waitFor(() => ui.calls.some(call => call.path.includes('configuration/effective?environment=SIT&section=dbhelpers')), 'helper configuration section');
+  assert.equal(ui.node('configuration-search').value, 'orders');
 });
 
 test('ignores late configuration responses after navigating away', async () => {
@@ -223,7 +508,7 @@ test('ignores late configuration responses after navigating away', async () => {
   ui.resolveConfiguration(0, declared);
   await waitFor(() => ui.node('configuration-status').textContent.includes('Declared configuration: ready'), 'declared configuration response');
   ui.node('show-effective-configuration').listeners.click();
-  await waitFor(() => ui.calls.some(call => call.path === 'packages/payments/configuration/effective?environment=SIT'), 'effective configuration request');
+  await waitFor(() => ui.calls.some(call => call.path.startsWith('packages/payments/configuration/effective?environment=SIT')), 'effective configuration request');
 
   ui.location.hash = '#/';
   ui.window.listeners.hashchange();

@@ -163,7 +163,7 @@ public final class ServerConfig {
     private static InlineLoad inlineLoad(Object raw) {
         Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.inlineLoad");
         Set<String> allowed=Set.of("enabled","maxWorkloads","maxTargets","maxTotalUsers",
-                "maxAggregateArrivalRatePerSecond","maxConcurrentPerWorkload","maxDurationSeconds");
+                "maxAggregateArrivalRatePerSecond","maxConcurrentPerWorkload","maxTotalConcurrent","maxDurationSeconds");
         for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))
             throw new IllegalArgumentException("server.inlineLoad contains an unknown setting");
         boolean enabled=boolValue(values,"enabled",false);
@@ -171,12 +171,13 @@ public final class ServerConfig {
         int targets=inlineIntValue(values,"maxTargets",20,1,256);
         int users=inlineIntValue(values,"maxTotalUsers",100,1,100000);
         int concurrent=inlineIntValue(values,"maxConcurrentPerWorkload",100,1,1000000);
+        int totalConcurrent=inlineIntValue(values,"maxTotalConcurrent",1000,1,1000000);
         int duration=inlineIntValue(values,"maxDurationSeconds",3600,1,86400);
         Object configuredRate=values.get("maxAggregateArrivalRatePerSecond");
         double rate=configuredRate==null?100.0:configuredRate instanceof Number?((Number)configuredRate).doubleValue():Double.NaN;
         if(!Double.isFinite(rate)||rate<=0.0||rate>1000000.0)
             throw new IllegalArgumentException("server.inlineLoad.maxAggregateArrivalRatePerSecond must be a finite number greater than 0 and at most 1000000");
-        return new InlineLoad(enabled,workloads,targets,users,rate,concurrent,duration);
+        return new InlineLoad(enabled,workloads,targets,users,rate,concurrent,totalConcurrent,duration);
     }
     private static int inlineIntValue(Map<?,?> values,String key,int fallback,int min,int max) {
         Object raw=values.get(key);
@@ -194,13 +195,13 @@ public final class ServerConfig {
     /** Server-owned limits for browser-created Load drafts. Path-based Load remains compatible. */
     public static final class InlineLoad {
         public final boolean enabled;
-        public final int maxWorkloads,maxTargets,maxTotalUsers,maxConcurrentPerWorkload,maxDurationSeconds;
+        public final int maxWorkloads,maxTargets,maxTotalUsers,maxConcurrentPerWorkload,maxTotalConcurrent,maxDurationSeconds;
         public final double maxAggregateArrivalRatePerSecond;
         private InlineLoad(boolean enabled,int maxWorkloads,int maxTargets,int maxTotalUsers,
-                           double maxAggregateArrivalRatePerSecond,int maxConcurrentPerWorkload,int maxDurationSeconds) {
+                           double maxAggregateArrivalRatePerSecond,int maxConcurrentPerWorkload,int maxTotalConcurrent,int maxDurationSeconds) {
             this.enabled=enabled;this.maxWorkloads=maxWorkloads;this.maxTargets=maxTargets;this.maxTotalUsers=maxTotalUsers;
             this.maxAggregateArrivalRatePerSecond=maxAggregateArrivalRatePerSecond;
-            this.maxConcurrentPerWorkload=maxConcurrentPerWorkload;this.maxDurationSeconds=maxDurationSeconds;
+            this.maxConcurrentPerWorkload=maxConcurrentPerWorkload;this.maxTotalConcurrent=maxTotalConcurrent;this.maxDurationSeconds=maxDurationSeconds;
         }
     }
 
