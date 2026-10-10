@@ -130,7 +130,7 @@
         li.append(link(`#/packages/${encodeURIComponent(item.packageId)}`, item.packageId));
         const advanced = el('button', 'Advanced Load'); advanced.type = 'button';
         advanced.addEventListener('click', () => { location.hash = `#/advanced-load/${encodeURIComponent(item.packageId)}`; });
-        li.append(document.createTextNode(' '), advanced); packageList.append(li);
+        li.append(el('span', ' '), advanced); packageList.append(li);
       });
       const tbody = byId('jobs'); tbody.replaceChildren();
       listItems(jobs).forEach(job => {
