@@ -203,12 +203,12 @@ class PackageResourceInspectorTest {
     @Test void advancedLoadRestoresTypedToolInputsAndArgumentsFromTheRedactedSidecar() throws Exception {
         Path root=packageWithQuickLoadTargets("advanced-load-tool-values");
         writeUtf8(root.resolve("config/tools/echo.debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {correlationId: CORR-DEFAULT}\narguments: {value: ARG-DEFAULT}\n");
-        Map<String,Object> keepInput=Map.of("$attDebugKeepDefault","/inputs/correlationId");
-        Map<String,Object> keepArgument=Map.of("$attDebugKeepDefault","/arguments/value");
-        Map<String,Object> request=Map.of("schemaVersion","att-load/v1.6","load",Map.of("users",2,"duration","5s"),
-                "workloads",List.of(Map.of("id","tool","load",Map.of("users",2),
-                        "target",Map.of("type","tool","id","echo","arguments",Map.of("value",keepArgument)),
-                        "inputs",Map.of("correlationId",keepInput))));
+        Map<String,Object> keepInput=mapOf("$attDebugKeepDefault","/inputs/correlationId");
+        Map<String,Object> keepArgument=mapOf("$attDebugKeepDefault","/arguments/value");
+        Map<String,Object> request=mapOf("schemaVersion","att-load/v1.6","load",mapOf("users",2,"duration","5s"),
+                "workloads",java.util.Arrays.asList(mapOf("id","tool","load",mapOf("users",2),
+                        "target",mapOf("type","tool","id","echo","arguments",mapOf("value",keepArgument)),
+                        "inputs",mapOf("correlationId",keepInput))));
 
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
         Map<String,Object> result=inspector.validateLoadScenario(request);
