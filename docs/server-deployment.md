@@ -16,6 +16,8 @@ Tomcat owns listeners, TLS, access logs, and authentication. The WAR uses the Se
 
 `server.dataDir` stores H2 control-plane metadata and job output. Worker concurrency, queue size, Load admission, graceful stop timeout, and optional per-Worker heap limits are bounded by `workers`. `workers.heapMaxMb` sets `-Xmx` for every Worker (64–65536 MiB); optional `heapInitialMb` sets `-Xms` (32–65536 MiB), requires `heapMaxMb`, and cannot exceed it. Plan the aggregate heap allowance against `maxConcurrent` plus the Server and container memory. Rejected submissions are discarded before they create durable job records. Terminal job metadata, journals, and artifacts are retained for `server.jobRetentionDays` (default 30, allowed range 1–3650); expired jobs are cleaned at startup and hourly, while active jobs are preserved. `workers.maxConcurrentLoad` bounds admitted Load jobs, including queued jobs, so waiting Loads do not occupy general Worker threads. Excess Load or overall-capacity submissions receive HTTP 429. `workers.libraryDirs` optionally lists absolute, existing, readable directories whose JARs are added to the Worker subprocess classpath for external JDBC, MQ, or other dependencies; configure only trusted server-owned directories. The `packages` registry is read-only and maps stable package IDs to canonical roots beneath `allowedRoots`. `server.inspection` separately bounds read-only resource discovery; it uses one-shot Workers and has its own concurrency, queue, timeout, heap, source, and response limits. Tool script text is unavailable unless its package-relative path is listed under `server.inspection.safeTextSources` for that package ID.
 
+Browser-created Quick and Advanced Load drafts have a separate opt-in: `server.inlineLoad.enabled` defaults to `false`. When enabled, the Server enforces the configured workload, target, total Virtual User, aggregate Arrival Rate, per-workload concurrency, and total timing-envelope caps after Engine validation and again before queue admission. The example below sets conservative defaults. The duration cap is the sum of warmup, ramp-up, measured duration, and ramp-down; target count includes each fixed target and each VU mix entry. A disabled feature returns `403 ATT-SERVER-INLINE-LOAD-DISABLED`. These limits apply to browser-created drafts; existing path-based Load submissions retain their compatibility behavior and continue to use `workers.maxConcurrentLoad` admission.
+
 ```yaml
 server:
   dataDir: /var/lib/att-server
@@ -33,6 +35,14 @@ server:
     # safeTextSources:
     #   payments:
     #     - tools/payment-check.sh
+  inlineLoad:
+    enabled: false
+    maxWorkloads: 10
+    maxTargets: 20
+    maxTotalUsers: 100
+    maxAggregateArrivalRatePerSecond: 100
+    maxConcurrentPerWorkload: 100
+    maxDurationSeconds: 3600
 workers:
   maxConcurrent: 8
   queuedLimit: 100
@@ -51,6 +61,17 @@ packages:
   entries:
     payments: /srv/att/packages/payments
 ```
+
+Inline Load settings use these defaults and hard ranges:
+
+| Setting | Default | Allowed range | Enforcement |
+| --- | ---: | ---: | --- |
+| `maxWorkloads` | 10 | 1–128 | Workloads per draft |
+| `maxTargets` | 20 | 1–256 | Fixed targets plus VU mix entries |
+| `maxTotalUsers` | 100 | 1–100,000 | Sum of Virtual Users across workloads |
+| `maxAggregateArrivalRatePerSecond` | 100 | greater than 0 to 1,000,000 | Sum of arrival rates normalized to requests per second |
+| `maxConcurrentPerWorkload` | 100 | 1–1,000,000 | Each Arrival Rate workload |
+| `maxDurationSeconds` | 3,600 | 1–86,400 | Sum of warmup, ramp-up, duration, and ramp-down |
 
 `dataDir` must be absolute. Package roots, allowed roots, and configured Worker library directories must exist at startup. Package paths are canonicalized; symlinks that resolve outside an allowed root are rejected. Clients submit `packageId`; they cannot select a package path, output path, Worker executable, or classpath. Package registration and mutation endpoints are not available in v1.
 
@@ -113,6 +134,8 @@ Content-Type: application/json
 ```
 
 The API returns `202 Accepted` and a job ID. Jobs move through `QUEUED`, `PREPARING`, and `RUNNING`, then finish as `PASS`, `FAIL`, `ERROR`, `INVALID`, or `CANCELLED`. Capacity overflow returns `429` with an `ATT-SERVER-CAPACITY-EXCEEDED` error. Errors use an `error` object with `code`, `summary`, `detail`, and `requestId`; server stack traces are not returned.
+
+Browser Quick and Advanced Load endpoints return `403 ATT-SERVER-INLINE-LOAD-DISABLED` until `server.inlineLoad.enabled` is enabled. A scenario that exceeds an enabled cap returns `400 ATT-SERVER-INVALID-REQUEST` and is not queued.
 
 Job records include an additive `performance` object when measurements are available. `performance.timings` uses monotonic elapsed time for admission, queue wait, Worker preparation/spawn, Worker-ready (first `STATUS`), execution-ready (first `PROGRESS` or `LOG`), Worker lifetime, and result-to-termination. `performance.worker` records heap, live-thread, GC, process CPU, and sampled peak RSS metrics from the isolated Worker. Sampling is event-triggered and limited to one sample per 100 ms; brief peaks can be missed. RSS is available on Linux `/proc` systems only. Worker resource metrics are included in the canonical job record and survive Server restart.
 
@@ -196,7 +219,7 @@ The Server rechecks the package revision at submission and before Worker start. 
 
 ### Target-scoped Quick Load
 
-Quick Load is available from a selected Template, Flow, or Tool. It uses one fixed target and creates one Workload. The model is `virtualUsers` or `arrivalRate`; the Server composes the matching current `att-load/v1.6` policy and validates the target through the existing Load pipeline.
+Quick Load is available from a selected Template, Flow, or Tool when `server.inlineLoad.enabled` is true. It uses one fixed target and creates one Workload. The model is `virtualUsers` or `arrivalRate`; the Server composes the matching current `att-load/v1.6` policy and validates the target through the existing Load pipeline. When disabled, both Quick Load form/policy reads and draft creation return `403 ATT-SERVER-INLINE-LOAD-DISABLED`.
 
 ```http
 GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT
@@ -230,7 +253,7 @@ The Server checks the package revision at draft submission, before Worker start,
 
 ### Advanced Load builder
 
-Advanced Load creates a full `att-load/v1.6` scenario with one or more workloads. The selected `model` must be `virtualUsers` or `arrivalRate` for every workload. Virtual Users workloads can use one fixed target or a weighted `mix`; Arrival Rate workloads use one fixed target each. The Engine validates the shared timing envelope, workload intensity, thresholds, Testdata policies, and every target before the Server creates a draft.
+Advanced Load creates a full `att-load/v1.6` scenario with one or more workloads when `server.inlineLoad.enabled` is true. The selected `model` must be `virtualUsers` or `arrivalRate` for every workload. Virtual Users workloads can use one fixed target or a weighted `mix`; Arrival Rate workloads use one fixed target each. The Engine validates the shared timing envelope, workload intensity, thresholds, Testdata policies, and every target before the Server creates a draft. The Server then enforces its configured inline Load caps before returning the preview. Exceeding a cap returns `400 ATT-SERVER-INVALID-REQUEST` with a safe summary; the Server does not schedule the scenario.
 
 Read safe model policy defaults with:
 
@@ -302,3 +325,13 @@ Artifact paths are relative to the job output directory. Absolute paths, travers
 ## Distribution and compatibility
 
 The Server binary is distributed separately as `att-4.1.0-server.tar.gz`, containing `server/att-server-4.1.0.war` and the deployment guides. The local CLI is in `att-4.1.0-local.tar.gz` with its runtime libraries. Keeping these archives separate avoids duplicating the WAR's bundled libraries in the local package. Tomcat provides the HTTP listener and Servlet API. The Server requires Java 17; the CLI, Engine, and Worker continue to target Java 8.
+
+### Issue #176 rollout checklist
+
+1. Back up the Server `dataDir` and retain the current WAR and deployment configuration for rollback.
+2. Keep Tomcat authentication enabled and terminate public traffic with HTTPS. Confirm the package roots and Server data directory are separate and writable only by the service account.
+3. Deploy the Server WAR as an exploded web application so its `WEB-INF/lib` directory is available to Worker processes. Confirm `/api/v1/health` and `/api/v1/version` through the deployed Tomcat context path.
+4. Begin with `server.inlineLoad.enabled: false`. Verify the Package and Configuration Explorers against a non-production package. Enable browser Load only in an approved environment and set caps for expected workload count, targets, users or rate, concurrency, and total envelope duration.
+5. Monitor Worker and Load queue capacity, job outcomes, cancellation, and retained artifacts. The package remains read-only; rollback consists of disabling inline Load and restoring the prior WAR/config if needed.
+
+This checklist describes deployment steps; it does not substitute for the P6 security, browser, compatibility, packaged-WAR, and hosted-CI acceptance evidence.

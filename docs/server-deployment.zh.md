@@ -16,6 +16,8 @@ Tomcat 負責監聽器、TLS、存取記錄及驗證。請設定 Realm、SSO 整
 
 `server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。`server.inspection` 獨立限制唯讀資源探索，使用一次性的 Worker，並設有獨立並行數、佇列、逾時、heap、source 及 response 上限。除非 package 的 `server.inspection.safeTextSources` 明確列出相對路徑，否則不會提供 Tool script 文字。
 
+瀏覽器建立的 Quick Load 及 Advanced Load draft 另有獨立 opt-in：`server.inlineLoad.enabled` 預設為 `false`。啟用後，Server 會在 Engine 驗證後及進入佇列前，再次檢查 workload 數、target 數、Virtual User 總數、Arrival Rate 總和、每個 workload 的並行數及完整時間窗口上限。以下範例設定保守預設值。時間窗口上限為 warmup、ramp-up、duration、ramp-down 的總和；target 數包含固定 target 及每個 VU mix entry。功能停用時回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`。這些限制適用於瀏覽器建立的 draft；既有 path-based Load request 維持相容行為，並繼續受 `workers.maxConcurrentLoad` 限制。
+
 ```yaml
 server:
   dataDir: /var/lib/att-server
@@ -33,6 +35,14 @@ server:
     # safeTextSources:
     #   payments:
     #     - tools/payment-check.sh
+  inlineLoad:
+    enabled: false
+    maxWorkloads: 10
+    maxTargets: 20
+    maxTotalUsers: 100
+    maxAggregateArrivalRatePerSecond: 100
+    maxConcurrentPerWorkload: 100
+    maxDurationSeconds: 3600
 workers:
   maxConcurrent: 8
   queuedLimit: 100
@@ -51,6 +61,17 @@ packages:
   entries:
     payments: /srv/att/packages/payments
 ```
+
+Inline Load 設定使用以下預設值及硬性範圍：
+
+| 設定 | 預設值 | 允許範圍 | 限制對象 |
+| --- | ---: | ---: | --- |
+| `maxWorkloads` | 10 | 1–128 | 每個 draft 的 workload 數 |
+| `maxTargets` | 20 | 1–256 | 固定 target 及 VU mix entry 總數 |
+| `maxTotalUsers` | 100 | 1–100,000 | 所有 workload 的 Virtual Users 總數 |
+| `maxAggregateArrivalRatePerSecond` | 100 | 大於 0 至 1,000,000 | 轉為每秒請求數後的 Arrival Rate 總和 |
+| `maxConcurrentPerWorkload` | 100 | 1–1,000,000 | 每個 Arrival Rate workload |
+| `maxDurationSeconds` | 3,600 | 1–86,400 | warmup、ramp-up、duration 及 ramp-down 總和 |
 
 `dataDir` 必須是絕對路徑。啟動時，allowed root、package root 及 Worker library directory 必須已存在。系統會將 package 路徑 canonicalize；若 symlink 指向 allowed root 以外，便會拒絕。Client 提交 `packageId`，不能指定 package 路徑、輸出路徑、Worker 執行檔或 classpath。v1 不提供 package 註冊或修改 API。
 
@@ -113,6 +134,8 @@ Content-Type: application/json
 ```
 
 API 會回傳 `202 Accepted` 及 job ID。工作狀態依序為 `QUEUED`、`PREPARING`、`RUNNING`，最後為 `PASS`、`FAIL`、`ERROR`、`INVALID` 或 `CANCELLED`。容量已滿時會回傳 `429` 及 `ATT-SERVER-CAPACITY-EXCEEDED`。錯誤使用包含 `code`、`summary`、`detail` 及 `requestId` 的 `error` 物件；Server 不會回傳 stack trace。
+
+啟用 `server.inlineLoad.enabled` 前，瀏覽器 Quick 及 Advanced Load endpoint 會回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`。超出已啟用上限的 scenario 會回傳 `400 ATT-SERVER-INVALID-REQUEST`，且不會進入佇列。
 
 工作記錄在有量度數據時會加入 `performance` 物件。`performance.timings` 使用 monotonic clock 記錄 admission、佇列等待、Worker 準備及啟動、Worker-ready（首個 `STATUS`）、execution-ready（首個 `PROGRESS` 或 `LOG`）、Worker 存活時間及結果至終止時間。`performance.worker` 記錄隔離 Worker 的 Heap、live thread、GC、process CPU 及抽樣 RSS 峰值。抽樣由事件觸發，每 100 ms 最多一次，可能漏掉短暫峰值。RSS 只在 Linux `/proc` 系統提供。Worker 資源數據會保存在標準工作記錄，Server 重啟後仍可讀取。
 
@@ -196,7 +219,7 @@ Server 會在提交時及 Worker 啟動前重新檢查 package revision。若在
 
 ### 目標範圍內的 Quick Load
 
-Quick Load 可從已選取的 Template、Flow 或 Tool 開啟，固定使用該目標並組成一個 Workload。Model 可選 `virtualUsers` 或 `arrivalRate`；Server 會組成相符的現行 `att-load/v1.6` policy，並使用現有 Load pipeline 驗證目標。
+設定 `server.inlineLoad.enabled: true` 後，Quick Load 才可從已選取的 Template、Flow 或 Tool 開啟；它固定使用該目標並組成一個 Workload。Model 可選 `virtualUsers` 或 `arrivalRate`；Server 會組成相符的現行 `att-load/v1.6` policy，並使用現有 Load pipeline 驗證目標。功能停用時，Quick Load form、policy 及 draft endpoint 都會回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`。
 
 ```http
 GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT
@@ -230,7 +253,7 @@ Server 會在 draft 提交時、Worker 啟動前及 Worker 內重新檢查 packa
 
 ### Advanced Load builder
 
-Advanced Load 會建立包含一個或多個 workload 的完整 `att-load/v1.6` scenario。所有 workload 必須使用同一 `virtualUsers` 或 `arrivalRate` model。Virtual Users workload 可使用單一固定 target 或 weighted `mix`；每個 Arrival Rate workload 使用一個固定 target。Engine 會在 Server 建立 draft 前驗證共用時間窗口、workload intensity、thresholds、Testdata policy 及所有 target。
+設定 `server.inlineLoad.enabled: true` 後，Advanced Load 才會建立包含一個或多個 workload 的完整 `att-load/v1.6` scenario。所有 workload 必須使用同一 `virtualUsers` 或 `arrivalRate` model。Virtual Users workload 可使用單一固定 target 或 weighted `mix`；每個 Arrival Rate workload 使用一個固定 target。Engine 會在 Server 建立 draft 前驗證共用時間窗口、workload intensity、thresholds、Testdata policy 及所有 target，Server 隨後會檢查管理員設定的 inline Load 上限。若超出任何上限，回傳 `400 ATT-SERVER-INVALID-REQUEST` 及安全摘要，且不會排程 scenario。
 
 讀取安全的 model policy 預設值：
 
@@ -302,3 +325,13 @@ Artifact 路徑必須相對於工作輸出目錄。絕對路徑、目錄 travers
 ## 發行與相容性
 
 Server binary 會以獨立的 `att-4.1.0-server.tar.gz` 發佈，內含 `server/att-server-4.1.0.war` 及部署指南。Local CLI 位於 `att-4.1.0-local.tar.gz`，並包含其 runtime library。兩個 archive 分開後，local package 不會再重複附帶 WAR 內的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
+
+### Issue #176 rollout checklist
+
+1. 備份 Server `dataDir`，並保留目前 WAR 及部署設定以便回復。
+2. 保持 Tomcat 驗證啟用，並以 HTTPS 接收公開流量。確認 package root 與 Server data directory 分離，且只有服務帳戶可寫入。
+3. 將 Server WAR 以 exploded web application 部署，確保 Worker process 可使用 `WEB-INF/lib`。透過實際 Tomcat context path 檢查 `/api/v1/health` 及 `/api/v1/version`。
+4. 初始維持 `server.inlineLoad.enabled: false`。先用非正式環境 package 檢視 Package 與 Configuration Explorer。只在核准的環境啟用瀏覽器 Load，並設定 workload 數、target、users 或 rate、並行數及完整時間窗口上限。
+5. 監察 Worker 與 Load 佇列容量、工作結果、取消及保留的 artifacts。Package 維持唯讀；回復時停用 inline Load，必要時還原前一版 WAR 及設定。
+
+此清單說明部署步驟，不能取代 P6 的安全性、瀏覽器、相容性、WAR 封裝及 hosted CI 驗收證據。

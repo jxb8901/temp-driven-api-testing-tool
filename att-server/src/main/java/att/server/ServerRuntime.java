@@ -46,6 +46,8 @@ final class ServerRuntime implements AutoCloseable {
     static final Pattern DRAFT_ID=Pattern.compile("D[0-9A-F]{32}");
     static final Pattern QUICK_LOAD_DRAFT_ID=Pattern.compile("L[0-9A-F]{32}");
     static final Pattern ADVANCED_LOAD_DRAFT_ID=Pattern.compile("A[0-9A-F]{32}");
+    private static final Pattern INLINE_LOAD_DURATION=Pattern.compile("^([0-9]+)(ms|s|m|h)$");
+    private static final Pattern INLINE_LOAD_RATE=Pattern.compile("^([1-9][0-9]*(?:\\.[0-9]+)?)/(s|m)$");
     static final int MAX_ACTIVE_DRAFTS=128, MAX_DRAFTS_PER_PRINCIPAL=16;
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
@@ -112,6 +114,13 @@ final class ServerRuntime implements AutoCloseable {
         if(!serverIssuedDraft&&(input.has("draftId")||input.has("inlineDebugInput")||input.has("inlineLoadScenario")
                 ||input.has("expectedRevisionDigest")||input.has("draftResourceId")))
             throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
+        if(serverIssuedDraft&&"load".equals(command)) {
+            requireInlineLoadEnabled();
+            JsonNode scenarioNode=input.get("inlineLoadScenario");
+            if(scenarioNode==null||!scenarioNode.isObject())throw new IllegalArgumentException("A validated inline Load scenario is required");
+            @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(scenarioNode,Map.class);
+            enforceInlineLoadLimits(scenario);
+        }
         String packageId=required(input,"packageId");Path root=config.packages.get(packageId);
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
         validatePackageRoot(root);
@@ -255,6 +264,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> inspectQuickLoadForm(String packageId,String type,String resourceId,String model,String environment,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
+        requireInlineLoadEnabled();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
         if(!"virtualUsers".equals(model)&&!"arrivalRate".equals(model))throw new IllegalArgumentException("model is invalid");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
@@ -266,6 +276,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> inspectQuickLoadPolicy(String packageId,String model,String environment,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
+        requireInlineLoadEnabled();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
         if(!"virtualUsers".equals(model)&&!"arrivalRate".equals(model))throw new IllegalArgumentException("model is invalid");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
@@ -329,6 +340,7 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> createQuickLoadDraft(JsonNode input,String principal) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
         if(!config.inspection.enabled)throw new NotFoundException();
+        requireInlineLoadEnabled();
         requireObject(input,"A JSON object is required");
         requireOnlyFields(input,"packageId","environment","target","model","input","load","execution");
         String packageId=required(input,"packageId");Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
@@ -352,6 +364,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}"))
             throw new IllegalStateException("Quick Load validation Worker returned an invalid response");
         @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
+        enforceInlineLoadLimits(scenario);
         Object rawResource=inspected.get("resource"),rawTarget=inspected.get("target");
         if(!(rawResource instanceof Map)||!(rawTarget instanceof Map))throw new IllegalStateException("Quick Load validation Worker returned an invalid target");
         @SuppressWarnings("unchecked") Map<String,Object> resource=(Map<String,Object>)rawResource;
@@ -375,6 +388,7 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
         if(!config.inspection.enabled)throw new NotFoundException();
+        requireInlineLoadEnabled();
         requireObject(input,"A JSON object is required");requireOnlyFields(input,"packageId","environment","scenario");
         String packageId=required(input,"packageId");Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
@@ -388,6 +402,7 @@ final class ServerRuntime implements AutoCloseable {
                 ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel))
             throw new IllegalStateException("Load validation Worker returned an invalid response");
         @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
+        enforceInlineLoadLimits(scenario);
         AdvancedLoadDraftState draft=new AdvancedLoadDraftState("A"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
                 principal,packageId,environment,(String)rawModel,(String)rawDigest,scenario,inspected,
                 Instant.now().plusMillis(DRAFT_TTL_MILLIS));
@@ -466,6 +481,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> submitQuickLoadDraft(JsonNode body,String principal) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        requireInlineLoadEnabled();
         requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId");
         String packageId=required(body,"packageId"),draftId=required(body,"draftId");
         QuickLoadDraft draft;
@@ -498,6 +514,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> submitAdvancedLoadDraft(JsonNode body,String principal) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        requireInlineLoadEnabled();
         requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId");
         String packageId=required(body,"packageId"),draftId=required(body,"draftId");
         AdvancedLoadDraftState draft;
@@ -598,6 +615,83 @@ final class ServerRuntime implements AutoCloseable {
     private static void requireOnlyFields(JsonNode object,String... allowed) {
         java.util.Set<String> names=new java.util.HashSet<>(java.util.Arrays.asList(allowed));
         java.util.Iterator<String> fields=object.fieldNames();while(fields.hasNext())if(!names.contains(fields.next()))throw new IllegalArgumentException("Unknown request field");
+    }
+    private void requireInlineLoadEnabled() {
+        if(!config.inlineLoad.enabled)throw new InlineLoadDisabledException();
+    }
+    private void enforceInlineLoadLimits(Map<String,Object> scenario) {
+        requireInlineLoadEnabled();
+        Object rawWorkloads=scenario.get("workloads");
+        if(!(rawWorkloads instanceof List)||((List<?>)rawWorkloads).isEmpty())
+            throw new IllegalArgumentException("Validated Load scenario must contain workloads");
+        List<?> workloads=(List<?>)rawWorkloads;
+        ServerConfig.InlineLoad limits=config.inlineLoad;
+        if(workloads.size()>limits.maxWorkloads)
+            throw new IllegalArgumentException("Scenario exceeds server.inlineLoad.maxWorkloads");
+        long totalUsers=0L,totalTargets=0L;
+        double totalArrivalRate=0.0;
+        long maximumEnvelopeMs=0L;
+        for(int i=0;i<workloads.size();i++) {
+            Object raw=workloads.get(i);
+            if(!(raw instanceof Map))throw new IllegalArgumentException("Validated Load workload is invalid");
+            Map<?,?> workload=(Map<?,?>)raw;
+            Object mix=workload.get("mix");
+            if(mix instanceof List)totalTargets+=((List<?>)mix).size();
+            else if(workload.get("target") instanceof Map)totalTargets++;
+            else throw new IllegalArgumentException("Validated Load target is invalid");
+
+            Object rawLoad=workload.get("load");
+            if(!(rawLoad instanceof Map))throw new IllegalArgumentException("Validated Load pacing is invalid");
+            Map<?,?> load=(Map<?,?>)rawLoad;
+            if(load.get("users") instanceof Number) {
+                totalUsers+=validatedCount(load.get("users"),"users");
+            } else {
+                totalArrivalRate+=validatedRatePerSecond(load.get("arrivalRate"));
+                long concurrent=validatedCount(load.get("maxConcurrent"),"maxConcurrent");
+                if(concurrent>limits.maxConcurrentPerWorkload)
+                    throw new IllegalArgumentException("Workload exceeds server.inlineLoad.maxConcurrentPerWorkload");
+            }
+            long envelope=durationEnvelopeMillis(load);
+            maximumEnvelopeMs=Math.max(maximumEnvelopeMs,envelope);
+            if(totalUsers>limits.maxTotalUsers)
+                throw new IllegalArgumentException("Scenario exceeds server.inlineLoad.maxTotalUsers");
+            if(totalArrivalRate>limits.maxAggregateArrivalRatePerSecond)
+                throw new IllegalArgumentException("Scenario exceeds server.inlineLoad.maxAggregateArrivalRatePerSecond");
+        }
+        if(totalTargets>limits.maxTargets)
+            throw new IllegalArgumentException("Scenario exceeds server.inlineLoad.maxTargets");
+        if(maximumEnvelopeMs>TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds))
+            throw new IllegalArgumentException("Scenario exceeds server.inlineLoad.maxDurationSeconds");
+    }
+    private static long validatedCount(Object value,String field) {
+        if(!(value instanceof Number))throw new IllegalArgumentException("Validated Load "+field+" is invalid");
+        Number number=(Number)value;long count=number.longValue();
+        if(count<1||number.doubleValue()!=count)throw new IllegalArgumentException("Validated Load "+field+" is invalid");
+        return count;
+    }
+    private static double validatedRatePerSecond(Object value) {
+        if(!(value instanceof String))throw new IllegalArgumentException("Validated Load arrivalRate is invalid");
+        java.util.regex.Matcher matcher=INLINE_LOAD_RATE.matcher(((String)value).trim());
+        if(!matcher.matches())throw new IllegalArgumentException("Validated Load arrivalRate is invalid");
+        double rate=Double.parseDouble(matcher.group(1));
+        if("m".equals(matcher.group(2)))rate/=60.0;
+        if(!Double.isFinite(rate)||rate<=0.0)throw new IllegalArgumentException("Validated Load arrivalRate is invalid");
+        return rate;
+    }
+    private static long durationMillis(Object value,String field) {
+        if(!(value instanceof String))throw new IllegalArgumentException("Validated Load "+field+" is invalid");
+        java.util.regex.Matcher matcher=INLINE_LOAD_DURATION.matcher(((String)value).trim());
+        if(!matcher.matches())throw new IllegalArgumentException("Validated Load "+field+" is invalid");
+        long amount=Long.parseLong(matcher.group(1));
+        long multiplier="ms".equals(matcher.group(2))?1L:"s".equals(matcher.group(2))?1000L:"m".equals(matcher.group(2))?60000L:3600000L;
+        try{return Math.multiplyExact(amount,multiplier);}
+        catch(ArithmeticException overflow){throw new IllegalArgumentException("Validated Load "+field+" is too large");}
+    }
+    private static long durationEnvelopeMillis(Map<?,?> load) {
+        try {
+            return Math.addExact(Math.addExact(durationMillis(load.get("warmup"),"warmup"),durationMillis(load.get("rampUp"),"rampUp")),
+                    Math.addExact(durationMillis(load.get("duration"),"duration"),durationMillis(load.get("rampDown"),"rampDown")));
+        } catch(ArithmeticException overflow) { return Long.MAX_VALUE; }
     }
     private static String optionalText(JsonNode object,String name) {
         JsonNode value=object.get(name);if(value==null||value.isNull())return null;
@@ -821,6 +915,7 @@ final class ServerRuntime implements AutoCloseable {
     static final class StaleCursorException extends RuntimeException {}
     static final class StaleDraftException extends RuntimeException {}
     static final class DraftCapacityException extends RuntimeException {}
+    static final class InlineLoadDisabledException extends RuntimeException {}
     static final class DraftValidationException extends IllegalArgumentException {
         final List<Map<String,Object>> diagnostics;
         DraftValidationException(List<Map<String,Object>> diagnostics) {

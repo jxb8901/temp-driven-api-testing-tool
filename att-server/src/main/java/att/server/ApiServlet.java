@@ -69,7 +69,8 @@ public final class ApiServlet extends HttpServlet {
             if(path.matches("/jobs/[^/]+/result")){Map<String,Object> result=runtime.resultRecord(segment(path,2));result.put("requestId",requestId);json(res,200,result);return;}
             if(path.matches("/jobs/[^/]+")){Map<String,Object> view=runtime.jobRecord(segment(path,2));view.put("requestId",requestId);json(res,200,view);return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
-        } catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
+        } catch(ServerRuntime.InlineLoadDisabledException e){error(res,403,"ATT-SERVER-INLINE-LOAD-DISABLED","Browser-submitted Load is disabled by Server configuration",requestId);}
+          catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
           catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(ServerRuntime.StaleCursorException e){error(res,409,"ATT-RESOURCE-CURSOR-STALE","The package resources changed; refresh the Explorer",requestId);}
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","Package content changed after preview; rebuild the draft",requestId);}
@@ -107,7 +108,8 @@ public final class ApiServlet extends HttpServlet {
                 Map<String,Object> job=runtime.submitLoadDraft(input,req.getUserPrincipal().getName());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);return;
             }
             Map<String,Object> job=runtime.submit(command,input,principal);job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);
-        } catch(ServerRuntime.QueueFullException e){error(res,429,"ATT-SERVER-CAPACITY-EXCEEDED",e.getMessage(),requestId);}
+        } catch(ServerRuntime.InlineLoadDisabledException e){error(res,403,"ATT-SERVER-INLINE-LOAD-DISABLED","Browser-submitted Load is disabled by Server configuration",requestId);}
+          catch(ServerRuntime.QueueFullException e){error(res,429,"ATT-SERVER-CAPACITY-EXCEEDED",e.getMessage(),requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
           catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","Package content changed after preview; rebuild the draft",requestId);}
@@ -204,6 +206,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionCapacityException e){throw e;}
           catch(ServerRuntime.InspectionTimeoutException e){throw e;}
           catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
+          catch(ServerRuntime.InlineLoadDisabledException e){throw e;}
           catch(IllegalArgumentException e){throw e;}
           catch(Exception e){throw new IOException(e);}
     }
@@ -244,6 +247,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionCapacityException e){throw e;}
           catch(ServerRuntime.InspectionTimeoutException e){throw e;}
           catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
+          catch(ServerRuntime.InlineLoadDisabledException e){throw e;}
           catch(IllegalArgumentException e){throw e;}
           catch(Exception e){throw new IOException(e);}
     }
