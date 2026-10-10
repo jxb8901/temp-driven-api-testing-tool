@@ -35,6 +35,7 @@
             <h3 id="resource-title"></h3><p id="resource-description"></p>
             <p id="resource-state" role="status"></p><p id="resource-source-status" role="status"></p>
             <button id="show-resource-source" type="button" hidden>View safe source</button>
+            <button id="resource-configuration-link" type="button" hidden>View Tool configuration</button>
             <button id="run-resource-case" type="button" hidden>Run this Case</button>
             <h4>Identity and provenance</h4><pre id="resource-metadata"></pre>
             <h4>Definition</h4><pre id="resource-definition"></pre>
@@ -42,6 +43,24 @@
             <h4 id="resource-source-heading" hidden>Safe source projection</h4><pre id="resource-source" hidden></pre>
           </article>
         </div>
+      </section>
+      <section id="configuration-explorer" aria-labelledby="configuration-heading">
+        <h2 id="configuration-heading">Configuration</h2>
+        <div class="resource-filters">
+          <button id="show-declared-configuration" type="button">View declared configuration</button>
+          <label for="configuration-environment">Effective environment</label><select id="configuration-environment"></select>
+          <button id="show-effective-configuration" type="button">View effective configuration</button>
+          <button id="use-configuration-environment" type="button" disabled>Use this environment</button>
+          <label for="configuration-section">Section</label><select id="configuration-section" disabled></select>
+          <label for="configuration-search">Filter fields</label><input id="configuration-search" type="search" maxlength="200">
+          <label for="configuration-left">Compare</label><select id="configuration-left"></select>
+          <label for="configuration-right">with</label><select id="configuration-right"></select>
+          <button id="compare-configuration" type="button">Compare profiles</button>
+          <button id="load-more-configuration" type="button" hidden>Load more configuration</button>
+          <button id="refresh-configuration" type="button">Refresh configuration</button>
+        </div>
+        <p id="configuration-status" role="status" aria-live="polite"></p>
+        <div id="configuration-view" aria-live="polite"></div>
       </section>
       <form id="submit-form">
         <label>Command <select name="command"><option>run</option><option>debug</option><option>load</option><option>validate</option></select></label>

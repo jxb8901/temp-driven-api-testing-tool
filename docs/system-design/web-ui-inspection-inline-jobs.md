@@ -20,7 +20,7 @@ This design preserves the existing package-relative job API and CLI behavior. It
 
 ## API boundary
 
-The routes below define the public v1 contract. P1 implements the first three resource discovery routes and typed response DTOs in `att-server-api`; the `debug-form` route and configuration, draft, and inline-job routes remain future work. The REST layer must not deserialize new UI requests directly into `att-worker.WorkerRequest`.
+The routes below define the public v1 contract. P1 implements the first three resource discovery routes and typed response DTOs in `att-server-api`. P2 implements the configuration inspection routes and typed response envelope. The `debug-form`, draft, and inline-job routes remain future work. The REST layer must not deserialize new UI requests directly into `att-worker.WorkerRequest`.
 
 ### Resource discovery
 
