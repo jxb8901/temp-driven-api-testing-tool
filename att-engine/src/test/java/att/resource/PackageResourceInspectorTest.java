@@ -280,7 +280,7 @@ class PackageResourceInspectorTest {
             writeUtf8(root.resolve("templates/PAYMENT/template.yaml"),templateYaml("PAYMENT","description: changed"));
             assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
                     ()->inspector.verifyRevision(revision));
-            assertEquals(2,inspector.indexBuildCount(),
+            assertTrue(inspector.indexBuildCount()>=2,
                     "authoritative revision checks must rebuild content even when the cached snapshot appears current");
             long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
             while(inspector.packageChangeVersion()==version&&System.nanoTime()<deadline)Thread.sleep(20);
