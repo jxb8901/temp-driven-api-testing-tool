@@ -951,6 +951,7 @@ Debug 可在沒有 workbook Testcase 的情況下執行單一 Template、Flow �
 ./att.sh debug template PAYMENT_INVOKE
 ./att.sh debug flow common.compose.v1 --input /tmp/compose.debug.yaml
 ./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml --env UAT
+./att.sh debug template PAYMENT_INVOKE --profile
 ```
 
 不帶 target 執行 `./att.sh debug`，會列出 statically valid、可執行的 Tool、Template 和 Flow，附 copyable command。只會顯示實際存在的 regular non-symlink default sidecar。Discovery 會檢查 selected target dependencies，但不建立 Debug output，也不呼叫 Tool。可用 `--format json` 取得 machine-readable 結果。
@@ -1021,8 +1022,11 @@ Debug 執行 target-scoped validation：只驗證 selected Template/Flow depende
 output/debug/<debugId>/
 ├── case.log
 ├── result.yaml
+├── performance.json       # 使用 --profile 時
 └── artifacts/
 ```
+
+`--profile` 會記錄從 Java main entry 到第一個已輸出的 progress event 及第一個 target action 的 monotonic timing，並記錄 config、input、validation、context setup、resource-helper setup、action execution、finalization 和 result-write phases。報告的 `totalMs` 不包括 shell launcher 和 JVM startup。若沒有輸出 progress event（例如 quiet run），first-console phase 會省略。可參考[與 3.7.3 比較的流程](system-design/debug-startup-benchmark.zh.md)執行可重複的 startup benchmark。
 
 `execution.debugIdFormat` 可使用 package 與 target metadata 設定 standalone `<debugId>`；`--debug-id <id>` 可指定 exact literal。明確或配置的 ID 若目錄已存在會 fail；legacy `<type>-<targetId>` default 仍會加 timestamp suffix。解析後的 Debug ID 同時用於目錄名、`debugId`、`EXEC.RUN_ID` 和 `EXEC.ID`。
 
@@ -2520,6 +2524,7 @@ mvn -DskipTests -pl att-cli -am compile
 | `./att.sh debug <type> <id> --debug-id <id>` | 指定 standalone Debug 的 exact directory identity |
 | `./att.sh debug <type> <id> --unsafe-failure-details` | 為此次 standalone local Debug 展開 collector failure diagnostics；會先警告並保留 secret redaction |
 | `./att.sh debug <type> <id> --output-dir <dir>` | 將 debug 輸出隔離到 `<dir>/debug/<debugId>/` |
+| `./att.sh debug <type> <id> --profile` | 將 CLI 啟動及 Debug phase timing 寫入 `performance.json` |
 | `./att.sh debug <type> <id> --format json` | 輸出緊湊機器可讀摘要；完整證據仍在 `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
 
@@ -2589,7 +2594,7 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 
 ### 完整 CLI option matrix
 
-`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.12` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
+`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.12` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
 
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 

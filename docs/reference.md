@@ -969,6 +969,7 @@ Debug executes one Template, Flow or Tool without requiring a workbook Testcase.
 ./att.sh debug template PAYMENT_INVOKE
 ./att.sh debug flow common.compose.v1 --input /tmp/compose.debug.yaml
 ./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml --env UAT
+./att.sh debug template PAYMENT_INVOKE --profile
 ```
 
 Run `./att.sh debug` with no target to list statically valid runnable Tools, Templates and Flows with copyable commands. A default sidecar path is displayed only when that regular non-symlink file exists. Discovery validates selected target dependencies but does not create Debug output or invoke Tools. Use `--format json` for machine-readable discovery output.
@@ -1039,8 +1040,11 @@ Each invocation is isolated under:
 output/debug/<debugId>/
 ├── case.log
 ├── result.yaml
+├── performance.json       # with --profile
 └── artifacts/
 ```
+
+`--profile` records monotonic timings from Java main entry through the first printed progress event and the first target action, along with config, input, validation, context setup, resource-helper setup, action execution, finalization, and result-write phases. The report's `totalMs` excludes the shell launcher and JVM startup. The first-console phase is absent when no progress event is printed (for example, a quiet run). See the [3.7.3 comparison procedure](system-design/debug-startup-benchmark.md) for repeatable startup benchmarks.
 
 Debug does not create or update normal `latest-run.yaml`. Exit codes are `0` PASS, `1` FAIL, `2` invalid CLI/config/input/validation, and `3` runtime error. It is execution-equivalent at the selected reusable-component boundary, but it is **not** a workbook Case: there is no workbook selection, Stage history or result-workbook lifecycle unless explicitly represented by debug inputs/artifacts.
 
@@ -1146,6 +1150,7 @@ Each invocation writes:
 output/debug/<debugId>/
 ├── case.log
 ├── result.yaml
+├── performance.json       # with --profile
 └── artifacts/
     └── case.yaml
 ```
@@ -2588,6 +2593,7 @@ On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not in
 | `./att.sh debug <type> <id> --debug-id <id>` | Set the exact standalone Debug directory identity |
 | `./att.sh debug <type> <id> --unsafe-failure-details` | Opt into expanded collector failure diagnostics for this standalone local Debug run; prints a warning and keeps secret redaction |
 | `./att.sh debug <type> <id> --output-dir <dir>` | Isolate debug output below `<dir>/debug/<debugId>/` |
+| `./att.sh debug <type> <id> --profile` | Write CLI startup and Debug phase timings to `performance.json` |
 | `./att.sh debug <type> <id> --format json` | Emit a compact machine-readable console summary; full evidence remains in `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | Suppress detailed live progress; keep the final summary and errors |
 
@@ -2678,7 +2684,7 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 
 ### Complete option matrix
 
-`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.12` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.12` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
 
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 

@@ -6,6 +6,7 @@ Debug 可在沒有 workbook Testcase 的情況下執行單一 Template、Flow �
 ./att.sh debug template PAYMENT_INVOKE
 ./att.sh debug flow common.compose.v1 --input /tmp/compose.debug.yaml
 ./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml --env UAT
+./att.sh debug template PAYMENT_INVOKE --profile
 ```
 
 不帶 target 執行 `./att.sh debug`，會列出 statically valid、可執行的 Tool、Template 和 Flow，附 copyable command。只會顯示實際存在的 regular non-symlink default sidecar。Discovery 會檢查 selected target dependencies，但不建立 Debug output，也不呼叫 Tool。可用 `--format json` 取得 machine-readable 結果。
@@ -76,8 +77,11 @@ Debug 執行 target-scoped validation：只驗證 selected Template/Flow depende
 output/debug/<debugId>/
 ├── case.log
 ├── result.yaml
+├── performance.json       # 使用 --profile 時
 └── artifacts/
 ```
+
+`--profile` 會記錄從 Java main entry 到第一個已輸出的 progress event 及第一個 target action 的 monotonic timing，並記錄 config、input、validation、context setup、resource-helper setup、action execution、finalization 和 result-write phases。報告的 `totalMs` 不包括 shell launcher 和 JVM startup。若沒有輸出 progress event（例如 quiet run），first-console phase 會省略。可參考[與 3.7.3 比較的流程](../../system-design/debug-startup-benchmark.zh.md)執行可重複的 startup benchmark。
 
 `execution.debugIdFormat` 可使用 package 與 target metadata 設定 standalone `<debugId>`；`--debug-id <id>` 可指定 exact literal。明確或配置的 ID 若目錄已存在會 fail；legacy `<type>-<targetId>` default 仍會加 timestamp suffix。解析後的 Debug ID 同時用於目錄名、`debugId`、`EXEC.RUN_ID` 和 `EXEC.ID`。
 

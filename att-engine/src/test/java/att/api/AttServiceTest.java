@@ -75,6 +75,39 @@ class AttServiceTest {
                 ? ((java.util.List<java.util.Map<String,Object>>)result.toMap().get("diagnostics")).get(0) : null);
     }
 
+    @Test void debugProfileWritesStartupAndExecutionPhases() throws Exception {
+        Path root=temp.resolve("debug-profile-package");
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("templates/SIMPLE"));
+        Files.createDirectories(root.resolve("testcase"));
+        Files.createDirectories(root.resolve("tools"));
+        att.TestSchemas.install(root);
+        Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.11\n"
+                + "outputDirectory: output\nenvironment: SIT\n"
+                + "templates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes("UTF-8"));
+        Files.write(root.resolve("templates/SIMPLE/template.yaml"), ("schemaVersion: att-template/v3.4\n"
+                + "name: SIMPLE\ndescription: debug profile test\nactions:\n"
+                + "  say: {type: log, message: hello}\n").getBytes("UTF-8"));
+        Files.write(root.resolve("templates/SIMPLE/debug.yaml"), "schemaVersion: att-debug/v1.2\n".getBytes("UTF-8"));
+        long entry=System.nanoTime()-1000000000L;
+        DebugStartupMetrics startup=new DebugStartupMetrics(entry,12500000L);
+        ExecutionEventListener observer=event -> startup.markFirstConsoleEvent();
+
+        DebugResult result=new DefaultAttService().debug(new DebugRequest(root,Paths.get("config/config.yaml"),null,
+                null,"profiled-debug","template","SIMPLE",null,false,observer,"profiled-debug",
+                Collections.<String>emptyList(),true,startup));
+
+        Path performance=Paths.get(root.resolve(result.paths().get("performance")).toString());
+        assertEquals("PASS",result.status());
+        assertTrue(Files.isRegularFile(performance));
+        String report=new String(Files.readAllBytes(performance),"UTF-8");
+        assertTrue(report.contains("\"timingOrigin\":\"java-main-entry\""),report);
+        assertTrue(report.contains("\"cliArgumentParseMs\":"),report);
+        assertTrue(report.contains("\"processToFirstConsoleEventMs\":"),report);
+        assertTrue(report.contains("\"processToFirstActionMs\":"),report);
+        assertTrue(report.contains("\"debugInputLoadMs\":"),report);
+    }
+
     @Test void concurrentLoadRequestsAtomicallyReserveTheSameOuterRunId() throws Exception {
         Path root=temp.resolve("load-collision-package");
         Files.createDirectories(root.resolve("config"));
