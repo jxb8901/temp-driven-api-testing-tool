@@ -22,6 +22,7 @@ import java.util.Map;
 public final class WorkerMain {
     private static final String PROTOCOL="att-worker/v1";
     private final ObjectMapper mapper=new ObjectMapper();
+    private final WorkerResourceTelemetry resourceTelemetry=new WorkerResourceTelemetry();
     private final PrintStream protocol;
     private String jobId;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
@@ -58,7 +59,7 @@ public final class WorkerMain {
         try {
             OperationResult result=dispatch(request);
             Map<String,Object> payload=new LinkedHashMap<String,Object>(); payload.put("status",result.status()); payload.put("exitCode",result.exitCode()); payload.put("durationMs",result.durationMs()); payload.put("result",result.toMap());
-            emit(WorkerEvent.Type.RESULT,payload);
+            emitResult(payload);
             return result.exitCode();
         } catch(Exception error) {
             String code="WORKER_EXECUTION_FAILED", message=error.getMessage();
@@ -70,7 +71,7 @@ public final class WorkerMain {
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException) { code="ATT-RESOURCE-CURSOR-STALE"; message="The package resources changed; refresh the Explorer"; }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
             emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message)));
-            emit(WorkerEvent.Type.RESULT,fields("status",status,"exitCode",exit,"result",fields("executionId",null,"status",status,"exitCode",exit)));
+            emitResult(fields("status",status,"exitCode",exit,"result",fields("executionId",null,"status",status,"exitCode",exit)));
             return exit;
         }
     }
@@ -112,8 +113,9 @@ public final class WorkerMain {
                 ? WorkerEvent.Type.PROGRESS : WorkerEvent.Type.LOG;
         try { emit(type,data); } catch(Exception error) { throw new IllegalStateException(error); }
     }
-    private void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception { protocol.println(mapper.writeValueAsString(new WorkerEvent(type,jobId,data).toMap())); protocol.flush(); }
-    private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message)); emit(WorkerEvent.Type.RESULT,fields("status","INVALID","exitCode",2,"result",fields("executionId",null,"status","INVALID","exitCode",2))); return 2; }
+    private void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception { resourceTelemetry.sample();protocol.println(mapper.writeValueAsString(new WorkerEvent(type,jobId,data).toMap())); protocol.flush(); }
+    private void emitResult(Map<String,Object> payload) throws Exception {payload.put("workerMetrics",resourceTelemetry.snapshot());emit(WorkerEvent.Type.RESULT,payload);}
+    private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message)); emitResult(fields("status","INVALID","exitCode",2,"result",fields("executionId",null,"status","INVALID","exitCode",2))); return 2; }
     private static Map<String,Object> fields(Object... values) { Map<String,Object> map=new LinkedHashMap<String,Object>(); for(int i=0;i+1<values.length;i+=2)map.put(String.valueOf(values[i]),values[i+1]); return map; }
     private static boolean bool(Boolean value) { return Boolean.TRUE.equals(value); }
     private static String text(Map<String,Object> value,String key) { String found=optionalText(value,key); if(found==null||found.trim().isEmpty())throw new IllegalArgumentException("target."+key+" is required"); return found; }

@@ -45,4 +45,16 @@ class ServerConfigTest {
     }
 
     private static String yaml(Path path){return "'"+path.toAbsolutePath().toString().replace("'","''")+"'";}
+
+    @Test void validatesAndLoadsBoundedWorkerHeapSettings() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("heap-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path valid=temp.resolve("heap-valid.yaml");Files.writeString(valid,"server:\n  dataDir: "+temp.resolve("heap-data")+"\n  javaExecutable: "+java+"\nworkers:\n  heapInitialMb: 128\n  heapMaxMb: 1024\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        ServerConfig loaded=ServerConfig.load(valid);
+        assertEquals(128,loaded.workerHeapInitialMb);assertEquals(1024,loaded.workerHeapMaxMb);
+
+        Path invalid=temp.resolve("heap-invalid.yaml");Files.writeString(invalid,"server:\n  dataDir: "+temp.resolve("heap-invalid-data")+"\n  javaExecutable: "+java+"\nworkers:\n  heapInitialMb: 2048\n  heapMaxMb: 1024\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(invalid));
+        assertTrue(error.getMessage().contains("must not exceed"));
+    }
 }

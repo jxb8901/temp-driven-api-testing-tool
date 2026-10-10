@@ -91,28 +91,29 @@ public final class ApiServlet extends HttpServlet {
         String last=req.getHeader("Last-Event-ID");long cursor=0;
         if(last!=null&&!last.isBlank())try{cursor=Long.parseLong(last);}catch(NumberFormatException e){error(res,400,"ATT-SERVER-INVALID-LAST-EVENT-ID","Last-Event-ID must be a non-negative integer",requestId(req,res));return;}
         if(cursor<0){error(res,400,"ATT-SERVER-INVALID-LAST-EVENT-ID","Last-Event-ID must be a non-negative integer",requestId(req,res));return;}
-        JobEvents events;try{events=runtime.events(jobId);}catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId(req,res));return;}catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The event journal is unavailable",requestId(req,res));return;}
+        JobEvents events;Path packageRoot;Path outputDirectory;try{events=runtime.events(jobId);packageRoot=runtime.packageRootForJob(jobId);outputDirectory=runtime.outputDirectoryForJob(jobId);}catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId(req,res));return;}catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The event journal is unavailable",requestId(req,res));return;}
         if(!runtime.streamSlots.tryAcquire()){error(res,503,"ATT-SERVER-STREAM-CAPACITY","SSE observer capacity is full",requestId(req,res));return;}
         boolean handedOff=false;
         try {
             AsyncContext async=req.startAsync();async.setTimeout(0);final long start=cursor;
             res.setStatus(200);res.setCharacterEncoding("UTF-8");res.setContentType("text/event-stream");res.setHeader("Cache-Control","no-cache, no-transform");res.setHeader("X-Accel-Buffering","no");
-            runtime.streams.execute(()->{try{stream(async,jobId,events,start);}finally{runtime.streamSlots.release();}});handedOff=true;
+            runtime.streams.execute(()->{try{stream(async,jobId,events,start,outputDirectory,packageRoot);}finally{runtime.streamSlots.release();}});handedOff=true;
         } catch(RejectedExecutionException full) {
             if(!res.isCommitted()){res.resetBuffer();error(res,503,"ATT-SERVER-STREAM-CAPACITY","SSE observer capacity is full",requestId(req,res));}
             if(req.isAsyncStarted())req.getAsyncContext().complete();
         } finally {if(!handedOff)runtime.streamSlots.release();}
     }
-    private void stream(AsyncContext async,String jobId,JobEvents journal,long cursor){
+    private void stream(AsyncContext async,String jobId,JobEvents journal,long cursor,Path outputDirectory,Path packageRoot){
         long lastWrite=System.nanoTime();java.util.concurrent.ArrayBlockingQueue<Boolean> wakeup=new java.util.concurrent.ArrayBlockingQueue<>(1);
         AutoCloseable subscription=journal.listen(event->wakeup.offer(Boolean.TRUE));wakeup.offer(Boolean.TRUE);
         try(PrintWriter out=async.getResponse().getWriter()){
             while(true){
                 wakeup.poll(15,TimeUnit.SECONDS);
                 List<Map<String,Object>> events=journal.after(cursor,100);
-                for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(runtime.publicEventData(jobId,event.get("data")))+"\n\n");out.flush();if(out.checkError())return;cursor=id;lastWrite=System.nanoTime();}
-                if(runtime.terminal(jobId)&&!journal.hasMore(cursor))break;
-                if(journal.hasMore(cursor))wakeup.offer(Boolean.TRUE);
+                for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(runtime.publicEventData(event.get("data"),outputDirectory,packageRoot))+"\n\n");cursor=id;}
+                if(!events.isEmpty()){out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
+                if(journal.hasMore(cursor)){wakeup.offer(Boolean.TRUE);continue;}
+                if(runtime.terminal(jobId)&&journal.resultDeliveredThrough(cursor)&&!journal.hasMore(cursor))break;
                 if(System.nanoTime()-lastWrite>TimeUnit.SECONDS.toNanos(15)){out.print(": keepalive\n\n");out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
             }
         }catch(Exception ignored){}finally{try{subscription.close();}catch(Exception ignored){}async.complete();}

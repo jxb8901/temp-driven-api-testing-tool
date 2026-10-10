@@ -87,6 +87,52 @@ class StageTemplateLoaderTest {
         assertEquals(2, PayloadCache.stats().loads());
     }
 
+    @Test void payloadCacheEvictsLeastRecentlyUsedEntryAtEntryLimit() throws Exception {
+        PayloadCache.clearForTests();
+        Path first = tempDir.resolve("payload-0.txt");
+        for (int i = 0; i <= PayloadCache.MAX_CACHE_ENTRIES; i++) {
+            Path payload = tempDir.resolve("payload-" + i + ".txt");
+            Files.write(payload, ("payload-" + i).getBytes("UTF-8"));
+            assertEquals("payload-" + i, PayloadCache.readUtf8(payload));
+            if (i == 0) first = payload;
+        }
+        assertEquals("payload-1", PayloadCache.readUtf8(tempDir.resolve("payload-1.txt")));
+        assertEquals("payload-0", PayloadCache.readUtf8(first));
+        assertEquals(PayloadCache.MAX_CACHE_ENTRIES + 2, PayloadCache.stats().loads());
+        assertEquals(1, PayloadCache.stats().hits());
+    }
+
+    @Test void payloadCacheDoesNotRetainSingleOversizedPayload() throws Exception {
+        PayloadCache.clearForTests();
+        Path payload = tempDir.resolve("large-payload.txt");
+        char[] value = new char[PayloadCache.MAX_ENTRY_CHARS + 1];
+        java.util.Arrays.fill(value, 'x');
+        Files.write(payload, new String(value).getBytes("UTF-8"));
+
+        assertEquals(value.length, PayloadCache.readUtf8(payload).length());
+        assertEquals(value.length, PayloadCache.readUtf8(payload).length());
+        assertEquals(2, PayloadCache.stats().loads());
+        assertEquals(0, PayloadCache.stats().hits());
+    }
+
+    @Test void payloadCacheEvictsToStayWithinCharacterBudget() throws Exception {
+        PayloadCache.clearForTests();
+        Path first = tempDir.resolve("budget-payload-0.txt");
+        byte[] value = new byte[PayloadCache.MAX_ENTRY_CHARS];
+        java.util.Arrays.fill(value, (byte) 'x');
+        for (int i = 0; i <= PayloadCache.MAX_CACHED_CHARS / PayloadCache.MAX_ENTRY_CHARS; i++) {
+            Path payload = tempDir.resolve("budget-payload-" + i + ".txt");
+            Files.write(payload, value);
+            PayloadCache.readUtf8(payload);
+            if (i == 0) first = payload;
+        }
+
+        assertEquals(value.length, PayloadCache.readUtf8(first).length());
+        assertEquals(PayloadCache.MAX_CACHED_CHARS / PayloadCache.MAX_ENTRY_CHARS + 2,
+                PayloadCache.stats().loads());
+        assertEquals(0, PayloadCache.stats().hits());
+    }
+
     @Test void rejectsRemovedActionDefaultsAndInvalidActionFailureMode() throws Exception {
         Path defaults = tempDir.resolve("templates/defaults");
         Files.createDirectories(defaults);

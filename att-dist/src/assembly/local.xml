@@ -7,6 +7,7 @@
         <file><source>${project.basedir}/../README.md</source><outputDirectory>/</outputDirectory><destName>README.md</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/../CHANGELOG.md</source><outputDirectory>/</outputDirectory><destName>CHANGELOG.md</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/src/release/local/RELEASE_MANIFEST.txt</source><outputDirectory>/</outputDirectory><destName>RELEASE_MANIFEST.txt</destName><fileMode>0644</fileMode><filtered>true</filtered></file>
+        <file><source>${project.build.directory}/att-${project.version}-modules.jar</source><outputDirectory>lib</outputDirectory><destName>att-${project.version}.jar</destName><fileMode>0644</fileMode></file>
     </files>
     <fileSets>
         <fileSet><directory>${project.basedir}/../config</directory><outputDirectory>config</outputDirectory></fileSet>
@@ -19,7 +20,6 @@
         <fileSet><directory>${project.basedir}/../schemas</directory><outputDirectory>schemas</outputDirectory></fileSet>
     </fileSets>
     <dependencySets>
-        <dependencySet><useProjectArtifact>false</useProjectArtifact><outputDirectory>lib</outputDirectory><includes><include>att:att-cli</include></includes><outputFileNameMapping>att-${project.version}.jar</outputFileNameMapping><useTransitiveDependencies>false</useTransitiveDependencies><unpack>false</unpack></dependencySet>
-        <dependencySet><useProjectArtifact>false</useProjectArtifact><outputDirectory>lib</outputDirectory><excludes><exclude>att:att-cli</exclude><exclude>att:att-server</exclude></excludes><useTransitiveDependencies>true</useTransitiveDependencies><unpack>false</unpack></dependencySet>
+        <dependencySet><useProjectArtifact>false</useProjectArtifact><outputDirectory>lib</outputDirectory><excludes><exclude>att:att-cli</exclude><exclude>att:att-engine</exclude><exclude>att:att-remote</exclude><exclude>att:att-server-api</exclude><exclude>att:att-server</exclude><exclude>att:att-worker</exclude></excludes><useTransitiveDependencies>true</useTransitiveDependencies><unpack>false</unpack></dependencySet>
     </dependencySets>
 </assembly>

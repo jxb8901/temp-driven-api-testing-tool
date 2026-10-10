@@ -347,6 +347,38 @@ class CaseExecutionLogTest {
         assertTrue(output.flushes > 0);
     }
 
+    @Test void bufferedCaseLogFlushesBoundedBatchesAndRetainsRedactedFailureEvidenceOnClose() throws Exception {
+        Path file = tempDir.resolve("buffered-case.log");
+        CaseExecutionLog log = CaseExecutionLog.buffered(file, false);
+        log.registerSecretRedactions(java.util.Collections.singletonList("secret-value"));
+        StringBuilder batch = new StringBuilder(64 * 1024);
+        for (int i = 0; i < 64 * 1024; i++) batch.append('x');
+        log.appendRaw("ACTION TRACE", batch.toString());
+        assertTrue(Files.size(file) > 0L, "large writes must flush once the bounded batch is reached");
+        log.appendRaw("ERROR", "token=secret-value");
+        log.close();
+
+        String persisted = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(persisted.contains("[ERROR]"));
+        assertTrue(persisted.contains("token=[REDACTED_SECRET]"));
+        assertFalse(persisted.contains("secret-value"));
+    }
+
+    @Test void bufferedCaseLogCloseFlushesSubThresholdRedactedFailureEvidence() throws Exception {
+        Path file = tempDir.resolve("buffered-close-only.log");
+        CaseExecutionLog log = CaseExecutionLog.buffered(file, false);
+        log.registerSecretRedactions(java.util.Collections.singletonList("secret-value"));
+        log.appendRaw("ERROR", "token=secret-value");
+
+        assertEquals(0L, Files.size(file), "A sub-threshold append should remain buffered before close");
+        log.close();
+
+        String persisted = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(persisted.contains("[ERROR]"));
+        assertTrue(persisted.contains("token=[REDACTED_SECRET]"));
+        assertFalse(persisted.contains("secret-value"));
+    }
+
     @Test void redactsProjectRootSecretsBeforePathPresentation() throws Exception {
         Path root = Files.createDirectories(tempDir.resolve("secret project"));
         String secret = root.resolve("private-token").toString();

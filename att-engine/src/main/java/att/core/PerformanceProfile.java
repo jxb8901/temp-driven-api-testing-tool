@@ -16,16 +16,28 @@ import java.util.Map;
 /** Per-run phase timings and cache/I/O counters emitted by --profile. */
 public final class PerformanceProfile {
     private final boolean enabled;
-    private final long started = System.nanoTime();
+    private final long started;
+    private final String timingOrigin;
     private final Map<String, Object> phases = new LinkedHashMap<String, Object>();
     private final Map<String, Object> counters = new LinkedHashMap<String, Object>();
-    private final JsonSchemaVerifier.Stats schemaStart = JsonSchemaVerifier.stats();
-    private final StageTemplateLoader.Stats templateStart = StageTemplateLoader.stats();
-    private final PayloadCache.Stats payloadStart = PayloadCache.stats();
-    private final CommandRunner.Stats processStart = CommandRunner.stats();
+    private final JsonSchemaVerifier.Stats schemaStart;
+    private final StageTemplateLoader.Stats templateStart;
+    private final PayloadCache.Stats payloadStart;
+    private final CommandRunner.Stats processStart;
+    private long firstActionNanos;
+    private boolean firstActionCaptured;
 
-    public PerformanceProfile(boolean enabled) { this.enabled = enabled; }
-    public long begin() { return System.nanoTime(); }
+    public PerformanceProfile(boolean enabled) { this(enabled, System.nanoTime(), "engine-entry"); }
+    public PerformanceProfile(boolean enabled, long startedAtNanos, String timingOrigin) {
+        this.enabled = enabled;
+        this.started = startedAtNanos;
+        this.timingOrigin = timingOrigin == null || timingOrigin.trim().isEmpty() ? "engine-entry" : timingOrigin;
+        this.schemaStart = enabled ? JsonSchemaVerifier.stats() : null;
+        this.templateStart = enabled ? StageTemplateLoader.stats() : null;
+        this.payloadStart = enabled ? PayloadCache.stats() : null;
+        this.processStart = enabled ? CommandRunner.stats() : null;
+    }
+    public long begin() { return enabled ? System.nanoTime() : 0L; }
     public void end(String phase, long phaseStarted) { if (enabled) phases.put(phase, millis(System.nanoTime() - phaseStarted)); }
     public void endAccumulated(String phase, long phaseStarted) {
         if (!enabled) return;
@@ -34,6 +46,13 @@ public final class PerformanceProfile {
         phases.put(phase, elapsed + (previous instanceof Number ? ((Number) previous).longValue() : 0L));
     }
     public void counter(String name, long value) { if (enabled) counters.put(name, value); }
+    public void durationNanos(String phase, long durationNanos) { if (enabled && durationNanos >= 0L) phases.put(phase, millis(durationNanos)); }
+    public void markFirstAction() {
+        if (enabled && !firstActionCaptured) {
+            firstActionNanos = System.nanoTime();
+            firstActionCaptured = true;
+        }
+    }
 
     public void write(Path runDirectory) throws Exception {
         if (!enabled) return;
@@ -50,9 +69,14 @@ public final class PerformanceProfile {
         counters.put("processStdoutBytes", process.stdoutBytes() - processStart.stdoutBytes());
         counters.put("processStderrBytes", process.stderrBytes() - processStart.stderrBytes());
         counters.put("processTruncatedStreams", process.truncatedStreams() - processStart.truncatedStreams());
+        if (firstActionCaptured) phases.put("processToFirstActionMs", millis(firstActionNanos - started));
         Map<String, Object> root = new LinkedHashMap<String, Object>();
         root.put("schemaVersion", "att-performance/v2.4.3");
         root.put("attVersion", Version.PRODUCT);
+        if (!"engine-entry".equals(timingOrigin)) {
+            root.put("timingOrigin", timingOrigin);
+            root.put("clock", "monotonic");
+        }
         root.put("totalMs", millis(System.nanoTime() - started));
         root.put("phases", phases);
         root.put("counters", counters);

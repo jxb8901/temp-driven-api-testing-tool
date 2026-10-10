@@ -323,7 +323,7 @@ public final class CliOptions {
         else if ("snapshot".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--all"));
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
         else if ("build".equals(command)) allowed.add("--output-dir");
-        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--debug-id", "--output-dir", "--format", "--quiet", "--verbose", "--env", "--unsafe-failure-details"));
+        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--debug-id", "--output-dir", "--profile", "--format", "--quiet", "--verbose", "--env", "--unsafe-failure-details"));
         else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--format", "--quiet", "--verbose", "--profile", "--output-dir", "--run-id", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy", "--env"));
         for (String option : seen) if (!allowed.contains(option)) throw new IllegalArgumentException("Option " + option + " is not valid for command " + command);
     }

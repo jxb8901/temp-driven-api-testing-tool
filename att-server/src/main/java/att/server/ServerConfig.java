@@ -18,6 +18,7 @@ public final class ServerConfig {
     public final Path dataDir;
     public final Path javaExecutable;
     public final int maxConcurrent, queuedLimit, maxConcurrentLoad, gracefulStopMs, jobRetentionDays;
+    public final int workerHeapInitialMb, workerHeapMaxMb;
     public final int maxRequestBytes, maxEventsPerJob, maxArtifacts;
     public final boolean authenticationRequired;
     public final Map<String, Path> packages;
@@ -26,10 +27,12 @@ public final class ServerConfig {
     public final Inspection inspection;
 
     private ServerConfig(Path dataDir, Path javaExecutable, int maxConcurrent, int queuedLimit,
-                         int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays, int maxRequestBytes,
+                         int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
+                         int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
                          int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection) {
         this.dataDir=dataDir; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
+        this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
         this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;
         this.packages=Collections.unmodifiableMap(new LinkedHashMap<>(packages));
         this.allowedRoots=List.copyOf(allowedRoots);
@@ -75,6 +78,9 @@ public final class ServerConfig {
         for(Object entry:libraryDirs){Path library=canonicalRequired(string(entry,"workers.libraryDirs entry"),"workers.libraryDirs entry",true);if(!Files.isReadable(library))throw new IllegalArgumentException("workers.libraryDirs entry must be readable: "+library);workerLibraries.add(library);}
         int max=intValue(workers,"maxConcurrent",8,1,256), queue=intValue(workers,"queuedLimit",100,0,100000),
             load=intValue(workers,"maxConcurrentLoad",2,1,256), stop=intValue(workers,"gracefulStopMs",10000,0,300000);
+        int heapMax=intValue(workers,"heapMaxMb",0,64,65536), heapInitial=intValue(workers,"heapInitialMb",0,32,65536);
+        if(heapInitial>0&&heapMax==0)throw new IllegalArgumentException("workers.heapInitialMb requires workers.heapMaxMb");
+        if(heapInitial>heapMax)throw new IllegalArgumentException("workers.heapInitialMb must not exceed workers.heapMaxMb");
         int retention=intValue(server,"jobRetentionDays",30,1,3650);
         int request=intValue(server,"maxRequestBytes",1048576,1024,16777216), events=intValue(server,"maxEventsPerJob",10000,100,1000000),
             artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
@@ -86,7 +92,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,java,max,queue,load,stop,retention,request,events,artifacts,authenticationRequired,resolved,allowed,workerLibraries,inspection);
+        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,resolved,allowed,workerLibraries,inspection);
     }
 
     public static Path configPath() {

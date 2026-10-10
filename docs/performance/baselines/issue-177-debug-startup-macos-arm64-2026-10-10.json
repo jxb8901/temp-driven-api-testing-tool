@@ -1,0 +1,4105 @@
+{
+  "schemaVersion": "att-debug-startup-benchmark/v1",
+  "baseline": {
+    "baselineSource": {
+      "version": "ATT V3.7.3",
+      "cases": {
+        "version": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 50.844,
+                "p95": 56.054,
+                "mean": 51.439,
+                "standardDeviation": 1.673,
+                "coefficientOfVariationPercent": 3.25
+              },
+              "totalMs": {
+                "p50": 52.18,
+                "p95": 57.46,
+                "mean": 52.775,
+                "standardDeviation": 1.699,
+                "coefficientOfVariationPercent": 3.22
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.955333,
+                "totalMs": 52.327792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.660334,
+                "totalMs": 51.953709
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.709625,
+                "totalMs": 52.025917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 56.053667,
+                "totalMs": 57.460042
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.984458,
+                "totalMs": 53.331708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.513709,
+                "totalMs": 51.899542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.731917,
+                "totalMs": 52.031625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.091917,
+                "totalMs": 52.38525
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.695334,
+                "totalMs": 51.97825
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.99075,
+                "totalMs": 52.355333
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 51.715,
+                "p95": 54.137,
+                "mean": 51.752,
+                "standardDeviation": 1.107,
+                "coefficientOfVariationPercent": 2.14
+              },
+              "totalMs": {
+                "p50": 53.058,
+                "p95": 55.934,
+                "mean": 53.171,
+                "standardDeviation": 1.252,
+                "coefficientOfVariationPercent": 2.35
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.196875,
+                "totalMs": 51.5005
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.593875,
+                "totalMs": 51.898916
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 54.136709,
+                "totalMs": 55.93425
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 52.248333,
+                "totalMs": 53.627667
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.477958,
+                "totalMs": 52.803167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.251167,
+                "totalMs": 52.607584
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.952833,
+                "totalMs": 53.312625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.13075,
+                "totalMs": 52.417208
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 52.103375,
+                "totalMs": 53.702709
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 52.432375,
+                "totalMs": 53.900542
+              }
+            ]
+          }
+        },
+        "help": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 46.684,
+                "p95": 46.897,
+                "mean": 46.619,
+                "standardDeviation": 0.242,
+                "coefficientOfVariationPercent": 0.52
+              },
+              "totalMs": {
+                "p50": 52.855,
+                "p95": 53.167,
+                "mean": 52.821,
+                "standardDeviation": 0.234,
+                "coefficientOfVariationPercent": 0.44
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.735417,
+                "totalMs": 53.088
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.309583,
+                "totalMs": 52.484167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.440667,
+                "totalMs": 52.645083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.583208,
+                "totalMs": 52.833125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.845958,
+                "totalMs": 52.993
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.8355,
+                "totalMs": 53.1675
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.173292,
+                "totalMs": 52.539625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.71825,
+                "totalMs": 52.876542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.89675,
+                "totalMs": 52.938042
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.649542,
+                "totalMs": 52.648875
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 46.465,
+                "p95": 49.522,
+                "mean": 46.698,
+                "standardDeviation": 1.154,
+                "coefficientOfVariationPercent": 2.47
+              },
+              "totalMs": {
+                "p50": 52.987,
+                "p95": 55.895,
+                "mean": 52.95,
+                "standardDeviation": 1.218,
+                "coefficientOfVariationPercent": 2.3
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 45.685709,
+                "totalMs": 51.697167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.521542,
+                "totalMs": 55.894542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.316083,
+                "totalMs": 53.556791
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.792584,
+                "totalMs": 53.125917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.167833,
+                "totalMs": 52.91025
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.761458,
+                "totalMs": 53.063458
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.140625,
+                "totalMs": 53.204375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 45.844917,
+                "totalMs": 51.974875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 45.99825,
+                "totalMs": 52.105375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 45.753833,
+                "totalMs": 51.968291
+              }
+            ]
+          }
+        },
+        "noopTemplate": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 295.467,
+                "p95": 334.497,
+                "mean": 299.427,
+                "standardDeviation": 12.522,
+                "coefficientOfVariationPercent": 4.18
+              },
+              "totalMs": {
+                "p50": 344.26,
+                "p95": 396.329,
+                "mean": 348.995,
+                "standardDeviation": 16.951,
+                "coefficientOfVariationPercent": 4.86
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 334.497042,
+                "totalMs": 396.328917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.02025,
+                "totalMs": 338.547875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.563542,
+                "totalMs": 344.811334
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.557625,
+                "totalMs": 343.708334
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.098125,
+                "totalMs": 341.449375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.766,
+                "totalMs": 342.166375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 298.452208,
+                "totalMs": 347.063333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 299.632167,
+                "totalMs": 349.805958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.168209,
+                "totalMs": 345.478042
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.513917,
+                "totalMs": 340.592667
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 296.173,
+                "p95": 301.302,
+                "mean": 296.949,
+                "standardDeviation": 3.171,
+                "coefficientOfVariationPercent": 1.07
+              },
+              "totalMs": {
+                "p50": 345.272,
+                "p95": 353.29,
+                "mean": 346.141,
+                "standardDeviation": 4.549,
+                "coefficientOfVariationPercent": 1.31
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.152625,
+                "totalMs": 342.425458
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.561667,
+                "totalMs": 341.10175
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.942042,
+                "totalMs": 340.546583
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.453416,
+                "totalMs": 343.525
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 300.214875,
+                "totalMs": 350.691667
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 301.302042,
+                "totalMs": 353.289917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 300.132167,
+                "totalMs": 351.575209
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 299.384917,
+                "totalMs": 346.611625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.988958,
+                "totalMs": 347.71575
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.357875,
+                "totalMs": 343.9315
+              }
+            ]
+          }
+        },
+        "flow": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 294.677,
+                "p95": 307.519,
+                "mean": 296.089,
+                "standardDeviation": 4.408,
+                "coefficientOfVariationPercent": 1.49
+              },
+              "totalMs": {
+                "p50": 360.404,
+                "p95": 368.956,
+                "mean": 360.084,
+                "standardDeviation": 4.75,
+                "coefficientOfVariationPercent": 1.32
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.869125,
+                "totalMs": 362.364416
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.431208,
+                "totalMs": 359.628917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.812208,
+                "totalMs": 361.997708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.655667,
+                "totalMs": 351.543959
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.15125,
+                "totalMs": 356.142167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.501667,
+                "totalMs": 356.072875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.851917,
+                "totalMs": 360.29325
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 298.244083,
+                "totalMs": 363.322333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.518625,
+                "totalMs": 368.95575
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.852417,
+                "totalMs": 360.514917
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 296.674,
+                "p95": 305.338,
+                "mean": 297.409,
+                "standardDeviation": 3.608,
+                "coefficientOfVariationPercent": 1.21
+              },
+              "totalMs": {
+                "p50": 361.525,
+                "p95": 373.064,
+                "mean": 362.647,
+                "standardDeviation": 5.844,
+                "coefficientOfVariationPercent": 1.61
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.490083,
+                "totalMs": 358.894958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.180042,
+                "totalMs": 356.738459
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 299.409833,
+                "totalMs": 366.284708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 297.711375,
+                "totalMs": 361.256625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.261334,
+                "totalMs": 368.420542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 305.337916,
+                "totalMs": 373.064125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 299.774375,
+                "totalMs": 361.792791
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.637084,
+                "totalMs": 357.637125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.120708,
+                "totalMs": 355.220833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 298.162292,
+                "totalMs": 367.157
+              }
+            ]
+          }
+        },
+        "tool": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 297.188,
+                "p95": 301.007,
+                "mean": 297.305,
+                "standardDeviation": 2.225,
+                "coefficientOfVariationPercent": 0.75
+              },
+              "totalMs": {
+                "p50": 369.017,
+                "p95": 791.169,
+                "mean": 410.205,
+                "standardDeviation": 133.894,
+                "coefficientOfVariationPercent": 32.64
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.355125,
+                "totalMs": 791.168708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 301.0065,
+                "totalMs": 365.931583
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 297.943916,
+                "totalMs": 369.684583
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.554708,
+                "totalMs": 364.917833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 297.398667,
+                "totalMs": 370.6035
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 300.472125,
+                "totalMs": 371.821875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 297.792166,
+                "totalMs": 368.350125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.981416,
+                "totalMs": 361.242625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.978292,
+                "totalMs": 370.100875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.570666,
+                "totalMs": 368.227416
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 296.358,
+                "p95": 307.696,
+                "mean": 297.644,
+                "standardDeviation": 3.73,
+                "coefficientOfVariationPercent": 1.25
+              },
+              "totalMs": {
+                "p50": 368.291,
+                "p95": 380.188,
+                "mean": 369.113,
+                "standardDeviation": 4.826,
+                "coefficientOfVariationPercent": 1.31
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.36625,
+                "totalMs": 366.799667
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.257875,
+                "totalMs": 372.383042
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.348875,
+                "totalMs": 371.647334
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 299.466584,
+                "totalMs": 369.509542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.69575,
+                "totalMs": 380.187792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.315,
+                "totalMs": 365.740208
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.197208,
+                "totalMs": 364.967875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 297.271208,
+                "totalMs": 368.898083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.410417,
+                "totalMs": 363.310459
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.111375,
+                "totalMs": 367.683083
+              }
+            ]
+          }
+        },
+        "resourceHttp": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 295.129,
+                "p95": 303.852,
+                "mean": 296.462,
+                "standardDeviation": 3.458,
+                "coefficientOfVariationPercent": 1.17
+              },
+              "totalMs": {
+                "p50": 452.369,
+                "p95": 463.344,
+                "mean": 453.319,
+                "standardDeviation": 6.046,
+                "coefficientOfVariationPercent": 1.33
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 299.506166,
+                "totalMs": 460.934
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.983292,
+                "totalMs": 454.527792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 303.852208,
+                "totalMs": 463.344292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 299.099959,
+                "totalMs": 452.269
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 297.329125,
+                "totalMs": 452.27275
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.275042,
+                "totalMs": 448.650375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.929875,
+                "totalMs": 444.50825
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.005833,
+                "totalMs": 452.465916
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.828291,
+                "totalMs": 446.460708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.814625,
+                "totalMs": 457.7555
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 295.917,
+                "p95": 297.238,
+                "mean": 295.431,
+                "standardDeviation": 1.452,
+                "coefficientOfVariationPercent": 0.49
+              },
+              "totalMs": {
+                "p50": 450.397,
+                "p95": 455.922,
+                "mean": 450.599,
+                "standardDeviation": 2.456,
+                "coefficientOfVariationPercent": 0.55
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 297.188875,
+                "totalMs": 455.922
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 297.2385,
+                "totalMs": 449.454542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.329917,
+                "totalMs": 447.273
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.389375,
+                "totalMs": 452.8105
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.566541,
+                "totalMs": 450.028125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.912625,
+                "totalMs": 448.596875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.935,
+                "totalMs": 448.725083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.922167,
+                "totalMs": 450.995334
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.989125,
+                "totalMs": 450.765083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.83875,
+                "totalMs": 451.420541
+              }
+            ]
+          }
+        }
+      }
+    },
+    "baselineBinary": {
+      "version": "ATT V3.7.3",
+      "cases": {
+        "version": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 50.072,
+                "p95": 52.308,
+                "mean": 50.176,
+                "standardDeviation": 0.905,
+                "coefficientOfVariationPercent": 1.8
+              },
+              "totalMs": {
+                "p50": 51.36,
+                "p95": 53.682,
+                "mean": 51.501,
+                "standardDeviation": 0.905,
+                "coefficientOfVariationPercent": 1.76
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 52.307792,
+                "totalMs": 53.682209
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.0605,
+                "totalMs": 50.472125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.120958,
+                "totalMs": 51.467917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.865666,
+                "totalMs": 51.144625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.116709,
+                "totalMs": 51.34825
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.975667,
+                "totalMs": 51.370792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.20225,
+                "totalMs": 50.535458
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.8635,
+                "totalMs": 52.143916
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.215417,
+                "totalMs": 51.542209
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.027541,
+                "totalMs": 51.303166
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 49.387,
+                "p95": 50.49,
+                "mean": 49.597,
+                "standardDeviation": 0.476,
+                "coefficientOfVariationPercent": 0.96
+              },
+              "totalMs": {
+                "p50": 50.758,
+                "p95": 51.839,
+                "mean": 50.903,
+                "standardDeviation": 0.473,
+                "coefficientOfVariationPercent": 0.93
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.555333,
+                "totalMs": 50.866458
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.489834,
+                "totalMs": 51.839375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.95025,
+                "totalMs": 51.164625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.18575,
+                "totalMs": 50.491
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.392167,
+                "totalMs": 50.667584
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.021042,
+                "totalMs": 50.304708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.377292,
+                "totalMs": 50.825375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.249125,
+                "totalMs": 51.513125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.381667,
+                "totalMs": 50.690625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.363708,
+                "totalMs": 50.663583
+              }
+            ]
+          }
+        },
+        "help": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 43.936,
+                "p95": 46.752,
+                "mean": 44.333,
+                "standardDeviation": 0.939,
+                "coefficientOfVariationPercent": 2.12
+              },
+              "totalMs": {
+                "p50": 50.879,
+                "p95": 53.28,
+                "mean": 51.091,
+                "standardDeviation": 0.885,
+                "coefficientOfVariationPercent": 1.73
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.752459,
+                "totalMs": 53.279875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.723583,
+                "totalMs": 50.361041
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.948209,
+                "totalMs": 50.73375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.495958,
+                "totalMs": 51.243
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.652167,
+                "totalMs": 51.023792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.657,
+                "totalMs": 51.694125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.6725,
+                "totalMs": 51.169542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.92425,
+                "totalMs": 50.565625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.691667,
+                "totalMs": 50.327834
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.807709,
+                "totalMs": 50.513
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 44.552,
+                "p95": 47.47,
+                "mean": 44.92,
+                "standardDeviation": 1.254,
+                "coefficientOfVariationPercent": 2.79
+              },
+              "totalMs": {
+                "p50": 51.342,
+                "p95": 54.232,
+                "mean": 51.776,
+                "standardDeviation": 1.331,
+                "coefficientOfVariationPercent": 2.57
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 45.478459,
+                "totalMs": 52.267
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.580875,
+                "totalMs": 51.304542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.651083,
+                "totalMs": 50.261041
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.59425,
+                "totalMs": 50.172167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.522166,
+                "totalMs": 52.61225
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 46.6225,
+                "totalMs": 53.407917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.209334,
+                "totalMs": 50.915709
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.601791,
+                "totalMs": 51.379958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.473459,
+                "totalMs": 51.212459
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.470375,
+                "totalMs": 54.23175
+              }
+            ]
+          }
+        },
+        "noopTemplate": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 291.475,
+                "p95": 300.355,
+                "mean": 291.048,
+                "standardDeviation": 4.628,
+                "coefficientOfVariationPercent": 1.59
+              },
+              "totalMs": {
+                "p50": 340.554,
+                "p95": 349.642,
+                "mean": 340.047,
+                "standardDeviation": 4.495,
+                "coefficientOfVariationPercent": 1.32
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.803,
+                "totalMs": 340.659166
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.75675,
+                "totalMs": 342.377875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 287.775125,
+                "totalMs": 337.865291
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.972917,
+                "totalMs": 336.154709
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 282.819083,
+                "totalMs": 332.655666
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 287.302791,
+                "totalMs": 337.750958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.104792,
+                "totalMs": 341.590209
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 300.354833,
+                "totalMs": 349.641625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.192792,
+                "totalMs": 340.448625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.397542,
+                "totalMs": 341.324209
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 288.518,
+                "p95": 299.733,
+                "mean": 289.412,
+                "standardDeviation": 5.399,
+                "coefficientOfVariationPercent": 1.87
+              },
+              "totalMs": {
+                "p50": 336.383,
+                "p95": 347.174,
+                "mean": 336.959,
+                "standardDeviation": 6.377,
+                "coefficientOfVariationPercent": 1.89
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 283.369541,
+                "totalMs": 330.436916
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 287.100791,
+                "totalMs": 337.177958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 287.52,
+                "totalMs": 333.79275
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.263084,
+                "totalMs": 335.935292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 299.732791,
+                "totalMs": 347.174458
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 286.935083,
+                "totalMs": 336.297
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 289.516666,
+                "totalMs": 336.468791
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 282.310167,
+                "totalMs": 326.41075
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.807083,
+                "totalMs": 339.459916
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.5605,
+                "totalMs": 346.433666
+              }
+            ]
+          }
+        },
+        "flow": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 290.01,
+                "p95": 293.505,
+                "mean": 289.466,
+                "standardDeviation": 3.263,
+                "coefficientOfVariationPercent": 1.13
+              },
+              "totalMs": {
+                "p50": 347.142,
+                "p95": 355.002,
+                "mean": 347.509,
+                "standardDeviation": 4.04,
+                "coefficientOfVariationPercent": 1.16
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.340292,
+                "totalMs": 349.919417
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.470209,
+                "totalMs": 348.284375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.505209,
+                "totalMs": 350.94475
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 284.569042,
+                "totalMs": 342.03875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 287.617625,
+                "totalMs": 345.999167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 288.844959,
+                "totalMs": 344.25775
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.418417,
+                "totalMs": 349.962875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 288.414833,
+                "totalMs": 345.697375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.174125,
+                "totalMs": 355.002167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 284.307,
+                "totalMs": 342.98375
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 290.415,
+                "p95": 307.005,
+                "mean": 292.225,
+                "standardDeviation": 7.527,
+                "coefficientOfVariationPercent": 2.58
+              },
+              "totalMs": {
+                "p50": 346.425,
+                "p95": 362.308,
+                "mean": 348.422,
+                "standardDeviation": 7.379,
+                "coefficientOfVariationPercent": 2.12
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.004708,
+                "totalMs": 362.3085
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.412542,
+                "totalMs": 345.360667
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.076083,
+                "totalMs": 345.355417
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 279.348,
+                "totalMs": 336.267
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 288.679333,
+                "totalMs": 346.254041
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 289.275834,
+                "totalMs": 343.993375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 299.908375,
+                "totalMs": 357.517167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 288.595708,
+                "totalMs": 346.595083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 297.200583,
+                "totalMs": 352.871916
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.753666,
+                "totalMs": 347.697583
+              }
+            ]
+          }
+        },
+        "tool": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 294.529,
+                "p95": 305.028,
+                "mean": 293.827,
+                "standardDeviation": 6.42,
+                "coefficientOfVariationPercent": 2.18
+              },
+              "totalMs": {
+                "p50": 357.317,
+                "p95": 1061.904,
+                "mean": 426.678,
+                "standardDeviation": 223.305,
+                "coefficientOfVariationPercent": 52.34
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 299.127958,
+                "totalMs": 1061.904208
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 298.8995,
+                "totalMs": 362.602542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 305.028417,
+                "totalMs": 369.098375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.521208,
+                "totalMs": 357.502583
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 285.306208,
+                "totalMs": 346.733083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 289.1425,
+                "totalMs": 351.220584
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.100333,
+                "totalMs": 352.88825
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.536667,
+                "totalMs": 357.132292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 284.654083,
+                "totalMs": 346.994125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.950792,
+                "totalMs": 360.70075
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 293.828,
+                "p95": 322.644,
+                "mean": 299.386,
+                "standardDeviation": 12.165,
+                "coefficientOfVariationPercent": 4.06
+              },
+              "totalMs": {
+                "p50": 355.038,
+                "p95": 494.274,
+                "mean": 372.862,
+                "standardDeviation": 44.158,
+                "coefficientOfVariationPercent": 11.84
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.046791,
+                "totalMs": 351.472208
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.665916,
+                "totalMs": 353.141833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 289.937166,
+                "totalMs": 351.5805
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 305.984709,
+                "totalMs": 366.882875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.920041,
+                "totalMs": 361.215083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.41025,
+                "totalMs": 356.132291
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.52375,
+                "totalMs": 351.501542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.246709,
+                "totalMs": 353.942792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 318.480209,
+                "totalMs": 494.274292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 322.6445,
+                "totalMs": 388.478458
+              }
+            ]
+          }
+        },
+        "resourceHttp": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 290.652,
+                "p95": 294.472,
+                "mean": 289.955,
+                "standardDeviation": 3.584,
+                "coefficientOfVariationPercent": 1.24
+              },
+              "totalMs": {
+                "p50": 438.454,
+                "p95": 450.787,
+                "mean": 440.435,
+                "standardDeviation": 6.098,
+                "coefficientOfVariationPercent": 1.38
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.471833,
+                "totalMs": 450.786958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.179958,
+                "totalMs": 444.639541
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 288.662834,
+                "totalMs": 437.586042
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 287.863167,
+                "totalMs": 436.079917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 286.59975,
+                "totalMs": 433.403834
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.937792,
+                "totalMs": 448.957375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.366042,
+                "totalMs": 439.321125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 282.821208,
+                "totalMs": 435.72175
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.094584,
+                "totalMs": 434.883667
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.55175,
+                "totalMs": 442.974375
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 292.34,
+                "p95": 305.764,
+                "mean": 292.69,
+                "standardDeviation": 7.047,
+                "coefficientOfVariationPercent": 2.41
+              },
+              "totalMs": {
+                "p50": 440.465,
+                "p95": 458.138,
+                "mean": 441.574,
+                "standardDeviation": 8.002,
+                "coefficientOfVariationPercent": 1.81
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 281.555708,
+                "totalMs": 433.381333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 288.433833,
+                "totalMs": 436.149875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.940541,
+                "totalMs": 437.883666
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.945958,
+                "totalMs": 438.927666
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.734625,
+                "totalMs": 442.002333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 305.763875,
+                "totalMs": 458.137625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.9125,
+                "totalMs": 443.486833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.504333,
+                "totalMs": 444.541333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 300.950542,
+                "totalMs": 449.839459
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 285.162792,
+                "totalMs": 431.38625
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "candidate": {
+    "candidateSource": {
+      "version": "ATT V4.0.1",
+      "cases": {
+        "version": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 48.661,
+                "p95": 50.18,
+                "mean": 48.771,
+                "standardDeviation": 0.572,
+                "coefficientOfVariationPercent": 1.17
+              },
+              "totalMs": {
+                "p50": 50.044,
+                "p95": 51.497,
+                "mean": 50.082,
+                "standardDeviation": 0.575,
+                "coefficientOfVariationPercent": 1.15
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.899042,
+                "totalMs": 50.176458
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.18725,
+                "totalMs": 49.4695
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.130833,
+                "totalMs": 49.441167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.616083,
+                "totalMs": 49.927833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.628166,
+                "totalMs": 50.002208
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.179834,
+                "totalMs": 51.49675
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.502,
+                "totalMs": 49.762125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.69375,
+                "totalMs": 50.176334
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.014417,
+                "totalMs": 50.279459
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.856583,
+                "totalMs": 50.086666
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 48.517,
+                "p95": 48.881,
+                "mean": 48.496,
+                "standardDeviation": 0.243,
+                "coefficientOfVariationPercent": 0.5
+              },
+              "totalMs": {
+                "p50": 49.787,
+                "p95": 50.169,
+                "mean": 49.776,
+                "standardDeviation": 0.248,
+                "coefficientOfVariationPercent": 0.5
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.880792,
+                "totalMs": 50.168833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.658167,
+                "totalMs": 50.027917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.576333,
+                "totalMs": 49.797916
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.384542,
+                "totalMs": 49.649625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.519959,
+                "totalMs": 49.776792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.695042,
+                "totalMs": 49.961084
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.513041,
+                "totalMs": 49.803333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.364083,
+                "totalMs": 49.630833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.396916,
+                "totalMs": 49.662083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.975834,
+                "totalMs": 49.277625
+              }
+            ]
+          }
+        },
+        "help": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 43.966,
+                "p95": 45.326,
+                "mean": 44.003,
+                "standardDeviation": 0.582,
+                "coefficientOfVariationPercent": 1.32
+              },
+              "totalMs": {
+                "p50": 50.331,
+                "p95": 51.738,
+                "mean": 50.411,
+                "standardDeviation": 0.623,
+                "coefficientOfVariationPercent": 1.24
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.785292,
+                "totalMs": 50.031959
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 42.95775,
+                "totalMs": 49.294458
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 45.326292,
+                "totalMs": 51.738334
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.007042,
+                "totalMs": 50.386667
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.925209,
+                "totalMs": 50.607292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.104458,
+                "totalMs": 50.508708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.04875,
+                "totalMs": 50.203083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.788917,
+                "totalMs": 50.275334
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.835125,
+                "totalMs": 50.216792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.25375,
+                "totalMs": 50.845917
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 44.415,
+                "p95": 44.692,
+                "mean": 44.37,
+                "standardDeviation": 0.344,
+                "coefficientOfVariationPercent": 0.77
+              },
+              "totalMs": {
+                "p50": 50.75,
+                "p95": 51.057,
+                "mean": 50.653,
+                "standardDeviation": 0.326,
+                "coefficientOfVariationPercent": 0.64
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.359875,
+                "totalMs": 50.742625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.643875,
+                "totalMs": 50.821084
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.691667,
+                "totalMs": 50.889917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.616375,
+                "totalMs": 50.824958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.457917,
+                "totalMs": 50.75775
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.215,
+                "totalMs": 50.622542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.138416,
+                "totalMs": 50.325666
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.371083,
+                "totalMs": 50.576833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 44.648208,
+                "totalMs": 51.057333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 43.556833,
+                "totalMs": 49.913583
+              }
+            ]
+          }
+        },
+        "noopTemplate": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 310.867,
+                "p95": 696.32,
+                "mean": 359.506,
+                "standardDeviation": 120.433,
+                "coefficientOfVariationPercent": 33.5
+              },
+              "totalMs": {
+                "p50": 373.636,
+                "p95": 765.786,
+                "mean": 433.887,
+                "standardDeviation": 127.693,
+                "coefficientOfVariationPercent": 29.43
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 362.242375,
+                "totalMs": 440.733542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 309.178208,
+                "totalMs": 367.732416
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 314.676,
+                "totalMs": 374.660083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 308.356,
+                "totalMs": 367.238667
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.473959,
+                "totalMs": 375.184
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 310.403875,
+                "totalMs": 372.0745
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 311.330459,
+                "totalMs": 372.61125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 309.952125,
+                "totalMs": 372.111791
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 365.124875,
+                "totalMs": 530.742292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 696.320458,
+                "totalMs": 765.786125
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 333.015,
+                "p95": 369.648,
+                "mean": 341.886,
+                "standardDeviation": 19.259,
+                "coefficientOfVariationPercent": 5.63
+              },
+              "totalMs": {
+                "p50": 400.401,
+                "p95": 440.955,
+                "mean": 409.073,
+                "standardDeviation": 20.329,
+                "coefficientOfVariationPercent": 4.97
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 324.743166,
+                "totalMs": 397.374166
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 369.648208,
+                "totalMs": 440.954541
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 364.253,
+                "totalMs": 433.3465
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 362.887541,
+                "totalMs": 430.69875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 356.222,
+                "totalMs": 419.042333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 333.940792,
+                "totalMs": 402.195
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 327.326042,
+                "totalMs": 393.95675
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 332.089,
+                "totalMs": 398.608
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 331.181916,
+                "totalMs": 393.381791
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 316.567541,
+                "totalMs": 381.176416
+              }
+            ]
+          },
+          "profileCaptureWallMs": 385.55,
+          "profile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "timingOrigin": "java-main-entry",
+            "clock": "monotonic",
+            "totalMs": 335,
+            "phases": {
+              "cliArgumentParseMs": 1,
+              "configLoadMs": 174,
+              "debugOutputSetupMs": 0,
+              "debugInputLoadMs": 26,
+              "debugTargetResolveMs": 1,
+              "debugValidationMs": 7,
+              "debugContextSetupMs": 5,
+              "debugResourceSetupMs": 3,
+              "debugExecutionMs": 3,
+              "debugFinalizationMs": 2,
+              "debugResultWriteMs": 2,
+              "processToFirstConsoleEventMs": 276,
+              "processToFirstActionMs": 325
+            },
+            "counters": {
+              "schemasCompiled": 5,
+              "schemaCacheHits": 1,
+              "templatesLoaded": 1,
+              "templateCacheHits": 1,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 0,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 13790208,
+              "committedHeapBytes": 28311552,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        },
+        "flow": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 314.68,
+                "p95": 347.558,
+                "mean": 315.701,
+                "standardDeviation": 12.051,
+                "coefficientOfVariationPercent": 3.82
+              },
+              "totalMs": {
+                "p50": 393.338,
+                "p95": 443.676,
+                "mean": 396.069,
+                "standardDeviation": 18.033,
+                "coefficientOfVariationPercent": 4.55
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 313.81775,
+                "totalMs": 396.812625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 316.646792,
+                "totalMs": 395.7635
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 317.258584,
+                "totalMs": 394.420209
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 315.542917,
+                "totalMs": 392.254917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 309.339084,
+                "totalMs": 385.04425
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 309.134542,
+                "totalMs": 383.952125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 305.679792,
+                "totalMs": 381.318542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 305.6565,
+                "totalMs": 385.192625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 347.5575,
+                "totalMs": 443.676
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 316.378291,
+                "totalMs": 402.2555
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 309.114,
+                "p95": 332.119,
+                "mean": 313.255,
+                "standardDeviation": 9.851,
+                "coefficientOfVariationPercent": 3.14
+              },
+              "totalMs": {
+                "p50": 387.727,
+                "p95": 424.903,
+                "mean": 392.406,
+                "standardDeviation": 14.904,
+                "coefficientOfVariationPercent": 3.8
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 306.765042,
+                "totalMs": 385.316584
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 332.11875,
+                "totalMs": 424.902834
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.370708,
+                "totalMs": 379.552125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 302.809042,
+                "totalMs": 402.595167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 308.108458,
+                "totalMs": 383.231292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 314.006709,
+                "totalMs": 390.136792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 304.154583,
+                "totalMs": 375.276791
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 310.119916,
+                "totalMs": 382.317333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 323.418917,
+                "totalMs": 402.856792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 323.680917,
+                "totalMs": 397.878917
+              }
+            ]
+          },
+          "profileCaptureWallMs": 386.46,
+          "profile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "timingOrigin": "java-main-entry",
+            "clock": "monotonic",
+            "totalMs": 340,
+            "phases": {
+              "cliArgumentParseMs": 1,
+              "configLoadMs": 171,
+              "debugOutputSetupMs": 0,
+              "debugInputLoadMs": 30,
+              "debugTargetResolveMs": 4,
+              "debugValidationMs": 8,
+              "debugContextSetupMs": 4,
+              "debugResourceSetupMs": 3,
+              "debugExecutionMs": 6,
+              "debugFinalizationMs": 3,
+              "debugResultWriteMs": 3,
+              "processToFirstConsoleEventMs": 271,
+              "processToFirstActionMs": 326
+            },
+            "counters": {
+              "schemasCompiled": 6,
+              "schemaCacheHits": 3,
+              "templatesLoaded": 0,
+              "templateCacheHits": 0,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 0,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 17148560,
+              "committedHeapBytes": 26214400,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        },
+        "tool": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 310.42,
+                "p95": 313.84,
+                "mean": 309.765,
+                "standardDeviation": 3.149,
+                "coefficientOfVariationPercent": 1.02
+              },
+              "totalMs": {
+                "p50": 391.468,
+                "p95": 887.4,
+                "mean": 441.835,
+                "standardDeviation": 156.602,
+                "coefficientOfVariationPercent": 35.44
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 302.893041,
+                "totalMs": 887.399666
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 311.252209,
+                "totalMs": 391.859667
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 309.588,
+                "totalMs": 390.779167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 308.673375,
+                "totalMs": 391.075584
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.877292,
+                "totalMs": 387.238917
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.784541,
+                "totalMs": 388.641958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 313.840167,
+                "totalMs": 395.547084
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 312.007,
+                "totalMs": 394.467125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 311.293416,
+                "totalMs": 390.598333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 312.438583,
+                "totalMs": 400.744792
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 310.933,
+                "p95": 319.226,
+                "mean": 311.455,
+                "standardDeviation": 3.801,
+                "coefficientOfVariationPercent": 1.22
+              },
+              "totalMs": {
+                "p50": 393.837,
+                "p95": 405.059,
+                "mean": 394.816,
+                "standardDeviation": 5.616,
+                "coefficientOfVariationPercent": 1.42
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 310.474541,
+                "totalMs": 394.108125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 313.920375,
+                "totalMs": 395.475458
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.728334,
+                "totalMs": 390.738834
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 312.782833,
+                "totalMs": 396.866417
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 308.404875,
+                "totalMs": 392.073583
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 311.39125,
+                "totalMs": 393.566417
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 306.58575,
+                "totalMs": 388.091334
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 314.599083,
+                "totalMs": 405.058791
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 309.435791,
+                "totalMs": 389.028833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 319.226208,
+                "totalMs": 403.148
+              }
+            ]
+          },
+          "profileCaptureWallMs": 408.439,
+          "profile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "timingOrigin": "java-main-entry",
+            "clock": "monotonic",
+            "totalMs": 361,
+            "phases": {
+              "cliArgumentParseMs": 1,
+              "configLoadMs": 181,
+              "debugOutputSetupMs": 0,
+              "debugInputLoadMs": 17,
+              "debugTargetResolveMs": 5,
+              "debugValidationMs": 9,
+              "debugContextSetupMs": 5,
+              "debugResourceSetupMs": 4,
+              "debugExecutionMs": 21,
+              "debugFinalizationMs": 6,
+              "debugResultWriteMs": 4,
+              "processToFirstConsoleEventMs": 282,
+              "processToFirstActionMs": 327
+            },
+            "counters": {
+              "schemasCompiled": 4,
+              "schemaCacheHits": 1,
+              "templatesLoaded": 0,
+              "templateCacheHits": 0,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 16,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 18814816,
+              "committedHeapBytes": 30408704,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        },
+        "resourceHttp": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 309.483,
+                "p95": 321.166,
+                "mean": 310.981,
+                "standardDeviation": 4.517,
+                "coefficientOfVariationPercent": 1.45
+              },
+              "totalMs": {
+                "p50": 481.762,
+                "p95": 510.754,
+                "mean": 484.541,
+                "standardDeviation": 12.157,
+                "coefficientOfVariationPercent": 2.51
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 311.667542,
+                "totalMs": 510.753958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 308.768709,
+                "totalMs": 484.467417
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 321.165792,
+                "totalMs": 500.867875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 310.1975,
+                "totalMs": 483.68475
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 312.323375,
+                "totalMs": 482.638292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 306.914291,
+                "totalMs": 480.208208
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.868791,
+                "totalMs": 474.90875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.11825,
+                "totalMs": 472.25675
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 308.062666,
+                "totalMs": 474.734583
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 315.720875,
+                "totalMs": 480.884959
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 307.161,
+                "p95": 309.93,
+                "mean": 307.631,
+                "standardDeviation": 1.686,
+                "coefficientOfVariationPercent": 0.55
+              },
+              "totalMs": {
+                "p50": 474.844,
+                "p95": 489.503,
+                "mean": 476.187,
+                "standardDeviation": 5.765,
+                "coefficientOfVariationPercent": 1.21
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 306.683417,
+                "totalMs": 475.959125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 309.90275,
+                "totalMs": 477.56125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 305.257542,
+                "totalMs": 469.44975
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.180583,
+                "totalMs": 473.728417
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.141834,
+                "totalMs": 472.140625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 305.713792,
+                "totalMs": 473.492167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 309.430458,
+                "totalMs": 489.503333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 306.749833,
+                "totalMs": 477.145875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 309.929542,
+                "totalMs": 481.120959
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 308.321208,
+                "totalMs": 471.768583
+              }
+            ]
+          },
+          "profileCaptureWallMs": 474.781,
+          "profile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "timingOrigin": "java-main-entry",
+            "clock": "monotonic",
+            "totalMs": 428,
+            "phases": {
+              "cliArgumentParseMs": 1,
+              "configLoadMs": 164,
+              "debugOutputSetupMs": 0,
+              "debugInputLoadMs": 27,
+              "debugTargetResolveMs": 1,
+              "debugValidationMs": 9,
+              "debugContextSetupMs": 4,
+              "debugResourceSetupMs": 3,
+              "debugExecutionMs": 103,
+              "debugFinalizationMs": 5,
+              "debugResultWriteMs": 4,
+              "processToFirstConsoleEventMs": 264,
+              "processToFirstActionMs": 315
+            },
+            "counters": {
+              "schemasCompiled": 5,
+              "schemaCacheHits": 1,
+              "templatesLoaded": 1,
+              "templateCacheHits": 1,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 0,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 20405800,
+              "committedHeapBytes": 31457280,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        }
+      }
+    },
+    "candidateBinary": {
+      "version": "ATT V4.0.1",
+      "cases": {
+        "version": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 51.264,
+                "p95": 52.428,
+                "mean": 51.381,
+                "standardDeviation": 0.533,
+                "coefficientOfVariationPercent": 1.04
+              },
+              "totalMs": {
+                "p50": 52.605,
+                "p95": 53.847,
+                "mean": 52.811,
+                "standardDeviation": 0.601,
+                "coefficientOfVariationPercent": 1.14
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.850208,
+                "totalMs": 53.420958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.980083,
+                "totalMs": 52.418541
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.182708,
+                "totalMs": 52.510833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.277625,
+                "totalMs": 52.613042
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.043583,
+                "totalMs": 52.37975
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.250708,
+                "totalMs": 52.597458
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.5065,
+                "totalMs": 51.880083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.656708,
+                "totalMs": 53.429
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 52.427792,
+                "totalMs": 53.84725
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.63025,
+                "totalMs": 53.011709
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 51.865,
+                "p95": 52.537,
+                "mean": 51.957,
+                "standardDeviation": 0.344,
+                "coefficientOfVariationPercent": 0.66
+              },
+              "totalMs": {
+                "p50": 53.292,
+                "p95": 54.058,
+                "mean": 53.376,
+                "standardDeviation": 0.368,
+                "coefficientOfVariationPercent": 0.69
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.608042,
+                "totalMs": 52.979792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.660875,
+                "totalMs": 53.0325
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 52.464542,
+                "totalMs": 53.89775
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.79575,
+                "totalMs": 53.162042
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.88575,
+                "totalMs": 53.284125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.567042,
+                "totalMs": 53.052292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.989,
+                "totalMs": 53.413916
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 51.84525,
+                "totalMs": 53.299625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 52.212375,
+                "totalMs": 53.576791
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 52.536916,
+                "totalMs": 54.058083
+              }
+            ]
+          }
+        },
+        "help": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 47.697,
+                "p95": 50.404,
+                "mean": 48.123,
+                "standardDeviation": 1.056,
+                "coefficientOfVariationPercent": 2.19
+              },
+              "totalMs": {
+                "p50": 53.011,
+                "p95": 55.654,
+                "mean": 53.411,
+                "standardDeviation": 1.098,
+                "coefficientOfVariationPercent": 2.06
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.783791,
+                "totalMs": 54.019125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.531084,
+                "totalMs": 52.86425
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.501209,
+                "totalMs": 53.948875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 49.054875,
+                "totalMs": 54.545625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.863833,
+                "totalMs": 53.157958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.26475,
+                "totalMs": 52.533208
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 50.404459,
+                "totalMs": 55.653667
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.424709,
+                "totalMs": 52.578875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.077417,
+                "totalMs": 52.301084
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.322333,
+                "totalMs": 52.511083
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 47.757,
+                "p95": 53.941,
+                "mean": 48.317,
+                "standardDeviation": 2.067,
+                "coefficientOfVariationPercent": 4.28
+              },
+              "totalMs": {
+                "p50": 52.964,
+                "p95": 59.821,
+                "mean": 53.652,
+                "standardDeviation": 2.251,
+                "coefficientOfVariationPercent": 4.2
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 53.941125,
+                "totalMs": 59.820666
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.841875,
+                "totalMs": 53.043209
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.241167,
+                "totalMs": 53.409708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.016917,
+                "totalMs": 52.063
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.027417,
+                "totalMs": 52.33925
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.672542,
+                "totalMs": 52.875042
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.068,
+                "totalMs": 52.402792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 47.262917,
+                "totalMs": 52.885292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.413042,
+                "totalMs": 53.692292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 48.687333,
+                "totalMs": 53.990667
+              }
+            ]
+          }
+        },
+        "noopTemplate": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 292.958,
+                "p95": 301.903,
+                "mean": 294.05,
+                "standardDeviation": 3.323,
+                "coefficientOfVariationPercent": 1.13
+              },
+              "totalMs": {
+                "p50": 355.48,
+                "p95": 362.043,
+                "mean": 356.106,
+                "standardDeviation": 3.065,
+                "coefficientOfVariationPercent": 0.86
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.296333,
+                "totalMs": 356.713541
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.210417,
+                "totalMs": 353.097375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.764125,
+                "totalMs": 353.604208
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.951125,
+                "totalMs": 353.320167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 301.902875,
+                "totalMs": 362.042833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.194666,
+                "totalMs": 354.975791
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.152791,
+                "totalMs": 355.983541
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 297.283708,
+                "totalMs": 360.599666
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.888917,
+                "totalMs": 356.635083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.858292,
+                "totalMs": 354.082917
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 292.929,
+                "p95": 307.651,
+                "mean": 295.142,
+                "standardDeviation": 5.934,
+                "coefficientOfVariationPercent": 2.01
+              },
+              "totalMs": {
+                "p50": 356.483,
+                "p95": 370.759,
+                "mean": 357.94,
+                "standardDeviation": 5.728,
+                "coefficientOfVariationPercent": 1.6
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.280375,
+                "totalMs": 354.436834
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 288.236167,
+                "totalMs": 350.049584
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.056292,
+                "totalMs": 355.203583
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.651334,
+                "totalMs": 370.759459
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 302.525833,
+                "totalMs": 363.451708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.578042,
+                "totalMs": 357.762875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 297.241208,
+                "totalMs": 358.946041
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.963292,
+                "totalMs": 354.994625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.192208,
+                "totalMs": 355.067958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.696959,
+                "totalMs": 358.72875
+              }
+            ]
+          },
+          "profileCaptureWallMs": 349.518,
+          "profile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "timingOrigin": "java-main-entry",
+            "clock": "monotonic",
+            "totalMs": 296,
+            "phases": {
+              "cliArgumentParseMs": 1,
+              "configLoadMs": 154,
+              "debugOutputSetupMs": 0,
+              "debugInputLoadMs": 25,
+              "debugTargetResolveMs": 1,
+              "debugValidationMs": 7,
+              "debugContextSetupMs": 4,
+              "debugResourceSetupMs": 3,
+              "debugExecutionMs": 2,
+              "debugFinalizationMs": 4,
+              "debugResultWriteMs": 3,
+              "processToFirstConsoleEventMs": 240,
+              "processToFirstActionMs": 286
+            },
+            "counters": {
+              "schemasCompiled": 5,
+              "schemaCacheHits": 1,
+              "templatesLoaded": 1,
+              "templateCacheHits": 1,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 0,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 17721728,
+              "committedHeapBytes": 30408704,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        },
+        "flow": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 291.859,
+                "p95": 302.763,
+                "mean": 292.268,
+                "standardDeviation": 4.683,
+                "coefficientOfVariationPercent": 1.6
+              },
+              "totalMs": {
+                "p50": 365.89,
+                "p95": 380.106,
+                "mean": 367.249,
+                "standardDeviation": 5.294,
+                "coefficientOfVariationPercent": 1.44
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 289.718666,
+                "totalMs": 365.0865
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.22,
+                "totalMs": 366.600958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 302.763208,
+                "totalMs": 380.105792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.225042,
+                "totalMs": 368.379208
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.345709,
+                "totalMs": 369.913417
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.498791,
+                "totalMs": 365.178458
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.57575,
+                "totalMs": 369.336
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 287.320042,
+                "totalMs": 362.422084
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 288.260042,
+                "totalMs": 362.139542
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 287.749542,
+                "totalMs": 363.326542
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 292.23,
+                "p95": 302.094,
+                "mean": 294.103,
+                "standardDeviation": 3.893,
+                "coefficientOfVariationPercent": 1.32
+              },
+              "totalMs": {
+                "p50": 366.747,
+                "p95": 382.31,
+                "mean": 369.643,
+                "standardDeviation": 5.989,
+                "coefficientOfVariationPercent": 1.62
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.099791,
+                "totalMs": 365.132333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.931625,
+                "totalMs": 371.209125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 299.885083,
+                "totalMs": 382.3105
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 302.093834,
+                "totalMs": 377.589375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.206833,
+                "totalMs": 370.764166
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.530042,
+                "totalMs": 364.559875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.858583,
+                "totalMs": 366.434708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.431291,
+                "totalMs": 366.572958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.634375,
+                "totalMs": 364.932459
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.35975,
+                "totalMs": 366.920916
+              }
+            ]
+          },
+          "profileCaptureWallMs": 368.476,
+          "profile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "timingOrigin": "java-main-entry",
+            "clock": "monotonic",
+            "totalMs": 316,
+            "phases": {
+              "cliArgumentParseMs": 1,
+              "configLoadMs": 160,
+              "debugOutputSetupMs": 0,
+              "debugInputLoadMs": 32,
+              "debugTargetResolveMs": 5,
+              "debugValidationMs": 8,
+              "debugContextSetupMs": 6,
+              "debugResourceSetupMs": 3,
+              "debugExecutionMs": 6,
+              "debugFinalizationMs": 3,
+              "debugResultWriteMs": 3,
+              "processToFirstConsoleEventMs": 245,
+              "processToFirstActionMs": 303
+            },
+            "counters": {
+              "schemasCompiled": 6,
+              "schemaCacheHits": 3,
+              "templatesLoaded": 0,
+              "templateCacheHits": 0,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 0,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 9645056,
+              "committedHeapBytes": 30408704,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        },
+        "tool": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 291.591,
+                "p95": 300.858,
+                "mean": 293.485,
+                "standardDeviation": 4.09,
+                "coefficientOfVariationPercent": 1.39
+              },
+              "totalMs": {
+                "p50": 375.557,
+                "p95": 823.747,
+                "mean": 421.506,
+                "standardDeviation": 141.399,
+                "coefficientOfVariationPercent": 33.55
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.699458,
+                "totalMs": 823.746792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 300.479541,
+                "totalMs": 383.60775
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.783875,
+                "totalMs": 377.154792
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.147458,
+                "totalMs": 372.921333
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 300.858,
+                "totalMs": 383.959708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.378208,
+                "totalMs": 379.853916
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.035,
+                "totalMs": 373.95875
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 290.656292,
+                "totalMs": 372.969209
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 289.729333,
+                "totalMs": 373.432375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.084166,
+                "totalMs": 373.457041
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 295.016,
+                "p95": 306.023,
+                "mean": 295.589,
+                "standardDeviation": 4.747,
+                "coefficientOfVariationPercent": 1.61
+              },
+              "totalMs": {
+                "p50": 378.48,
+                "p95": 387.329,
+                "mean": 378.896,
+                "standardDeviation": 4.505,
+                "coefficientOfVariationPercent": 1.19
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.968167,
+                "totalMs": 376.629334
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 298.433667,
+                "totalMs": 383.055
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 288.388083,
+                "totalMs": 371.994541
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.41475,
+                "totalMs": 374.747667
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 306.023125,
+                "totalMs": 387.329083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.72675,
+                "totalMs": 379.93775
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.866542,
+                "totalMs": 376.057708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.063666,
+                "totalMs": 377.140083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 298.368916,
+                "totalMs": 382.243375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.634,
+                "totalMs": 379.82075
+              }
+            ]
+          },
+          "profileCaptureWallMs": 381.824,
+          "profile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "timingOrigin": "java-main-entry",
+            "clock": "monotonic",
+            "totalMs": 329,
+            "phases": {
+              "cliArgumentParseMs": 1,
+              "configLoadMs": 161,
+              "debugOutputSetupMs": 0,
+              "debugInputLoadMs": 17,
+              "debugTargetResolveMs": 4,
+              "debugValidationMs": 8,
+              "debugContextSetupMs": 4,
+              "debugResourceSetupMs": 3,
+              "debugExecutionMs": 26,
+              "debugFinalizationMs": 6,
+              "debugResultWriteMs": 5,
+              "processToFirstConsoleEventMs": 247,
+              "processToFirstActionMs": 290
+            },
+            "counters": {
+              "schemasCompiled": 4,
+              "schemaCacheHits": 1,
+              "templatesLoaded": 0,
+              "templateCacheHits": 0,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 16,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 10430200,
+              "committedHeapBytes": 29360128,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        },
+        "resourceHttp": {
+          "cold": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 295.028,
+                "p95": 329.082,
+                "mean": 300.266,
+                "standardDeviation": 11.372,
+                "coefficientOfVariationPercent": 3.79
+              },
+              "totalMs": {
+                "p50": 461.848,
+                "p95": 501.128,
+                "mean": 468.112,
+                "standardDeviation": 13.401,
+                "coefficientOfVariationPercent": 2.86
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.146375,
+                "totalMs": 467.044708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.858334,
+                "totalMs": 459.739209
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.701958,
+                "totalMs": 459.396833
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 304.583916,
+                "totalMs": 472.125
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 298.643625,
+                "totalMs": 461.135167
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 329.081625,
+                "totalMs": 501.127959
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 307.483334,
+                "totalMs": 479.364375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.860458,
+                "totalMs": 462.561625
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 295.196083,
+                "totalMs": 460.299708
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.103167,
+                "totalMs": 458.321667
+              }
+            ]
+          },
+          "warm": {
+            "summary": {
+              "samples": 10,
+              "firstOutputMs": {
+                "p50": 292.903,
+                "p95": 305.609,
+                "mean": 294.691,
+                "standardDeviation": 5.23,
+                "coefficientOfVariationPercent": 1.77
+              },
+              "totalMs": {
+                "p50": 460.234,
+                "p95": 479.674,
+                "mean": 462.167,
+                "standardDeviation": 8.087,
+                "coefficientOfVariationPercent": 1.75
+              }
+            },
+            "raw": [
+              {
+                "exitCode": 0,
+                "firstOutputMs": 296.013042,
+                "totalMs": 461.017084
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 289.792541,
+                "totalMs": 456.838083
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 292.707625,
+                "totalMs": 465.238292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 301.823791,
+                "totalMs": 472.093958
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 294.968042,
+                "totalMs": 459.473709
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.884208,
+                "totalMs": 455.353375
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 289.820416,
+                "totalMs": 455.865208
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 291.189708,
+                "totalMs": 455.123291
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 293.099,
+                "totalMs": 460.994292
+              },
+              {
+                "exitCode": 0,
+                "firstOutputMs": 305.60875,
+                "totalMs": 479.673875
+              }
+            ]
+          },
+          "profileCaptureWallMs": 461.832,
+          "profile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "timingOrigin": "java-main-entry",
+            "clock": "monotonic",
+            "totalMs": 408,
+            "phases": {
+              "cliArgumentParseMs": 1,
+              "configLoadMs": 161,
+              "debugOutputSetupMs": 0,
+              "debugInputLoadMs": 25,
+              "debugTargetResolveMs": 1,
+              "debugValidationMs": 9,
+              "debugContextSetupMs": 4,
+              "debugResourceSetupMs": 3,
+              "debugExecutionMs": 103,
+              "debugFinalizationMs": 5,
+              "debugResultWriteMs": 4,
+              "processToFirstConsoleEventMs": 246,
+              "processToFirstActionMs": 295
+            },
+            "counters": {
+              "schemasCompiled": 5,
+              "schemaCacheHits": 1,
+              "templatesLoaded": 1,
+              "templateCacheHits": 1,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 0,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 12216904,
+              "committedHeapBytes": 85983232,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        }
+      }
+    }
+  },
+  "comparison": {
+    "source": {
+      "version": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": 4.29,
+            "p95ImprovementPercent": 10.48
+          },
+          "totalMs": {
+            "medianImprovementPercent": 4.09,
+            "p95ImprovementPercent": 10.38
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": 6.18,
+            "p95ImprovementPercent": 9.71
+          },
+          "totalMs": {
+            "medianImprovementPercent": 6.16,
+            "p95ImprovementPercent": 10.31
+          }
+        }
+      },
+      "help": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": 5.82,
+            "p95ImprovementPercent": 3.35
+          },
+          "totalMs": {
+            "medianImprovementPercent": 4.78,
+            "p95ImprovementPercent": 2.69
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": 4.41,
+            "p95ImprovementPercent": 9.75
+          },
+          "totalMs": {
+            "medianImprovementPercent": 4.22,
+            "p95ImprovementPercent": 8.66
+          }
+        }
+      },
+      "noopTemplate": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -5.21,
+            "p95ImprovementPercent": -108.17
+          },
+          "totalMs": {
+            "medianImprovementPercent": -8.53,
+            "p95ImprovementPercent": -93.22
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -12.44,
+            "p95ImprovementPercent": -22.68
+          },
+          "totalMs": {
+            "medianImprovementPercent": -15.97,
+            "p95ImprovementPercent": -24.81
+          }
+        }
+      },
+      "flow": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -6.79,
+            "p95ImprovementPercent": -13.02
+          },
+          "totalMs": {
+            "medianImprovementPercent": -9.14,
+            "p95ImprovementPercent": -20.25
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -4.19,
+            "p95ImprovementPercent": -8.77
+          },
+          "totalMs": {
+            "medianImprovementPercent": -7.25,
+            "p95ImprovementPercent": -13.9
+          }
+        }
+      },
+      "tool": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -4.45,
+            "p95ImprovementPercent": -4.26
+          },
+          "totalMs": {
+            "medianImprovementPercent": -6.08,
+            "p95ImprovementPercent": -12.16
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -4.92,
+            "p95ImprovementPercent": -3.75
+          },
+          "totalMs": {
+            "medianImprovementPercent": -6.94,
+            "p95ImprovementPercent": -6.54
+          }
+        }
+      },
+      "resourceHttp": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -4.86,
+            "p95ImprovementPercent": -5.7
+          },
+          "totalMs": {
+            "medianImprovementPercent": -6.5,
+            "p95ImprovementPercent": -10.23
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -3.8,
+            "p95ImprovementPercent": -4.27
+          },
+          "totalMs": {
+            "medianImprovementPercent": -5.43,
+            "p95ImprovementPercent": -7.37
+          }
+        }
+      }
+    },
+    "binary": {
+      "version": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -2.38,
+            "p95ImprovementPercent": -0.23
+          },
+          "totalMs": {
+            "medianImprovementPercent": -2.42,
+            "p95ImprovementPercent": -0.31
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -5.02,
+            "p95ImprovementPercent": -4.05
+          },
+          "totalMs": {
+            "medianImprovementPercent": -4.99,
+            "p95ImprovementPercent": -4.28
+          }
+        }
+      },
+      "help": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -8.56,
+            "p95ImprovementPercent": -7.81
+          },
+          "totalMs": {
+            "medianImprovementPercent": -4.19,
+            "p95ImprovementPercent": -4.46
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -7.19,
+            "p95ImprovementPercent": -13.63
+          },
+          "totalMs": {
+            "medianImprovementPercent": -3.16,
+            "p95ImprovementPercent": -10.31
+          }
+        }
+      },
+      "noopTemplate": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -0.51,
+            "p95ImprovementPercent": -0.52
+          },
+          "totalMs": {
+            "medianImprovementPercent": -4.38,
+            "p95ImprovementPercent": -3.55
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -1.53,
+            "p95ImprovementPercent": -2.64
+          },
+          "totalMs": {
+            "medianImprovementPercent": -5.98,
+            "p95ImprovementPercent": -6.79
+          }
+        }
+      },
+      "flow": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -0.64,
+            "p95ImprovementPercent": -3.15
+          },
+          "totalMs": {
+            "medianImprovementPercent": -5.4,
+            "p95ImprovementPercent": -7.07
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -0.62,
+            "p95ImprovementPercent": 1.6
+          },
+          "totalMs": {
+            "medianImprovementPercent": -5.87,
+            "p95ImprovementPercent": -5.52
+          }
+        }
+      },
+      "tool": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": 1.0,
+            "p95ImprovementPercent": 1.37
+          },
+          "totalMs": {
+            "medianImprovementPercent": -5.1,
+            "p95ImprovementPercent": 22.43
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -0.4,
+            "p95ImprovementPercent": 5.15
+          },
+          "totalMs": {
+            "medianImprovementPercent": -6.6,
+            "p95ImprovementPercent": 21.64
+          }
+        }
+      },
+      "resourceHttp": {
+        "cold": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -1.51,
+            "p95ImprovementPercent": -11.75
+          },
+          "totalMs": {
+            "medianImprovementPercent": -5.34,
+            "p95ImprovementPercent": -11.17
+          }
+        },
+        "warm": {
+          "firstOutputMs": {
+            "medianImprovementPercent": -0.19,
+            "p95ImprovementPercent": 0.05
+          },
+          "totalMs": {
+            "medianImprovementPercent": -4.49,
+            "p95ImprovementPercent": -4.7
+          }
+        }
+      }
+    }
+  },
+  "environment": {
+    "platform": "macOS-26.1-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "processor": "Apple M2",
+    "python": "3.13.1",
+    "javaVersion": "openjdk version \"26.0.1\" 2026-04-21\nOpenJDK Runtime Environment Homebrew (build 26.0.1)\nOpenJDK 64-Bit Server VM Homebrew (build 26.0.1, mixed mode, sharing)",
+    "runsPerCondition": 10,
+    "warmups": 3,
+    "hardwareModel": "MacBook Air (Mac14,2)",
+    "logicalCpuCount": 8,
+    "memory": "8 GB"
+  },
+  "measurement": {
+    "fixtureSchemaVersions": {
+      "baseline": {
+        "config": "att-config/v2.11",
+        "template": "att-template/v3.6",
+        "flow": "att-flow/v3.6",
+        "debug": "att-debug/v1.1"
+      },
+      "candidate": {
+        "config": "att-config/v2.12",
+        "template": "att-template/v3.6",
+        "flow": "att-flow/v3.6",
+        "debug": "att-debug/v1.2"
+      }
+    },
+    "cold": "New JVM processes without explicit benchmark warmups; the OS may cache files after the first sample.",
+    "warm": "New JVM processes measured after the configured warmup invocations.",
+    "firstOutputMs": "Launcher process spawn to the first non-empty stdout or stderr line.",
+    "scope": "Includes shell launcher and JVM startup. Candidate profile captures are separate from comparison samples."
+  },
+  "provenance": {
+    "baselineRevision": "d661efd4dff843f422f2b9853960f9ecec4f75bb",
+    "candidateRevision": "f93db028e254d3f0e8843e2428633eadc614d532",
+    "baselineSourceRuntimeSha256": "1c3f93c9af995a63f3edc039e16206013c5ae3ecb1ab8ee6fd40f5d3cb6d1956",
+    "candidateSourceRuntimeSha256": "3d16556f2929e1ae4a68b5bcd677f2823945198e71e3f66bdd091e04ffa25980",
+    "baselineBinaryTreeSha256": "b269b50710b1b9a265f0e3d05490d8a9ad6e4b71e1fe8654e79d8829230e8568",
+    "candidateBinaryTreeSha256": "5d3a0fa5fba1d0064d588a8364ae99b00d618e820dfe40e561b5257786207010"
+  }
+}

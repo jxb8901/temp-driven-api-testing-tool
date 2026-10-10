@@ -90,6 +90,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Configuration owners](#configuration-owners)
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
+  - [編譯 source checkout](#編譯-source-checkout)
   - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
   - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
   - [Typed overrides and quick Load](#typed-overrides-and-quick-load)
@@ -950,6 +951,7 @@ Debug 可在沒有 workbook Testcase 的情況下執行單一 Template、Flow �
 ./att.sh debug template PAYMENT_INVOKE
 ./att.sh debug flow common.compose.v1 --input /tmp/compose.debug.yaml
 ./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml --env UAT
+./att.sh debug template PAYMENT_INVOKE --profile
 ```
 
 不帶 target 執行 `./att.sh debug`，會列出 statically valid、可執行的 Tool、Template 和 Flow，附 copyable command。只會顯示實際存在的 regular non-symlink default sidecar。Discovery 會檢查 selected target dependencies，但不建立 Debug output，也不呼叫 Tool。可用 `--format json` 取得 machine-readable 結果。
@@ -1020,8 +1022,11 @@ Debug 執行 target-scoped validation：只驗證 selected Template/Flow depende
 output/debug/<debugId>/
 ├── case.log
 ├── result.yaml
+├── performance.json       # 使用 --profile 時
 └── artifacts/
 ```
+
+`--profile` 會記錄從 Java main entry 到第一個已輸出的 progress event 及第一個 target action 的 monotonic timing，並記錄 config、input、validation、context setup、resource-helper setup、action execution、finalization 和 result-write phases。報告的 `totalMs` 不包括 shell launcher 和 JVM startup。若沒有輸出 progress event（例如 quiet run），first-console phase 會省略。可參考[與 3.7.3 比較的流程](system-design/debug-startup-benchmark.zh.md)執行可重複的 startup benchmark。
 
 `execution.debugIdFormat` 可使用 package 與 target metadata 設定 standalone `<debugId>`；`--debug-id <id>` 可指定 exact literal。明確或配置的 ID 若目錄已存在會 fail；legacy `<type>-<targetId>` default 仍會加 timestamp suffix。解析後的 Debug ID 同時用於目錄名、`debugId`、`EXEC.RUN_ID` 和 `EXEC.ID`。
 
@@ -1277,6 +1282,8 @@ Closed workload 會在 iteration 同步執行時保留配置的 virtual user 數
 ```
 
 例如 HTTP 每秒 20 個 request、平均 response time 為 1.5 秒，約需 30 條 concurrent connection，才不會先受 client pool 限制。HTTP 預設 `pool.maxConnections: 50`、`pool.maxConnectionsPerRoute: 20`；請按 workload 需要調整兩者，並確保 per-route 值不大於總數。另為 latency 變化及其他 route 留出 headroom，再查看 `resources.http` 的 active/idle/waiting/peak observations。Pool capacity 是 generator-side 上限，不代表應向未確認承載能力的 service 發送該流量。
+
+DB workload 可用相同估算，將 DB operations/second 乘以 connection lease 平均時間（connection 借出後仍被使用的時間）。例如每秒 40 次 operation、平均 lease 100 ms，約需四條 concurrent connection。每個 DB helper 的 `pool.maxSize` 可按此 concurrency 加上 headroom 設定，再查看其 `resources.db` active/idle/waiting、borrow timeout 及 total borrow wait metrics。每個 helper 預設 maximum 為 20；這是 client-side 上限，並非建議的目標 database 容量。
 
 MQ request/reply 若每秒 10 個 request、平均 reply time 為 3 秒，整個 workload 約需 30 條 leased connection。`pool.maxSize` 應按每個**實體 MQ instance** 的預期 in-flight request 數 sizing，而非按 logical helper。單一 instance（或 request 固定送往一個 instance）約需 30 條再加 headroom。兩個平均分配的 instance 平均各需約 15 條；亦要考慮 selection skew 並確認實際分佈。`resources.mq` 按實體 instance 顯示 pool metrics，請逐一查看 waiting、timeout 及 response latency。`minIdle` 會在該實體 pool 首次被使用並建立時套用，不會在 Load 開始前建立或預熱 pool。若要避免 connection creation 影響 measured steady state，請配合 Load warm-up / first-use warm-up phase 使用 `minIdle`。負載變化時，請依觀察到的平均 latency 重新估算；tail latency 可用於 headroom 規劃，但不是公式中的平均值。
 
@@ -2445,6 +2452,16 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
+### 編譯 source checkout
+
+Source checkout 的 launcher 只會執行已預先編譯的 classes，不會自行編譯。請使用 JDK 和 Maven 明確編譯支援 Java 8 的 CLI、Engine、Remote 及 Server API module：
+
+```sh
+mvn -DskipTests -pl att-cli -am compile
+```
+
+之後在 macOS/Linux 執行 `./att.sh`，在 Windows 執行 `att.bat`。若缺少所需 classes，launcher 會以錯誤訊息列出 build command，並停止執行。已打包的 release 內含 application JAR，只需要 Java 8 或以上的 runtime，無須 Maven。使用相關 integration 時，可把可選 JDBC 或 IBM MQ driver JAR 放入 `lib/`。Server WAR 需要 Java 17 或以上版本。
+
 ### 按任務查閱語法、option 和範例
 
 #### 查看 help 和版本
@@ -2509,6 +2526,7 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 | `./att.sh debug <type> <id> --debug-id <id>` | 指定 standalone Debug 的 exact directory identity |
 | `./att.sh debug <type> <id> --unsafe-failure-details` | 為此次 standalone local Debug 展開 collector failure diagnostics；會先警告並保留 secret redaction |
 | `./att.sh debug <type> <id> --output-dir <dir>` | 將 debug 輸出隔離到 `<dir>/debug/<debugId>/` |
+| `./att.sh debug <type> <id> --profile` | 將 CLI 啟動及 Debug phase timing 寫入 `performance.json` |
 | `./att.sh debug <type> <id> --format json` | 輸出緊湊機器可讀摘要；完整證據仍在 `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
 
@@ -2578,7 +2596,7 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 
 ### 完整 CLI option matrix
 
-`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.12` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 或 `load` 寫入 performance diagnostics。
+`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.12` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
 
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 

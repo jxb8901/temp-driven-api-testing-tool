@@ -24,15 +24,21 @@ public final class FrameworkRunner {
     private FrameworkRunner() {}
 
     public static void main(String[] args) throws Exception {
+        long javaMainEntryNanos = System.nanoTime();
         if (args.length > 0 && "remote".equals(args[0])) {
             int remoteExit = att.remote.RemoteCommand.run(java.util.Arrays.copyOfRange(args, 1, args.length));
             if (remoteExit != 0) System.exit(remoteExit);
             return;
         }
         CliOptions options = null;
+        long argumentParseNanos = 0L;
         Path root = Paths.get("").toAbsolutePath();
         try {
-            try { options = CliOptions.parse(args); }
+            long argumentParseStartedNanos = System.nanoTime();
+            try {
+                options = CliOptions.parse(args);
+                argumentParseNanos = System.nanoTime() - argumentParseStartedNanos;
+            }
             catch (IllegalArgumentException e) {
                 throw new att.validation.DiagnosticException(DiagnosticCodes.CLI_INVALID, "Invalid ATT command line",
                         e.getMessage(), null, "argv", null, null, null, null, null,
@@ -48,16 +54,20 @@ public final class FrameworkRunner {
                     return;
                 }
                 AttService service = new DefaultAttService();
+                att.api.DebugStartupMetrics startupMetrics = options.profile()
+                        ? new att.api.DebugStartupMetrics(javaMainEntryNanos, argumentParseNanos) : null;
                 DebugResult debug = service.debug(new DebugRequest(root, options.configPath(), options.environment(),
                         options.outputDirectory(), null, options.debugTargetType(), options.debugTargetId(),
-                        options.debugInput(), options.unsafeFailureDetails(), cliObserver(options, root),
-                        options.debugId(), options.variableOverrides()));
+                        options.debugInput(), options.unsafeFailureDetails(), cliObserver(options, root, startupMetrics),
+                        options.debugId(), options.variableOverrides(), options.profile(), startupMetrics));
                 if ("json".equals(options.format())) {
                     java.util.Map<String, Object> output = new java.util.LinkedHashMap<String, Object>();
                     output.put("executionId", debug.executionId()); output.put("status", debug.status()); output.put("exitCode", debug.exitCode());
                     output.put("failureDetailMode", options.unsafeFailureDetails() ? "local-unsafe" : "safe-default");
                     output.put("durationMs", debug.durationMs()); output.put("log", cliDisplayPath(debug.paths().get("log"), root));
                     output.put("result", cliDisplayPath(debug.paths().get("result"), root));
+                    if (debug.paths().containsKey("performance"))
+                        output.put("performance", cliDisplayPath(debug.paths().get("performance"), root));
                     output.put("diagnostics", presentedDiagnostics(debug.diagnostics(), root));
                     System.out.println(att.validation.JsonSupport.write(output));
                 } else {
@@ -67,6 +77,8 @@ public final class FrameworkRunner {
                     if (!options.quiet()) {
                         System.out.println("Log: " + cliDisplayPath(debug.paths().get("log"), root));
                         System.out.println("Result: " + cliDisplayPath(debug.paths().get("result"), root));
+                        if (debug.paths().containsKey("performance"))
+                            System.out.println("Performance: " + cliDisplayPath(debug.paths().get("performance"), root));
                     }
                     if (!debug.diagnostics().isEmpty()) System.err.println(att.core.PathPresentation.displayText(
                             att.validation.DiagnosticRenderer.exception(debug.diagnostics().get(0)), root));
@@ -255,6 +267,11 @@ public final class FrameworkRunner {
     }
 
     private static att.api.ExecutionEventListener cliObserver(final CliOptions options, final Path root) {
+        return cliObserver(options, root, null);
+    }
+
+    private static att.api.ExecutionEventListener cliObserver(final CliOptions options, final Path root,
+                                                               final att.api.DebugStartupMetrics startupMetrics) {
         return event -> {
             if ((options.quiet() && event.type() != att.api.ExecutionEvent.Type.WARNING)
                     || (!options.verbose() && event.type() != att.api.ExecutionEvent.Type.WARNING
@@ -262,7 +279,11 @@ public final class FrameworkRunner {
             String message = renderExecutionEvent(event, root);
             if (message == null) return;
             java.io.PrintStream output = "json".equals(options.format()) ? System.err : System.out;
-            synchronized (output) { output.println(message); output.flush(); }
+            synchronized (output) {
+                output.println(message);
+                output.flush();
+                if (startupMetrics != null) startupMetrics.markFirstConsoleEvent();
+            }
         };
     }
 
@@ -426,7 +447,7 @@ public final class FrameworkRunner {
     }
 
     private static void help() {
-        System.out.println("Debug: ./att.sh debug [template|flow|tool <id>] [--config <file>] [--env <name>] [--debug-id <id>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--unsafe-failure-details] [--output-dir <dir>] [--format human|json] [--quiet|--verbose]");
+        System.out.println("Debug: ./att.sh debug [template|flow|tool <id>] [--config <file>] [--env <name>] [--debug-id <id>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--unsafe-failure-details] [--output-dir <dir>] [--profile] [--format human|json] [--quiet|--verbose]");
         System.out.println("Debug discovery: ./att.sh debug [--format human|json] lists runnable targets and existing sidecars; discovery does not execute targets.");
         System.out.println("Load: ./att.sh load [<scenario.yaml> | --debug template|flow|tool <id>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--config <file>] [--env <name>] [--run-id <id>] [--users <n>|--arrival-rate <n/s>] [--duration <duration>] [--max-concurrent <n>] [--format human|json]");
         System.out.println("Load discovery: ./att.sh load [--format human|json] lists valid scenarios; load/load.yaml supplies the optional Quick Load policy.");
@@ -434,6 +455,7 @@ public final class FrameworkRunner {
         System.out.println("Load options: --warmup <duration> --ramp-up <duration> --ramp-down <duration> --think-time <duration> --overload-policy drop --output-dir <dir> --profile --quiet|--verbose");
         System.out.println("Load output: <output-dir>/load/<runId>/load-summary.json|yaml and report/index.html; exit codes PASS=0, threshold FAIL=1, validation=2, runtime=3");
         System.out.println("Environment profiles: use --env <name> with run, validate, debug, or load; --config selects the common config.");
+        System.out.println("Profile output: run/load write runtime diagnostics; debug <type> <id> --profile records startup and Debug phases.");
         System.out.println(Version.DISPLAY + "\nUsage: ./att.sh <command> [options] (Windows: att.bat)\n\nCommands:\n  run       Validate and execute cases\n  validate  Validate package or selected dependencies\n  snapshot  Generate canonical testcase snapshots\n  debug     Execute one Template, Flow, or Tool\n  load      Execute a closed or fixed-arrival-rate load scenario\n  remote    Submit and manage jobs through ATT Server\n  docs      Generate one self-contained HTML reference\n  report    Regenerate a persisted report\n  build     Archive the latest completed run\n  clean     Delete generated ATT output\n  version   Print version\n  help      Show this help\n\nSelection:\n  --suite <xlsx> | --all | --case <workbookId.groupId.rowCaseId> | --tag <tag>\n  --exclude-tag <tag> --rerun-failed --dry-run --fail-fast --run-id <id> --output-dir <dir>\n  run, debug, and load stream bounded progress by default; --quiet keeps the final summary; --verbose remains accepted\n  run may use --update-snapshot to explicitly refresh changed selected snapshots before validation\n  snapshot defaults to --all when no selector is supplied; --all remains accepted\n  --format human|json --ci-output junit,json [--queue|--allow-parallel-runs] [--profile] --quiet --verbose\n  --parallel remains a deprecated alias for --allow-parallel-runs");
     }
 

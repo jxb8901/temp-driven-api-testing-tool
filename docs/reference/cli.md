@@ -17,6 +17,16 @@
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
+## Build a source checkout
+
+The source checkout launchers run prebuilt classes and never compile code. Build the Java 8-compatible CLI, Engine, Remote, and Server API modules explicitly with a JDK and Maven:
+
+```sh
+mvn -DskipTests -pl att-cli -am compile
+```
+
+Then run `./att.sh` on macOS/Linux or `att.bat` on Windows. If required classes are missing, the launcher exits with the build command and does not try to run it. Packaged releases contain prebuilt application JARs and require a Java 8 or later runtime, not Maven. Place optional JDBC or IBM MQ driver JARs in `lib/` when those integrations are used. The Server WAR requires Java 17 or later.
+
 ## Find syntax, options, and examples by task
 
 ### Check help and version
@@ -84,6 +94,7 @@ On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not in
 | `./att.sh debug <type> <id> --debug-id <id>` | Set the exact standalone Debug directory identity |
 | `./att.sh debug <type> <id> --unsafe-failure-details` | Opt into expanded collector failure diagnostics for this standalone local Debug run; prints a warning and keeps secret redaction |
 | `./att.sh debug <type> <id> --output-dir <dir>` | Isolate debug output below `<dir>/debug/<debugId>/` |
+| `./att.sh debug <type> <id> --profile` | Write CLI startup and Debug phase timings to `performance.json` |
 | `./att.sh debug <type> <id> --format json` | Emit a compact machine-readable console summary; full evidence remains in `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | Suppress detailed live progress; keep the final summary and errors |
 
@@ -174,7 +185,7 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 
 ## Complete option matrix
 
-`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.12` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.12` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
 
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 
