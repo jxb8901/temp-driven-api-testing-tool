@@ -32,6 +32,8 @@ public final class WorkerRequest {
     public List<String> overrides;
     public String inspectionAction;
     public String inspectionType;
+    public String inspectionEnvironment;
+    public String inspectionOtherEnvironment;
     public String inspectionResourceId;
     public String inspectionQuery;
     public Integer inspectionOffset;

@@ -12,7 +12,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
   }
 }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [] } = {}) {
+function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [] } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
@@ -40,7 +40,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   const window = { listeners: {}, confirm: () => confirmCancel,
     addEventListener(name, listener) { this.listeners[name] = listener; }
   };
-  const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [], pendingHomeJobs = [], pendingResults = [];
+  const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [], pendingHomeJobs = [], pendingResults = [], pendingConfigurations = [];
   const state = { jobStatus, resourcePage: 0 };
   let rejectHome;
   const delayedHome = new Promise((_, reject) => { rejectHome = reject; });
@@ -55,11 +55,13 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   async function fetch(url, options = {}) {
     const path = String(url).split('/api/v1/')[1];
     calls.push({ path, options });
+    const jsonResponse = data => ({ ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => data });
     if (deferSubmit && options.method === 'POST') return new Promise((resolve, reject) => pendingSubmissions.push({ resolve, reject }));
     if (deferCancel && options.method === 'DELETE') return new Promise((resolve, reject) => pendingCancellations.push({ resolve, reject }));
     if (deferArtifacts && /^jobs\/[^/]+\/artifacts$/.test(path)) return new Promise(resolve => pendingArtifacts.push(resolve));
     if (deferJobLists && path === 'jobs' && !options.method) return new Promise((resolve, reject) => pendingHomeJobs.push({ resolve, reject }));
     if (deferResult && /^jobs\/[^/]+\/result$/.test(path)) return new Promise(resolve => pendingResults.push(resolve));
+    if (deferConfiguration && /^packages\/[^/]+\/configuration(?:\/|\?)/.test(path)) return new Promise(resolve => pendingConfigurations.push(resolve));
     if (deferHome && (path === 'packages' || path === 'jobs')) return delayedHome;
     if (postForbidden && path === 'jobs/run' && options.method === 'POST') {
       return { ok: false, status: 403, headers: { get: () => 'application/json' },
@@ -77,6 +79,9 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
       : { items: resourceItems, total: resourceItems.length, nextCursor: null };
     else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+\/source$/.test(path)) result = { available: true, text: '<img src=x onerror=alert(1)>', format: 'yaml' };
     else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+$/.test(path)) result = { resource: resourceItems[0], definition: { action: 'log' }, diagnostics: [] };
+    else if (/^packages\/[^/]+\/configuration\/effective\?/.test(path)) result = configuration.effective || {};
+    else if (/^packages\/[^/]+\/configuration\/compare\?/.test(path)) result = configuration.compare || {};
+    else if (/^packages\/[^/]+\/configuration\?/.test(path)) result = configuration.declared || {};
     else if (path.startsWith('packages/')) result = { packageId: path.substring(9) };
     else if (path === 'jobs') result = { items: [] };
     else if (/^jobs\/(run|debug|load|validate)$/.test(path) && options.method === 'POST') result = { jobId: 'J1' };
@@ -85,7 +90,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     else if (/^jobs\/[^/]+$/.test(path) && options.method === 'DELETE') result = { status: 'CANCEL_REQUESTED' };
     else if (/^jobs\/[^/]+$/.test(path)) result = { jobId: path.split('/')[1], status: state.jobStatus, packageId: 'payments', command: 'run' };
     else throw Error('Unexpected fetch path ' + path);
-    return { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => result };
+    return jsonResponse(result);
   }
   class FormData {
     constructor(form) { return new Map(form.formValues || []); }
@@ -96,6 +101,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     rejectSubmission: (index, error) => pendingSubmissions[index].reject(error),
     resolveCancellation: (index, response) => pendingCancellations[index].resolve(response),
     resolveArtifacts: (index, response) => pendingArtifacts[index](response),
+    resolveConfiguration: (index, data) => pendingConfigurations[index](data && data.ok !== undefined ? data : ({ ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => data })),
     resolveHomeJobList: (index, response) => pendingHomeJobs[index].resolve(response),
     resolveResult: (index, response) => pendingResults[index](response),
     rejectCancellation: (index, error) => pendingCancellations[index].reject(error),
@@ -169,6 +175,61 @@ test('loads additional package resource pages with the opaque cursor', async () 
   const requests = ui.calls.filter(call => /^packages\/payments\/resources\?/.test(call.path));
   assert.equal(requests.length, 2, 'Repeated clicks must not fetch and append the same cursor twice');
   assert.match(requests[1].path, /cursor=opaque\.cursor/);
+});
+
+test('inspects declared and effective configuration and compares profiles through the public API', async () => {
+  const configuration = {
+    declared: {
+      view: 'declared', state: 'ready', schemaVersion: 'att-config/v2.12',
+      environments: [{ name: 'SIT', state: 'active', default: true }, { name: 'UAT', state: 'active', default: false }],
+      globals: {}, sections: [], diagnostics: []
+    },
+    effective: {
+      view: 'effective', state: 'ready', environment: 'SIT',
+      globals: { timeoutMs: { state: 'visible', value: 5000 } },
+      sections: [{ id: 'dbhelpers', entries: [{ id: 'orders', fields: { url: { state: 'hidden' }, readOnly: { state: 'visible', value: true } } }] }],
+      diagnostics: []
+    },
+    compare: {
+      view: 'compare', state: 'ready', leftEnvironment: 'SIT', rightEnvironment: 'UAT',
+      fields: [{ path: 'dbhelpers.orders.url', left: { state: 'hidden' }, right: { state: 'hidden' }, change: 'hidden' }],
+      diagnostics: []
+    }
+  };
+  const ui = boot({ hash: '#/packages/payments', configuration });
+  await waitFor(() => ui.node('configuration-status').textContent.includes('Declared configuration: ready'), 'declared configuration');
+  assert.equal(ui.node('configuration-environment').children.length, 2);
+  assert.equal(ui.node('configuration-environment').value, 'SIT');
+  assert.equal(ui.node('configuration-left').value, 'SIT');
+  assert.equal(ui.node('configuration-right').value, 'UAT');
+  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration?view=declared'));
+
+  ui.node('show-effective-configuration').listeners.click();
+  await waitFor(() => ui.node('configuration-status').textContent.includes('Effective configuration for SIT: ready'), 'effective configuration');
+  assert.ok(ui.node('configuration-view').textContent.includes('"state": "hidden"'));
+  assert.ok(ui.node('configuration-view').textContent.includes('"readOnly"'));
+  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/effective?environment=SIT'));
+
+  await ui.node('compare-configuration').listeners.click();
+  await waitFor(() => ui.node('configuration-status').textContent.includes('Configuration comparison: SIT and UAT: ready'), 'configuration comparison');
+  assert.ok(ui.node('configuration-view').textContent.includes('"change": "hidden"'));
+  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/compare?left=SIT&right=UAT'));
+});
+
+test('ignores late configuration responses after navigating away', async () => {
+  const declared = { view: 'declared', state: 'ready', environments: [{ name: 'SIT', state: 'active', default: true }], globals: {}, sections: [], diagnostics: [] };
+  const ui = boot({ hash: '#/packages/payments', deferConfiguration: true });
+  await waitFor(() => ui.calls.some(call => call.path === 'packages/payments/configuration?view=declared'), 'declared configuration request');
+  ui.resolveConfiguration(0, declared);
+  await waitFor(() => ui.node('configuration-status').textContent.includes('Declared configuration: ready'), 'declared configuration response');
+  ui.node('show-effective-configuration').listeners.click();
+  await waitFor(() => ui.calls.some(call => call.path === 'packages/payments/configuration/effective?environment=SIT'), 'effective configuration request');
+
+  ui.location.hash = '#/';
+  ui.window.listeners.hashchange();
+  ui.resolveConfiguration(1, { view: 'effective', state: 'ready', environment: 'STALE', globals: {}, sections: [], diagnostics: [] });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.node('configuration-view').textContent.includes('STALE'), false);
 });
 
 test('runs only the selected Case from its package-relative suite', async () => {

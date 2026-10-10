@@ -2,6 +2,7 @@ package att.worker;
 
 import att.api.*;
 import att.resource.PackageResourceInspector;
+import att.resource.PackageConfigurationInspector;
 import att.worker.internal.DiagnosticSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -69,6 +70,8 @@ public final class WorkerMain {
             else if(error instanceof PackageResourceInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package resource response exceeded the configured limit"; }
             else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured limit"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException) { code="ATT-RESOURCE-CURSOR-STALE"; message="The package resources changed; refresh the Explorer"; }
+            else if(error instanceof PackageConfigurationInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package configuration response exceeded the configured limit"; }
+            else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
             emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message)));
             emitResult(fields("status",status,"exitCode",exit,"result",fields("executionId",null,"status",status,"exitCode",exit)));
@@ -88,6 +91,14 @@ public final class WorkerMain {
         if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),r.validationScope));
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
+            if("configuration".equals(r.inspectionType)) {
+                PackageConfigurationInspector inspector = new PackageConfigurationInspector(root, config,
+                        r.maxResponseBytes == null ? 262144 : r.maxResponseBytes);
+                Map<String,Object> inspected = inspector.inspect(r.inspectionAction,
+                        r.inspectionEnvironment, r.inspectionOtherEnvironment);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
             PackageResourceInspector inspector = new PackageResourceInspector(root, config, r.environment,
                     r.safeTextSources, r.maxSourceBytes == null ? 65536 : r.maxSourceBytes,
                     r.maxResponseBytes == null ? 262144 : r.maxResponseBytes);

@@ -69,6 +69,41 @@ class ServerRuntimeTest {
             assertThrows(IllegalArgumentException.class,()->runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor")),"bob"));
         } finally {runtime.close();}
     }
+
+    @Test void returnsDeclaredEffectiveAndComparisonConfigurationThroughTheBoundedInspectorWorker() throws Exception {
+        Path packageRoot=Path.of("").toRealPath();
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name"," ").toLowerCase().contains("win")?"java.exe":"java");
+        Path configFile=temp.resolve("configuration-inspection-server.yaml");
+        Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("configuration-inspection-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(packageRoot)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
+        ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("configuration-inspection-WEB-INF-lib"));
+        addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
+            Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
+                Path target=libs.resolve(candidate.getFileName());try{Files.createSymbolicLink(target,candidate);}catch(Exception unsupported){Files.copy(candidate,target);}
+            }
+        }
+        ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{
+            builder.environment().put("ORDERS_DB_USERNAME","inspection-test-user");builder.environment().put("ORDERS_DB_PASSWORD","inspection-test-password");
+            builder.environment().put("PAYMENT_MQ_USERNAME","inspection-test-user");builder.environment().put("PAYMENT_MQ_PASSWORD","inspection-test-password");
+            return builder.start();
+        });
+        try {
+            Map<String,Object> declared=runtime.inspectConfiguration("p","declared",null,null,"alice");
+            assertEquals("declared",declared.get("state"));
+            assertTrue(declared.toString().contains("SIT"));assertTrue(declared.toString().contains("UAT"));
+            Map<String,Object> effective=runtime.inspectConfiguration("p","effective","SIT",null,"alice");
+            assertEquals("ready",effective.get("state"));assertEquals("SIT",effective.get("environment"));
+            Map<String,Object> comparison=runtime.inspectConfiguration("p","compare","SIT","UAT","alice");
+            assertEquals("ready",comparison.get("state"));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> fields=(List<Map<String,Object>>)comparison.get("fields");
+            Map<String,Object> hidden=fields.stream().filter(item->"dbhelpers.orders.url".equals(item.get("path"))).findFirst().orElseThrow(AssertionError::new);
+            assertEquals("hidden",hidden.get("change"));
+            String publicData=declared+" "+effective+" "+comparison;
+            assertFalse(publicData.contains("sit-db.example.internal"));assertFalse(publicData.contains("uat-db.example.internal"));
+            assertFalse(publicData.contains("inspection-test-password"));assertFalse(publicData.contains(packageRoot.toString()));
+        } finally {runtime.close();}
+    }
     @Test void cancellationCannotSlipBetweenWorkerLaunchAndProcessPublication() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),"Uses a POSIX test launcher");
         Path allowed=Files.createDirectory(temp.resolve("cancel-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));

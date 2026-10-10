@@ -123,13 +123,15 @@ class AuthenticationIntegrationTest {
         if(code==200&&uri.startsWith("/att/ui/")) {assertEquals("nosniff",connection.getHeaderField("X-Content-Type-Options"));assertNotNull(connection.getHeaderField("Content-Security-Policy"));}
         connection.disconnect();return code;}
     private static void assertAnonymousInspectionIsRejected(int port)throws Exception {
-        HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/packages/p/resources?type=case").openConnection();
-        connection.setConnectTimeout(3000);connection.setReadTimeout(3000);
-        try {
-            assertEquals(401,connection.getResponseCode(),"Inspection still requires a real Servlet Principal in anonymous legacy mode");
-            com.fasterxml.jackson.databind.JsonNode body=ServerRuntime.JSON.readTree(connection.getErrorStream().readAllBytes());
-            assertEquals("ATT-SERVER-AUTHENTICATION-REQUIRED",body.path("error").path("code").asText());
-        } finally {connection.disconnect();}
+        for(String path:List.of("/att/api/v1/packages/p/resources?type=case","/att/api/v1/packages/p/configuration?view=declared")) {
+            HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+path).openConnection();
+            connection.setConnectTimeout(3000);connection.setReadTimeout(3000);
+            try {
+                assertEquals(401,connection.getResponseCode(),"Inspection still requires a real Servlet Principal in anonymous legacy mode");
+                com.fasterxml.jackson.databind.JsonNode body=ServerRuntime.JSON.readTree(connection.getErrorStream().readAllBytes());
+                assertEquals("ATT-SERVER-AUTHENTICATION-REQUIRED",body.path("error").path("code").asText());
+            } finally {connection.disconnect();}
+        }
     }
     private static void restore(String old){if(old==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",old);}
     private static int postBody(int port,String authorization,String contentType,String origin,String body)throws Exception {

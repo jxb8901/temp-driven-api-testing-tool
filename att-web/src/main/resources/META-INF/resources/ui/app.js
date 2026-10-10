@@ -16,6 +16,7 @@
   let homeRequestSequence = 0;
   let resourcePageSequence = 0;
   let resourceDetailSequence = 0;
+  let configurationRequestSequence = 0;
   let resourceLoadPending = false;
   let resourceCursor = null;
   let resourceItems = [];
@@ -109,8 +110,79 @@
       if (generation !== navigation) return;
       text(byId('package-title'), item.packageId || id);
       byId('submit-form').elements.packageId?.remove();
-      await loadResources(id, true, generation);
+      await Promise.all([loadResources(id, true, generation), loadDeclaredConfiguration(id, generation)]);
     } catch (error) { if (generation === navigation) message(error.message); }
+  }
+  function renderConfiguration(data, label) {
+    const state = data && data.state ? data.state : 'unavailable';
+    const diagnostics = Array.isArray(data && data.diagnostics) ? data.diagnostics : [];
+    const detail = diagnostics.map(item => item.summary || item.code || 'Configuration warning').join(' ');
+    text(byId('configuration-status'), `${label}: ${state}${detail ? `. ${detail}` : '.'}`);
+    text(byId('configuration-view'), JSON.stringify(safeData(data || {}), null, 2));
+  }
+  function setConfigurationProfiles(data) {
+    const profiles = Array.isArray(data && data.environments) ? data.environments.filter(item => item.state === 'active' && item.name) : [];
+    const ids = ['configuration-environment', 'configuration-left', 'configuration-right'];
+    ids.forEach(id => {
+      const select = byId(id); select.replaceChildren();
+      profiles.forEach(profile => {
+        const option = el('option', profile.name); option.value = profile.name; select.append(option);
+      });
+      if (profiles.length) select.value = profiles.find(profile => profile.default)?.name || profiles[0].name;
+    });
+    if (profiles.length > 1) byId('configuration-right').value = profiles[1].name;
+    return profiles;
+  }
+  async function loadDeclaredConfiguration(packageId, generation = navigation) {
+    const sequence = ++configurationRequestSequence;
+    text(byId('configuration-view'), '');
+    text(byId('configuration-status'), 'Loading declared configuration…');
+    try {
+      const data = await request(`packages/${encodeURIComponent(packageId)}/configuration?view=declared`);
+      if (sequence !== configurationRequestSequence || generation !== navigation || selectedPackage !== packageId) return;
+      setConfigurationProfiles(data);
+      renderConfiguration(data, 'Declared configuration');
+    } catch (error) {
+      if (sequence === configurationRequestSequence && generation === navigation && selectedPackage === packageId) {
+        text(byId('configuration-status'), 'Declared configuration is unavailable.'); message(error.message);
+      }
+    }
+  }
+  async function showEffectiveConfiguration() {
+    const packageId = selectedPackage, generation = navigation;
+    const environment = String(byId('configuration-environment').value || '').trim();
+    if (!packageId || !environment) { text(byId('configuration-status'), 'Select a declared environment first.'); return; }
+    const sequence = ++configurationRequestSequence;
+    text(byId('configuration-view'), '');
+    text(byId('configuration-status'), `Loading effective configuration for ${environment}…`);
+    try {
+      const data = await request(`packages/${encodeURIComponent(packageId)}/configuration/effective?environment=${encodeURIComponent(environment)}`);
+      if (sequence !== configurationRequestSequence || generation !== navigation || selectedPackage !== packageId) return;
+      renderConfiguration(data, `Effective configuration for ${environment}`);
+    } catch (error) {
+      if (sequence === configurationRequestSequence && generation === navigation && selectedPackage === packageId) {
+        text(byId('configuration-status'), `Effective configuration for ${environment} is unavailable.`); message(error.message);
+      }
+    }
+  }
+  async function compareConfiguration() {
+    const packageId = selectedPackage, generation = navigation;
+    const left = String(byId('configuration-left').value || '').trim();
+    const right = String(byId('configuration-right').value || '').trim();
+    if (!packageId || !left || !right) { text(byId('configuration-status'), 'Select two declared environments to compare.'); return; }
+    const sequence = ++configurationRequestSequence;
+    text(byId('configuration-view'), '');
+    text(byId('configuration-status'), `Comparing ${left} with ${right}…`);
+    try {
+      const query = `left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`;
+      const data = await request(`packages/${encodeURIComponent(packageId)}/configuration/compare?${query}`);
+      if (sequence !== configurationRequestSequence || generation !== navigation || selectedPackage !== packageId) return;
+      renderConfiguration(data, `Configuration comparison: ${left} and ${right}`);
+    } catch (error) {
+      if (sequence === configurationRequestSequence && generation === navigation && selectedPackage === packageId) {
+        text(byId('configuration-status'), 'Configuration comparison is unavailable.'); message(error.message);
+      }
+    }
   }
   function resourcePath(packageId, resource) {
     return `packages/${encodeURIComponent(packageId)}/resources/${encodeURIComponent(resource.type)}/${encodeURIComponent(resource.resourceId)}`;
@@ -373,6 +445,10 @@
   byId('load-more-resources').addEventListener('click', () => { if (selectedPackage && resourceCursor) loadResources(selectedPackage, false); });
   byId('show-resource-source').addEventListener('click', showResourceSource);
   byId('run-resource-case').addEventListener('click', runResourceCase);
+  byId('show-declared-configuration').addEventListener('click', () => { if (selectedPackage) loadDeclaredConfiguration(selectedPackage); });
+  byId('show-effective-configuration').addEventListener('click', showEffectiveConfiguration);
+  byId('compare-configuration').addEventListener('click', compareConfiguration);
+  byId('refresh-configuration').addEventListener('click', () => { if (selectedPackage) loadDeclaredConfiguration(selectedPackage); });
   byId('refresh-jobs').addEventListener('click', () => loadHome());
   window.addEventListener('hashchange', route);
   route();

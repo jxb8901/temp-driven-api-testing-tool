@@ -43,6 +43,20 @@
           </article>
         </div>
       </section>
+      <section id="configuration-explorer" aria-labelledby="configuration-heading">
+        <h2 id="configuration-heading">Configuration</h2>
+        <div class="resource-filters">
+          <button id="show-declared-configuration" type="button">View declared configuration</button>
+          <label for="configuration-environment">Effective environment</label><select id="configuration-environment"></select>
+          <button id="show-effective-configuration" type="button">View effective configuration</button>
+          <label for="configuration-left">Compare</label><select id="configuration-left"></select>
+          <label for="configuration-right">with</label><select id="configuration-right"></select>
+          <button id="compare-configuration" type="button">Compare profiles</button>
+          <button id="refresh-configuration" type="button">Refresh configuration</button>
+        </div>
+        <p id="configuration-status" role="status" aria-live="polite"></p>
+        <pre id="configuration-view"></pre>
+      </section>
       <form id="submit-form">
         <label>Command <select name="command"><option>run</option><option>debug</option><option>load</option><option>validate</option></select></label>
         <label>Environment <input name="environment" maxlength="128"></label>

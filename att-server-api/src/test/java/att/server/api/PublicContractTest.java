@@ -32,4 +32,16 @@ class PublicContractTest {
         assertEquals("ATT-RESOURCE-INDEX-WARNING",json.path("diagnostics").get(0).path("code").asText());
         assertFalse(json.has("revisionDigest"));
     }
+
+    @Test void configurationInspectionRoutesReturnTypedSafeViewEnvelope() throws Exception {
+        assertEquals("/api/v1/packages/{packageId}/configuration",ServerApi.PACKAGE_CONFIGURATION);
+        assertEquals("/api/v1/packages/{packageId}/configuration/effective",ServerApi.PACKAGE_CONFIGURATION_EFFECTIVE);
+        assertEquals("/api/v1/packages/{packageId}/configuration/compare",ServerApi.PACKAGE_CONFIGURATION_COMPARE);
+        ConfigurationInspection.Response response=new ConfigurationInspection.Response();response.view="effective";response.state="ready";response.environment="SIT";
+        response.globals=java.util.Collections.<String,Object>singletonMap("timeoutMs",java.util.Map.of("state","visible","value",5000));
+        response.diagnostics=java.util.Collections.emptyList();
+        com.fasterxml.jackson.databind.JsonNode json=new ObjectMapper().readTree(new ObjectMapper().writeValueAsBytes(response));
+        assertEquals("effective",json.path("view").asText());assertEquals("visible",json.path("globals").path("timeoutMs").path("state").asText());
+        assertFalse(json.toString().contains("packageRoot"));assertFalse(json.toString().contains("serverDataDir"));
+    }
 }
