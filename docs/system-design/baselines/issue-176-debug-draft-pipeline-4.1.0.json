@@ -1,0 +1,61 @@
+{
+  "schemaVersion" : "att-server-debug-draft-pipeline-benchmark/v1",
+  "measuredAtUtc" : "2026-10-10T16:11:04.893585Z",
+  "sourceRevision" : "944fe89",
+  "runtime" : {
+    "architecture" : "aarch64",
+    "os" : "Mac OS X",
+    "attVersion" : "4.1.0",
+    "availableProcessors" : 8,
+    "javaVersion" : "26.0.1"
+  },
+  "fixture" : {
+    "casesPerWorkbook" : 300,
+    "workbookCount" : 5,
+    "totalCases" : 1500,
+    "target" : "template:FORM"
+  },
+  "settings" : {
+    "measurement" : "ServerRuntime API pipeline; no browser rendering",
+    "runs" : 3,
+    "inspectionWorkerConcurrency" : 1,
+    "warmups" : 0
+  },
+  "samples" : [ {
+    "sample" : 0,
+    "status" : "PASS",
+    "formMs" : 45.781791,
+    "draftCreateMs" : 43.96975,
+    "previewMs" : 0.283375,
+    "submitMs" : 670.166166,
+    "submitToFirstEventMs" : 682.05275,
+    "draftCreateToFirstEventMs" : 683.571917,
+    "wholePipelineToFirstEventMs" : 775.870709,
+    "firstEventToCompletionMs" : 1107.232666,
+    "firstEvent" : "status"
+  }, {
+    "sample" : 1,
+    "status" : "PASS",
+    "formMs" : 19.738,
+    "draftCreateMs" : 20.652209,
+    "previewMs" : 0.392125,
+    "submitMs" : 1043.640334,
+    "submitToFirstEventMs" : 1046.010917,
+    "draftCreateToFirstEventMs" : 1046.410792,
+    "wholePipelineToFirstEventMs" : 1086.842167,
+    "firstEventToCompletionMs" : 1093.559417,
+    "firstEvent" : "status"
+  }, {
+    "sample" : 2,
+    "status" : "PASS",
+    "formMs" : 15.517541,
+    "draftCreateMs" : 19.425625,
+    "previewMs" : 0.210542,
+    "submitMs" : 836.851292,
+    "submitToFirstEventMs" : 843.300167,
+    "draftCreateToFirstEventMs" : 843.514292,
+    "wholePipelineToFirstEventMs" : 878.56875,
+    "firstEventToCompletionMs" : 1118.000916,
+    "firstEvent" : "status"
+  } ]
+}
