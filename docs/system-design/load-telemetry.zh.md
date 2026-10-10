@@ -8,6 +8,8 @@ Load latency percentile 使用有界 primitive `long` reservoir。Run-level repo
 
 `PayloadCache` 為 process scope，並會在 file 的 canonical path、size 或 modification time 改變時使 entry 失效。它採 least-recently-used eviction，最多保留 512 個 entries、共 16,777,216 個 UTF-16 code units；超過 2,097,152 code units 的單一 file 不會被 cache。這將 cached character data 限制在約 32 MiB；此上限不限制呼叫端載入的 String 或 compiled plan 自己的 snapshot。
 
+如需比較 physical、interactive-mirror、deferred 及 bounded mode 的本機 evidence-log append 數據，請看 [CaseExecutionLog 基準測試](case-execution-log-benchmark.zh.md)。
+
 Iteration scope 的 testdata choice 只保留在目前 input mapping 的 memo table。Run-level resolver map 只含 user/workload choices，因此 iteration 數量增加時，其 iteration cache size 應保持為零。一般 regression suite 會檢查 20,000 次 synthetic iterations。若要執行較長時間的 retained-heap 檢查：
 
 ~~~sh

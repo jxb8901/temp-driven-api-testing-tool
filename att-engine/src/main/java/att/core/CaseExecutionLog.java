@@ -28,6 +28,7 @@ import java.util.Set;
  */
 public class CaseExecutionLog implements AutoCloseable {
     private static final String TRUNCATION_MARKER = "... earlier case log events omitted ...\n";
+    private static final int BATCHED_LOG_BUFFER_CHARS = 64 * 1024;
     private final Path path;
     private Path projectRoot;
     private final boolean yamlAnchors;
@@ -38,8 +39,10 @@ public class CaseExecutionLog implements AutoCloseable {
     private final ArrayDeque<String> boundedDeferred;
     private final int deferredCharacterLimit;
     private final boolean discarding;
+    private final boolean flushEachWrite;
     private boolean truncated;
     private int boundedDeferredCharacters;
+    private long bufferedCharacters;
     private final List<String> secretRedactions;
     private final java.util.Set<Throwable> loggedInternalErrors;
 
@@ -52,15 +55,17 @@ public class CaseExecutionLog implements AutoCloseable {
     }
 
     public CaseExecutionLog(Path path, boolean yamlAnchors, java.util.function.Consumer<String> mirror) throws IOException {
-        this(path, yamlAnchors, mirror, true, 0, false);
+        this(path, yamlAnchors, mirror, true, 0, false, true);
     }
 
     private CaseExecutionLog(Path path, boolean yamlAnchors, java.util.function.Consumer<String> mirror,
-                             boolean physical, int deferredCharacterLimit, boolean discarding) throws IOException {
+                             boolean physical, int deferredCharacterLimit, boolean discarding,
+                             boolean flushEachWrite) throws IOException {
         this.path = path;
         this.yamlAnchors = yamlAnchors;
         this.mirror = mirror;
         this.discarding = discarding;
+        this.flushEachWrite = flushEachWrite;
         this.deferredCharacterLimit = deferredCharacterLimit;
         if (discarding) {
             this.writer = null;
@@ -75,7 +80,8 @@ public class CaseExecutionLog implements AutoCloseable {
                     new IdentityHashMap<Throwable, Boolean>());
             if (physical) {
                 if (path.getParent() != null) Files.createDirectories(path.getParent());
-                this.writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8);
+                BufferedWriter fileWriter = Files.newBufferedWriter(path, StandardCharsets.UTF_8);
+                this.writer = flushEachWrite ? fileWriter : new BufferedWriter(fileWriter, BATCHED_LOG_BUFFER_CHARS);
                 this.deferred = null;
                 this.boundedDeferred = null;
                 this.yaml = new Yaml();
@@ -98,7 +104,7 @@ public class CaseExecutionLog implements AutoCloseable {
      * The path is logical; no directory or file is created until materialization.
      */
     public static CaseExecutionLog lightweight(Path logicalPath, boolean yamlAnchors) throws IOException {
-        return new CaseExecutionLog(logicalPath, yamlAnchors, null, false, 0, false);
+        return new CaseExecutionLog(logicalPath, yamlAnchors, null, false, 0, false, true);
     }
 
     public static CaseExecutionLog lightweight(Path logicalPath) throws IOException {
@@ -110,7 +116,7 @@ public class CaseExecutionLog implements AutoCloseable {
      * buffering, mirroring or file reads. Collector runners own the public log record.
      */
     public static CaseExecutionLog discarding(Path logicalPath) throws IOException {
-        return new CaseExecutionLog(logicalPath, false, null, false, 0, true);
+        return new CaseExecutionLog(logicalPath, false, null, false, 0, true, true);
     }
 
     /**
@@ -120,7 +126,12 @@ public class CaseExecutionLog implements AutoCloseable {
     public static CaseExecutionLog bounded(Path logicalPath, boolean yamlAnchors, int maxCharacters) throws IOException {
         if (maxCharacters <= TRUNCATION_MARKER.length())
             throw new IllegalArgumentException("Bounded case log must allow the truncation marker and content");
-        return new CaseExecutionLog(logicalPath, yamlAnchors, null, false, maxCharacters, false);
+        return new CaseExecutionLog(logicalPath, yamlAnchors, null, false, maxCharacters, false, true);
+    }
+
+    /** Creates physical evidence with bounded batching for non-observed Run execution. */
+    public static CaseExecutionLog buffered(Path path, boolean yamlAnchors) throws IOException {
+        return new CaseExecutionLog(path, yamlAnchors, null, true, 0, false, false);
     }
 
     public Path path() {
@@ -288,7 +299,11 @@ public class CaseExecutionLog implements AutoCloseable {
         String safeText = PathPresentation.displayText(redactSecrets(text), projectRoot);
         if (writer != null) {
             writer.write(safeText);
-            writer.flush();
+            bufferedCharacters += safeText.length();
+            if (flushEachWrite || mirror != null || bufferedCharacters >= BATCHED_LOG_BUFFER_CHARS) {
+                writer.flush();
+                bufferedCharacters = 0L;
+            }
         } else if (deferredCharacterLimit > 0) {
             appendBounded(safeText);
         } else {
