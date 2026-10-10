@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -158,18 +159,18 @@ class PackageResourceInspectorTest {
         assertFalse(form.toString().contains("debugAccounts"));
 
         Map<String,Object> draft=inspector.validateQuickLoadInput("template","FORM","virtualUsers",
-                Map.of("inputs",Map.of("amount",7),"vars",Map.of("reference","REF001")),
-                Map.of("users",3),Map.of(),List.of("testdata/load.yaml"));
+                mapOf("inputs",mapOf("amount",7),"vars",mapOf("reference","REF001")),
+                mapOf("users",3),mapOf(),Collections.singletonList("testdata/load.yaml"));
         assertEquals(Boolean.FALSE,draft.get("debugLocalTestdataOmitted"),"Submitted Load input contains no Debug-local imports");
-        assertEquals(List.of("testdata/load.yaml"),draft.get("loadTestdata"));
-        assertEquals(List.of("testdata/load.yaml"),((Map<?,?>)draft.get("normalizedScenario")).get("testdata"));
+        assertEquals(Collections.singletonList("testdata/load.yaml"),draft.get("loadTestdata"));
+        assertEquals(Collections.singletonList("testdata/load.yaml"),((Map<?,?>)draft.get("normalizedScenario")).get("testdata"));
         assertTrue(String.valueOf(draft.get("previewYaml")).contains("users: 3"));
         assertArrayEquals(original,Files.readAllBytes(sidecar),"Quick Load must not modify the Debug sidecar");
     }
 
     @Test void quickLoadFormsSupportEveryTargetWithAndWithoutDebugSidecars() throws Exception {
         Path root=packageWithQuickLoadTargets("quick-load-targets");
-        for(String type:List.of("template","flow","tool")) {
+        for(String type:java.util.Arrays.asList("template","flow","tool")) {
             PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
             @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list",type,null,null,0,20).get("items");
             String logicalId="tool".equals(type)?"echo":"template".equals(type)?"FORM":"FLOW.v1";
@@ -187,7 +188,7 @@ class PackageResourceInspectorTest {
                 "schemaVersion: att-debug/v1.2\ninputs: {flowValue: 9}\nvars: {flowRef: FLOW01}\n");
         writeUtf8(root.resolve("config/tools/echo.debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {toolInput: 11}\narguments: {value: typed-argument}\n");
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
-        for(String type:List.of("template","flow","tool")) {
+        for(String type:java.util.Arrays.asList("template","flow","tool")) {
             @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list",type,null,null,0,20).get("items");
             String logicalId="tool".equals(type)?"echo":"template".equals(type)?"FORM":"FLOW.v1";
             String resourceId=String.valueOf(items.stream().filter(item->logicalId.equals(item.get("logicalId"))).findFirst().orElseThrow(AssertionError::new).get("resourceId"));
@@ -319,6 +320,12 @@ class PackageResourceInspectorTest {
             workbook.write(output);
         }
         return root;
+    }
+
+    private static Map<String,Object> mapOf(Object... entries) {
+        Map<String,Object> values=new LinkedHashMap<>();
+        for(int i=0;i<entries.length;i+=2) values.put((String)entries[i],entries[i+1]);
+        return values;
     }
 
     private static String templateYaml(String name,String extraField) {
