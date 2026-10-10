@@ -26,7 +26,7 @@ The runner uses Python's standard library, makes a temporary minimal ATT package
 
 The checked-in [4.0.1 report](baselines/issue-177-run-load-4.0.1.json) records the package tree hash, source revision, operating system, hardware, logical CPU count, Python/JVM versions, benchmark settings, raw samples, per-helper HTTP pool snapshots and across-run summaries. Whole-process p95 uses nearest-rank over three measured samples, so it is the maximum of those three observations. Each Load run's p95/p99 comes from ATT's bounded latency reservoir. Treat these results as a local baseline, not a portable performance target.
 
-## 4.0.1 result
+## Recorded results for 4.0.1
 
 The capture used source revision `b35bc653561b45d441cafda4537a8d66e09eb039` on a Mac14,2 MacBook Air with Apple M2, 8 GB RAM, macOS 26.1, eight logical CPUs, OpenJDK 26.0.1 and Python 3.13.1. It recorded the binary tree SHA-256 in the JSON report. No local Java 8 or 17 installation was available for this run.
 

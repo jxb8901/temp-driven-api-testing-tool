@@ -26,7 +26,7 @@ Runner 只使用 Python standard library，會建立臨時 minimal ATT package�
 
 已提交的 [4.0.1 報告](baselines/issue-177-run-load-4.0.1.json)包含 package tree hash、source revision、作業系統、硬件、logical CPU 數、Python／JVM 版本、benchmark 設定、原始樣本、每個 helper 的 HTTP pool snapshot 及跨 run 摘要。Whole-process p95 使用三個測量樣本的 nearest-rank，因此等於三次觀察中的最大值。每次 Load run 的 p95／p99 則取自 ATT bounded latency reservoir。這些結果是本機 baseline，並非可移植的效能門檻。
 
-## 4.0.1 結果
+## 已記錄的 4.0.1 結果
 
 此測量使用 source revision `b35bc653561b45d441cafda4537a8d66e09eb039`，在 Mac14,2 MacBook Air、Apple M2、8 GB RAM、macOS 26.1、8 個 logical CPU、OpenJDK 26.0.1 及 Python 3.13.1 執行。JSON 報告記錄 binary tree SHA-256。當時本機沒有 Java 8 或 17 可供此次 benchmark 使用。
 
