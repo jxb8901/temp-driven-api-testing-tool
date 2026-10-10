@@ -14,6 +14,11 @@ public final class ConfigurationInspection {
         public String environment;
         public String leftEnvironment;
         public String rightEnvironment;
+        public String section;
+        public Integer offset;
+        public Integer limit;
+        public Integer total;
+        public Integer nextOffset;
         public Map<String, Object> globals;
         public List<Map<String, Object>> environments;
         public List<Map<String, Object>> sections;

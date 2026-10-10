@@ -58,9 +58,16 @@ public final class PackageConfigurationInspector {
     }
 
     public Map<String, Object> inspect(String action, String environment, String otherEnvironment) throws Exception {
+        return inspect(action, environment, otherEnvironment, null, 0, 0);
+    }
+
+    public Map<String, Object> inspect(String action, String environment, String otherEnvironment,
+                                       String section, int offset, int limit) throws Exception {
+        if (offset < 0) throw new IllegalArgumentException("offset must be non-negative");
+        if (limit < 0 || limit > 100) throw new IllegalArgumentException("limit must be between 1 and 100");
         if ("declared".equals(action)) return bounded(declared());
-        if ("effective".equals(action)) return bounded(effective(environment));
-        if ("compare".equals(action)) return bounded(compare(environment, otherEnvironment));
+        if ("effective".equals(action)) return bounded(effective(environment, section, offset, limit));
+        if ("compare".equals(action)) return bounded(compare(environment, otherEnvironment, offset, limit));
         throw new IllegalArgumentException("Unsupported configuration inspection action");
     }
 
@@ -74,33 +81,34 @@ public final class PackageConfigurationInspector {
             result.put("sections", declaredSections(raw, profiles));
             result.put("diagnostics", Collections.emptyList());
             return result;
-        } catch (ConfigurationLimitException limit) {
-            throw limit;
+        } catch (ConfigurationLimitException exceeded) {
+            throw exceeded;
         } catch (Exception invalid) {
             return invalid("declared", null, "ATT-CONFIG-INVALID", "Package configuration is unavailable or invalid");
         }
     }
 
-    private Map<String, Object> effective(String environment) {
+    private Map<String, Object> effective(String environment, String section, int offset, int limit) {
         String safeEnvironment = normalizedEnvironment(environment);
         try {
             Map<?, ?> raw = readConfig();
             validateReferencedFiles(raw, safeEnvironment);
             FrameworkConfig config = new FrameworkConfigLoader().load(configFile(), packageRoot, safeEnvironment);
-            return snapshot(raw, config, "effective");
-        } catch (ConfigurationLimitException limit) {
-            throw limit;
+            return snapshot(raw, config, "effective", section, offset, limit);
+        } catch (ConfigurationLimitException exceeded) {
+            throw exceeded;
         } catch (Exception invalid) {
             return invalid("effective", safeEnvironment, "ATT-CONFIG-INVALID", "Selected configuration is unavailable or invalid");
         }
     }
 
-    private Map<String, Object> compare(String leftEnvironment, String rightEnvironment) {
+    private Map<String, Object> compare(String leftEnvironment, String rightEnvironment, int offset, int limit) {
         String leftName = normalizedEnvironment(leftEnvironment);
         String rightName = normalizedEnvironment(rightEnvironment);
+        if (leftName == null || rightName == null) throw new IllegalArgumentException("left and right environments must be valid profile names");
         if (leftName.equalsIgnoreCase(rightName)) throw new IllegalArgumentException("left and right environments must differ");
-        Map<String, Object> left = effective(leftName);
-        Map<String, Object> right = effective(rightName);
+        Map<String, Object> left = effective(leftName, null, 0, 0);
+        Map<String, Object> right = effective(rightName, null, 0, 0);
         Map<String, Object> result = base("compare", "ready", text(left.get("schemaVersion"), 64));
         result.put("leftEnvironment", leftName);
         result.put("rightEnvironment", rightName);
@@ -143,19 +151,29 @@ public final class PackageConfigurationInspector {
             fields.add(item);
         }
         result.put("state", "ready");
-        result.put("fields", fields);
+        if (limit > 0) {
+            if (offset > fields.size()) throw new IllegalArgumentException("offset exceeds the current comparison");
+            int start = Math.min(offset, fields.size());
+            int end = Math.min(fields.size(), start + limit);
+            result.put("offset", Integer.valueOf(start));
+            result.put("limit", Integer.valueOf(limit));
+            result.put("total", Integer.valueOf(fields.size()));
+            result.put("nextOffset", end < fields.size() ? Integer.valueOf(end) : null);
+            result.put("fields", new ArrayList<Map<String, Object>>(fields.subList(start, end)));
+        } else result.put("fields", fields);
         result.put("diagnostics", diagnostics);
         return result;
     }
 
-    private Map<String, Object> snapshot(Map<?, ?> raw, FrameworkConfig config, String view) throws Exception {
+    private Map<String, Object> snapshot(Map<?, ?> raw, FrameworkConfig config, String view,
+                                         String selectedSection, int offset, int limit) throws Exception {
         String environment = config.environment();
         Map<String, Object> result = base(view, "ready", text(raw.get("schemaVersion"), 64));
         result.put("environment", environment);
         result.put("environments", profiles(raw));
         Map<String, Object> globals = new LinkedHashMap<String, Object>();
         String globalOrigin = "global";
-        putVisible(globals, "environment", config.environment(), globalOrigin);
+        putVisible(globals, "environment", config.environment(), environmentOrigin(raw, environment));
         putVisible(globals, "timeoutMs", Integer.valueOf(config.timeoutMs()), globalOrigin);
         putVisible(globals, "xml.namespaceMode", config.xmlNamespaceMode(), globalOrigin);
         putVisible(globals, "caseLog.yamlAnchors", Boolean.valueOf(config.caseLogYamlAnchors()), globalOrigin);
@@ -179,6 +197,30 @@ public final class PackageConfigurationInspector {
         sections.add(httpSection(config.httpHelpers(), httpOrigin));
         sections.add(toolSection(config.tools()));
         sections.add(testdataSection(config, origin(raw, environment, "testdata")));
+        if (limit > 0) {
+            Map<String, Object> selected = null;
+            int total = "globals".equals(selectedSection) ? globals.size() : 0;
+            for (Map<String, Object> section : sections) {
+                @SuppressWarnings("unchecked") List<Map<String, Object>> entries = (List<Map<String, Object>>) section.get("entries");
+                if (section.get("id").equals(selectedSection)) {
+                    selected = section;
+                    total = entries.size();
+                    if (offset > total) throw new IllegalArgumentException("offset exceeds the current configuration section");
+                    int end = Math.min(total, offset + limit);
+                    section.put("entries", new ArrayList<Map<String, Object>>(entries.subList(offset, end)));
+                } else section.put("entries", Collections.emptyList());
+                section.put("entryCount", Integer.valueOf(entries.size()));
+            }
+            if (selectedSection != null && selected == null && !"globals".equals(selectedSection))
+                throw new IllegalArgumentException("Unknown configuration section");
+            if ("globals".equals(selectedSection) && offset > total)
+                throw new IllegalArgumentException("offset exceeds the global configuration fields");
+            result.put("section", selectedSection);
+            result.put("offset", Integer.valueOf(offset));
+            result.put("limit", Integer.valueOf(limit));
+            result.put("total", Integer.valueOf(total));
+            result.put("nextOffset", selectedSection != null && offset + limit < total ? Integer.valueOf(offset + limit) : null);
+        }
         result.put("sections", sections);
         result.put("diagnostics", Collections.emptyList());
         return result;
@@ -624,9 +666,18 @@ public final class PackageConfigurationInspector {
     }
 
     private static String normalizedEnvironment(String environment) {
-        if (environment == null || !ENVIRONMENT.matcher(environment.trim()).matches())
+        if (environment == null || environment.trim().isEmpty()) return null;
+        if (!ENVIRONMENT.matcher(environment.trim()).matches())
             throw new IllegalArgumentException("environment must be a valid profile name");
         return environment.trim();
+    }
+
+    private static String environmentOrigin(Map<?, ?> raw, String selected) {
+        Object profiles = raw.get("environments");
+        if (!(profiles instanceof Map) || selected == null) return "global";
+        for (Object key : ((Map<?, ?>) profiles).keySet())
+            if (selected.equalsIgnoreCase(String.valueOf(key)) && !String.valueOf(key).startsWith("x-")) return "profile";
+        return "global";
     }
 
     private static String safeEnum(String value, String... allowed) {

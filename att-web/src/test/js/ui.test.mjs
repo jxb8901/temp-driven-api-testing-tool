@@ -11,6 +11,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
     await new Promise(resolve => setImmediate(resolve));
   }
 }
+function allText(node) { return [node.textContent || '', ...(node.children || []).map(allText)].join(' '); }
 
 function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [] } = {}) {
   class Element {
@@ -206,14 +207,80 @@ test('inspects declared and effective configuration and compares profiles throug
 
   ui.node('show-effective-configuration').listeners.click();
   await waitFor(() => ui.node('configuration-status').textContent.includes('Effective configuration for SIT: ready'), 'effective configuration');
-  assert.ok(ui.node('configuration-view').textContent.includes('"state": "hidden"'));
-  assert.ok(ui.node('configuration-view').textContent.includes('"readOnly"'));
-  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/effective?environment=SIT'));
+  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/effective?environment=SIT&offset=0&limit=50'));
+  ui.node('configuration-section').value = 'dbhelpers';
+  ui.node('configuration-section').listeners.change();
+  await waitFor(() => ui.calls.some(call => call.path.includes('configuration/effective?environment=SIT&section=dbhelpers')), 'selected configuration section');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(allText(ui.node('configuration-view')).includes('hidden'));
+  assert.ok(allText(ui.node('configuration-view')).includes('readOnly'));
+  ui.node('submit-form').elements.environment = { value: '' };
+  ui.node('use-configuration-environment').listeners.click();
+  assert.equal(ui.node('submit-form').elements.environment.value, 'SIT');
+  assert.equal(ui.calls.some(call => call.path === 'jobs/run' && call.options.method === 'POST'), false);
 
   await ui.node('compare-configuration').listeners.click();
   await waitFor(() => ui.node('configuration-status').textContent.includes('Configuration comparison: SIT and UAT: ready'), 'configuration comparison');
-  assert.ok(ui.node('configuration-view').textContent.includes('"change": "hidden"'));
-  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/compare?left=SIT&right=UAT'));
+  assert.ok(allText(ui.node('configuration-view')).includes('hidden'));
+  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/compare?left=SIT&right=UAT&offset=0&limit=50'));
+});
+
+test('defaults comparison selectors to different profiles when the default is not first', async () => {
+  const configuration = { declared: { view: 'declared', state: 'ready', environments: [
+    { name: 'SIT', state: 'active', default: false }, { name: 'UAT', state: 'active', default: true }
+  ], globals: {}, sections: [], diagnostics: [] } };
+  const ui = boot({ hash: '#/packages/payments', configuration });
+  await waitFor(() => ui.node('configuration-status').textContent.includes('Declared configuration: ready'), 'declared profiles');
+  assert.equal(ui.node('configuration-left').value, 'UAT');
+  assert.equal(ui.node('configuration-right').value, 'SIT');
+  assert.equal(ui.node('compare-configuration').disabled, false);
+});
+
+test('supports an unprofiled package default and disables profile comparison', async () => {
+  const configuration = {
+    declared: { view: 'declared', state: 'ready', environments: [], globals: {}, sections: [], diagnostics: [] },
+    effective: { view: 'effective', state: 'ready', environment: 'LOCAL', environments: [], globals: { timeoutMs: { state: 'visible', value: 5000, origin: 'global' } }, sections: [], diagnostics: [] }
+  };
+  const ui = boot({ hash: '#/packages/payments', configuration });
+  await waitFor(() => ui.node('configuration-status').textContent.includes('Declared configuration: ready'), 'unprofiled declaration');
+  assert.equal(ui.node('configuration-environment').children[0].textContent, 'Package default');
+  assert.equal(ui.node('compare-configuration').disabled, true);
+  ui.node('show-effective-configuration').listeners.click();
+  await waitFor(() => ui.node('configuration-status').textContent.includes('Effective package default configuration: ready'), 'unprofiled effective config');
+  assert.ok(ui.calls.some(call => call.path === 'packages/payments/configuration/effective?offset=0&limit=50'));
+  ui.node('submit-form').elements.environment = { value: '' };
+  ui.node('use-configuration-environment').listeners.click();
+  assert.equal(ui.node('submit-form').elements.environment.value, 'LOCAL');
+});
+
+test('links a Tool detail to its grouped configuration section', async () => {
+  const tool = { resourceId: 'tool.c2FtcGxl', type: 'tool', logicalId: 'sample.lookup', name: 'Lookup', sourceAvailable: false, state: 'ready', references: [], referencedBy: [] };
+  const configuration = {
+    declared: { view: 'declared', state: 'ready', environments: [{ name: 'SIT', state: 'active', default: true }], globals: {}, sections: [], diagnostics: [] },
+    effective: { view: 'effective', state: 'ready', environment: 'SIT', globals: {}, sections: [{ id: 'tools', title: 'Tools', entryCount: 1, entries: [{ id: 'sample.lookup', fields: { timeoutMs: { state: 'visible', value: 1000 } } }] }], diagnostics: [] }
+  };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [tool], configuration });
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'Tool resource');
+  await ui.node('resource-list').children[0].children[0].listeners.click();
+  assert.equal(ui.node('resource-configuration-link').hidden, false);
+  ui.node('resource-configuration-link').listeners.click();
+  await waitFor(() => ui.calls.some(call => call.path.includes('configuration/effective?environment=SIT&section=tools')), 'Tool configuration section');
+  assert.equal(ui.node('configuration-search').value, 'sample.lookup');
+});
+
+test('links a resolved helper reference to its configuration section', async () => {
+  const flow = { resourceId: 'flow.bG9n', type: 'flow', logicalId: 'PAYMENT.flow.v1', name: 'Payment flow', sourceAvailable: false, state: 'ready', references: [{ type: 'dbhelper', logicalId: 'orders', resolution: 'resolved' }], referencedBy: [] };
+  const configuration = {
+    declared: { view: 'declared', state: 'ready', environments: [{ name: 'SIT', state: 'active', default: true }], globals: {}, sections: [], diagnostics: [] },
+    effective: { view: 'effective', state: 'ready', environment: 'SIT', globals: {}, sections: [{ id: 'dbhelpers', title: 'DB helpers', entryCount: 1, entries: [{ id: 'orders', fields: { readOnly: { state: 'visible', value: true } } }] }], diagnostics: [] }
+  };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [flow], configuration });
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'Flow resource');
+  await ui.node('resource-list').children[0].children[0].listeners.click();
+  assert.equal(ui.node('resource-configuration-link').hidden, false);
+  ui.node('resource-configuration-link').listeners.click();
+  await waitFor(() => ui.calls.some(call => call.path.includes('configuration/effective?environment=SIT&section=dbhelpers')), 'helper configuration section');
+  assert.equal(ui.node('configuration-search').value, 'orders');
 });
 
 test('ignores late configuration responses after navigating away', async () => {
@@ -223,7 +290,7 @@ test('ignores late configuration responses after navigating away', async () => {
   ui.resolveConfiguration(0, declared);
   await waitFor(() => ui.node('configuration-status').textContent.includes('Declared configuration: ready'), 'declared configuration response');
   ui.node('show-effective-configuration').listeners.click();
-  await waitFor(() => ui.calls.some(call => call.path === 'packages/payments/configuration/effective?environment=SIT'), 'effective configuration request');
+  await waitFor(() => ui.calls.some(call => call.path.startsWith('packages/payments/configuration/effective?environment=SIT')), 'effective configuration request');
 
   ui.location.hash = '#/';
   ui.window.listeners.hashchange();

@@ -109,7 +109,9 @@ public final class WorkerMain {
                 PackageConfigurationInspector inspector = new PackageConfigurationInspector(root, config,
                         r.maxResponseBytes == null ? 262144 : r.maxResponseBytes);
                 Map<String,Object> inspected = inspector.inspect(r.inspectionAction,
-                        r.inspectionEnvironment, r.inspectionOtherEnvironment);
+                        r.inspectionEnvironment, r.inspectionOtherEnvironment, r.inspectionSection,
+                        r.inspectionOffset == null ? 0 : r.inspectionOffset,
+                        r.inspectionLimit == null ? 0 : r.inspectionLimit);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
