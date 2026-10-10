@@ -2,6 +2,8 @@
 
 `JobEventsPerformanceBenchmark` is an opt-in local benchmark for the Server journal path. It measures synthetic event append latency and throughput, first-event time, cursor replay, retained disk bytes, process CPU time, writer-thread allocated bytes (when the JVM exposes them), and sampled heap use with 1, 4, or 8 concurrent job journals. It writes machine and JVM details plus raw run samples to JSON.
 
+For H2 metadata connection and status-poll measurements, see [Server JobStore benchmark](server-job-store-benchmark.md).
+
 The benchmark does not start Workers, Tomcat, SSE sockets, or a system under test. Its measurements isolate journal behavior; they do not represent end-to-end job latency or Worker blocking. `writerAllocatedBytes` covers append-thread allocations and excludes compactor threads. `processCpuMs` includes append and compaction work. `heapUsedBeforeBytes` and `heapUsedAfterBytes` are point samples, not peak heap. No fixed regression threshold is enabled until a stable machine-specific baseline exists.
 
 ## Capture and compare a baseline
