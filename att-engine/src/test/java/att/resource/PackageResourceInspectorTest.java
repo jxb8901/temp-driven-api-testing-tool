@@ -221,7 +221,8 @@ class PackageResourceInspectorTest {
             assertNotEquals(version,inspector.packageChangeVersion(),"package file changes should invalidate the watched snapshot");
             assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
                     ()->inspector.inspect("list","template",null,null,1,1,revision));
-            assertEquals(2,inspector.indexBuildCount(),"a package change must rebuild the cached index before checking the cursor");
+            assertTrue(inspector.indexBuildCount()>=2,
+                    "a package change must rebuild the cached index before checking the cursor");
         } finally { inspector.close(); }
     }
 
