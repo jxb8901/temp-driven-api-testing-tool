@@ -1,4 +1,4 @@
-# ATT 4.0.0 - Automated Testing Tool
+# ATT 4.0.1 - Automated Testing Tool
 
 ATT is an offline, template-driven API and integration test runner for SIT/UAT. Excel rows define Testcases; Stages select Templates; Templates execute ordered Actions; reusable Flows and configured Resources keep implementation logic out of test data.
 
@@ -91,9 +91,17 @@ schemas/      published ATT schemas
 output/       run/debug/load evidence and reports
 ```
 
-ATT 4.0.0 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.6`. Current schemas live under `schemas/`; previous and older definitions are historical references under `schemas/history/`, not current runtime contracts.
+ATT 4.0.1 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.6`. Current schemas live under `schemas/`; previous and older definitions are historical references under `schemas/history/`, not current runtime contracts.
 
 ## Build and validation
+
+Source launchers run only prebuilt classes; `att.sh` and `att.bat` never compile code. To prepare the Java 8-compatible CLI, Engine, Remote, and Server API modules, use a JDK and Maven:
+
+```sh
+mvn -DskipTests -pl att-cli -am compile
+```
+
+Then run `./att.sh` on macOS/Linux or `att.bat` on Windows. A missing prebuilt class produces an error with the explicit build command. Packaged releases contain prebuilt JARs and need a Java 8 or later runtime, not Maven. Optional JDBC and IBM MQ driver JARs can be placed in `lib/`. The Server WAR requires Java 17 or later.
 
 ```sh
 mvn clean verify

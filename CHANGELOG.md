@@ -1,5 +1,10 @@
 # Changelog
 
+# ATT 4.0.1 - 2026-10-10
+
+- Remove implicit Maven and `javac` compilation from the Unix and Windows launchers; source checkouts now require an explicit build before commands can run (#177).
+- Add launcher checks for prebuilt source classes and clearer build instructions for source and packaged installations.
+
 # ATT 4.0.0 - 2026-10-07
 
 - Implement ATT Server v1 as a Java 17 Jakarta Servlet WAR for external Tomcat 10.1+ (#165).

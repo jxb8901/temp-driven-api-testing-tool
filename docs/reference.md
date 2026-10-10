@@ -1,7 +1,7 @@
-# ATT v4.0.0 reference manual
+# ATT v4.0.1 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 4.0.0
+Version: 4.0.1
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -90,6 +90,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Configuration owners](#configuration-owners)
 - [CLI reference](#cli-reference)
   - [Choose a command](#choose-a-command)
+  - [Build a source checkout](#build-a-source-checkout)
   - [Find syntax, options, and examples by task](#find-syntax-options-and-examples-by-task)
   - [Use ATT Server from the CLI](#use-att-server-from-the-cli)
   - [Typed overrides and quick Load](#typed-overrides-and-quick-load)
@@ -2510,6 +2511,16 @@ A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references 
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
+### Build a source checkout
+
+The source checkout launchers run prebuilt classes and never compile code. Build the Java 8-compatible CLI, Engine, Remote, and Server API modules explicitly with a JDK and Maven:
+
+```sh
+mvn -DskipTests -pl att-cli -am compile
+```
+
+Then run `./att.sh` on macOS/Linux or `att.bat` on Windows. If required classes are missing, the launcher exits with the build command and does not try to run it. Packaged releases contain prebuilt application JARs and require a Java 8 or later runtime, not Maven. Place optional JDBC or IBM MQ driver JARs in `lib/` when those integrations are used. The Server WAR requires Java 17 or later.
+
 ### Find syntax, options, and examples by task
 
 #### Check help and version
@@ -2900,7 +2911,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.0.0",
+  "attVersion": "4.0.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2939,7 +2950,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven plus Python 3 and Pandoc for Reference generation. It outputs `att-4.0.0-local.tar.gz` for the CLI, `att-4.0.0-server.tar.gz` for the WAR and deployment guides, and `att-4.0.0-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
+`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven plus Python 3 and Pandoc for Reference generation. It outputs `att-4.0.1-local.tar.gz` for the CLI, `att-4.0.1-server.tar.gz` for the WAR and deployment guides, and `att-4.0.1-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
 
 ### Runtime dependencies
 

@@ -4,19 +4,23 @@ setlocal EnableExtensions DisableDelayedExpansion
 set "ROOT_DIR=%~dp0"
 cd /d "%ROOT_DIR%" || exit /b 2
 where java >nul 2>&1
-if errorlevel 1 (echo Java is required. Please install JDK 8 or newer. 1>&2& exit /b 2)
+if errorlevel 1 (echo A Java 8 or later runtime is required. 1>&2& exit /b 2)
 set "APP_JAR="
 for %%F in ("%ROOT_DIR%lib\att-*.jar") do if exist "%%~fF" if not defined APP_JAR set "APP_JAR=%%~fF"
 if defined APP_JAR goto packaged
-where mvn >nul 2>&1
-if errorlevel 1 goto source_classes
-echo Compiling ATT sources...
-call mvn -q -DskipTests -pl att-cli -am compile
-if errorlevel 1 exit /b 1
-:source_classes
-if not exist "%ROOT_DIR%att-cli\target\classes\att\FrameworkRunner.class" (echo Maven is required to compile ATT sources. Build a release package first or install Maven. 1>&2& exit /b 2)
+set "MISSING_CLASSES="
+if not exist "%ROOT_DIR%att-cli\target\classes\att\FrameworkRunner.class" set "MISSING_CLASSES=%MISSING_CLASSES% att-cli/target/classes/att/FrameworkRunner.class"
+if not exist "%ROOT_DIR%att-engine\target\classes\att\Version.class" set "MISSING_CLASSES=%MISSING_CLASSES% att-engine/target/classes/att/Version.class"
+if not exist "%ROOT_DIR%att-remote\target\classes\att\remote\RemoteCommand.class" set "MISSING_CLASSES=%MISSING_CLASSES% att-remote/target/classes/att/remote/RemoteCommand.class"
+if not exist "%ROOT_DIR%att-server-api\target\classes\att\server\api\ServerApi.class" set "MISSING_CLASSES=%MISSING_CLASSES% att-server-api/target/classes/att/server/api/ServerApi.class"
+if defined MISSING_CLASSES (
+  echo ATT source checkout is missing required prebuilt classes:%MISSING_CLASSES% 1>&2
+  echo Build explicitly with: mvn -DskipTests -pl att-cli -am compile 1>&2
+  echo Or use the local package produced by the release build. 1>&2
+  exit /b 2
+)
 if not defined M2_REPO set "M2_REPO=%USERPROFILE%\.m2\repository"
-set "CP=%ROOT_DIR%att-cli\target\classes;%ROOT_DIR%att-cli\target\test-classes;%ROOT_DIR%att-engine\target\classes"
+set "CP=%ROOT_DIR%att-cli\target\classes;%ROOT_DIR%att-engine\target\classes"
 set "CP=%CP%;%ROOT_DIR%att-remote\target\classes;%ROOT_DIR%att-server-api\target\classes"
 set "CP=%CP%;%M2_REPO%\commons-io\commons-io\2.16.1\commons-io-2.16.1.jar"
 set "CP=%CP%;%M2_REPO%\org\apache\httpcomponents\httpclient\4.5.13\httpclient-4.5.13.jar"
