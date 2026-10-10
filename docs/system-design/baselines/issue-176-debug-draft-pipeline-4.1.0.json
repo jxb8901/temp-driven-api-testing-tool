@@ -1,61 +1,61 @@
 {
   "schemaVersion" : "att-server-debug-draft-pipeline-benchmark/v1",
-  "measuredAtUtc" : "2026-10-10T16:11:04.893585Z",
-  "sourceRevision" : "944fe89",
+  "measuredAtUtc" : "2026-10-10T16:44:34.854411Z",
+  "sourceRevision" : "2b28097",
   "runtime" : {
+    "javaVersion" : "26.0.1",
     "architecture" : "aarch64",
     "os" : "Mac OS X",
     "attVersion" : "4.1.0",
-    "availableProcessors" : 8,
-    "javaVersion" : "26.0.1"
+    "availableProcessors" : 8
   },
   "fixture" : {
+    "target" : "template:FORM",
     "casesPerWorkbook" : 300,
     "workbookCount" : 5,
-    "totalCases" : 1500,
-    "target" : "template:FORM"
+    "totalCases" : 1500
   },
   "settings" : {
-    "measurement" : "ServerRuntime API pipeline; no browser rendering",
     "runs" : 3,
     "inspectionWorkerConcurrency" : 1,
-    "warmups" : 0
+    "warmups" : 0,
+    "measurement" : "ServerRuntime API pipeline; no browser rendering"
   },
   "samples" : [ {
     "sample" : 0,
     "status" : "PASS",
-    "formMs" : 45.781791,
-    "draftCreateMs" : 43.96975,
-    "previewMs" : 0.283375,
-    "submitMs" : 670.166166,
-    "submitToFirstEventMs" : 682.05275,
-    "draftCreateToFirstEventMs" : 683.571917,
-    "wholePipelineToFirstEventMs" : 775.870709,
-    "firstEventToCompletionMs" : 1107.232666,
+    "formMs" : 45.24325,
+    "draftCreateMs" : 57.156,
+    "previewMs" : 0.313458,
+    "submitMs" : 678.395375,
+    "submitToFirstEventMs" : 687.358375,
+    "draftCreateToFirstEventMs" : 689.373833,
+    "wholePipelineToFirstEventMs" : 793.397917,
+    "firstEventToCompletionMs" : 1155.076458,
     "firstEvent" : "status"
   }, {
     "sample" : 1,
     "status" : "PASS",
-    "formMs" : 19.738,
-    "draftCreateMs" : 20.652209,
-    "previewMs" : 0.392125,
-    "submitMs" : 1043.640334,
-    "submitToFirstEventMs" : 1046.010917,
-    "draftCreateToFirstEventMs" : 1046.410792,
-    "wholePipelineToFirstEventMs" : 1086.842167,
-    "firstEventToCompletionMs" : 1093.559417,
+    "formMs" : 21.500583,
+    "draftCreateMs" : 19.935667,
+    "previewMs" : 0.358,
+    "submitMs" : 1031.97725,
+    "submitToFirstEventMs" : 1034.36575,
+    "draftCreateToFirstEventMs" : 1034.727917,
+    "wholePipelineToFirstEventMs" : 1076.205875,
+    "firstEventToCompletionMs" : 1098.213,
     "firstEvent" : "status"
   }, {
     "sample" : 2,
     "status" : "PASS",
-    "formMs" : 15.517541,
-    "draftCreateMs" : 19.425625,
-    "previewMs" : 0.210542,
-    "submitMs" : 836.851292,
-    "submitToFirstEventMs" : 843.300167,
-    "draftCreateToFirstEventMs" : 843.514292,
-    "wholePipelineToFirstEventMs" : 878.56875,
-    "firstEventToCompletionMs" : 1118.000916,
+    "formMs" : 20.5005,
+    "draftCreateMs" : 23.051125,
+    "previewMs" : 0.282875,
+    "submitMs" : 886.314792,
+    "submitToFirstEventMs" : 891.695625,
+    "draftCreateToFirstEventMs" : 891.98325,
+    "wholePipelineToFirstEventMs" : 935.698666,
+    "firstEventToCompletionMs" : 1082.962375,
     "firstEvent" : "status"
   } ]
 }
