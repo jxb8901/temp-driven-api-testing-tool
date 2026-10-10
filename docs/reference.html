@@ -3199,6 +3199,14 @@ headroom for latency variation and other routes, then confirm with
 <code>resources.http</code> active/idle/waiting/peak observations. Pool
 capacity is a generator-side ceiling, not a recommendation to send that
 load to an unverified service.</p>
+<p>For DB work, use the connection-lease time in the same estimate: DB
+operations/second × mean time a borrowed connection stays in use. For
+example, 40 operations/second with a 100 ms mean lease needs about four
+concurrent connections. Set <code>pool.maxSize</code> for each DB helper
+to that concurrency plus headroom, then check its
+<code>resources.db</code> active/idle/waiting, borrow-timeout and
+total-borrow-wait metrics. The default maximum is 20 per helper; it is a
+client-side limit, not a target database capacity recommendation.</p>
 <p>For MQ request/reply, 10 requests/second with a mean 3-second reply
 time likewise needs about 30 leased connections across the workload.
 Size <code>pool.maxSize</code> for the expected in-flight requests
