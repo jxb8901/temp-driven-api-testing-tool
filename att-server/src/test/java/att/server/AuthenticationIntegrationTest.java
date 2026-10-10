@@ -241,7 +241,9 @@ class AuthenticationIntegrationTest {
             List<Future<HttpURLConnection>> pending=new ArrayList<>();
             for(int i=0;i<5;i++)pending.add(clients.submit(()->{HttpURLConnection c=(HttpURLConnection)new java.net.URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();c.setConnectTimeout(3000);c.setReadTimeout(5000);c.setRequestProperty("Authorization",authorization);assertEquals(200,c.getResponseCode());return c;}));
             for(Future<HttpURLConnection> future:pending)connections.add(future.get(5,TimeUnit.SECONDS));
-            // Keep all five response streams open before publishing the live event.
+            // HTTP 200 can arrive before the asynchronous stream task subscribes to the journal.
+            // Wait until every listener is registered so this checks live fan-out, not setup timing.
+            awaitSseListeners(journal,connections.size());
             append.invoke(journal,"progress",Map.of("message","live observer event"));
             for(HttpURLConnection connection:connections) {
                 try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
@@ -252,6 +254,17 @@ class AuthenticationIntegrationTest {
         } finally {
             var finish=runtime.getClass().getDeclaredMethod("finish",jobType,String.class,int.class);finish.setAccessible(true);finish.invoke(runtime,job,"PASS",0);for(HttpURLConnection c:connections)c.disconnect();clients.shutdownNow();
         }
+    }
+    private static void awaitSseListeners(Object journal,int expected)throws Exception {
+        var listeners=journal.getClass().getDeclaredField("listeners");listeners.setAccessible(true);
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+        int count=0;
+        do {
+            count=((java.util.Collection<?>)listeners.get(journal)).size();
+            if(count==expected)return;
+            Thread.sleep(10);
+        } while(System.nanoTime()<deadline);
+        assertEquals(expected,count,"All concurrent SSE streams should subscribe before the live event is appended");
     }
     private static Object field(Object target,String name)throws Exception {var field=target.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(target);}
     private static void copySchemas(Path packageRoot)throws Exception {
