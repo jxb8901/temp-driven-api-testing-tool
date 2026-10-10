@@ -2,7 +2,12 @@ package att.resource;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -44,7 +49,9 @@ class PackageResourceInspectorTest {
     }
 
     @Test void returnsSafeTemplateProjectionAndEnforcesRevisionBoundPagination() throws Exception {
-        PackageResourceInspector inspector=inspector();
+        Path root=packageWithTemplate("safe-source", "TEST", "description: harmless");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.singletonList("templates/TEST/template.yaml"),65536,262144);
         @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspect("list","template",null,null,0,1);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
         assertEquals(1,items.size());
@@ -83,17 +90,54 @@ class PackageResourceInspectorTest {
         Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates/SECRET"));Files.createDirectories(root.resolve("testcase"));
         writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         writeUtf8(root.resolve("templates/SECRET/template.yaml"),"schemaVersion: att-template/v3.6\nname: SECRET\n"
-                +"description: 'password=top-secret; Bearer abc123; https://user:pass@example.com; /outside/private'\n"
-                +"actions:\n  note:\n    type: log\n    message: safe\n");
+                +"description: 'password=top-secret; Bearer abc123; https://user:pass@example.com; /outside/private; account 123456789'\n"
+                +"x-business:\n  payload: 'customer account 123456789'\n  details:\n    message: 'temporary credential is violet-123'\n"
+                +"actions:\n  note:\n    type: log\n    description: 'temporary credential is violet-123'\n"
+                +"    message: |\n      benign looking text\n      account 123456789\n");
         att.TestSchemas.install(root);
-        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.singletonList("templates/SECRET/template.yaml"),65536,262144);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
         assertEquals(1,items.size());
         Map<String,Object> source=inspector.inspect("source","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
-        assertEquals(Boolean.TRUE,source.get("available"));assertEquals(Boolean.TRUE,source.get("redacted"));
+        assertEquals(Boolean.TRUE,source.get("available"),source.toString());assertEquals(Boolean.TRUE,source.get("redacted"),source.toString());
         String text=String.valueOf(source.get("text"));
         assertFalse(text.contains("top-secret"));assertFalse(text.contains("abc123"));assertFalse(text.contains("user:pass"));
         assertFalse(text.contains("/outside/private"));assertFalse(text.contains(root.toString()));
+        assertFalse(text.contains("123456789"));assertFalse(text.contains("violet-123"));
+        Map<String,Object> detail=inspector.inspect("detail","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
+        assertFalse(detail.toString().contains("123456789"));assertFalse(detail.toString().contains("violet-123"));
+    }
+
+    @Test void doesNotExposeYamlSourceWithoutAnExplicitServerVisibilityPolicy() throws Exception {
+        Path root=packageWithTemplate("source-policy", "POLICY", "description: package authored text");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        assertEquals(Boolean.FALSE,items.get(0).get("sourceAvailable"));
+        Map<String,Object> source=inspector.inspect("source","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
+        assertEquals(Boolean.FALSE,source.get("available"));assertEquals("visibility-policy",source.get("reason"));
+    }
+
+    @Test void hidesWorkbookBusinessValuesAndBoundsHighFanInSummaries() throws Exception {
+        Path root=packageWithCaseWorkbook("case-data", 125);
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases=(List<Map<String,Object>>)inspector.inspect("list","case",null,null,0,1).get("items");
+        Map<String,Object> detail=inspector.inspect("detail","case",String.valueOf(cases.get(0).get("resourceId")),null,0,1);
+        assertFalse(detail.toString().contains("customer account 123456789"));
+        assertFalse(detail.toString().contains("temporary credential violet-123"));
+        @SuppressWarnings("unchecked") Map<String,Object> definition=(Map<String,Object>)detail.get("definition");
+        assertEquals("hidden",definition.get("caseDataState"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> stages=(List<Map<String,Object>>)definition.get("stages");
+        assertEquals("hidden",stages.get(0).get("valuesState"));
+
+        @SuppressWarnings("unchecked") List<Map<String,Object>> templates=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        Map<String,Object> target=templates.get(0);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> referencedBy=(List<Map<String,Object>>)target.get("referencedBy");
+        assertEquals(100,referencedBy.size());
+        assertEquals(125,target.get("referencedByCount"));
+        assertEquals(Boolean.TRUE,target.get("referencedByHasMore"));
     }
 
     @Test void rejectsTraversalAndDoesNotReadAnExternalSymlinkedTemplate() throws Exception {
@@ -116,7 +160,8 @@ class PackageResourceInspectorTest {
 
     @Test void reportsOversizedSourceAsUnavailableWithoutReturningPartialContent() throws Exception {
         Path root=packageWithTemplate("oversized", "LARGE", "description: '"+repeat('x',1024)+"'");
-        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),256,4096);
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.singletonList("templates/LARGE/template.yaml"),256,4096);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
         assertEquals(1,items.size());
         Map<String,Object> source=inspector.inspect("source","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
@@ -161,6 +206,26 @@ class PackageResourceInspectorTest {
         Path template=Files.createDirectories(root.resolve("templates").resolve(name)).resolve("template.yaml");
         writeUtf8(template,templateYaml(name,extraField));
         att.TestSchemas.install(root);
+        return root;
+    }
+
+    private Path packageWithCaseWorkbook(String directory, int rows) throws Exception {
+        Path root=packageWithTemplate(directory,"TARGET","description: harmless");
+        Path suite=Files.createDirectories(root.resolve("testcase")).resolve("cases.xlsx");
+        writeUtf8(root.resolve("testcase/cases.yaml"),"schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n  sheet: Cases\n  caseId: Case ID\n  tags: Tags\n  dataColumns: payload=Payload\nstages:\n  - key: invoke\n    template: Template\n    dataColumns: request=Request\n");
+        try (Workbook workbook=new XSSFWorkbook(); OutputStream output=Files.newOutputStream(suite)) {
+            Sheet sheet=workbook.createSheet("Cases");
+            Row header=sheet.createRow(0);
+            String[] columns={"Case ID","Tags","Payload","Template","Request"};
+            for(int i=0;i<columns.length;i++)header.createCell(i).setCellValue(columns[i]);
+            for(int i=0;i<rows;i++) {
+                Row row=sheet.createRow(i+1);
+                row.createCell(0).setCellValue("CASE_"+i);row.createCell(1).setCellValue("smoke");
+                row.createCell(2).setCellValue("customer account 123456789");row.createCell(3).setCellValue("TARGET");
+                row.createCell(4).setCellValue("temporary credential violet-123");
+            }
+            workbook.write(output);
+        }
         return root;
     }
 
