@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Validated, immutable deployment configuration for the single-node control plane. */
 public final class ServerConfig {
@@ -25,11 +26,12 @@ public final class ServerConfig {
     public final List<Path> allowedRoots;
     public final List<Path> workerLibraryDirs;
     public final Inspection inspection;
+    public final InlineLoad inlineLoad;
 
     private ServerConfig(Path dataDir, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad) {
         this.dataDir=dataDir; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
@@ -38,6 +40,7 @@ public final class ServerConfig {
         this.allowedRoots=List.copyOf(allowedRoots);
         this.workerLibraryDirs=List.copyOf(workerLibraryDirs);
         this.inspection=inspection;
+        this.inlineLoad=inlineLoad;
     }
 
     public static ServerConfig load(Path file) throws Exception {
@@ -85,6 +88,7 @@ public final class ServerConfig {
         int request=intValue(server,"maxRequestBytes",1048576,1024,16777216), events=intValue(server,"maxEventsPerJob",10000,100,1000000),
             artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
         Inspection inspection=inspection(server.get("inspection"),resolved);
+        InlineLoad inlineLoad=inlineLoad(server.get("inlineLoad"));
         Files.createDirectories(data);
         Path realData=data.toRealPath();
         String attHome=System.getProperty("att.home");if(attHome==null||attHome.isBlank())attHome=System.getenv("ATT_HOME");
@@ -92,7 +96,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,resolved,allowed,workerLibraries,inspection);
+        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,resolved,allowed,workerLibraries,inspection,inlineLoad);
     }
 
     public static Path configPath() {
@@ -154,6 +158,51 @@ public final class ServerConfig {
             safeSources.put(packageId,List.copyOf(checked));
         }
         return new Inspection(enabled,concurrent,queued,timeout,heap,response,source,safeSources);
+    }
+
+    private static InlineLoad inlineLoad(Object raw) {
+        Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.inlineLoad");
+        Set<String> allowed=Set.of("enabled","maxWorkloads","maxTargets","maxTotalUsers",
+                "maxAggregateArrivalRatePerSecond","maxConcurrentPerWorkload","maxTotalConcurrent","maxDurationSeconds");
+        for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))
+            throw new IllegalArgumentException("server.inlineLoad contains an unknown setting");
+        boolean enabled=boolValue(values,"enabled",false);
+        int workloads=inlineIntValue(values,"maxWorkloads",10,1,128);
+        int targets=inlineIntValue(values,"maxTargets",20,1,256);
+        int users=inlineIntValue(values,"maxTotalUsers",100,1,100000);
+        int concurrent=inlineIntValue(values,"maxConcurrentPerWorkload",100,1,1000000);
+        int totalConcurrent=inlineIntValue(values,"maxTotalConcurrent",1000,1,1000000);
+        int duration=inlineIntValue(values,"maxDurationSeconds",3600,1,86400);
+        Object configuredRate=values.get("maxAggregateArrivalRatePerSecond");
+        double rate=configuredRate==null?100.0:configuredRate instanceof Number?((Number)configuredRate).doubleValue():Double.NaN;
+        if(!Double.isFinite(rate)||rate<=0.0||rate>1000000.0)
+            throw new IllegalArgumentException("server.inlineLoad.maxAggregateArrivalRatePerSecond must be a finite number greater than 0 and at most 1000000");
+        return new InlineLoad(enabled,workloads,targets,users,rate,concurrent,totalConcurrent,duration);
+    }
+    private static int inlineIntValue(Map<?,?> values,String key,int fallback,int min,int max) {
+        Object raw=values.get(key);
+        if(raw==null)return fallback;
+        if(!(raw instanceof Number))throw new IllegalArgumentException("server.inlineLoad."+key+" must be an integer");
+        try {
+            long value=new java.math.BigDecimal(String.valueOf(raw)).longValueExact();
+            if(value<min||value>max)throw new IllegalArgumentException("server.inlineLoad."+key+" must be between "+min+" and "+max);
+            return (int)value;
+        } catch(NumberFormatException|ArithmeticException invalid) {
+            throw new IllegalArgumentException("server.inlineLoad."+key+" must be an integer");
+        }
+    }
+
+    /** Server-owned limits for browser-created Load drafts. Path-based Load remains compatible. */
+    public static final class InlineLoad {
+        public final boolean enabled;
+        public final int maxWorkloads,maxTargets,maxTotalUsers,maxConcurrentPerWorkload,maxTotalConcurrent,maxDurationSeconds;
+        public final double maxAggregateArrivalRatePerSecond;
+        private InlineLoad(boolean enabled,int maxWorkloads,int maxTargets,int maxTotalUsers,
+                           double maxAggregateArrivalRatePerSecond,int maxConcurrentPerWorkload,int maxTotalConcurrent,int maxDurationSeconds) {
+            this.enabled=enabled;this.maxWorkloads=maxWorkloads;this.maxTargets=maxTargets;this.maxTotalUsers=maxTotalUsers;
+            this.maxAggregateArrivalRatePerSecond=maxAggregateArrivalRatePerSecond;
+            this.maxConcurrentPerWorkload=maxConcurrentPerWorkload;this.maxTotalConcurrent=maxTotalConcurrent;this.maxDurationSeconds=maxDurationSeconds;
+        }
     }
 
     public static final class Inspection {
