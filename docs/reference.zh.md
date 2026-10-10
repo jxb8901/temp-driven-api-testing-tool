@@ -1,7 +1,7 @@
-# ATT v4.0.0 使用手冊與參考
+# ATT v4.1.0 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.0.0
+Version: 4.1.0
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -2822,7 +2822,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.0.0",
+  "attVersion": "4.1.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2861,7 +2861,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.0.0-local.tar.gz`、包含 WAR 和部署指南的 `att-4.0.0-server.tar.gz`，以及 source archive `att-4.0.0-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
+`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.1.0-local.tar.gz`、包含 WAR 和部署指南的 `att-4.1.0-server.tar.gz`，以及 source archive `att-4.1.0-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
 
 ### Runtime dependencies
 

@@ -1,4 +1,4 @@
-# ATT v4.0.0 quick start
+# ATT v4.1.0 quick start
 
 [中文快速入門](quick-start.zh.md) · [Reference Manual](reference.html)
 
@@ -291,4 +291,4 @@ Do not try to learn every ATT feature from this tutorial. Follow the Reference p
 
 For direct DB Actions specifically, remember the safety boundary: `query` may retry `ASSERTION`/`TIMEOUT`, while `update` supports `timeoutMs` but rejects automatic retry. See the [DBHelper Reference](reference/resources/dbhelper.md) for the full contract.
 
-For field-by-field supported behavior, use the generated [ATT V4.0.0 Reference Manual](reference.html) rather than extending this tutorial into a second manual.
+For field-by-field supported behavior, use the generated [ATT V4.1.0 Reference Manual](reference.html) rather than extending this tutorial into a second manual.

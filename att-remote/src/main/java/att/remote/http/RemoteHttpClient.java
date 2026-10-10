@@ -66,7 +66,7 @@ public class RemoteHttpClient {
         try {
             URL url=new URL(apiBase+path); HttpURLConnection c=(HttpURLConnection)url.openConnection();c.setConnectTimeout(10000);c.setReadTimeout(60000);c.setUseCaches(false);
             if(username!=null) { if(password==null)throw new RemoteException("Basic credentials are missing");String token=Base64.getEncoder().encodeToString((username+":"+password).getBytes(StandardCharsets.UTF_8));c.setRequestProperty("Authorization","Basic "+token); }
-            c.setRequestProperty("User-Agent","ATT-Remote/4.0.0");return c;
+            c.setRequestProperty("User-Agent","ATT-Remote/4.1.0");return c;
         } catch(RemoteException e){throw e;} catch(Exception e){throw new RemoteException("Invalid ATT Server request URL",e);}
     }
     private static void check(HttpURLConnection c) throws IOException,RemoteException {

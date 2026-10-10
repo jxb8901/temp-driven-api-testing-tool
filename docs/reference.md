@@ -1,7 +1,7 @@
-# ATT v4.0.0 reference manual
+# ATT v4.1.0 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 4.0.0
+Version: 4.1.0
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -2900,7 +2900,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.0.0",
+  "attVersion": "4.1.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2939,7 +2939,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven plus Python 3 and Pandoc for Reference generation. It outputs `att-4.0.0-local.tar.gz` for the CLI, `att-4.0.0-server.tar.gz` for the WAR and deployment guides, and `att-4.0.0-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
+`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven plus Python 3 and Pandoc for Reference generation. It outputs `att-4.1.0-local.tar.gz` for the CLI, `att-4.1.0-server.tar.gz` for the WAR and deployment guides, and `att-4.1.0-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
 
 ### Runtime dependencies
 

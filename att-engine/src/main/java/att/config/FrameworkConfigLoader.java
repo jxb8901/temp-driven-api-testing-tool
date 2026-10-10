@@ -48,7 +48,7 @@ public final class FrameworkConfigLoader {
                 att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, rawMap,
                         schemaVersion, Version.CONFIG_SCHEMA);
                 throw new IllegalArgumentException("Unsupported config schemaVersion '" + schemaVersion
-                        + "'; ATT 4.0.0 supports " + Version.CONFIG_SCHEMA + " and " + Version.PREVIOUS_CONFIG_SCHEMA
+                        + "'; ATT 4.1.0 supports " + Version.CONFIG_SCHEMA + " and " + Version.PREVIOUS_CONFIG_SCHEMA
                         + ". Migrate command Tool result.format to stdoutFormat and update referenced descriptors. See docs/reference/appendices/migrations.md.");
             }
             boolean v29 = v210;
@@ -581,7 +581,7 @@ public final class FrameworkConfigLoader {
             boolean v27 = false;
             boolean v26 = false;
             if (!v29) throw new IllegalArgumentException("Unsupported tool group schemaVersion '" + version
-                    + "'; ATT 4.0.0 supports only " + Version.TOOL_GROUP_SCHEMA
+                    + "'; ATT 4.1.0 supports only " + Version.TOOL_GROUP_SCHEMA
                     + ". Migrate command Tool parsing to stdoutFormat and see docs/reference/appendices/migrations.md.");
             Path schema = schema(projectRoot, "att-tool-group-v2.9.schema.json");
             att.validation.SchemaMigrationGuidance.verify(schema, schema, group, version, Version.TOOL_GROUP_SCHEMA);

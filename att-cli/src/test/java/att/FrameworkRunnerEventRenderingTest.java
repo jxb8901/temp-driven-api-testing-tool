@@ -50,13 +50,13 @@ class FrameworkRunnerEventRenderingTest {
     }
 
     @Test void validationPassProgressRendersTheCliSummaryOnceFromTheStructuredEvent() throws Exception {
-        Map<String,Object> data = fields("event", "RUN_VALIDATION_SUMMARY", "productVersion", "4.0.0",
+        Map<String,Object> data = fields("event", "RUN_VALIDATION_SUMMARY", "productVersion", "4.1.0",
                 "suites", 2, "cases", 5, "templates", 3, "tools", 4);
         ExecutionEvent event = new ExecutionEvent(ExecutionEvent.Type.PROGRESS, "run-1", null, null, null,
                 "VALIDATION_PASS", null, "Validation passed", data);
         Method render = FrameworkRunner.class.getDeclaredMethod("renderExecutionEvent", ExecutionEvent.class, Path.class);
         render.setAccessible(true);
-        assertEquals("[1/4] V4.0.0 validation PASS: 2 suites, 5 cases, 3 templates, 4 tools",
+        assertEquals("[1/4] V4.1.0 validation PASS: 2 suites, 5 cases, 3 templates, 4 tools",
                 render.invoke(null, event, root));
     }
 

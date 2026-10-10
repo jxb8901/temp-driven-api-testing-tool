@@ -195,7 +195,7 @@ public final class FlowRegistry {
             att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                     flowVersion, Version.FLOW_SCHEMA);
             throw new IllegalArgumentException("Unsupported Flow schemaVersion '" + flowVersion
-                    + "'; ATT 4.0.0 supports only " + Version.FLOW_SCHEMA
+                    + "'; ATT 4.1.0 supports only " + Version.FLOW_SCHEMA
                     + ". Migrate nested Actions to the current typed-result contract and see docs/reference/appendices/migrations.md.");
         }
         Path schema = att.validation.SchemaFiles.resolve(projectRoot,

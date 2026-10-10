@@ -9,7 +9,7 @@ from documentation_contracts import (active_schemas, stale_claims, current_html,
                                      standalone_page_errors)
 from build_reference_manual import rebase_headings, assembly_heading_offset
 
-VERSION = "4.0.0"
+VERSION = "4.1.0"
 CATALOG = """schemaVersion: att-schema-catalog/v3.0
 schemas:
   att-load/v1.6: att-load-v1.6.schema.json
@@ -34,7 +34,7 @@ class DocumentationContractsTest(unittest.TestCase):
                 self.assertTrue(stale_claims(text, self.active, VERSION))
 
     def test_current_schemas_pass(self):
-        self.assertEqual([], stale_claims("ATT 4.0.0; att-load/v1.6; config v2.12; att-testdata/v1.0",
+        self.assertEqual([], stale_claims("ATT 4.1.0; att-load/v1.6; config v2.12; att-testdata/v1.0",
                                           self.active, VERSION))
 
     def test_testdata_mapping_example_is_bootstrap_safe_and_uses_selected_record_paths(self):
