@@ -268,6 +268,21 @@ test('links a Tool detail to its grouped configuration section', async () => {
   assert.equal(ui.node('configuration-search').value, 'sample.lookup');
 });
 
+test('links a resolved helper reference to its configuration section', async () => {
+  const flow = { resourceId: 'flow.bG9n', type: 'flow', logicalId: 'PAYMENT.flow.v1', name: 'Payment flow', sourceAvailable: false, state: 'ready', references: [{ type: 'dbhelper', logicalId: 'orders', resolution: 'resolved' }], referencedBy: [] };
+  const configuration = {
+    declared: { view: 'declared', state: 'ready', environments: [{ name: 'SIT', state: 'active', default: true }], globals: {}, sections: [], diagnostics: [] },
+    effective: { view: 'effective', state: 'ready', environment: 'SIT', globals: {}, sections: [{ id: 'dbhelpers', title: 'DB helpers', entryCount: 1, entries: [{ id: 'orders', fields: { readOnly: { state: 'visible', value: true } } }] }], diagnostics: [] }
+  };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [flow], configuration });
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'Flow resource');
+  await ui.node('resource-list').children[0].children[0].listeners.click();
+  assert.equal(ui.node('resource-configuration-link').hidden, false);
+  ui.node('resource-configuration-link').listeners.click();
+  await waitFor(() => ui.calls.some(call => call.path.includes('configuration/effective?environment=SIT&section=dbhelpers')), 'helper configuration section');
+  assert.equal(ui.node('configuration-search').value, 'orders');
+});
+
 test('ignores late configuration responses after navigating away', async () => {
   const declared = { view: 'declared', state: 'ready', environments: [{ name: 'SIT', state: 'active', default: true }], globals: {}, sections: [], diagnostics: [] };
   const ui = boot({ hash: '#/packages/payments', deferConfiguration: true });

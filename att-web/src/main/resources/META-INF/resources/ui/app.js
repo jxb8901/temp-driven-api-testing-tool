@@ -27,6 +27,7 @@
   let resourceCursor = null;
   let resourceItems = [];
   let activeResource = null;
+  let resourceConfigurationTarget = null;
   let cancelRequested = false;
   let versionPromise = null;
   let navigation = 0;
@@ -339,6 +340,13 @@
   function resourcePath(packageId, resource) {
     return `packages/${encodeURIComponent(packageId)}/resources/${encodeURIComponent(resource.type)}/${encodeURIComponent(resource.resourceId)}`;
   }
+  function configurationTarget(resource) {
+    const sections = { tool: 'tools', dbhelper: 'dbhelpers', mqhelper: 'mqhelpers', sshhelper: 'sshhelpers', httphelper: 'httphelpers' };
+    if (resource && resource.type === 'tool') return { section: 'tools', id: resource.logicalId || '', label: 'Tool' };
+    const reference = (resource && Array.isArray(resource.references) ? resource.references : [])
+      .find(item => item && item.resolution === 'resolved' && sections[item.type]);
+    return reference ? { section: sections[reference.type], id: reference.logicalId || '', label: reference.type } : null;
+  }
   function renderResourceList() {
     const list = byId('resource-list'); list.replaceChildren();
     resourceItems.forEach(item => {
@@ -410,6 +418,7 @@
       const data = await request(resourcePath(selectedPackage, item));
       if (selection !== resourceDetailSequence || generation !== navigation || !selectedPackage) return;
       activeResource = data.resource || item;
+      resourceConfigurationTarget = configurationTarget(activeResource);
       text(byId('resource-title'), `${activeResource.name || activeResource.logicalId} · ${activeResource.type}`);
       text(byId('resource-description'), activeResource.description || activeResource.state || '');
       const invalid = activeResource.state === 'invalid';
@@ -429,7 +438,8 @@
       const sourceAvailable = activeResource.sourceAvailable === true;
       text(byId('resource-source-status'), sourceAvailable ? 'Safe source is available.' : 'Source is not available for this resource.');
       byId('show-resource-source').hidden = !sourceAvailable;
-      byId('resource-configuration-link').hidden = activeResource.type !== 'tool';
+      byId('resource-configuration-link').hidden = resourceConfigurationTarget == null;
+      if (resourceConfigurationTarget) text(byId('resource-configuration-link'), `View ${resourceConfigurationTarget.label} configuration`);
       byId('run-resource-case').hidden = activeResource.type !== 'case' || activeResource.state === 'invalid';
       byId('resource-source-heading').hidden = true; byId('resource-source').hidden = true; text(byId('resource-source'), '');
       byId('resource-detail').hidden = false;
@@ -599,12 +609,13 @@
   byId('show-resource-source').addEventListener('click', showResourceSource);
   byId('resource-configuration-link').addEventListener('click', async () => {
     const item = activeResource;
-    if (!item || item.type !== 'tool') return;
-    byId('configuration-search').value = item.logicalId || '';
+    const target = resourceConfigurationTarget;
+    if (!item || !target) return;
+    byId('configuration-search').value = target.id;
     await showEffectiveConfiguration();
     if (configurationMode === 'effective') {
-      byId('configuration-section').value = 'tools';
-      await loadConfigurationSection('tools', 0, false);
+      byId('configuration-section').value = target.section;
+      await loadConfigurationSection(target.section, 0, false);
     }
   });
   byId('run-resource-case').addEventListener('click', runResourceCase);
