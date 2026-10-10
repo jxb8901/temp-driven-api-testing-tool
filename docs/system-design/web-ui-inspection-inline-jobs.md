@@ -89,7 +89,8 @@ Example Quick Load draft request:
   "model": "virtualUsers",
   "input": { "inputs": { "channel": "WEB" }, "vars": {} },
   "load": { "users": 10, "duration": "1m" },
-  "execution": { "thinkTime": "100ms" }
+  "execution": { "thinkTime": "100ms" },
+  "testdata": ["testdata/load-accounts.yaml"]
 }
 ```
 
@@ -99,7 +100,7 @@ Quick Load reads `load/load.visualuser.yaml` or `load/load.arrivalrate.yaml` as 
 
 Debug is available only from a selected Template, Flow, or Tool detail and contains one fixed target. All forms use typed `inputs`; Template and Flow also use `vars`, while Tool uses `arguments` and rejects `vars`. The form reads safe defaults from the package-authored `debug.yaml` when present. When absent, the Server creates valid `att-debug/v1.2` defaults in memory. Sidecars remain unchanged. Expression strings and native scalar, map, and list values are preserved; the browser does not evaluate them.
 
-Quick Load uses one fixed selected target and composes one Workload. It reads `load/load.visualuser.yaml` or `load/load.arrivalrate.yaml` as a read-only package policy when present, otherwise it uses the bundled policy fallback. It does not require a stored Debug input or Load scenario. P4 submits the inline scenario through the existing Load validator, scheduler, event stream, and evidence pipeline. Advanced Load selects VU or Arrival Rate before adding Workloads. VU supports single-target or weighted-mix Workloads. Arrival Rate supports multiple single-target Workloads and rejects mixes. Every Workload uses the same model and timing envelope. Debug-only fields and Debug-local Testdata are not copied into Load; users configure supported Load-level fields explicitly.
+Quick Load uses one fixed selected target and composes one Workload. It reads `load/load.visualuser.yaml` or `load/load.arrivalrate.yaml` as a read-only package policy when present, otherwise it uses the bundled policy fallback. It does not require a stored Debug input or Load scenario. P4 submits the inline scenario through the existing Load validator, scheduler, event stream, and evidence pipeline. Debug-local Testdata is omitted with a visible form warning; users can supply additional package-relative Load-level descriptor paths through the separate `testdata` field, which is validated with the model policy's existing descriptors. Advanced Load selects VU or Arrival Rate before adding Workloads. VU supports single-target or weighted-mix Workloads. Arrival Rate supports multiple single-target Workloads and rejects mixes. Every Workload uses the same model and timing envelope. Debug-only fields and Debug-local Testdata are not copied into Load.
 
 ## Worker and Engine data flow
 

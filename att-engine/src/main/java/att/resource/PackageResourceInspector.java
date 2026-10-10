@@ -55,6 +55,7 @@ import java.util.stream.Stream;
 public final class PackageResourceInspector {
     public static final int MAX_PAGE_SIZE = 100;
     public static final int DEFAULT_PAGE_SIZE = 50;
+    private static final int MAX_INLINE_BACK_REFERENCES = 100;
     private static final int MAX_RESOURCES = 20000;
     private static final int MAX_WORKBOOKS = 500;
     private static final long MAX_TOTAL_WORKBOOK_BYTES = 128L * 1024L * 1024L;
@@ -149,6 +150,11 @@ public final class PackageResourceInspector {
         result.put("resource", summary(resource, index));
         result.put("revisionDigest", index.revisionDigest);
         if (resource.yamlSource != null) {
+            if (!sourceAllowed(resource.yamlSource)) {
+                result.put("available", Boolean.FALSE);
+                result.put("reason", "visibility-policy");
+                return bounded(result);
+            }
             try {
                 Object authored = loadYaml(resource.yamlSource, maxSourceBytes);
                 Object safe = safeMap(yamlMapping(authored));
@@ -270,18 +276,37 @@ public final class PackageResourceInspector {
                                                       Map<String, Object> businessInput,
                                                       Map<String, Object> loadOverrides,
                                                       Map<String, Object> workloadExecution) throws Exception {
+        return validateQuickLoadInput(type, logicalId, model, businessInput, loadOverrides, workloadExecution,
+                Collections.<String>emptyList());
+    }
+
+    /** Validates business inputs, pacing, and explicit Load-level Testdata descriptor paths. */
+    public Map<String, Object> validateQuickLoadInput(String type, String logicalId, String model,
+                                                      Map<String, Object> businessInput,
+                                                      Map<String, Object> loadOverrides,
+                                                      Map<String, Object> workloadExecution,
+                                                      List<String> testdata) throws Exception {
         if (!debuggable(type) || logicalId == null || logicalId.trim().isEmpty() || logicalId.length() > 512)
             throw new ResourceNotFoundException();
         Index index = index();
         Resource resource = index.resolve(type, logicalId);
         if (resource == null || !"ready".equals(resource.state)) throw new ResourceNotFoundException();
-        return quickLoadProjection(index, resource, model, businessInput, loadOverrides, workloadExecution);
+        return quickLoadProjection(index, resource, model, businessInput, loadOverrides, workloadExecution, testdata);
     }
 
     private Map<String, Object> quickLoadProjection(Index index, Resource resource, String model,
                                                     Map<String, Object> businessInput,
                                                     Map<String, Object> loadOverrides,
                                                     Map<String, Object> workloadExecution) throws Exception {
+        return quickLoadProjection(index, resource, model, businessInput, loadOverrides, workloadExecution,
+                Collections.<String>emptyList());
+    }
+
+    private Map<String, Object> quickLoadProjection(Index index, Resource resource, String model,
+                                                    Map<String, Object> businessInput,
+                                                    Map<String, Object> loadOverrides,
+                                                    Map<String, Object> workloadExecution,
+                                                    List<String> testdata) throws Exception {
         FrameworkConfig config = frameworkConfig();
         DebugEngine engine = new DebugEngine(packageRoot, config);
         Map<String, Object> projectedInput = engine.projectLoadBusinessInput(resource.type, resource.logicalId, businessInput);
@@ -290,11 +315,18 @@ public final class PackageResourceInspector {
         att.load.LoadScenarioLoader loader = new att.load.LoadScenarioLoader(packageRoot);
         Map<String, Object> policy = loader.loadQuickLoadPolicy(model);
         att.load.LoadScenario scenario = new att.load.LoadScenarioBuilder(loader).buildQuickLoad(model,
-                resource.type, resource.logicalId, normalizedInput, policy, loadOverrides, workloadExecution);
+                resource.type, resource.logicalId, normalizedInput, policy, loadOverrides, workloadExecution, testdata);
         att.load.LoadTarget target = new att.load.LoadTargetResolver(packageRoot, config).resolve(scenario);
         new att.load.LoadTargetValidator(packageRoot, config).validate(scenario, target);
         Map<String, Object> scenarioMap = scenario.toMap();
-        Map<String, Object> safeScenarioProjection = engine.projectSafeValue(scenarioMap);
+        Map<String, Object> normalizedScenario = new LinkedHashMap<String, Object>(scenarioMap);
+        List<Object> scenarioTestdata = new ArrayList<Object>();
+        Object policyTestdata = policy.get("testdata");
+        if (policyTestdata instanceof List) scenarioTestdata.addAll((List<?>) policyTestdata);
+        else if (policyTestdata != null) scenarioTestdata.add(policyTestdata);
+        if (testdata != null) scenarioTestdata.addAll(testdata);
+        if (!scenarioTestdata.isEmpty()) normalizedScenario.put("testdata", scenarioTestdata);
+        Map<String, Object> safeScenarioProjection = projectQuickLoadScenario(scenarioMap, engine);
         @SuppressWarnings("unchecked") Map<String, Object> safeScenario =
                 (Map<String, Object>) safeScenarioProjection.get("value");
         boolean redacted = Boolean.TRUE.equals(projectedInput.get("redacted"))
@@ -308,12 +340,78 @@ public final class PackageResourceInspector {
         result.put("target", target(resource));
         result.put("model", model);
         result.put("input", projectedInput.get("input"));
+        result.put("debugLocalTestdataOmitted", projectedInput.get("debugLocalTestdataOmitted"));
+        result.put("loadTestdata", testdata == null ? Collections.emptyList() : new ArrayList<String>(testdata));
         result.put("redacted", Boolean.valueOf(redacted));
         result.put("preview", safeScenario);
         result.put("previewYaml", new Yaml(options).dump(safeScenario));
-        result.put("normalizedScenario", scenarioMap);
+        result.put("normalizedScenario", normalizedScenario);
         result.put("revisionDigest", index.revisionDigest);
         return bounded(result);
+    }
+
+    private Map<String, Object> projectQuickLoadScenario(Map<String, Object> scenario, DebugEngine engine) {
+        Map<String, Object> safe = new LinkedHashMap<String, Object>(scenario);
+        List<Object> workloads = new ArrayList<Object>();
+        boolean[] redacted = new boolean[] { false };
+        Object rawWorkloads = scenario.get("workloads");
+        if (rawWorkloads instanceof List) for (Object rawWorkload : (List<?>) rawWorkloads) {
+            if (!(rawWorkload instanceof Map)) { workloads.add(rawWorkload); continue; }
+            @SuppressWarnings("unchecked") Map<String, Object> workload = new LinkedHashMap<String, Object>((Map<String, Object>) rawWorkload);
+            Map<String, Object> business = new LinkedHashMap<String, Object>();
+            if (workload.containsKey("inputs")) business.put("inputs", workload.get("inputs"));
+            if (workload.containsKey("vars")) business.put("vars", workload.get("vars"));
+            Object rawTarget = workload.get("target");
+            Map<String, Object> target = null;
+            if (rawTarget instanceof Map) {
+                @SuppressWarnings("unchecked") Map<String, Object> copiedTarget = new LinkedHashMap<String, Object>((Map<String, Object>) rawTarget);
+                target = copiedTarget;
+                if (target.containsKey("arguments")) business.put("arguments", target.get("arguments"));
+            }
+            Map<String, Object> projected = engine.projectSafeValue(business);
+            @SuppressWarnings("unchecked") Map<String, Object> safeBusiness = (Map<String, Object>) projected.get("value");
+            redacted[0] |= Boolean.TRUE.equals(projected.get("redacted"));
+            if (safeBusiness.containsKey("inputs")) workload.put("inputs", safeBusiness.get("inputs"));
+            if (safeBusiness.containsKey("vars")) workload.put("vars", safeBusiness.get("vars"));
+            if (target != null) {
+                if (safeBusiness.containsKey("arguments")) target.put("arguments", safeBusiness.get("arguments"));
+                workload.put("target", target);
+            }
+            Object rawMix = workload.get("mix");
+            if (rawMix instanceof List) {
+                List<Object> mix = new ArrayList<Object>();
+                for (Object rawEntry : (List<?>) rawMix) {
+                    if (!(rawEntry instanceof Map)) { mix.add(rawEntry); continue; }
+                    @SuppressWarnings("unchecked") Map<String, Object> entry = new LinkedHashMap<String, Object>((Map<String, Object>) rawEntry);
+                    Map<String, Object> entryBusiness = new LinkedHashMap<String, Object>();
+                    if (entry.containsKey("inputs")) entryBusiness.put("inputs", entry.get("inputs"));
+                    if (entry.containsKey("vars")) entryBusiness.put("vars", entry.get("vars"));
+                    Object entryTarget = entry.get("target");
+                    Map<String, Object> copiedEntryTarget = null;
+                    if (entryTarget instanceof Map) {
+                        @SuppressWarnings("unchecked") Map<String, Object> copied = new LinkedHashMap<String, Object>((Map<String, Object>) entryTarget);
+                        copiedEntryTarget = copied;
+                        if (copied.containsKey("arguments")) entryBusiness.put("arguments", copied.get("arguments"));
+                    }
+                    Map<String, Object> entryProjection = engine.projectSafeValue(entryBusiness);
+                    @SuppressWarnings("unchecked") Map<String, Object> safeEntryBusiness = (Map<String, Object>) entryProjection.get("value");
+                    redacted[0] |= Boolean.TRUE.equals(entryProjection.get("redacted"));
+                    if (safeEntryBusiness.containsKey("inputs")) entry.put("inputs", safeEntryBusiness.get("inputs"));
+                    if (safeEntryBusiness.containsKey("vars")) entry.put("vars", safeEntryBusiness.get("vars"));
+                    if (copiedEntryTarget != null) {
+                        if (safeEntryBusiness.containsKey("arguments")) copiedEntryTarget.put("arguments", safeEntryBusiness.get("arguments"));
+                        entry.put("target", copiedEntryTarget);
+                    }
+                    mix.add(entry);
+                }
+                workload.put("mix", mix);
+            }
+            workloads.add(workload);
+        }
+        if (rawWorkloads instanceof List) safe.put("workloads", workloads);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("value", safe); result.put("redacted", Boolean.valueOf(redacted[0]));
+        return result;
     }
 
     /** Validates typed inline Debug values against a resolvable logical target. */
@@ -530,7 +628,7 @@ public final class PackageResourceInspector {
                     resource.provenance.put("groupId", testCase.groupId());
                     resource.provenance.put("sheet", testCase.sheetName());
                     resource.provenance.put("rowNumber", Integer.valueOf(testCase.rowNumber()));
-                    resource.definition.put("caseData", sanitize(testCase.caseData(), null));
+                    resource.definition.put("caseDataState", "hidden");
                     resource.definition.put("caseId", testCase.caseId());
                     resource.definition.put("tags", new ArrayList<String>(resource.tags));
                     List<Map<String, Object>> stages = new ArrayList<Map<String, Object>>();
@@ -539,7 +637,7 @@ public final class PackageResourceInspector {
                         Map<String, Object> value = new LinkedHashMap<String, Object>();
                         value.put("key", stage.key());
                         value.put("template", scrub(stage.templateName()));
-                        value.put("values", sanitize(stage.values(), null));
+                        value.put("valuesState", "hidden");
                         stages.add(value);
                         resource.relations.add(new Relation("template", stage.templateName()));
                     }
@@ -591,7 +689,9 @@ public final class PackageResourceInspector {
                     resource.diagnostics.add(diagnostic("ATT-RESOURCE-REFERENCE-UNRESOLVED",
                             "Reference to " + relation.type + " '" + scrub(relation.logicalId) + "' is unresolved"));
                 } else {
-                    target.backReferences.add(referenceOf(resource));
+                    target.backReferenceCount++;
+                    if (target.backReferences.size() < MAX_INLINE_BACK_REFERENCES)
+                        target.backReferences.add(referenceOf(resource));
                 }
             }
             resource.references = resolved;
@@ -604,13 +704,16 @@ public final class PackageResourceInspector {
         result.put("type", resource.type);
         result.put("logicalId", scrub(resource.logicalId));
         result.put("name", scrub(resource.name));
-        result.put("description", scrub(resource.description));
+        result.put("description", resource.description == null || resource.description.isEmpty() ? "" : "[HIDDEN]");
         result.put("tags", new ArrayList<String>(resource.tags));
         result.put("state", resource.state);
-        result.put("sourceAvailable", Boolean.valueOf(resource.yamlSource != null || resource.textSource != null));
+        result.put("sourceAvailable", Boolean.valueOf(resource.yamlSource != null && sourceAllowed(resource.yamlSource)
+                || resource.textSource != null));
         result.put("provenance", sanitize(resource.provenance, null));
         result.put("references", resource.references);
         result.put("referencedBy", resource.backReferences);
+        result.put("referencedByCount", Integer.valueOf(resource.backReferenceCount));
+        result.put("referencedByHasMore", Boolean.valueOf(resource.backReferenceCount > resource.backReferences.size()));
         result.put("diagnostics", resource.diagnostics);
         return result;
     }
@@ -677,18 +780,73 @@ public final class PackageResourceInspector {
     }
 
     private Map<String, Object> safeMap(Map<?, ?> source) {
-        Map<String,Object> projected=new LinkedHashMap<String,Object>();
-        Set<String> allowed=new HashSet<String>(java.util.Arrays.asList("schemaVersion","id","name","description","actions","parameters","params","inputs","outputs","variables","environment","timeoutMs","timeoutSec","retry","retryOn","assert","assertions","expected","expect","flow","tool","type","use","call","when","condition","if","foreach","report","config","caseId","groupId","workbookId","tags","template","stage","stages","executionKind","toolId","logicalId","arguments","required","enum","multiValue","value","default","format","properties","items","schema","additionalProperties","title","version","groupId"));
-        for(Map.Entry<?,?> entry:source.entrySet()) {
-            String key=String.valueOf(entry.getKey());
-            if(allowed.contains(key)||sensitiveKey(key))projected.put(key,entry.getValue());
-        }
-        Object value = sanitize(projected, null);
+        Set<String> allowed = new HashSet<String>(java.util.Arrays.asList(
+                "schemaVersion", "id", "name", "description", "actions", "parameters", "params", "inputs",
+                "outputs", "variables", "environment", "timeoutMs", "timeoutSec", "retry", "retryOn", "assert",
+                "assertions", "expected", "expect", "flow", "tool", "type", "use", "call", "when", "condition",
+                "if", "foreach", "report", "config", "caseId", "groupId", "workbookId", "tags", "template",
+                "stage", "stages", "executionKind", "toolId", "logicalId", "arguments", "required", "enum",
+                "multiValue", "value", "default", "format", "properties", "items", "schema", "additionalProperties",
+                "title", "version"));
+        Object value = safeProjection(source, null, allowed);
         if (value instanceof Map) {
             @SuppressWarnings("unchecked") Map<String, Object> result = (Map<String, Object>) value;
             return result;
         }
         return new LinkedHashMap<String, Object>();
+    }
+
+    /** Recursively keep descriptor structure while excluding arbitrary authored scalar payloads. */
+    private Object safeProjection(Object value, String key, Set<String> allowed) {
+        if (key != null && sensitiveKey(key)) return "[REDACTED]";
+        if (key != null && freeFormKey(key)) return "[HIDDEN]";
+        if (value instanceof Map) {
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                String name = String.valueOf(entry.getKey());
+                Object child = entry.getValue();
+                if (allowed.contains(name) || sensitiveKey(name) || freeFormKey(name)) {
+                    result.put(name, safeProjection(child, name, allowed));
+                } else if (child instanceof Map || child instanceof Iterable) {
+                    Object projected = safeProjection(child, name, allowed);
+                    if (projected instanceof Map && !((Map<?, ?>) projected).isEmpty()) result.put(name, projected);
+                    else if (projected instanceof Iterable && ((Iterable<?>) projected).iterator().hasNext()) result.put(name, projected);
+                }
+            }
+            return result;
+        }
+        if (value instanceof Iterable) {
+            List<Object> result = new ArrayList<Object>();
+            for (Object item : (Iterable<?>) value) {
+                Object projected = safeProjection(item, null, allowed);
+                if (projected instanceof Map && ((Map<?, ?>) projected).isEmpty()) continue;
+                if (projected != null) result.add(projected);
+            }
+            return result;
+        }
+        if (value instanceof String) return key != null && allowed.contains(key) ? scrub((String) value) : null;
+        return key != null && allowed.contains(key) ? value : null;
+    }
+
+    private static boolean freeFormKey(String key) {
+        String normalized = key.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        return normalized.equals("description") || normalized.equals("message") || normalized.equals("note")
+                || normalized.equals("text") || normalized.equals("body") || normalized.equals("payload")
+                || normalized.equals("command") || normalized.equals("script") || normalized.equals("value")
+                || normalized.equals("default") || normalized.equals("expected") || normalized.equals("expect")
+                || normalized.equals("values") || normalized.equals("casedata") || normalized.equals("outputs")
+                || normalized.equals("call") || normalized.equals("expression") || normalized.equals("assert")
+                || normalized.equals("actual") || normalized.equals("when") || normalized.equals("condition")
+                || normalized.equals("if") || normalized.equals("runwhen");
+    }
+
+    private boolean sourceAllowed(Path source) {
+        try {
+            String logical = resources.fromInternalPath(source, PackageResourceResolver.Kind.FILE).logicalName();
+            return safeTextSources.contains(logical);
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private Object sanitize(Object value, String key) {
@@ -930,6 +1088,7 @@ public final class PackageResourceInspector {
         final List<Relation> relations = new ArrayList<Relation>();
         List<Map<String, Object>> references = new ArrayList<Map<String, Object>>();
         final List<Map<String, Object>> backReferences = new ArrayList<Map<String, Object>>();
+        int backReferenceCount;
         final List<Map<String, Object>> diagnostics = new ArrayList<Map<String, Object>>();
 
         Resource(String type, String resourceId, String logicalId) {

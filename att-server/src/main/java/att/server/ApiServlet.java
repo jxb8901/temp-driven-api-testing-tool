@@ -216,7 +216,10 @@ public final class ApiServlet extends HttpServlet {
             else throw new ServerRuntime.NotFoundException();
             String environment="effective".equals(action)?req.getParameter("environment"):"compare".equals(action)?req.getParameter("left"):null;
             String otherEnvironment="compare".equals(action)?req.getParameter("right"):null;
-            Map<String,Object> result=runtime.inspectConfiguration(packageId,action,environment,otherEnvironment,principal);
+            String section="effective".equals(action)?req.getParameter("section"):null;
+            int offset=parseOffset(req.getParameter("offset"));
+            int limit="declared".equals(action)?0:parseConfigurationLimit(req.getParameter("limit"));
+            Map<String,Object> result=runtime.inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,principal);
             ConfigurationInspection.Response response=ServerRuntime.JSON.convertValue(result,ConfigurationInspection.Response.class);
             response.requestId=requestId;json(res,200,response);
         } catch(ServerRuntime.NotFoundException e){throw e;}
@@ -227,6 +230,8 @@ public final class ApiServlet extends HttpServlet {
           catch(Exception e){throw new IOException(e);}
     }
     private static int parseLimit(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be an integer between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new IllegalArgumentException("limit must be between 1 and 100");return value;}
+    private static int parseOffset(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,6}"))throw new IllegalArgumentException("offset must be a non-negative integer");return Integer.parseInt(raw);}
+    private static int parseConfigurationLimit(String raw){if(raw==null||raw.isEmpty())return 50;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new IllegalArgumentException("limit must be between 1 and 100");return value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
     private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/configuration(?:/.*)?");}
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}

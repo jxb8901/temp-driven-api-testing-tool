@@ -35,6 +35,7 @@
             <h3 id="resource-title"></h3><p id="resource-description"></p>
             <p id="resource-state" role="status"></p><p id="resource-source-status" role="status"></p>
             <button id="show-resource-source" type="button" hidden>View safe source</button>
+            <button id="resource-configuration-link" type="button" hidden>View Tool configuration</button>
             <button id="run-resource-case" type="button" hidden>Run this Case</button>
             <button id="debug-resource" type="button" hidden>Debug this target</button>
             <button id="quick-load-resource" type="button" hidden>Quick Load this target</button>
@@ -72,6 +73,7 @@
                 <label>Duration <input id="quick-load-duration" placeholder="e.g. 10s"></label>
                 <label>Ramp down <input id="quick-load-ramp-down" placeholder="e.g. 0s"></label>
                 <label>Business inputs and variables (JSON object)<textarea id="quick-load-input" rows="8" spellcheck="false"></textarea></label>
+                <label>Additional Load-level Testdata descriptor paths (JSON array)<textarea id="quick-load-testdata" rows="3" spellcheck="false">[]</textarea></label>
                 <button id="reset-quick-load-form" type="button">Reset defaults</button>
                 <button id="preview-quick-load-form" type="button">Validate and preview</button>
                 <button id="submit-quick-load-form" type="button">Review and start Load</button>
@@ -89,13 +91,17 @@
           <button id="show-declared-configuration" type="button">View declared configuration</button>
           <label for="configuration-environment">Effective environment</label><select id="configuration-environment"></select>
           <button id="show-effective-configuration" type="button">View effective configuration</button>
+          <button id="use-configuration-environment" type="button" disabled>Use this environment</button>
+          <label for="configuration-section">Section</label><select id="configuration-section" disabled></select>
+          <label for="configuration-search">Filter fields</label><input id="configuration-search" type="search" maxlength="200">
           <label for="configuration-left">Compare</label><select id="configuration-left"></select>
           <label for="configuration-right">with</label><select id="configuration-right"></select>
           <button id="compare-configuration" type="button">Compare profiles</button>
+          <button id="load-more-configuration" type="button" hidden>Load more configuration</button>
           <button id="refresh-configuration" type="button">Refresh configuration</button>
         </div>
         <p id="configuration-status" role="status" aria-live="polite"></p>
-        <pre id="configuration-view"></pre>
+        <div id="configuration-view" aria-live="polite"></div>
       </section>
       <form id="submit-form">
         <label>Command <select name="command"><option>run</option><option>load</option><option>validate</option></select></label>
