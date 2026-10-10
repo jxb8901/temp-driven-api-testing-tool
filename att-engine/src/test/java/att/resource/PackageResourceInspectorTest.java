@@ -289,7 +289,6 @@ class PackageResourceInspectorTest {
                     ()->inspector.inspect("list","template",null,null,1,1,revision));
             assertTrue(inspector.indexBuildCount()>=2,
                     "the cached package index must have been rebuilt before rejecting the stale cursor");
-                    "the cached package index must be rebuilt before rejecting the stale cursor");
         } finally { inspector.close(); }
     }
 
