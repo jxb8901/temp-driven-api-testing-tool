@@ -168,7 +168,10 @@ class WindowsLauncherTest {
         String version = projectVersion();
         createApplicationJar(lib.resolve("att-" + version + ".jar"));
         for (String directory : new String[]{"config", "templates", "testcase", "load", "tools", "schemas"}) {
-            copyTree(Paths.get(directory), root.resolve(directory));
+            Path source = Paths.get(directory);
+            Path destination = root.resolve(directory);
+            if (Files.isDirectory(source)) copyTree(source, destination);
+            else Files.createDirectories(destination);
         }
 
         Path mavenRepository = Paths.get(System.getProperty("user.home"), ".m2", "repository");
