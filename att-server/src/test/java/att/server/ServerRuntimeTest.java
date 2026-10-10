@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -57,7 +58,9 @@ class ServerRuntimeTest {
                 Path target=libs.resolve(candidate.getFileName());try{Files.createSymbolicLink(target,candidate);}catch(Exception unsupported){Files.copy(candidate,target);}
             }
         }
+        AtomicInteger inspectorStarts=new AtomicInteger();
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{
+            inspectorStarts.incrementAndGet();
             builder.environment().put("ORDERS_DB_USERNAME","inspection-test");builder.environment().put("ORDERS_DB_PASSWORD","inspection-test");
             builder.environment().put("PAYMENT_MQ_USERNAME","inspection-test");builder.environment().put("PAYMENT_MQ_PASSWORD","inspection-test");
             return builder.start();
@@ -69,8 +72,12 @@ class ServerRuntimeTest {
             Map<String,Object> second=runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor")),"alice");
             @SuppressWarnings("unchecked") List<Map<String,Object>> secondItems=(List<Map<String,Object>>)second.get("items");
             assertEquals(1,secondItems.size());assertNotEquals(firstItems.get(0).get("resourceId"),secondItems.get(0).get("resourceId"));
+            String resourceId=String.valueOf(firstItems.get(0).get("resourceId"));
+            runtime.inspectResource("p","detail","template",resourceId,null,1,null,"alice");
+            runtime.inspectResource("p","source","template",resourceId,null,1,null,"alice");
             assertThrows(IllegalArgumentException.class,()->runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor"))+"x","alice"));
             assertThrows(IllegalArgumentException.class,()->runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor")),"bob"));
+            assertEquals(1,inspectorStarts.get(),"pagination, detail, and source requests should reuse the bounded inspection Worker process");
         } finally {runtime.close();}
     }
 
@@ -226,6 +233,9 @@ class ServerRuntimeTest {
             while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status"))&&System.nanoTime()<deadline){Thread.sleep(20);record=runtime.jobRecord(jobId);}
             assertEquals("PASS",record.get("status"),String.valueOf(runtime.resultRecord(jobId)));
             assertEquals("load",record.get("command"));assertArrayEquals(originalSidecar,Files.readAllBytes(debugSidecar));
+            long releaseDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(((Number)runtime.counts().get("activeWorkers")).intValue()>0&&System.nanoTime()<releaseDeadline)Thread.sleep(10);
+            assertEquals(0,((Number)runtime.counts().get("activeWorkers")).intValue(),"Completed Load jobs must release admission before the stale-draft check");
             assertTrue(Files.exists(loadPolicy));
 
             Map<String,Object> toolScenario=Map.of("schemaVersion","att-load/v1.6","load",Map.of("users",1,"duration","1s"),
