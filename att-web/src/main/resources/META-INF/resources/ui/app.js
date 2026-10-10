@@ -134,7 +134,7 @@
         advanced.disabled = !inlineLoadEnabled;
         if (inlineLoadEnabled) advanced.addEventListener('click', () => { location.hash = `#/advanced-load/${encodeURIComponent(item.packageId)}`; });
         else advanced.title = 'The Server administrator has disabled browser-created Load drafts.';
-        li.append(document.createTextNode(' '), advanced); packageList.append(li);
+        li.append(el('span', ' '), advanced); packageList.append(li);
       });
       const tbody = byId('jobs'); tbody.replaceChildren();
       listItems(jobs).forEach(job => {
