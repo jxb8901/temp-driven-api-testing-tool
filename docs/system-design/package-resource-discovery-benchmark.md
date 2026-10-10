@@ -4,17 +4,19 @@ These opt-in local captures provide reproducible performance context for the Iss
 
 ## Package resource discovery
 
-[`PackageResourceInspectionPerformanceBenchmark`](../../att-server/src/test/java/att/server/PackageResourceInspectionPerformanceBenchmark.java) measures `ServerRuntime.inspectResource` through a one-shot Worker. It excludes HTTP and Tomcat overhead. The fixture is the repository test package; it contains 60 resources (26 Cases, 10 Templates, 3 Flows, and 21 Tools). The inspection path does not connect to external databases or message brokers.
+[`PackageResourceInspectionPerformanceBenchmark`](../../att-server/src/test/java/att/server/PackageResourceInspectionPerformanceBenchmark.java) measures `ServerRuntime.inspectResource` through the persistent bounded inspection Worker pool. It excludes HTTP and Tomcat overhead and does not connect to external databases or message brokers. The current generated fixture contains five Excel workbooks with 300 Cases each, 200 Templates, and one Tool.
 
-The [4.1.0 capture](baselines/issue-176-resource-discovery-4.1.0.json) used one warmup and three measured calls per scenario, with a page size of 100. It ran on an 8-core Apple Silicon Mac, macOS 26.1, and OpenJDK 26.0.1. With only three measured calls, p95 is the highest observed sample and is not a stable distribution estimate.
+The [4.1.0 large-package capture](baselines/issue-176-resource-discovery-large-4.1.0.json) used one warmup and five measured calls at page size 50. It ran on an 8-core Apple Silicon Mac, macOS 26.1, and OpenJDK 26.0.1. Cold index construction took 1,142.5 ms; the report includes warm first-page, page-N, detail, and Tool-source samples. With five measured calls, p95 is the highest observed sample and is not a stable distribution estimate. A [60-resource capture](baselines/issue-176-resource-discovery-4.1.0.json) from before the persistent cache remains as a historical reference only; it is not a representative large-package measurement.
 
-| Filter | Resources returned | p50 (ms) | p95 (ms) |
+| Scenario | p50 (ms) | p95 (ms) |
 | --- | ---: | ---: | ---: |
-| All | 60 | 848.4 | 854.5 |
-| Case | 26 | 836.4 | 862.3 |
-| Template | 10 | 863.3 | 995.3 |
-| Flow | 3 | 824.2 | 896.4 |
-| Tool | 21 | 818.0 | 873.8 |
+| Case first page | 14.9 | 17.3 |
+| Case page N | 9.3 | 10.7 |
+| Case detail | 0.9 | 1.1 |
+| Template first page | 7.4 | 10.2 |
+| Template page N | 8.6 | 10.8 |
+| Template detail | 1.3 | 1.5 |
+| Tool source | 2.0 | 2.0 |
 
 Run from the repository root. Maven compiles the required modules and runs this benchmark class:
 
@@ -23,12 +25,14 @@ mvn -B -ntp -pl att-server -am \
   -Dtest=PackageResourceInspectionPerformanceBenchmark \
   -Dsurefire.failIfNoSpecifiedTests=false \
   -Datt.server.inspection.benchmark.warmups=1 \
-  -Datt.server.inspection.benchmark.runs=3 \
-  -Datt.server.inspection.benchmark.pageSize=100 \
+  -Datt.server.inspection.benchmark.runs=5 \
+  -Datt.server.inspection.benchmark.pageSize=50 \
   -Datt.server.inspection.benchmark.revision="$(git rev-parse HEAD)" \
-  -Datt.server.inspection.benchmark.output=target/issue-176-resource-discovery.json \
+  -Datt.server.inspection.benchmark.output=target/issue-176-resource-discovery-large.json \
   test
 ```
+
+The older 60-resource baseline can no longer be reproduced by this benchmark version because the benchmark now generates the larger package locally.
 
 ## Server Worker and SSE first-event timing
 

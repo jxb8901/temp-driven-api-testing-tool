@@ -4,17 +4,19 @@
 
 ## 套件資源探索
 
-[`PackageResourceInspectionPerformanceBenchmark`](../../att-server/src/test/java/att/server/PackageResourceInspectionPerformanceBenchmark.java) 透過一次性 Worker 量度 `ServerRuntime.inspectResource`，不包括 HTTP 和 Tomcat 開銷。測試資料是 Repository 的測試套件，共有 60 項資源（26 個 Case、10 個 Template、3 個 Flow 及 21 個 Tool）。資源檢視路徑不會連接外部資料庫或訊息代理。
+[`PackageResourceInspectionPerformanceBenchmark`](../../att-server/src/test/java/att/server/PackageResourceInspectionPerformanceBenchmark.java) 透過持續執行且有界的 inspection Worker pool 量度 `ServerRuntime.inspectResource`，不包括 HTTP 和 Tomcat 開銷，也不會連接外部資料庫或訊息代理。現時產生的測試套件包括五個 Excel 活頁簿（每個 300 個 Case）、200 個 Template 及一個 Tool。
 
-[4.1.0 擷取結果](baselines/issue-176-resource-discovery-4.1.0.json)每個情境先預熱一次，再量度三次；分頁大小為 100。測試機為 8 核心 Apple Silicon、macOS 26.1 及 OpenJDK 26.0.1。由於每個情境只量度三次，p95 是最高的觀察樣本，不是穩定的分佈估計。
+[4.1.0 大型套件擷取結果](baselines/issue-176-resource-discovery-large-4.1.0.json)先預熱一次，再以分頁大小 50 量度五次。測試機為 8 核心 Apple Silicon、macOS 26.1 及 OpenJDK 26.0.1。冷啟動索引需時 1,142.5 毫秒；報告包括暖啟動的第一頁、第 N 頁、詳情及 Tool 原始碼請求。量度五次時，p95 是最高的觀察樣本，不是穩定的分佈估計。另有一份快取實作之前量度的[60 項資源擷取結果](baselines/issue-176-resource-discovery-4.1.0.json)，只作歷史參考，並非具代表性的大型套件數據。
 
-| 篩選條件 | 資源數量 | p50（毫秒） | p95（毫秒） |
-| --- | ---: | ---: | ---: |
-| 全部 | 60 | 848.4 | 854.5 |
-| Case | 26 | 836.4 | 862.3 |
-| Template | 10 | 863.3 | 995.3 |
-| Flow | 3 | 824.2 | 896.4 |
-| Tool | 21 | 818.0 | 873.8 |
+| 情境 | p50（毫秒） | p95（毫秒） |
+| --- | ---: | ---: |
+| Case 第一頁 | 14.9 | 17.3 |
+| Case 第 N 頁 | 9.3 | 10.7 |
+| Case 詳情 | 0.9 | 1.1 |
+| Template 第一頁 | 7.4 | 10.2 |
+| Template 第 N 頁 | 8.6 | 10.8 |
+| Template 詳情 | 1.3 | 1.5 |
+| Tool 原始碼 | 2.0 | 2.0 |
 
 請在 Repository 根目錄執行以下指令。Maven 會編譯所需模組並只執行此基準測試類別：
 
@@ -23,12 +25,14 @@ mvn -B -ntp -pl att-server -am \
   -Dtest=PackageResourceInspectionPerformanceBenchmark \
   -Dsurefire.failIfNoSpecifiedTests=false \
   -Datt.server.inspection.benchmark.warmups=1 \
-  -Datt.server.inspection.benchmark.runs=3 \
-  -Datt.server.inspection.benchmark.pageSize=100 \
+  -Datt.server.inspection.benchmark.runs=5 \
+  -Datt.server.inspection.benchmark.pageSize=50 \
   -Datt.server.inspection.benchmark.revision="$(git rev-parse HEAD)" \
-  -Datt.server.inspection.benchmark.output=target/issue-176-resource-discovery.json \
+  -Datt.server.inspection.benchmark.output=target/issue-176-resource-discovery-large.json \
   test
 ```
+
+由於現時版本會在本機產生較大的測試套件，因此不能用此版基準測試重現較早的 60 項資源結果。
 
 ## Server Worker 與 SSE 首個事件時間
 
