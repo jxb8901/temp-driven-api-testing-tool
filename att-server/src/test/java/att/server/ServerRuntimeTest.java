@@ -109,6 +109,56 @@ class ServerRuntimeTest {
             assertFalse(publicData.contains("inspection-test-password"));assertFalse(publicData.contains(packageRoot.toString()));
         } finally {runtime.close();}
     }
+
+    @Test void validatesDebugDraftsWithoutDisclosingDefaultsAndRejectsStalePrincipalBoundSubmissions() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("debug-draft-packages"));Path packageRoot=Files.createDirectory(allowed.resolve("p"));
+        Path templates=Files.createDirectories(packageRoot.resolve("templates/FORM"));Files.createDirectories(packageRoot.resolve("testcase"));
+        Files.createDirectories(packageRoot.resolve("config"));copySchemas(packageRoot);
+        Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: debug form test\nactions:\n"
+                +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");
+        Path debugSidecar=templates.resolve("debug.yaml");Files.writeString(debugSidecar,"schemaVersion: att-debug/v1.2\ninputs:\n"
+                +"  value: safe\n  payload:\n    account: 'customer account 123456789'\n    message: 'temporary credential violet-123'\n");
+        byte[] originalSidecar=Files.readAllBytes(debugSidecar);
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path configFile=temp.resolve("debug-draft-server.yaml");Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("debug-draft-data"))+"\n  javaExecutable: "+yaml(javaBin)
+                +"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
+        Path libs=Files.createDirectory(temp.resolve("debug-draft-WEB-INF-lib"));
+        addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
+            Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")
+                    &&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
+                Path target=libs.resolve(candidate.getFileName());try{Files.createSymbolicLink(target,candidate);}catch(Exception unsupported){Files.copy(candidate,target);}
+            }
+        }
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(configFile),libs.toString());
+        try {
+            Map<String,Object> page=runtime.inspectResource("p","list","template",null,null,10,null,"alice");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
+            String resourceId=String.valueOf(items.get(0).get("resourceId"));
+            Map<String,Object> form=runtime.inspectDebugForm("p","template",resourceId,null,"alice");
+            assertFalse(form.toString().contains("123456789"));assertFalse(form.toString().contains("violet-123"));
+            assertFalse(form.containsKey("normalizedInput"));
+            com.fasterxml.jackson.databind.node.ObjectNode body=ServerRuntime.JSON.createObjectNode();body.put("packageId","p");
+            body.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id","FORM")));
+            body.set("input",ServerRuntime.JSON.valueToTree(form.get("input")));
+            Map<String,Object> draft=runtime.createDebugDraft(body,"alice");String draftId=String.valueOf(draft.get("draftId"));
+            assertFalse(draft.toString().contains("123456789"));assertFalse(draft.toString().contains("violet-123"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getDebugDraft(draftId,"bob"));
+            assertArrayEquals(originalSidecar,Files.readAllBytes(debugSidecar),"Draft creation must not modify the package sidecar");
+
+            Files.writeString(debugSidecar,"schemaVersion: att-debug/v1.2\ninputs:\n  value: changed\n");
+            Map<String,Object> accepted=runtime.submitDebugDraft(ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"draftId\":\""+draftId+"\"}"),"alice");
+            String jobId=String.valueOf(accepted.get("jobId"));long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(25);
+            Map<String,Object> record=runtime.jobRecord(jobId);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status"))&&System.nanoTime()<deadline){Thread.sleep(20);record=runtime.jobRecord(jobId);}
+            assertEquals("INVALID",record.get("status"),String.valueOf(runtime.resultRecord(jobId)));
+            String events=runtime.events(jobId).after(0).toString();assertTrue(events.contains("ATT-SERVER-DRAFT-STALE"),events);
+            assertTrue(Files.exists(debugSidecar));
+        } finally {runtime.close();}
+    }
     @Test void cancellationCannotSlipBetweenWorkerLaunchAndProcessPublication() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),"Uses a POSIX test launcher");
         Path allowed=Files.createDirectory(temp.resolve("cancel-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));
@@ -306,6 +356,16 @@ class ServerRuntimeTest {
     private static void addModuleJar(Path lib,String name,Path classes)throws Exception {
         Path target=lib.resolve(name+".jar");try(OutputStream file=Files.newOutputStream(target);JarOutputStream jar=new JarOutputStream(file);var paths=Files.walk(classes)) {
             paths.filter(Files::isRegularFile).forEach(path->{try{jar.putNextEntry(new JarEntry(classes.relativize(path).toString().replace('\\','/')));Files.copy(path,jar);jar.closeEntry();}catch(Exception e){throw new IllegalStateException(e);}});
+        }
+    }
+    private static void copySchemas(Path packageRoot)throws Exception {
+        Path source=Path.of("schemas").toRealPath(),destination=packageRoot.resolve("schemas");
+        try(var paths=Files.walk(source)) {
+            for(Path path:(Iterable<Path>)paths::iterator) {
+                Path target=destination.resolve(source.relativize(path));
+                if(Files.isDirectory(path))Files.createDirectories(target);
+                else {Files.createDirectories(target.getParent());Files.copy(path,target);}
+            }
         }
     }
     private static String yaml(Path path){return "'"+path.toAbsolutePath().toString().replace("'","''")+"'";}

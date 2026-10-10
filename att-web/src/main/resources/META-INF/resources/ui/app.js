@@ -486,7 +486,7 @@
       byId('debug-arguments-label').hidden = !tool;
       resetDebugForm();
       byId('debug-form-editor').hidden = false;
-      text(byId('debug-form-status'), data.redacted ? 'Defaults loaded. Sensitive fields are hidden in the form and preview.' : 'Defaults loaded from the package sidecar, or generated as empty defaults.');
+      text(byId('debug-form-status'), data.redacted ? 'Defaults loaded. Package-authored values are hidden. Keep each $attDebugKeepDefault marker to reuse that value, or replace it with an override.' : 'Defaults loaded from the package sidecar, or generated as empty defaults.');
     } catch (error) {
       if (sequence === debugFormSequence && generation === navigation && activeResource === item) {
         text(byId('debug-form-status'), `Debug defaults are unavailable. ${debugValidationMessage(error)}`); message(error.message);
@@ -534,11 +534,12 @@
     const environment = String(byId('submit-form').elements.environment.value || '').trim();
     if (environment) body.environment = environment;
     const fingerprint = JSON.stringify(body);
-    if (debugDraft && debugDraftFingerprint === fingerprint) {
+    if (debugDraft && debugDraftFingerprint === fingerprint && debugDraftUsable(debugDraft)) {
       text(byId('debug-preview'), debugDraft.previewYaml || JSON.stringify(debugDraft.preview || {}, null, 2));
       text(byId('debug-form-status'), debugDraft.redacted ? 'Validation passed. The preview hides sensitive fields.' : 'Validation passed.');
       return debugDraft;
     }
+    if (debugDraft) { debugDraft = null; debugDraftFingerprint = ''; }
     if (debugPreviewPending && debugPreviewPendingFingerprint === fingerprint) return debugPreviewPending;
     const pending = (async () => {
       text(byId('debug-form-status'), 'Validating the effective Debug input…');
@@ -561,6 +562,10 @@
       }
     }
   }
+  function debugDraftUsable(draft) {
+    const expires = Date.parse(draft && draft.expiresAt || '');
+    return Number.isFinite(expires) && expires > Date.now() + 15000;
+  }
   async function runDebugDraft() {
     const packageId = selectedPackage, generation = navigation;
     if (!packageId || submitting.has(packageId)) return;
@@ -572,7 +577,12 @@
       debugDraft = null; debugDraftFingerprint = '';
       if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
     } catch (error) {
-      if (generation === navigation && selectedPackage === packageId) { text(byId('debug-form-status'), `Debug was not submitted. ${debugValidationMessage(error)}`); message(error.message); }
+      if (generation === navigation && selectedPackage === packageId) {
+        const stale = error && (error.status === 404 || error.status === 409 || error.code === 'ATT-SERVER-DRAFT-STALE');
+        if (stale) { debugDraft = null; debugDraftFingerprint = ''; text(byId('debug-form-status'), 'The Debug draft expired or the Server restarted. Validate the current input and start Debug again.'); }
+        else text(byId('debug-form-status'), `Debug was not submitted. ${debugValidationMessage(error)}`);
+        message(error.message);
+      }
     } finally {
       submitting.delete(packageId); if (selectedPackage === packageId) byId('submit-debug-form').disabled = false;
     }

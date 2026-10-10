@@ -149,13 +149,6 @@ final class ServerRuntime implements AutoCloseable {
     private void execute(Job job,Path jobPath,AdmissionLease lease) {
         job.workerStartedNanos=System.nanoTime();
         try {
-            if(job.request.expectedRevisionDigest!=null) {
-                try { verifyDraftRevision(job.packageId,job.request); }
-                catch(StaleDraftException changed) {
-                    finishQuietly(job,"INVALID",2,"ATT-SERVER-DRAFT-STALE","Package content changed after preview; rebuild the Debug draft");
-                    return;
-                }
-            }
             Process process;
             synchronized(job) {
                 // Publish the process while holding the same lock used by cancel(). A
@@ -241,19 +234,19 @@ final class ServerRuntime implements AutoCloseable {
         return result;
     }
     Map<String,Object> inspectDebugForm(String packageId,String type,String resourceId,String environment,String principal) throws Exception {
-        Map<String,Object> result=inspectDebugFormInternal(packageId,type,resourceId,environment,principal,null);
+        Map<String,Object> result=inspectDebugFormInternal(packageId,type,resourceId,environment,principal);
         result.remove("revisionDigest");
         return result;
     }
     private Map<String,Object> inspectDebugFormInternal(String packageId,String type,String resourceId,String environment,
-                                                        String principal,String expectedRevision) throws Exception {
+                                                        String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(resourceId==null||resourceId.isBlank()||resourceId.length()>512)throw new IllegalArgumentException("resourceId is invalid");
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,environment);
-        request.inspectionAction="debug-form";request.inspectionType=type;request.inspectionResourceId=resourceId;request.expectedRevisionDigest=expectedRevision;
+        request.inspectionAction="debug-form";request.inspectionType=type;request.inspectionResourceId=resourceId;
         return executeInspection(root,request);
     }
     Map<String,Object> createDebugDraft(JsonNode input,String principal) throws Exception {
@@ -317,7 +310,6 @@ final class ServerRuntime implements AutoCloseable {
         }
         boolean submitted=false;
         try {
-            verifyDraftRevision(draft);
             requireLiveDraft(draft);
             com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
             internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
@@ -337,19 +329,8 @@ final class ServerRuntime implements AutoCloseable {
             if(!submitted)synchronized(draft){draft.submitting=false;}
         }
     }
-    private void verifyDraftRevision(DebugDraft draft) throws Exception {
-        try { inspectDebugFormInternal(draft.packageId,draft.targetType,draft.resourceId,draft.environment,draft.principal,draft.revisionDigest); }
-        catch(StaleCursorException|NotFoundException changed){throw new StaleDraftException();}
-    }
     private void requireLiveDraft(DebugDraft draft) {
         if(!draft.expiresAt.isAfter(Instant.now()))throw new StaleDraftException();
-    }
-    private void verifyDraftRevision(String packageId,WorkerRequest request) throws Exception {
-        if(request.expectedRevisionDigest==null)return;
-        DebugDraft draft=new DebugDraft("", "", packageId, request.environment,
-                String.valueOf(request.target.get("type")),String.valueOf(request.target.get("id")),request.draftResourceId,
-                request.expectedRevisionDigest,Collections.<String,Object>emptyMap(),Collections.<String,Object>emptyMap(),Instant.now());
-        verifyDraftRevision(draft);
     }
     private WorkerRequest inspectionRequest(String packageId,Path root,String environment) {
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";
