@@ -1,0 +1,1539 @@
+{
+  "schemaVersion": "att-run-load-benchmark/v1",
+  "runtime": {
+    "versionOutput": "stdout: ATT V4.0.1",
+    "sourceRevision": "unknown",
+    "binaryTreeSha256": "359059902da3bb1868382b4b3a29d61fadac3fae3584155384d0baa0c58089bc"
+  },
+  "environment": {
+    "platform": "macOS-26.1-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "logicalCpuCount": 8,
+    "pythonVersion": "3.13.1",
+    "javaVersion": "openjdk version \"26.0.1\" 2026-04-21\nOpenJDK Runtime Environment Homebrew (build 26.0.1)\nOpenJDK 64-Bit Server VM Homebrew (build 26.0.1, mixed mode, sharing)"
+  },
+  "measurement": {
+    "loadTarget": "Local loopback HTTP helper returning a fixed JSON response; not an external SUT.",
+    "arrivalRatesPerSecond": [
+      500,
+      1000
+    ],
+    "evidenceModes": [
+      "metrics"
+    ],
+    "sampleRuns": 2,
+    "wholeProcessWarmupRuns": 1,
+    "loadWarmup": "1s",
+    "loadDuration": "2s",
+    "maxConcurrent": 256,
+    "timeoutSeconds": 120.0,
+    "localHttpServer": {
+      "host": "127.0.0.1",
+      "configuredRequestQueueSize": 256,
+      "osReportedSomaxconn": 128,
+      "effectiveBacklogEstimate": 128,
+      "note": "The effective backlog is estimated from the configured listen value and OS somaxconn; the OS may apply additional limits."
+    },
+    "maxRetainedSamples": 10,
+    "wallTime": "Includes launcher and JVM startup; firstOutputMs is process spawn to first non-empty stdout/stderr line.",
+    "percentile": "p95 uses nearest-rank over whole-process samples; per-run Load p95 is ATT's bounded latency reservoir."
+  },
+  "run20": {
+    "caseCount": 20,
+    "warmups": 1,
+    "warmupResults": [],
+    "measurements": [
+      {
+        "runId": "run20-02",
+        "exitCode": 0,
+        "firstOutputMs": 311.304542,
+        "totalMs": 771.240583,
+        "timedOut": false,
+        "summary": {
+          "total": 20,
+          "passed": 20,
+          "failed": 0,
+          "error": 0,
+          "skipped": 0,
+          "invalid": 0,
+          "report": "$ATT_HOME/output/run20-02/report/index.html"
+        },
+        "output": {
+          "fileCount": 47,
+          "bytes": 172418
+        }
+      },
+      {
+        "runId": "run20-03",
+        "exitCode": 0,
+        "firstOutputMs": 296.374209,
+        "totalMs": 755.479334,
+        "timedOut": false,
+        "summary": {
+          "total": 20,
+          "passed": 20,
+          "failed": 0,
+          "error": 0,
+          "skipped": 0,
+          "invalid": 0,
+          "report": "$ATT_HOME/output/run20-03/report/index.html"
+        },
+        "output": {
+          "fileCount": 47,
+          "bytes": 172410
+        }
+      }
+    ],
+    "timedOutSamples": 0,
+    "wallTime": {
+      "firstOutputMs": {
+        "samples": 2,
+        "p50": 303.839,
+        "p95": 311.305,
+        "mean": 303.839,
+        "standardDeviation": 10.557,
+        "coefficientOfVariationPercent": 3.47
+      },
+      "totalMs": {
+        "samples": 2,
+        "p50": 763.36,
+        "p95": 771.241,
+        "mean": 763.36,
+        "standardDeviation": 11.145,
+        "coefficientOfVariationPercent": 1.46
+      }
+    }
+  },
+  "load": {
+    "500TPS-metrics": {
+      "ratePerSecond": 500,
+      "evidenceMode": "metrics",
+      "duration": "2s",
+      "warmup": "1s",
+      "warmupRuns": 1,
+      "warmupResults": [],
+      "measurements": [
+        {
+          "runId": "load-500-metrics-02",
+          "exitCode": 0,
+          "firstOutputMs": 3374.717916,
+          "totalMs": 3381.264458,
+          "timedOut": false,
+          "status": "PASS",
+          "metrics": {
+            "model": "arrivalRate",
+            "configuredArrivalRatePerSecond": 500.0,
+            "configuredMaxConcurrent": 256,
+            "scheduled": 1500,
+            "started": 1500,
+            "completed": 1500,
+            "success": 1500,
+            "measuredSuccess": 1000,
+            "failure": 0,
+            "measuredFailure": 0,
+            "runtimeError": 0,
+            "measuredRuntimeError": 0,
+            "dropped": 0,
+            "measuredDropped": 0,
+            "warmupCompleted": 500,
+            "measuredCompleted": 1000,
+            "measuredAchievedArrivalRate": 498.2561036372695,
+            "achievedArrivalRatePercent": 100.0,
+            "completedThroughput": 498.2561036372695,
+            "schedulerLagMeanMs": 0.5433333333333333,
+            "schedulerLagMaxMs": 10,
+            "p50Ms": 0,
+            "p95Ms": 1,
+            "p99Ms": 1,
+            "latencyMinMs": 0,
+            "latencyMeanMs": 0.501,
+            "latencyMaxMs": 2,
+            "latencyObservationCount": 1000,
+            "latencySampleCount": 1000,
+            "latencySampleCapacity": 4096,
+            "latencySampleRate": 1.0,
+            "errorClassifications": {},
+            "generator": {
+              "sampling": "event-triggered; at most one sample per 100 ms",
+              "sampleCount": 30,
+              "heapUsedBytes": 31269472,
+              "heapPeakUsedBytes": 53310216,
+              "heapCommittedBytes": 68157440,
+              "heapPeakCommittedBytes": 68157440,
+              "heapMaxBytes": 2147483648,
+              "liveThreads": 78,
+              "liveThreadsPeak": 78,
+              "gcMetricsAvailable": true,
+              "gcCollectionCount": 6,
+              "gcCollectionTimeMs": 8,
+              "gcMetricsUnavailableReason": null,
+              "processCpuSupported": true,
+              "processCpuTimeMs": 2914,
+              "processCpuPercent": 97.21161335841967,
+              "processCpuUnavailableReason": null,
+              "heapWarmupEndBytes": 30692392
+            }
+          },
+          "resources": {
+            "db": {},
+            "mq": {},
+            "http": {
+              "benchmark": {
+                "active": 0,
+                "idle": 65,
+                "waiting": 0,
+                "max": 256,
+                "peakActive": 65,
+                "peakIdle": 65,
+                "peakWaiting": 0
+              }
+            },
+            "resourceMetricSamples": 30,
+            "render": {
+              "renderPlansCompiled": 0,
+              "renderPlanCacheHits": 0,
+              "renderPayloadResolutions": 0,
+              "renderPayloadResolutionCacheHits": 0,
+              "renderEvaluations": 0,
+              "renderArtifactWrites": 0,
+              "renderSourceBytes": 0
+            },
+            "executionIds": {
+              "customExecutionIdsTracked": 0,
+              "executionIdCollisionTrackingSize": 0
+            },
+            "execution": {
+              "executionPlansCompiled": 1,
+              "actionPlansCompiled": 1,
+              "actionEvaluations": 1500
+            },
+            "generator": {
+              "testdata": {
+                "mappingEvaluations": 1500,
+                "selectionRequests": 0,
+                "selectionEvaluations": 0,
+                "selectionCacheHits": 0,
+                "selectionCacheSizesByScope": {
+                  "workload": 0,
+                  "user": 0,
+                  "iteration": 0,
+                  "execution": 0,
+                  "total": 0
+                },
+                "workloads": {
+                  "local-http": {
+                    "mappingEvaluations": 1500,
+                    "selectionRequests": 0,
+                    "selectionEvaluations": 0,
+                    "selectionCacheHits": 0,
+                    "selectionCacheSizesByScope": {
+                      "workload": 0,
+                      "user": 0,
+                      "iteration": 0,
+                      "execution": 0,
+                      "total": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "output": {
+            "fileCount": 4,
+            "bytes": 75579
+          },
+          "performanceProfile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "totalMs": 3327,
+            "phases": {
+              "configLoadMs": 130,
+              "validationMs": 23,
+              "loadExecutionMs": 3054,
+              "loadReportMs": 38
+            },
+            "counters": {
+              "loadScheduled": 1500,
+              "loadStarted": 1500,
+              "loadCompleted": 1500,
+              "loadDropped": 0,
+              "renderPlansCompiled": 0,
+              "renderPlanCacheHits": 0,
+              "renderPayloadResolutions": 0,
+              "renderPayloadResolutionCacheHits": 0,
+              "renderEvaluations": 0,
+              "renderArtifactWrites": 0,
+              "renderSourceBytes": 0,
+              "schemasCompiled": 4,
+              "schemaCacheHits": 1,
+              "templatesLoaded": 1,
+              "templateCacheHits": 0,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 0,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 44900960,
+              "committedHeapBytes": 68157440,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        },
+        {
+          "runId": "load-500-metrics-03",
+          "exitCode": 0,
+          "firstOutputMs": 3365.942083,
+          "totalMs": 3370.610333,
+          "timedOut": false,
+          "status": "PASS",
+          "metrics": {
+            "model": "arrivalRate",
+            "configuredArrivalRatePerSecond": 500.0,
+            "configuredMaxConcurrent": 256,
+            "scheduled": 1500,
+            "started": 1500,
+            "completed": 1500,
+            "success": 1500,
+            "measuredSuccess": 1000,
+            "failure": 0,
+            "measuredFailure": 0,
+            "runtimeError": 0,
+            "measuredRuntimeError": 0,
+            "dropped": 0,
+            "measuredDropped": 0,
+            "warmupCompleted": 500,
+            "measuredCompleted": 1000,
+            "measuredAchievedArrivalRate": 498.75311720698255,
+            "achievedArrivalRatePercent": 100.0,
+            "completedThroughput": 498.75311720698255,
+            "schedulerLagMeanMs": 0.5153333333333333,
+            "schedulerLagMaxMs": 11,
+            "p50Ms": 0,
+            "p95Ms": 1,
+            "p99Ms": 1,
+            "latencyMinMs": 0,
+            "latencyMeanMs": 0.502,
+            "latencyMaxMs": 3,
+            "latencyObservationCount": 1000,
+            "latencySampleCount": 1000,
+            "latencySampleCapacity": 4096,
+            "latencySampleRate": 1.0,
+            "errorClassifications": {},
+            "generator": {
+              "sampling": "event-triggered; at most one sample per 100 ms",
+              "sampleCount": 30,
+              "heapUsedBytes": 61057928,
+              "heapPeakUsedBytes": 61057928,
+              "heapCommittedBytes": 82837504,
+              "heapPeakCommittedBytes": 82837504,
+              "heapMaxBytes": 2147483648,
+              "liveThreads": 77,
+              "liveThreadsPeak": 77,
+              "gcMetricsAvailable": true,
+              "gcCollectionCount": 6,
+              "gcCollectionTimeMs": 9,
+              "gcMetricsUnavailableReason": null,
+              "processCpuSupported": true,
+              "processCpuTimeMs": 2834,
+              "processCpuPercent": 94.6191424274489,
+              "processCpuUnavailableReason": null,
+              "heapWarmupEndBytes": 41460008
+            }
+          },
+          "resources": {
+            "db": {},
+            "mq": {},
+            "http": {
+              "benchmark": {
+                "active": 0,
+                "idle": 62,
+                "waiting": 0,
+                "max": 256,
+                "peakActive": 62,
+                "peakIdle": 62,
+                "peakWaiting": 0
+              }
+            },
+            "resourceMetricSamples": 30,
+            "render": {
+              "renderPlansCompiled": 0,
+              "renderPlanCacheHits": 0,
+              "renderPayloadResolutions": 0,
+              "renderPayloadResolutionCacheHits": 0,
+              "renderEvaluations": 0,
+              "renderArtifactWrites": 0,
+              "renderSourceBytes": 0
+            },
+            "executionIds": {
+              "customExecutionIdsTracked": 0,
+              "executionIdCollisionTrackingSize": 0
+            },
+            "execution": {
+              "executionPlansCompiled": 1,
+              "actionPlansCompiled": 1,
+              "actionEvaluations": 1500
+            },
+            "generator": {
+              "testdata": {
+                "mappingEvaluations": 1500,
+                "selectionRequests": 0,
+                "selectionEvaluations": 0,
+                "selectionCacheHits": 0,
+                "selectionCacheSizesByScope": {
+                  "workload": 0,
+                  "user": 0,
+                  "iteration": 0,
+                  "execution": 0,
+                  "total": 0
+                },
+                "workloads": {
+                  "local-http": {
+                    "mappingEvaluations": 1500,
+                    "selectionRequests": 0,
+                    "selectionEvaluations": 0,
+                    "selectionCacheHits": 0,
+                    "selectionCacheSizesByScope": {
+                      "workload": 0,
+                      "user": 0,
+                      "iteration": 0,
+                      "execution": 0,
+                      "total": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "output": {
+            "fileCount": 4,
+            "bytes": 75585
+          },
+          "performanceProfile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "totalMs": 3320,
+            "phases": {
+              "configLoadMs": 131,
+              "validationMs": 24,
+              "loadExecutionMs": 3047,
+              "loadReportMs": 39
+            },
+            "counters": {
+              "loadScheduled": 1500,
+              "loadStarted": 1500,
+              "loadCompleted": 1500,
+              "loadDropped": 0,
+              "renderPlansCompiled": 0,
+              "renderPlanCacheHits": 0,
+              "renderPayloadResolutions": 0,
+              "renderPayloadResolutionCacheHits": 0,
+              "renderEvaluations": 0,
+              "renderArtifactWrites": 0,
+              "renderSourceBytes": 0,
+              "schemasCompiled": 4,
+              "schemaCacheHits": 1,
+              "templatesLoaded": 1,
+              "templateCacheHits": 0,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 0,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 26994464,
+              "committedHeapBytes": 82837504,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        }
+      ],
+      "timedOutSamples": 0,
+      "wallTime": {
+        "firstOutputMs": {
+          "samples": 2,
+          "p50": 3370.33,
+          "p95": 3374.718,
+          "mean": 3370.33,
+          "standardDeviation": 6.205,
+          "coefficientOfVariationPercent": 0.18
+        },
+        "totalMs": {
+          "samples": 2,
+          "p50": 3375.937,
+          "p95": 3381.264,
+          "mean": 3375.937,
+          "standardDeviation": 7.534,
+          "coefficientOfVariationPercent": 0.22
+        }
+      },
+      "loadMetricsAcrossRuns": {
+        "load": {
+          "achievedArrivalRatePercent": {
+            "samples": 2,
+            "p50": 100.0,
+            "p95": 100.0,
+            "mean": 100.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "completed": {
+            "samples": 2,
+            "p50": 1500.0,
+            "p95": 1500.0,
+            "mean": 1500.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "completedThroughput": {
+            "samples": 2,
+            "p50": 498.505,
+            "p95": 498.753,
+            "mean": 498.505,
+            "standardDeviation": 0.351,
+            "coefficientOfVariationPercent": 0.07
+          },
+          "configuredArrivalRatePerSecond": {
+            "samples": 2,
+            "p50": 500.0,
+            "p95": 500.0,
+            "mean": 500.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "configuredMaxConcurrent": {
+            "samples": 2,
+            "p50": 256.0,
+            "p95": 256.0,
+            "mean": 256.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "dropped": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "failure": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "latencyMaxMs": {
+            "samples": 2,
+            "p50": 2.5,
+            "p95": 3.0,
+            "mean": 2.5,
+            "standardDeviation": 0.707,
+            "coefficientOfVariationPercent": 28.28
+          },
+          "latencyMeanMs": {
+            "samples": 2,
+            "p50": 0.502,
+            "p95": 0.502,
+            "mean": 0.502,
+            "standardDeviation": 0.001,
+            "coefficientOfVariationPercent": 0.14
+          },
+          "latencyMinMs": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "latencyObservationCount": {
+            "samples": 2,
+            "p50": 1000.0,
+            "p95": 1000.0,
+            "mean": 1000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "latencySampleCapacity": {
+            "samples": 2,
+            "p50": 4096.0,
+            "p95": 4096.0,
+            "mean": 4096.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "latencySampleCount": {
+            "samples": 2,
+            "p50": 1000.0,
+            "p95": 1000.0,
+            "mean": 1000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "latencySampleRate": {
+            "samples": 2,
+            "p50": 1.0,
+            "p95": 1.0,
+            "mean": 1.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "measuredAchievedArrivalRate": {
+            "samples": 2,
+            "p50": 498.505,
+            "p95": 498.753,
+            "mean": 498.505,
+            "standardDeviation": 0.351,
+            "coefficientOfVariationPercent": 0.07
+          },
+          "measuredCompleted": {
+            "samples": 2,
+            "p50": 1000.0,
+            "p95": 1000.0,
+            "mean": 1000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "measuredDropped": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "measuredFailure": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "measuredRuntimeError": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "measuredSuccess": {
+            "samples": 2,
+            "p50": 1000.0,
+            "p95": 1000.0,
+            "mean": 1000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "p50Ms": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "p95Ms": {
+            "samples": 2,
+            "p50": 1.0,
+            "p95": 1.0,
+            "mean": 1.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "p99Ms": {
+            "samples": 2,
+            "p50": 1.0,
+            "p95": 1.0,
+            "mean": 1.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "runtimeError": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "scheduled": {
+            "samples": 2,
+            "p50": 1500.0,
+            "p95": 1500.0,
+            "mean": 1500.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "schedulerLagMaxMs": {
+            "samples": 2,
+            "p50": 10.5,
+            "p95": 11.0,
+            "mean": 10.5,
+            "standardDeviation": 0.707,
+            "coefficientOfVariationPercent": 6.73
+          },
+          "schedulerLagMeanMs": {
+            "samples": 2,
+            "p50": 0.529,
+            "p95": 0.543,
+            "mean": 0.529,
+            "standardDeviation": 0.02,
+            "coefficientOfVariationPercent": 3.74
+          },
+          "started": {
+            "samples": 2,
+            "p50": 1500.0,
+            "p95": 1500.0,
+            "mean": 1500.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "success": {
+            "samples": 2,
+            "p50": 1500.0,
+            "p95": 1500.0,
+            "mean": 1500.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "warmupCompleted": {
+            "samples": 2,
+            "p50": 500.0,
+            "p95": 500.0,
+            "mean": 500.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          }
+        },
+        "generator": {
+          "gcCollectionCount": {
+            "samples": 2,
+            "p50": 6.0,
+            "p95": 6.0,
+            "mean": 6.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "gcCollectionTimeMs": {
+            "samples": 2,
+            "p50": 8.5,
+            "p95": 9.0,
+            "mean": 8.5,
+            "standardDeviation": 0.707,
+            "coefficientOfVariationPercent": 8.32
+          },
+          "heapCommittedBytes": {
+            "samples": 2,
+            "p50": 75497472.0,
+            "p95": 82837504.0,
+            "mean": 75497472.0,
+            "standardDeviation": 10380372.803,
+            "coefficientOfVariationPercent": 13.75
+          },
+          "heapMaxBytes": {
+            "samples": 2,
+            "p50": 2147483648.0,
+            "p95": 2147483648.0,
+            "mean": 2147483648.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "heapPeakCommittedBytes": {
+            "samples": 2,
+            "p50": 75497472.0,
+            "p95": 82837504.0,
+            "mean": 75497472.0,
+            "standardDeviation": 10380372.803,
+            "coefficientOfVariationPercent": 13.75
+          },
+          "heapPeakUsedBytes": {
+            "samples": 2,
+            "p50": 57184072.0,
+            "p95": 61057928.0,
+            "mean": 57184072.0,
+            "standardDeviation": 5478459.694,
+            "coefficientOfVariationPercent": 9.58
+          },
+          "heapUsedBytes": {
+            "samples": 2,
+            "p50": 46163700.0,
+            "p95": 61057928.0,
+            "mean": 46163700.0,
+            "standardDeviation": 21063619.239,
+            "coefficientOfVariationPercent": 45.63
+          },
+          "heapWarmupEndBytes": {
+            "samples": 2,
+            "p50": 36076200.0,
+            "p95": 41460008.0,
+            "mean": 36076200.0,
+            "standardDeviation": 7613854.291,
+            "coefficientOfVariationPercent": 21.1
+          },
+          "liveThreads": {
+            "samples": 2,
+            "p50": 77.5,
+            "p95": 78.0,
+            "mean": 77.5,
+            "standardDeviation": 0.707,
+            "coefficientOfVariationPercent": 0.91
+          },
+          "liveThreadsPeak": {
+            "samples": 2,
+            "p50": 77.5,
+            "p95": 78.0,
+            "mean": 77.5,
+            "standardDeviation": 0.707,
+            "coefficientOfVariationPercent": 0.91
+          },
+          "processCpuPercent": {
+            "samples": 2,
+            "p50": 95.915,
+            "p95": 97.212,
+            "mean": 95.915,
+            "standardDeviation": 1.833,
+            "coefficientOfVariationPercent": 1.91
+          },
+          "processCpuTimeMs": {
+            "samples": 2,
+            "p50": 2874.0,
+            "p95": 2914.0,
+            "mean": 2874.0,
+            "standardDeviation": 56.569,
+            "coefficientOfVariationPercent": 1.97
+          },
+          "sampleCount": {
+            "samples": 2,
+            "p50": 30.0,
+            "p95": 30.0,
+            "mean": 30.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          }
+        }
+      }
+    },
+    "1000TPS-metrics": {
+      "ratePerSecond": 1000,
+      "evidenceMode": "metrics",
+      "duration": "2s",
+      "warmup": "1s",
+      "warmupRuns": 1,
+      "warmupResults": [],
+      "measurements": [
+        {
+          "runId": "load-1000-metrics-02",
+          "exitCode": 0,
+          "firstOutputMs": 3369.453834,
+          "totalMs": 3374.4615,
+          "timedOut": false,
+          "status": "PASS",
+          "metrics": {
+            "model": "arrivalRate",
+            "configuredArrivalRatePerSecond": 1000.0,
+            "configuredMaxConcurrent": 256,
+            "scheduled": 3000,
+            "started": 3000,
+            "completed": 3000,
+            "success": 3000,
+            "measuredSuccess": 2000,
+            "failure": 0,
+            "measuredFailure": 0,
+            "runtimeError": 0,
+            "measuredRuntimeError": 0,
+            "dropped": 0,
+            "measuredDropped": 0,
+            "warmupCompleted": 1000,
+            "measuredCompleted": 2000,
+            "measuredAchievedArrivalRate": 998.003992015968,
+            "achievedArrivalRatePercent": 100.0,
+            "completedThroughput": 998.003992015968,
+            "schedulerLagMeanMs": 0.563,
+            "schedulerLagMaxMs": 16,
+            "p50Ms": 0,
+            "p95Ms": 1,
+            "p99Ms": 1,
+            "latencyMinMs": 0,
+            "latencyMeanMs": 0.1435,
+            "latencyMaxMs": 2,
+            "latencyObservationCount": 2000,
+            "latencySampleCount": 2000,
+            "latencySampleCapacity": 4096,
+            "latencySampleRate": 1.0,
+            "errorClassifications": {},
+            "generator": {
+              "sampling": "event-triggered; at most one sample per 100 ms",
+              "sampleCount": 30,
+              "heapUsedBytes": 37163008,
+              "heapPeakUsedBytes": 48770256,
+              "heapCommittedBytes": 63963136,
+              "heapPeakCommittedBytes": 63963136,
+              "heapMaxBytes": 2147483648,
+              "liveThreads": 161,
+              "liveThreadsPeak": 161,
+              "gcMetricsAvailable": true,
+              "gcCollectionCount": 12,
+              "gcCollectionTimeMs": 18,
+              "gcMetricsUnavailableReason": null,
+              "processCpuSupported": true,
+              "processCpuTimeMs": 4039,
+              "processCpuPercent": 134.8801234463635,
+              "processCpuUnavailableReason": null,
+              "heapWarmupEndBytes": 24653584
+            }
+          },
+          "resources": {
+            "db": {},
+            "mq": {},
+            "http": {
+              "benchmark": {
+                "active": 0,
+                "idle": 100,
+                "waiting": 0,
+                "max": 256,
+                "peakActive": 100,
+                "peakIdle": 100,
+                "peakWaiting": 0
+              }
+            },
+            "resourceMetricSamples": 30,
+            "render": {
+              "renderPlansCompiled": 0,
+              "renderPlanCacheHits": 0,
+              "renderPayloadResolutions": 0,
+              "renderPayloadResolutionCacheHits": 0,
+              "renderEvaluations": 0,
+              "renderArtifactWrites": 0,
+              "renderSourceBytes": 0
+            },
+            "executionIds": {
+              "customExecutionIdsTracked": 0,
+              "executionIdCollisionTrackingSize": 0
+            },
+            "execution": {
+              "executionPlansCompiled": 1,
+              "actionPlansCompiled": 1,
+              "actionEvaluations": 3000
+            },
+            "generator": {
+              "testdata": {
+                "mappingEvaluations": 3000,
+                "selectionRequests": 0,
+                "selectionEvaluations": 0,
+                "selectionCacheHits": 0,
+                "selectionCacheSizesByScope": {
+                  "workload": 0,
+                  "user": 0,
+                  "iteration": 0,
+                  "execution": 0,
+                  "total": 0
+                },
+                "workloads": {
+                  "local-http": {
+                    "mappingEvaluations": 3000,
+                    "selectionRequests": 0,
+                    "selectionEvaluations": 0,
+                    "selectionCacheHits": 0,
+                    "selectionCacheSizesByScope": {
+                      "workload": 0,
+                      "user": 0,
+                      "iteration": 0,
+                      "execution": 0,
+                      "total": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "output": {
+            "fileCount": 4,
+            "bytes": 75603
+          },
+          "performanceProfile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "totalMs": 3321,
+            "phases": {
+              "configLoadMs": 130,
+              "validationMs": 27,
+              "loadExecutionMs": 3049,
+              "loadReportMs": 33
+            },
+            "counters": {
+              "loadScheduled": 3000,
+              "loadStarted": 3000,
+              "loadCompleted": 3000,
+              "loadDropped": 0,
+              "renderPlansCompiled": 0,
+              "renderPlanCacheHits": 0,
+              "renderPayloadResolutions": 0,
+              "renderPayloadResolutionCacheHits": 0,
+              "renderEvaluations": 0,
+              "renderArtifactWrites": 0,
+              "renderSourceBytes": 0,
+              "schemasCompiled": 4,
+              "schemaCacheHits": 1,
+              "templatesLoaded": 1,
+              "templateCacheHits": 0,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 0,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 20131408,
+              "committedHeapBytes": 63963136,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        },
+        {
+          "runId": "load-1000-metrics-03",
+          "exitCode": 0,
+          "firstOutputMs": 3363.185041,
+          "totalMs": 3369.466083,
+          "timedOut": false,
+          "status": "PASS",
+          "metrics": {
+            "model": "arrivalRate",
+            "configuredArrivalRatePerSecond": 1000.0,
+            "configuredMaxConcurrent": 256,
+            "scheduled": 3000,
+            "started": 3000,
+            "completed": 3000,
+            "success": 3000,
+            "measuredSuccess": 2000,
+            "failure": 0,
+            "measuredFailure": 0,
+            "runtimeError": 0,
+            "measuredRuntimeError": 0,
+            "dropped": 0,
+            "measuredDropped": 0,
+            "warmupCompleted": 1000,
+            "measuredCompleted": 2000,
+            "measuredAchievedArrivalRate": 998.5022466300549,
+            "achievedArrivalRatePercent": 100.0,
+            "completedThroughput": 998.5022466300549,
+            "schedulerLagMeanMs": 0.4583333333333333,
+            "schedulerLagMaxMs": 12,
+            "p50Ms": 0,
+            "p95Ms": 1,
+            "p99Ms": 1,
+            "latencyMinMs": 0,
+            "latencyMeanMs": 0.1545,
+            "latencyMaxMs": 2,
+            "latencyObservationCount": 2000,
+            "latencySampleCount": 2000,
+            "latencySampleCapacity": 4096,
+            "latencySampleRate": 1.0,
+            "errorClassifications": {},
+            "generator": {
+              "sampling": "event-triggered; at most one sample per 100 ms",
+              "sampleCount": 30,
+              "heapUsedBytes": 50677144,
+              "heapPeakUsedBytes": 70601928,
+              "heapCommittedBytes": 87031808,
+              "heapPeakCommittedBytes": 87031808,
+              "heapMaxBytes": 2147483648,
+              "liveThreads": 166,
+              "liveThreadsPeak": 166,
+              "gcMetricsAvailable": true,
+              "gcCollectionCount": 10,
+              "gcCollectionTimeMs": 14,
+              "gcMetricsUnavailableReason": null,
+              "processCpuSupported": true,
+              "processCpuTimeMs": 4268,
+              "processCpuPercent": 142.59686228900316,
+              "processCpuUnavailableReason": null,
+              "heapWarmupEndBytes": 28726744
+            }
+          },
+          "resources": {
+            "db": {},
+            "mq": {},
+            "http": {
+              "benchmark": {
+                "active": 0,
+                "idle": 141,
+                "waiting": 0,
+                "max": 256,
+                "peakActive": 141,
+                "peakIdle": 141,
+                "peakWaiting": 0
+              }
+            },
+            "resourceMetricSamples": 30,
+            "render": {
+              "renderPlansCompiled": 0,
+              "renderPlanCacheHits": 0,
+              "renderPayloadResolutions": 0,
+              "renderPayloadResolutionCacheHits": 0,
+              "renderEvaluations": 0,
+              "renderArtifactWrites": 0,
+              "renderSourceBytes": 0
+            },
+            "executionIds": {
+              "customExecutionIdsTracked": 0,
+              "executionIdCollisionTrackingSize": 0
+            },
+            "execution": {
+              "executionPlansCompiled": 1,
+              "actionPlansCompiled": 1,
+              "actionEvaluations": 3000
+            },
+            "generator": {
+              "testdata": {
+                "mappingEvaluations": 3000,
+                "selectionRequests": 0,
+                "selectionEvaluations": 0,
+                "selectionCacheHits": 0,
+                "selectionCacheSizesByScope": {
+                  "workload": 0,
+                  "user": 0,
+                  "iteration": 0,
+                  "execution": 0,
+                  "total": 0
+                },
+                "workloads": {
+                  "local-http": {
+                    "mappingEvaluations": 3000,
+                    "selectionRequests": 0,
+                    "selectionEvaluations": 0,
+                    "selectionCacheHits": 0,
+                    "selectionCacheSizesByScope": {
+                      "workload": 0,
+                      "user": 0,
+                      "iteration": 0,
+                      "execution": 0,
+                      "total": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "output": {
+            "fileCount": 4,
+            "bytes": 75776
+          },
+          "performanceProfile": {
+            "schemaVersion": "att-performance/v2.4.3",
+            "attVersion": "4.0.1",
+            "totalMs": 3317,
+            "phases": {
+              "configLoadMs": 136,
+              "validationMs": 24,
+              "loadExecutionMs": 3047,
+              "loadReportMs": 31
+            },
+            "counters": {
+              "loadScheduled": 3000,
+              "loadStarted": 3000,
+              "loadCompleted": 3000,
+              "loadDropped": 0,
+              "renderPlansCompiled": 0,
+              "renderPlanCacheHits": 0,
+              "renderPayloadResolutions": 0,
+              "renderPayloadResolutionCacheHits": 0,
+              "renderEvaluations": 0,
+              "renderArtifactWrites": 0,
+              "renderSourceBytes": 0,
+              "schemasCompiled": 4,
+              "schemaCacheHits": 1,
+              "templatesLoaded": 1,
+              "templateCacheHits": 0,
+              "payloadsLoaded": 0,
+              "payloadCacheHits": 0,
+              "processStdoutBytes": 0,
+              "processStderrBytes": 0,
+              "processTruncatedStreams": 0
+            },
+            "memorySnapshot": {
+              "usedHeapBytes": 69027224,
+              "committedHeapBytes": 87031808,
+              "maxHeapBytes": 2147483648
+            }
+          }
+        }
+      ],
+      "timedOutSamples": 0,
+      "wallTime": {
+        "firstOutputMs": {
+          "samples": 2,
+          "p50": 3366.319,
+          "p95": 3369.454,
+          "mean": 3366.319,
+          "standardDeviation": 4.433,
+          "coefficientOfVariationPercent": 0.13
+        },
+        "totalMs": {
+          "samples": 2,
+          "p50": 3371.964,
+          "p95": 3374.461,
+          "mean": 3371.964,
+          "standardDeviation": 3.532,
+          "coefficientOfVariationPercent": 0.1
+        }
+      },
+      "loadMetricsAcrossRuns": {
+        "load": {
+          "achievedArrivalRatePercent": {
+            "samples": 2,
+            "p50": 100.0,
+            "p95": 100.0,
+            "mean": 100.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "completed": {
+            "samples": 2,
+            "p50": 3000.0,
+            "p95": 3000.0,
+            "mean": 3000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "completedThroughput": {
+            "samples": 2,
+            "p50": 998.253,
+            "p95": 998.502,
+            "mean": 998.253,
+            "standardDeviation": 0.352,
+            "coefficientOfVariationPercent": 0.04
+          },
+          "configuredArrivalRatePerSecond": {
+            "samples": 2,
+            "p50": 1000.0,
+            "p95": 1000.0,
+            "mean": 1000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "configuredMaxConcurrent": {
+            "samples": 2,
+            "p50": 256.0,
+            "p95": 256.0,
+            "mean": 256.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "dropped": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "failure": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "latencyMaxMs": {
+            "samples": 2,
+            "p50": 2.0,
+            "p95": 2.0,
+            "mean": 2.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "latencyMeanMs": {
+            "samples": 2,
+            "p50": 0.149,
+            "p95": 0.154,
+            "mean": 0.149,
+            "standardDeviation": 0.008,
+            "coefficientOfVariationPercent": 5.22
+          },
+          "latencyMinMs": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "latencyObservationCount": {
+            "samples": 2,
+            "p50": 2000.0,
+            "p95": 2000.0,
+            "mean": 2000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "latencySampleCapacity": {
+            "samples": 2,
+            "p50": 4096.0,
+            "p95": 4096.0,
+            "mean": 4096.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "latencySampleCount": {
+            "samples": 2,
+            "p50": 2000.0,
+            "p95": 2000.0,
+            "mean": 2000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "latencySampleRate": {
+            "samples": 2,
+            "p50": 1.0,
+            "p95": 1.0,
+            "mean": 1.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "measuredAchievedArrivalRate": {
+            "samples": 2,
+            "p50": 998.253,
+            "p95": 998.502,
+            "mean": 998.253,
+            "standardDeviation": 0.352,
+            "coefficientOfVariationPercent": 0.04
+          },
+          "measuredCompleted": {
+            "samples": 2,
+            "p50": 2000.0,
+            "p95": 2000.0,
+            "mean": 2000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "measuredDropped": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "measuredFailure": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "measuredRuntimeError": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "measuredSuccess": {
+            "samples": 2,
+            "p50": 2000.0,
+            "p95": 2000.0,
+            "mean": 2000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "p50Ms": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "p95Ms": {
+            "samples": 2,
+            "p50": 1.0,
+            "p95": 1.0,
+            "mean": 1.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "p99Ms": {
+            "samples": 2,
+            "p50": 1.0,
+            "p95": 1.0,
+            "mean": 1.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "runtimeError": {
+            "samples": 2,
+            "p50": 0.0,
+            "p95": 0.0,
+            "mean": 0.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "scheduled": {
+            "samples": 2,
+            "p50": 3000.0,
+            "p95": 3000.0,
+            "mean": 3000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "schedulerLagMaxMs": {
+            "samples": 2,
+            "p50": 14.0,
+            "p95": 16.0,
+            "mean": 14.0,
+            "standardDeviation": 2.828,
+            "coefficientOfVariationPercent": 20.2
+          },
+          "schedulerLagMeanMs": {
+            "samples": 2,
+            "p50": 0.511,
+            "p95": 0.563,
+            "mean": 0.511,
+            "standardDeviation": 0.074,
+            "coefficientOfVariationPercent": 14.49
+          },
+          "started": {
+            "samples": 2,
+            "p50": 3000.0,
+            "p95": 3000.0,
+            "mean": 3000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "success": {
+            "samples": 2,
+            "p50": 3000.0,
+            "p95": 3000.0,
+            "mean": 3000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "warmupCompleted": {
+            "samples": 2,
+            "p50": 1000.0,
+            "p95": 1000.0,
+            "mean": 1000.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          }
+        },
+        "generator": {
+          "gcCollectionCount": {
+            "samples": 2,
+            "p50": 11.0,
+            "p95": 12.0,
+            "mean": 11.0,
+            "standardDeviation": 1.414,
+            "coefficientOfVariationPercent": 12.86
+          },
+          "gcCollectionTimeMs": {
+            "samples": 2,
+            "p50": 16.0,
+            "p95": 18.0,
+            "mean": 16.0,
+            "standardDeviation": 2.828,
+            "coefficientOfVariationPercent": 17.68
+          },
+          "heapCommittedBytes": {
+            "samples": 2,
+            "p50": 75497472.0,
+            "p95": 87031808.0,
+            "mean": 75497472.0,
+            "standardDeviation": 16312014.404,
+            "coefficientOfVariationPercent": 21.61
+          },
+          "heapMaxBytes": {
+            "samples": 2,
+            "p50": 2147483648.0,
+            "p95": 2147483648.0,
+            "mean": 2147483648.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          },
+          "heapPeakCommittedBytes": {
+            "samples": 2,
+            "p50": 75497472.0,
+            "p95": 87031808.0,
+            "mean": 75497472.0,
+            "standardDeviation": 16312014.404,
+            "coefficientOfVariationPercent": 21.61
+          },
+          "heapPeakUsedBytes": {
+            "samples": 2,
+            "p50": 59686092.0,
+            "p95": 70601928.0,
+            "mean": 59686092.0,
+            "standardDeviation": 15437323.316,
+            "coefficientOfVariationPercent": 25.86
+          },
+          "heapUsedBytes": {
+            "samples": 2,
+            "p50": 43920076.0,
+            "p95": 50677144.0,
+            "mean": 43920076.0,
+            "standardDeviation": 9555937.207,
+            "coefficientOfVariationPercent": 21.76
+          },
+          "heapWarmupEndBytes": {
+            "samples": 2,
+            "p50": 26690164.0,
+            "p95": 28726744.0,
+            "mean": 26690164.0,
+            "standardDeviation": 2880159.057,
+            "coefficientOfVariationPercent": 10.79
+          },
+          "liveThreads": {
+            "samples": 2,
+            "p50": 163.5,
+            "p95": 166.0,
+            "mean": 163.5,
+            "standardDeviation": 3.536,
+            "coefficientOfVariationPercent": 2.16
+          },
+          "liveThreadsPeak": {
+            "samples": 2,
+            "p50": 163.5,
+            "p95": 166.0,
+            "mean": 163.5,
+            "standardDeviation": 3.536,
+            "coefficientOfVariationPercent": 2.16
+          },
+          "processCpuPercent": {
+            "samples": 2,
+            "p50": 138.738,
+            "p95": 142.597,
+            "mean": 138.738,
+            "standardDeviation": 5.457,
+            "coefficientOfVariationPercent": 3.93
+          },
+          "processCpuTimeMs": {
+            "samples": 2,
+            "p50": 4153.5,
+            "p95": 4268.0,
+            "mean": 4153.5,
+            "standardDeviation": 161.927,
+            "coefficientOfVariationPercent": 3.9
+          },
+          "sampleCount": {
+            "samples": 2,
+            "p50": 30.0,
+            "p95": 30.0,
+            "mean": 30.0,
+            "standardDeviation": 0.0,
+            "coefficientOfVariationPercent": 0.0
+          }
+        }
+      }
+    }
+  }
+}

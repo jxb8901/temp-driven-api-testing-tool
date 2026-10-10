@@ -8,6 +8,7 @@ import math
 import os
 import platform
 import queue
+import signal
 import shutil
 import statistics
 import subprocess
@@ -49,10 +50,39 @@ def launcher_command(root, arguments):
     return [str(launcher)] + arguments
 
 
-def run_command(command, cwd):
+def terminate_process_tree(process):
+    if os.name == "nt":
+        taskkill = shutil.which("taskkill")
+        if taskkill:
+            try:
+                subprocess.run([taskkill, "/PID", str(process.pid), "/T", "/F"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        if process.poll() is None:
+            process.kill()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if process.poll() is None:
+            process.kill()
+
+
+def run_command(command, cwd, timeout_seconds=300.0):
     started = time.perf_counter_ns()
+    options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
     process = subprocess.Popen(command, cwd=str(cwd), stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True, bufsize=1)
+                               stderr=subprocess.PIPE, text=True, bufsize=1, **options)
     output = queue.Queue()
 
     def collect(name, stream):
@@ -72,9 +102,15 @@ def run_command(command, cwd):
     first_output_ns = None
     finished_streams = set()
     tail = []
+    deadline = time.monotonic() + timeout_seconds
+    timed_out = False
     while len(finished_streams) < 2:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            break
         try:
-            timestamp, name, line = output.get(timeout=0.05)
+            timestamp, name, line = output.get(timeout=min(0.05, remaining))
         except queue.Empty:
             continue
         if timestamp is None:
@@ -85,16 +121,42 @@ def run_command(command, cwd):
             tail.append("{}: {}".format(name, line))
             del tail[:-8]
 
-    exit_code = process.wait()
+    if not timed_out:
+        try:
+            process.wait(timeout=max(0.001, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            timed_out = True
+    if timed_out:
+        terminate_process_tree(process)
+    try:
+        exit_code = process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        exit_code = process.wait(timeout=2)
     finished = time.perf_counter_ns()
     for reader in readers:
-        reader.join()
-    return {
+        reader.join(timeout=2)
+    while True:
+        try:
+            timestamp, name, line = output.get_nowait()
+        except queue.Empty:
+            break
+        if timestamp is not None:
+            if first_output_ns is None:
+                first_output_ns = timestamp
+            tail.append("{}: {}".format(name, line))
+            del tail[:-8]
+    result = {
         "exitCode": exit_code,
         "firstOutputMs": None if first_output_ns is None else (first_output_ns - started) / 1e6,
         "totalMs": (finished - started) / 1e6,
         "outputTail": tail,
+        "timedOut": timed_out,
     }
+    if timed_out:
+        result["timeoutSeconds"] = timeout_seconds
+        result["terminationReason"] = "per-invocation timeout; process group/tree terminated"
+    return result
 
 
 def write_text(path, contents):
@@ -232,11 +294,17 @@ def summarize_metric(values):
 
 
 def file_metrics(root):
+    if not root.is_dir():
+        return {"fileCount": 0, "bytes": 0}
     files = [path for path in root.rglob("*") if path.is_file()]
     return {"fileCount": len(files), "bytes": sum(path.stat().st_size for path in files)}
 
 
 def require_success(result, command_name):
+    if result.get("timedOut"):
+        raise RuntimeError("{} exceeded {} seconds; {}\n{}".format(
+            command_name, result["timeoutSeconds"], result["terminationReason"],
+            "\n".join(result["outputTail"])))
     if result["exitCode"] != 0:
         raise RuntimeError("{} failed (exit {}):\n{}".format(
             command_name, result["exitCode"], "\n".join(result["outputTail"])))
@@ -277,11 +345,12 @@ def numeric_summary(samples, sections):
     return result
 
 
-def run_run_benchmark(root, runs, warmups, case_count):
+def run_run_benchmark(root, runs, warmups, case_count, timeout_seconds):
     suite = "testcase/run-20.xlsx"
-    snapshot = run_command(launcher_command(root, ["snapshot", "--suite", suite]), root)
+    snapshot = run_command(launcher_command(root, ["snapshot", "--suite", suite]), root, timeout_seconds)
     require_success(snapshot, "Run benchmark snapshot generation")
     samples = []
+    warmup_results = []
     total_invocations = warmups + runs
     for index in range(total_invocations):
         run_id = "run20-{:02d}".format(index + 1)
@@ -289,7 +358,25 @@ def run_run_benchmark(root, runs, warmups, case_count):
         if run_directory.exists():
             shutil.rmtree(run_directory)
         result = run_command(launcher_command(root, ["run", "--suite", suite,
-            "--run-id", run_id, "--output-dir", "output", "--format", "json", "--quiet"]), root)
+            "--run-id", run_id, "--output-dir", "output", "--format", "json", "--quiet"]), root,
+            timeout_seconds)
+        if result.get("timedOut"):
+            timeout_sample = {
+                "runId": run_id,
+                "exitCode": result["exitCode"],
+                "firstOutputMs": result["firstOutputMs"],
+                "totalMs": result["totalMs"],
+                "timedOut": True,
+                "timeoutSeconds": result["timeoutSeconds"],
+                "terminationReason": result["terminationReason"],
+                "outputTail": result["outputTail"],
+                "output": file_metrics(run_directory),
+            }
+            if index >= warmups:
+                samples.append(timeout_sample)
+            else:
+                warmup_results.append(timeout_sample)
+            continue
         require_success(result, "Run benchmark {}".format(run_id))
         run_summary = parse_final_json(result["outputTail"])
         if run_summary is None or int(run_summary.get("total", -1)) != case_count:
@@ -297,20 +384,24 @@ def run_run_benchmark(root, runs, warmups, case_count):
                 run_id, case_count, run_summary))
         if index >= warmups:
             samples.append({
+                "runId": run_id,
                 "exitCode": result["exitCode"],
                 "firstOutputMs": result["firstOutputMs"],
                 "totalMs": result["totalMs"],
+                "timedOut": False,
                 "summary": run_summary,
                 "output": file_metrics(run_directory),
             })
     return {
         "caseCount": case_count,
         "warmups": warmups,
+        "warmupResults": warmup_results,
         "measurements": samples,
+        "timedOutSamples": sum(1 for sample in samples if sample.get("timedOut")),
         "wallTime": {
             "firstOutputMs": summarize_metric([sample["firstOutputMs"] for sample in samples
-                                                if sample["firstOutputMs"] is not None]),
-            "totalMs": summarize_metric([sample["totalMs"] for sample in samples]),
+                                                if not sample.get("timedOut") and sample["firstOutputMs"] is not None]),
+            "totalMs": summarize_metric([sample["totalMs"] for sample in samples if not sample.get("timedOut")]),
         },
     }
 
@@ -352,12 +443,13 @@ def selected_load_metrics(metrics):
 
 
 def run_load_benchmarks(root, rates, evidence_modes, duration, warmup, max_concurrent,
-                        max_samples, runs, warmups):
+                        max_samples, runs, warmups, timeout_seconds):
     conditions = {}
     for rate in rates:
         for evidence_mode in evidence_modes:
             key = "{}TPS-{}".format(rate, evidence_mode)
             measured = []
+            warmup_results = []
             for index in range(warmups + runs):
                 run_id = "load-{}-{}-{:02d}".format(rate, evidence_mode, index + 1)
                 scenario = root / "load" / (run_id + ".yaml")
@@ -365,10 +457,27 @@ def run_load_benchmarks(root, rates, evidence_modes, duration, warmup, max_concu
                                                    evidence_mode, max_samples))
                 result = run_command(launcher_command(root, ["load", str(scenario.relative_to(root)),
                     "--run-id", run_id, "--output-dir", "output", "--format", "json",
-                    "--quiet", "--profile"]), root)
+                    "--quiet", "--profile"]), root, timeout_seconds)
                 run_directory = root / "output" / "load" / run_id
                 summary_path = run_directory / "load-summary.json"
                 profile_path = run_directory / "performance.json"
+                if result.get("timedOut"):
+                    timeout_sample = {
+                        "runId": run_id,
+                        "exitCode": result["exitCode"],
+                        "firstOutputMs": result["firstOutputMs"],
+                        "totalMs": result["totalMs"],
+                        "timedOut": True,
+                        "timeoutSeconds": result["timeoutSeconds"],
+                        "terminationReason": result["terminationReason"],
+                        "outputTail": result["outputTail"],
+                        "output": file_metrics(run_directory),
+                    }
+                    if index >= warmups:
+                        measured.append(timeout_sample)
+                    else:
+                        warmup_results.append(timeout_sample)
+                    continue
                 if not summary_path.is_file():
                     require_success(result, "Load benchmark {}".format(run_id))
                     raise RuntimeError("Missing Load summary for {}".format(run_id))
@@ -385,9 +494,11 @@ def run_load_benchmarks(root, rates, evidence_modes, duration, warmup, max_concu
                                 failure_diagnostics.append({"event": item, "caseLog": log_path.read_text(
                                     encoding="utf-8", errors="replace")[-4000:]})
                 sample = {
+                    "runId": run_id,
                     "exitCode": result["exitCode"],
                     "firstOutputMs": result["firstOutputMs"],
                     "totalMs": result["totalMs"],
+                    "timedOut": False,
                     "status": summary.get("status"),
                     "metrics": selected_load_metrics(metrics),
                     "resources": summary.get("resources", {}),
@@ -411,11 +522,14 @@ def run_load_benchmarks(root, rates, evidence_modes, duration, warmup, max_concu
                 "duration": duration,
                 "warmup": warmup,
                 "warmupRuns": warmups,
+                "warmupResults": warmup_results,
                 "measurements": measured,
+                "timedOutSamples": sum(1 for sample in measured if sample.get("timedOut")),
                 "wallTime": {
                     "firstOutputMs": summarize_metric([sample["firstOutputMs"] for sample in measured
-                                                        if sample["firstOutputMs"] is not None]),
-                    "totalMs": summarize_metric([sample["totalMs"] for sample in measured]),
+                                                        if not sample.get("timedOut") and sample["firstOutputMs"] is not None]),
+                    "totalMs": summarize_metric([sample["totalMs"] for sample in measured
+                                                  if not sample.get("timedOut")]),
                 },
                 "loadMetricsAcrossRuns": {
                     "load": numeric_summary(measured, ["metrics"]),
@@ -446,6 +560,34 @@ def parse_csv(value, cast, label):
     return result
 
 
+def create_http_server(max_concurrent):
+    class ConfiguredThreadingHTTPServer(ThreadingHTTPServer):
+        request_queue_size = max(128, max_concurrent)
+
+    server = ConfiguredThreadingHTTPServer(("127.0.0.1", 0), ReadyHandler)
+    server.daemon_threads = True
+    return server
+
+
+def os_listen_backlog_limit():
+    if sys.platform.startswith("linux"):
+        limit_path = Path("/proc/sys/net/core/somaxconn")
+        if limit_path.is_file():
+            try:
+                return int(limit_path.read_text(encoding="ascii").strip())
+            except (OSError, ValueError):
+                return None
+    elif sys.platform == "darwin":
+        try:
+            result = subprocess.run(["sysctl", "-n", "kern.ipc.somaxconn"],
+                                    capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                return int(result.stdout.strip())
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-root", type=Path, required=True,
@@ -462,11 +604,15 @@ def main():
     parser.add_argument("--runs", type=int, default=3, help="Measured runs per condition")
     parser.add_argument("--warmups", type=int, default=1,
                         help="Discarded whole-process warmup runs per condition")
+    parser.add_argument("--timeout-seconds", type=float, default=300.0,
+                        help="Per-invocation deadline; timed-out samples are retained in the report")
     parser.add_argument("--case-count", type=int, default=20)
     parser.add_argument("--output", type=Path, default=Path("run-load-benchmark-4.0.1.json"))
     args = parser.parse_args()
     if args.runs < 2 or args.warmups < 0:
         parser.error("--runs must be >= 2 and --warmups must be >= 0")
+    if args.timeout_seconds <= 0:
+        parser.error("--timeout-seconds must be positive")
     if args.max_concurrent < 1 or args.max_samples < 0 or args.case_count < 20:
         parser.error("--max-concurrent must be positive, --max-samples non-negative, and --case-count >= 20")
     rates = parse_csv(args.rates, int, "--rates")
@@ -476,9 +622,7 @@ def main():
         parser.error("unsupported evidence mode(s): {}".format(", ".join(invalid)))
 
     runtime_root = args.runtime_root.resolve()
-    http_server = ThreadingHTTPServer(("127.0.0.1", 0), ReadyHandler)
-    http_server.daemon_threads = True
-    http_server.request_queue_size = max(128, args.max_concurrent)
+    http_server = create_http_server(args.max_concurrent)
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     http_thread.start()
     try:
@@ -486,18 +630,21 @@ def main():
             package_root = Path(temporary) / "package"
             package_root.mkdir()
             install_package(runtime_root, package_root, http_server.server_address[1], args.case_count)
-            version = run_command(launcher_command(package_root, ["version"]), package_root)
+            version = run_command(launcher_command(package_root, ["version"]), package_root,
+                                  args.timeout_seconds)
             require_success(version, "Read runtime version")
             runtime_version = "\n".join(version["outputTail"])
-            run_result = run_run_benchmark(package_root, args.runs, args.warmups, args.case_count)
+            run_result = run_run_benchmark(package_root, args.runs, args.warmups, args.case_count,
+                                           args.timeout_seconds)
             load_results = run_load_benchmarks(package_root, rates, evidence_modes,
                 args.duration, args.load_warmup, args.max_concurrent, args.max_samples,
-                args.runs, args.warmups)
+                args.runs, args.warmups, args.timeout_seconds)
     finally:
         http_server.shutdown()
         http_server.server_close()
         http_thread.join(timeout=2)
 
+    os_backlog_limit = os_listen_backlog_limit()
     report = {
         "schemaVersion": "att-run-load-benchmark/v1",
         "runtime": {"versionOutput": runtime_version, "sourceRevision": args.runtime_revision,
@@ -519,6 +666,15 @@ def main():
             "loadWarmup": args.load_warmup,
             "loadDuration": args.duration,
             "maxConcurrent": args.max_concurrent,
+            "timeoutSeconds": args.timeout_seconds,
+            "localHttpServer": {
+                "host": "127.0.0.1",
+                "configuredRequestQueueSize": http_server.request_queue_size,
+                "osReportedSomaxconn": os_backlog_limit,
+                "effectiveBacklogEstimate": min(http_server.request_queue_size, os_backlog_limit)
+                    if os_backlog_limit is not None else None,
+                "note": "The effective backlog is estimated from the configured listen value and OS somaxconn; the OS may apply additional limits.",
+            },
             "maxRetainedSamples": args.max_samples,
             "wallTime": "Includes launcher and JVM startup; firstOutputMs is process spawn to first non-empty stdout/stderr line.",
             "percentile": "p95 uses nearest-rank over whole-process samples; per-run Load p95 is ATT's bounded latency reservoir.",

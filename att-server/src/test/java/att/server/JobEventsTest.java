@@ -135,4 +135,30 @@ class JobEventsTest {
         assertEquals(16,recovered.after(128).size());
         assertEquals(128,Files.readAllLines(file).size());
     }
+
+    @Test void failedCatchUpWaitsForNextAppendThresholdAndThenMakesProgress() throws Exception {
+        Path file=temp.resolve("bounded-compaction-retry.jsonl");
+        java.util.concurrent.atomic.AtomicInteger compactions=new java.util.concurrent.atomic.AtomicInteger();
+        final JobEvents[] journal=new JobEvents[1];
+        journal[0]=new JobEvents(file,128,Runnable::run,()->{
+            if(compactions.getAndIncrement()==0) {
+                try {
+                    for(int i=1;i<=33;i++)journal[0].append("progress",Map.of("burst",i));
+                } catch(Exception failure) {throw new IllegalStateException(failure);}
+            }
+        });
+
+        for(int i=1;i<=128;i++)journal[0].append("progress",Map.of("sequence",i));
+        assertEquals(1,compactions.get(),"An oversized catch-up must not immediately resubmit compaction");
+        assertEquals(161,journal[0].latest());
+        assertEquals(161,Files.readAllLines(file).size(),"A failed snapshot must leave the original journal intact");
+
+        for(int i=162;i<=256;i++)journal[0].append("progress",Map.of("sequence",i));
+        assertEquals(2,compactions.get(),"The next event threshold should retry compaction once");
+        assertEquals(256,journal[0].latest());
+        assertEquals(128,Files.readAllLines(file).size(),"A later snapshot should restore the configured disk window");
+        JobEvents recovered=new JobEvents(file,128,Runnable::run);
+        assertEquals(256,recovered.latest());
+        assertEquals(128,recovered.after(128).size());
+    }
 }
