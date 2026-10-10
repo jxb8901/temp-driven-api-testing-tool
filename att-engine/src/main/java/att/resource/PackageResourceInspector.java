@@ -24,10 +24,18 @@ import java.io.StringReader;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardWatchEventKinds;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -44,6 +52,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -52,7 +61,7 @@ import java.util.stream.Stream;
  * Read-only logical package index used by the authenticated Server inspector Worker.
  * It only opens resources reachable through the package configuration and never executes Tools.
  */
-public final class PackageResourceInspector {
+public final class PackageResourceInspector implements AutoCloseable {
     public static final int MAX_PAGE_SIZE = 100;
     public static final int DEFAULT_PAGE_SIZE = 50;
     private static final int MAX_INLINE_BACK_REFERENCES = 100;
@@ -77,10 +86,22 @@ public final class PackageResourceInspector {
     private final Set<String> safeTextSources;
     private final int maxSourceBytes;
     private final int maxResponseBytes;
+    private final boolean cacheEnabled;
+    private volatile Index cachedIndex;
+    private volatile long cachedIndexVersion = Long.MIN_VALUE;
+    private volatile PackageWatch packageWatch;
+    private volatile boolean cacheUnavailable;
+    private volatile long indexBuildCount;
 
     public PackageResourceInspector(Path packageRoot, Path configPath, String environment,
                                     Collection<String> safeTextSources,
                                     int maxSourceBytes, int maxResponseBytes) {
+        this(packageRoot,configPath,environment,safeTextSources,maxSourceBytes,maxResponseBytes,false);
+    }
+
+    public PackageResourceInspector(Path packageRoot, Path configPath, String environment,
+                                    Collection<String> safeTextSources,
+                                    int maxSourceBytes, int maxResponseBytes, boolean cacheEnabled) {
         this.resources = new PackageResourceResolver(packageRoot);
         this.packageRoot = resources.packageRoot();
         this.configPath = configPath == null ? Paths.get("config/config.yaml") : configPath;
@@ -89,6 +110,7 @@ public final class PackageResourceInspector {
                 safeTextSources == null ? Collections.<String>emptySet() : safeTextSources);
         this.maxSourceBytes = positive(maxSourceBytes, 65536, "maxSourceBytes");
         this.maxResponseBytes = positive(maxResponseBytes, 262144, "maxResponseBytes");
+        this.cacheEnabled = cacheEnabled;
     }
 
     public Map<String, Object> inspect(String action, String type, String resourceId,
@@ -216,6 +238,33 @@ public final class PackageResourceInspector {
     }
 
     private Index index() throws Exception {
+        if (!cacheEnabled || cacheUnavailable) return buildIndex();
+        PackageWatch watch;
+        try { watch = packageWatch(); }
+        catch (Exception unavailable) { cacheUnavailable = true; return buildIndex(); }
+        for (int attempt = 0; attempt < 3; attempt++) {
+            long version = watch.version();
+            Index cached = cachedIndex;
+            if (cached != null && cachedIndexVersion == version) return cached;
+            Index built = buildIndex();
+            try { watch.registerFileParents(built.files); }
+            catch (Exception unavailable) {
+                cacheUnavailable = true;
+                close();
+                return built;
+            }
+            long after = watch.version();
+            if (after == version) {
+                cachedIndex = built;
+                cachedIndexVersion = after;
+                return built;
+            }
+        }
+        throw new ResourceLimitException();
+    }
+
+    private Index buildIndex() throws Exception {
+        indexBuildCount++;
         Index index = new Index();
         Path configFile = configPath.isAbsolute() ? configPath : packageRoot.resolve(configPath);
         configFile = resources.fromInternalPath(configFile, PackageResourceResolver.Kind.FILE).canonicalPath();
@@ -331,6 +380,60 @@ public final class PackageResourceInspector {
         } catch (Exception ignored) {
             index.debugSidecars.put(logicalName, null);
         }
+    }
+
+    long indexBuildCount() { return indexBuildCount; }
+    long packageChangeVersion() throws Exception { return packageWatch().version(); }
+
+    private PackageWatch packageWatch() throws Exception {
+        PackageWatch current = packageWatch;
+        if (current != null) return current;
+        synchronized (this) {
+            current = packageWatch;
+            if (current == null) packageWatch = current = new PackageWatch(packageRoot, packageWatchRoots());
+        }
+        return current;
+    }
+
+    private WatchRoots packageWatchRoots() throws Exception {
+        WatchRoots roots = new WatchRoots();
+        Path configFile = configPath.isAbsolute() ? configPath : packageRoot.resolve(configPath);
+        configFile = resources.fromInternalPath(configFile, PackageResourceResolver.Kind.FILE).canonicalPath();
+        roots.recursive.add(configFile.getParent());
+        FrameworkConfig config = new FrameworkConfigLoader().load(configFile, packageRoot, environment);
+        Path templatesRoot = config.templatesRoot().isAbsolute()
+                ? config.templatesRoot() : packageRoot.resolve(config.templatesRoot());
+        Path casesRoot = config.testcasesRoot().isAbsolute()
+                ? config.testcasesRoot() : packageRoot.resolve(config.testcasesRoot());
+        addWatchRoot(templatesRoot, roots);
+        addWatchRoot(casesRoot, roots);
+        for (ToolConfig tool : config.tools().values()) {
+            if (tool.sourceFile() == null) continue;
+            try {
+                Path source = tool.sourceFile().isAbsolute() ? tool.sourceFile() : packageRoot.resolve(tool.sourceFile());
+                Path canonical = resources.fromInternalPath(source, PackageResourceResolver.Kind.FILE).canonicalPath();
+                if (canonical.getParent() != null) roots.direct.add(canonical.getParent());
+            } catch (Exception ignored) { /* invalid or external Tool descriptors are not watchable */ }
+        }
+        return roots;
+    }
+
+    private void addWatchRoot(Path candidate, WatchRoots roots) {
+        try {
+            roots.recursive.add(resources.fromInternalPath(candidate, PackageResourceResolver.Kind.DIRECTORY).canonicalPath());
+        } catch (Exception unavailable) {
+            Path absolute = candidate.toAbsolutePath().normalize();
+            Path parent = absolute.getParent();
+            if (parent != null && parent.startsWith(packageRoot) && Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS))
+                roots.direct.add(parent);
+        }
+    }
+
+    @Override public void close() {
+        PackageWatch watch = packageWatch;
+        packageWatch = null;
+        cachedIndex = null;
+        if (watch != null) watch.close();
     }
 
     private void indexTemplates(Index index, FrameworkConfig config, Path templatesRoot) {
@@ -867,6 +970,145 @@ public final class PackageResourceInspector {
         return result.toString();
     }
     private static boolean deepEquals(Object left, Object right) { return left == null ? right == null : left.equals(right); }
+
+    /**
+     * Watches package metadata so a long-lived inspection Worker can reuse its parsed index.
+     * Any create, edit, deletion, or watcher overflow invalidates the snapshot conservatively.
+     */
+    private static final class PackageWatch implements AutoCloseable {
+        private static final int MAX_WATCHED_DIRECTORIES = 20000;
+        private final Path root;
+        private final WatchService service;
+        private final Map<WatchKey, Path> directories = new HashMap<WatchKey, Path>();
+        private final Set<Path> watchedDirectories = new HashSet<Path>();
+        private final AtomicLong version = new AtomicLong();
+        private final Thread thread;
+        private volatile boolean closed;
+
+        PackageWatch(Path root, WatchRoots roots) throws Exception {
+            this.root = root.toRealPath();
+            this.service = FileSystems.getDefault().newWatchService();
+            try {
+                for (Path candidate : roots.recursive) {
+                    if (candidate == null || !candidate.startsWith(this.root)) continue;
+                    if (Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS)) registerTree(candidate);
+                    else if (candidate.getParent() != null) registerTree(candidate.getParent());
+                }
+                for (Path candidate : roots.direct) registerDirectory(candidate);
+            } catch (Exception failure) {
+                try { service.close(); } catch (Exception ignored) { }
+                throw failure;
+            }
+            this.thread = new Thread(new Runnable() {
+                @Override public void run() { watchLoop(); }
+            }, "att-package-inspection-watch");
+            this.thread.setDaemon(true);
+            this.thread.start();
+        }
+
+        synchronized long version() {
+            drainPendingEvents();
+            return version.get();
+        }
+
+        private void watchLoop() {
+            while (!closed) {
+                try {
+                    WatchKey key = service.take();
+                    synchronized (this) { process(key); }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (Exception ignored) {
+                    version.incrementAndGet();
+                }
+            }
+        }
+
+        private void drainPendingEvents() {
+            WatchKey key;
+            while ((key = service.poll()) != null) process(key);
+        }
+
+        private void process(WatchKey key) {
+            Path directory = directories.get(key);
+            if (directory == null) {
+                key.cancel();
+                version.incrementAndGet();
+                return;
+            }
+            for (WatchEvent<?> event : key.pollEvents()) {
+                if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+                    version.incrementAndGet();
+                    continue;
+                }
+                Object context = event.context();
+                if (context instanceof Path && event.kind() == StandardWatchEventKinds.ENTRY_CREATE) {
+                    Path child = directory.resolve((Path) context);
+                    if (Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)) {
+                        try { registerTree(child); }
+                        catch (Exception ignored) { /* the create event still invalidates the old snapshot */ }
+                    }
+                }
+                version.incrementAndGet();
+            }
+            if (!key.reset()) {
+                directories.remove(key);
+                if (directory != null) watchedDirectories.remove(directory);
+                version.incrementAndGet();
+            }
+        }
+
+        private synchronized void registerTree(Path start) throws Exception {
+            if (!start.startsWith(root) || Files.isSymbolicLink(start)) return;
+            Files.walkFileTree(start, new SimpleFileVisitor<Path>() {
+                @Override public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes)
+                        throws java.io.IOException {
+                    if (Files.isSymbolicLink(directory) || watchedDirectories.contains(directory)) return FileVisitResult.SKIP_SUBTREE;
+                    if (directories.size() >= MAX_WATCHED_DIRECTORIES) throw new java.io.IOException("Package has too many directories to watch");
+                    WatchKey key = directory.register(service,
+                            StandardWatchEventKinds.ENTRY_CREATE,
+                            StandardWatchEventKinds.ENTRY_MODIFY,
+                            StandardWatchEventKinds.ENTRY_DELETE);
+                    directories.put(key, directory);
+                    watchedDirectories.add(directory);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        }
+
+        synchronized void registerFileParents(Collection<Path> files) throws Exception {
+            for (Path file : files) {
+                Path parent = file.getParent();
+                if (parent == null || !parent.startsWith(root) || Files.isSymbolicLink(parent)) continue;
+                registerDirectory(parent);
+            }
+        }
+
+        private void registerDirectory(Path directory) throws Exception {
+            if (!directory.startsWith(root) || Files.isSymbolicLink(directory)
+                    || watchedDirectories.contains(directory) || !Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) return;
+            if (directories.size() >= MAX_WATCHED_DIRECTORIES) throw new java.io.IOException("Package has too many directories to watch");
+            WatchKey key = directory.register(service,
+                    StandardWatchEventKinds.ENTRY_CREATE,
+                    StandardWatchEventKinds.ENTRY_MODIFY,
+                    StandardWatchEventKinds.ENTRY_DELETE);
+            directories.put(key, directory);
+            watchedDirectories.add(directory);
+        }
+
+        @Override public void close() {
+            closed = true;
+            try { service.close(); } catch (Exception ignored) { }
+            thread.interrupt();
+            synchronized (this) { directories.clear(); watchedDirectories.clear(); }
+        }
+    }
+
+    private static final class WatchRoots {
+        final Set<Path> recursive = new TreeSet<Path>();
+        final Set<Path> direct = new TreeSet<Path>();
+    }
 
     private static final class Index {
         final Map<String, Resource> byId = new LinkedHashMap<String, Resource>();

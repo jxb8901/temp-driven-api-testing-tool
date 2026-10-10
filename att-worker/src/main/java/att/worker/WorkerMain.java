@@ -19,18 +19,31 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** One-request, one-result process adapter for the typed engine API. */
+/** Typed Engine process adapter with a one-request job mode and a bounded inspection daemon mode. */
 public final class WorkerMain {
     private static final String PROTOCOL="att-worker/v1";
     private final ObjectMapper mapper=new ObjectMapper();
     private final WorkerResourceTelemetry resourceTelemetry=new WorkerResourceTelemetry();
     private final PrintStream protocol;
+    private final LinkedHashMap<InspectorKey,PackageResourceInspector> resourceInspectors =
+            new LinkedHashMap<InspectorKey,PackageResourceInspector>(8,0.75f,true);
     private String jobId;
+    private boolean inspectionDaemon;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
         PrintStream protocol=System.out;
         System.setOut(System.err);
-        int exit=new WorkerMain(protocol).execute();
+        WorkerMain worker=new WorkerMain(protocol);
+        if(args.length==1&&"--inspection-daemon".equals(args[0])) {
+            worker.executeInspectionDaemon();
+            return;
+        }
+        if(args.length!=0) {
+            int invalid=worker.fail("WORKER_REQUEST_INVALID","Unsupported Worker mode");
+            if(invalid!=0)System.exit(invalid);
+            return;
+        }
+        int exit=worker.execute();
         if(exit!=0) System.exit(exit);
     }
     private int execute() throws Exception {
@@ -50,11 +63,42 @@ public final class WorkerMain {
             emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
             return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
         }
+        return executeRequest(input);
+    }
+
+    private void executeInspectionDaemon() throws Exception {
+        inspectionDaemon=true;
+        try(BufferedReader requests=new BufferedReader(new InputStreamReader(System.in,StandardCharsets.UTF_8))) {
+            String line;
+            while((line=requests.readLine())!=null) {
+                if(line.trim().isEmpty())continue;
+                JsonNode input;
+                try {
+                    JsonParser parser=mapper.getFactory().createParser(line);
+                    input=mapper.readTree(parser);
+                    if(parser.nextToken()!=null)throw new IllegalArgumentException("Only one JSON request is accepted per line");
+                } catch(Exception error) {
+                    jobId=null;
+                    emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
+                    fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
+                    continue;
+                }
+                executeRequest(input);
+            }
+        } finally {
+            closeResourceInspectors();
+        }
+    }
+
+    private int executeRequest(JsonNode input) throws Exception {
+        if(input==null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","A JSON request is required"); }
+        if(input.hasNonNull("jobId")) jobId=input.get("jobId").asText();
         WorkerRequest request;
         emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
         try { request=mapper.treeToValue(input,WorkerRequest.class); }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
         if(!PROTOCOL.equals(request.protocolVersion)) return fail("WORKER_PROTOCOL_UNSUPPORTED","Unsupported protocolVersion; expected "+PROTOCOL);
+        if(inspectionDaemon&&!("inspect".equals(request.command))) return fail("WORKER_REQUEST_INVALID","Inspection Workers accept only inspect requests");
         jobId=request.jobId;
         if(jobId==null||jobId.trim().isEmpty()) return fail("WORKER_REQUEST_INVALID","jobId is required");
         try {
@@ -115,9 +159,7 @@ public final class WorkerMain {
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
-            PackageResourceInspector inspector = new PackageResourceInspector(root, config, r.environment,
-                    r.safeTextSources, r.maxSourceBytes == null ? 65536 : r.maxSourceBytes,
-                    r.maxResponseBytes == null ? 262144 : r.maxResponseBytes);
+            PackageResourceInspector inspector = resourceInspector(root, config, r);
             if("debug-form".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.inspectDebugForm(r.inspectionType,r.inspectionResourceId,r.expectedRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
@@ -137,6 +179,55 @@ public final class WorkerMain {
                     Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
         }
         throw new IllegalArgumentException("Unsupported Worker command: "+r.command);
+    }
+
+    private synchronized PackageResourceInspector resourceInspector(Path root,Path config,WorkerRequest request) {
+        List<String> safeSources=new ArrayList<String>();
+        if(request.safeTextSources!=null)safeSources.addAll(request.safeTextSources);
+        Collections.sort(safeSources);
+        InspectorKey key=new InspectorKey(root.toAbsolutePath().normalize().toString(),
+                config==null?"":config.toString(),request.environment,safeSources,
+                request.maxSourceBytes==null?65536:request.maxSourceBytes,
+                request.maxResponseBytes==null?262144:request.maxResponseBytes);
+        PackageResourceInspector inspector=resourceInspectors.get(key);
+        if(inspector!=null)return inspector;
+        inspector=new PackageResourceInspector(root,config,request.environment,safeSources,
+                key.maxSourceBytes,key.maxResponseBytes,inspectionDaemon);
+        resourceInspectors.put(key,inspector);
+        while(resourceInspectors.size()>2) {
+            Map.Entry<InspectorKey,PackageResourceInspector> eldest=resourceInspectors.entrySet().iterator().next();
+            resourceInspectors.remove(eldest.getKey());
+            eldest.getValue().close();
+        }
+        return inspector;
+    }
+
+    private synchronized void closeResourceInspectors() {
+        for(PackageResourceInspector inspector:resourceInspectors.values())inspector.close();
+        resourceInspectors.clear();
+    }
+
+    private static final class InspectorKey {
+        final String root,config,environment;
+        final List<String> safeTextSources;
+        final int maxSourceBytes,maxResponseBytes;
+        InspectorKey(String root,String config,String environment,List<String> safeTextSources,
+                     int maxSourceBytes,int maxResponseBytes) {
+            this.root=root;this.config=config;this.environment=environment;
+            this.safeTextSources=Collections.unmodifiableList(new ArrayList<String>(safeTextSources));
+            this.maxSourceBytes=maxSourceBytes;this.maxResponseBytes=maxResponseBytes;
+        }
+        @Override public boolean equals(Object other) {
+            if(this==other)return true;
+            if(!(other instanceof InspectorKey))return false;
+            InspectorKey value=(InspectorKey)other;
+            return maxSourceBytes==value.maxSourceBytes&&maxResponseBytes==value.maxResponseBytes
+                    &&java.util.Objects.equals(root,value.root)&&java.util.Objects.equals(config,value.config)
+                    &&java.util.Objects.equals(environment,value.environment)&&safeTextSources.equals(value.safeTextSources);
+        }
+        @Override public int hashCode() {
+            return java.util.Objects.hash(root,config,environment,safeTextSources,maxSourceBytes,maxResponseBytes);
+        }
     }
     private Map<String,Object> requiredTarget(WorkerRequest r) { if(r.target==null)throw new IllegalArgumentException("target is required"); return r.target; }
     private void emitExecution(att.api.ExecutionEvent event) {
