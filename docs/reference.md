@@ -90,6 +90,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Configuration owners](#configuration-owners)
 - [CLI reference](#cli-reference)
   - [Choose a command](#choose-a-command)
+  - [Build a source checkout](#build-a-source-checkout)
   - [Find syntax, options, and examples by task](#find-syntax-options-and-examples-by-task)
   - [Use ATT Server from the CLI](#use-att-server-from-the-cli)
   - [Typed overrides and quick Load](#typed-overrides-and-quick-load)
@@ -968,6 +969,7 @@ Debug executes one Template, Flow or Tool without requiring a workbook Testcase.
 ./att.sh debug template PAYMENT_INVOKE
 ./att.sh debug flow common.compose.v1 --input /tmp/compose.debug.yaml
 ./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml --env UAT
+./att.sh debug template PAYMENT_INVOKE --profile
 ```
 
 Run `./att.sh debug` with no target to list statically valid runnable Tools, Templates and Flows with copyable commands. A default sidecar path is displayed only when that regular non-symlink file exists. Discovery validates selected target dependencies but does not create Debug output or invoke Tools. Use `--format json` for machine-readable discovery output.
@@ -1038,8 +1040,11 @@ Each invocation is isolated under:
 output/debug/<debugId>/
 ├── case.log
 ├── result.yaml
+├── performance.json       # with --profile
 └── artifacts/
 ```
+
+`--profile` records monotonic timings from Java main entry through the first printed progress event and the first target action, along with config, input, validation, context setup, resource-helper setup, action execution, finalization, and result-write phases. The report's `totalMs` excludes the shell launcher and JVM startup. The first-console phase is absent when no progress event is printed (for example, a quiet run). See the [3.7.3 comparison procedure](system-design/debug-startup-benchmark.md) for repeatable startup benchmarks.
 
 Debug does not create or update normal `latest-run.yaml`. Exit codes are `0` PASS, `1` FAIL, `2` invalid CLI/config/input/validation, and `3` runtime error. It is execution-equivalent at the selected reusable-component boundary, but it is **not** a workbook Case: there is no workbook selection, Stage history or result-workbook lifecycle unless explicitly represented by debug inputs/artifacts.
 
@@ -1145,6 +1150,7 @@ Each invocation writes:
 output/debug/<debugId>/
 ├── case.log
 ├── result.yaml
+├── performance.json       # with --profile
 └── artifacts/
     └── case.yaml
 ```
@@ -1269,6 +1275,8 @@ average concurrency ≈ arrival rate (requests/second) × mean response time (se
 ```
 
 For example, 20 HTTP requests/second at a mean 1.5-second response time needs about 30 concurrent connections to avoid the client pool becoming the limiting factor. HTTP defaults to `pool.maxConnections: 50` and `pool.maxConnectionsPerRoute: 20`; raise both as needed for the workload, keeping the per-route value no greater than the total. Add headroom for latency variation and other routes, then confirm with `resources.http` active/idle/waiting/peak observations. Pool capacity is a generator-side ceiling, not a recommendation to send that load to an unverified service.
+
+For DB work, use the connection-lease time in the same estimate: DB operations/second × mean time a borrowed connection stays in use. For example, 40 operations/second with a 100 ms mean lease needs about four concurrent connections. Set `pool.maxSize` for each DB helper to that concurrency plus headroom, then check its `resources.db` active/idle/waiting, borrow-timeout and total-borrow-wait metrics. The default maximum is 20 per helper; it is a client-side limit, not a target database capacity recommendation.
 
 For MQ request/reply, 10 requests/second with a mean 3-second reply time likewise needs about 30 leased connections across the workload. Size `pool.maxSize` for the expected in-flight requests **per physical MQ instance**, not per logical helper. With a single instance (or calls pinned to one instance), that is about 30 plus headroom. With two evenly selected instances, it is about 15 per instance on average; account for selection skew and verify the actual distribution. `resources.mq` reports pool metrics per physical instance, so inspect each pool's waiting and timeout metrics alongside response latency. `minIdle` is applied when that physical pool is first created on use; it does not create or warm the pool before Load starts. To move connection creation out of measured steady-state latency, combine `minIdle` with a Load warm-up/first-use warm-up phase. Recalculate from observed mean latency as load changes; tail latency is useful for headroom, but is not the mean used by the estimate.
 
@@ -2510,6 +2518,16 @@ A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references 
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
+### Build a source checkout
+
+The source checkout launchers run prebuilt classes and never compile code. Build the Java 8-compatible CLI, Engine, Remote, and Server API modules explicitly with a JDK and Maven:
+
+```sh
+mvn -DskipTests -pl att-cli -am compile
+```
+
+Then run `./att.sh` on macOS/Linux or `att.bat` on Windows. If required classes are missing, the launcher exits with the build command and does not try to run it. Packaged releases contain prebuilt application JARs and require a Java 8 or later runtime, not Maven. Place optional JDBC or IBM MQ driver JARs in `lib/` when those integrations are used. The Server WAR requires Java 17 or later.
+
 ### Find syntax, options, and examples by task
 
 #### Check help and version
@@ -2577,6 +2595,7 @@ On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not in
 | `./att.sh debug <type> <id> --debug-id <id>` | Set the exact standalone Debug directory identity |
 | `./att.sh debug <type> <id> --unsafe-failure-details` | Opt into expanded collector failure diagnostics for this standalone local Debug run; prints a warning and keeps secret redaction |
 | `./att.sh debug <type> <id> --output-dir <dir>` | Isolate debug output below `<dir>/debug/<debugId>/` |
+| `./att.sh debug <type> <id> --profile` | Write CLI startup and Debug phase timings to `performance.json` |
 | `./att.sh debug <type> <id> --format json` | Emit a compact machine-readable console summary; full evidence remains in `result.yaml` |
 | `./att.sh debug <type> <id> --quiet` | Suppress detailed live progress; keep the final summary and errors |
 
@@ -2667,7 +2686,7 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 
 ### Complete option matrix
 
-`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.12` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` or `load`.
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.12` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
 
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 

@@ -17,6 +17,10 @@ workers:
   # Maximum admitted Load jobs (queued or executing); excess submissions receive HTTP 429.
   maxConcurrentLoad: 2
   gracefulStopMs: 10000
+  # Optional per-Worker heap bounds. Set heapMaxMb to limit each isolated process;
+  # heapInitialMb requires heapMaxMb and cannot exceed it.
+  # heapInitialMb: 256
+  # heapMaxMb: 1024
   # Optional directories containing external JDBC, MQ, or other Worker dependency JARs.
   libraryDirs: []
 

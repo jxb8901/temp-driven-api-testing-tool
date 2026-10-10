@@ -119,12 +119,16 @@ public final class DebugEngine {
     }
 
     public Result run(ExecutionOptions options) throws Exception {
+        return run(options, null);
+    }
+
+    public Result run(ExecutionOptions options, att.core.PerformanceProfile performanceProfile) throws Exception {
         String target = options.debugTargetType() + ":" + safeConsoleIdentity(options.debugTargetId());
         att.core.ConsoleCancellationHook cancellation = new att.core.ConsoleCancellationHook(new Runnable() {
             @Override public void run() { options.emitEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.STATUS,
                     null,null,null,null,"CANCELLED",null,null,java.util.Collections.<String,Object>singletonMap("target",target))); }
         });
-        try { return runInternal(options); }
+        try { return runInternal(options, performanceProfile); }
         finally { cancellation.close(); }
     }
 
@@ -136,7 +140,7 @@ public final class DebugEngine {
                 Collections.<String>emptyList());
     }
 
-    private Result runInternal(ExecutionOptions options) throws Exception {
+    private Result runInternal(ExecutionOptions options, att.core.PerformanceProfile performanceProfile) throws Exception {
         Instant started = Instant.now();
         String targetType = options.debugTargetType();
         String targetId = options.debugTargetId();
@@ -144,11 +148,13 @@ public final class DebugEngine {
                 null,null,null,null,"UNSAFE_FAILURE_DETAILS",null,
                 "[ATT WARNING] --unsafe-failure-details is enabled: collector diagnostics may expose local data. Configured secrets remain redacted. Use only with trusted local data.",
                 java.util.Collections.<String,Object>emptyMap()));
+        long outputSetupPhase = performanceProfile == null ? 0L : performanceProfile.begin();
         Path debugDirectory = createDebugDirectory(options, targetType, targetId, started);
         Path artifacts = debugDirectory.resolve("artifacts");
         Path logPath = debugDirectory.resolve("case.log");
         Path resultPath = debugDirectory.resolve("result.yaml");
         Files.createDirectories(artifacts);
+        if (performanceProfile != null) performanceProfile.end("debugOutputSetupMs", outputSetupPhase);
 
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("schemaVersion", Version.DEBUG_SCHEMA);
@@ -191,9 +197,14 @@ public final class DebugEngine {
                                 })
                             : null);
             log.setProjectRoot(projectRoot);
-            input = loadInput(options, targetType, targetId);
+            long inputLoadPhase = performanceProfile == null ? 0L : performanceProfile.begin();
+            try { input = loadInput(options, targetType, targetId); }
+            finally { if (performanceProfile != null) performanceProfile.end("debugInputLoadMs", inputLoadPhase); }
             result.put("input", att.core.PathPresentation.displayPath(input.path, projectRoot));
-            ResolvedTarget resolved = resolveTarget(targetType, targetId, input);
+            long targetResolvePhase = performanceProfile == null ? 0L : performanceProfile.begin();
+            ResolvedTarget resolved;
+            try { resolved = resolveTarget(targetType, targetId, input); }
+            finally { if (performanceProfile != null) performanceProfile.end("debugTargetResolveMs", targetResolvePhase); }
             StageCaseData stage = input.stage(resolved.template.name());
             TestCase testCase = syntheticCase(targetType, targetId, input, stage);
             if ("tool".equals(targetType))
@@ -210,50 +221,63 @@ public final class DebugEngine {
                         testCase.caseId(),null,null,"INPUT_RESOLVED",null,null,eventData));
             }
 
-            new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
-                    resolved.flows, input.path, "debug", testCase.caseData(), input.vars, input.testdataDescriptors);
+            long validationPhase = performanceProfile == null ? 0L : performanceProfile.begin();
+            try {
+                new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
+                        resolved.flows, input.path, "debug", testCase.caseData(), input.vars, input.testdataDescriptors);
+            } finally { if (performanceProfile != null) performanceProfile.end("debugValidationMs", validationPhase); }
 
-            context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(),
-                    debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug",
-                    started.toString(), started.toString());
-            context.setProject(projectRoot);
-            context.setUnsafeFailureDetails(options.unsafeFailureDetails());
-            context.setSourceMetadata("debug", input.path, testCase.caseId());
-            context.setTargetMetadata(targetType, targetId);
-            context.setTemplateMetadata(resolved.template.name(), resolved.template.directory());
-            context.put("CASE.environment", config.environment());
-            context.put("CASE.failureDetailMode", options.unsafeFailureDetails() ? "local-unsafe" : "safe-default");
-            att.testdata.TestdataInputResolver testdata = new att.testdata.TestdataInputResolver(
-                    new att.testdata.TestdataRegistry(projectRoot, config.testdataDescriptors(), input.testdataDescriptors,
-                            "debug-local"));
-            context.replaceInputValues(testdata.resolve(testCase.caseData(), context, null, null));
-            if ("template".equals(targetType) || "flow".equals(targetType))
-                att.core.ExecutionBootstrapVariables.evaluate(input.vars, context, bootstrapEngine,
-                        att.core.ExecutionBootstrapVariables.Scope.DEBUG);
-            Map<String, Object> resolvedStageValues = testdata.resolve(stage.values(), context, null, null);
-            if (!testdata.selectionEvidence().isEmpty())
-                context.put("CASE.testdataSelections", testdata.selectionEvidence());
-            stage = new StageCaseData(stage.key(), stage.templateName(), resolvedStageValues);
-            context.put("CASE.debugInput", context.logicalPackageName(input.path));
-            Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();
-            debugHeader.put("target", target);
-            debugHeader.put("input", logicalInputName(input.path));
-            debugHeader.put("caseId", testCase.caseId());
-            log.append("DEBUG TARGET", debugHeader);
-            context.beginStage(stage, resolved.template.name(), resolved.template.directory());
-            stageStarted = true;
+            long contextSetupPhase = performanceProfile == null ? 0L : performanceProfile.begin();
+            try {
+                context = new CaseRuntimeContext(testCase, artifacts, debugDirectory.getFileName().toString(),
+                        debugDirectory.getFileName().toString(), debugDirectory, logPath, "debug",
+                        started.toString(), started.toString());
+                context.setProject(projectRoot);
+                context.setUnsafeFailureDetails(options.unsafeFailureDetails());
+                context.setSourceMetadata("debug", input.path, testCase.caseId());
+                context.setTargetMetadata(targetType, targetId);
+                context.setTemplateMetadata(resolved.template.name(), resolved.template.directory());
+                context.put("CASE.environment", config.environment());
+                context.put("CASE.failureDetailMode", options.unsafeFailureDetails() ? "local-unsafe" : "safe-default");
+                att.testdata.TestdataInputResolver testdata = new att.testdata.TestdataInputResolver(
+                        new att.testdata.TestdataRegistry(projectRoot, config.testdataDescriptors(), input.testdataDescriptors,
+                                "debug-local"));
+                context.replaceInputValues(testdata.resolve(testCase.caseData(), context, null, null));
+                if ("template".equals(targetType) || "flow".equals(targetType))
+                    att.core.ExecutionBootstrapVariables.evaluate(input.vars, context, bootstrapEngine,
+                            att.core.ExecutionBootstrapVariables.Scope.DEBUG);
+                Map<String, Object> resolvedStageValues = testdata.resolve(stage.values(), context, null, null);
+                if (!testdata.selectionEvidence().isEmpty())
+                    context.put("CASE.testdataSelections", testdata.selectionEvidence());
+                stage = new StageCaseData(stage.key(), stage.templateName(), resolvedStageValues);
+                context.put("CASE.debugInput", context.logicalPackageName(input.path));
+                Map<String, Object> debugHeader = new LinkedHashMap<String, Object>();
+                debugHeader.put("target", target);
+                debugHeader.put("input", logicalInputName(input.path));
+                debugHeader.put("caseId", testCase.caseId());
+                log.append("DEBUG TARGET", debugHeader);
+                context.beginStage(stage, resolved.template.name(), resolved.template.directory());
+                stageStarted = true;
+            } finally { if (performanceProfile != null) performanceProfile.end("debugContextSetupMs", contextSetupPhase); }
 
-            db = new DbHelperExecutor(projectRoot, config);
-            db.beginCase();
-            caseStarted = true;
-            ToolInvoker toolInvoker = new ToolInvoker(projectRoot, config);
-            MqHelperExecutor mq = new MqHelperExecutor(projectRoot, config, mqTransportFactory);
-            http = new att.exec.HttpHelperExecutor(projectRoot, config);
-            UnifiedTemplateEngine engine = new UnifiedTemplateEngine(toolInvoker, db, mq, http,
-                    new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
-            actionResults.addAll(new att.template.StageTemplateRunner(engine, resolved.flows)
-                    .execute(stage.key(), resolved.template, context, log));
-            actionResults.addAll(db.finishCase(context, log));
+            long resourceSetupPhase = performanceProfile == null ? 0L : performanceProfile.begin();
+            UnifiedTemplateEngine engine;
+            try {
+                db = new DbHelperExecutor(projectRoot, config);
+                db.beginCase();
+                caseStarted = true;
+                ToolInvoker toolInvoker = new ToolInvoker(projectRoot, config);
+                MqHelperExecutor mq = new MqHelperExecutor(projectRoot, config, mqTransportFactory);
+                http = new att.exec.HttpHelperExecutor(projectRoot, config);
+                engine = new UnifiedTemplateEngine(toolInvoker, db, mq, http,
+                        new att.template.DefaultBuiltInProvider(new att.template.SequenceService()));
+            } finally { if (performanceProfile != null) performanceProfile.end("debugResourceSetupMs", resourceSetupPhase); }
+            long executionPhase = performanceProfile == null ? 0L : performanceProfile.begin();
+            try {
+                actionResults.addAll(new att.template.StageTemplateRunner(engine, resolved.flows, performanceProfile)
+                        .execute(stage.key(), resolved.template, context, log));
+                actionResults.addAll(db.finishCase(context, log));
+            } finally { if (performanceProfile != null) performanceProfile.end("debugExecutionMs", executionPhase); }
             status = ResultAggregator.aggregate(statuses(actionResults));
             exitCode = ResultAggregator.exitCode(status);
             context.put("CASE.status", status.name());
@@ -288,17 +312,22 @@ public final class DebugEngine {
             appendError(log, diagnostic);
             if (caseStarted && db != null) db.abortCase();
         } finally {
-            if (context != null) {
-                context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
-                if (stageStarted && !stageFinished) {
-                    try { context.finishStage(status.name(), Duration.between(started, Instant.now()).toMillis()); } catch (Exception ignored) { }
+            long finalizationPhase = performanceProfile == null ? 0L : performanceProfile.begin();
+            try {
+                if (context != null) {
+                    context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
+                    if (stageStarted && !stageFinished) {
+                        try { context.finishStage(status.name(), Duration.between(started, Instant.now()).toMillis()); } catch (Exception ignored) { }
+                    }
+                    try { Files.write(artifacts.resolve("case.yaml"), new Yaml().dump(att.core.PathPresentation.displayStructure(context.caseTree(), projectRoot)).getBytes(StandardCharsets.UTF_8)); }
+                    catch (Exception ignored) { /* result.yaml still records the primary outcome */ }
                 }
-                try { Files.write(artifacts.resolve("case.yaml"), new Yaml().dump(att.core.PathPresentation.displayStructure(context.caseTree(), projectRoot)).getBytes(StandardCharsets.UTF_8)); }
-                catch (Exception ignored) { /* result.yaml still records the primary outcome */ }
+                if (log != null) try { log.close(); } catch (Exception ignored) { }
+                if (db != null) db.close();
+                if (http != null) http.close();
+            } finally {
+                if (performanceProfile != null) performanceProfile.end("debugFinalizationMs", finalizationPhase);
             }
-            if (log != null) try { log.close(); } catch (Exception ignored) { }
-            if (db != null) db.close();
-            if (http != null) http.close();
         }
 
         long durationMs = Duration.between(started, Instant.now()).toMillis();
@@ -309,7 +338,9 @@ public final class DebugEngine {
         result.put("actions", actionMaps(actionResults));
         if (context != null) result.put("case", att.core.PathPresentation.displayStructure(context.caseTree(), projectRoot));
         if (diagnostic != null) result.put("diagnostic", diagnostic.toDiagnostic().toMap());
+        long resultPersistencePhase = performanceProfile == null ? 0L : performanceProfile.begin();
         Files.write(resultPath, new Yaml().dump(att.core.PathPresentation.displayStructure(result, projectRoot)).getBytes(StandardCharsets.UTF_8));
+        if (performanceProfile != null) performanceProfile.end("debugResultWriteMs", resultPersistencePhase);
         return new Result(status, exitCode, durationMs, debugDirectory, logPath, resultPath, diagnostic);
     }
 

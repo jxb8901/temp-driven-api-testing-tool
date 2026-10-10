@@ -51,7 +51,14 @@ class CliOptionsTest {
         assertEquals(java.nio.file.Paths.get("templates/flows/common/compose/debug.yaml"), options.debugInput());
         assertEquals("debug", options.validationScope());
         assertTrue(options.verbose());
+        assertFalse(options.profile());
         assertThrows(IllegalArgumentException.class, () -> CliOptions.parse(new String[]{"debug", "template", "X", "--all"}));
+    }
+
+    @Test void debugProfileRequiresAnExecutionTarget() {
+        CliOptions options = CliOptions.parse(new String[]{"debug", "template", "SIMPLE", "--profile"});
+        assertTrue(options.profile());
+        assertThrows(IllegalArgumentException.class, () -> CliOptions.parse(new String[]{"debug", "--profile"}));
     }
 
     @Test void parsesDebugIdentityAsAStandaloneDebugOnlyOption() {

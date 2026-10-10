@@ -95,6 +95,14 @@ ATT 4.1.0 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `
 
 ## Build and validation
 
+Source launchers run only prebuilt classes; `att.sh` and `att.bat` never compile code. To prepare the Java 8-compatible CLI, Engine, Remote, and Server API modules, use a JDK and Maven:
+
+```sh
+mvn -DskipTests -pl att-cli -am compile
+```
+
+Then run `./att.sh` on macOS/Linux or `att.bat` on Windows. A missing prebuilt class produces an error with the explicit build command. Packaged releases contain prebuilt JARs and need a Java 8 or later runtime, not Maven. Optional JDBC and IBM MQ driver JARs can be placed in `lib/`. The Server WAR requires Java 17 or later.
+
 ```sh
 mvn clean verify
 python3 tools/build_reference_manual.py --check
