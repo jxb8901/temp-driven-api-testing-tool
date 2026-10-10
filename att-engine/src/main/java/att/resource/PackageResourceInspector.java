@@ -225,8 +225,9 @@ public final class PackageResourceInspector {
         indexTools(index, config);
         indexCases(index, config);
         indexDebugSidecars(index, config);
+        indexQuickLoadPolicies(index);
         resolveReferences(index);
-        index.revisionDigest = digestFiles(index.files, index.debugSidecars);
+        index.revisionDigest = digestFiles(index.files, index.debugSidecars, index.quickLoadPolicies);
         Collections.sort(index.ordered, new Comparator<Resource>() {
             @Override public int compare(Resource left, Resource right) {
                 return left.resourceId.compareTo(right.resourceId);
@@ -249,6 +250,68 @@ public final class PackageResourceInspector {
         result.put("target", target(resource));
         result.put("input", projection.get("input"));
         result.put("redacted", projection.get("redacted"));
+        result.put("revisionDigest", index.revisionDigest);
+        return bounded(result);
+    }
+
+    /** Returns safe business defaults and a validated one-workload Quick Load preview. */
+    public Map<String, Object> inspectQuickLoadForm(String type, String resourceId, String model,
+                                                    String expectedRevisionDigest) throws Exception {
+        Index index = index();
+        requireExpectedRevision(index, expectedRevisionDigest);
+        Resource resource = index.byId.get(resourceId);
+        if (resource == null || !debuggable(resource.type) || !resource.type.equals(type) || !"ready".equals(resource.state))
+            throw new ResourceNotFoundException();
+        return quickLoadProjection(index, resource, model, null, null, null);
+    }
+
+    /** Validates business defaults and policy overrides, returning a private typed scenario for draft creation. */
+    public Map<String, Object> validateQuickLoadInput(String type, String logicalId, String model,
+                                                      Map<String, Object> businessInput,
+                                                      Map<String, Object> loadOverrides,
+                                                      Map<String, Object> workloadExecution) throws Exception {
+        if (!debuggable(type) || logicalId == null || logicalId.trim().isEmpty() || logicalId.length() > 512)
+            throw new ResourceNotFoundException();
+        Index index = index();
+        Resource resource = index.resolve(type, logicalId);
+        if (resource == null || !"ready".equals(resource.state)) throw new ResourceNotFoundException();
+        return quickLoadProjection(index, resource, model, businessInput, loadOverrides, workloadExecution);
+    }
+
+    private Map<String, Object> quickLoadProjection(Index index, Resource resource, String model,
+                                                    Map<String, Object> businessInput,
+                                                    Map<String, Object> loadOverrides,
+                                                    Map<String, Object> workloadExecution) throws Exception {
+        FrameworkConfig config = frameworkConfig();
+        DebugEngine engine = new DebugEngine(packageRoot, config);
+        Map<String, Object> projectedInput = engine.projectLoadBusinessInput(resource.type, resource.logicalId, businessInput);
+        @SuppressWarnings("unchecked") Map<String, Object> normalizedInput =
+                (Map<String, Object>) projectedInput.get("normalizedInput");
+        att.load.LoadScenarioLoader loader = new att.load.LoadScenarioLoader(packageRoot);
+        Map<String, Object> policy = loader.loadQuickLoadPolicy(model);
+        att.load.LoadScenario scenario = new att.load.LoadScenarioBuilder(loader).buildQuickLoad(model,
+                resource.type, resource.logicalId, normalizedInput, policy, loadOverrides, workloadExecution);
+        att.load.LoadTarget target = new att.load.LoadTargetResolver(packageRoot, config).resolve(scenario);
+        new att.load.LoadTargetValidator(packageRoot, config).validate(scenario, target);
+        Map<String, Object> scenarioMap = scenario.toMap();
+        Map<String, Object> safeScenarioProjection = engine.projectSafeValue(scenarioMap);
+        @SuppressWarnings("unchecked") Map<String, Object> safeScenario =
+                (Map<String, Object>) safeScenarioProjection.get("value");
+        boolean redacted = Boolean.TRUE.equals(projectedInput.get("redacted"))
+                || Boolean.TRUE.equals(safeScenarioProjection.get("redacted"));
+        DumperOptions options = new DumperOptions();
+        options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+        options.setPrettyFlow(true);
+        options.setWidth(120);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("resource", summary(resource, index));
+        result.put("target", target(resource));
+        result.put("model", model);
+        result.put("input", projectedInput.get("input"));
+        result.put("redacted", Boolean.valueOf(redacted));
+        result.put("preview", safeScenario);
+        result.put("previewYaml", new Yaml(options).dump(safeScenario));
+        result.put("normalizedScenario", scenarioMap);
         result.put("revisionDigest", index.revisionDigest);
         return bounded(result);
     }
@@ -714,7 +777,8 @@ public final class PackageResourceInspector {
         return workbook.resolveSibling(name);
     }
 
-    private String digestFiles(Set<Path> files, Map<String, Path> debugSidecars) throws Exception {
+    private String digestFiles(Set<Path> files, Map<String, Path> debugSidecars,
+                               Map<String, Path> quickLoadPolicies) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         List<Path> ordered = new ArrayList<Path>(files);
         Collections.sort(ordered);
@@ -744,7 +808,29 @@ public final class PackageResourceInspector {
             digest.update((byte) (sidecar.getValue() == null ? 0 : 1));
             digest.update((byte) 0xff);
         }
+        for (Map.Entry<String, Path> policy : quickLoadPolicies.entrySet()) {
+            digest.update(utf8("quick-load-policy"));
+            digest.update((byte) 0);
+            digest.update(utf8(policy.getKey()));
+            digest.update((byte) 0);
+            digest.update((byte) (policy.getValue() == null ? 0 : 1));
+            digest.update((byte) 0xff);
+        }
         return hex(digest.digest());
+    }
+
+    private void indexQuickLoadPolicies(Index index) {
+        for (String filename : new String[]{"load.visualuser.yaml", "load.arrivalrate.yaml"}) {
+            Path candidate = packageRoot.resolve("load").resolve(filename).toAbsolutePath().normalize();
+            String logicalName = packageRoot.relativize(candidate).toString().replace('\\', '/');
+            try {
+                PackageResourceResolver.PackageResource resource = resources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE);
+                index.files.add(resource.canonicalPath());
+                index.quickLoadPolicies.put(resource.logicalName(), resource.canonicalPath());
+            } catch (Exception ignored) {
+                index.quickLoadPolicies.put(logicalName, null);
+            }
+        }
     }
 
     private void indexFile(Index index, Path file) throws Exception {
@@ -811,6 +897,7 @@ public final class PackageResourceInspector {
         final List<Map<String, Object>> diagnostics = new ArrayList<Map<String, Object>>();
         final Set<Path> files = new TreeSet<Path>();
         final Map<String, Path> debugSidecars = new TreeMap<String, Path>();
+        final Map<String, Path> quickLoadPolicies = new TreeMap<String, Path>();
         String revisionDigest;
 
         void add(Resource resource) {

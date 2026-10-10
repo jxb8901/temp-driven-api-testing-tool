@@ -28,6 +28,14 @@
   let debugDraftFingerprint = '';
   let debugPreviewPending = null;
   let debugPreviewPendingFingerprint = '';
+  let quickLoadDefaults = null;
+  let quickLoadTarget = null;
+  let quickLoadPolicyDefaults = null;
+  let quickLoadFormSequence = 0;
+  let quickLoadDraft = null;
+  let quickLoadDraftFingerprint = '';
+  let quickLoadPreviewPending = null;
+  let quickLoadPreviewPendingFingerprint = '';
   let cancelRequested = false;
   let versionPromise = null;
   let navigation = 0;
@@ -205,6 +213,14 @@
     byId('resource-debug').hidden = true; byId('debug-form-editor').hidden = true;
     text(byId('debug-form-status'), ''); text(byId('debug-preview'), '');
   }
+  function clearQuickLoadForm() {
+    quickLoadFormSequence++; quickLoadDefaults = null; quickLoadTarget = null; quickLoadPolicyDefaults = null;
+    quickLoadDraft = null; quickLoadDraftFingerprint = '';
+    quickLoadPreviewPending = null; quickLoadPreviewPendingFingerprint = '';
+    byId('resource-quick-load').hidden = true;
+    byId('quick-load-form-editor').hidden = true;
+    text(byId('quick-load-form-status'), ''); text(byId('quick-load-preview'), '');
+  }
   function renderResourceList() {
     const list = byId('resource-list'); list.replaceChildren();
     resourceItems.forEach(item => {
@@ -222,6 +238,7 @@
       resourceDetailSequence++; resourceLoadPending = false;
       byId('resource-list').replaceChildren(); byId('resource-detail').hidden = true;
       clearDebugForm();
+      clearQuickLoadForm();
       byId('load-more-resources').hidden = true; byId('load-more-resources').disabled = false;
       text(byId('resource-count'), 'Loading package resources…');
     }
@@ -298,7 +315,9 @@
       byId('show-resource-source').hidden = !sourceAvailable;
       byId('run-resource-case').hidden = activeResource.type !== 'case' || activeResource.state === 'invalid';
       byId('debug-resource').hidden = !['template','flow','tool'].includes(activeResource.type) || activeResource.state === 'invalid';
+      byId('quick-load-resource').hidden = !['template','flow','tool'].includes(activeResource.type) || activeResource.state === 'invalid';
       clearDebugForm();
+      clearQuickLoadForm();
       byId('resource-source-heading').hidden = true; byId('resource-source').hidden = true; text(byId('resource-source'), '');
       byId('resource-detail').hidden = false;
     } catch (error) { if (selection === resourceDetailSequence && generation === navigation) message(error.message); }
@@ -412,6 +431,149 @@
       if (generation === navigation && selectedPackage === packageId) { text(byId('debug-form-status'), `Debug was not submitted. ${debugValidationMessage(error)}`); message(error.message); }
     } finally {
       submitting.delete(packageId); if (selectedPackage === packageId) byId('submit-debug-form').disabled = false;
+    }
+  }
+  async function loadQuickLoadForm() {
+    const item = activeResource, packageId = selectedPackage, generation = navigation;
+    if (!item || !packageId || !['template','flow','tool'].includes(item.type)) return;
+    const model = String(byId('quick-load-model').value || 'virtualUsers');
+    const sequence = ++quickLoadFormSequence;
+    quickLoadDefaults = null; quickLoadTarget = null; quickLoadPolicyDefaults = null;
+    quickLoadDraft = null; quickLoadDraftFingerprint = '';
+    byId('resource-quick-load').hidden = false; byId('quick-load-form-editor').hidden = true;
+    text(byId('quick-load-form-status'), 'Loading safe business defaults and Load policy…'); text(byId('quick-load-preview'), '');
+    try {
+      const environment = String(byId('submit-form').elements.environment.value || '').trim();
+      const params = [`model=${encodeURIComponent(model)}`];
+      if (environment) params.push(`environment=${encodeURIComponent(environment)}`);
+      const data = await request(`${resourcePath(packageId,item)}/quick-load-form?${params.join('&')}`);
+      if (sequence !== quickLoadFormSequence || generation !== navigation || activeResource !== item || selectedPackage !== packageId) return;
+      quickLoadDefaults = JSON.parse(JSON.stringify(data.input || {}));
+      quickLoadPolicyDefaults = JSON.parse(JSON.stringify(data.preview || {}));
+      quickLoadTarget = data.target || { type: item.type, id: item.logicalId };
+      setQuickLoadControls(quickLoadPolicyDefaults, model);
+      resetQuickLoadForm();
+      byId('quick-load-form-editor').hidden = false;
+      text(byId('quick-load-form-status'), data.redacted
+        ? 'Defaults loaded. Sensitive business values are hidden in the form and preview.'
+        : 'Defaults loaded from the target sidecar, or generated as empty inputs with a bundled low-intensity policy.');
+    } catch (error) {
+      if (sequence === quickLoadFormSequence && generation === navigation && activeResource === item) {
+        text(byId('quick-load-form-status'), `Quick Load defaults are unavailable. ${debugValidationMessage(error)}`); message(error.message);
+      }
+    }
+  }
+  function setQuickLoadControls(scenario, model) {
+    const load = scenario && scenario.load || {};
+    const workload = scenario && Array.isArray(scenario.workloads) ? scenario.workloads[0] || {} : {};
+    const execution = workload.execution || {};
+    byId('quick-load-users-fields').hidden = model !== 'virtualUsers';
+    byId('quick-load-arrival-fields').hidden = model !== 'arrivalRate';
+    byId('quick-load-users').value = load.users == null ? '' : String(load.users);
+    byId('quick-load-arrival-rate').value = load.arrivalRate == null ? '' : String(load.arrivalRate);
+    byId('quick-load-max-concurrent').value = load.maxConcurrent == null ? '' : String(load.maxConcurrent);
+    byId('quick-load-duration').value = load.duration == null ? '' : String(load.duration);
+    byId('quick-load-warmup').value = load.warmup == null ? '' : String(load.warmup);
+    byId('quick-load-ramp-up').value = load.rampUp == null ? '' : String(load.rampUp);
+    byId('quick-load-ramp-down').value = load.rampDown == null ? '' : String(load.rampDown);
+    byId('quick-load-think-time').value = execution.thinkTime == null ? '' : String(execution.thinkTime);
+  }
+  function resetQuickLoadForm() {
+    if (!quickLoadDefaults || !quickLoadPolicyDefaults) return;
+    quickLoadDraft = null; quickLoadDraftFingerprint = '';
+    byId('quick-load-input').value = JSON.stringify(quickLoadDefaults, null, 2);
+    setQuickLoadControls(quickLoadPolicyDefaults, String(byId('quick-load-model').value || 'virtualUsers'));
+    text(byId('quick-load-preview'), '');
+  }
+  function parsePositiveInteger(id, label) {
+    const value = String(byId(id).value || '').trim();
+    if (!value) return null;
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error(`${label} must be a positive integer.`);
+    return parsed;
+  }
+  function currentQuickLoadBody() {
+    if (!quickLoadDefaults || !quickLoadTarget) throw new Error('Open Quick Load from a selected Template, Flow, or Tool first.');
+    let input;
+    try { input = JSON.parse(String(byId('quick-load-input').value || '{}')); }
+    catch (_) { throw new Error('Business inputs and variables must be a JSON object.'); }
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Business inputs and variables must be a JSON object.');
+    const model = String(byId('quick-load-model').value || 'virtualUsers');
+    const load = {};
+    const duration = String(byId('quick-load-duration').value || '').trim();
+    if (!duration) throw new Error('Duration is required.');
+    load.duration = duration;
+    for (const [id, key] of [['quick-load-warmup','warmup'],['quick-load-ramp-up','rampUp'],['quick-load-ramp-down','rampDown']]) {
+      const value = String(byId(id).value || '').trim(); if (value) load[key] = value;
+    }
+    const execution = {};
+    if (model === 'virtualUsers') {
+      const users = parsePositiveInteger('quick-load-users', 'Virtual users');
+      if (users == null) throw new Error('Virtual users is required.');
+      load.users = users;
+      const thinkTime = String(byId('quick-load-think-time').value || '').trim(); if (thinkTime) execution.thinkTime = thinkTime;
+    } else {
+      const arrivalRate = String(byId('quick-load-arrival-rate').value || '').trim();
+      if (!arrivalRate) throw new Error('Arrival rate is required.');
+      load.arrivalRate = arrivalRate;
+      const maximum = parsePositiveInteger('quick-load-max-concurrent', 'Maximum concurrent');
+      if (maximum == null) throw new Error('Maximum concurrent is required.');
+      load.maxConcurrent = maximum;
+      load.overloadPolicy = 'drop';
+    }
+    const body = { packageId: selectedPackage, target: quickLoadTarget, model, input, load, execution };
+    const environment = String(byId('submit-form').elements.environment.value || '').trim();
+    if (environment) body.environment = environment;
+    return body;
+  }
+  async function previewQuickLoadDraft() {
+    const item = activeResource, packageId = selectedPackage, generation = navigation;
+    if (!item || !packageId || !quickLoadTarget) throw new Error('Open Quick Load from a selected resource detail first.');
+    const body = currentQuickLoadBody();
+    const fingerprint = JSON.stringify(body);
+    if (quickLoadDraft && quickLoadDraftFingerprint === fingerprint
+        && Date.parse(quickLoadDraft.expiresAt || '') > Date.now() + 1000) {
+      text(byId('quick-load-preview'), quickLoadDraft.previewYaml || JSON.stringify(quickLoadDraft.preview || {}, null, 2));
+      text(byId('quick-load-form-status'), quickLoadDraft.redacted ? 'Validation passed. The preview hides sensitive fields.' : 'Validation passed.');
+      return quickLoadDraft;
+    }
+    if (quickLoadPreviewPending && quickLoadPreviewPendingFingerprint === fingerprint) return quickLoadPreviewPending;
+    const pending = (async () => {
+      text(byId('quick-load-form-status'), 'Validating the policy and effective one-workload scenario…');
+      const draft = await request('drafts/quick-load', { method: 'POST', body: JSON.stringify(body) });
+      if (generation !== navigation || selectedPackage !== packageId || activeResource !== item) return null;
+      if (JSON.stringify(currentQuickLoadBody()) !== fingerprint) return null;
+      quickLoadDraft = draft; quickLoadDraftFingerprint = fingerprint;
+      text(byId('quick-load-preview'), draft.previewYaml || JSON.stringify(draft.preview || {}, null, 2));
+      text(byId('quick-load-form-status'), draft.redacted ? 'Validation passed. The preview hides sensitive fields.' : 'Validation passed.');
+      return draft;
+    })();
+    quickLoadPreviewPending = pending; quickLoadPreviewPendingFingerprint = fingerprint;
+    try { return await pending; }
+    finally {
+      if (quickLoadPreviewPending === pending) { quickLoadPreviewPending = null; quickLoadPreviewPendingFingerprint = ''; }
+    }
+  }
+  async function runQuickLoadDraft() {
+    const packageId = selectedPackage, generation = navigation;
+    if (!packageId || submitting.has(packageId)) return;
+    submitting.add(packageId); byId('submit-quick-load-form').disabled = true;
+    try {
+      const draft = await previewQuickLoadDraft();
+      if (!draft || generation !== navigation || selectedPackage !== packageId) return;
+      const modelLabel = draft.model === 'arrivalRate' ? 'Arrival Rate' : 'Virtual Users';
+      if (JSON.stringify(currentQuickLoadBody()) !== quickLoadDraftFingerprint) return;
+      if (!window.confirm(`Start ${modelLabel} Load for ${draft.target.type} ${draft.target.id}? Review the validated YAML preview before confirming.`)) return;
+      const accepted = await request('jobs/load', { method: 'POST', body: JSON.stringify({ packageId, draftId: draft.draftId }) });
+      quickLoadDraft = null; quickLoadDraftFingerprint = '';
+      if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
+    } catch (error) {
+      if (generation === navigation && selectedPackage === packageId) {
+        text(byId('quick-load-form-status'), `Quick Load was not submitted. ${debugValidationMessage(error)}`); message(error.message);
+      }
+      if (error.status === 404 || error.status === 409) { quickLoadDraft = null; quickLoadDraftFingerprint = ''; }
+    } finally {
+      submitting.delete(packageId); if (selectedPackage === packageId) byId('submit-quick-load-form').disabled = false;
     }
   }
   async function showResourceSource() {
@@ -578,6 +740,7 @@
   byId('show-resource-source').addEventListener('click', showResourceSource);
   byId('run-resource-case').addEventListener('click', runResourceCase);
   byId('debug-resource').addEventListener('click', loadDebugForm);
+  byId('quick-load-resource').addEventListener('click', loadQuickLoadForm);
   byId('reset-debug-form').addEventListener('click', resetDebugForm);
   ['debug-inputs','debug-vars','debug-arguments'].forEach(id => byId(id).addEventListener('input', () => {
     debugDraft = null; debugDraftFingerprint = ''; text(byId('debug-preview'), '');
@@ -585,12 +748,26 @@
   }));
   byId('submit-form').elements.environment.addEventListener('input', () => {
     debugDraft = null; debugDraftFingerprint = ''; text(byId('debug-preview'), '');
+    quickLoadDraft = null; quickLoadDraftFingerprint = ''; text(byId('quick-load-preview'), '');
   });
   byId('preview-debug-form').addEventListener('click', async () => {
     try { await previewDebugDraft(); }
     catch (error) { text(byId('debug-form-status'), `Debug input is invalid. ${debugValidationMessage(error)}`); message(error.message); }
   });
   byId('submit-debug-form').addEventListener('click', runDebugDraft);
+  byId('quick-load-model').addEventListener('change', loadQuickLoadForm);
+  byId('reset-quick-load-form').addEventListener('click', resetQuickLoadForm);
+  ['quick-load-users','quick-load-think-time','quick-load-arrival-rate','quick-load-max-concurrent',
+    'quick-load-duration','quick-load-warmup','quick-load-ramp-up','quick-load-ramp-down','quick-load-input'].forEach(id =>
+    byId(id).addEventListener('input', () => {
+      quickLoadDraft = null; quickLoadDraftFingerprint = ''; text(byId('quick-load-preview'), '');
+      text(byId('quick-load-form-status'), 'Input changed. Validate it before starting Load.');
+    }));
+  byId('preview-quick-load-form').addEventListener('click', async () => {
+    try { await previewQuickLoadDraft(); }
+    catch (error) { text(byId('quick-load-form-status'), `Quick Load input is invalid. ${debugValidationMessage(error)}`); message(error.message); }
+  });
+  byId('submit-quick-load-form').addEventListener('click', runQuickLoadDraft);
   byId('show-declared-configuration').addEventListener('click', () => { if (selectedPackage) loadDeclaredConfiguration(selectedPackage); });
   byId('show-effective-configuration').addEventListener('click', showEffectiveConfiguration);
   byId('compare-configuration').addEventListener('click', compareConfiguration);

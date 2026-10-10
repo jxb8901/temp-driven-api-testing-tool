@@ -69,13 +69,16 @@ public final class WorkerMain {
             else if(error instanceof PackageResourceInspector.ResourceNotFoundException) { code="ATT-RESOURCE-NOT-FOUND"; message="Package resource was not found"; }
             else if(error instanceof PackageResourceInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package resource response exceeded the configured limit"; }
             else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured limit"; }
-            else if(error instanceof PackageResourceInspector.StaleResourceCursorException&&"debug".equals(request.command)&&request.expectedRevisionDigest!=null) { code="ATT-SERVER-DRAFT-STALE"; message="Package content changed after preview; rebuild the Debug draft"; exit=2; status="INVALID"; }
+            else if(error instanceof PackageResourceInspector.StaleResourceCursorException
+                    &&("debug".equals(request.command)||"load".equals(request.command))
+                    &&request.expectedRevisionDigest!=null) { code="ATT-SERVER-DRAFT-STALE"; message="Package content changed after preview; rebuild the draft"; exit=2; status="INVALID"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException) { code="ATT-RESOURCE-CURSOR-STALE"; message="The package resources changed; refresh the Explorer"; }
             else if(error instanceof PackageConfigurationInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package configuration response exceeded the configured limit"; }
             else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
             Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message));
-            if("inspect".equals(request.command)&&("debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction))
+            if("inspect".equals(request.command)&&("debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
+                    ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction))
                     &&error instanceof att.validation.DiagnosticException) {
                 att.validation.DiagnosticException typed=(att.validation.DiagnosticException)error;
                 diagnostic.put("summary",DiagnosticSanitizer.redactText(typed.summary()));
@@ -101,6 +104,14 @@ public final class WorkerMain {
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides,false,null,r.inlineDebugInput)); }
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
             att.load.LoadEventListener observer = event -> { try { emit(WorkerEvent.Type.PROGRESS, event.toMap(root)); } catch(Exception error) { throw new IllegalStateException(error); } };
+            if(r.inlineLoadScenario!=null) {
+                if(r.expectedRevisionDigest!=null) new PackageResourceInspector(root,config,r.environment,
+                        r.safeTextSources,r.maxSourceBytes==null?65536:r.maxSourceBytes,
+                        r.maxResponseBytes==null?262144:r.maxResponseBytes).verifyRevision(r.expectedRevisionDigest);
+                att.load.LoadScenario parsed=new att.load.LoadScenarioLoader(root).loadInline(r.inlineLoadScenario);
+                return service.load(new LoadRequest(root,config,r.environment,output,r.runId,null,null,null,
+                        null,null,null,null,null,null,null,null,null,r.overrides,observer,parsed,false));
+            }
             return service.load(new LoadRequest(root,config,r.environment,output,r.runId,path(r.scenario),optionalText(t,"type"),optionalText(t,"id"),l.get("users"),l.get("arrivalRate"),l.get("warmup"),l.get("rampUp"),l.get("duration"),l.get("rampDown"),l.get("thinkTime"),l.get("maxConcurrent"),l.get("overloadPolicy"),r.overrides,observer)); }
         if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),r.validationScope));
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
@@ -116,6 +127,11 @@ public final class WorkerMain {
             PackageResourceInspector inspector = new PackageResourceInspector(root, config, r.environment,
                     r.safeTextSources, r.maxSourceBytes == null ? 65536 : r.maxSourceBytes,
                     r.maxResponseBytes == null ? 262144 : r.maxResponseBytes);
+            if("revision".equals(r.inspectionAction)) {
+                inspector.verifyRevision(r.expectedRevisionDigest);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",Collections.<String,Object>emptyMap()));
+            }
             if("debug-form".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.inspectDebugForm(r.inspectionType,r.inspectionResourceId,r.expectedRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
@@ -123,6 +139,18 @@ public final class WorkerMain {
             }
             if("debug-input".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.validateDebugInput(r.inspectionType,r.inspectionTargetId,r.inlineDebugInput);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
+            if("quick-load-form".equals(r.inspectionAction)) {
+                Map<String,Object> inspected=inspector.inspectQuickLoadForm(r.inspectionType,r.inspectionResourceId,
+                        r.loadModel,r.expectedRevisionDigest);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
+            if("quick-load-input".equals(r.inspectionAction)) {
+                Map<String,Object> inspected=inspector.validateQuickLoadInput(r.inspectionType,r.inspectionTargetId,
+                        r.loadModel,r.inlineLoadInput,r.loadOverrides,r.workloadExecution);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }

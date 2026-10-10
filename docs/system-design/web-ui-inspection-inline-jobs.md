@@ -1,6 +1,6 @@
 # ATT Web UI inspection and inline job contracts
 
-Status: Issue #176 P0 contract baseline. P1 implements authenticated package resource discovery and the Package Resource Explorer. P2 implements declared/effective configuration inspection. P3 adds target-scoped Debug forms, in-memory drafts, and typed inline Debug execution. Quick Load and Advanced Load remain follow-up phases.
+Status: Issue #176 P0 contract baseline. P1 implements authenticated package resource discovery and the Package Resource Explorer. P2 implements declared/effective configuration inspection. P3 adds target-scoped Debug forms, in-memory drafts, and typed inline Debug execution. P4 adds target-scoped Quick Load forms, model-specific policies, and one-workload inline Load execution. The Advanced Load builder remains a follow-up phase.
 
 ## Purpose and scope
 
@@ -53,7 +53,7 @@ The Engine's `FrameworkConfigLoader` selects and resolves the environment. Inspe
 
 ```http
 POST /api/v1/drafts/debug
-POST /api/v1/drafts/load
+POST /api/v1/drafts/quick-load
 GET  /api/v1/drafts/{draftId}
 POST /api/v1/jobs/debug
 POST /api/v1/jobs/load
@@ -61,9 +61,9 @@ POST /api/v1/jobs/load
 
 Debug draft creation validates the typed request and selected target closure. It returns a safe YAML preview, validation diagnostics, and an opaque draft ID. Drafts are bound to the authenticated Servlet Principal, package, environment, target, and private package revision. The in-memory store is bounded to 128 active drafts across the Server and 16 per authenticated principal; each expires after 10 minutes. Server restart invalidates drafts, so clients must rebuild and revalidate them.
 
-A draft captures normalized values and an internal content digest for the target, sidecars, config, and referenced resource closure. The digest never leaves the Server. The Server checks the package revision when the draft is submitted and immediately before Worker start. A change detected during submission returns HTTP 409 and `ATT-SERVER-DRAFT-STALE`; a change detected after job acceptance marks the job `INVALID` with that diagnostic. The submitted Worker input is the same immutable typed value validated for preview.
+A draft captures normalized values and an internal content digest for the target, sidecars, config, referenced resource closure, and, for Quick Load, the selected model policy. The digest never leaves the Server. The Server checks the package revision when the draft is submitted and immediately before Worker start; the Worker verifies it again before Engine execution. A change detected during submission returns HTTP 409 and `ATT-SERVER-DRAFT-STALE`; a change detected after job acceptance marks the job `INVALID` with that diagnostic. The submitted Worker input is the same immutable typed value validated for preview.
 
-P3 Debug job submission accepts `packageId` and `draftId`; it does not accept an arbitrary file path. Quick Load and Advanced Load drafts and inline submission are follow-up phases. Existing path-based `debugInput` and `scenario` submissions remain available to compatible clients.
+P3 Debug and P4 Quick Load submission accept `packageId` and `draftId`; neither accepts an arbitrary file path or client-supplied digest. P5 will add the home-level Advanced Load builder. Existing path-based `debugInput` and `scenario` submissions remain available to compatible clients.
 
 Example Debug draft request:
 
@@ -79,34 +79,27 @@ Example Debug draft request:
 }
 ```
 
-Example Load draft request:
+Example Quick Load draft request:
 
 ```json
 {
   "packageId": "payments",
   "environment": "SIT",
-  "scenario": {
-    "schemaVersion": "att-load/v1.6",
-    "load": { "warmup": "5s", "rampUp": "10s", "duration": "1m", "rampDown": "5s" },
-    "workloads": [
-      {
-        "id": "payment",
-        "load": { "users": 10 },
-        "target": { "type": "flow", "id": "PAYMENT.submit" },
-        "inputs": { "channel": "WEB" }
-      }
-    ]
-  }
+  "target": { "type": "flow", "id": "PAYMENT.submit" },
+  "model": "virtualUsers",
+  "input": { "inputs": { "channel": "WEB" }, "vars": {} },
+  "load": { "users": 10, "duration": "1m" },
+  "execution": { "thinkTime": "100ms" }
 }
 ```
 
-The Load draft response includes the complete normalized scenario when every field is visible. If visibility policy masks any field, the response marks the preview as redacted and non-runnable; the UI must not present that redacted text as an executable export. The Server still validates and executes its immutable private draft.
+Quick Load reads `load/load.visualuser.yaml` or `load/load.arrivalrate.yaml` as a policy-only descriptor, with a bundled one-user/one-arrival-per-second, ten-second fallback. The policy must match the selected model. The response includes a safe, normalized one-workload preview. If visibility policy masks any field, the response marks the preview as redacted and non-runnable; the UI must not present that redacted text as an executable export. The Server still validates and executes its immutable private draft.
 
 ## Typed Debug and Load rules
 
 Debug is available only from a selected Template, Flow, or Tool detail and contains one fixed target. All forms use typed `inputs`; Template and Flow also use `vars`, while Tool uses `arguments` and rejects `vars`. The form reads safe defaults from the package-authored `debug.yaml` when present. When absent, the Server creates valid `att-debug/v1.2` defaults in memory. Sidecars remain unchanged. Expression strings and native scalar, map, and list values are preserved; the browser does not evaluate them.
 
-Quick Load uses one fixed selected target and composes one Workload. It reads `load.visualuser.yaml` or `load.arrivalrate.yaml` as a read-only package policy when present, otherwise it uses the bundled policy fallback. It does not require a stored Debug input or Load scenario. Advanced Load selects VU or Arrival Rate before adding Workloads. VU supports single-target or weighted-mix Workloads. Arrival Rate supports multiple single-target Workloads and rejects mixes. Every Workload uses the same model and timing envelope. Debug-only fields and Debug-local Testdata are not copied into Load; users configure supported Load-level fields explicitly.
+Quick Load uses one fixed selected target and composes one Workload. It reads `load/load.visualuser.yaml` or `load/load.arrivalrate.yaml` as a read-only package policy when present, otherwise it uses the bundled policy fallback. It does not require a stored Debug input or Load scenario. P4 submits the inline scenario through the existing Load validator, scheduler, event stream, and evidence pipeline. Advanced Load selects VU or Arrival Rate before adding Workloads. VU supports single-target or weighted-mix Workloads. Arrival Rate supports multiple single-target Workloads and rejects mixes. Every Workload uses the same model and timing envelope. Debug-only fields and Debug-local Testdata are not copied into Load; users configure supported Load-level fields explicitly.
 
 ## Worker and Engine data flow
 
@@ -121,7 +114,7 @@ authenticated browser
   -> Engine executes through the existing service and scheduler
 ```
 
-The Server alone supplies the package root, output directory, Worker executable, and classpath. Public DTOs cannot set them. P3 adds an explicit typed inline Debug field to the Worker protocol; later Load phases add their own typed fields without accepting arbitrary external paths. Engine input objects are immutable copies. Debug defaults use the existing `DebugEngine` sidecar rules, with blank typed defaults when a sidecar is absent. Load scenarios use the current `att-load/v1.6` schema and `LoadScenarioLoader` semantic checks.
+The Server alone supplies the package root, output directory, Worker executable, and classpath. Public DTOs cannot set them. P3 adds an explicit typed inline Debug field and P4 adds a typed, one-workload inline Load scenario to the Worker protocol; neither accepts arbitrary external paths. Engine input objects are immutable copies. Debug defaults use the existing `DebugEngine` sidecar rules, with blank typed defaults when a sidecar is absent. Load scenarios use the current `att-load/v1.6` schema and `LoadScenarioLoader` semantic checks, composed through the shared `LoadScenarioBuilder`.
 
 Job metadata continues to store the command and package ID summary, not the submitted input or draft contents. Drafts are not persisted. Temporary values exist only in Server and Worker memory and are cleared on expiry, cancellation, terminal completion, or Server shutdown.
 

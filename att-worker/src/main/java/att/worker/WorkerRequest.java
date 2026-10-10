@@ -16,6 +16,7 @@ public final class WorkerRequest {
     public String debugId;
     public Map<String,Object> target;
     public String scenario;
+    public Map<String,Object> inlineLoadScenario;
     public List<String> suites;
     public String suiteDirectory;
     public List<String> caseIds;
@@ -28,6 +29,10 @@ public final class WorkerRequest {
     public String validationScope;
     public String debugInput;
     public Map<String,Object> inlineDebugInput;
+    public Map<String,Object> inlineLoadInput;
+    public String loadModel;
+    public Map<String,Object> loadOverrides;
+    public Map<String,Object> workloadExecution;
     public Boolean unsafeFailureDetails;
     public Map<String,String> load;
     public List<String> overrides;
