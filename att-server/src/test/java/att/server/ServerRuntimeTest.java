@@ -304,6 +304,9 @@ class ServerRuntimeTest {
             String advancedJobId=String.valueOf(advancedAccepted.get("jobId"));long advancedDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);Map<String,Object> advancedRecord=runtime.jobRecord(advancedJobId);
             while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(advancedRecord.get("status"))&&System.nanoTime()<advancedDeadline){Thread.sleep(20);advancedRecord=runtime.jobRecord(advancedJobId);}
             assertEquals("PASS",advancedRecord.get("status"),"The executable Tool asserts it received both restored values: "+runtime.resultRecord(advancedJobId));
+            long advancedReleaseDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(((Number)runtime.counts().get("activeWorkers")).intValue()>0&&System.nanoTime()<advancedReleaseDeadline)Thread.sleep(10);
+            assertEquals(0,((Number)runtime.counts().get("activeWorkers")).intValue(),"The Advanced Load Worker must exit before the test temp directory is removed");
             assertArrayEquals(originalToolSidecar,Files.readAllBytes(toolSidecar));
             Map<String,Object> stale=runtime.createQuickLoadDraft(body,"alice");
             Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: changed\nactions:\n"
