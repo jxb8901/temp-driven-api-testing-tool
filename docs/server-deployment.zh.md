@@ -102,7 +102,7 @@ Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authenticatio
 
 | 方法 | 路徑 | 用途 |
 | --- | --- | --- |
-| `GET` | `/health`、`/version` | 健康狀態及 build 資訊 |
+| `GET` | `/health`、`/version` | 健康狀態、build 及瀏覽器 Load capability 資訊 |
 | `GET` | `/metrics` | 有界的工作及 Worker 數量 |
 | `GET` | `/packages`、`/packages/{packageId}` | 讀取設定中的 registry |
 | `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | 列出安全的 Case、Template、Flow 及 Tool 投影 |

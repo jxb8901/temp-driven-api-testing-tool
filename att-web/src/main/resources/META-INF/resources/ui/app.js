@@ -51,6 +51,7 @@
   let advancedSubmitting = false;
   let cancelRequested = false;
   let versionPromise = null;
+  let inlineLoadEnabled = true;
   let navigation = 0;
   const submitting = new Set();
 
@@ -77,6 +78,7 @@
     if (!versionPromise) {
       versionPromise = request('version').then(info => {
         if (String(info.apiVersion) !== '1') throw new Error('Incompatible ATT Server API version; this Web UI requires /api/v1.');
+        inlineLoadEnabled = info.inlineLoadEnabled !== false;
         text(byId('connection'), 'Connected');
       }).catch(error => { versionPromise = null; throw error; });
     }
@@ -128,8 +130,10 @@
       listItems(packages).forEach(item => {
         const li = document.createElement('li');
         li.append(link(`#/packages/${encodeURIComponent(item.packageId)}`, item.packageId));
-        const advanced = el('button', 'Advanced Load'); advanced.type = 'button';
-        advanced.addEventListener('click', () => { location.hash = `#/advanced-load/${encodeURIComponent(item.packageId)}`; });
+        const advanced = el('button', inlineLoadEnabled ? 'Advanced Load' : 'Advanced Load (disabled)'); advanced.type = 'button';
+        advanced.disabled = !inlineLoadEnabled;
+        if (inlineLoadEnabled) advanced.addEventListener('click', () => { location.hash = `#/advanced-load/${encodeURIComponent(item.packageId)}`; });
+        else advanced.title = 'The Server administrator has disabled browser-created Load drafts.';
         li.append(document.createTextNode(' '), advanced); packageList.append(li);
       });
       const tbody = byId('jobs'); tbody.replaceChildren();
@@ -153,6 +157,14 @@
       text(byId('advanced-load-policy-status'), 'Choose the scenario model before configuring workloads.');
       text(byId('advanced-load-status'), ''); text(byId('advanced-load-preview'), ''); clearAdvancedLoadDraft();
     }
+    if (!inlineLoadEnabled) {
+      advancedLoadModel = ''; advancedLoadPolicy = null;
+      byId('advanced-load-model').disabled = true; byId('advanced-load-editor').hidden = true;
+      text(byId('advanced-load-package'), packageId);
+      text(byId('advanced-load-policy-status'), 'Browser-created Quick and Advanced Load are disabled by Server configuration.');
+      return;
+    }
+    byId('advanced-load-model').disabled = false;
     try {
       const item = await request(`packages/${encodeURIComponent(packageId)}`);
       if (generation !== navigation || selectedPackage !== packageId) return;
@@ -170,6 +182,9 @@
   }
   async function loadAdvancedLoadPolicy() {
     const packageId = selectedPackage, generation = navigation;
+    if (!inlineLoadEnabled) {
+      text(byId('advanced-load-policy-status'), 'Browser-created Quick and Advanced Load are disabled by Server configuration.'); return;
+    }
     const model = String(byId('advanced-load-model').value || '');
     const sequence = ++advancedLoadSequence;
     advancedLoadModel = model; advancedLoadPolicy = null; clearAdvancedLoadDraft();
@@ -703,7 +718,7 @@
       byId('show-resource-source').hidden = !sourceAvailable;
       byId('run-resource-case').hidden = activeResource.type !== 'case' || activeResource.state === 'invalid';
       byId('debug-resource').hidden = !['template','flow','tool'].includes(activeResource.type) || activeResource.state === 'invalid';
-      byId('quick-load-resource').hidden = !['template','flow','tool'].includes(activeResource.type) || activeResource.state === 'invalid';
+      byId('quick-load-resource').hidden = !inlineLoadEnabled || !['template','flow','tool'].includes(activeResource.type) || activeResource.state === 'invalid';
       clearDebugForm();
       clearQuickLoadForm();
       byId('resource-source-heading').hidden = true; byId('resource-source').hidden = true; text(byId('resource-source'), '');
@@ -823,6 +838,9 @@
   }
   async function loadQuickLoadForm() {
     const item = activeResource, packageId = selectedPackage, generation = navigation;
+    if (!inlineLoadEnabled) {
+      text(byId('quick-load-form-status'), 'Browser-created Quick and Advanced Load are disabled by Server configuration.'); return;
+    }
     if (!item || !packageId || !['template','flow','tool'].includes(item.type)) return;
     const model = String(byId('quick-load-model').value || 'virtualUsers');
     const sequence = ++quickLoadFormSequence;

@@ -8,7 +8,7 @@ Package Resource Explorer 會按 package-scoped 邏輯資源 ID 列出已設定�
 
 Debug 只能從已選取的 Template、Flow 或 Tool 詳細資料開啟。表單會載入該目標選填 `debug.yaml` 的安全預設值；若檔案不存在，Server 會提供有效的空白 `att-debug/v1.2` 預設值。可以用 JSON object 編輯巢狀值、還原已載入的預設值、驗證，並在開始 Debug 前檢視已遮蔽的 YAML 預覽。所有目標都使用 `inputs`；Template 與 Flow 亦使用 `vars`，Tool 則使用 `arguments` 並不接受 `vars`。Server 會將記憶體中的 draft 綁定至已驗證 Principal 及目前 package revision。Draft 於 10 分鐘後過期，Server 重啟後失效。編輯或提交都不會寫入 package 檔案。現有以路徑提交的 Debug API 仍供相容用戶端使用。
 
-瀏覽器建立的 Quick Load 與 Advanced Load 預設停用。Server 管理員必須設定 `server.inlineLoad.enabled: true`，並配置 workload、target、user、rate、並行數及 duration 上限，這些表單才可建立 draft。停用時 endpoint 回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出上限會在 Server 驗證時拒絕。此設定不會停用既有 path-based Load 用戶端。
+瀏覽器建立的 Quick Load 與 Advanced Load 預設停用。Server 管理員必須設定 `server.inlineLoad.enabled: true`，並配置 workload、target、user、rate、並行數及 duration 上限，這些表單才可建立 draft。UI 會從 `/api/v1/version` 讀取 `inlineLoadEnabled`；功能關閉時會停用 Advanced Load 入口、隱藏 Quick Load，直接開啟頁面則會顯示停用狀態。停用時 endpoint 回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出上限會在 Server 驗證時拒絕。此設定不會停用既有 path-based Load 用戶端。
 
 Quick Load 同樣可從這些目標詳細資料開啟。選擇 Virtual Users 或 Arrival Rate，編輯安全的 business inputs、調整 model pacing、驗證並檢視 effective YAML。若存在相符的 `load/load.visualuser.yaml` 或 `load/load.arrivalrate.yaml`，Server 會讀取該 policy；否則使用內建 10 秒低強度 fallback。UI 會在提交流量前要求檢視及確認。Quick Load 只複製 `inputs`、`vars` 或 Tool `arguments`，不會複製 Debug case/stage 欄位或 Debug-local Testdata。Server 會將 draft 綁定至已驗證 Principal 及目前 package revision，並提交與驗證時相同的不可變 scenario。
 

@@ -102,7 +102,7 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/health`, `/version` | Health and build information |
+| `GET` | `/health`, `/version` | Health, build, and browser Load capability information |
 | `GET` | `/metrics` | Bounded job and Worker counts |
 | `GET` | `/packages`, `/packages/{packageId}` | Read the configured registry |
 | `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | List safe Case, Template, Flow, and Tool projections |
