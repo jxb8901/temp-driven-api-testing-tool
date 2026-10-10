@@ -207,11 +207,23 @@ final class ServerRuntime implements AutoCloseable {
     }
     private static void validatePackagePath(Path root,String relative,String name) throws Exception {if(relative==null)return;Path base=root.toRealPath();Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base))throw new IllegalArgumentException(name+" escapes PACKAGE_ROOT");Path existing=candidate;while(existing!=null&&!Files.exists(existing))existing=existing.getParent();if(existing!=null&&!existing.toRealPath().startsWith(base))throw new IllegalArgumentException(name+" resolves outside PACKAGE_ROOT");}
     private static void validateTarget(Map<String,Object> target){if(target==null)throw new IllegalArgumentException("target is required");Object type=target.get("type"),id=target.get("id");if(!(type instanceof String)||!(id instanceof String))throw new IllegalArgumentException("target.type and target.id are required");}
-    Object publicEventData(String id,Object data) throws Exception {return publicJson(id,JSON.writeValueAsString(data));}
+    Path packageRootForJob(String id) throws Exception {
+        Job active=jobs.get(id);
+        if(active!=null)return config.packages.get(active.packageId);
+        Map<String,Object> row=store.get(id);
+        if(row==null)throw new NotFoundException();
+        return config.packages.get(String.valueOf(row.get("packageId")));
+    }
+    Path outputDirectoryForJob(String id) {
+        return config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
+    }
+    Object publicEventData(Object data,Path output,Path packageRoot) throws Exception {
+        JsonNode node=JSON.valueToTree(att.worker.internal.DiagnosticSanitizer.sanitizeValue(data));
+        return sanitize(node,output,packageRoot);
+    }
     private JsonNode publicJson(String id,String json) throws Exception {
         JsonNode node=JSON.readTree(json);Object safe=att.worker.internal.DiagnosticSanitizer.sanitizeValue(JSON.convertValue(node,Object.class));node=JSON.valueToTree(safe);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
-        Path packageRoot=null;Job active=jobs.get(id);if(active!=null)packageRoot=config.packages.get(active.packageId);else {Map<String,Object> row=store.get(id);if(row!=null)packageRoot=config.packages.get(String.valueOf(row.get("packageId")));}
-        return sanitize(node,output,packageRoot);
+        return sanitize(node,output,packageRootForJob(id));
     }
     private JsonNode sanitize(JsonNode node,Path output,Path packageRoot) {
         if(node==null)return null;
