@@ -91,6 +91,56 @@ class ServerRuntimeTest {
         } finally {runtime.close();}
     }
 
+    @Test void recordsAndPersistsWorkerLifecycleTimingsAndResourceMetrics() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("metrics-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));
+        Path yaml=temp.resolve("metrics-server.yaml");Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("metrics-data")+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("metrics-libs")).toString());
+        try {
+            String id="J0123456789ABCDEF";Job job=new Job(id,"run","p","test",new att.worker.WorkerRequest(),
+                    new JobEvents(runtime.config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),100));
+            long now=System.nanoTime();job.requestReceivedNanos=now-100_000_000L;job.admittedNanos=now-80_000_000L;
+            job.workerStartedNanos=now-70_000_000L;job.workerSpawnStartedNanos=now-60_000_000L;job.workerSpawnedNanos=now-50_000_000L;
+            job.status="PREPARING";runtime.store.insert(job,"{}");runtime.jobs.put(id,job);
+
+            runtime.handleWorkerEvent(job,"{\"type\":\"STATUS\",\"jobId\":\""+id+"\",\"status\":\"RUNNING\"}");
+            runtime.handleWorkerEvent(job,"{\"type\":\"PROGRESS\",\"jobId\":\""+id+"\",\"message\":\"ready\"}");
+            runtime.handleWorkerEvent(job,"{\"type\":\"RESULT\",\"jobId\":\""+id+"\",\"status\":\"PASS\",\"exitCode\":0,\"result\":{\"status\":\"PASS\",\"exitCode\":0},\"workerMetrics\":{\"heapPeakUsedBytes\":4096,\"processCpuSupported\":true}}");
+            job.workerTerminatedNanos=System.nanoTime();runtime.store.update(job);runtime.jobs.remove(id);
+
+            Map<String,Object> record=runtime.jobRecord(id);
+            Map<?,?> performance=(Map<?,?>)record.get("performance");Map<?,?> timings=(Map<?,?>)performance.get("timings");
+            assertTrue(((Number)timings.get("admissionMs")).doubleValue()>=0.0);
+            assertTrue(((Number)timings.get("queueWaitMs")).doubleValue()>=0.0);
+            assertTrue(((Number)timings.get("workerSpawnMs")).doubleValue()>=0.0);
+            assertTrue(((Number)timings.get("workerReadyMs")).doubleValue()>=0.0);
+            assertTrue(((Number)timings.get("executionReadyMs")).doubleValue()>=0.0);
+            assertTrue(((Number)timings.get("workerLifetimeMs")).doubleValue()>=0.0);
+            assertEquals(4096L,((Number)((Map<?,?>)performance.get("worker")).get("heapPeakUsedBytes")).longValue());
+        } finally {runtime.close();}
+    }
+
+    @Test void appliesValidatedHeapBoundsToWorkerCommandWithoutAcceptingArbitraryJvmFlags() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("heap-command-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path yaml=temp.resolve("heap-command-server.yaml");Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("heap-command-data")+"\n  javaExecutable: "+java+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n  heapInitialMb: 128\n  heapMaxMb: 1024\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        AtomicReference<List<String>> command=new AtomicReference<>();
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("heap-command-libs")).toString(),builder->{
+            command.set(new java.util.ArrayList<>(builder.command()));
+            throw new java.io.IOException("captured Worker launch command");
+        });
+        try {
+            Map<String,Object> submitted=runtime.submit("validate",ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}"),"test");
+            String id=(String)submitted.get("jobId");long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(!runtime.jobs.isEmpty()&&System.nanoTime()<deadline)Thread.sleep(10);
+            assertTrue(runtime.jobs.isEmpty());
+            assertNotNull(command.get());
+            assertTrue(command.get().contains("-Xms128m"));
+            assertTrue(command.get().contains("-Xmx1024m"));
+            assertTrue(command.get().stream().noneMatch(argument->argument.startsWith("-javaagent")||argument.startsWith("-D")));
+            assertEquals("ERROR",runtime.jobRecord(id).get("status"));
+        } finally {runtime.close();}
+    }
+
     @Test void rejectsPackageRootReplacedBySymlinkAfterServerInitialization() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),"Uses POSIX symlink behavior");
         Path allowed=Files.createDirectory(temp.resolve("symlink-allowed"));Path outside=Files.createDirectory(temp.resolve("symlink-outside"));
