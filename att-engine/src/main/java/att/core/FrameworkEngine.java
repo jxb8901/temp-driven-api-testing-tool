@@ -208,12 +208,12 @@ public class FrameworkEngine {
             Map<String,Object> logData = new LinkedHashMap<String,Object>(); logData.put("file", portable(caseLogPath));
             progress(options, "CASE_LOG_PATH", runId, testCase.caseId(), null, null, null, null, null, logData);
         }
-        CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath, suiteConfig.caseLogYamlAnchors(),
-                options.hasObserver()
-                        ? new CaseLogConsoleMirror(testCase.caseId(), new java.util.function.Consumer<String>() {
+        CaseExecutionLog caseLog = options.hasObserver()
+                ? new CaseExecutionLog(caseLogPath, suiteConfig.caseLogYamlAnchors(),
+                        new CaseLogConsoleMirror(testCase.caseId(), new java.util.function.Consumer<String>() {
                             @Override public void accept(String text) { options.emitCaseLog(runId, testCase.caseId(), text); }
-                        })
-                        : null);
+                        }))
+                : CaseExecutionLog.buffered(caseLogPath, suiteConfig.caseLogYamlAnchors());
         caseLog.setProjectRoot(projectRoot);
         CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, validatedCaseId, runId,
                 runDirectory, caseLogPath, "testcase", started.toString(), runStartedAt.toString());

@@ -8,6 +8,8 @@ Load latency percentiles use a bounded primitive `long` reservoir. The run-level
 
 `PayloadCache` is process-scoped and invalidates entries when a file's canonical path, size or modification time changes. It uses least-recently-used eviction, retains at most 512 entries and 16,777,216 UTF-16 code units in total, and skips a file larger than 2,097,152 code units. This bounds cached content to about 32 MiB of character data; the cap does not limit the caller's loaded string or a compiled plan's own snapshot.
 
+For local evidence-log append measurements across physical, interactive-mirror, deferred and bounded modes, see [CaseExecutionLog benchmark](case-execution-log-benchmark.md).
+
 Iteration-scoped testdata choices live only in the active input mapping's memo table. The run-scoped resolver map contains only user/workload choices, so its reported iteration cache size should remain zero as iteration count rises. The regular regression suite checks 20,000 synthetic iterations. For a slower retained-heap check, run:
 
 ~~~sh
