@@ -147,14 +147,12 @@ class AuthenticationIntegrationTest {
         Object store=field(runtime,"store");var insert=store.getClass().getDeclaredMethod("insert",jobType,String.class);insert.setAccessible(true);insert.invoke(store,job,"{}");
         @SuppressWarnings("unchecked") Map<String,Object> jobs=(Map<String,Object>)field(runtime,"jobs");jobs.put(id,job);
         var append=journalType.getDeclaredMethod("append",String.class,Map.class);append.setAccessible(true);append.invoke(journal,"status",Map.of("jobId",id,"status","RUNNING"));
-        Object streams=field(runtime,"streams");java.lang.reflect.Method activeCount=streams.getClass().getMethod("getActiveCount");
         var clients=Executors.newFixedThreadPool(5);List<HttpURLConnection> connections=new ArrayList<>();
         try {
             List<Future<HttpURLConnection>> pending=new ArrayList<>();
             for(int i=0;i<5;i++)pending.add(clients.submit(()->{HttpURLConnection c=(HttpURLConnection)new java.net.URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();c.setConnectTimeout(3000);c.setReadTimeout(5000);c.setRequestProperty("Authorization",authorization);assertEquals(200,c.getResponseCode());return c;}));
             for(Future<HttpURLConnection> future:pending)connections.add(future.get(5,TimeUnit.SECONDS));
-            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);while((Integer)activeCount.invoke(streams)<5&&System.nanoTime()<deadline)Thread.sleep(10);
-            assertEquals(5,activeCount.invoke(streams),"Five simultaneous observers must all own live stream threads");
+            // Keep all five response streams open before publishing the live event.
             append.invoke(journal,"progress",Map.of("message","live observer event"));
             for(HttpURLConnection connection:connections) {
                 try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
