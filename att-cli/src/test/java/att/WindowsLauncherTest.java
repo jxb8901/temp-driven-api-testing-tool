@@ -127,6 +127,20 @@ class WindowsLauncherTest {
                 }
             }
 
+            for (Path root : roots) {
+                Path fixturePath = root.equals(sourceRoot) ? temp.resolve("source-debug-fixture")
+                        : root.resolve("target/launcher-debug-smoke");
+                Path debugFixture = createDebugFixture(root, fixturePath);
+                for (Path path : paths) {
+                    ProcessResult result = invokeWindows(root, path, buildToolLog,
+                            "debug", "template", "SIMPLE", "--config", debugFixture.resolve("config.yaml").toString(),
+                            "--input", debugFixture.resolve("templates/SIMPLE/debug.yaml").toString(),
+                            "--format", "json", "--quiet");
+                    assertEquals(0, result.exitCode, result.output);
+                    assertTrue(result.output.contains("PASS"), result.output);
+                }
+            }
+
             Path missingRoot = temp.resolve("missing-source");
             Files.createDirectories(missingRoot);
             Files.copy(workspace.resolve("att.bat"), missingRoot.resolve("att.bat"));
@@ -155,6 +169,23 @@ class WindowsLauncherTest {
         Files.write(path.resolve("javac.cmd"), buildToolShim("javac").getBytes(StandardCharsets.UTF_8));
         if (mavenPresent) Files.write(path.resolve("mvn.cmd"), buildToolShim("mvn").getBytes(StandardCharsets.UTF_8));
         return path;
+    }
+
+    private static Path createDebugFixture(Path root, Path fixture) throws Exception {
+        Path template = fixture.resolve("templates/SIMPLE");
+        Files.createDirectories(template);
+        String fixtureRelative = root.relativize(fixture).toString().replace(File.separatorChar, '/');
+        Files.write(fixture.resolve("config.yaml"), ("schemaVersion: att-config/v2.11\n"
+                + "environment: SIT\noutputDirectory: " + fixtureRelative + "/output\n"
+                + "templates: {root: " + fixtureRelative + "/templates}\n"
+                + "testcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(template.resolve("template.yaml"), ("schemaVersion: att-template/v3.4\nname: SIMPLE\n"
+                + "description: Launcher Debug execution smoke\nactions:\n"
+                + "  record:\n    type: log\n    message: launcher-debug-smoke\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(template.resolve("debug.yaml"), "schemaVersion: att-debug/v1.2\ninputs: {}\n"
+                .getBytes(StandardCharsets.UTF_8));
+        return fixture;
     }
 
     private static String buildToolShim(String tool) {
