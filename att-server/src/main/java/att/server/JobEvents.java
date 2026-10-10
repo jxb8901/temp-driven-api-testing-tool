@@ -46,6 +46,7 @@ final class JobEvents {
     private final Executor compactionExecutor;
     private final Runnable afterSnapshotWrite;
     private final AtomicLong sequence = new AtomicLong();
+    private long resultEventId = -1L;
     private final AtomicBoolean compactionScheduled = new AtomicBoolean();
     private final AtomicBoolean compactionAgain = new AtomicBoolean();
     private final NavigableMap<Long, Map<String, Object>> events = new TreeMap<>();
@@ -73,7 +74,9 @@ final class JobEvents {
                     try {
                         @SuppressWarnings("unchecked") Map<String, Object> event = JSON.readValue(line, Map.class);
                         sequence.set(Math.max(sequence.get(), ((Number) event.get("id")).longValue()));
-                        events.put(((Number) event.get("id")).longValue(), event);
+                        long id = ((Number) event.get("id")).longValue();
+                        events.put(id, event);
+                        if ("result".equals(event.get("event"))) resultEventId = id;
                     } catch (Exception ignored) {
                         // Ignore an incomplete or malformed final line and keep the valid journal prefix.
                     }
@@ -98,6 +101,7 @@ final class JobEvents {
             Files.writeString(file, JSON.writeValueAsString(event) + "\n", StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             events.put(id, event);
+            if ("result".equals(type)) resultEventId = id;
             trimRetainedEvents();
             for (Consumer<Map<String, Object>> listener : listeners) {
                 try {
@@ -128,6 +132,11 @@ final class JobEvents {
 
     synchronized boolean hasMore(long id) {
         return !events.isEmpty() && events.lastKey() > id;
+    }
+
+    /** True only after the stream cursor has passed the final result marker. */
+    synchronized boolean resultDeliveredThrough(long id) {
+        return resultEventId >= 0L && id >= resultEventId;
     }
 
     long latest() { return sequence.get(); }
