@@ -61,6 +61,9 @@ class ServerRuntimeTest {
             allowLaunch.countDown();cancel.get(5,TimeUnit.SECONDS);
             assertEquals("CANCELLED",runtime.jobRecord(id).get("status"));
             assertNotNull(launched.get());assertFalse(launched.get().isAlive(),"Cancellation must terminate the published Worker process");
+            long cleanupDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(runtime.jobs.containsKey(id)&&System.nanoTime()<cleanupDeadline)Thread.sleep(10);
+            assertFalse(runtime.jobs.containsKey(id),"Worker cleanup must finish before the temporary fixture is removed");
         } finally {allowLaunch.countDown();runtime.close();}
     }
 
