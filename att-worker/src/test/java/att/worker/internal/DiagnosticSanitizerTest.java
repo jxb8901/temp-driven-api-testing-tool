@@ -2,6 +2,7 @@ package att.worker.internal;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -15,10 +16,11 @@ class DiagnosticSanitizerTest {
     }
 
     @Test void normalizesSensitiveFieldNamesWithoutChangingTheRedactionContract() {
-        Map<String, Object> safe = DiagnosticSanitizer.sanitize(Map.of(
-                "api-key", "example-key",
-                "request-id", "request-123",
-                "message", "token=example-token"));
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("api-key", "example-key");
+        source.put("request-id", "request-123");
+        source.put("message", "token=example-token");
+        Map<String, Object> safe = DiagnosticSanitizer.sanitize(source);
 
         assertEquals("[REDACTED_SECRET]", safe.get("api-key"));
         assertEquals("request-123", safe.get("request-id"));
