@@ -1,6 +1,6 @@
 # ATT Server deployment and API
 
-ATT Server 4.0.0 provides a single-node control plane for submitting ATT Run, Debug, Load, and Validate jobs over a versioned REST API. Deploy its WAR to an external Tomcat 10.1+ instance running Java 17 or later. The CLI, Engine, and Worker remain Java 8-compatible.
+ATT Server 4.0.1 provides a single-node control plane for submitting ATT Run, Debug, Load, and Validate jobs over a versioned REST API. Deploy its WAR to an external Tomcat 10.1+ instance running Java 17 or later. The CLI, Engine, and Worker remain Java 8-compatible.
 
 ## Prepare the deployment
 
@@ -8,7 +8,7 @@ ATT Server 4.0.0 provides a single-node control plane for submitting ATT Run, De
 2. Create package directories under an allowed root and ensure the Tomcat service account can read them.
 3. Copy `config/att-server.example.yaml` to a protected location, update its absolute paths, and keep credentials out of the file and package content.
 4. Set `-Datt.server.config=/etc/att/server.yaml` in Tomcat's Java options. The `ATT_SERVER_CONFIG` environment variable is also accepted when the system property is absent.
-5. Deploy `att-server-4.0.0.war` to Tomcat 10.1+. Keep Tomcat's `unpackWARs` enabled so the Server can launch the Worker from `WEB-INF/lib`.
+5. Deploy `att-server-4.0.1.war` to Tomcat 10.1+. Keep Tomcat's `unpackWARs` enabled so the Server can launch the Worker from `WEB-INF/lib`.
 
 Tomcat owns listeners, TLS, access logs, and authentication. The WAR uses the Servlet container's configured authentication mechanism on package and job APIs and metrics, and preserves the container's challenge or redirect when authentication fails. Any authenticated Servlet Principal has the same API permissions in v1; no `ATT_USER` role assignment or ATT-specific RBAC is required. Health and version remain public. Terminate TLS before exposing BASIC credentials. The Server fails startup when its configuration, Java baseline, or package mappings are invalid.
 
@@ -111,4 +111,4 @@ Artifact paths are relative to the job output directory. Absolute paths, travers
 
 ## Distribution and compatibility
 
-The Server binary is distributed separately as `att-4.0.0-server.tar.gz`, containing `server/att-server-4.0.0.war` and the deployment guides. The local CLI is in `att-4.0.0-local.tar.gz` with its runtime libraries. Keeping these archives separate avoids duplicating the WAR's bundled libraries in the local package. Tomcat provides the HTTP listener and Servlet API. The Server requires Java 17; the CLI, Engine, and Worker continue to target Java 8.
+The Server binary is distributed separately as `att-4.0.1-server.tar.gz`, containing `server/att-server-4.0.1.war` and the deployment guides. The local CLI is in `att-4.0.1-local.tar.gz` with its runtime libraries. Keeping these archives separate avoids duplicating the WAR's bundled libraries in the local package. Tomcat provides the HTTP listener and Servlet API. The Server requires Java 17; the CLI, Engine, and Worker continue to target Java 8.

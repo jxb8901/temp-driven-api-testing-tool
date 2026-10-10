@@ -1,6 +1,6 @@
 # ATT Server 部署與 API
 
-ATT Server 4.0.0 提供單節點控制平面，讓用戶透過版本化 REST API 提交 ATT Run、Debug、Load 及 Validate 工作。請將 WAR 部署至使用 Java 17 或更新版本的外部 Tomcat 10.1+。CLI、Engine 及 Worker 仍相容 Java 8。
+ATT Server 4.0.1 提供單節點控制平面，讓用戶透過版本化 REST API 提交 ATT Run、Debug、Load 及 Validate 工作。請將 WAR 部署至使用 Java 17 或更新版本的外部 Tomcat 10.1+。CLI、Engine 及 Worker 仍相容 Java 8。
 
 ## 準備部署
 
@@ -8,7 +8,7 @@ ATT Server 4.0.0 提供單節點控制平面，讓用戶透過版本化 REST API
 2. 在允許的根目錄下建立 package 目錄，並確保 Tomcat 服務帳戶可讀取。
 3. 將 `config/att-server.example.yaml` 複製到受保護的位置，更新絕對路徑，並勿將憑證放進設定檔或 package 內容。
 4. 在 Tomcat Java 選項設定 `-Datt.server.config=/etc/att/server.yaml`。若沒有系統屬性，亦可使用 `ATT_SERVER_CONFIG` 環境變數。
-5. 將 `att-server-4.0.0.war` 部署至 Tomcat 10.1+。請保持 Tomcat 的 `unpackWARs` 啟用，讓 Server 可從 `WEB-INF/lib` 啟動 Worker。
+5. 將 `att-server-4.0.1.war` 部署至 Tomcat 10.1+。請保持 Tomcat 的 `unpackWARs` 啟用，讓 Server 可從 `WEB-INF/lib` 啟動 Worker。
 
 Tomcat 負責監聽器、TLS、存取記錄及驗證。請設定 Realm、SSO 整合、用戶端憑證或其他容器支援的機制；驗證失敗時，Server 會保留容器回傳的 challenge 或 redirect。若設定、Java 基線或 package mapping 無效，Server 會在啟動時失敗。
 
@@ -111,4 +111,4 @@ Artifact 路徑必須相對於工作輸出目錄。絕對路徑、目錄 travers
 
 ## 發行與相容性
 
-Server binary 會以獨立的 `att-4.0.0-server.tar.gz` 發佈，內含 `server/att-server-4.0.0.war` 及部署指南。Local CLI 位於 `att-4.0.0-local.tar.gz`，並包含其 runtime library。兩個 archive 分開後，local package 不會再重複附帶 WAR 內的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
+Server binary 會以獨立的 `att-4.0.1-server.tar.gz` 發佈，內含 `server/att-server-4.0.1.war` 及部署指南。Local CLI 位於 `att-4.0.1-local.tar.gz`，並包含其 runtime library。兩個 archive 分開後，local package 不會再重複附帶 WAR 內的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。

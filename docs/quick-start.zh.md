@@ -1,4 +1,4 @@
-# ATT v4.0.0 快速入門
+# ATT v4.0.1 快速入門
 
 [English Quick Start](quick-start.md) · [Reference Manual](reference.zh.html)
 
@@ -40,20 +40,27 @@ Workbook 內有兩個 Testcase：
 
 ## 確認前置條件
 
-ATT 需要 Java 8 或以上版本。macOS/Linux 的 source checkout launcher 可用 Maven 編譯；沒有 Maven 時，如 `javac` 及本機 Maven cache 內的 ATT dependency jars 齊備，亦可使用 fallback。Windows 的 `att.bat` 以 Maven 編譯 source checkout；沒有 Maven 時需要已有的 compiled classes。已打包的 release 不需要 Maven。在 repository root：
+ATT CLI、Engine、Remote 及 Server API module 支援 Java 8 或以上版本。Source checkout 需要 JDK 和 Maven，並須明確編譯這些 module；`att.sh` 和 `att.bat` 只會執行已預先編譯的 classes。完整 4.0.1 release build 亦會編譯需要 Java 17 的 Server module。已打包的 release 內含 application JAR，只需要 Java runtime，無須 Maven。
 
 1. 在 macOS/Linux 上，如有需要先令 launcher 可執行：
    ```sh
    chmod +x att.sh
    ```
 
-2. 確認 CLI 可以啟動：
+2. 在 repository root 編譯 CLI 和所需 module：
+   ```sh
+   mvn -DskipTests -pl att-cli -am compile
+   ```
+
+   此命令需要 JDK 和 Maven。若使用 database 或 IBM MQ integration，請把可選的 vendor driver JAR 放入 `lib/`。
+
+3. 確認 CLI 可以啟動：
 
    ```sh
    ./att.sh version
    ```
 
-   Windows 使用者請把 `./att.sh` 換成 `att.bat`。
+   Windows 使用者請執行相同的 Maven 命令，再執行 `att.bat version`。
 
 ## 看懂 Workbook 與 Sidecar
 
@@ -291,4 +298,4 @@ Quick Start 不應變成第二本 Reference Manual。按你真正要做的工作
 
 Direct DB Action 的安全邊界是：`query` 可以針對 `ASSERTION` / `TIMEOUT` retry；`update` 可設定 `timeoutMs`，但會拒絕自動 retry。完整契約見 [DBHelper](reference.zh/resources/dbhelper.md)。
 
-需要查完整欄位與 public contract 時，直接使用生成的 [ATT V4.0.0 中文 Reference Manual](reference.zh.html)。
+需要查完整欄位與 public contract 時，直接使用生成的 [ATT V4.0.1 中文 Reference Manual](reference.zh.html)。

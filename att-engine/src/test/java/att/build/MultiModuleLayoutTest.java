@@ -94,8 +94,8 @@ class MultiModuleLayoutTest {
         assertTrue(outputDir >= 0 && finalRepack > outputDir && finalExtract > finalRepack && smoke > finalExtract, build);
         String launcher=read(root.resolve("att.sh"));
         assertTrue(launcher.contains("$ENGINE_DIR/target/classes"));
-        assertTrue(launcher.contains("att-remote/target/classes"));
-        assertTrue(launcher.contains("att-server-api/target/classes"));
+        assertTrue(launcher.contains("$REMOTE_DIR/target/classes"));
+        assertTrue(launcher.contains("$API_DIR/target/classes"));
     }
 
     @Test void cleanCannotDeleteAnyModuleSourceTree() throws Exception {

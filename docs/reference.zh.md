@@ -1,7 +1,7 @@
-# ATT v4.0.0 使用手冊與參考
+# ATT v4.0.1 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.0.0
+Version: 4.0.1
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -90,6 +90,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Configuration owners](#configuration-owners)
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
+  - [編譯 source checkout](#編譯-source-checkout)
   - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
   - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
   - [Typed overrides and quick Load](#typed-overrides-and-quick-load)
@@ -2445,6 +2446,16 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
+### 編譯 source checkout
+
+Source checkout 的 launcher 只會執行已預先編譯的 classes，不會自行編譯。請使用 JDK 和 Maven 明確編譯支援 Java 8 的 CLI、Engine、Remote 及 Server API module：
+
+```sh
+mvn -DskipTests -pl att-cli -am compile
+```
+
+之後在 macOS/Linux 執行 `./att.sh`，在 Windows 執行 `att.bat`。若缺少所需 classes，launcher 會以錯誤訊息列出 build command，並停止執行。已打包的 release 內含 application JAR，只需要 Java 8 或以上的 runtime，無須 Maven。使用相關 integration 時，可把可選 JDBC 或 IBM MQ driver JAR 放入 `lib/`。Server WAR 需要 Java 17 或以上版本。
+
 ### 按任務查閱語法、option 和範例
 
 #### 查看 help 和版本
@@ -2822,7 +2833,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.0.0",
+  "attVersion": "4.0.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2861,7 +2872,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.0.0-local.tar.gz`、包含 WAR 和部署指南的 `att-4.0.0-server.tar.gz`，以及 source archive `att-4.0.0-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
+`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.0.1-local.tar.gz`、包含 WAR 和部署指南的 `att-4.0.1-server.tar.gz`，以及 source archive `att-4.0.1-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
 
 ### Runtime dependencies
 

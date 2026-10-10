@@ -1,4 +1,4 @@
-# ATT v4.0.0 quick start
+# ATT v4.0.1 quick start
 
 [中文快速入門](quick-start.zh.md) · [Reference Manual](reference.html)
 
@@ -40,20 +40,27 @@ You do not need to understand every ATT schema before running them.
 
 ## Check prerequisites
 
-ATT requires Java 8 or later. On macOS/Linux, the source checkout launcher can compile with Maven or fall back to `javac` when Maven is unavailable and the ATT dependency jars are present in the local Maven cache. On Windows, `att.bat` compiles a source checkout with Maven and requires existing compiled classes if Maven is unavailable. Packaged releases do not need Maven. From the repository root:
+ATT CLI, Engine, Remote, and Server API modules support Java 8 or later. A source checkout needs a JDK and Maven to build these modules explicitly; `att.sh` and `att.bat` only run prebuilt classes. The full 4.0.1 release build also includes the Java 17 Server module. Packaged releases contain their application JARs and need a Java runtime, not Maven.
 
 1. On macOS/Linux, make the launcher executable if necessary:
    ```sh
    chmod +x att.sh
    ```
 
-2. Check the CLI:
+2. From the repository root, compile the CLI and its required modules:
+   ```sh
+   mvn -DskipTests -pl att-cli -am compile
+   ```
+
+   This command requires a JDK and Maven. For database or IBM MQ integrations, provide the optional vendor driver JARs in `lib/`.
+
+3. Check the CLI:
 
    ```sh
    ./att.sh version
    ```
 
-   On Windows, use `att.bat` instead of `./att.sh`.
+   On Windows, run the same Maven command, then use `att.bat version`.
 
 ## Inspect the workbook and sidecar
 
@@ -291,4 +298,4 @@ Do not try to learn every ATT feature from this tutorial. Follow the Reference p
 
 For direct DB Actions specifically, remember the safety boundary: `query` may retry `ASSERTION`/`TIMEOUT`, while `update` supports `timeoutMs` but rejects automatic retry. See the [DBHelper Reference](reference/resources/dbhelper.md) for the full contract.
 
-For field-by-field supported behavior, use the generated [ATT V4.0.0 Reference Manual](reference.html) rather than extending this tutorial into a second manual.
+For field-by-field supported behavior, use the generated [ATT V4.0.1 Reference Manual](reference.html) rather than extending this tutorial into a second manual.
