@@ -193,6 +193,7 @@ final class ServerRuntime implements AutoCloseable {
         Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;
     }
     private void transition(Job j,String next) throws Exception {synchronized(j){if(j.terminal())return;j.status=next;if("RUNNING".equals(next))j.startedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",next));}}
+    // terminal() shares this monitor; SSE also waits for JobEvents' result marker before closing.
     void finish(Job j,String status,int code) throws Exception {synchronized(j){if(j.terminal())return;j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",status));Map<String,Object> result=new LinkedHashMap<>();result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);result.put("result",j.resultJson==null?null:publicJson(j.id,j.resultJson));append(j,"result",result);}}
     private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
     private void append(Job j,String type,Map<String,?> data) throws Exception {j.events.append(type,data);}
@@ -207,11 +208,23 @@ final class ServerRuntime implements AutoCloseable {
     }
     private static void validatePackagePath(Path root,String relative,String name) throws Exception {if(relative==null)return;Path base=root.toRealPath();Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base))throw new IllegalArgumentException(name+" escapes PACKAGE_ROOT");Path existing=candidate;while(existing!=null&&!Files.exists(existing))existing=existing.getParent();if(existing!=null&&!existing.toRealPath().startsWith(base))throw new IllegalArgumentException(name+" resolves outside PACKAGE_ROOT");}
     private static void validateTarget(Map<String,Object> target){if(target==null)throw new IllegalArgumentException("target is required");Object type=target.get("type"),id=target.get("id");if(!(type instanceof String)||!(id instanceof String))throw new IllegalArgumentException("target.type and target.id are required");}
-    Object publicEventData(String id,Object data) throws Exception {return publicJson(id,JSON.writeValueAsString(data));}
+    Path packageRootForJob(String id) throws Exception {
+        Job active=jobs.get(id);
+        if(active!=null)return config.packages.get(active.packageId);
+        Map<String,Object> row=store.get(id);
+        if(row==null)throw new NotFoundException();
+        return config.packages.get(String.valueOf(row.get("packageId")));
+    }
+    Path outputDirectoryForJob(String id) {
+        return config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
+    }
+    Object publicEventData(Object data,Path output,Path packageRoot) throws Exception {
+        JsonNode node=JSON.valueToTree(att.worker.internal.DiagnosticSanitizer.sanitizeValue(data));
+        return sanitize(node,output,packageRoot);
+    }
     private JsonNode publicJson(String id,String json) throws Exception {
         JsonNode node=JSON.readTree(json);Object safe=att.worker.internal.DiagnosticSanitizer.sanitizeValue(JSON.convertValue(node,Object.class));node=JSON.valueToTree(safe);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
-        Path packageRoot=null;Job active=jobs.get(id);if(active!=null)packageRoot=config.packages.get(active.packageId);else {Map<String,Object> row=store.get(id);if(row!=null)packageRoot=config.packages.get(String.valueOf(row.get("packageId")));}
-        return sanitize(node,output,packageRoot);
+        return sanitize(node,output,packageRootForJob(id));
     }
     private JsonNode sanitize(JsonNode node,Path output,Path packageRoot) {
         if(node==null)return null;

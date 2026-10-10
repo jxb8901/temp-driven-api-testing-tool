@@ -29,6 +29,7 @@ public final class DiagnosticSanitizer {
 
     public static String redactText(String value) {
         if(value==null)return "";
+        if(value.indexOf(':')<0&&value.indexOf('=')<0)return value;
         Matcher headerMatcher=SENSITIVE_HEADER.matcher(value);StringBuffer headerSafe=new StringBuffer();
         while(headerMatcher.find())headerMatcher.appendReplacement(headerSafe,Matcher.quoteReplacement(headerMatcher.group(1)+REDACTED));
         headerMatcher.appendTail(headerSafe);
@@ -47,7 +48,9 @@ public final class DiagnosticSanitizer {
     }
 
     private static boolean sensitiveName(String value) {
-        String key=value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]","");
+        String lower=value.toLowerCase(Locale.ROOT);StringBuilder normalized=new StringBuilder(lower.length());
+        for(int i=0;i<lower.length();i++){char c=lower.charAt(i);if(c>='a'&&c<='z'||c>='0'&&c<='9')normalized.append(c);}
+        String key=normalized.toString();
         return key.contains("password")||key.contains("passwd")||key.contains("token")||key.contains("secret")
                 ||key.contains("credential")||key.contains("apikey")||key.contains("privatekey")||key.contains("accesskey")
                 ||key.contains("authorization")||key.contains("cookie");

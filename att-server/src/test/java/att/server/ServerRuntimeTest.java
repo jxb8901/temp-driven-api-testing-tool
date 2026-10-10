@@ -82,6 +82,32 @@ class ServerRuntimeTest {
         } finally {runtime.close();}
     }
 
+    @Test void sseCompletionWaitsForResultMarkerAndClientCursor() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("sse-completion-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));Path yaml=temp.resolve("sse-completion-server.yaml");
+        Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("sse-completion-data")+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("sse-completion-libs")).toString());
+        try {
+            String id="J1122334455667788";Job job=new Job(id,"run","p","test",new att.worker.WorkerRequest(),new JobEvents(runtime.config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),100));
+            runtime.store.insert(job,"{}");runtime.jobs.put(id,job);long clientCursor=job.events.latest();
+            AtomicReference<Boolean> terminalValue=new AtomicReference<>();CountDownLatch terminalCheckStarted=new CountDownLatch(1);
+            Thread terminalCheck=new Thread(()->{terminalCheckStarted.countDown();try{terminalValue.set(runtime.terminal(id));}catch(Exception failure){throw new RuntimeException(failure);}},"test-sse-terminal-check");
+            synchronized(job) {
+                job.status="PASS";job.exitCode=0;job.finishedAt=java.time.Instant.now();runtime.store.update(job);
+                assertFalse(job.events.resultDeliveredThrough(clientCursor),"An old Last-Event-ID cursor must not pass an unpublished result marker");
+                terminalCheck.start();assertTrue(terminalCheckStarted.await(5,TimeUnit.SECONDS));long blockedDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(2);
+                while(terminalCheck.getState()!=Thread.State.BLOCKED&&System.nanoTime()<blockedDeadline)Thread.yield();
+                assertEquals(Thread.State.BLOCKED,terminalCheck.getState(),"Terminal observation must wait while final journal events are unpublished");
+                job.events.append("status",Map.of("jobId",id,"status","PASS"));
+                job.events.append("result",Map.of("jobId",id,"status","PASS","exitCode",0));
+            }
+            terminalCheck.join(5000);
+            assertFalse(terminalCheck.isAlive());assertEquals(Boolean.TRUE,terminalValue.get());
+            List<Map<String,Object>> replay=job.events.after(clientCursor);assertEquals(List.of("status","result"),replay.stream().map(event->event.get("event")).toList());
+            long resumedCursor=((Number)replay.get(0).get("id")).longValue();assertFalse(job.events.resultDeliveredThrough(resumedCursor),"Receiving only the status event must not close SSE");
+            resumedCursor=((Number)replay.get(1).get("id")).longValue();assertTrue(job.events.resultDeliveredThrough(resumedCursor),"SSE can close once Last-Event-ID has passed the result event");assertFalse(job.events.hasMore(resumedCursor));
+        } finally {runtime.close();}
+    }
+
     @Test void publicResultsReplacePackageAndOutputRootsWithLogicalReferences() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("redact-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));Path yaml=temp.resolve("redact-server.yaml");
         Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("redact-data")+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");

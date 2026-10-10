@@ -17,6 +17,7 @@ class JobEventsTest {
         events.append("status",Map.of("status","QUEUED"));events.append("status",Map.of("status","RUNNING"));events.append("result",Map.of("status","PASS"));
         JobEvents reopened=new JobEvents(file,3);
         assertEquals(3,reopened.latest());assertEquals(2,reopened.after(1).size());assertEquals(3L,((Number)reopened.after(1).get(1).get("id")).longValue());
+        assertFalse(reopened.resultDeliveredThrough(2));assertTrue(reopened.resultDeliveredThrough(3));
         reopened.append("log",Map.of("message","x".repeat(70000)));
         assertEquals(true,reopened.after(3).get(0).get("data").toString().contains("truncated"));
         assertTrue(Files.size(file)>0);

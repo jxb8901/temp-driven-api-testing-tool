@@ -65,12 +65,22 @@ class MultiModuleLayoutTest {
             assertFalse(lower.contains(forbidden), server);
     }
 
-    @Test void releasePackagingContainsCliEngineAndWorkerDependencies() throws Exception {
+    @Test void releasePackagingBundlesAttModulesAndKeepsThirdPartyJarsSeparate() throws Exception {
         Path root = Paths.get("").toAbsolutePath().normalize();
         String local = read(root.resolve("att-dist/src/assembly/local.xml"));
-        assertTrue(local.contains("<include>att:att-cli</include>"), local);
+        assertTrue(local.contains("att-${project.version}-modules.jar"), local);
         assertTrue(local.contains("att-${project.version}.jar"), local);
+        assertTrue(local.contains("<unpack>false</unpack>"), local);
+        for (String module : Arrays.asList("att-cli", "att-engine", "att-remote", "att-server-api", "att-worker"))
+            assertTrue(local.contains("<exclude>att:" + module + "</exclude>"), local);
         assertFalse(local.contains("att-server-${project.version}.war"), local);
+
+        String modules = read(root.resolve("att-dist/src/assembly/modules.xml"));
+        assertTrue(modules.contains("<format>jar</format>"), modules);
+        assertTrue(modules.contains("<unpack>true</unpack>"), modules);
+        for (String module : Arrays.asList("att-cli", "att-engine", "att-remote", "att-server-api", "att-worker"))
+            assertTrue(modules.contains("<include>att:" + module + "</include>"), modules);
+
         String serverAssembly = read(root.resolve("att-dist/src/assembly/server.xml"));
         assertTrue(serverAssembly.contains("att-server-${project.version}.war"), serverAssembly);
         assertTrue(serverAssembly.contains("docs/server-deployment.md"), serverAssembly);
