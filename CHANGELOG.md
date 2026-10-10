@@ -1,5 +1,10 @@
 # Changelog
 
+# ATT 4.1.0 - 2026-10-10
+
+- Upgrade the ATT product version to 4.1.0.
+- Define the phased Package/Config Explorer and resource-scoped inline job contracts for issue #176.
+
 # ATT 4.0.1 - 2026-10-10
 
 - Remove implicit Maven and `javac` compilation from the Unix and Windows launchers; source checkouts now require an explicit build before commands can run (#177).
