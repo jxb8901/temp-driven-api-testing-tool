@@ -2908,6 +2908,13 @@ workload 需要調整兩者，並確保 per-route 值不大於總數。另為 la
 變化及其他 route 留出 headroom，再查看 <code>resources.http</code> 的
 active/idle/waiting/peak observations。Pool capacity 是 generator-side
 上限，不代表應向未確認承載能力的 service 發送該流量。</p>
+<p>DB workload 可用相同估算，將 DB operations/second 乘以 connection
+lease 平均時間（connection 借出後仍被使用的時間）。例如每秒 40 次
+operation、平均 lease 100 ms，約需四條 concurrent connection。每個 DB
+helper 的 <code>pool.maxSize</code> 可按此 concurrency 加上 headroom
+設定，再查看其 <code>resources.db</code> active/idle/waiting、borrow
+timeout 及 total borrow wait metrics。每個 helper 預設 maximum 為
+20；這是 client-side 上限，並非建議的目標 database 容量。</p>
 <p>MQ request/reply 若每秒 10 個 request、平均 reply time 為 3 秒，整個
 workload 約需 30 條 leased connection。<code>pool.maxSize</code>
 應按每個<strong>實體 MQ instance</strong> 的預期 in-flight request 數

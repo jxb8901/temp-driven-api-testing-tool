@@ -6,14 +6,19 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Process-level UTF-8 payload cache invalidated by canonical path, size and modification time. */
+/** Bounded process-level UTF-8 payload cache invalidated by canonical path, size and modification time. */
 public final class PayloadCache {
-    private static final Map<Key, String> CACHE = new LinkedHashMap<Key, String>();
+    static final int MAX_CACHE_ENTRIES = 512;
+    static final long MAX_CACHED_CHARS = 16L * 1024L * 1024L;
+    static final int MAX_ENTRY_CHARS = 2 * 1024 * 1024;
+    private static final Map<Key, String> CACHE = new LinkedHashMap<Key, String>(16, 0.75f, true);
     private static final AtomicLong HITS = new AtomicLong();
     private static final AtomicLong LOADS = new AtomicLong();
+    private static long cachedChars;
 
     private PayloadCache() {}
 
@@ -31,20 +36,40 @@ public final class PayloadCache {
             while ((count = reader.read(buffer)) >= 0) content.append(buffer, 0, count);
         }
         String loaded = content.toString();
+        LOADS.incrementAndGet();
         synchronized (CACHE) {
+            String concurrent = CACHE.get(key);
+            if (concurrent != null) return concurrent;
             removeOlder(canonical);
-            String previous = CACHE.put(key, loaded);
-            if (previous == null) LOADS.incrementAndGet(); else return previous;
+            if (loaded.length() <= MAX_ENTRY_CHARS) {
+                CACHE.put(key, loaded);
+                cachedChars += loaded.length();
+                evictToBound();
+            }
         }
         return loaded;
     }
 
     public static Stats stats() { return new Stats(LOADS.get(), HITS.get()); }
-    static void clearForTests() { synchronized (CACHE) { CACHE.clear(); } LOADS.set(0); HITS.set(0); }
+    static void clearForTests() { synchronized (CACHE) { CACHE.clear(); cachedChars = 0L; } LOADS.set(0); HITS.set(0); }
 
     private static void removeOlder(Path canonical) {
-        java.util.Iterator<Key> keys = CACHE.keySet().iterator();
-        while (keys.hasNext()) if (keys.next().path.equals(canonical)) keys.remove();
+        Iterator<Map.Entry<Key, String>> entries = CACHE.entrySet().iterator();
+        while (entries.hasNext()) {
+            Map.Entry<Key, String> entry = entries.next();
+            if (entry.getKey().path.equals(canonical)) {
+                cachedChars -= entry.getValue().length();
+                entries.remove();
+            }
+        }
+    }
+
+    private static void evictToBound() {
+        Iterator<Map.Entry<Key, String>> entries = CACHE.entrySet().iterator();
+        while ((CACHE.size() > MAX_CACHE_ENTRIES || cachedChars > MAX_CACHED_CHARS) && entries.hasNext()) {
+            cachedChars -= entries.next().getValue().length();
+            entries.remove();
+        }
     }
 
     public static final class Stats {
