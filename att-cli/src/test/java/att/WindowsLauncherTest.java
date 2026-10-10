@@ -105,7 +105,9 @@ class WindowsLauncherTest {
     @Test @EnabledOnOs(OS.WINDOWS)
     void sourceAndPackagedLaunchersNeverCompileWithMavenPresentOrAbsent() throws Exception {
         Path workspace = Paths.get("").toAbsolutePath();
-        Path temp = Files.createTempDirectory(workspace.resolve("target"), "windows-launcher-run-only-");
+        Path targetDirectory = workspace.resolve("target");
+        Files.createDirectories(targetDirectory);
+        Path temp = Files.createTempDirectory(targetDirectory, "windows-launcher-run-only-");
         Path buildToolLog = temp.resolve("build-tools.log");
         try {
             Path mavenPath = createWindowsPath(temp.resolve("path-with-maven"), true);
