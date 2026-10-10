@@ -58,7 +58,7 @@ Server state is stored in `dataDir/db/`. Each job uses `dataDir/jobs/<jobId>/` f
 
 ## Authentication and identity
 
-Tomcat authenticates requests. ATT Server reads `HttpServletRequest.getUserPrincipal()` and requires a Principal on package, resource-inspection, Debug draft, job, result, event, and artifact endpoints. The new resource-inspection and Debug draft endpoints always require a real Servlet Principal, even when anonymous access is enabled for the legacy API. Health and version may be anonymous. The principal name is stored with job and audit metadata and is not sent to the Worker or exposed in ATT expression Context.
+Tomcat authenticates requests. ATT Server reads `HttpServletRequest.getUserPrincipal()` and requires a Principal on package, resource-inspection, Debug/Quick Load draft, job, result, event, and artifact endpoints. The new resource-inspection and Debug/Quick Load draft endpoints always require a real Servlet Principal, even when anonymous access is enabled for the legacy API. Health and version may be anonymous. The principal name is stored with job and audit metadata and is not sent to the Worker or exposed in ATT expression Context.
 
 State-changing requests require `application/json`; requests carrying an `Origin` must match the request origin. Behind a TLS-terminating proxy, configure Tomcat's `RemoteIpValve` to derive the Servlet scheme, host, and port from the proxy's forwarded headers. Set `internalProxies` to only the actual proxy addresses, and ensure the proxy removes client-supplied `Forwarded`/`X-Forwarded-*` headers before adding its own. For example, adapt these header names and trusted addresses to the proxy:
 
@@ -88,9 +88,11 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | Read one safe resource definition and references |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | Read a redacted YAML projection or allowlisted Tool script |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/debug-form?environment=SIT` | Read safe target-scoped Debug defaults |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT` | Read safe defaults and one-workload Quick Load preview |
 | `POST` | `/drafts/debug` | Validate a fixed-target Debug input and create an in-memory draft |
-| `GET` | `/drafts/{draftId}` | Read the safe preview for an owned Debug draft |
-| `POST` | `/jobs/debug` | Submit an owned Debug draft |
+| `POST` | `/drafts/quick-load` | Validate a fixed-target Quick Load and create an in-memory draft |
+| `GET` | `/drafts/{draftId}` | Read the safe preview for an owned Debug or Quick Load draft |
+| `POST` | `/jobs/debug`, `/jobs/load` | Submit an owned Debug or Quick Load draft |
 | `POST` | `/jobs/run`, `/jobs/load`, `/jobs/validate` | Submit one path-based job |
 | `GET` | `/jobs`, `/jobs/{jobId}` | List recent jobs or read job status |
 | `GET` | `/jobs/{jobId}/result` | Read the canonical result and diagnostic |
@@ -160,7 +162,7 @@ Invalid list parameters return `400`; unknown packages/resources return the same
 
 ### Target-scoped Debug and drafts
 
-Debug form and draft endpoints require a real authenticated Servlet Principal, including when anonymous access is enabled for legacy jobs. Use a resource ID from the Package Resource Explorer; Cases cannot be Debug targets.
+Debug form, Quick Load form, and draft endpoints require a real authenticated Servlet Principal, including when anonymous access is enabled for legacy jobs. Use a resource ID from the Package Resource Explorer; Cases cannot be Debug or Quick Load targets.
 
 ```http
 GET /api/v1/packages/payments/resources/flow/{resourceId}/debug-form?environment=SIT
@@ -189,6 +191,40 @@ Content-Type: application/json
 ```
 
 The Server rechecks the package revision at submission and before Worker start. A change detected during submission returns `409 ATT-SERVER-DRAFT-STALE`; a change detected after job acceptance marks the job `INVALID` with that diagnostic. Validation failures return a top-level `diagnostics` array with safe `code`, `summary`, `field`, and logical `resourceId` values; source paths and parser snippets are omitted. Worker execution receives the same immutable typed values validated for the preview; inline values remain in memory and do not create files under the package root. Existing path-based Debug requests remain supported for compatible clients.
+
+### Target-scoped Quick Load
+
+Quick Load is available from a selected Template, Flow, or Tool. It uses one fixed target and creates one Workload. The model is `virtualUsers` or `arrivalRate`; the Server composes the matching current `att-load/v1.6` policy and validates the target through the existing Load pipeline.
+
+```http
+GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT
+```
+
+The form response includes safe `inputs` and `vars` defaults for Template/Flow targets, or `inputs` and `arguments` for a Tool, plus a redacted one-workload preview. It reads only the business fields from the optional target `debug.yaml`; Debug-only `case`, `stage`, and local `testdata` are not copied. When a sidecar has Debug-local Testdata, the form reports that those imports were omitted. Supply any needed package-relative descriptors in the separate Load-level `testdata` array; these paths are validated as part of the effective Load scenario.
+
+The Server reads `load/load.visualuser.yaml` for `virtualUsers` and `load/load.arrivalrate.yaml` for `arrivalRate`. These are policy-only `att-load/v1.6` descriptors; the selected policy must match the chosen model. If a model-specific file is absent, a bundled low-intensity fallback is used: one Virtual User for 10 seconds, or 1 arrival per second for 10 seconds with `maxConcurrent: 1` and `overloadPolicy: drop`. Existing CLI `load/load.yaml` behavior is unchanged.
+
+Validate business values and pacing overrides to create an owned draft:
+
+```http
+POST /api/v1/drafts/quick-load
+Content-Type: application/json
+
+{"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"model":"virtualUsers","input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}},"load":{"users":4,"duration":"30s"},"execution":{"thinkTime":"100ms"},"testdata":["testdata/load-accounts.yaml"]}
+```
+
+`load` accepts only pacing fields supported by the selected model. `execution` accepts the optional closed-workload `thinkTime`. `testdata` is an optional array of additional package-relative Load descriptor paths; it is kept separate from Debug-local imports and the model policy's existing descriptors. The response returns a principal-bound opaque `draftId` beginning with `L`, the safe effective YAML preview, redaction state, and expiry. Debug and Quick Load drafts share the 128-active-per-Server, 16-per-Principal, 10-minute in-memory limits.
+
+After reviewing the preview, submit only the draft identity:
+
+```http
+POST /api/v1/jobs/load
+Content-Type: application/json
+
+{"packageId":"payments","draftId":"L0123456789ABCDEF0123456789ABCDEF"}
+```
+
+The Server checks the package revision at draft submission, before Worker start, and again in the Worker. A stale draft returns `409 ATT-SERVER-DRAFT-STALE`, or marks an already accepted job `INVALID` with that diagnostic. The Worker receives the exact immutable scenario validated for preview; it stays in memory and is not written into the package. Existing path-based Load requests remain supported.
 
 ### Package configuration inspection
 

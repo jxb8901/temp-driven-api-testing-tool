@@ -106,10 +106,62 @@ public final class LoadScenarioLoader {
         }
     }
 
-    /** Returns the optional policy-only load/load.yaml descriptor for Quick Load and discovery. */
+    /** Returns the optional policy-only load/load.yaml descriptor for existing CLI Quick Load behavior. */
     public Map<String, Object> loadDefaultPolicy() throws Exception {
-        Path source = projectRoot.resolve("load/load.yaml").normalize();
-        if (!Files.exists(source)) return null;
+        return loadPolicy(projectRoot.resolve("load/load.yaml").normalize());
+    }
+
+    /** Loads a model-specific Quick Load policy, or the low-intensity bundled fallback. */
+    public Map<String, Object> loadQuickLoadPolicy(String model) throws Exception {
+        if (!LoadScenarioBuilder.MODEL_VIRTUAL_USERS.equals(model)
+                && !LoadScenarioBuilder.MODEL_ARRIVAL_RATE.equals(model))
+            throw quickLoadFailure(null, "model", "Quick Load model must be virtualUsers or arrivalRate");
+        String filename = LoadScenarioBuilder.MODEL_VIRTUAL_USERS.equals(model)
+                ? "load.visualuser.yaml" : "load.arrivalrate.yaml";
+        Path source = projectRoot.resolve("load").resolve(filename).normalize();
+        Map<String, Object> policy;
+        if (!Files.exists(source, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            policy = bundledQuickLoadPolicy(model);
+        } else {
+            policy = loadPolicy(source);
+            if (policy == null) throw quickLoadFailure(source, "policy", "Quick Load policy is unavailable");
+        }
+        Map<String, Object> load = configMap(policy.get("load"), "load");
+        boolean users = load.containsKey("users");
+        boolean arrivalRate = load.containsKey("arrivalRate");
+        if (users == arrivalRate
+                || LoadScenarioBuilder.MODEL_VIRTUAL_USERS.equals(model) != users)
+            throw quickLoadFailure(source, "load", "Quick Load policy does not match the selected load model");
+        return policy;
+    }
+
+    private Map<String, Object> bundledQuickLoadPolicy(String model) throws Exception {
+        Map<String, Object> policy = new LinkedHashMap<String, Object>();
+        policy.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
+        Map<String, Object> load = new LinkedHashMap<String, Object>();
+        if (LoadScenarioBuilder.MODEL_VIRTUAL_USERS.equals(model)) {
+            load.put("users", 1);
+        } else {
+            load.put("arrivalRate", "1/s");
+            load.put("maxConcurrent", 1);
+            load.put("overloadPolicy", "drop");
+        }
+        load.put("duration", "10s");
+        policy.put("load", load);
+        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.6.schema.json");
+        JsonSchemaVerifier.verify(schema, policy);
+        LoadScenario scenario = semanticCurrent(null, policy, false);
+        if (!scenario.policyOnly()) throw quickLoadFailure(null, "workloads", "Bundled Quick Load fallback must be policy-only");
+        return policy;
+    }
+
+    private Map<String, Object> loadPolicy(Path source) throws Exception {
+        source = source.toAbsolutePath().normalize();
+        if (!Files.exists(source, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return null;
+        // Keep policy loading and the package revision snapshot on the same canonical root.
+        // In particular, do not follow an external symlinked `load/` directory here.
+        new att.resource.PackageResourceResolver(projectRoot)
+                .fromInternalPath(source, att.resource.PackageResourceResolver.Kind.FILE);
         if (!Files.isRegularFile(source) || Files.isSymbolicLink(source))
             throw invalid(source, "Load policy must be a regular non-symlink file", "policy", "Create a regular att-load/v1.6 YAML policy descriptor.", null);
         Object loaded = YamlSupport.load(source);
@@ -142,6 +194,27 @@ public final class LoadScenarioLoader {
         JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.6.schema.json"), migrated);
         semanticCurrent(source, migrated, false);
         return migrated;
+    }
+
+    /** Parses a server-issued inline scenario through the same current schema and semantic rules as a file. */
+    public LoadScenario loadInline(Map<String, Object> values) throws Exception {
+        if (values == null) throw quickLoadFailure(null, "scenario", "Inline Load scenario is required");
+        Map<String, Object> map = objectMap(values);
+        try {
+            SchemaSupport.requireVersion(map, Version.LOAD_SCHEMA_CURRENT, "inline load scenario");
+            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.6.schema.json"), map);
+            return semanticCurrent(null, map, true);
+        } catch (DiagnosticException error) {
+            throw error;
+        } catch (SemanticFailure error) {
+            throw new DiagnosticException(DiagnosticCodes.LOAD_INVALID, "Invalid inline Load scenario", error.getMessage(),
+                    null, error.field(), null, null, null, null, null,
+                    "Correct the reported Load scenario field and preview the scenario again.", error);
+        } catch (JsonSchemaVerifier.SchemaValidationException error) {
+            throw new DiagnosticException(DiagnosticCodes.LOAD_INVALID, "Invalid inline Load scenario", error.getMessage(),
+                    null, error.field(), null, null, null, null, null,
+                    "Correct the reported Load scenario field and preview the scenario again.", error);
+        }
     }
 
     /** Builds the transient one-workload Load scenario used by `load --debug`. */

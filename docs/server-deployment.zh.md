@@ -58,7 +58,7 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 ## 驗證與身份
 
-Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authentication mechanism。v1 所有已驗證的 Servlet Principal 具有相同 API 權限，不要求 `ATT_USER` 角色，也沒有 ATT 專用 RBAC。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。驗證失敗時，Server 保留 container response，包括 BASIC challenge 或 FORM/SSO redirect。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、資源檢視、Debug draft、job、result、event 及 artifact API 均要求 Principal。即使舊 API 啟用匿名模式，新的資源探索及 Debug draft endpoint 仍要求真實 Servlet Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
+Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authentication mechanism。v1 所有已驗證的 Servlet Principal 具有相同 API 權限，不要求 `ATT_USER` 角色，也沒有 ATT 專用 RBAC。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。驗證失敗時，Server 保留 container response，包括 BASIC challenge 或 FORM/SSO redirect。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、資源檢視、Debug/Quick Load draft、job、result、event 及 artifact API 均要求 Principal。即使舊 API 啟用匿名模式，新的資源探索及 Debug/Quick Load draft endpoint 仍要求真實 Servlet Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
 
 改變狀態的請求必須使用 `application/json`；如請求帶有 `Origin`，必須與請求來源相同。若 TLS 在反向代理終止，請設定 Tomcat `RemoteIpValve`，由代理的 forwarded headers 還原 Servlet scheme、host 及 port。`internalProxies` 只可列出實際代理位址，並確保代理會先移除用戶提交的 `Forwarded`/`X-Forwarded-*` headers，再加入自身的值。請依代理實際使用的 header 名稱及受信任位址調整設定：
 
@@ -88,9 +88,11 @@ Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authenticatio
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | 讀取單一資源定義及關聯 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已遮蔽的 YAML 投影或允許清單內的 Tool script |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/debug-form?environment=SIT` | 讀取目標範圍內的安全 Debug 預設值 |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT` | 讀取安全預設值及單 workload Quick Load 預覽 |
 | `POST` | `/drafts/debug` | 驗證固定目標的 Debug 輸入並建立記憶體 draft |
-| `GET` | `/drafts/{draftId}` | 讀取所屬 Debug draft 的安全預覽 |
-| `POST` | `/jobs/debug` | 提交所屬 Debug draft |
+| `POST` | `/drafts/quick-load` | 驗證固定目標的 Quick Load 並建立記憶體 draft |
+| `GET` | `/drafts/{draftId}` | 讀取所屬 Debug 或 Quick Load draft 的安全預覽 |
+| `POST` | `/jobs/debug`、`/jobs/load` | 提交所屬 Debug 或 Quick Load draft |
 | `POST` | `/jobs/run`、`/jobs/load`、`/jobs/validate` | 提交 path-based 工作 |
 | `GET` | `/jobs`、`/jobs/{jobId}` | 列出近期工作或讀取狀態 |
 | `GET` | `/jobs/{jobId}/result` | 讀取標準結果及診斷 |
@@ -160,7 +162,7 @@ GET /api/v1/packages/payments/resources/template/{resourceId}/source
 
 ### 目標範圍內的 Debug 與 draft
 
-Debug form 及 draft endpoint 要求真實、已驗證的 Servlet Principal，即使舊 job API 啟用匿名存取亦一樣。請使用 Package Resource Explorer 回傳的資源 ID；Case 不能作為 Debug 目標。
+Debug form、Quick Load form 及 draft endpoint 要求真實、已驗證的 Servlet Principal，即使舊 job API 啟用匿名存取亦一樣。請使用 Package Resource Explorer 回傳的資源 ID；Case 不能作為 Debug 或 Quick Load 目標。
 
 ```http
 GET /api/v1/packages/payments/resources/flow/{resourceId}/debug-form?environment=SIT
@@ -189,6 +191,40 @@ Content-Type: application/json
 ```
 
 Server 會在提交時及 Worker 啟動前重新檢查 package revision。若在提交時發現變更，會回傳 `409 ATT-SERVER-DRAFT-STALE`；若工作已接受後才發現變更，工作會以該 diagnostic 標記為 `INVALID`。驗證失敗會在頂層 `diagnostics` array 回傳安全的 `code`、`summary`、`field` 及邏輯 `resourceId`；不會包含 source path 或 parser snippet。Worker 會收到與預覽驗證相同的不可變 typed values；inline input 留在記憶體，不會在 package root 下建立檔案。舊有以路徑提交的 Debug request 仍可供相容用戶端使用。
+
+### 目標範圍內的 Quick Load
+
+Quick Load 可從已選取的 Template、Flow 或 Tool 開啟，固定使用該目標並組成一個 Workload。Model 可選 `virtualUsers` 或 `arrivalRate`；Server 會組成相符的現行 `att-load/v1.6` policy，並使用現有 Load pipeline 驗證目標。
+
+```http
+GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT
+```
+
+表單回應會為 Template/Flow 提供安全的 `inputs`、`vars` 預設值，或為 Tool 提供 `inputs`、`arguments`，並附上已遮蔽的單 workload 預覽。它只讀取目標選填 `debug.yaml` 內的 business 欄位；不會複製 Debug 專用的 `case`、`stage` 及 local `testdata`。若 sidecar 包含 Debug-local Testdata，表單會明確提示這些 imports 已略過。需要的 package-relative descriptor 可另外放入 Load-level `testdata` array，並會按 effective Load scenario 驗證。
+
+Server 會為 `virtualUsers` 讀取 `load/load.visualuser.yaml`，為 `arrivalRate` 讀取 `load/load.arrivalrate.yaml`。這些是 policy-only 的 `att-load/v1.6` descriptor，必須與所選 model 相符。若 model 專用檔案不存在，會使用內建低強度 fallback：一個 Virtual User 執行 10 秒，或每秒 1 次 arrival、執行 10 秒，並設定 `maxConcurrent: 1` 及 `overloadPolicy: drop`。既有 CLI `load/load.yaml` 行為不變。
+
+提交 business values 及 pacing overrides 以建立所屬 draft：
+
+```http
+POST /api/v1/drafts/quick-load
+Content-Type: application/json
+
+{"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"model":"virtualUsers","input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}},"load":{"users":4,"duration":"30s"},"execution":{"thinkTime":"100ms"},"testdata":["testdata/load-accounts.yaml"]}
+```
+
+`load` 只接受所選 model 支援的 pacing 欄位；`execution` 可包含 closed-workload 的 `thinkTime`。可選的 `testdata` array 可指定額外 package-relative Load descriptor paths；這些路徑與 Debug-local imports 分開處理，並會附加於 model policy 既有 descriptors。回應會提供綁定 Principal 的不透明 `draftId`（以 `L` 開頭）、安全的 effective YAML 預覽、遮蔽狀態及過期時間。Debug 與 Quick Load drafts 共用每個 Server 最多 128 個、每位 Principal 最多 16 個、有效期 10 分鐘的記憶體限制。
+
+檢視預覽後，只提交 draft identity：
+
+```http
+POST /api/v1/jobs/load
+Content-Type: application/json
+
+{"packageId":"payments","draftId":"L0123456789ABCDEF0123456789ABCDEF"}
+```
+
+Server 會在 draft 提交時、Worker 啟動前及 Worker 內重新檢查 package revision。若 draft 過期會回傳 `409 ATT-SERVER-DRAFT-STALE`；工作接納後才發現變更，則會標示為 `INVALID` 並附該診斷。Worker 會收到與預覽驗證相同的不可變 scenario；內容只留在記憶體，不會寫入 package。舊有 path-based Load request 仍受支援。
 
 ### Package configuration inspection
 

@@ -46,7 +46,8 @@ public final class LoadRequest extends AttRequest {
                        att.load.LoadEventListener listener, att.load.LoadScenario parsedScenario,
                        boolean profile) {
         super(packageRoot, configPath, environment, outputDirectory, runId);
-        if (scenario == null && (debugTargetType == null || debugTargetId == null)) throw new IllegalArgumentException("Load requires a scenario or a Debug target");
+        if (scenario == null && parsedScenario == null && (debugTargetType == null || debugTargetId == null))
+            throw new IllegalArgumentException("Load requires a scenario, an inline scenario, or a Debug target");
         this.scenario = scenario; this.debugTargetType = debugTargetType; this.debugTargetId = debugTargetId;
         this.users=users; this.arrivalRate=arrivalRate; this.warmup=warmup; this.rampUp=rampUp; this.duration=duration;
         this.rampDown=rampDown; this.thinkTime=thinkTime; this.maxConcurrent=maxConcurrent; this.overloadPolicy=overloadPolicy;

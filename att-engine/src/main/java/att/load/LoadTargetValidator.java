@@ -65,8 +65,9 @@ public final class LoadTargetValidator {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             if (typed != null) throw typed;
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.LOAD_INVALID,
-                    "Invalid load target dependencies", e.getMessage(), scenario.source().toString(), "target", null, null, null,
-                    target.template().name(), null,
+                    "Invalid load target dependencies", e.getMessage(),
+                    scenario.source() == null ? "<inline Load scenario>" : scenario.source().toString(),
+                    "target", null, null, null, target.template().name(), null,
                     "Correct the selected Template/Flow/Tool dependency before starting load scheduling.", e);
         }
     }

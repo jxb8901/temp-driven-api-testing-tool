@@ -6,6 +6,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.Map;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -164,6 +168,74 @@ class ServerRuntimeTest {
             assertEquals("INVALID",record.get("status"),String.valueOf(runtime.resultRecord(jobId)));
             String events=runtime.events(jobId).after(0).toString();assertTrue(events.contains("ATT-SERVER-DRAFT-STALE"),events);
             assertTrue(Files.exists(debugSidecar));
+        } finally {runtime.close();}
+    }
+
+    @Test void quickLoadDraftOmitsDebugImportsAndRunsOnlyExplicitLoadTestdata() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("quick-load-packages"));Path packageRoot=Files.createDirectory(allowed.resolve("p"));
+        Path templates=Files.createDirectories(packageRoot.resolve("templates/FORM"));Files.createDirectories(packageRoot.resolve("testcase"));
+        Files.createDirectories(packageRoot.resolve("config"));copySchemas(packageRoot);
+        Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: Quick Load test\nactions:\n"
+                +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");
+        Path debugData=Files.createDirectories(packageRoot.resolve("debug-data")).resolve("debug.yaml");
+        Files.writeString(debugData,"schemaVersion: att-testdata/v1.0\nid: debugAccounts\nrecords: [{id: 17}]\n");
+        Path loadData=Files.createDirectories(packageRoot.resolve("testdata")).resolve("load.yaml");
+        Files.writeString(loadData,"schemaVersion: att-testdata/v1.0\nid: loadAccounts\nrecords: [{id: 42}]\n");
+        Path debugSidecar=templates.resolve("debug.yaml");
+        Files.writeString(debugSidecar,"schemaVersion: att-debug/v1.2\ntestdata: [debug-data/debug.yaml]\ninputs: {value: default}\nvars: {reference: REF001}\n");
+        byte[] originalSidecar=Files.readAllBytes(debugSidecar);
+        Path loadPolicy=Files.createDirectories(packageRoot.resolve("load")).resolve("load.visualuser.yaml");
+        Files.writeString(loadPolicy,"schemaVersion: att-load/v1.6\nload: {users: 1, duration: 1s}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path configFile=temp.resolve("quick-load-server.yaml");Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("quick-load-data"))+"\n  javaExecutable: "+yaml(javaBin)
+                +"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
+        Path libs=Files.createDirectory(temp.resolve("quick-load-WEB-INF-lib"));
+        addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
+            Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")
+                    &&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
+                Path target=libs.resolve(candidate.getFileName());try{Files.createSymbolicLink(target,candidate);}catch(Exception unsupported){Files.copy(candidate,target);}
+            }
+        }
+        MutableClock clock=new MutableClock();
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(configFile),libs.toString(),ProcessBuilder::start,clock);
+        try {
+            Map<String,Object> page=runtime.inspectResource("p","list","template",null,null,10,null,"alice");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
+            String resourceId=String.valueOf(items.get(0).get("resourceId"));
+            Map<String,Object> form=runtime.inspectQuickLoadForm("p","template",resourceId,"virtualUsers",null,"alice");
+            assertEquals(Boolean.TRUE,form.get("debugLocalTestdataOmitted"));
+            assertFalse(form.toString().contains("debug-data/debug.yaml"));assertFalse(form.toString().contains("debugAccounts"));
+            com.fasterxml.jackson.databind.node.ObjectNode body=ServerRuntime.JSON.createObjectNode();body.put("packageId","p");
+            body.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id","FORM")));
+            body.put("model","virtualUsers");body.set("input",ServerRuntime.JSON.valueToTree(Map.of("inputs",Map.of("value","draft"),"vars",Map.of("reference","REF002"))));
+            body.set("load",ServerRuntime.JSON.valueToTree(Map.of("users",1,"duration","1s")));
+            body.set("testdata",ServerRuntime.JSON.valueToTree(List.of("testdata/load.yaml")));
+            Map<String,Object> draft=runtime.createQuickLoadDraft(body,"alice");String draftId=String.valueOf(draft.get("draftId"));
+            assertFalse(draft.toString().contains("debugAccounts"));assertFalse(draft.toString().contains("testdata/load.yaml"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getQuickLoadDraft(draftId,"bob"));
+            assertArrayEquals(originalSidecar,Files.readAllBytes(debugSidecar),"Draft validation must leave Debug sidecars unchanged");
+            Map<String,Object> accepted=runtime.submitQuickLoadDraft(ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"draftId\":\""+draftId+"\"}"),"alice");
+            String jobId=String.valueOf(accepted.get("jobId"));long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);Map<String,Object> record=runtime.jobRecord(jobId);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status"))&&System.nanoTime()<deadline){Thread.sleep(20);record=runtime.jobRecord(jobId);}
+            assertEquals("PASS",record.get("status"),String.valueOf(runtime.resultRecord(jobId)));
+            assertEquals("load",record.get("command"));assertArrayEquals(originalSidecar,Files.readAllBytes(debugSidecar));
+            long releaseDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(((Number)runtime.counts().get("activeWorkers")).intValue()>0&&System.nanoTime()<releaseDeadline)Thread.sleep(10);
+            assertEquals(0,((Number)runtime.counts().get("activeWorkers")).intValue(),"Completed Load jobs must release admission before the stale-draft check");
+            assertTrue(Files.exists(loadPolicy));
+            Map<String,Object> stale=runtime.createQuickLoadDraft(body,"alice");
+            Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: changed\nactions:\n"
+                    +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");
+            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.submitQuickLoadDraft(
+                    ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"draftId\":\""+stale.get("draftId")+"\"}"),"alice"));
+
+            Map<String,Object> expired=runtime.createQuickLoadDraft(body,"alice");
+            clock.advance(Duration.ofMinutes(11));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getQuickLoadDraft(String.valueOf(expired.get("draftId")),"alice"));
         } finally {runtime.close();}
     }
     @Test void cancellationCannotSlipBetweenWorkerLaunchAndProcessPublication() throws Exception {
@@ -364,6 +436,13 @@ class ServerRuntimeTest {
         Path target=lib.resolve(name+".jar");try(OutputStream file=Files.newOutputStream(target);JarOutputStream jar=new JarOutputStream(file);var paths=Files.walk(classes)) {
             paths.filter(Files::isRegularFile).forEach(path->{try{jar.putNextEntry(new JarEntry(classes.relativize(path).toString().replace('\\','/')));Files.copy(path,jar);jar.closeEntry();}catch(Exception e){throw new IllegalStateException(e);}});
         }
+    }
+    private static final class MutableClock extends Clock {
+        private Instant current=Instant.now();
+        @Override public ZoneId getZone(){return java.time.ZoneOffset.UTC;}
+        @Override public Clock withZone(ZoneId zone){return this;}
+        @Override public Instant instant(){return current;}
+        void advance(Duration duration){current=current.plus(duration);}
     }
     private static void copySchemas(Path packageRoot)throws Exception {
         Path source=Path.of("schemas").toRealPath(),destination=packageRoot.resolve("schemas");

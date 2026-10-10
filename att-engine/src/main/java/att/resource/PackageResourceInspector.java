@@ -280,8 +280,9 @@ public final class PackageResourceInspector implements AutoCloseable {
         indexTools(index, config);
         indexCases(index, config);
         indexDebugSidecars(index, config);
+        indexQuickLoadPolicies(index);
         resolveReferences(index);
-        index.revisionDigest = digestFiles(index.files, index.debugSidecars);
+        index.revisionDigest = digestFiles(index.files, index.debugSidecars, index.quickLoadPolicies);
         Collections.sort(index.ordered, new Comparator<Resource>() {
             @Override public int compare(Resource left, Resource right) {
                 return left.resourceId.compareTo(right.resourceId);
@@ -308,6 +309,160 @@ public final class PackageResourceInspector implements AutoCloseable {
         return bounded(result);
     }
 
+    /** Returns safe business defaults and a validated one-workload Quick Load preview. */
+    public Map<String, Object> inspectQuickLoadForm(String type, String resourceId, String model,
+                                                    String expectedRevisionDigest) throws Exception {
+        Index index = index();
+        requireExpectedRevision(index, expectedRevisionDigest);
+        Resource resource = index.byId.get(resourceId);
+        if (resource == null || !debuggable(resource.type) || !resource.type.equals(type) || !"ready".equals(resource.state))
+            throw new ResourceNotFoundException();
+        return quickLoadProjection(index, resource, model, null, null, null);
+    }
+
+    /** Validates business defaults and policy overrides, returning a private typed scenario for draft creation. */
+    public Map<String, Object> validateQuickLoadInput(String type, String logicalId, String model,
+                                                      Map<String, Object> businessInput,
+                                                      Map<String, Object> loadOverrides,
+                                                      Map<String, Object> workloadExecution) throws Exception {
+        return validateQuickLoadInput(type, logicalId, model, businessInput, loadOverrides, workloadExecution,
+                Collections.<String>emptyList());
+    }
+
+    /** Validates business inputs, pacing, and explicit Load-level Testdata descriptor paths. */
+    public Map<String, Object> validateQuickLoadInput(String type, String logicalId, String model,
+                                                      Map<String, Object> businessInput,
+                                                      Map<String, Object> loadOverrides,
+                                                      Map<String, Object> workloadExecution,
+                                                      List<String> testdata) throws Exception {
+        if (!debuggable(type) || logicalId == null || logicalId.trim().isEmpty() || logicalId.length() > 512)
+            throw new ResourceNotFoundException();
+        Index index = index();
+        Resource resource = index.resolve(type, logicalId);
+        if (resource == null || !"ready".equals(resource.state)) throw new ResourceNotFoundException();
+        return quickLoadProjection(index, resource, model, businessInput, loadOverrides, workloadExecution, testdata);
+    }
+
+    private Map<String, Object> quickLoadProjection(Index index, Resource resource, String model,
+                                                    Map<String, Object> businessInput,
+                                                    Map<String, Object> loadOverrides,
+                                                    Map<String, Object> workloadExecution) throws Exception {
+        return quickLoadProjection(index, resource, model, businessInput, loadOverrides, workloadExecution,
+                Collections.<String>emptyList());
+    }
+
+    private Map<String, Object> quickLoadProjection(Index index, Resource resource, String model,
+                                                    Map<String, Object> businessInput,
+                                                    Map<String, Object> loadOverrides,
+                                                    Map<String, Object> workloadExecution,
+                                                    List<String> testdata) throws Exception {
+        FrameworkConfig config = frameworkConfig();
+        DebugEngine engine = new DebugEngine(packageRoot, config);
+        Map<String, Object> projectedInput = engine.projectLoadBusinessInput(resource.type, resource.logicalId, businessInput);
+        @SuppressWarnings("unchecked") Map<String, Object> normalizedInput =
+                (Map<String, Object>) projectedInput.get("normalizedInput");
+        att.load.LoadScenarioLoader loader = new att.load.LoadScenarioLoader(packageRoot);
+        Map<String, Object> policy = loader.loadQuickLoadPolicy(model);
+        att.load.LoadScenario scenario = new att.load.LoadScenarioBuilder(loader).buildQuickLoad(model,
+                resource.type, resource.logicalId, normalizedInput, policy, loadOverrides, workloadExecution, testdata);
+        att.load.LoadTarget target = new att.load.LoadTargetResolver(packageRoot, config).resolve(scenario);
+        new att.load.LoadTargetValidator(packageRoot, config).validate(scenario, target);
+        Map<String, Object> scenarioMap = scenario.toMap();
+        Map<String, Object> normalizedScenario = new LinkedHashMap<String, Object>(scenarioMap);
+        List<Object> scenarioTestdata = new ArrayList<Object>();
+        Object policyTestdata = policy.get("testdata");
+        if (policyTestdata instanceof List) scenarioTestdata.addAll((List<?>) policyTestdata);
+        else if (policyTestdata != null) scenarioTestdata.add(policyTestdata);
+        if (testdata != null) scenarioTestdata.addAll(testdata);
+        if (!scenarioTestdata.isEmpty()) normalizedScenario.put("testdata", scenarioTestdata);
+        Map<String, Object> safeScenarioProjection = projectQuickLoadScenario(scenarioMap, engine);
+        @SuppressWarnings("unchecked") Map<String, Object> safeScenario =
+                (Map<String, Object>) safeScenarioProjection.get("value");
+        boolean redacted = Boolean.TRUE.equals(projectedInput.get("redacted"))
+                || Boolean.TRUE.equals(safeScenarioProjection.get("redacted"));
+        DumperOptions options = new DumperOptions();
+        options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+        options.setPrettyFlow(true);
+        options.setWidth(120);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("resource", summary(resource, index));
+        result.put("target", target(resource));
+        result.put("model", model);
+        result.put("input", projectedInput.get("input"));
+        result.put("debugLocalTestdataOmitted", projectedInput.get("debugLocalTestdataOmitted"));
+        result.put("loadTestdata", testdata == null ? Collections.emptyList() : new ArrayList<String>(testdata));
+        result.put("redacted", Boolean.valueOf(redacted));
+        result.put("preview", safeScenario);
+        result.put("previewYaml", new Yaml(options).dump(safeScenario));
+        result.put("normalizedScenario", normalizedScenario);
+        result.put("revisionDigest", index.revisionDigest);
+        return bounded(result);
+    }
+
+    private Map<String, Object> projectQuickLoadScenario(Map<String, Object> scenario, DebugEngine engine) {
+        Map<String, Object> safe = new LinkedHashMap<String, Object>(scenario);
+        List<Object> workloads = new ArrayList<Object>();
+        boolean[] redacted = new boolean[] { false };
+        Object rawWorkloads = scenario.get("workloads");
+        if (rawWorkloads instanceof List) for (Object rawWorkload : (List<?>) rawWorkloads) {
+            if (!(rawWorkload instanceof Map)) { workloads.add(rawWorkload); continue; }
+            @SuppressWarnings("unchecked") Map<String, Object> workload = new LinkedHashMap<String, Object>((Map<String, Object>) rawWorkload);
+            Map<String, Object> business = new LinkedHashMap<String, Object>();
+            if (workload.containsKey("inputs")) business.put("inputs", workload.get("inputs"));
+            if (workload.containsKey("vars")) business.put("vars", workload.get("vars"));
+            Object rawTarget = workload.get("target");
+            Map<String, Object> target = null;
+            if (rawTarget instanceof Map) {
+                @SuppressWarnings("unchecked") Map<String, Object> copiedTarget = new LinkedHashMap<String, Object>((Map<String, Object>) rawTarget);
+                target = copiedTarget;
+                if (target.containsKey("arguments")) business.put("arguments", target.get("arguments"));
+            }
+            Map<String, Object> projected = engine.projectSafeValue(business);
+            @SuppressWarnings("unchecked") Map<String, Object> safeBusiness = (Map<String, Object>) projected.get("value");
+            redacted[0] |= Boolean.TRUE.equals(projected.get("redacted"));
+            if (safeBusiness.containsKey("inputs")) workload.put("inputs", safeBusiness.get("inputs"));
+            if (safeBusiness.containsKey("vars")) workload.put("vars", safeBusiness.get("vars"));
+            if (target != null) {
+                if (safeBusiness.containsKey("arguments")) target.put("arguments", safeBusiness.get("arguments"));
+                workload.put("target", target);
+            }
+            Object rawMix = workload.get("mix");
+            if (rawMix instanceof List) {
+                List<Object> mix = new ArrayList<Object>();
+                for (Object rawEntry : (List<?>) rawMix) {
+                    if (!(rawEntry instanceof Map)) { mix.add(rawEntry); continue; }
+                    @SuppressWarnings("unchecked") Map<String, Object> entry = new LinkedHashMap<String, Object>((Map<String, Object>) rawEntry);
+                    Map<String, Object> entryBusiness = new LinkedHashMap<String, Object>();
+                    if (entry.containsKey("inputs")) entryBusiness.put("inputs", entry.get("inputs"));
+                    if (entry.containsKey("vars")) entryBusiness.put("vars", entry.get("vars"));
+                    Object entryTarget = entry.get("target");
+                    Map<String, Object> copiedEntryTarget = null;
+                    if (entryTarget instanceof Map) {
+                        @SuppressWarnings("unchecked") Map<String, Object> copied = new LinkedHashMap<String, Object>((Map<String, Object>) entryTarget);
+                        copiedEntryTarget = copied;
+                        if (copied.containsKey("arguments")) entryBusiness.put("arguments", copied.get("arguments"));
+                    }
+                    Map<String, Object> entryProjection = engine.projectSafeValue(entryBusiness);
+                    @SuppressWarnings("unchecked") Map<String, Object> safeEntryBusiness = (Map<String, Object>) entryProjection.get("value");
+                    redacted[0] |= Boolean.TRUE.equals(entryProjection.get("redacted"));
+                    if (safeEntryBusiness.containsKey("inputs")) entry.put("inputs", safeEntryBusiness.get("inputs"));
+                    if (safeEntryBusiness.containsKey("vars")) entry.put("vars", safeEntryBusiness.get("vars"));
+                    if (copiedEntryTarget != null) {
+                        if (safeEntryBusiness.containsKey("arguments")) copiedEntryTarget.put("arguments", safeEntryBusiness.get("arguments"));
+                        entry.put("target", copiedEntryTarget);
+                    }
+                    mix.add(entry);
+                }
+                workload.put("mix", mix);
+            }
+            workloads.add(workload);
+        }
+        if (rawWorkloads instanceof List) safe.put("workloads", workloads);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("value", safe); result.put("redacted", Boolean.valueOf(redacted[0]));
+        return result;
+    }
+
     /** Validates typed inline Debug values against a resolvable logical target. */
     public Map<String, Object> validateDebugInput(String type, String logicalId,
                                                   Map<String, Object> input) throws Exception {
@@ -330,7 +485,31 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     /** Checks a Server-issued draft revision without returning the digest to the caller. */
     public void verifyRevision(String expectedRevisionDigest) throws Exception {
-        requireExpectedRevision(index(), expectedRevisionDigest);
+        requireExpectedRevision(refreshedIndexForVerification(), expectedRevisionDigest);
+    }
+
+    private Index refreshedIndexForVerification() throws Exception {
+        if (!cacheEnabled || cacheUnavailable) return buildIndex();
+        PackageWatch watch;
+        try { watch = packageWatch(); }
+        catch (Exception unavailable) { cacheUnavailable = true; return buildIndex(); }
+        for (int attempt = 0; attempt < 3; attempt++) {
+            long version = watch.version();
+            Index fresh = buildIndex();
+            try { watch.registerFileParents(fresh.files); }
+            catch (Exception unavailable) {
+                cacheUnavailable = true;
+                close();
+                return fresh;
+            }
+            long after = watch.version();
+            if (after == version) {
+                cachedIndex = fresh;
+                cachedIndexVersion = after;
+                return fresh;
+            }
+        }
+        throw new ResourceLimitException();
     }
 
     private void requireExpectedRevision(Index index, String expectedRevisionDigest) {
@@ -883,7 +1062,8 @@ public final class PackageResourceInspector implements AutoCloseable {
         return workbook.resolveSibling(name);
     }
 
-    private String digestFiles(Set<Path> files, Map<String, Path> debugSidecars) throws Exception {
+    private String digestFiles(Set<Path> files, Map<String, Path> debugSidecars,
+                               Map<String, Path> quickLoadPolicies) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         List<Path> ordered = new ArrayList<Path>(files);
         Collections.sort(ordered);
@@ -913,7 +1093,29 @@ public final class PackageResourceInspector implements AutoCloseable {
             digest.update((byte) (sidecar.getValue() == null ? 0 : 1));
             digest.update((byte) 0xff);
         }
+        for (Map.Entry<String, Path> policy : quickLoadPolicies.entrySet()) {
+            digest.update(utf8("quick-load-policy"));
+            digest.update((byte) 0);
+            digest.update(utf8(policy.getKey()));
+            digest.update((byte) 0);
+            digest.update((byte) (policy.getValue() == null ? 0 : 1));
+            digest.update((byte) 0xff);
+        }
         return hex(digest.digest());
+    }
+
+    private void indexQuickLoadPolicies(Index index) {
+        for (String filename : new String[]{"load.visualuser.yaml", "load.arrivalrate.yaml"}) {
+            Path candidate = packageRoot.resolve("load").resolve(filename).toAbsolutePath().normalize();
+            String logicalName = packageRoot.relativize(candidate).toString().replace('\\', '/');
+            try {
+                PackageResourceResolver.PackageResource resource = resources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE);
+                index.files.add(resource.canonicalPath());
+                index.quickLoadPolicies.put(resource.logicalName(), resource.canonicalPath());
+            } catch (Exception ignored) {
+                index.quickLoadPolicies.put(logicalName, null);
+            }
+        }
     }
 
     private void indexFile(Index index, Path file) throws Exception {
@@ -1119,6 +1321,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         final List<Map<String, Object>> diagnostics = new ArrayList<Map<String, Object>>();
         final Set<Path> files = new TreeSet<Path>();
         final Map<String, Path> debugSidecars = new TreeMap<String, Path>();
+        final Map<String, Path> quickLoadPolicies = new TreeMap<String, Path>();
         String revisionDigest;
 
         void add(Resource resource) {

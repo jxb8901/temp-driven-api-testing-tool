@@ -58,9 +58,13 @@ public final class LoadTargetResolver {
             throw e;
         } catch (Exception e) {
             throw new DiagnosticException(DiagnosticCodes.LOAD_INVALID, "Unable to resolve load target",
-                    e.getMessage(), scenario.source().toString(), "target", null, null, null, null, null,
+                    e.getMessage(), sourceLabel(scenario), "target", null, null, null, null, null,
                     "Correct target.type/target.id and ensure its Template, Flow, Tool, and dependencies are available.", e);
         }
+    }
+
+    private static String sourceLabel(LoadScenario scenario) {
+        return scenario.source() == null ? "<inline Load scenario>" : scenario.source().toString();
     }
 
     private ToolConfig findTool(String id) {
