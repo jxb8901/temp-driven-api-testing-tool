@@ -15,6 +15,9 @@
     <build><plugins><plugin>
         <groupId>org.apache.maven.plugins</groupId><artifactId>maven-assembly-plugin</artifactId>
         <executions>
+            <execution><id>module-jar</id><phase>prepare-package</phase><goals><goal>single</goal></goals><configuration>
+                <descriptors><descriptor>src/assembly/modules.xml</descriptor></descriptors><finalName>att-${project.version}-modules</finalName><appendAssemblyId>false</appendAssemblyId><attach>false</attach>
+            </configuration></execution>
             <execution><id>local-release</id><phase>package</phase><goals><goal>single</goal></goals><configuration>
                 <descriptors><descriptor>src/assembly/local.xml</descriptor></descriptors><finalName>att-${project.version}-local</finalName><appendAssemblyId>false</appendAssemblyId><attach>false</attach><tarLongFileMode>posix</tarLongFileMode>
             </configuration></execution>
