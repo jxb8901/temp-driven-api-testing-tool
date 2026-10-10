@@ -92,14 +92,31 @@ public final class DefaultAttService implements AttService {
         return new RunResult(result.runId(),result.status().name(),result.exitCode(),elapsed(started),validation.diagnostics,paths("report",OperationResult.display(result.reportPath(),request.packageRoot())),summary,failures);
     }
     @Override public DebugResult debug(DebugRequest request) throws Exception {
-        long started=System.nanoTime();
+        long serviceStarted=System.nanoTime();
+        DebugStartupMetrics startupMetrics=request.startupMetrics();
+        long profileStarted=startupMetrics==null?serviceStarted:startupMetrics.javaMainEntryNanos();
+        att.core.PerformanceProfile profile=request.profileEnabled()
+                ?new att.core.PerformanceProfile(true,profileStarted,startupMetrics==null?"debug-service-entry":"java-main-entry")
+                :null;
+        if(profile!=null&&startupMetrics!=null)
+            profile.durationNanos("cliArgumentParseMs",startupMetrics.argumentParseNanos());
         String requestedDebugId = request.debugId() == null || request.debugId().trim().isEmpty()
                 ? request.runId() : request.debugId();
         ExecutionOptions opts=options(request,"debug",null,null,null,null,null,false,false,false,false,"selected",request.targetType(),request.targetId(),request.input(),request.unsafeFailureDetails(),null,null,null,null,null,null,null,null,null,null,request.overrides())
                 .withRunId(requestedDebugId).withObserver(request.observer());
-        DebugEngine.Result result=new DebugEngine(request.packageRoot(),config(request)).run(opts);
+        long configPhase=profile==null?0L:profile.begin();
+        FrameworkConfig cfg=config(request);
+        if(profile!=null)profile.end("configLoadMs",configPhase);
+        DebugEngine.Result result=new DebugEngine(request.packageRoot(),cfg).run(opts,profile);
+        if(profile!=null) {
+            if(startupMetrics!=null&&startupMetrics.hasFirstConsoleEvent())
+                profile.durationNanos("processToFirstConsoleEventMs",
+                        startupMetrics.firstConsoleEventNanos()-startupMetrics.javaMainEntryNanos());
+            profile.write(result.outputDirectory());
+        }
         List<Diagnostic> ds=result.diagnostic()==null?Collections.<Diagnostic>emptyList():Collections.singletonList(result.diagnostic().toDiagnostic());
         Map<String,String> paths=paths("outputDirectory",OperationResult.display(result.outputDirectory(),request.packageRoot()),"log",OperationResult.display(result.logPath(),request.packageRoot()),"result",OperationResult.display(result.resultPath(),request.packageRoot()));
+        if(profile!=null)paths.put("performance",OperationResult.display(result.outputDirectory().resolve("performance.json"),request.packageRoot()));
         return new DebugResult(result.executionId(),result.status().name(),result.exitCode(),result.durationMs(),ds,paths,Collections.<String,Object>emptyMap());
     }
     @Override public ValidateResult validate(ValidateRequest request) throws Exception {

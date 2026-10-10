@@ -2643,7 +2643,8 @@ workbook Testcase.</p>
 <div class="sourceCode" id="cb25"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE</span>
 <span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug flow common.compose.v1 <span class="at">--input</span> /tmp/compose.debug.yaml</span>
-<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug tool fpp.invokeApi <span class="at">--input</span> /tmp/invoke.debug.yaml <span class="at">--env</span> UAT</span></code></pre></div>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug tool fpp.invokeApi <span class="at">--input</span> /tmp/invoke.debug.yaml <span class="at">--env</span> UAT</span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--profile</span></span></code></pre></div>
 <p>Run <code>./att.sh debug</code> with no target to list statically
 valid runnable Tools, Templates and Flows with copyable commands. A
 default sidecar path is displayed only when that regular non-symlink
@@ -2786,7 +2787,17 @@ invocation contract.</p>
 <pre class="text"><code>output/debug/&lt;debugId&gt;/
 ├── case.log
 ├── result.yaml
+├── performance.json       # with --profile
 └── artifacts/</code></pre>
+<p><code>--profile</code> records monotonic timings from Java main entry
+through the first printed progress event and the first target action,
+along with config, input, validation, context setup, resource-helper
+setup, action execution, finalization, and result-write phases. The
+report's <code>totalMs</code> excludes the shell launcher and JVM
+startup. The first-console phase is absent when no progress event is
+printed (for example, a quiet run). See the <a
+href="system-design/debug-startup-benchmark.md">3.7.3 comparison
+procedure</a> for repeatable startup benchmarks.</p>
 <p>Debug does not create or update normal <code>latest-run.yaml</code>.
 Exit codes are <code>0</code> PASS, <code>1</code> FAIL, <code>2</code>
 invalid CLI/config/input/validation, and <code>3</code> runtime error.
@@ -2955,6 +2966,7 @@ evidence view.</p>
 <pre class="text"><code>output/debug/&lt;debugId&gt;/
 ├── case.log
 ├── result.yaml
+├── performance.json       # with --profile
 └── artifacts/
     └── case.yaml</code></pre>
 <p><code>result.yaml</code> contains the target, status, exit code,
@@ -5939,11 +5951,16 @@ local Debug run; prints a warning and keeps secret redaction</td>
 <code>&lt;dir&gt;/debug/&lt;debugId&gt;/</code></td>
 </tr>
 <tr class="even">
+<td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --profile</code></td>
+<td>Write CLI startup and Debug phase timings to
+<code>performance.json</code></td>
+</tr>
+<tr class="odd">
 <td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --format json</code></td>
 <td>Emit a compact machine-readable console summary; full evidence
 remains in <code>result.yaml</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --quiet</code></td>
 <td>Suppress detailed live progress; keep the final summary and
 errors</td>
@@ -6173,7 +6190,8 @@ compatibility spelling for <code>--allow-parallel-runs</code>; prefer
 the latter. <code>--queue</code> and <code>--allow-parallel-runs</code>
 control process-level output-root concurrency, not Case workers.
 <code>--profile</code> writes performance diagnostics for
-<code>run</code> or <code>load</code>.</p>
+<code>run</code> and <code>load</code>, and writes startup plus
+execution phase timings for a selected <code>debug</code> target.</p>
 <p>Load uses the scenario as the base and explicit workload options
 override the corresponding fields before the effective scenario is
 validated again:</p>

@@ -2378,7 +2378,8 @@ Tool。</p>
 <div class="sourceCode" id="cb24"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE</span>
 <span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug flow common.compose.v1 <span class="at">--input</span> /tmp/compose.debug.yaml</span>
-<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug tool fpp.invokeApi <span class="at">--input</span> /tmp/invoke.debug.yaml <span class="at">--env</span> UAT</span></code></pre></div>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug tool fpp.invokeApi <span class="at">--input</span> /tmp/invoke.debug.yaml <span class="at">--env</span> UAT</span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> debug template PAYMENT_INVOKE <span class="at">--profile</span></span></code></pre></div>
 <p>不帶 target 執行 <code>./att.sh debug</code>，會列出 statically
 valid、可執行的 Tool、Template 和 Flow，附 copyable
 command。只會顯示實際存在的 regular non-symlink default
@@ -2515,7 +2516,16 @@ configured Tool invocation contract。</p>
 <pre class="text"><code>output/debug/&lt;debugId&gt;/
 ├── case.log
 ├── result.yaml
+├── performance.json       # 使用 --profile 時
 └── artifacts/</code></pre>
+<p><code>--profile</code> 會記錄從 Java main entry 到第一個已輸出的
+progress event 及第一個 target action 的 monotonic timing，並記錄
+config、input、validation、context setup、resource-helper setup、action
+execution、finalization 和 result-write phases。報告的
+<code>totalMs</code> 不包括 shell launcher 和 JVM startup。若沒有輸出
+progress event（例如 quiet run），first-console phase 會省略。可參考<a
+href="system-design/debug-startup-benchmark.zh.md">與 3.7.3
+比較的流程</a>執行可重複的 startup benchmark。</p>
 <p><code>execution.debugIdFormat</code> 可使用 package 與 target
 metadata 設定 standalone
 <code>&lt;debugId&gt;</code>；<code>--debug-id &lt;id&gt;</code> 可指定
@@ -5425,10 +5435,15 @@ diagnostics；會先警告並保留 secret redaction</td>
 <code>&lt;dir&gt;/debug/&lt;debugId&gt;/</code></td>
 </tr>
 <tr class="even">
+<td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --profile</code></td>
+<td>將 CLI 啟動及 Debug phase timing 寫入
+<code>performance.json</code></td>
+</tr>
+<tr class="odd">
 <td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --format json</code></td>
 <td>輸出緊湊機器可讀摘要；完整證據仍在 <code>result.yaml</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>./att.sh debug &lt;type&gt; &lt;id&gt; --quiet</code></td>
 <td>抑制詳細實時進度；保留最終摘要和錯誤</td>
 </tr>
@@ -5615,8 +5630,9 @@ configuration；<code>--env &lt;name&gt;</code> 從
 相容拼法，應優先使用後者。<code>--queue</code> 與
 <code>--allow-parallel-runs</code> 控制共用 output root 的 process-level
 concurrency，不會在單一 run 內增加 Case worker。<code>--profile</code>
-為 <code>run</code> 或 <code>load</code> 寫入 performance
-diagnostics。</p>
+為 <code>run</code> 和 <code>load</code> 寫入 performance
+diagnostics，並為選定的 <code>debug</code> target 寫入啟動及執行 phase
+timing。</p>
 <p>Load 以 scenario 為基礎；明確提供的 workload option
 會先覆蓋對應欄位，再重新驗證 effective scenario：</p>
 <div class="sourceCode" id="cb87"><pre

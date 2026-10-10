@@ -29,17 +29,27 @@ public class StageTemplateRunner {
     private final RenderPlanCache renderPlans;
     private final FlowRegistry flows;
     private final CompiledExecutionPlan executionPlan;
+    private final att.core.PerformanceProfile performanceProfile;
 
     public StageTemplateRunner(UnifiedTemplateEngine templateEngine) { this(templateEngine, null, new RenderPlanCache()); }
     public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows) { this(templateEngine, flows, new RenderPlanCache()); }
     public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows, RenderPlanCache renderPlans) {
-        this(templateEngine, flows, renderPlans, null);
+        this(templateEngine, flows, renderPlans, null, null);
     }
     public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows, RenderPlanCache renderPlans,
                                CompiledExecutionPlan executionPlan) {
+        this(templateEngine, flows, renderPlans, executionPlan, null);
+    }
+    public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows,
+                               att.core.PerformanceProfile performanceProfile) {
+        this(templateEngine, flows, new RenderPlanCache(), null, performanceProfile);
+    }
+    public StageTemplateRunner(UnifiedTemplateEngine templateEngine, FlowRegistry flows, RenderPlanCache renderPlans,
+                               CompiledExecutionPlan executionPlan, att.core.PerformanceProfile performanceProfile) {
         this.templateEngine = templateEngine; this.flows = flows;
         this.renderPlans = renderPlans == null ? new RenderPlanCache() : renderPlans;
         this.executionPlan = executionPlan;
+        this.performanceProfile = performanceProfile;
     }
 
     public List<ValidationResult> execute(String stageName, StageTemplate template, CaseRuntimeContext context, CaseExecutionLog log) {
@@ -94,6 +104,7 @@ public class StageTemplateRunner {
                 actionStart.put("type", type);
                 actionStart.put("status", "START");
                 appendProgress(log, "ACTION", actionStart);
+                if (performanceProfile != null) performanceProfile.markFirstAction();
                 if ("render".equals(type)) executeRender(action, template, context, log, output, targets);
                 else if ("tool".equals(type)) toolStatus = executeTool(stageName, template, action, context, log, output, targets, node, actionPlan);
                 else if ("db".equals(type)) toolStatus = executeDb(stageName, action, context, log, output, targets);
