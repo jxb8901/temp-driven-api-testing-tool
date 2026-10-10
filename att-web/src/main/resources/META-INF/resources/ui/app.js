@@ -1176,7 +1176,8 @@
     debugDraft = null; debugDraftFingerprint = ''; text(byId('debug-preview'), '');
     text(byId('debug-form-status'), 'Input changed. Validate it before starting Debug.');
   }));
-  byId('submit-form').elements.environment.addEventListener('input', () => {
+  const debugEnvironment = byId('submit-form').elements.environment;
+  if (debugEnvironment) debugEnvironment.addEventListener('input', () => {
     debugDraft = null; debugDraftFingerprint = ''; text(byId('debug-preview'), '');
     quickLoadDraft = null; quickLoadDraftFingerprint = ''; text(byId('quick-load-preview'), '');
   });
