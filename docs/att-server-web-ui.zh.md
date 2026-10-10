@@ -6,7 +6,7 @@ ATT Server 在 `<Tomcat context path>/ui/` 提供靜態瀏覽器主控台，例�
 
 Package Resource Explorer 會按 package-scoped 邏輯資源 ID 列出已設定的 Case、Template、Flow 及 Tool，並支援類型與文字篩選、加密續頁 cursor、資源詳細資料及安全關聯。只有 `server.inspection.safeTextSources` 列出的 package 相對路徑才會提供 source；YAML 會以遞迴結構投影回傳並隱藏自由文字值，Tool script 文字則會遮蔽。Case 詳細資料會顯示身份及 Stage/Template 中繼資料，並隱藏 workbook 業務值。反向關聯最多內嵌 100 筆，並同時回傳準確數量及 `referencedByHasMore`。Explorer 不會瀏覽任意檔案、不會執行 Tool，也不會修改 package 內容。若分頁期間 package 有變更，Server 會拒絕過期 cursor，UI 可重新整理清單。
 
-Configuration Explorer 會顯示已宣告設定、所選 environment 經 Engine 解析後的設定，以及兩個 profile 的欄位比較。它使用 package 正常的 `FrameworkConfigLoader` 選擇規則，不會連接 DB、MQ、HTTP 或 SSH。可能洩露憑證或網絡拓撲的值會標示為 hidden；Server 不會比較 hidden 值。Explorer 顯示安全的 helper 與 Tool metadata、environment 來源、profile 繼承或替換狀態，以及 Testdata descriptor metadata，但不會顯示 records 或未限制的 YAML。公開 endpoint 詳情見 [ATT Server 部署與 API](server-deployment.zh.md)。
+Configuration Explorer 會顯示已宣告設定、按 section 分組的 Engine effective 設定，以及兩個 profile 的分頁欄位比較。它使用 package 正常的 `FrameworkConfigLoader` 選擇規則，不會連接 DB、MQ、HTTP 或 SSH。Root-only package 可直接檢視已設定的預設值，無需選擇 profile。可能洩露憑證或網絡拓撲的值會標示為 hidden；Server 不會比較 hidden 值。Explorer 顯示欄位狀態與來源、篩選所選 section，並可把 effective environment 填入現有 Run/Debug/Load 表單而不提交工作。Tool 詳細資料會連結至其設定 section。Explorer 顯示安全的 helper 與 Tool metadata、profile 繼承或替換狀態，以及 Testdata descriptor metadata，但不會顯示 records 或未限制的 YAML。公開 endpoint 及分頁參數見 [ATT Server 部署與 API](server-deployment.zh.md#package-configuration-inspection)。
 
 瀏覽器只使用公開的同源 `/api/v1` REST 與 SSE 契約。REST 請求與原生 `EventSource` 使用瀏覽器管理的容器驗證。SSE 重新連線使用瀏覽器標準 `Last-Event-ID` 行為；重新整理工作頁面時會從 Server 重新載入工作狀態與保留事件。關閉瀏覽器分頁不會取消工作。取消前需要確認，UI 會等候 Server 回報終端狀態。
 
