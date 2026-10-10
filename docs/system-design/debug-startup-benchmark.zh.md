@@ -2,7 +2,9 @@
 
 `tools/benchmark_debug_startup.py` 會使用已建置的 source tree 和解壓後的 binary distribution 比較 v3.7.3 baseline release 與候選版本。它會將各 runtime 複製到暫存 launcher root，再安裝功能相同的合成 fixture 和同一個 schema catalog。Config 和 Debug 的 `schemaVersion` 會採用各 release 的 current schema；fixture action 和 input 保持一致。Harness 會核對 runtime 版本，並為每個 sample 啟動新的 process。
 
-Fixture 包括 `version`、`help`、no-op Template、三個 action 的 Flow、已配置 Tool，以及呼叫本機測試 server 的 HTTP Template。Cold samples 不做明確 benchmark warmup；warm samples 則在設定的 warmup 次數後執行。兩種條件都會為每個樣本啟動新 process。報告會提供 process spawn 到第一個輸出，以及整個 command wall time 的 p50、p95、mean、standard deviation 和 coefficient of variation；source 與 binary distribution 會分開比較。正數 improvement percentage 代表候選版本較快。候選版本會額外執行 profile 並擷取 `performance.json`，這些額外樣本不會計入比較。
+Fixture 包括 `version`、`help`、no-op Template、三個 action 的 Flow、已配置 Tool，以及呼叫本機測試 server 的 HTTP Template。Cold samples 不做明確 benchmark warmup；warm samples 則在設定的 warmup 次數後執行。兩種條件都會為每個樣本啟動新 process，並以有 seed 的隨機次序交錯執行每組 baseline/candidate 配對。報告會記錄 seed 和實際次序。Cold 只代表「沒有該 case 的明確 warmup」，不代表作業系統 file cache 是 cold。報告會提供 process spawn 到第一個輸出，以及整個 command wall time 的 p50、p95、mean、standard deviation 和 coefficient of variation；source 與 binary distribution 會分開比較。正數 improvement percentage 代表候選版本較快。候選版本會額外執行 profile 並擷取 `performance.json`，這些額外樣本不會計入比較。
+
+每次 launcher invocation 都有 deadline（`--timeout-seconds`，預設 120 秒）。逾時時 harness 會終止 process group/tree，並把 timeout、終止原因和 output tail 保留在 raw report；timeout 樣本不會納入 latency summary。
 
 ```sh
 python3 tools/benchmark_debug_startup.py \
@@ -13,7 +15,7 @@ python3 tools/benchmark_debug_startup.py \
   --baseline-revision BASELINE_SHA \
   --candidate-revision CANDIDATE_SHA \
   --schemas-dir ./schemas \
-  --warmups 3 --runs 10 \
+  --warmups 3 --runs 10 --timeout-seconds 120 --order-seed 20261010 \
   --output /tmp/att-debug-startup-4.0.1.json
 ```
 

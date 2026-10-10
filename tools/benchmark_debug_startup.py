@@ -8,6 +8,8 @@ import math
 import os
 import platform
 import queue
+import random
+import signal
 import shutil
 import statistics
 import subprocess
@@ -41,10 +43,39 @@ def launcher_command(root, arguments):
     return [str(root / "att.sh")] + arguments
 
 
-def run_command(command, cwd):
+def terminate_process_tree(process):
+    if os.name == "nt":
+        taskkill = shutil.which("taskkill")
+        if taskkill:
+            try:
+                subprocess.run([taskkill, "/PID", str(process.pid), "/T", "/F"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        if process.poll() is None:
+            process.kill()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if process.poll() is None:
+            process.kill()
+
+
+def run_command(command, cwd, timeout_seconds=120.0):
     started = time.perf_counter_ns()
+    options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
     process = subprocess.Popen(command, cwd=str(cwd), stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True, bufsize=1)
+                               stderr=subprocess.PIPE, text=True, bufsize=1, **options)
     output = queue.Queue()
 
     def collect(name, stream):
@@ -64,9 +95,15 @@ def run_command(command, cwd):
     first_output_ns = None
     finished_streams = set()
     tail = []
+    deadline = time.monotonic() + timeout_seconds
+    timed_out = False
     while len(finished_streams) < 2:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            break
         try:
-            timestamp, name, line = output.get(timeout=0.05)
+            timestamp, name, line = output.get(timeout=min(0.05, remaining))
         except queue.Empty:
             continue
         if timestamp is None:
@@ -77,16 +114,42 @@ def run_command(command, cwd):
             tail.append("{}: {}".format(name, line))
             del tail[:-8]
 
-    exit_code = process.wait()
+    if not timed_out:
+        try:
+            process.wait(timeout=max(0.001, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            timed_out = True
+    if timed_out:
+        terminate_process_tree(process)
+    try:
+        exit_code = process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        exit_code = process.wait(timeout=2)
     finished = time.perf_counter_ns()
     for reader in readers:
-        reader.join()
-    return {
+        reader.join(timeout=2)
+    while True:
+        try:
+            timestamp, name, line = output.get_nowait()
+        except queue.Empty:
+            break
+        if timestamp is not None:
+            if first_output_ns is None:
+                first_output_ns = timestamp
+            tail.append("{}: {}".format(name, line))
+            del tail[:-8]
+    result = {
         "exitCode": exit_code,
         "firstOutputMs": None if first_output_ns is None else (first_output_ns - started) / 1e6,
         "totalMs": (finished - started) / 1e6,
         "outputTail": tail,
+        "timedOut": timed_out,
     }
+    if timed_out:
+        result["timeoutSeconds"] = timeout_seconds
+        result["terminationReason"] = "per-sample timeout; process group/tree terminated"
+    return result
 
 
 def link_or_copy_classes(source, destination):
@@ -247,10 +310,12 @@ def summarize_metric(values):
 
 
 def summarize(samples):
-    first = [sample["firstOutputMs"] for sample in samples if sample["firstOutputMs"] is not None]
-    total = [sample["totalMs"] for sample in samples]
-    return {"samples": len(samples), "firstOutputMs": summarize_metric(first),
-            "totalMs": summarize_metric(total)}
+    successful = [sample for sample in samples if not sample.get("timedOut")]
+    first = [sample["firstOutputMs"] for sample in successful if sample["firstOutputMs"] is not None]
+    total = [sample["totalMs"] for sample in successful]
+    return {"samples": len(samples), "successfulSamples": len(successful),
+            "timedOutSamples": len(samples) - len(successful),
+            "firstOutputMs": summarize_metric(first), "totalMs": summarize_metric(total)}
 
 
 def directory_sha256(directory):
@@ -315,12 +380,15 @@ def hardware_details():
     return details
 
 
-def measure(command, root, identity):
-    result = run_command(command, root)
+def measure(command, root, identity, timeout_seconds):
+    result = run_command(command, root, timeout_seconds)
+    if result["timedOut"]:
+        return {key: result[key] for key in ("exitCode", "firstOutputMs", "totalMs", "timedOut",
+                                             "timeoutSeconds", "terminationReason", "outputTail")}
     if result["exitCode"] != 0:
         raise RuntimeError("Benchmark command failed (exit {}): {}\n{}".format(
             result["exitCode"], identity, "\n".join(result["outputTail"])))
-    return {key: result[key] for key in ("exitCode", "firstOutputMs", "totalMs")}
+    return {key: result[key] for key in ("exitCode", "firstOutputMs", "totalMs", "timedOut")}
 
 
 def debug_command(root, target, identity, profile=False):
@@ -334,64 +402,43 @@ def debug_command(root, target, identity, profile=False):
     return launcher_command(root, args)
 
 
-def run_distribution(label, root, runs, warmups, expected_version):
-    cases = {
-        "version": ["version"],
-        "help": ["help"],
-        "noopTemplate": ["template", "NOOP"],
-        "flow": ["flow", "common.benchmark.v1"],
-        "tool": ["tool", "benchmark.noop"],
-        "resourceHttp": ["template", "RESOURCE"],
-    }
-    report = {"version": None, "cases": {}}
-    version_result = run_command(launcher_command(root, ["version"]), root)
-    if version_result["exitCode"] != 0 or not version_result["outputTail"]:
+def prepare_distribution(label, root, expected_version, timeout_seconds):
+    version_result = run_command(launcher_command(root, ["version"]), root, timeout_seconds)
+    if version_result["timedOut"] or version_result["exitCode"] != 0 or not version_result["outputTail"]:
         raise RuntimeError("Could not read version for {}: {}".format(label, version_result["outputTail"]))
-    report["version"] = version_result["outputTail"][-1].split(": ", 1)[-1]
-    if expected_version not in report["version"]:
-        raise RuntimeError("{} reports {!r}, expected version label {!r}".format(
-            label, report["version"], expected_version))
+    version = version_result["outputTail"][-1].split(": ", 1)[-1]
+    if expected_version not in version:
+        raise RuntimeError("{} reports {!r}, expected version label {!r}".format(label, version, expected_version))
+    return {"version": version, "cases": {}}
 
-    for case_name, target in cases.items():
-        samples = {"cold": [], "warm": []}
-        for index in range(runs):
-            if case_name in ("version", "help"):
-                command = launcher_command(root, target)
-            else:
-                command = debug_command(root, target, "{}-cold-{}".format(case_name, index))
-            samples["cold"].append(measure(command, root, "{} cold {} {}".format(label, case_name, index)))
 
-        for index in range(warmups):
-            if case_name in ("version", "help"):
-                command = launcher_command(root, target)
-            else:
-                command = debug_command(root, target, "{}-warmup-{}".format(case_name, index))
-            measure(command, root, "{} warmup {} {}".format(label, case_name, index))
-        for index in range(runs):
-            if case_name in ("version", "help"):
-                command = launcher_command(root, target)
-            else:
-                command = debug_command(root, target, "{}-warm-{}".format(case_name, index))
-            samples["warm"].append(measure(command, root, "{} warm {} {}".format(label, case_name, index)))
+def sample_command(label, root, case_name, target, condition, index):
+    if case_name in ("version", "help"):
+        return launcher_command(root, target)
+    identity = "{}-{}-{}-{}".format(case_name, condition, index, label)
+    return debug_command(root, target, identity)
 
-        report["cases"][case_name] = {
-            "cold": {"summary": summarize(samples["cold"]), "raw": samples["cold"]},
-            "warm": {"summary": summarize(samples["warm"]), "raw": samples["warm"]},
-        }
 
-        if label.startswith("candidate") and case_name not in ("version", "help"):
-            identity = "{}-profile".format(case_name)
-            profile_sample = measure(debug_command(root, target, identity, profile=True), root,
-                                     "{} profile {}".format(label, case_name))
-            profile_root = root / "output" / identity
-            profile_paths = list(profile_root.rglob("performance.json"))
-            if len(profile_paths) != 1:
-                raise RuntimeError("Expected one profile under {}, found {}".format(
-                    profile_root, len(profile_paths)))
-            profile_path = profile_paths[0]
-            report["cases"][case_name]["profileCaptureWallMs"] = round(profile_sample["totalMs"], 3)
-            report["cases"][case_name]["profile"] = json.loads(profile_path.read_text(encoding="utf-8"))
-    return report
+def randomized_pair(labels, rng):
+    order = list(labels)
+    rng.shuffle(order)
+    return order
+
+
+def capture_candidate_profile(label, root, case_name, target, timeout_seconds, report):
+    identity = "{}-profile".format(case_name)
+    sample = measure(debug_command(root, target, identity, profile=True), root,
+                     "{} profile {}".format(label, case_name), timeout_seconds)
+    report["cases"][case_name]["profileCaptureWallMs"] = round(sample["totalMs"], 3)
+    if sample.get("timedOut"):
+        report["cases"][case_name]["profileCaptureTimedOut"] = True
+        report["cases"][case_name]["profileCaptureTimeout"] = sample
+        return
+    profile_root = root / "output" / identity
+    profile_paths = list(profile_root.rglob("performance.json"))
+    if len(profile_paths) != 1:
+        raise RuntimeError("Expected one profile under {}, found {}".format(profile_root, len(profile_paths)))
+    report["cases"][case_name]["profile"] = json.loads(profile_paths[0].read_text(encoding="utf-8"))
 
 
 def compare_pair(baseline, candidate):
@@ -409,9 +456,9 @@ def compare_pair(baseline, candidate):
                 new_p95 = new[metric]["p95"]
                 comparisons[case_name][condition][metric] = {
                     "medianImprovementPercent": round((old_median - new_median) * 100.0 / old_median, 2)
-                    if old_median else None,
+                    if old_median is not None and new_median is not None and old_median else None,
                     "p95ImprovementPercent": round((old_p95 - new_p95) * 100.0 / old_p95, 2)
-                    if old_p95 else None,
+                    if old_p95 is not None and new_p95 is not None and old_p95 else None,
                 }
     return comparisons
 
@@ -443,14 +490,31 @@ def main():
                         help="One shared package schemas directory")
     parser.add_argument("--runs", type=int, default=10)
     parser.add_argument("--warmups", type=int, default=3)
+    parser.add_argument("--timeout-seconds", type=float, default=120.0,
+                        help="Per-invocation deadline; timed-out samples are retained in the report")
+    parser.add_argument("--order-seed", type=int, default=20261010,
+                        help="Seed for paired baseline/candidate sample ordering")
     parser.add_argument("--output", type=Path, default=Path("debug-startup-benchmark.json"))
     args = parser.parse_args()
     if args.runs < 2 or args.warmups < 0:
         parser.error("--runs must be >= 2 and --warmups must be >= 0")
+    if args.timeout_seconds <= 0:
+        parser.error("--timeout-seconds must be positive")
     schemas = args.schemas_dir.resolve()
     if not schemas.is_dir():
         parser.error("schemas directory does not exist: {}".format(schemas))
 
+    cases = {
+        "version": ["version"],
+        "help": ["help"],
+        "noopTemplate": ["template", "NOOP"],
+        "flow": ["flow", "common.benchmark.v1"],
+        "tool": ["tool", "benchmark.noop"],
+        "resourceHttp": ["template", "RESOURCE"],
+    }
+    specs = runtime_specs(args)
+    rng = random.Random(args.order_seed)
+    orders = []
     http_server = ThreadingHTTPServer(("127.0.0.1", 0), ReadyHandler)
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     http_thread.start()
@@ -459,7 +523,8 @@ def main():
         with tempfile.TemporaryDirectory(prefix="att-startup-benchmark-") as temporary:
             temp_root = Path(temporary)
             measurements = {}
-            for label, source, distribution, packaged_distribution in runtime_specs(args):
+            roots = {}
+            for label, source, distribution, packaged_distribution in specs:
                 fixture_root = temp_root / (label + "-fixture")
                 fixture_root.mkdir()
                 install_fixture(fixture_root, schemas, http_port,
@@ -473,8 +538,65 @@ def main():
                     source_path = fixture_root / relative
                     if source_path.exists():
                         shutil.copytree(source_path, install_root / relative, dirs_exist_ok=True)
+                roots[label] = install_root
+                measurements[label] = {"version": None, "cases": {}}
+
+            preflight_order = randomized_pair([label for label, *_ in specs], rng)
+            for label in preflight_order:
                 expected = args.baseline_label if label.startswith("baseline") else args.candidate_label
-                measurements[label] = run_distribution(label, install_root, args.runs, args.warmups, expected)
+                measurements[label]["version"] = prepare_distribution(
+                    label, roots[label], expected, args.timeout_seconds)["version"]
+
+            comparison_pairs = [("source", ("baselineSource", "candidateSource")),
+                                ("binary", ("baselineBinary", "candidateBinary"))]
+            for case_name, target in cases.items():
+                for condition in ("cold", "warm"):
+                    raw_by_label = {label: [] for label in measurements}
+                    if condition == "warm":
+                        for warmup_index in range(args.warmups):
+                            group_order = randomized_pair(comparison_pairs, rng)
+                            for comparison_name, pair in group_order:
+                                pair_order = randomized_pair(pair, rng)
+                                order_entry = {"case": case_name, "condition": condition,
+                                               "phase": "warmup", "sampleIndex": warmup_index,
+                                               "comparison": comparison_name, "order": pair_order}
+                                outcomes = {}
+                                for label in pair_order:
+                                    sample = measure(sample_command(label, roots[label], case_name, target,
+                                                                    condition, "warmup-{}".format(warmup_index)),
+                                                     roots[label], "{} warmup {} {}".format(
+                                                         label, case_name, warmup_index), args.timeout_seconds)
+                                    outcomes[label] = {"timedOut": sample.get("timedOut", False),
+                                                      "outputTail": sample.get("outputTail", [])}
+                                order_entry["outcomes"] = outcomes
+                                orders.append(order_entry)
+
+                    for sample_index in range(args.runs):
+                        group_order = randomized_pair(comparison_pairs, rng)
+                        for comparison_name, pair in group_order:
+                            pair_order = randomized_pair(pair, rng)
+                            orders.append({"case": case_name, "condition": condition,
+                                           "phase": "measured", "sampleIndex": sample_index,
+                                           "comparison": comparison_name, "order": pair_order})
+                            for label in pair_order:
+                                sample = measure(sample_command(label, roots[label], case_name, target,
+                                                                condition, sample_index), roots[label],
+                                                 "{} {} {} {}".format(label, condition,
+                                                                       case_name, sample_index),
+                                                 args.timeout_seconds)
+                                raw_by_label[label].append(sample)
+
+                    for label, samples in raw_by_label.items():
+                        measurements[label]["cases"].setdefault(case_name, {})[condition] = {
+                            "summary": summarize(samples), "raw": samples,
+                        }
+
+            for case_name, target in cases.items():
+                if case_name in ("version", "help"):
+                    continue
+                for label in ("candidateSource", "candidateBinary"):
+                    capture_candidate_profile(label, roots[label], case_name, target,
+                                               args.timeout_seconds, measurements[label])
     finally:
         http_server.shutdown()
         http_server.server_close()
@@ -500,6 +622,8 @@ def main():
             "javaVersion": subprocess.run(["java", "-version"], capture_output=True, text=True).stderr.strip(),
             "runsPerCondition": args.runs,
             "warmups": args.warmups,
+            "timeoutSeconds": args.timeout_seconds,
+            "orderSeed": args.order_seed,
         },
         "provenance": {
             "baselineRevision": source_revision(args.baseline_source, args.baseline_revision),
@@ -517,7 +641,10 @@ def main():
                               "flow": "att-flow/v3.6", "debug": "att-debug/v1.2"},
             },
             "cold": "New JVM processes without explicit benchmark warmups; the OS may cache files after the first sample.",
-            "warm": "New JVM processes measured after the configured warmup invocations.",
+            "warm": "New JVM processes measured after configured warmups; warmups and samples are paired and interleaved.",
+            "orderSeed": args.order_seed,
+            "pairedSampleOrder": orders,
+            "timeouts": "Timed-out sample records include their deadline, termination reason, and captured output tail; summaries exclude timed-out samples.",
             "firstOutputMs": "Launcher process spawn to the first non-empty stdout or stderr line.",
             "scope": "Includes shell launcher and JVM startup. Candidate profile captures are separate from comparison samples.",
         },

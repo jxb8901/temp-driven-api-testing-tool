@@ -2,7 +2,9 @@
 
 `tools/benchmark_debug_startup.py` compares the v3.7.3 baseline release and a candidate using both built source trees and extracted binary distributions. It copies each runtime into a temporary launch root, then installs equivalent synthetic fixtures and the same schema catalog. Config and Debug `schemaVersion` values follow each release's current schema; the fixture actions and inputs stay the same. The harness verifies runtime version labels and starts a new process for every sample.
 
-The fixtures cover `version`, `help`, a no-op Template, a three-action Flow, a configured Tool, and an HTTP-backed Template calling a local test server. Cold samples have no explicit benchmark warmups; warm samples follow the configured warmup count. Both conditions still start a fresh process each time. The report includes p50, p95, mean, standard deviation and coefficient of variation for process-spawn-to-first-output and total wall time. It compares baseline and candidate source distributions separately from binary distributions. A positive improvement percentage means the candidate was faster. Candidate `performance.json` reports are captured in additional profiled runs and excluded from comparison samples.
+The fixtures cover `version`, `help`, a no-op Template, a three-action Flow, a configured Tool, and an HTTP-backed Template calling a local test server. Cold samples have no explicit benchmark warmups; warm samples follow the configured warmup count. Both conditions start a fresh process each time, and each baseline/candidate pair is interleaved in seeded randomized order. The report records the seed and exact order. The cold label means “no explicit same-case warmup”; it does not imply an OS-cold cache. The report includes p50, p95, mean, standard deviation and coefficient of variation for process-spawn-to-first-output and total wall time. A positive improvement percentage means the candidate was faster. Candidate `performance.json` reports are captured in additional profiled runs and excluded from comparison samples.
+
+Every launcher invocation has a deadline (`--timeout-seconds`, default 120). On expiry the harness terminates the process group/tree, records the timeout and output tail, and excludes that sample from latency summaries while retaining it in the raw report.
 
 ```sh
 python3 tools/benchmark_debug_startup.py \
@@ -13,7 +15,7 @@ python3 tools/benchmark_debug_startup.py \
   --baseline-revision BASELINE_SHA \
   --candidate-revision CANDIDATE_SHA \
   --schemas-dir ./schemas \
-  --warmups 3 --runs 10 \
+  --warmups 3 --runs 10 --timeout-seconds 120 --order-seed 20261010 \
   --output /tmp/att-debug-startup-4.0.1.json
 ```
 
