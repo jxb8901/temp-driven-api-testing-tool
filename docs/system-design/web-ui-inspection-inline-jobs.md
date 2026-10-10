@@ -142,7 +142,23 @@ Redaction runs before JSON or YAML serialization. Errors contain stable codes an
 
 ## Resource isolation, bounds, and admission
 
-Resource discovery runs in a bounded pool of long-lived inspector Worker processes, not on Tomcat request threads. Each Worker handles one request at a time and retains at most two package indexes. Package file events and watcher overflow invalidate cached indexes; a stale cursor triggers a fresh index and revision check. The inspector is read-only and does not invoke Tools. Initial `server.inspection` defaults are `maxConcurrent: 2`, `queuedLimit: 16`, `timeoutMs: 30000`, `heapMaxMb: 512`, `maxResponseBytes: 262144`, and `maxSourceBytes: 65536`. These bounds do not inherit the general job queue limits. Timeout or output-limit violations terminate the inspector Worker; the next request starts a replacement. The inspector reuses `PackageResourceResolver` for package confinement and rejects traversal and external symlinks. Results are lazy and paginated.
+Resource discovery runs in a bounded pool of long-lived inspector Worker processes, not on Tomcat request threads. Each Worker handles one request at a time and retains at most two package indexes. Initial index construction scans configured package resources; subsequent page, detail, and source requests reuse the snapshot. Package file events and watcher overflow invalidate cached indexes, and authoritative draft revision checks build a fresh snapshot before approval. The inspector is read-only and does not invoke Tools. Initial `server.inspection` defaults are `maxConcurrent: 2`, `queuedLimit: 16`, `timeoutMs: 30000`, `heapMaxMb: 512`, `maxResponseBytes: 262144`, and `maxSourceBytes: 65536`. These bounds do not inherit the general job queue limits. Timeout or output-limit violations terminate the inspector Worker; the next request starts a replacement. The inspector reuses `PackageResourceResolver` for package confinement and rejects traversal and external symlinks. Responses are paginated.
+
+The opt-in `att.server.PackageResourceInspectionPerformanceBenchmark` exercises this cache on a generated package with five Excel workbooks (300 Cases each) and 200 Templates. It records cold index construction and warm Case/Template first-page, page-N, detail, and Tool-source latency through the persistent Worker; it excludes HTTP and Tomcat overhead. Run it from the repository root:
+
+```sh
+mvn -B -ntp -pl att-server -am \
+  -Dtest=PackageResourceInspectionPerformanceBenchmark \
+  -Dsurefire.failIfNoSpecifiedTests=false \
+  -Datt.server.inspection.benchmark.warmups=1 \
+  -Datt.server.inspection.benchmark.runs=5 \
+  -Datt.server.inspection.benchmark.pageSize=50 \
+  -Datt.server.inspection.benchmark.revision="$(git rev-parse HEAD)" \
+  -Datt.server.inspection.benchmark.output=target/issue-176-resource-discovery-large.json \
+  test
+```
+
+The report preserves raw samples and package size. Timing results are descriptive and are not portable pass/fail thresholds.
 
 New inspection and draft endpoints always require a Servlet Principal, even when a deployment enables anonymous access for the legacy API. Unknown packages and resources return the same not-found shape. New DTOs reject unknown fields and ambiguous combinations. Existing requests remain backward compatible.
 
