@@ -36,7 +36,7 @@ rm -rf "$ROOT_DIR/target/release"; mkdir -p "$LOCAL_WORK" "$SERVER_WORK" "$DIST_
 tar -xzf "$LOCAL_ARCHIVE" -C "$LOCAL_WORK"
 LOCAL_PACKAGE_DIR="$LOCAL_WORK/$LOCAL_PACKAGE_NAME"
 LOCAL_PACKAGE_ROOT="$LOCAL_PACKAGE_DIR/packages/default"
-for required in att.sh att.bat lib config/att-server.example.yaml packages/default/config/config.yaml packages/default/schemas packages/default/testcase packages/default/templates packages/default/tools; do
+for required in att.sh att.bat lib config/att-server.example.yaml packages/default/config/config.yaml packages/default/config/tools packages/default/schemas packages/default/testcase packages/default/templates packages/default/tools; do
   if [ ! -e "$LOCAL_PACKAGE_DIR/$required" ]; then echo "Local archive is missing required layout path: $required" >&2; exit 2; fi
 done
 if [ -e "$LOCAL_PACKAGE_DIR/config/att-server.yaml" ] || [ -e "$LOCAL_PACKAGE_ROOT/config/att-server.yaml" ] || [ -e "$LOCAL_PACKAGE_DIR/data" ]; then
