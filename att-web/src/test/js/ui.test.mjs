@@ -17,19 +17,53 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
-      this.textContent = ''; this.hidden = false; this.disabled = false; this.submitButton = { disabled: false };
+      this.textContent = ''; this.hidden = false; this.disabled = false; this.value = ''; this.options = [];
+      this.submitButton = { disabled: false };
     }
     addEventListener(name, listener) { this.listeners[name] = listener; }
     append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
     replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(node => node !== this); }
     get firstElementChild() { return this.children[0]; }
-    querySelector(selector) { return selector === 'button[type="submit"]' ? this.submitButton : null; }
+    querySelector(selector) {
+      if (selector === 'button[type="submit"]') return this.submitButton;
+      const field = /^\[data-field="([^"]+)"\]$/.exec(selector);
+      if (field) return this.fields && this.fields[field[1]] || null;
+      const role = /^\[data-role="([^"]+)"\]$/.exec(selector);
+      if (role) return this.roles && this.roles[role[1]] || null;
+      return null;
+    }
+    querySelectorAll(selector) {
+      if (selector === '.advanced-workload') return this.children.filter(child => child.className === 'advanced-workload');
+      if (selector === '.advanced-mix-entry') return this.children.filter(child => child.className === 'advanced-mix-entry');
+      if (selector === '[data-field="targetType"]') return this.fields && this.fields.targetType ? [this.fields.targetType] : [];
+      return [];
+    }
     reset() { this.formValues = []; }
   }
+  const makeAdvancedWorkload = () => {
+    const article = new Element(); article.className = 'advanced-workload'; article.fields = {}; article.roles = {};
+    const field = (name, value = '') => { const element = new Element(); element.value = value; article.fields[name] = element; return element; };
+    field('id'); field('structure', 'single').options = [{ value: 'single' }, { value: 'mix' }];
+    field('users', '1'); field('thinkTime'); field('arrivalRate', '1/s'); field('maxConcurrent', '1');
+    field('testdata', '{}'); field('thresholds', '{}'); field('workloadBusiness', '{}');
+    field('targetType', 'template'); field('targetId', 'TEMPLATE'); field('business', '{}');
+    for (const role of ['virtual-users-fields','arrival-rate-fields','single-target','mix-targets','mix-workload-business','mix-entries'])
+      article.roles[role] = new Element();
+    article.cloneNode = () => {
+      const copy = makeAdvancedWorkload();
+      for (const [name, element] of Object.entries(article.fields)) copy.fields[name].value = element.value;
+      return copy;
+    };
+    return article;
+  };
   const elements = new Map();
   const node = id => {
-    if (!elements.has(id)) elements.set(id, new Element());
+    if (!elements.has(id)) {
+      const element = new Element();
+      if (id === 'advanced-workload-template') element.content = { firstElementChild: makeAdvancedWorkload() };
+      elements.set(id, element);
+    }
     return elements.get(id);
   };
   node('submit-form').elements.environment = Object.assign(new Element(), { value: '' });
@@ -43,7 +77,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     addEventListener(name, listener) { this.listeners[name] = listener; }
   };
   const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [], pendingHomeJobs = [], pendingResults = [], pendingConfigurations = [];
-  const state = { jobStatus, resourcePage: 0, debugDraft: 0, debugSubmit: 0, quickLoadDraft: 0 };
+  const state = { jobStatus, resourcePage: 0, debugDraft: 0, debugSubmit: 0, quickLoadDraft: 0, policyRequests: [] };
   let rejectHome;
   const delayedHome = new Promise((_, reject) => { rejectHome = reject; });
   class EventSource {
@@ -82,6 +116,10 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     let result;
     if (path === 'version') result = { apiVersion: version };
     else if (path === 'packages') result = { items: [{ packageId: 'payments' }] };
+    else if (/^packages\/[^/]+\/load-policy\?/.test(path)) {
+      state.policyRequests.push(new URLSearchParams(path.split('?')[1]).get('environment'));
+      result = { policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '10s' }, execution: { thinkTime: '1ms' } }, redacted: false };
+    }
     else if (/^packages\/[^/]+\/resources\?/.test(path)) result = resourcePages.length
       ? resourcePages[Math.min(state.resourcePage++, resourcePages.length - 1)]
       : { items: resourceItems, total: resourceItems.length, nextCursor: null };
@@ -108,6 +146,10 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
         redacted: false, expiresAt: new Date(Date.now() + 60000).toISOString()
       };
     }
+    else if (path === 'drafts/load' && options.method === 'POST') result = {
+      draftId: 'A123', preview: { schemaVersion: 'att-load/v1.6' }, previewYaml: 'schemaVersion: att-load/v1.6',
+      redacted: false, expiresAt: new Date(Date.now() + 60000).toISOString()
+    };
     else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+\/source$/.test(path)) result = { available: true, text: '<img src=x onerror=alert(1)>', format: 'yaml' };
     else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+$/.test(path)) result = { resource: resourceItems[0], definition: { action: 'log' }, diagnostics: [] };
     else if (/^packages\/[^/]+\/configuration\/effective\?/.test(path)) result = configuration.effective || {};
@@ -259,6 +301,59 @@ test('revalidates an expired Quick Load draft before asking to start Load', asyn
   assert.equal(ui.calls.filter(call => call.path === 'jobs/load').length, 1, ui.node('quick-load-form-status').textContent);
   await waitFor(() => ui.location.hash === '#/jobs/J1', 'Quick Load job submission');
   assert.deepEqual(JSON.parse(ui.calls.find(call => call.path === 'jobs/load').options.body), { packageId: 'payments', draftId: 'L_FRESH' });
+});
+
+test('preserves configured Advanced Load workloads when the environment policy changes', async () => {
+  const ui = boot({ hash: '#/advanced-load/payments' });
+  await waitFor(() => ui.node('advanced-load-package').textContent === 'payments', 'Advanced Load package');
+  ui.node('advanced-load-model').value = 'virtualUsers';
+  await ui.node('advanced-load-model').listeners.change();
+  const workloads = ui.node('advanced-load-workloads');
+  ui.node('add-advanced-workload').listeners.click();
+  assert.equal(workloads.children.length, 2);
+  workloads.children[0].fields.id.value = 'orders';
+  workloads.children[0].fields.users.value = '7';
+  workloads.children[0].fields.targetId.value = 'ORDER_FORM';
+  workloads.children[1].fields.id.value = 'payments';
+  workloads.children[1].fields.users.value = '3';
+  workloads.children[1].fields.targetType.value = 'flow';
+  workloads.children[1].fields.targetId.value = 'PAYMENT_FLOW';
+  ui.node('advanced-load-duration').value = '45s';
+  ui.node('advanced-load-seed').value = '42';
+
+  ui.node('advanced-load-environment').value = 'UAT';
+  ui.node('advanced-load-environment').listeners.input();
+  ui.node('advanced-load-environment').listeners.change();
+  await waitFor(() => ui.node('advanced-load-policy-status').textContent.includes('Policy reloaded for this environment'), 'UAT policy reload');
+
+  assert.deepEqual(ui.state.policyRequests, [null, 'UAT']);
+  assert.equal(workloads.children.length, 2);
+  assert.deepEqual(workloads.children.map(item => [item.fields.id.value, item.fields.users.value, item.fields.targetType.value, item.fields.targetId.value]), [
+    ['orders', '7', 'template', 'ORDER_FORM'], ['payments', '3', 'flow', 'PAYMENT_FLOW']
+  ]);
+  assert.equal(ui.node('advanced-load-duration').value, '45s');
+  assert.equal(ui.node('advanced-load-seed').value, '42');
+});
+
+test('submits Advanced Load Tool inputs and arguments on their distinct scenario fields', async () => {
+  const ui = boot({ hash: '#/advanced-load/payments' });
+  await waitFor(() => ui.node('advanced-load-package').textContent === 'payments', 'Advanced Load package');
+  ui.node('advanced-load-model').value = 'virtualUsers';
+  await ui.node('advanced-load-model').listeners.change();
+  ui.node('add-advanced-workload').listeners.click();
+  const workload = ui.node('advanced-load-workloads').children[0];
+  workload.fields.targetType.value = 'tool';
+  workload.fields.targetId.value = 'sample.lookup';
+  workload.fields.business.value = JSON.stringify({
+    inputs: { correlationId: 'CORR-176' }, arguments: { limit: 9 }
+  });
+
+  ui.node('validate-advanced-load').listeners.click();
+  await waitFor(() => ui.calls.some(call => call.path === 'drafts/load' && call.options.method === 'POST'), 'Advanced Load draft validation');
+  const submitted = JSON.parse(ui.calls.find(call => call.path === 'drafts/load' && call.options.method === 'POST').options.body);
+  const scenarioWorkload = submitted.scenario.workloads[0];
+  assert.deepEqual(scenarioWorkload.inputs, { correlationId: 'CORR-176' });
+  assert.deepEqual(scenarioWorkload.target.arguments, { limit: 9 });
 });
 
 test('shows safe index diagnostics when some package resources cannot be indexed', async () => {

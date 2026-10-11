@@ -14,10 +14,42 @@
     <p id="message" role="status" aria-live="polite"></p>
     <section id="home">
       <h1>Packages</h1>
+      <p>Open a package explorer or start an Advanced Load scenario from a configured package.</p>
       <div class="columns">
         <section><h2>Configured packages</h2><ul id="packages" class="package-list"></ul></section>
         <section><h2>Recent jobs</h2><button id="refresh-jobs" type="button">Refresh jobs</button><div class="table-wrap"><table><thead><tr><th>Job</th><th>Package</th><th>Command</th><th>Status</th><th>Created</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
       </div>
+    </section>
+    <section id="advanced-load" hidden>
+      <p><a href="#/">← Packages and jobs</a></p>
+      <h1>Advanced Load</h1>
+      <p id="advanced-load-package"></p>
+      <label for="advanced-load-environment">Environment</label><input id="advanced-load-environment" maxlength="32">
+      <label for="advanced-load-model">Choose the scenario model first</label>
+      <select id="advanced-load-model"><option value="">Choose a model</option><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select>
+      <p id="advanced-load-policy-status" role="status" aria-live="polite"></p>
+      <section id="advanced-load-editor" hidden>
+        <h2>Shared scenario settings</h2>
+        <label>Warmup <input id="advanced-load-warmup" placeholder="e.g. 5s"></label>
+        <label>Ramp up <input id="advanced-load-ramp-up" placeholder="e.g. 10s"></label>
+        <label>Duration <input id="advanced-load-duration" placeholder="e.g. 1m"></label>
+        <label>Ramp down <input id="advanced-load-ramp-down" placeholder="e.g. 5s"></label>
+        <label>Seed (optional) <input id="advanced-load-seed" inputmode="numeric"></label>
+        <label>Root execution defaults (JSON object)<textarea id="advanced-load-execution" rows="3" spellcheck="false"></textarea></label>
+        <label>Package-relative Testdata imports (JSON array)<textarea id="advanced-load-testdata" rows="3" spellcheck="false"></textarea></label>
+        <label>Aggregate thresholds (JSON object)<textarea id="advanced-load-thresholds" rows="3" spellcheck="false"></textarea></label>
+        <label>Scenario evidence (JSON object)<textarea id="advanced-load-evidence" rows="3" spellcheck="false"></textarea></label>
+        <h2>Workloads</h2>
+        <p>Every workload uses the selected model and shared timing envelope. Mix entry inputs and variables replace matching workload keys.</p>
+        <div id="advanced-load-workloads"></div>
+        <button id="add-advanced-workload" type="button">Add workload</button>
+        <p id="advanced-load-status" role="status" aria-live="polite"></p>
+        <button id="validate-advanced-load" type="button">Validate and preview</button>
+        <button id="copy-advanced-load" type="button" disabled>Copy YAML</button>
+        <button id="export-advanced-load" type="button" disabled>Export YAML</button>
+        <button id="start-advanced-load" type="button">Review and start Load</button>
+        <h2>Safe effective Load YAML</h2><pre id="advanced-load-preview"></pre>
+      </section>
     </section>
     <section id="package-view" hidden>
       <p><a href="#/">← Packages</a></p><h1 id="package-title"></h1>
@@ -137,6 +169,47 @@
         <button type="submit">Submit job</button>
       </form>
     </section>
+    <template id="advanced-workload-template">
+      <article class="advanced-workload">
+        <h3>Workload</h3>
+        <button type="button" data-action="duplicate-workload">Duplicate</button>
+        <button type="button" data-action="move-workload-up">Move up</button>
+        <button type="button" data-action="move-workload-down">Move down</button>
+        <button type="button" data-action="remove-workload">Remove</button>
+        <label>Workload ID <input data-field="id" maxlength="72"></label>
+        <div data-role="virtual-users-fields"><label>Virtual users <input data-field="users" inputmode="numeric"></label><label>Think time (optional) <input data-field="thinkTime" placeholder="e.g. 200ms"></label></div>
+        <div data-role="arrival-rate-fields" hidden><label>Arrival rate <input data-field="arrivalRate" placeholder="e.g. 7/s"></label><label>Maximum concurrent <input data-field="maxConcurrent" inputmode="numeric"></label></div>
+        <label>Workload Testdata policies (JSON object)<textarea data-field="testdata" rows="3" spellcheck="false"></textarea></label>
+        <label>Workload thresholds (JSON object)<textarea data-field="thresholds" rows="3" spellcheck="false"></textarea></label>
+        <label>Target structure <select data-field="structure"><option value="single">Single target</option><option value="mix">Weighted mix (Virtual Users only)</option></select></label>
+        <label data-role="mix-workload-business" hidden>Workload-level inputs and variables for mix entries (JSON object)<textarea data-field="workloadBusiness" rows="4" spellcheck="false">{"inputs":{},"vars":{}}</textarea></label>
+        <div data-role="single-target">
+          <label>Target type <select data-field="targetType"><option value="template">Template</option><option value="flow">Flow</option><option value="tool">Tool</option></select></label>
+          <label>Target ID <input data-field="targetId" list="advanced-target-options"></label>
+          <button type="button" data-action="load-target-defaults">Load sidecar defaults</button>
+          <label>Target inputs and variables/arguments (JSON object)<textarea data-field="business" rows="5" spellcheck="false">{"inputs":{},"vars":{}}</textarea></label>
+        </div>
+        <div data-role="mix-targets" hidden>
+          <div data-role="mix-entries"></div>
+          <button type="button" data-action="add-mix-entry">Add mix target</button>
+        </div>
+      </article>
+    </template>
+    <template id="advanced-mix-entry-template">
+      <fieldset class="advanced-mix-entry">
+        <legend>Mix target</legend>
+        <label>Entry ID <input data-field="id" maxlength="72"></label>
+        <label>Weight <input data-field="weight" inputmode="numeric" value="1"></label>
+        <label>Target type <select data-field="targetType"><option value="template">Template</option><option value="flow">Flow</option><option value="tool">Tool</option></select></label>
+        <label>Target ID <input data-field="targetId" list="advanced-target-options"></label>
+        <button type="button" data-action="load-target-defaults">Load sidecar defaults</button>
+        <label>Entry inputs and variables/arguments (JSON object)<textarea data-field="business" rows="4" spellcheck="false">{"inputs":{},"vars":{}}</textarea></label>
+        <button type="button" data-action="move-mix-up">Move up</button>
+        <button type="button" data-action="move-mix-down">Move down</button>
+        <button type="button" data-action="remove-mix-entry">Remove</button>
+      </fieldset>
+    </template>
+    <datalist id="advanced-target-options"></datalist>
     <section id="job-view" hidden>
       <p><a href="#/">← Packages and jobs</a></p><h1 id="job-title"></h1>
       <dl id="job-summary" class="summary"></dl>

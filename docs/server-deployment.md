@@ -89,10 +89,12 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | Read a redacted YAML projection or allowlisted Tool script |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/debug-form?environment=SIT` | Read safe target-scoped Debug defaults |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT` | Read safe defaults and one-workload Quick Load preview |
+| `GET` | `/packages/{packageId}/load-policy?model=virtualUsers&environment=SIT` | Read safe model-specific Load policy defaults for Advanced Load |
 | `POST` | `/drafts/debug` | Validate a fixed-target Debug input and create an in-memory draft |
 | `POST` | `/drafts/quick-load` | Validate a fixed-target Quick Load and create an in-memory draft |
-| `GET` | `/drafts/{draftId}` | Read the safe preview for an owned Debug or Quick Load draft |
-| `POST` | `/jobs/debug`, `/jobs/load` | Submit an owned Debug or Quick Load draft |
+| `POST` | `/drafts/load` | Validate an `att-load/v1.6` scenario and create an in-memory draft |
+| `GET` | `/drafts/{draftId}` | Read the safe preview for an owned Debug, Quick Load, or Advanced Load draft |
+| `POST` | `/jobs/debug`, `/jobs/load` | Submit an owned Debug, Quick Load, or Advanced Load draft |
 | `POST` | `/jobs/run`, `/jobs/load`, `/jobs/validate` | Submit one path-based job |
 | `GET` | `/jobs`, `/jobs/{jobId}` | List recent jobs or read job status |
 | `GET` | `/jobs/{jobId}/result` | Read the canonical result and diagnostic |
@@ -162,7 +164,7 @@ Invalid list parameters return `400`; unknown packages/resources return the same
 
 ### Target-scoped Debug and drafts
 
-Debug form, Quick Load form, and draft endpoints require a real authenticated Servlet Principal, including when anonymous access is enabled for legacy jobs. Use a resource ID from the Package Resource Explorer; Cases cannot be Debug or Quick Load targets.
+Debug form, Quick Load form, Load policy, and draft endpoints require a real authenticated Servlet Principal, including when anonymous access is enabled for legacy jobs. Use a resource ID from the Package Resource Explorer; Cases cannot be Debug or Quick Load targets.
 
 ```http
 GET /api/v1/packages/payments/resources/flow/{resourceId}/debug-form?environment=SIT
@@ -225,6 +227,42 @@ Content-Type: application/json
 ```
 
 The Server checks the package revision at draft submission, before Worker start, and again in the Worker. A stale draft returns `409 ATT-SERVER-DRAFT-STALE`, or marks an already accepted job `INVALID` with that diagnostic. The Worker receives the exact immutable scenario validated for preview; it stays in memory and is not written into the package. Existing path-based Load requests remain supported.
+
+### Advanced Load builder
+
+Advanced Load creates a full `att-load/v1.6` scenario with one or more workloads. The selected `model` must be `virtualUsers` or `arrivalRate` for every workload. Virtual Users workloads can use one fixed target or a weighted `mix`; Arrival Rate workloads use one fixed target each. The Engine validates the shared timing envelope, workload intensity, thresholds, Testdata policies, and every target before the Server creates a draft.
+
+Read safe model policy defaults with:
+
+```http
+GET /api/v1/packages/payments/load-policy?model=virtualUsers&environment=SIT
+```
+
+The response contains `model`, a redacted `policy`, its safe `previewYaml`, a `redacted` flag, and `requestId`. This endpoint is read-only and does not create a draft.
+
+Validate a complete scenario to create a server-issued draft:
+
+```http
+POST /api/v1/drafts/load
+Content-Type: application/json
+
+{
+  "packageId": "payments",
+  "environment": "SIT",
+  "scenario": {
+    "schemaVersion": "att-load/v1.6",
+    "load": {"users": 1, "duration": "30s"},
+    "workloads": [
+      {"id": "browse", "target": {"type": "flow", "id": "PAYMENT.browse"}, "load": {"users": 4}},
+      {"id": "submit", "target": {"type": "template", "id": "PAYMENT.submit"}, "load": {"users": 2}}
+    ]
+  }
+}
+```
+
+The Server validates the full scenario and resolves every target without scheduling traffic. It restores redacted values only from each selected target's package-local `debug.yaml` business fields; Debug `case`, `stage`, and local Testdata are excluded. The response contains an opaque draft ID beginning with `A`, a safe effective YAML preview, the selected model, a redaction flag, and expiry. Advanced Load shares the 128-active-draft Server limit, 16-draft per-Principal limit, and 10-minute expiry with Debug and Quick Load.
+
+Submit only the package and draft ID to `POST /api/v1/jobs/load`. The Server checks the package revision at submission and before Worker start, then passes the same immutable normalized scenario validated for preview through the existing Worker, Engine, scheduler, event, and evidence paths. A stale draft returns `409 ATT-SERVER-DRAFT-STALE`; a change detected after job acceptance marks the job `INVALID`. The browser disables YAML copy and export when any preview field is redacted. Existing path-based Load requests remain supported.
 
 ### Package configuration inspection
 

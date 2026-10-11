@@ -122,7 +122,9 @@ public final class WorkerMain {
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
             Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message));
             if("inspect".equals(request.command)&&("debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
-                    ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction))
+                    ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
+                    ||"quick-load-policy".equals(request.inspectionAction)
+                    ||"load-scenario".equals(request.inspectionAction))
                     &&error instanceof att.validation.DiagnosticException) {
                 att.validation.DiagnosticException typed=(att.validation.DiagnosticException)error;
                 diagnostic.put("summary",DiagnosticSanitizer.redactText(typed.summary()));
@@ -195,6 +197,16 @@ public final class WorkerMain {
             if("quick-load-input".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.validateQuickLoadInput(r.inspectionType,r.inspectionTargetId,
                         r.loadModel,r.inlineLoadInput,r.loadOverrides,r.workloadExecution,r.quickLoadTestdata);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
+            if("quick-load-policy".equals(r.inspectionAction)) {
+                Map<String,Object> inspected=inspector.inspectQuickLoadPolicy(r.loadModel);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
+            if("load-scenario".equals(r.inspectionAction)) {
+                Map<String,Object> inspected=inspector.validateLoadScenario(r.inlineLoadScenario);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }

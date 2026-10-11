@@ -53,6 +53,18 @@ public final class LoadRunCoordinator implements AutoCloseable {
                                         LoadRunResources resources, String runId,
                                         LoadEvidenceStore evidenceStore, Path outputRoot, Instant runStartedAt) throws Exception {
         Path root = projectRoot.toAbsolutePath().normalize();
+        Map<String, LoadTarget> targets = resolveAndValidateTargets(root, config, scenario);
+        try (LoadRunCoordinator coordinator = new LoadRunCoordinator(root, config, scenario, targets,
+                resources, outputRoot == null ? root.resolve(config.outputDirectory()) : outputRoot,
+                runId, evidenceStore, runStartedAt)) {
+            return coordinator.run();
+        }
+    }
+
+    /** Resolves and validates every single or mixed target without starting Load execution. */
+    public static Map<String, LoadTarget> resolveAndValidateTargets(Path projectRoot, FrameworkConfig config,
+                                                                    LoadScenario scenario) throws Exception {
+        Path root = projectRoot.toAbsolutePath().normalize();
         Map<String, LoadTarget> targets = new LinkedHashMap<String, LoadTarget>();
         LoadTargetResolver resolver = new LoadTargetResolver(root, config);
         LoadTargetValidator validator = new LoadTargetValidator(root, config);
@@ -71,11 +83,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
                 targets.put(workload.id(), target);
             }
         }
-        try (LoadRunCoordinator coordinator = new LoadRunCoordinator(root, config, scenario, targets,
-                resources, outputRoot == null ? root.resolve(config.outputDirectory()) : outputRoot,
-                runId, evidenceStore, runStartedAt)) {
-            return coordinator.run();
-        }
+        return Collections.unmodifiableMap(targets);
     }
 
     public LoadRunCoordinator(Path projectRoot, FrameworkConfig config, LoadScenario scenario,

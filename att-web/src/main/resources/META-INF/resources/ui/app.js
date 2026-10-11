@@ -43,6 +43,19 @@
   let quickLoadDraftFingerprint = '';
   let quickLoadPreviewPending = null;
   let quickLoadPreviewPendingFingerprint = '';
+  let advancedLoadSequence = 0;
+  let advancedLoadPackage = '';
+  let advancedLoadModel = '';
+  let advancedLoadPolicy = null;
+  let advancedLoadWorkloadSequence = 0;
+  let advancedLoadMixSequence = 0;
+  let advancedLoadDraft = null;
+  let advancedLoadDraftFingerprint = '';
+  let advancedLoadPreviewPending = null;
+  let advancedLoadPreviewPendingFingerprint = '';
+  let advancedTargetSuggestionSequence = 0;
+  const advancedTargetCatalogs = new Map();
+  let advancedSubmitting = false;
   let resourceConfigurationTarget = null;
   let cancelRequested = false;
   let versionPromise = null;
@@ -94,9 +107,10 @@
     closeStream();
     byId('home').hidden = parts.length > 0;
     byId('package-view').hidden = parts[0] !== 'packages' || !parts[1];
+    byId('advanced-load').hidden = parts[0] !== 'advanced-load' || !parts[1];
     byId('job-view').hidden = parts[0] !== 'jobs' || !parts[1];
     message('');
-    selectedPackage = parts[0] === 'packages' ? (parts[1] || '') : '';
+    selectedPackage = (parts[0] === 'packages' || parts[0] === 'advanced-load') ? (parts[1] || '') : '';
     if (selectedPackage && selectedPackage !== formPackage) {
       byId('submit-form').reset();
       formPackage = selectedPackage;
@@ -106,7 +120,8 @@
     if (submitButton) submitButton.disabled = selectedPackage !== '' && submitting.has(selectedPackage);
     ensureCompatible().then(() => {
       if (generation !== navigation) return;
-      if (selectedPackage) showPackage(selectedPackage, generation);
+      if (parts[0] === 'packages' && selectedPackage) showPackage(selectedPackage, generation);
+      else if (parts[0] === 'advanced-load' && selectedPackage) showAdvancedLoadPackage(selectedPackage, generation);
       else if (activeJob) showJob(activeJob, generation);
       else loadHome(generation);
     }).catch(error => { if (generation === navigation) { text(byId('connection'), 'Unavailable'); message(error.message); } });
@@ -118,7 +133,13 @@
       if (requestSequence !== homeRequestSequence || generation !== navigation) return;
       byId('connection').textContent = 'Connected';
       const packageList = byId('packages'); packageList.replaceChildren();
-      listItems(packages).forEach(item => { const li = document.createElement('li'); li.append(link(`#/packages/${encodeURIComponent(item.packageId)}`, item.packageId)); packageList.append(li); });
+      listItems(packages).forEach(item => {
+        const li = document.createElement('li');
+        li.append(link(`#/packages/${encodeURIComponent(item.packageId)}`, item.packageId));
+        const advanced = el('button', 'Advanced Load'); advanced.type = 'button';
+        advanced.addEventListener('click', () => { location.hash = `#/advanced-load/${encodeURIComponent(item.packageId)}`; });
+        li.append(el('span', ' '), advanced); packageList.append(li);
+      });
       const tbody = byId('jobs'); tbody.replaceChildren();
       listItems(jobs).forEach(job => {
         const row = document.createElement('tr');
@@ -130,6 +151,398 @@
         byId('connection').textContent = 'Unavailable'; message(error.message);
       }
     }
+  }
+  async function showAdvancedLoadPackage(packageId, generation) {
+    if (advancedLoadPackage !== packageId) {
+      advancedLoadPackage = packageId; advancedLoadSequence++; advancedLoadModel = ''; advancedLoadPolicy = null;
+      advancedLoadWorkloadSequence = 0; advancedLoadMixSequence = 0; advancedTargetSuggestionSequence++; advancedTargetCatalogs.clear();
+      byId('advanced-load-model').value = ''; byId('advanced-load-environment').value = '';
+      byId('advanced-load-editor').hidden = true; byId('advanced-load-workloads').replaceChildren();
+      text(byId('advanced-load-policy-status'), 'Choose the scenario model before configuring workloads.');
+      text(byId('advanced-load-status'), ''); text(byId('advanced-load-preview'), ''); clearAdvancedLoadDraft();
+    }
+    try {
+      const item = await request(`packages/${encodeURIComponent(packageId)}`);
+      if (generation !== navigation || selectedPackage !== packageId) return;
+      text(byId('advanced-load-package'), item.packageId || packageId);
+    } catch (error) { if (generation === navigation) message(error.message); }
+  }
+  function clearAdvancedLoadDraft() {
+    advancedLoadDraft = null; advancedLoadDraftFingerprint = '';
+    advancedLoadPreviewPending = null; advancedLoadPreviewPendingFingerprint = '';
+    byId('copy-advanced-load').disabled = true; byId('export-advanced-load').disabled = true;
+  }
+  function markAdvancedLoadDirty() {
+    clearAdvancedLoadDraft(); text(byId('advanced-load-preview'), '');
+    if (advancedLoadPolicy) text(byId('advanced-load-status'), 'Input changed. Validate the full scenario before starting Load.');
+  }
+  async function loadAdvancedLoadPolicy({ preserveScenario = false } = {}) {
+    const packageId = selectedPackage, generation = navigation;
+    const model = String(byId('advanced-load-model').value || '');
+    const sequence = ++advancedLoadSequence;
+    const previousPolicy = advancedLoadPolicy;
+    advancedLoadModel = model;
+    clearAdvancedLoadDraft();
+    if (!preserveScenario) {
+      advancedLoadPolicy = null;
+      byId('advanced-load-editor').hidden = true; byId('advanced-load-workloads').replaceChildren();
+    }
+    text(byId('advanced-load-preview'), ''); text(byId('advanced-load-policy-status'), ''); text(byId('advanced-load-status'), '');
+    if (!packageId || !['virtualUsers','arrivalRate'].includes(model)) {
+      text(byId('advanced-load-policy-status'), 'Choose the scenario model before configuring workloads.'); return;
+    }
+    text(byId('advanced-load-policy-status'), preserveScenario
+      ? 'Reloading model policy; keeping the configured scenario…'
+      : 'Loading safe model policy defaults…');
+    try {
+      const params = [`model=${encodeURIComponent(model)}`];
+      const environment = String(byId('advanced-load-environment').value || '').trim();
+      if (environment) params.push(`environment=${encodeURIComponent(environment)}`);
+      const data = await request(`packages/${encodeURIComponent(packageId)}/load-policy?${params.join('&')}`);
+      if (sequence !== advancedLoadSequence || generation !== navigation || selectedPackage !== packageId) return;
+      if (!data.policy || typeof data.policy !== 'object' || Array.isArray(data.policy)) throw new Error('The Server returned an invalid Load policy.');
+      const rootValues = preserveScenario ? Object.fromEntries([
+        'advanced-load-warmup','advanced-load-ramp-up','advanced-load-duration','advanced-load-ramp-down',
+        'advanced-load-seed','advanced-load-execution','advanced-load-testdata','advanced-load-thresholds','advanced-load-evidence'
+      ].map(id => [id, byId(id).value])) : null;
+      advancedLoadPolicy = JSON.parse(JSON.stringify(data.policy));
+      setAdvancedLoadControls(advancedLoadPolicy, model);
+      byId('advanced-load-editor').hidden = false;
+      if (preserveScenario) {
+        for (const [id, value] of Object.entries(rootValues)) byId(id).value = value;
+      } else addAdvancedWorkload();
+      text(byId('advanced-load-policy-status'), preserveScenario
+        ? (data.redacted
+          ? 'Policy reloaded for this environment. The configured scenario is preserved; sensitive defaults remain hidden.'
+          : 'Policy reloaded for this environment. The configured scenario is preserved and ready to validate.')
+        : (data.redacted
+          ? 'Safe policy defaults loaded. Sensitive values are hidden in the form and preview.'
+          : 'Safe policy defaults loaded from the package or the bundled low-intensity policy.'));
+    } catch (error) {
+      if (sequence === advancedLoadSequence && generation === navigation && selectedPackage === packageId) {
+        advancedLoadPolicy = previousPolicy;
+        byId('advanced-load-editor').hidden = !preserveScenario || !previousPolicy;
+        text(byId('advanced-load-policy-status'), preserveScenario
+          ? `The new environment's Load policy is unavailable. Your configured scenario is preserved. ${debugValidationMessage(error)}`
+          : `Load policy defaults are unavailable. ${debugValidationMessage(error)}`);
+        message(error.message);
+      }
+    }
+  }
+  function setAdvancedLoadControls(policy, model) {
+    const load = policy.load || {};
+    byId('advanced-load-warmup').value = load.warmup == null ? '' : String(load.warmup);
+    byId('advanced-load-ramp-up').value = load.rampUp == null ? '' : String(load.rampUp);
+    byId('advanced-load-duration').value = load.duration == null ? '' : String(load.duration);
+    byId('advanced-load-ramp-down').value = load.rampDown == null ? '' : String(load.rampDown);
+    byId('advanced-load-seed').value = policy.seed == null ? '' : String(policy.seed);
+    byId('advanced-load-execution').value = JSON.stringify(policy.execution || {}, null, 2);
+    byId('advanced-load-testdata').value = JSON.stringify(policy.testdata || [], null, 2);
+    byId('advanced-load-thresholds').value = JSON.stringify(policy.thresholds || {}, null, 2);
+    byId('advanced-load-evidence').value = JSON.stringify(policy.evidence || {}, null, 2);
+    advancedLoadModel = model;
+  }
+  function advancedField(root, name) { return root.querySelector(`[data-field="${name}"]`); }
+  function syncAdvancedWorkload(article) {
+    const model = advancedLoadModel;
+    const isUsers = model === 'virtualUsers';
+    article.querySelector('[data-role="virtual-users-fields"]').hidden = !isUsers;
+    article.querySelector('[data-role="arrival-rate-fields"]').hidden = isUsers;
+    const structure = advancedField(article, 'structure');
+    const mixOption = Array.from(structure.options).find(option => option.value === 'mix');
+    if (mixOption) mixOption.disabled = !isUsers;
+    if (!isUsers) structure.value = 'single';
+    const mixed = isUsers && structure.value === 'mix';
+    article.querySelector('[data-role="single-target"]').hidden = mixed;
+    article.querySelector('[data-role="mix-targets"]').hidden = !mixed;
+    article.querySelector('[data-role="mix-workload-business"]').hidden = !mixed;
+  }
+  function addAdvancedWorkload(copySource = null) {
+    if (!advancedLoadPolicy || !['virtualUsers','arrivalRate'].includes(advancedLoadModel)) return null;
+    const template = byId('advanced-workload-template');
+    const article = copySource ? copySource.cloneNode(true) : template.content.firstElementChild.cloneNode(true);
+    advancedLoadWorkloadSequence++;
+    advancedField(article, 'id').value = `workload-${advancedLoadWorkloadSequence}`;
+    if (copySource) {
+      article.querySelectorAll('.advanced-mix-entry').forEach(entry => {
+        advancedLoadMixSequence++;
+        advancedField(entry, 'id').value = `mix-${advancedLoadMixSequence}`;
+      });
+    } else {
+      const policyLoad = advancedLoadPolicy.load || {};
+      advancedField(article, 'users').value = policyLoad.users == null ? '1' : String(policyLoad.users);
+      advancedField(article, 'arrivalRate').value = policyLoad.arrivalRate == null ? '1/s' : String(policyLoad.arrivalRate);
+      advancedField(article, 'maxConcurrent').value = policyLoad.maxConcurrent == null ? '1' : String(policyLoad.maxConcurrent);
+      advancedField(article, 'thinkTime').value = (advancedLoadPolicy.execution || {}).thinkTime == null ? '' : String((advancedLoadPolicy.execution || {}).thinkTime);
+      advancedField(article, 'testdata').value = '{}'; advancedField(article, 'thresholds').value = '{}';
+    }
+    syncAdvancedWorkload(article);
+    byId('advanced-load-workloads').append(article);
+    article.querySelectorAll('[data-field="targetType"]').forEach(field => updateAdvancedTargetSuggestions(String(field.value || '')));
+    markAdvancedLoadDirty();
+    return article;
+  }
+  function addAdvancedMixEntry(workload) {
+    const entry = byId('advanced-mix-entry-template').content.firstElementChild.cloneNode(true);
+    advancedLoadMixSequence++;
+    advancedField(entry, 'id').value = `mix-${advancedLoadMixSequence}`;
+    workload.querySelector('[data-role="mix-entries"]').append(entry);
+    updateAdvancedTargetSuggestions('template');
+    markAdvancedLoadDirty();
+    return entry;
+  }
+  function moveAdvancedElement(node, direction, selector) {
+    const siblings = Array.from(node.parentElement.querySelectorAll(selector));
+    const index = siblings.indexOf(node), next = siblings[index + direction];
+    if (!next) return;
+    if (direction < 0) node.parentElement.insertBefore(node, next);
+    else node.parentElement.insertBefore(next, node);
+    markAdvancedLoadDirty();
+  }
+  async function updateAdvancedTargetSuggestions(type) {
+    if (!selectedPackage || !['template','flow','tool'].includes(type)) return;
+    const packageId = selectedPackage;
+    const sequence = ++advancedTargetSuggestionSequence;
+    try {
+      let values = advancedTargetCatalogs.get(`${packageId}:${type}`);
+      if (!values) {
+        const data = await request(`packages/${encodeURIComponent(packageId)}/resources?type=${encodeURIComponent(type)}&limit=100`);
+        values = listItems(data).filter(item => item.state === 'ready' && item.logicalId);
+        advancedTargetCatalogs.set(`${packageId}:${type}`, values);
+      }
+      if (sequence !== advancedTargetSuggestionSequence || selectedPackage !== packageId) return;
+      const list = byId('advanced-target-options'); list.replaceChildren();
+      values.forEach(item => { const option = document.createElement('option'); option.value = item.logicalId; list.append(option); });
+    } catch (_) { /* A typed logical target ID remains available when suggestions cannot load. */ }
+  }
+  async function findAdvancedTargetResource(type, logicalId) {
+    const key = `${selectedPackage}:${type}`;
+    let values = advancedTargetCatalogs.get(key);
+    const exact = items => items.find(item => item.logicalId === logicalId && item.state === 'ready');
+    let found = values && exact(values);
+    if (found) return found;
+    const params = [`type=${encodeURIComponent(type)}`, 'limit=100', `query=${encodeURIComponent(logicalId)}`];
+    const data = await request(`packages/${encodeURIComponent(selectedPackage)}/resources?${params.join('&')}`);
+    values = listItems(data); found = exact(values);
+    if (found) return found;
+    throw new Error(`No ready ${type} target matches logical ID ${logicalId}.`);
+  }
+  function sidecarBusiness(type, input) {
+    const projected = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+    return type === 'tool'
+      ? {
+          inputs: projected.inputs && typeof projected.inputs === 'object' && !Array.isArray(projected.inputs) ? projected.inputs : {},
+          arguments: projected.arguments && typeof projected.arguments === 'object' && !Array.isArray(projected.arguments) ? projected.arguments : {}
+        }
+      : {
+          inputs: projected.inputs && typeof projected.inputs === 'object' && !Array.isArray(projected.inputs) ? projected.inputs : {},
+          vars: projected.vars && typeof projected.vars === 'object' && !Array.isArray(projected.vars) ? projected.vars : {}
+        };
+  }
+  async function loadAdvancedTargetDefaults(button) {
+    const container = button.closest('.advanced-workload, .advanced-mix-entry');
+    const packageId = selectedPackage, generation = navigation;
+    const type = String(advancedField(container, 'targetType').value || '');
+    const logicalId = String(advancedField(container, 'targetId').value || '').trim();
+    const model = advancedLoadModel;
+    const environment = String(byId('advanced-load-environment').value || '').trim();
+    if (!logicalId) throw new Error('Enter a target logical ID first.');
+    const resource = await findAdvancedTargetResource(type, logicalId);
+    if (generation !== navigation || selectedPackage !== packageId || advancedLoadModel !== model
+        || String(byId('advanced-load-environment').value || '').trim() !== environment
+        || String(advancedField(container, 'targetType').value || '') !== type
+        || String(advancedField(container, 'targetId').value || '').trim() !== logicalId) return;
+    const params = [`model=${encodeURIComponent(model)}`]; if (environment) params.push(`environment=${encodeURIComponent(environment)}`);
+    const data = await request(`${resourcePath(packageId, resource)}/quick-load-form?${params.join('&')}`);
+    if (generation !== navigation || selectedPackage !== packageId || advancedLoadModel !== model
+        || String(byId('advanced-load-environment').value || '').trim() !== environment
+        || String(advancedField(container, 'targetType').value || '') !== type
+        || String(advancedField(container, 'targetId').value || '').trim() !== logicalId) return;
+    advancedField(container, 'targetId').value = data.target && data.target.id || logicalId;
+    advancedField(container, 'business').value = JSON.stringify(sidecarBusiness(type, data.input), null, 2);
+    markAdvancedLoadDirty(); text(byId('advanced-load-status'), data.redacted
+      ? `Safe ${type} sidecar defaults loaded; sensitive values remain hidden.`
+      : `Safe ${type} sidecar defaults loaded, or empty defaults were generated.`);
+  }
+  function parseAdvancedJson(container, fieldName, label, fallback) {
+    const field = advancedField(container, fieldName) || byId(`advanced-load-${fieldName}`);
+    const raw = String(field && field.value || '').trim();
+    if (!raw) return fallback;
+    let value; try { value = JSON.parse(raw); } catch (_) { throw new Error(`${label} must contain valid JSON.`); }
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be a JSON object.`);
+    return value;
+  }
+  function parseAdvancedBusiness(container, type) {
+    const business = parseAdvancedJson(container, 'business', 'Target business values', {});
+    const allowed = type === 'tool' ? ['inputs','arguments'] : ['inputs','vars'];
+    if (Object.keys(business).some(key => !allowed.includes(key)))
+      throw new Error(type === 'tool' ? 'Tool values support inputs and arguments only.' : 'Template and Flow values support inputs and vars only.');
+    for (const key of allowed) if (business[key] != null && (typeof business[key] !== 'object' || Array.isArray(business[key])))
+      throw new Error(`${key} must be a JSON object.`);
+    return business;
+  }
+  function advancedTarget(container) {
+    const type = String(advancedField(container, 'targetType').value || '');
+    const id = String(advancedField(container, 'targetId').value || '').trim();
+    if (!['template','flow','tool'].includes(type) || !id) throw new Error('Every target needs a type and logical ID.');
+    const target = { type, id };
+    const business = parseAdvancedBusiness(container, type);
+    if (type === 'tool') { if (business.arguments && Object.keys(business.arguments).length) target.arguments = business.arguments; }
+    return { target, business };
+  }
+  function readAdvancedWorkload(article) {
+    const id = String(advancedField(article, 'id').value || '').trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) throw new Error('Workload IDs must start with a letter or number and contain only letters, numbers, dot, underscore, or hyphen.');
+    const workload = { id, load: {} };
+    if (advancedLoadModel === 'virtualUsers') {
+      const users = Number(String(advancedField(article, 'users').value || '').trim());
+      if (!Number.isSafeInteger(users) || users < 1) throw new Error(`Workload ${id} needs a positive Virtual users count.`);
+      workload.load.users = users;
+      const thinkTime = String(advancedField(article, 'thinkTime').value || '').trim();
+      if (thinkTime) workload.execution = { thinkTime };
+    } else {
+      const arrivalRate = String(advancedField(article, 'arrivalRate').value || '').trim();
+      if (!arrivalRate) throw new Error(`Workload ${id} needs an arrival rate.`);
+      const maximum = Number(String(advancedField(article, 'maxConcurrent').value || '').trim());
+      if (!Number.isSafeInteger(maximum) || maximum < 1) throw new Error(`Workload ${id} needs a positive maximum concurrency.`);
+      Object.assign(workload.load, { arrivalRate, maxConcurrent: maximum, overloadPolicy: 'drop' });
+    }
+    const testdata = parseAdvancedJson(article, 'testdata', `Workload ${id} Testdata policies`, {});
+    const thresholds = parseAdvancedJson(article, 'thresholds', `Workload ${id} thresholds`, {});
+    if (Object.keys(testdata).length) workload.testdata = testdata;
+    if (Object.keys(thresholds).length) workload.thresholds = thresholds;
+    if (advancedLoadModel === 'virtualUsers' && String(advancedField(article, 'structure').value) === 'mix') {
+      const defaults = parseAdvancedJson(article, 'workloadBusiness', `Workload ${id} mix defaults`, {});
+      if (Object.keys(defaults).some(key => !['inputs','vars'].includes(key))) throw new Error(`Workload ${id} mix defaults support inputs and vars only.`);
+      for (const key of ['inputs','vars']) if (defaults[key] != null && (typeof defaults[key] !== 'object' || Array.isArray(defaults[key]))) throw new Error(`Workload ${id} mix ${key} defaults must be a JSON object.`);
+      if (defaults.inputs && Object.keys(defaults.inputs).length) workload.inputs = defaults.inputs;
+      if (defaults.vars && Object.keys(defaults.vars).length) workload.vars = defaults.vars;
+      const entries = Array.from(article.querySelectorAll('.advanced-mix-entry'));
+      if (!entries.length) throw new Error(`Workload ${id} needs at least one mix target.`);
+      workload.mix = entries.map(entry => {
+        const entryId = String(advancedField(entry, 'id').value || '').trim();
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(entryId)) throw new Error(`Mix entry IDs in workload ${id} must start with a letter or number and contain only letters, numbers, dot, underscore, or hyphen.`);
+        const weight = Number(String(advancedField(entry, 'weight').value || '').trim());
+        if (!Number.isSafeInteger(weight) || weight < 1) throw new Error(`Mix entry ${entryId} needs a positive integer weight.`);
+        const value = advancedTarget(entry);
+        const row = { id: entryId, weight, target: value.target };
+        if (value.business.inputs && Object.keys(value.business.inputs).length) row.inputs = value.business.inputs;
+        if (value.business.vars && Object.keys(value.business.vars).length) row.vars = value.business.vars;
+        return row;
+      });
+    } else {
+      const value = advancedTarget(article);
+      workload.target = value.target;
+      if (value.business.inputs && Object.keys(value.business.inputs).length) workload.inputs = value.business.inputs;
+      if (value.business.vars && Object.keys(value.business.vars).length) workload.vars = value.business.vars;
+    }
+    return workload;
+  }
+  function currentAdvancedLoadBody() {
+    if (!advancedLoadPolicy || !['virtualUsers','arrivalRate'].includes(advancedLoadModel)) throw new Error('Choose a scenario model and load its policy defaults first.');
+    const scenario = JSON.parse(JSON.stringify(advancedLoadPolicy));
+    scenario.schemaVersion = scenario.schemaVersion || 'att-load/v1.6';
+    const load = scenario.load && typeof scenario.load === 'object' ? scenario.load : {};
+    for (const [id,key] of [['advanced-load-warmup','warmup'],['advanced-load-ramp-up','rampUp'],['advanced-load-duration','duration'],['advanced-load-ramp-down','rampDown']]) {
+      const value = String(byId(id).value || '').trim();
+      if (!value) { delete load[key]; continue; }
+      load[key] = value;
+    }
+    if (!load.duration) throw new Error('The shared scenario duration is required.');
+    scenario.load = load;
+    const seedText = String(byId('advanced-load-seed').value || '').trim();
+    if (seedText) {
+      const seed = Number(seedText); if (!Number.isSafeInteger(seed)) throw new Error('Seed must be a safe integer.'); scenario.seed = seed;
+    } else delete scenario.seed;
+    scenario.execution = parseAdvancedJson(byId('advanced-load-editor'), 'execution', 'Root execution defaults', {});
+    if (!Object.keys(scenario.execution).length) delete scenario.execution;
+    scenario.testdata = JSON.parse(String(byId('advanced-load-testdata').value || '[]'));
+    if (!Array.isArray(scenario.testdata) || scenario.testdata.some(path => typeof path !== 'string')) throw new Error('Package-relative Testdata imports must be a JSON array of paths.');
+    if (!scenario.testdata.length) delete scenario.testdata;
+    scenario.thresholds = parseAdvancedJson(byId('advanced-load-editor'), 'thresholds', 'Aggregate thresholds', {});
+    if (!Object.keys(scenario.thresholds).length) delete scenario.thresholds;
+    scenario.evidence = parseAdvancedJson(byId('advanced-load-editor'), 'evidence', 'Scenario evidence', {});
+    if (!Object.keys(scenario.evidence).length) delete scenario.evidence;
+    const articles = Array.from(byId('advanced-load-workloads').querySelectorAll('.advanced-workload'));
+    if (!articles.length) throw new Error('Add at least one workload.');
+    const workloads = articles.map(readAdvancedWorkload);
+    const ids = workloads.map(workload => workload.id);
+    if (new Set(ids).size !== ids.length) throw new Error('Workload IDs must be unique.');
+    for (const workload of workloads) if (workload.mix) {
+      const mixIds = workload.mix.map(entry => entry.id);
+      if (new Set(mixIds).size !== mixIds.length) throw new Error(`Mix entry IDs must be unique within workload ${workload.id}.`);
+      if (workload.mix.some(entry => entry.target.type === 'tool') && (workload.vars || workload.mix.some(entry => entry.vars)))
+        throw new Error(`Workload ${workload.id} cannot combine Tool mix entries with workload or entry vars.`);
+    }
+    scenario.workloads = workloads;
+    const body = { packageId: selectedPackage, scenario };
+    const environment = String(byId('advanced-load-environment').value || '').trim();
+    if (environment) body.environment = environment;
+    return body;
+  }
+  async function previewAdvancedLoadDraft() {
+    const packageId = selectedPackage, generation = navigation;
+    if (!packageId) throw new Error('Choose a configured package first.');
+    const body = currentAdvancedLoadBody(), fingerprint = JSON.stringify(body);
+    if (advancedLoadDraft && advancedLoadDraftFingerprint === fingerprint && Date.parse(advancedLoadDraft.expiresAt || '') > Date.now() + 1000) {
+      text(byId('advanced-load-preview'), advancedLoadDraft.previewYaml || JSON.stringify(advancedLoadDraft.preview || {}, null, 2));
+      byId('copy-advanced-load').disabled = Boolean(advancedLoadDraft.redacted);
+      byId('export-advanced-load').disabled = Boolean(advancedLoadDraft.redacted);
+      text(byId('advanced-load-status'), advancedLoadDraft.redacted ? 'Validation passed. The preview hides sensitive fields; copy and export are disabled.' : 'Validation passed. Review the complete effective scenario before starting.');
+      return advancedLoadDraft;
+    }
+    if (advancedLoadPreviewPending && advancedLoadPreviewPendingFingerprint === fingerprint) return advancedLoadPreviewPending;
+    const pending = (async () => {
+      text(byId('advanced-load-status'), 'Validating the full att-load/v1.6 scenario and every target…');
+      const draft = await request('drafts/load', { method: 'POST', body: JSON.stringify(body) });
+      if (generation !== navigation || selectedPackage !== packageId || !advancedLoadPolicy) return null;
+      if (JSON.stringify(currentAdvancedLoadBody()) !== fingerprint) return null;
+      advancedLoadDraft = draft; advancedLoadDraftFingerprint = fingerprint;
+      text(byId('advanced-load-preview'), draft.previewYaml || JSON.stringify(draft.preview || {}, null, 2));
+      byId('copy-advanced-load').disabled = Boolean(draft.redacted);
+      byId('export-advanced-load').disabled = Boolean(draft.redacted);
+      text(byId('advanced-load-status'), draft.redacted ? 'Validation passed. The preview hides sensitive fields; copy and export are disabled.' : 'Validation passed. Review the complete effective scenario before starting.');
+      return draft;
+    })();
+    advancedLoadPreviewPending = pending; advancedLoadPreviewPendingFingerprint = fingerprint;
+    try { return await pending; }
+    finally { if (advancedLoadPreviewPending === pending) { advancedLoadPreviewPending = null; advancedLoadPreviewPendingFingerprint = ''; } }
+  }
+  async function runAdvancedLoadDraft() {
+    const packageId = selectedPackage, generation = navigation;
+    if (!packageId || submitting.has(packageId) || advancedSubmitting) return;
+    advancedSubmitting = true; submitting.add(packageId); byId('start-advanced-load').disabled = true;
+    try {
+      const draft = await previewAdvancedLoadDraft();
+      if (!draft || generation !== navigation || selectedPackage !== packageId) return;
+      if (JSON.stringify(currentAdvancedLoadBody()) !== advancedLoadDraftFingerprint) return;
+      const model = draft.model === 'arrivalRate' ? 'Arrival Rate' : 'Virtual Users';
+      const count = Array.from(byId('advanced-load-workloads').querySelectorAll('.advanced-workload')).length;
+      if (!window.confirm(`Start ${model} Load with ${count} workload${count === 1 ? '' : 's'}? Review the validated full scenario above before confirming.`)) return;
+      const accepted = await request('jobs/load', { method: 'POST', body: JSON.stringify({ packageId, draftId: draft.draftId }) });
+      clearAdvancedLoadDraft();
+      if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
+    } catch (error) {
+      if (generation === navigation && selectedPackage === packageId) {
+        text(byId('advanced-load-status'), `Load was not submitted. ${debugValidationMessage(error)}`); message(error.message);
+      }
+      if (error.status === 404 || error.status === 409) clearAdvancedLoadDraft();
+    } finally {
+      advancedSubmitting = false; submitting.delete(packageId); if (selectedPackage === packageId) byId('start-advanced-load').disabled = false;
+    }
+  }
+  async function copyAdvancedLoadYaml() {
+    const draft = advancedLoadDraft;
+    if (!draft || draft.redacted || !draft.previewYaml) return;
+    try { await navigator.clipboard.writeText(draft.previewYaml); text(byId('advanced-load-status'), 'Complete validated YAML copied to the clipboard.'); }
+    catch (_) { text(byId('advanced-load-status'), 'Clipboard access is unavailable in this browser context.'); }
+  }
+  function exportAdvancedLoadYaml() {
+    const draft = advancedLoadDraft;
+    if (!draft || draft.redacted || !draft.previewYaml) return;
+    const url = URL.createObjectURL(new Blob([draft.previewYaml], { type: 'text/yaml;charset=utf-8' }));
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'att-load-v1.6.yaml'; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   async function showPackage(id, generation) {
     try {
@@ -939,6 +1352,48 @@
   byId('run-resource-case').addEventListener('click', runResourceCase);
   byId('debug-resource').addEventListener('click', loadDebugForm);
   byId('quick-load-resource').addEventListener('click', loadQuickLoadForm);
+  byId('advanced-load-model').addEventListener('change', loadAdvancedLoadPolicy);
+  byId('advanced-load-environment').addEventListener('input', markAdvancedLoadDirty);
+  byId('advanced-load-environment').addEventListener('change', () => { if (advancedLoadModel) loadAdvancedLoadPolicy({ preserveScenario: true }); });
+  ['advanced-load-warmup','advanced-load-ramp-up','advanced-load-duration','advanced-load-ramp-down',
+    'advanced-load-seed','advanced-load-execution','advanced-load-testdata','advanced-load-thresholds','advanced-load-evidence']
+    .forEach(id => byId(id).addEventListener('input', markAdvancedLoadDirty));
+  byId('advanced-load-workloads').addEventListener('input', markAdvancedLoadDirty);
+  byId('advanced-load-workloads').addEventListener('change', event => {
+    const article = event.target.closest('.advanced-workload');
+    if (article && event.target.matches('[data-field="structure"]')) syncAdvancedWorkload(article);
+    if (event.target.matches('[data-field="targetType"]')) {
+      const container = event.target.closest('.advanced-workload, .advanced-mix-entry');
+      const business = advancedField(container, 'business');
+      if (business) business.value = event.target.value === 'tool' ? '{\n  "inputs": {},\n  "arguments": {}\n}' : '{\n  "inputs": {},\n  "vars": {}\n}';
+      updateAdvancedTargetSuggestions(String(event.target.value || ''));
+    }
+    markAdvancedLoadDirty();
+  });
+  byId('advanced-load-workloads').addEventListener('click', async event => {
+    const button = event.target.closest('button[data-action]'); if (!button) return;
+    const action = button.dataset.action, article = button.closest('.advanced-workload');
+    if (action === 'duplicate-workload' && article) addAdvancedWorkload(article);
+    else if (action === 'move-workload-up' && article) moveAdvancedElement(article, -1, '.advanced-workload');
+    else if (action === 'move-workload-down' && article) moveAdvancedElement(article, 1, '.advanced-workload');
+    else if (action === 'remove-workload' && article) { article.remove(); markAdvancedLoadDirty(); }
+    else if (action === 'add-mix-entry' && article) addAdvancedMixEntry(article);
+    else if (action === 'move-mix-up') moveAdvancedElement(button.closest('.advanced-mix-entry'), -1, '.advanced-mix-entry');
+    else if (action === 'move-mix-down') moveAdvancedElement(button.closest('.advanced-mix-entry'), 1, '.advanced-mix-entry');
+    else if (action === 'remove-mix-entry') { button.closest('.advanced-mix-entry').remove(); markAdvancedLoadDirty(); }
+    else if (action === 'load-target-defaults') {
+      try { await loadAdvancedTargetDefaults(button); }
+      catch (error) { text(byId('advanced-load-status'), `Target defaults are unavailable. ${debugValidationMessage(error)}`); message(error.message); }
+    }
+  });
+  byId('add-advanced-workload').addEventListener('click', () => addAdvancedWorkload());
+  byId('validate-advanced-load').addEventListener('click', async () => {
+    try { await previewAdvancedLoadDraft(); }
+    catch (error) { text(byId('advanced-load-status'), `Load scenario is invalid. ${debugValidationMessage(error)}`); message(error.message); }
+  });
+  byId('copy-advanced-load').addEventListener('click', copyAdvancedLoadYaml);
+  byId('export-advanced-load').addEventListener('click', exportAdvancedLoadYaml);
+  byId('start-advanced-load').addEventListener('click', runAdvancedLoadDraft);
   byId('reset-debug-form').addEventListener('click', resetDebugForm);
   ['debug-inputs','debug-vars','debug-arguments'].forEach(id => byId(id).addEventListener('input', () => {
     debugDraft = null; debugDraftFingerprint = ''; text(byId('debug-preview'), '');

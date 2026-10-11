@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 /** Safe response for a principal-bound, in-memory Quick Load preview draft. */
+@Deprecated
 public final class QuickLoadDraft {
     public String draftId;
     public String packageId;

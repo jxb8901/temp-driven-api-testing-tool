@@ -61,6 +61,25 @@ class AuthenticationIntegrationTest {
             String draftId=draft.path("draftId").asText();
             assertEquals(200,get(port,"/att/api/v1/drafts/"+draftId,basic));
             assertEquals(404,get(port,"/att/api/v1/drafts/"+draftId,other),"Drafts must be isolated by the authenticated principal");
+            JsonNode loadPolicy=getJson(port,"/att/api/v1/packages/debug/load-policy?model=virtualUsers",basic);
+            assertEquals("virtualUsers",loadPolicy.path("model").asText());
+            JsonNode advancedScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6",
+                    "load",Map.of("users",1,"duration","1s"),"workloads",List.of(Map.of("id","auth-load",
+                            "load",Map.of("users",1),"target",Map.of("type","template","id","FORM"),
+                            "inputs",Map.of("value","from-advanced-load")))));
+            JsonNode advancedDraft=postJson(port,"/att/api/v1/drafts/load",basic,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","scenario",advancedScenario)));
+            String advancedDraftId=advancedDraft.path("draftId").asText();assertTrue(advancedDraftId.startsWith("A"));
+            assertEquals(200,get(port,"/att/api/v1/drafts/"+advancedDraftId,basic));
+            assertEquals(404,get(port,"/att/api/v1/drafts/"+advancedDraftId,other),"Advanced Load drafts must be isolated by the authenticated principal");
+            JsonNode acceptedLoad=postJson(port,"/att/api/v1/jobs/load",basic,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","draftId",advancedDraftId)),202);
+            String loadJobId=acceptedLoad.path("jobId").asText();long loadDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+            JsonNode loadJob=getJson(port,"/att/api/v1/jobs/"+loadJobId,basic);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(loadJob.path("status").asText())&&System.nanoTime()<loadDeadline) {
+                Thread.sleep(20);loadJob=getJson(port,"/att/api/v1/jobs/"+loadJobId,basic);
+            }
+            assertEquals("PASS",loadJob.path("status").asText(),"The authenticated Advanced Load REST route must validate and submit its immutable Worker scenario");
             // Exercise the real public API behind the authenticated browser console.
             String jobId=submitJob(port,basic);
             assertEquals(200,get(port,"/att/api/v1/jobs/"+jobId,basic));
@@ -155,10 +174,13 @@ class AuthenticationIntegrationTest {
         assertEquals(200,connection.getResponseCode());try{return ServerRuntime.JSON.readTree(connection.getInputStream());}finally{connection.disconnect();}
     }
     private static JsonNode postJson(int port,String uri,String authorization,JsonNode body)throws Exception {
+        return postJson(port,uri,authorization,body,201);
+    }
+    private static JsonNode postJson(int port,String uri,String authorization,JsonNode body,int expectedStatus)throws Exception {
         HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(5000);connection.setReadTimeout(30000);
         connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Authorization",authorization);connection.setRequestProperty("Content-Type","application/json");
         try(var output=connection.getOutputStream()){output.write(ServerRuntime.JSON.writeValueAsBytes(body));}
-        assertEquals(201,connection.getResponseCode());try{return ServerRuntime.JSON.readTree(connection.getInputStream());}finally{connection.disconnect();}
+        assertEquals(expectedStatus,connection.getResponseCode());try{return ServerRuntime.JSON.readTree(connection.getInputStream());}finally{connection.disconnect();}
     }
     private static void assertAnonymousInspectionIsRejected(int port)throws Exception {
         for(String path:List.of("/att/api/v1/packages/p/resources?type=case","/att/api/v1/packages/p/configuration?view=declared")) {
