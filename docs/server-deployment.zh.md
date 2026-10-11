@@ -4,13 +4,39 @@ ATT Server 4.1.0 提供單節點控制平面，讓用戶透過版本化 REST API
 
 ## 準備部署
 
-1. 建立由 Server 管理的資料目錄，例如 `/var/lib/att-server`，只允許 Tomcat 服務帳戶寫入。此目錄須與 ATT 安裝檔案及 package root 分開。
-2. 在允許的根目錄下建立 package 目錄，並確保 Tomcat 服務帳戶可讀取。
-3. 將 `config/att-server.example.yaml` 複製到受保護的位置，更新絕對路徑，並勿將憑證放進設定檔或 package 內容。
-4. 在 Tomcat Java 選項設定 `-Datt.server.config=/etc/att/server.yaml`。若沒有系統屬性，亦可使用 `ATT_SERVER_CONFIG` 環境變數。
+1. 將 Local archive 解壓至安裝根目錄，並將 `ATT_HOME` 設為該目錄。預設 package root 為 `$ATT_HOME/packages/default`；其中包含自己的 `config/config.yaml`、`schemas/`、單數 `testcase/`、`templates/` 及頂層 `tools/`。
+2. 將 package root 設於 allowed root 之下，並確保 Tomcat 服務帳戶可讀取。解壓後的 `$ATT_HOME/packages/default` 可直接註冊為 package root。
+3. 將 `server.dataDir` 設為只有 Tomcat 服務帳戶可寫入的目錄。若與所有已註冊 package root 不相等、互不包含，則可使用 `$ATT_HOME/data`；亦可使用 `/var/lib/att-server`。Server data 不可放入 package 內容。
+4. 將 `$ATT_HOME/config/att-server.example.yaml` 複製至 `$ATT_HOME/config/att-server.yaml` 或受保護的外部路徑，更新絕對路徑，並勿將憑證放入 package。升級時不可覆寫既有的 active config。
 5. 將 `att-server-4.1.0.war` 部署至 Tomcat 10.1+。請保持 Tomcat 的 `unpackWARs` 啟用，讓 Server 可從 `WEB-INF/lib` 啟動 Worker。
 
-Tomcat 負責監聽器、TLS、存取記錄及驗證。請設定 Realm、SSO 整合、用戶端憑證或其他容器支援的機制；驗證失敗時，Server 會保留容器回傳的 challenge 或 redirect。若設定、Java 基線或 package mapping 無效，Server 會在啟動時失敗。
+Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 runtime library；可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
+
+Server 依次尋找 JVM property `-Datt.server.config`、環境變數 `ATT_SERVER_CONFIG`，再尋找 `$ATT_HOME/config/att-server.yaml`。最後一個路徑的 `ATT_HOME` 先取自 `-Datt.home`，再取自 `ATT_HOME` 環境變數。若選定的 config 不存在、不可讀或無效，Server 會在診斷中指出其路徑並停止啟動，不會改用其他來源。沒有明確來源或可用的預設 config 時，啟動錯誤會提供設定指引。
+
+Tomcat 負責 listener、TLS、access log 及驗證。請讓服務帳戶可讀取 ATT_HOME 和 package root，並擁有或可寫入 `server.dataDir`。請設定 Realm、SSO 整合、用戶端憑證或其他容器支援的機制；驗證失敗時，Server 會保留容器回傳的 challenge 或 redirect。若設定、Java 基線或 package mapping 無效，Server 會在啟動時失敗。
+
+## ATT_HOME 佈局與遷移
+
+共享安裝可採用以下佈局：
+
+```text
+att/                              # ATT_HOME
+  att.sh
+  att.bat
+  lib/
+  config/att-server.example.yaml  # 僅為範本
+  data/                           # 選用的 server.dataDir，由 Tomcat 管理
+  packages/default/               # 完整 package root
+    config/config.yaml
+    config/tools/
+    schemas/
+    testcase/
+    templates/
+    tools/                        # Tool script
+```
+
+遷移舊版平面 Local 安裝前先備份，並將新版 archive 解壓到暫存目錄。把舊版 `config/` 內容（排除 `att-server.example.yaml`）、`schemas/`、`testcase/`、`templates/`、頂層 `tools/` 及選用的 `sql/` 複製至相對應的 `packages/default/` 目錄。合併時保留目的地已存在的檔案；手動檢查 `config/config.yaml` 及自訂 package 檔案的衝突。請分開保留 `config/tools/`（Tool 設定）及頂層 `tools/`（script）。在遷移後的 package 通過驗證及執行前，保留舊的平面目錄。將 Server registry entry 更新至新 package root，並為 Tomcat 設定 `ATT_HOME` 或 `-Datt.home`。Server state 必須留在 package root 以外，安裝替換或升級時須保留；Local archive 不包含 `data/` 或 active Server config。
 
 ## 設定
 
