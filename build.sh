@@ -39,7 +39,7 @@ LOCAL_PACKAGE_ROOT="$LOCAL_PACKAGE_DIR/packages/default"
 for required in att.sh att.bat lib config/att-server.example.yaml packages/default/config/config.yaml packages/default/schemas packages/default/testcase packages/default/templates packages/default/tools; do
   if [ ! -e "$LOCAL_PACKAGE_DIR/$required" ]; then echo "Local archive is missing required layout path: $required" >&2; exit 2; fi
 done
-if [ -e "$LOCAL_PACKAGE_DIR/config/att-server.yaml" ] || [ -e "$LOCAL_PACKAGE_DIR/data" ]; then
+if [ -e "$LOCAL_PACKAGE_DIR/config/att-server.yaml" ] || [ -e "$LOCAL_PACKAGE_ROOT/config/att-server.yaml" ] || [ -e "$LOCAL_PACKAGE_DIR/data" ]; then
   echo "Local archive must not contain an active Server config or Server data directory" >&2; exit 2
 fi
 mkdir -p "$LOCAL_PACKAGE_ROOT/output"
