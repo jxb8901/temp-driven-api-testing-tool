@@ -46,10 +46,14 @@ class CliDiscoveryTest {
 
         Map<String, Object> result = CliDiscovery.load(root, config());
         @SuppressWarnings("unchecked") List<Map<String, Object>> scenarios = (List<Map<String, Object>>) result.get("scenarios");
-        assertTrue(scenarios.stream().anyMatch(s -> "valid".equals(s.get("id")) && Boolean.TRUE.equals(s.get("valid"))), result.toString());
-        assertTrue(scenarios.stream().anyMatch(s -> "invalid".equals(s.get("id")) && Boolean.FALSE.equals(s.get("valid"))));
-        assertFalse(scenarios.stream().anyMatch(s -> "unrelated".equals(s.get("id"))));
-        @SuppressWarnings("unchecked") List<Map<String, Object>> quick = (List<Map<String, Object>>) result.get("quick");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> invalid = (List<Map<String, Object>>) result.get("invalid");
+        assertEquals(1, scenarios.size(), result.toString());
+        assertEquals("load/scenarios/valid.yaml", scenarios.get(0).get("path"));
+        assertEquals(1, invalid.size(), result.toString());
+        assertEquals("load/scenarios/invalid.yaml", invalid.get(0).get("path"));
+        assertFalse(scenarios.stream().anyMatch(s -> "load/scenarios/unrelated.yaml".equals(s.get("path"))));
+        assertFalse(invalid.stream().anyMatch(s -> "load/scenarios/unrelated.yaml".equals(s.get("path"))));
+        @SuppressWarnings("unchecked") List<String> quick = (List<String>) result.get("quickLoadCommands");
         assertFalse(quick.isEmpty(), "quick load commands should be advertised for discovery scope: " + quick);
         assertFalse(Files.exists(root.resolve("output")), "discovery must not create load output or start a scheduler");
     }
