@@ -7,6 +7,9 @@ public final class ServerApi {
     public static final String HEALTH = PREFIX + "/health";
     public static final String SERVER_VERSION = PREFIX + "/version";
     public static final String PACKAGES = PREFIX + "/packages";
+    public static final String PACKAGE_RESOURCES = PACKAGES + "/{packageId}/resources";
+    public static final String PACKAGE_RESOURCE = PACKAGE_RESOURCES + "/{kind}/{resourceId}";
+    public static final String PACKAGE_RESOURCE_SOURCE = PACKAGE_RESOURCE + "/source";
     public static final String JOBS = PREFIX + "/jobs";
     public static final String EVENTS_MEDIA_TYPE = "text/event-stream";
     private ServerApi() { }

@@ -14,13 +14,25 @@ Tomcat owns listeners, TLS, access logs, and authentication. The WAR uses the Se
 
 ## Configuration
 
-`server.dataDir` stores H2 control-plane metadata and job output. Worker concurrency, queue size, Load admission, graceful stop timeout, and optional per-Worker heap limits are bounded by `workers`. `workers.heapMaxMb` sets `-Xmx` for every Worker (64–65536 MiB); optional `heapInitialMb` sets `-Xms` (32–65536 MiB), requires `heapMaxMb`, and cannot exceed it. Plan the aggregate heap allowance against `maxConcurrent` plus the Server and container memory. Rejected submissions are discarded before they create durable job records. Terminal job metadata, journals, and artifacts are retained for `server.jobRetentionDays` (default 30, allowed range 1–3650); expired jobs are cleaned at startup and hourly, while active jobs are preserved. `workers.maxConcurrentLoad` bounds admitted Load jobs, including queued jobs, so waiting Loads do not occupy general Worker threads. Excess Load or overall-capacity submissions receive HTTP 429. `workers.libraryDirs` optionally lists absolute, existing, readable directories whose JARs are added to the Worker subprocess classpath for external JDBC, MQ, or other dependencies; configure only trusted server-owned directories. The `packages` registry is read-only and maps stable package IDs to canonical roots beneath `allowedRoots`.
+`server.dataDir` stores H2 control-plane metadata and job output. Worker concurrency, queue size, Load admission, graceful stop timeout, and optional per-Worker heap limits are bounded by `workers`. `workers.heapMaxMb` sets `-Xmx` for every Worker (64–65536 MiB); optional `heapInitialMb` sets `-Xms` (32–65536 MiB), requires `heapMaxMb`, and cannot exceed it. Plan the aggregate heap allowance against `maxConcurrent` plus the Server and container memory. Rejected submissions are discarded before they create durable job records. Terminal job metadata, journals, and artifacts are retained for `server.jobRetentionDays` (default 30, allowed range 1–3650); expired jobs are cleaned at startup and hourly, while active jobs are preserved. `workers.maxConcurrentLoad` bounds admitted Load jobs, including queued jobs, so waiting Loads do not occupy general Worker threads. Excess Load or overall-capacity submissions receive HTTP 429. `workers.libraryDirs` optionally lists absolute, existing, readable directories whose JARs are added to the Worker subprocess classpath for external JDBC, MQ, or other dependencies; configure only trusted server-owned directories. The `packages` registry is read-only and maps stable package IDs to canonical roots beneath `allowedRoots`. `server.inspection` separately bounds read-only resource discovery with a pool of long-lived Worker processes. The pool has at most `maxConcurrent` processes; each handles one request at a time and caches up to two package indexes. Package file events invalidate those indexes. Inspection has separate queue, timeout, heap, source, and response limits. Tool script text is unavailable unless its package-relative path is listed under `server.inspection.safeTextSources` for that package ID.
 
 ```yaml
 server:
   dataDir: /var/lib/att-server
   authenticationRequired: true
   jobRetentionDays: 30
+  inspection:
+    enabled: true
+    maxConcurrent: 2
+    queuedLimit: 16
+    timeoutMs: 30000
+    heapMaxMb: 512
+    maxResponseBytes: 262144
+    maxSourceBytes: 65536
+    # Optional Tool script source allowlist. Paths are package-relative.
+    # safeTextSources:
+    #   payments:
+    #     - tools/payment-check.sh
 workers:
   maxConcurrent: 8
   queuedLimit: 100
@@ -46,7 +58,7 @@ Server state is stored in `dataDir/db/`. Each job uses `dataDir/jobs/<jobId>/` f
 
 ## Authentication and identity
 
-Tomcat authenticates requests. ATT Server reads `HttpServletRequest.getUserPrincipal()` and requires a Principal on package, job, result, event, and artifact endpoints. Health and version may be anonymous. The principal name is stored with job and audit metadata and is not sent to the Worker or exposed in ATT expression Context.
+Tomcat authenticates requests. ATT Server reads `HttpServletRequest.getUserPrincipal()` and requires a Principal on package, resource-inspection, job, result, event, and artifact endpoints. The new resource-inspection endpoints always require a real Servlet Principal, even when anonymous access is enabled for the legacy API. Health and version may be anonymous. The principal name is stored with job and audit metadata and is not sent to the Worker or exposed in ATT expression Context.
 
 State-changing requests require `application/json`; requests carrying an `Origin` must match the request origin. Behind a TLS-terminating proxy, configure Tomcat's `RemoteIpValve` to derive the Servlet scheme, host, and port from the proxy's forwarded headers. Set `internalProxies` to only the actual proxy addresses, and ensure the proxy removes client-supplied `Forwarded`/`X-Forwarded-*` headers before adding its own. For example, adapt these header names and trusted addresses to the proxy:
 
@@ -72,6 +84,9 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 | `GET` | `/health`, `/version` | Health and build information |
 | `GET` | `/metrics` | Bounded job and Worker counts |
 | `GET` | `/packages`, `/packages/{packageId}` | Read the configured registry |
+| `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | List safe Case, Template, Flow, and Tool projections |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | Read one safe resource definition and references |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | Read a redacted YAML projection or allowlisted Tool script |
 | `POST` | `/jobs/run`, `/jobs/debug`, `/jobs/load`, `/jobs/validate` | Submit one job |
 | `GET` | `/jobs`, `/jobs/{jobId}` | List recent jobs or read job status |
 | `GET` | `/jobs/{jobId}/result` | Read the canonical result and diagnostic |
@@ -94,6 +109,50 @@ The API returns `202 Accepted` and a job ID. Jobs move through `QUEUED`, `PREPAR
 Job records include an additive `performance` object when measurements are available. `performance.timings` uses monotonic elapsed time for admission, queue wait, Worker preparation/spawn, Worker-ready (first `STATUS`), execution-ready (first `PROGRESS` or `LOG`), Worker lifetime, and result-to-termination. `performance.worker` records heap, live-thread, GC, process CPU, and sampled peak RSS metrics from the isolated Worker. Sampling is event-triggered and limited to one sample per 100 ms; brief peaks can be missed. RSS is available on Linux `/proc` systems only. Worker resource metrics are included in the canonical job record and survive Server restart.
 
 `GET /jobs` returns the latest 100 jobs. Submission payloads are not persisted; metadata stores only the command and package ID summary. Engine results and diagnostics are persisted as control-plane metadata. Larger reports, logs, and other evidence remain under the job output directory.
+
+Resource discovery accepts `case`, `template`, `flow`, or `tool` as the optional `type`. List pages default to 50 items and allow up to 100; continuation cursors are encrypted, bound to the authenticated principal and query, and rejected with `409` if package content changes. The explorer returns logical resource IDs, safe projections, provenance, relationships, and stable diagnostics. YAML source responses are parsed and redacted projections, not original file bytes. Tool script source is returned only when the exact package-relative script path is explicitly allowlisted. Discovery never executes Tools and does not expose a filesystem browser. Inspection requires an authenticated Servlet Principal even when `server.authenticationRequired: false`; the inspection queue, Worker heap, timeout, and response bounds are independent of normal job execution.
+
+### Package resource inspection
+
+Use the public read-only endpoints with an authenticated Servlet Principal. `kind` is `case`, `template`, `flow`, or `tool`; `resourceId` is the opaque package-scoped ID returned by the list endpoint. The list `query` matches logical IDs, names, descriptions, and tags. Omit `type`, `query`, or `limit` to use the defaults. A continuation cursor is valid only for the same package, principal, type, and query.
+
+```http
+GET /api/v1/packages/payments/resources?type=case&query=refund&limit=50
+```
+
+The response includes safe summaries, a total count, and an opaque `nextCursor` when another page exists:
+
+```json
+{
+  "items": [{
+    "resourceId": "case.<opaque>",
+    "type": "case",
+    "logicalId": "PAYMENT.REFUND01",
+    "name": "Refund request",
+    "state": "ready",
+    "sourceAvailable": false,
+    "provenance": {"suite": "testcase/payments.xlsx", "groupId": "PAYMENT", "sheet": "Cases", "rowNumber": 12},
+    "references": [{"type": "template", "logicalId": "PAYMENT.refund", "resourceId": "template.<opaque>", "resolution": "resolved"}],
+    "referencedBy": [],
+    "diagnostics": []
+  }],
+  "total": 1,
+  "nextCursor": null,
+  "diagnostics": [],
+  "requestId": "..."
+}
+```
+
+Read one resource's parsed definition and relationships, then request its safe source projection separately:
+
+```http
+GET /api/v1/packages/payments/resources/template/{resourceId}
+GET /api/v1/packages/payments/resources/template/{resourceId}/source
+```
+
+The detail response contains `resource`, `definition`, `diagnostics`, and `requestId`. The source response contains `resource`, `available`, `format`, `text`, `redacted`, and `requestId`. For unavailable source, `available` is `false`, `reason` is `source-unavailable` or `size-limit`, and no partial text is returned. References with no matching resource have `resolution: "unresolved"` and a stable resource diagnostic.
+
+Invalid list parameters return `400`; unknown packages/resources return the same `404` shape. Stale cursors return `409`, oversized responses `413`, a full inspection queue `503`, and an inspector timeout `504`. Error responses use the existing `error.code`, `error.summary`, and `requestId` envelope; they do not include physical paths or parser exception messages.
 
 ## Server-sent events
 

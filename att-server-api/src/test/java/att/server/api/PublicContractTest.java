@@ -16,4 +16,20 @@ class PublicContractTest {
         assertThrows(IllegalArgumentException.class,()->ApiStatus.parse("FUTURE_SUCCESS"));
         assertEquals("1",ServerApi.VERSION);
     }
+
+    @Test void packageResourceRoutesAndResponsesAreTyped() throws Exception {
+        assertEquals("/api/v1/packages/{packageId}/resources",ServerApi.PACKAGE_RESOURCES);
+        assertEquals("/api/v1/packages/{packageId}/resources/{kind}/{resourceId}",ServerApi.PACKAGE_RESOURCE);
+        assertEquals("/api/v1/packages/{packageId}/resources/{kind}/{resourceId}/source",ServerApi.PACKAGE_RESOURCE_SOURCE);
+        ResourceInspection.Page page=new ResourceInspection.Page();page.total=1;page.nextCursor="signed-cursor";
+        ResourceInspection.Diagnostic pageDiagnostic=new ResourceInspection.Diagnostic();pageDiagnostic.code="ATT-RESOURCE-INDEX-WARNING";pageDiagnostic.summary="Some resources could not be indexed";
+        page.diagnostics=java.util.Collections.singletonList(pageDiagnostic);
+        ResourceInspection.Resource resource=new ResourceInspection.Resource();resource.resourceId="case.AAA";resource.type="case";
+        page.items=java.util.Collections.singletonList(resource);
+        com.fasterxml.jackson.databind.JsonNode json=new ObjectMapper().readTree(new ObjectMapper().writeValueAsBytes(page));
+        assertEquals("case.AAA",json.path("items").get(0).path("resourceId").asText());
+        assertEquals("signed-cursor",json.path("nextCursor").asText());
+        assertEquals("ATT-RESOURCE-INDEX-WARNING",json.path("diagnostics").get(0).path("code").asText());
+        assertFalse(json.has("revisionDigest"));
+    }
 }

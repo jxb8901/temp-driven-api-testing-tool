@@ -14,6 +14,12 @@
   let lastEventId = 0;
   let artifactRequestSequence = 0;
   let homeRequestSequence = 0;
+  let resourcePageSequence = 0;
+  let resourceDetailSequence = 0;
+  let resourceLoadPending = false;
+  let resourceCursor = null;
+  let resourceItems = [];
+  let activeResource = null;
   let cancelRequested = false;
   let versionPromise = null;
   let navigation = 0;
@@ -103,7 +109,130 @@
       if (generation !== navigation) return;
       text(byId('package-title'), item.packageId || id);
       byId('submit-form').elements.packageId?.remove();
+      await loadResources(id, true, generation);
     } catch (error) { if (generation === navigation) message(error.message); }
+  }
+  function resourcePath(packageId, resource) {
+    return `packages/${encodeURIComponent(packageId)}/resources/${encodeURIComponent(resource.type)}/${encodeURIComponent(resource.resourceId)}`;
+  }
+  function renderResourceList() {
+    const list = byId('resource-list'); list.replaceChildren();
+    resourceItems.forEach(item => {
+      const li = document.createElement('li');
+      const button = el('button', `${item.name || item.logicalId || item.resourceId} · ${item.type}${item.state === 'invalid' ? ' · invalid' : ''}`);
+      button.type = 'button';
+      button.addEventListener('click', () => selectResource(item));
+      li.append(button); list.append(li);
+    });
+    if (!resourceItems.length) list.append(el('li', 'No resources match this search.'));
+  }
+  async function loadResources(packageId, reset, generation = navigation) {
+    if (reset) {
+      resourcePageSequence++; resourceCursor = null; resourceItems = []; activeResource = null;
+      resourceDetailSequence++; resourceLoadPending = false;
+      byId('resource-list').replaceChildren(); byId('resource-detail').hidden = true;
+      byId('load-more-resources').hidden = true; byId('load-more-resources').disabled = false;
+      text(byId('resource-count'), 'Loading package resources…');
+    }
+    if (resourceLoadPending) return;
+    resourceLoadPending = true;
+    byId('load-more-resources').disabled = true;
+    const sequence = resourcePageSequence;
+    const type = String(byId('resource-type').value || '');
+    const query = String(byId('resource-search').value || '').trim();
+    const params = ['limit=50'];
+    if (type) params.push(`type=${encodeURIComponent(type)}`);
+    if (query) params.push(`query=${encodeURIComponent(query)}`);
+    if (!reset && resourceCursor) params.push(`cursor=${encodeURIComponent(resourceCursor)}`);
+    try {
+      const data = await request(`packages/${encodeURIComponent(packageId)}/resources?${params.join('&')}`);
+      if (sequence !== resourcePageSequence || generation !== navigation || selectedPackage !== packageId) return;
+      const items = listItems(data);
+      resourceItems = reset ? items : resourceItems.concat(items);
+      resourceCursor = data.nextCursor || null;
+      renderResourceList();
+      const shown = resourceItems.length; const total = Number(data.total || 0);
+      const diagnostics = Array.isArray(data.diagnostics) ? data.diagnostics : [];
+      const diagnosticText = diagnostics.length ? ` ${diagnostics.map(item => item.summary || item.code || 'Inspection warning').join(' ')}` : '';
+      text(byId('resource-count'), `Showing ${shown} of ${total} resources.${diagnosticText}`);
+      byId('load-more-resources').hidden = !resourceCursor;
+    } catch (error) {
+      if (sequence === resourcePageSequence && generation === navigation && selectedPackage === packageId) {
+        text(byId('resource-count'), 'Package resources are unavailable.'); message(error.message);
+      }
+    } finally {
+      if (sequence === resourcePageSequence) {
+        resourceLoadPending = false;
+        byId('load-more-resources').disabled = false;
+      }
+    }
+  }
+  function renderResourceLinks(targetId, values) {
+    const list = byId(targetId); list.replaceChildren();
+    (Array.isArray(values) ? values : []).forEach(value => {
+      const li = document.createElement('li');
+      if (value.resourceId && value.type) {
+        const button = el('button', `${value.name || value.logicalId || value.resourceId} · ${value.type}`);
+        button.type = 'button'; button.addEventListener('click', () => selectResource(value)); li.append(button);
+      } else text(li, `${value.logicalId || 'Unknown resource'} · ${value.resolution || 'unresolved'}`);
+      list.append(li);
+    });
+    if (!list.children.length) list.append(el('li', 'None'));
+  }
+  async function selectResource(item, generation = navigation) {
+    if (!selectedPackage || !item || !item.resourceId || !item.type) return;
+    const selection = ++resourceDetailSequence;
+    try {
+      const data = await request(resourcePath(selectedPackage, item));
+      if (selection !== resourceDetailSequence || generation !== navigation || !selectedPackage) return;
+      activeResource = data.resource || item;
+      text(byId('resource-title'), `${activeResource.name || activeResource.logicalId} · ${activeResource.type}`);
+      text(byId('resource-description'), activeResource.description || activeResource.state || '');
+      const invalid = activeResource.state === 'invalid';
+      const diagnostic = Array.isArray(activeResource.diagnostics) ? activeResource.diagnostics[0] : null;
+      text(byId('resource-state'), invalid
+        ? `Invalid resource${diagnostic && diagnostic.summary ? `: ${diagnostic.summary}` : ''}`
+        : 'Resource is ready.');
+      const metadata = {
+        logicalId: activeResource.logicalId,
+        tags: activeResource.tags || [],
+        provenance: activeResource.provenance || {}
+      };
+      text(byId('resource-metadata'), JSON.stringify(safeData(metadata), null, 2));
+      text(byId('resource-definition'), JSON.stringify(safeData(data.definition || {}), null, 2));
+      renderResourceLinks('resource-references', activeResource.references);
+      renderResourceLinks('resource-referenced-by', activeResource.referencedBy);
+      const sourceAvailable = activeResource.sourceAvailable === true;
+      text(byId('resource-source-status'), sourceAvailable ? 'Safe source is available.' : 'Source is not available for this resource.');
+      byId('show-resource-source').hidden = !sourceAvailable;
+      byId('run-resource-case').hidden = activeResource.type !== 'case' || activeResource.state === 'invalid';
+      byId('resource-source-heading').hidden = true; byId('resource-source').hidden = true; text(byId('resource-source'), '');
+      byId('resource-detail').hidden = false;
+    } catch (error) { if (selection === resourceDetailSequence && generation === navigation) message(error.message); }
+  }
+  async function showResourceSource() {
+    const item = activeResource, packageId = selectedPackage, generation = navigation;
+    if (!item || !packageId || !item.sourceAvailable) return;
+    try {
+      const data = await request(`${resourcePath(packageId, item)}/source`);
+      if (generation !== navigation || activeResource !== item) return;
+      text(byId('resource-source-heading'), 'Safe source projection');
+      const available = data.available === true;
+      text(byId('resource-source-status'), available ? 'Safe source is available.' : `Source unavailable (${data.reason || 'policy'}).`);
+      text(byId('resource-source'), available ? data.text : `Source unavailable (${data.reason || 'policy'}).`);
+      byId('resource-source-heading').hidden = false; byId('resource-source').hidden = false;
+    } catch (error) { if (generation === navigation) message(error.message); }
+  }
+  async function runResourceCase() {
+    const item = activeResource, packageId = selectedPackage, generation = navigation;
+    if (!item || item.type !== 'case' || !item.logicalId || !item.provenance || !item.provenance.suite || submitting.has(packageId)) return;
+    submitting.add(packageId); byId('run-resource-case').disabled = true;
+    try {
+      const body = { packageId, suites: [item.provenance.suite], caseIds: [item.logicalId] };
+      const accepted = await request('jobs/run', { method: 'POST', body: JSON.stringify(body) });
+      if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
+    } catch (error) { if (generation === navigation && selectedPackage === packageId) message(error.message); }
+    finally { submitting.delete(packageId); if (selectedPackage === packageId) byId('run-resource-case').disabled = false; }
   }
   function commaList(value) { const items = value.split(',').map(part => part.trim()).filter(Boolean); return items.length ? items : undefined; }
   byId('submit-form').addEventListener('submit', async event => {
@@ -239,6 +368,11 @@
       cancelRequested = false; byId('cancel-job').disabled = false; message(error.message);
     }
   });
+  byId('search-resources').addEventListener('click', () => { if (selectedPackage) loadResources(selectedPackage, true); });
+  byId('refresh-resources').addEventListener('click', () => { if (selectedPackage) loadResources(selectedPackage, true); });
+  byId('load-more-resources').addEventListener('click', () => { if (selectedPackage && resourceCursor) loadResources(selectedPackage, false); });
+  byId('show-resource-source').addEventListener('click', showResourceSource);
+  byId('run-resource-case').addEventListener('click', runResourceCase);
   byId('refresh-jobs').addEventListener('click', () => loadHome());
   window.addEventListener('hashchange', route);
   route();

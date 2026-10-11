@@ -1,0 +1,315 @@
+{
+  "schemaVersion" : "att-package-resource-discovery-benchmark/v2",
+  "version" : "4.1.0",
+  "sourceRevision" : "810b44fceb179b38822c17b5aecefb5eafcf0717",
+  "dataset" : "synthetic multi-workbook package",
+  "measurementScope" : "ServerRuntime.inspectResource through a persistent bounded inspection Worker; excludes HTTP and Tomcat overhead",
+  "environment" : {
+    "javaVersion" : "26.0.1",
+    "javaVm" : "OpenJDK 64-Bit Server VM",
+    "os" : "Mac OS X 26.1",
+    "architecture" : "aarch64",
+    "processors" : 8,
+    "maxHeapBytes" : 2147483648,
+    "liveThreads" : 9,
+    "capturedAt" : "2026-10-10T16:29:32.451642Z"
+  },
+  "settings" : {
+    "pageSize" : 50,
+    "workbooks" : 5,
+    "casesPerWorkbook" : 300,
+    "workerHeapMaxMb" : 512,
+    "runs" : 5,
+    "totalCases" : 1500,
+    "templates" : 200,
+    "workerTimeoutMs" : 120000,
+    "warmups" : 1
+  },
+  "coldIndexBuild" : {
+    "latencyMs" : 1142.517291,
+    "totalResources" : 1500,
+    "returnedResources" : 50
+  },
+  "scenarios" : [ {
+    "scenario" : "case-first-page",
+    "measuredRuns" : 5,
+    "p50LatencyMs" : 14.8775,
+    "p95LatencyMs" : 17.311334
+  }, {
+    "scenario" : "case-page-n",
+    "measuredRuns" : 5,
+    "p50LatencyMs" : 9.28625,
+    "p95LatencyMs" : 10.705292
+  }, {
+    "scenario" : "case-detail",
+    "measuredRuns" : 5,
+    "p50LatencyMs" : 0.92175,
+    "p95LatencyMs" : 1.114416
+  }, {
+    "scenario" : "template-first-page",
+    "measuredRuns" : 5,
+    "p50LatencyMs" : 7.3825,
+    "p95LatencyMs" : 10.158708
+  }, {
+    "scenario" : "template-page-n",
+    "measuredRuns" : 5,
+    "p50LatencyMs" : 8.587125,
+    "p95LatencyMs" : 10.796625
+  }, {
+    "scenario" : "template-detail",
+    "measuredRuns" : 5,
+    "p50LatencyMs" : 1.318541,
+    "p95LatencyMs" : 1.474875
+  }, {
+    "scenario" : "tool-source",
+    "measuredRuns" : 5,
+    "p50LatencyMs" : 1.955625,
+    "p95LatencyMs" : 1.994083
+  } ],
+  "samples" : [ {
+    "scenario" : "case-first-page",
+    "sample" : 1,
+    "latencyMs" : 14.8775,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 2,
+    "latencyMs" : 17.311334,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 3,
+    "latencyMs" : 16.511958,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 4,
+    "latencyMs" : 11.10875,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 5,
+    "latencyMs" : 11.857334,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 1,
+    "latencyMs" : 10.705292,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 2,
+    "latencyMs" : 9.28625,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 3,
+    "latencyMs" : 9.116542,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 4,
+    "latencyMs" : 8.720875,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 5,
+    "latencyMs" : 10.126875,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 1,
+    "latencyMs" : 0.987292,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 2,
+    "latencyMs" : 1.114416,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 3,
+    "latencyMs" : 0.812,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 4,
+    "latencyMs" : 0.92175,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 5,
+    "latencyMs" : 0.741875,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 1,
+    "latencyMs" : 7.3825,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 2,
+    "latencyMs" : 10.158708,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 3,
+    "latencyMs" : 6.841,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 4,
+    "latencyMs" : 7.683917,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 5,
+    "latencyMs" : 6.831541,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 1,
+    "latencyMs" : 8.175792,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 2,
+    "latencyMs" : 10.437584,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 3,
+    "latencyMs" : 7.691542,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 4,
+    "latencyMs" : 10.796625,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 5,
+    "latencyMs" : 8.587125,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 1,
+    "latencyMs" : 1.304292,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 2,
+    "latencyMs" : 1.330208,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 3,
+    "latencyMs" : 1.314666,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 4,
+    "latencyMs" : 1.474875,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 5,
+    "latencyMs" : 1.318541,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 1,
+    "latencyMs" : 1.994083,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 2,
+    "latencyMs" : 1.575,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 3,
+    "latencyMs" : 1.955625,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 4,
+    "latencyMs" : 1.027291,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 5,
+    "latencyMs" : 1.992875,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  } ]
+}

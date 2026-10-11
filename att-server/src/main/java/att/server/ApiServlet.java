@@ -1,6 +1,7 @@
 package att.server;
 
 import att.Version;
+import att.server.api.ResourceInspection;
 import att.server.api.ServerApi;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -35,8 +36,11 @@ public final class ApiServlet extends HttpServlet {
         try {
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",Version.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
             if("/version".equals(path)){json(res,200,Map.of("version",Version.PRODUCT,"apiVersion",ServerApi.VERSION,"buildTime",Version.BUILD_TIME,"gitCommit",Version.GIT_COMMIT,"javaMinimum",17,"requestId",requestId));return;}
+            boolean resourceRequest=resourcePath(path);
+            if(resourceRequest&&req.getUserPrincipal()==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
             String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
             if("/metrics".equals(path)){Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
+            if(resourceRequest){resourceGet(req,res,path,requestId,req.getUserPrincipal().getName());return;}
             if("/packages".equals(path)){json(res,200,Map.of("items",runtime.packages(),"requestId",requestId));return;}
             if(path.startsWith("/packages/")){String id=segment(path,2);json(res,200,runtime.packageView(id));return;}
             if("/jobs".equals(path)){json(res,200,Map.of("items",runtime.store.list(100),"requestId",requestId));return;}
@@ -47,6 +51,11 @@ public final class ApiServlet extends HttpServlet {
             if(path.matches("/jobs/[^/]+")){Map<String,Object> view=runtime.jobRecord(segment(path,2));view.put("requestId",requestId);json(res,200,view);return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
         } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(ServerRuntime.StaleCursorException e){error(res,409,"ATT-RESOURCE-CURSOR-STALE","The package resources changed; refresh the Explorer",requestId);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
+          catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
+          catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The request could not be completed",requestId);getServletContext().log("ATT Server request failed id="+requestId,e);}
     }
     @Override protected void doPost(HttpServletRequest req,HttpServletResponse res) throws IOException {
@@ -117,6 +126,38 @@ public final class ApiServlet extends HttpServlet {
     private void sendArtifact(HttpServletResponse response,Path file)throws IOException {
         String name=file.getFileName().toString().replaceAll("[\r\n\"]","_");response.setContentType("application/octet-stream");response.setHeader("X-Content-Type-Options","nosniff");response.setHeader("Content-Disposition","attachment; filename=\""+name+"\"");response.setContentLengthLong(Files.size(file));Files.copy(file,response.getOutputStream());
     }
+    private void resourceGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
+        String[] parts=path.split("/");
+        try {
+            if(parts.length<4||!"packages".equals(parts[1])||parts[2].isEmpty()||!"resources".equals(parts[3]))throw new ServerRuntime.NotFoundException();
+            String packageId=parts[2],action,kind=null,resourceId=null;String query=req.getParameter("query"),cursor=req.getParameter("cursor");int limit=parseLimit(req.getParameter("limit"));
+            if(parts.length==4)action="list";
+            else if(parts.length==7&&"source".equals(parts[6])){action="source";kind=parts[4];resourceId=parts[5];}
+            else if(parts.length==6){action="detail";kind=parts[4];resourceId=parts[5];}
+            else throw new ServerRuntime.NotFoundException();
+            if("list".equals(action)){kind=req.getParameter("type");resourceId=null;}
+            if(resourceId!=null&&(resourceId.isEmpty()||resourceId.length()>512))throw new IllegalArgumentException("resourceId is invalid");
+            Map<String,Object> result=runtime.inspectResource(packageId,action,kind,resourceId,query,limit,cursor,principal);
+            if("list".equals(action)) {
+                ResourceInspection.Page response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Page.class);
+                response.requestId=requestId;json(res,200,response);
+            } else if("detail".equals(action)) {
+                ResourceInspection.Detail response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Detail.class);
+                response.requestId=requestId;json(res,200,response);
+            } else {
+                ResourceInspection.Source response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Source.class);
+                response.requestId=requestId;json(res,200,response);
+            }
+        } catch(ServerRuntime.NotFoundException e){throw e;}
+          catch(ServerRuntime.StaleCursorException e){throw e;}
+          catch(ServerRuntime.InspectionCapacityException e){throw e;}
+          catch(ServerRuntime.InspectionTimeoutException e){throw e;}
+          catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
+          catch(IllegalArgumentException e){throw e;}
+          catch(Exception e){throw new IOException(e);}
+    }
+    private static int parseLimit(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be an integer between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new IllegalArgumentException("limit must be between 1 and 100");return value;}
+    private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}
     private static boolean sameOrigin(HttpServletRequest req){String origin=req.getHeader("Origin");if(origin==null)return true;if("null".equalsIgnoreCase(origin.trim()))return false;try{java.net.URI parsed=java.net.URI.create(origin);if(parsed.getHost()==null||parsed.getUserInfo()!=null||parsed.getRawPath()!=null&&!parsed.getRawPath().isEmpty()||parsed.getRawQuery()!=null||parsed.getFragment()!=null)return false;String scheme=req.getScheme().toLowerCase(java.util.Locale.ROOT),originScheme=parsed.getScheme().toLowerCase(java.util.Locale.ROOT);int requestPort=req.getServerPort(),originPort=parsed.getPort()<0?("https".equals(originScheme)?443:80):parsed.getPort();int effectiveRequest=requestPort<0?("https".equals(scheme)?443:80):requestPort;return scheme.equals(originScheme)&&req.getServerName().equalsIgnoreCase(parsed.getHost())&&effectiveRequest==originPort;}catch(Exception invalid){return false;}}
     private static String path(HttpServletRequest r){String p=r.getPathInfo();return p==null||p.isEmpty()?"/":p;}

@@ -56,7 +56,11 @@ class AuthenticationIntegrationTest {
 
         Path openConfig=Files.writeString(temp.resolve("open-server.yaml"),"server:\n  dataDir: "+temp.resolve("open-data")+"\n  authenticationRequired: false\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+packages+"\n  entries:\n    p: "+packages.resolve("p")+"\n");System.setProperty("att.server.config",openConfig.toString());
         Tomcat open=start(users,appDirectory("anonymous"));
-        try {assertEquals(200,request(open.getConnector().getLocalPort(),null));assertEquals(200,get(open.getConnector().getLocalPort(),"/att/ui/index.html",null));}
+        try {
+            int port=open.getConnector().getLocalPort();
+            assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
+            assertAnonymousInspectionIsRejected(port);
+        }
         finally {open.stop();open.destroy();restore(old);}
     }
 
@@ -118,6 +122,15 @@ class AuthenticationIntegrationTest {
     private static int get(int port,String uri,String authorization)throws Exception {HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(3000);connection.setReadTimeout(3000);if(authorization!=null)connection.setRequestProperty("Authorization",authorization);int code=connection.getResponseCode();if(code==401)assertTrue(connection.getHeaderField("WWW-Authenticate").startsWith("Basic"));
         if(code==200&&uri.startsWith("/att/ui/")) {assertEquals("nosniff",connection.getHeaderField("X-Content-Type-Options"));assertNotNull(connection.getHeaderField("Content-Security-Policy"));}
         connection.disconnect();return code;}
+    private static void assertAnonymousInspectionIsRejected(int port)throws Exception {
+        HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/packages/p/resources?type=case").openConnection();
+        connection.setConnectTimeout(3000);connection.setReadTimeout(3000);
+        try {
+            assertEquals(401,connection.getResponseCode(),"Inspection still requires a real Servlet Principal in anonymous legacy mode");
+            com.fasterxml.jackson.databind.JsonNode body=ServerRuntime.JSON.readTree(connection.getErrorStream().readAllBytes());
+            assertEquals("ATT-SERVER-AUTHENTICATION-REQUIRED",body.path("error").path("code").asText());
+        } finally {connection.disconnect();}
+    }
     private static void restore(String old){if(old==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",old);}
     private static int postBody(int port,String authorization,String contentType,String origin,String body)throws Exception {
         try(java.net.Socket socket=new java.net.Socket("127.0.0.1",port)) {socket.setSoTimeout(3000);java.io.OutputStream out=socket.getOutputStream();StringBuilder request=new StringBuilder("POST /att/api/v1/jobs/run HTTP/1.1\r\nHost: 127.0.0.1:").append(port).append("\r\nConnection: close\r\nAuthorization: ").append(authorization).append("\r\nContent-Type: ").append(contentType).append("\r\nContent-Length: ").append(body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length).append("\r\n");if(origin!=null)request.append("Origin: ").append(origin).append("\r\n");request.append("\r\n").append(body);out.write(request.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));out.flush();String status=new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(),java.nio.charset.StandardCharsets.UTF_8)).readLine();return Integer.parseInt(status.split(" ")[1]);}

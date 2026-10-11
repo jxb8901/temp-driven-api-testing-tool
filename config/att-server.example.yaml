@@ -10,6 +10,19 @@ server:
   maxArtifacts: 1000
   # Terminal job metadata, event journals, and artifacts are removed after this many days.
   jobRetentionDays: 30
+  # Read-only package discovery. Each inspector runs in a bounded one-shot Worker.
+  inspection:
+    enabled: true
+    maxConcurrent: 2
+    queuedLimit: 16
+    timeoutMs: 30000
+    heapMaxMb: 512
+    maxResponseBytes: 262144
+    maxSourceBytes: 65536
+    # Optional Tool script source allowlist. Paths are package-relative.
+    # safeTextSources:
+    #   payments:
+    #     - tools/payment-check.sh
 
 workers:
   maxConcurrent: 8

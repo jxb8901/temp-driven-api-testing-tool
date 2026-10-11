@@ -14,13 +14,25 @@ Tomcat 負責監聽器、TLS、存取記錄及驗證。請設定 Realm、SSO 整
 
 ## 設定
 
-`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。
+`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。`server.inspection` 以有界的常駐 Worker pool 獨立限制唯讀資源探索。Worker pool 的程序數不會超過 `maxConcurrent`，每個程序會依次處理請求，並快取最多兩個 package index；package 檔案變更事件會令快取失效。資源探索另設佇列、逾時、heap、source 及 response 上限。除非 package 的 `server.inspection.safeTextSources` 明確列出相對路徑，否則不會提供 Tool script 文字。
 
 ```yaml
 server:
   dataDir: /var/lib/att-server
   authenticationRequired: true
   jobRetentionDays: 30
+  inspection:
+    enabled: true
+    maxConcurrent: 2
+    queuedLimit: 16
+    timeoutMs: 30000
+    heapMaxMb: 512
+    maxResponseBytes: 262144
+    maxSourceBytes: 65536
+    # 選填 Tool script source allowlist；路徑相對於 package。
+    # safeTextSources:
+    #   payments:
+    #     - tools/payment-check.sh
 workers:
   maxConcurrent: 8
   queuedLimit: 100
@@ -46,7 +58,7 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 ## 驗證與身份
 
-Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authentication mechanism。v1 所有已驗證的 Servlet Principal 具有相同 API 權限，不要求 `ATT_USER` 角色，也沒有 ATT 專用 RBAC。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。驗證失敗時，Server 保留 container response，包括 BASIC challenge 或 FORM/SSO redirect。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、job、result、event 及 artifact API 均要求 Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
+Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authentication mechanism。v1 所有已驗證的 Servlet Principal 具有相同 API 權限，不要求 `ATT_USER` 角色，也沒有 ATT 專用 RBAC。Health 及 version 維持公開。對外提供 BASIC credentials 前，請先終止 TLS。驗證失敗時，Server 保留 container response，包括 BASIC challenge 或 FORM/SSO redirect。ATT Server 透過 `HttpServletRequest.getUserPrincipal()` 取得 Principal；package、資源檢視、job、result、event 及 artifact API 均要求 Principal。即使舊 API 啟用匿名模式，新的資源探索 endpoint 仍要求真實 Servlet Principal。Health 及 version 可匿名存取。Principal 名稱會記錄在 job 與 audit metadata 中，不會傳給 Worker，也不會放進 ATT expression Context。
 
 改變狀態的請求必須使用 `application/json`；如請求帶有 `Origin`，必須與請求來源相同。若 TLS 在反向代理終止，請設定 Tomcat `RemoteIpValve`，由代理的 forwarded headers 還原 Servlet scheme、host 及 port。`internalProxies` 只可列出實際代理位址，並確保代理會先移除用戶提交的 `Forwarded`/`X-Forwarded-*` headers，再加入自身的值。請依代理實際使用的 header 名稱及受信任位址調整設定：
 
@@ -72,6 +84,9 @@ Tomcat 負責驗證請求。WAR 使用 Servlet container 配置的 authenticatio
 | `GET` | `/health`、`/version` | 健康狀態及 build 資訊 |
 | `GET` | `/metrics` | 有界的工作及 Worker 數量 |
 | `GET` | `/packages`、`/packages/{packageId}` | 讀取設定中的 registry |
+| `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | 列出安全的 Case、Template、Flow 及 Tool 投影 |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | 讀取單一資源定義及關聯 |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已遮蔽的 YAML 投影或允許清單內的 Tool script |
 | `POST` | `/jobs/run`、`/jobs/debug`、`/jobs/load`、`/jobs/validate` | 提交一項工作 |
 | `GET` | `/jobs`、`/jobs/{jobId}` | 列出近期工作或讀取狀態 |
 | `GET` | `/jobs/{jobId}/result` | 讀取標準結果及診斷 |
@@ -94,6 +109,50 @@ API 會回傳 `202 Accepted` 及 job ID。工作狀態依序為 `QUEUED`、`PREP
 工作記錄在有量度數據時會加入 `performance` 物件。`performance.timings` 使用 monotonic clock 記錄 admission、佇列等待、Worker 準備及啟動、Worker-ready（首個 `STATUS`）、execution-ready（首個 `PROGRESS` 或 `LOG`）、Worker 存活時間及結果至終止時間。`performance.worker` 記錄隔離 Worker 的 Heap、live thread、GC、process CPU 及抽樣 RSS 峰值。抽樣由事件觸發，每 100 ms 最多一次，可能漏掉短暫峰值。RSS 只在 Linux `/proc` 系統提供。Worker 資源數據會保存在標準工作記錄，Server 重啟後仍可讀取。
 
 `GET /jobs` 回傳最近 100 項工作。系統不會保存提交 payload，只保存 command 及 package ID 摘要。Engine result 及診斷會作為控制平面 metadata 保存。較大的報告、log 及其他證據會留在工作輸出目錄。
+
+資源探索可用 `case`、`template`、`flow` 或 `tool` 篩選。每頁預設 50 項，最多 100 項；續頁 cursor 會加密並綁定已驗證的 Principal 及查詢。若 package 內容改變，舊 cursor 會以 `409` 拒絕。Explorer 回傳邏輯資源 ID、安全投影、來源資訊、關聯及穩定診斷碼。YAML source 是解析及遮蔽後的投影，並非原始檔案內容。只有 Server 設定明確允許的 package 相對路徑才會提供 Tool script source。探索程序不會執行 Tool，也不提供檔案系統瀏覽器。即使 `server.authenticationRequired: false`，資源探索仍要求已驗證的 Servlet Principal；檢查佇列、Worker heap、逾時及 response 大小均與一般工作執行分開限制。
+
+### 套件資源探索
+
+這些公開唯讀 endpoint 均要求已驗證的 Servlet Principal。`kind` 可為 `case`、`template`、`flow` 或 `tool`；`resourceId` 是清單 endpoint 回傳的不透明套件範圍 ID。清單的 `query` 會比對邏輯 ID、名稱、描述及 tags。省略 `type`、`query` 或 `limit` 時會使用預設值。續頁 cursor 只適用於相同 package、Principal、type 及 query。
+
+```http
+GET /api/v1/packages/payments/resources?type=case&query=refund&limit=50
+```
+
+回應包含安全摘要、總數，以及存在下一頁時才提供的不透明 `nextCursor`：
+
+```json
+{
+  "items": [{
+    "resourceId": "case.<opaque>",
+    "type": "case",
+    "logicalId": "PAYMENT.REFUND01",
+    "name": "Refund request",
+    "state": "ready",
+    "sourceAvailable": false,
+    "provenance": {"suite": "testcase/payments.xlsx", "groupId": "PAYMENT", "sheet": "Cases", "rowNumber": 12},
+    "references": [{"type": "template", "logicalId": "PAYMENT.refund", "resourceId": "template.<opaque>", "resolution": "resolved"}],
+    "referencedBy": [],
+    "diagnostics": []
+  }],
+  "total": 1,
+  "nextCursor": null,
+  "diagnostics": [],
+  "requestId": "..."
+}
+```
+
+先讀取單一資源的解析後定義及關聯，再另外要求安全來源投影：
+
+```http
+GET /api/v1/packages/payments/resources/template/{resourceId}
+GET /api/v1/packages/payments/resources/template/{resourceId}/source
+```
+
+詳細回應包含 `resource`、`definition`、`diagnostics` 及 `requestId`。來源回應包含 `resource`、`available`、`format`、`text`、`redacted` 及 `requestId`。來源不可用時，`available` 為 `false`，`reason` 為 `source-unavailable` 或 `size-limit`，而且不會回傳部分內容。找不到目標的關聯會標示 `resolution: "unresolved"`，並附有穩定資源診斷碼。
+
+無效清單參數會回傳 `400`；未知 package/resource 使用相同的 `404` 格式。過期 cursor 回傳 `409`，超大回應回傳 `413`，探索佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。錯誤回應使用既有的 `error.code`、`error.summary` 及 `requestId` 格式，不會包含實體路徑或 parser exception 訊息。
 
 ## Server-sent events
 
