@@ -6,7 +6,7 @@ ATT Server 4.1.0 提供單節點控制平面，讓用戶透過版本化 REST API
 
 1. 將 Local archive 解壓至安裝根目錄，並將 `ATT_HOME` 設為該目錄。預設 package root 為 `$ATT_HOME/packages/default`；其中包含自己的 `config/config.yaml`、`schemas/`、單數 `testcase/`、`templates/` 及頂層 `tools/`。
 2. 將 package root 設於 allowed root 之下，並確保 Tomcat 服務帳戶可讀取。解壓後的 `$ATT_HOME/packages/default` 可直接註冊為 package root。
-3. 將 `server.dataDir` 設為只有 Tomcat 服務帳戶可寫入的目錄。若與所有已註冊 package root 不相等、互不包含，則可使用 `$ATT_HOME/data`；亦可使用 `/var/lib/att-server`。Server data 不可放入 package 內容。
+3. 啟動前先建立 `server.dataDir`，並只允許 Tomcat 服務帳戶寫入。範例使用 `$ATT_HOME/data`；只要它與所有已註冊 package root 不相等、互不包含，即可使用。亦可使用 `/var/lib/att-server`。Server data 不可放入 package 內容。
 4. 將 `$ATT_HOME/config/att-server.example.yaml` 複製至 `$ATT_HOME/config/att-server.yaml` 或受保護的外部路徑，更新絕對路徑，並勿將憑證放入 package。升級時不可覆寫既有的 active config。
 5. 將 `att-server-4.1.0.war` 部署至 Tomcat 10.1+。請保持 Tomcat 的 `unpackWARs` 啟用，讓 Server 可從 `WEB-INF/lib` 啟動 Worker。
 
