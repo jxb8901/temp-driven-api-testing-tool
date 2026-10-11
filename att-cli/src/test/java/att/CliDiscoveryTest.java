@@ -46,7 +46,7 @@ class CliDiscoveryTest {
 
         Map<String, Object> result = CliDiscovery.load(root, config());
         @SuppressWarnings("unchecked") List<Map<String, Object>> scenarios = (List<Map<String, Object>>) result.get("scenarios");
-        assertTrue(scenarios.stream().anyMatch(s -> "valid".equals(s.get("id")) && Boolean.TRUE.equals(s.get("valid"))));
+        assertTrue(scenarios.stream().anyMatch(s -> "valid".equals(s.get("id")) && Boolean.TRUE.equals(s.get("valid"))), result.toString());
         assertTrue(scenarios.stream().anyMatch(s -> "invalid".equals(s.get("id")) && Boolean.FALSE.equals(s.get("valid"))));
         assertFalse(scenarios.stream().anyMatch(s -> "unrelated".equals(s.get("id"))));
         @SuppressWarnings("unchecked") List<Map<String, Object>> quick = (List<Map<String, Object>>) result.get("quick");
