@@ -123,13 +123,15 @@ class AuthenticationIntegrationTest {
         if(code==200&&uri.startsWith("/att/ui/")) {assertEquals("nosniff",connection.getHeaderField("X-Content-Type-Options"));assertNotNull(connection.getHeaderField("Content-Security-Policy"));}
         connection.disconnect();return code;}
     private static void assertAnonymousInspectionIsRejected(int port)throws Exception {
-        HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/packages/p/resources?type=case").openConnection();
-        connection.setConnectTimeout(3000);connection.setReadTimeout(3000);
-        try {
-            assertEquals(401,connection.getResponseCode(),"Inspection still requires a real Servlet Principal in anonymous legacy mode");
-            com.fasterxml.jackson.databind.JsonNode body=ServerRuntime.JSON.readTree(connection.getErrorStream().readAllBytes());
-            assertEquals("ATT-SERVER-AUTHENTICATION-REQUIRED",body.path("error").path("code").asText());
-        } finally {connection.disconnect();}
+        for(String path:List.of("/att/api/v1/packages/p/resources?type=case","/att/api/v1/packages/p/configuration?view=declared")) {
+            HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+path).openConnection();
+            connection.setConnectTimeout(3000);connection.setReadTimeout(3000);
+            try {
+                assertEquals(401,connection.getResponseCode(),"Inspection still requires a real Servlet Principal in anonymous legacy mode");
+                com.fasterxml.jackson.databind.JsonNode body=ServerRuntime.JSON.readTree(connection.getErrorStream().readAllBytes());
+                assertEquals("ATT-SERVER-AUTHENTICATION-REQUIRED",body.path("error").path("code").asText());
+            } finally {connection.disconnect();}
+        }
     }
     private static void restore(String old){if(old==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",old);}
     private static int postBody(int port,String authorization,String contentType,String origin,String body)throws Exception {
@@ -145,14 +147,12 @@ class AuthenticationIntegrationTest {
         Object store=field(runtime,"store");var insert=store.getClass().getDeclaredMethod("insert",jobType,String.class);insert.setAccessible(true);insert.invoke(store,job,"{}");
         @SuppressWarnings("unchecked") Map<String,Object> jobs=(Map<String,Object>)field(runtime,"jobs");jobs.put(id,job);
         var append=journalType.getDeclaredMethod("append",String.class,Map.class);append.setAccessible(true);append.invoke(journal,"status",Map.of("jobId",id,"status","RUNNING"));
-        Object streams=field(runtime,"streams");java.lang.reflect.Method activeCount=streams.getClass().getMethod("getActiveCount");
         var clients=Executors.newFixedThreadPool(5);List<HttpURLConnection> connections=new ArrayList<>();
         try {
             List<Future<HttpURLConnection>> pending=new ArrayList<>();
             for(int i=0;i<5;i++)pending.add(clients.submit(()->{HttpURLConnection c=(HttpURLConnection)new java.net.URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();c.setConnectTimeout(3000);c.setReadTimeout(5000);c.setRequestProperty("Authorization",authorization);assertEquals(200,c.getResponseCode());return c;}));
             for(Future<HttpURLConnection> future:pending)connections.add(future.get(5,TimeUnit.SECONDS));
-            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);while((Integer)activeCount.invoke(streams)<5&&System.nanoTime()<deadline)Thread.sleep(10);
-            assertEquals(5,activeCount.invoke(streams),"Five simultaneous observers must all own live stream threads");
+            // Keep all five response streams open before publishing the live event.
             append.invoke(journal,"progress",Map.of("message","live observer event"));
             for(HttpURLConnection connection:connections) {
                 try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {

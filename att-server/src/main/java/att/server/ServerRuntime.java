@@ -217,6 +217,37 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";request.packageRoot=root.toString();request.config="config/config.yaml";
         request.inspectionAction=action;request.inspectionType=type;request.inspectionResourceId=resourceId;request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
         request.expectedRevisionDigest=prior==null?null:prior.revision;request.safeTextSources=config.inspection.safeTextSources(packageId);request.maxSourceBytes=config.inspection.maxSourceBytes;request.maxResponseBytes=config.inspection.maxResponseBytes;
+        Map<String,Object> result=executeInspection(root,request);
+        Object revision=result.remove("revisionDigest");
+        if("list".equals(action)) {
+            Object next=result.remove("nextOffset");
+            if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,((Number)next).intValue(),(String)revision,principal));
+            else result.put("nextCursor",null);
+        }
+        return result;
+    }
+    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,String principal) throws Exception {
+        return inspectConfiguration(packageId,action,environment,otherEnvironment,null,0,0,principal);
+    }
+    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
+                                            String section,int offset,int limit,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        if(!List.of("declared","effective","compare").contains(action))throw new IllegalArgumentException("Unsupported configuration inspection action");
+        String selected=null,other=null;
+        if("effective".equals(action)&&environment!=null&&!environment.isBlank())selected=inspectionEnvironment(environment,"environment");
+        if("compare".equals(action)){
+            selected=inspectionEnvironment(environment,"left environment");
+            other=inspectionEnvironment(otherEnvironment,"right environment");
+            if(selected.equalsIgnoreCase(other))throw new IllegalArgumentException("left and right environments must differ");
+        }
+        WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";request.packageRoot=root.toString();request.config="config/config.yaml";
+        request.inspectionAction=action;request.inspectionType="configuration";request.inspectionEnvironment=selected;request.inspectionOtherEnvironment=other;
+        request.inspectionSection=section;request.inspectionOffset=offset;request.inspectionLimit=limit;request.maxResponseBytes=config.inspection.maxResponseBytes;
+        return executeInspection(root,request);
+    }
+    private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {
         Future<Map<String,Object>> future;
         try { future=inspectors.submit(()->runInspectionWorker(root,request)); }
         catch(RejectedExecutionException full){throw new InspectionCapacityException();}
@@ -233,13 +264,11 @@ final class ServerRuntime implements AutoCloseable {
         if(workerError!=null)throw new IllegalStateException("Package inspection Worker failed: "+workerError);
         Object raw=envelope.get("inspection");if(!(raw instanceof Map))throw new IllegalStateException("Package inspection Worker returned an invalid response");
         @SuppressWarnings("unchecked") Map<String,Object> result=new LinkedHashMap<>((Map<String,Object>)raw);
-        Object revision=result.remove("revisionDigest");
-        if("list".equals(action)) {
-            Object next=result.remove("nextOffset");
-            if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,((Number)next).intValue(),(String)revision,principal));
-            else result.put("nextCursor",null);
-        }
         return result;
+    }
+    private static String inspectionEnvironment(String value,String name) {
+        if(value==null||!value.trim().matches("[A-Za-z][A-Za-z0-9_-]{0,31}"))throw new IllegalArgumentException(name+" must be a valid profile name");
+        return value.trim();
     }
     private Map<String,Object> runInspectionWorker(Path root,WorkerRequest request) throws Exception {
         InspectionWorker worker=acquireInspectionWorker();

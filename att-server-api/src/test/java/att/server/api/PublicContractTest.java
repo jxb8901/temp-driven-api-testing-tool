@@ -2,6 +2,8 @@ package att.server.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PublicContractTest {
@@ -31,5 +33,20 @@ class PublicContractTest {
         assertEquals("signed-cursor",json.path("nextCursor").asText());
         assertEquals("ATT-RESOURCE-INDEX-WARNING",json.path("diagnostics").get(0).path("code").asText());
         assertFalse(json.has("revisionDigest"));
+    }
+
+    @Test void configurationInspectionRoutesReturnTypedSafeViewEnvelope() throws Exception {
+        assertEquals("/api/v1/packages/{packageId}/configuration",ServerApi.PACKAGE_CONFIGURATION);
+        assertEquals("/api/v1/packages/{packageId}/configuration/effective",ServerApi.PACKAGE_CONFIGURATION_EFFECTIVE);
+        assertEquals("/api/v1/packages/{packageId}/configuration/compare",ServerApi.PACKAGE_CONFIGURATION_COMPARE);
+        ConfigurationInspection.Response response=new ConfigurationInspection.Response();response.view="effective";response.state="ready";response.environment="SIT";
+        response.section="dbhelpers";response.offset=0;response.limit=50;response.total=120;response.nextOffset=50;
+        Map<String,Object> timeoutView=new LinkedHashMap<>();timeoutView.put("state","visible");timeoutView.put("value",5000);
+        response.globals=java.util.Collections.<String,Object>singletonMap("timeoutMs",timeoutView);
+        response.diagnostics=java.util.Collections.emptyList();
+        com.fasterxml.jackson.databind.JsonNode json=new ObjectMapper().readTree(new ObjectMapper().writeValueAsBytes(response));
+        assertEquals("effective",json.path("view").asText());assertEquals("visible",json.path("globals").path("timeoutMs").path("state").asText());
+        assertEquals(120,json.path("total").asInt());assertEquals(50,json.path("nextOffset").asInt());
+        assertFalse(json.toString().contains("packageRoot"));assertFalse(json.toString().contains("serverDataDir"));
     }
 }
