@@ -26,6 +26,16 @@ class ServerConfigTest {
         assertNull(ServerConfig.configPath("","","",""));
     }
 
+    @Test void missingDefaultCandidateAndNoConfigFailClearly() throws Exception {
+        Path home=Files.createDirectories(temp.resolve("default-config-home"));
+        Path candidate=ServerConfig.configPath("","","",home.toString());
+        assertEquals(home.resolve("config/att-server.yaml").toAbsolutePath().normalize(),candidate);
+        IllegalStateException missing=assertThrows(IllegalStateException.class,()->ServerConfig.load(candidate));
+        assertTrue(missing.getMessage().contains(candidate.toString()));
+        IllegalStateException absent=assertThrows(IllegalStateException.class,()->ServerConfig.load(ServerConfig.configPath("","","","")));
+        assertTrue(absent.getMessage().contains("ATT_SERVER_CONFIG"));
+    }
+
     @Test void missingExplicitConfigDoesNotFallBackToAttHomeCandidate() throws Exception {
         Path home=Files.createDirectories(temp.resolve("config-home"));
         Path fallback=Files.createDirectories(home.resolve("config")).resolve("att-server.yaml");
