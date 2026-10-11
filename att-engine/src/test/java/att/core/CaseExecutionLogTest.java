@@ -244,8 +244,8 @@ class CaseExecutionLogTest {
         log.appendRaw("ERROR", "Unable to read " + tempDir.resolve("private/token.pem"));
         log.appendRaw("SSH application STDOUT", "remote=/srv/app/request.xml");
         String text = new String(Files.readAllBytes(file), "UTF-8");
-        assertTrue(text.contains("$ATT_HOME/templates/付款.xml"));
-        assertTrue(text.contains("$ATT_HOME/output/run 1"));
+        assertTrue(text.contains("$ATT_PACKAGE_ROOT/templates/付款.xml"));
+        assertTrue(text.contains("$ATT_PACKAGE_ROOT/output/run 1"));
         assertTrue(text.contains("$EXTERNAL/token.pem"));
         assertTrue(text.contains("remotePath: /srv/app/request.xml"));
         assertTrue(text.contains("diagnostic: Unable"));
@@ -270,9 +270,9 @@ class CaseExecutionLogTest {
             log.setProjectRoot(context.projectRoot());
             log.append("CASE", context.caseTree());
             String rendered = new String(Files.readAllBytes(tempDir.resolve(mode + ".log")), "UTF-8");
-            assertTrue(rendered.contains("$ATT_HOME/output/run-123/case"), mode);
+            assertTrue(rendered.contains("$ATT_PACKAGE_ROOT/output/run-123/case"), mode);
             assertFalse(rendered.contains(root.toString()), mode);
-            int occurrences = occurrences(rendered, "$ATT_HOME/output/run-123/case");
+            int occurrences = occurrences(rendered, "$ATT_PACKAGE_ROOT/output/run-123/case");
             if (expectedOccurrences == null) expectedOccurrences = occurrences;
             else assertEquals(expectedOccurrences.intValue(), occurrences, mode);
         }
