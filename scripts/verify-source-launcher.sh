@@ -74,14 +74,14 @@ write_debug_fixture() {
   fixture="$root/$fixture_relative"
   mkdir -p "$fixture/templates/SIMPLE"
   cat > "$fixture/config.yaml" <<EOF
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 environment: SIT
 outputDirectory: $fixture_relative/output
 templates: {root: $fixture_relative/templates}
 testcase: {root: testcase}
 EOF
   cat > "$fixture/templates/SIMPLE/template.yaml" <<'EOF'
-schemaVersion: att-template/v3.4
+schemaVersion: att-template/v3.6
 name: SIMPLE
 description: Source launcher Debug execution smoke.
 actions:
