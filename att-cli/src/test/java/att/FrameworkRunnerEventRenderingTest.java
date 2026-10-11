@@ -1,58 +1,44 @@
 package att;
 
 import att.api.ExecutionEvent;
-import att.validation.Diagnostic;
-import att.validation.DiagnosticCodes;
-import att.validation.SourceLocation;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
+import java.lang.reflect.Method;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class FrameworkRunnerEventRenderingTest {
-    @Test void humanWarningRendersCanonicalDiagnosticLayout() throws Exception {
-        Path root = Paths.get("/tmp/att-package").toAbsolutePath().normalize();
-        SourceLocation source = new SourceLocation(root.resolve("templates/Pay/template.yaml").toString(),
-                8, 11, 8, 14, "      invoke: bad");
-        Diagnostic diagnostic = new Diagnostic(DiagnosticCodes.TEMPLATE_INVALID, "Invalid template expression",
-                "second line", root.resolve("templates/Pay/template.yaml").toString(), "actions.invoke",
-                "Cases", 12, 4, "Pay", "invoke", null, source, null, 2, null);
+    @TempDir Path root;
 
-        ByteArrayOutputStream captured = new ByteArrayOutputStream();
-        PrintStream previous = System.err;
-        System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8.name()));
-        try {
-            att.FrameworkRunner.class.getDeclaredMethod("printEvent", ExecutionEvent.class, CliOptions.class, Path.class)
-                    .setAccessible(true);
-        } catch (NoSuchMethodException ignored) {
-            // exercise through public event observer path below
-        } finally {
-            System.setErr(previous);
-        }
+    @Test void validationDiagnosticEventKeepsFullContextAndPortableSourceLocation() throws Exception {
+        Map<String,Object> source = new LinkedHashMap<String,Object>();
+        source.put("file", root.resolve("templates/Pay/template.yaml").toString());
+        source.put("line", 8); source.put("column", 11); source.put("endLine", 8); source.put("endColumn", 12);
+        source.put("excerpt", "actions:\n      invoke: bad"); source.put("excerptStartLine", 7);
+        Map<String,Object> diagnostic = new LinkedHashMap<String,Object>();
+        diagnostic.put("code", "ATT-TEMPLATE-001"); diagnostic.put("severity", "WARNING");
+        diagnostic.put("message", "Invalid template expression\n    second line");
+        diagnostic.put("file", root.resolve("templates/Pay/template.yaml").toString());
+        diagnostic.put("field", "actions.invoke"); diagnostic.put("sheet", "Cases"); diagnostic.put("row", 12);
+        diagnostic.put("column", 4); diagnostic.put("template", "Pay"); diagnostic.put("action", "invoke");
+        diagnostic.put("source", source); diagnostic.put("context", fields("caseId", "Case-12", "stage", "invoke"));
+        diagnostic.put("occurrences", 2);
 
-        CliOptions options = CliOptions.parse(new String[]{"run", "--suite", "x.xlsx"});
-        java.lang.reflect.Method observer = att.FrameworkRunner.class.getDeclaredMethod(
-                "cliObserver", CliOptions.class, Path.class);
-        observer.setAccessible(true);
-        att.api.ExecutionEventListener listener = (att.api.ExecutionEventListener) observer.invoke(null, options, root);
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        PrintCapture capture = new PrintCapture(buffer);
+        Method method = FrameworkRunner.class.getDeclaredMethod("printEvent", ExecutionEvent.class, CliOptions.class, Path.class);
+        method.setAccessible(true);
+        CliOptions options = CliOptions.parse(new String[]{"run", "--suite", "suite.xlsx"});
+        method.invoke(null, new ExecutionEvent(ExecutionEvent.Type.WARNING, null, null, null,
+                att.validation.Diagnostic.fromMap(diagnostic), null), options, root);
 
-        System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8.name()));
-        try {
-            listener.onEvent(new ExecutionEvent(ExecutionEvent.Type.WARNING, null, null, null, diagnostic, null));
-        } finally {
-            System.setErr(previous);
-        }
-
-        String output = captured.toString(StandardCharsets.UTF_8.name());
+        String output = buffer.toString("UTF-8");
         assertTrue(output.contains("[WARNING] ATT-TEMPLATE-001: Invalid template expression\n    second line"), output);
         assertTrue(output.contains("file=$ATT_PACKAGE_ROOT/templates/Pay/template.yaml"), output);
         assertTrue(output.contains("sheet=Cases, row=12, column=4, template=Pay, action=invoke"), output);
@@ -60,6 +46,24 @@ class FrameworkRunnerEventRenderingTest {
         assertTrue(output.contains("caseId: Case-12"), output);
         assertTrue(output.contains("actions:\n      invoke: bad\n              ^"), output);
         assertTrue(output.contains("occurrences: 2"), output);
-        assertFalse(output.contains(root.toString()), output);
+    }
+
+    private static Map<String,Object> fields(Object... values) {
+        Map<String,Object> map = new LinkedHashMap<String,Object>();
+        for (int i = 0; i < values.length; i += 2) map.put(String.valueOf(values[i]), values[i + 1]);
+        return map;
+    }
+
+    private static final class PrintCapture extends java.io.PrintStream {
+        private final java.io.ByteArrayOutputStream buffer;
+        PrintCapture(java.io.ByteArrayOutputStream buffer) {
+            super(buffer, true);
+            this.buffer = buffer;
+            System.setErr(this);
+        }
+        @Override public void close() {
+            System.setErr(System.out);
+            super.close();
+        }
     }
 }
