@@ -17,10 +17,10 @@ class PathPresentationTest {
 
     @Test void rendersRootAndPortableProjectRelativePaths() throws Exception {
         Path root = Files.createDirectories(temp.resolve("專案 folder"));
-        assertEquals("$ATT_HOME", PathPresentation.displayPath(root, root));
-        assertEquals("$ATT_HOME/templates/付款 request.xml",
+        assertEquals("$ATT_PACKAGE_ROOT", PathPresentation.displayPath(root, root));
+        assertEquals("$ATT_PACKAGE_ROOT/templates/付款 request.xml",
                 PathPresentation.displayPath(root.resolve("templates/付款 request.xml"), root));
-        assertEquals("input: $ATT_HOME/templates/debug.yaml", PathPresentation.displayText(
+        assertEquals("input: $ATT_PACKAGE_ROOT/templates/debug.yaml", PathPresentation.displayText(
                 "input: " + root.resolve("templates/debug.yaml"), root));
         Path aliasedRoot = java.nio.file.Paths.get("/var/folders/example/project");
         assertEquals("input: /private/var/folders/example/project/templates/debug.yaml",

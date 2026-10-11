@@ -252,14 +252,17 @@ class AuthenticationIntegrationTest {
         Object store=field(runtime,"store");var insert=store.getClass().getDeclaredMethod("insert",jobType,String.class);insert.setAccessible(true);insert.invoke(store,job,"{}");
         @SuppressWarnings("unchecked") Map<String,Object> jobs=(Map<String,Object>)field(runtime,"jobs");jobs.put(id,job);
         var append=journalType.getDeclaredMethod("append",String.class,Map.class);append.setAccessible(true);append.invoke(journal,"status",Map.of("jobId",id,"status","RUNNING"));
-        var clients=Executors.newFixedThreadPool(5);List<HttpURLConnection> connections=new ArrayList<>();
+        List<HttpURLConnection> connections=new ArrayList<>();
         try {
-            List<Future<HttpURLConnection>> pending=new ArrayList<>();
-            for(int i=0;i<5;i++)pending.add(clients.submit(()->{HttpURLConnection c=(HttpURLConnection)new java.net.URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();c.setConnectTimeout(3000);c.setReadTimeout(5000);c.setRequestProperty("Authorization",authorization);assertEquals(200,c.getResponseCode());return c;}));
-            for(Future<HttpURLConnection> future:pending)connections.add(future.get(5,TimeUnit.SECONDS));
-            // HTTP 200 can arrive before the asynchronous stream task subscribes to the journal.
-            // Wait until every listener is registered so this checks live fan-out, not setup timing.
-            awaitSseListeners(journal,connections.size());
+            for(int i=0;i<5;i++) {
+                HttpURLConnection connection=(HttpURLConnection)new java.net.URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();
+                connection.setConnectTimeout(3000);connection.setReadTimeout(5000);connection.setRequestProperty("Authorization",authorization);
+                connections.add(connection);
+                assertEquals(200,connection.getResponseCode());
+                // HTTP 200 can arrive before the asynchronous stream task subscribes to the journal.
+                // Wait for this listener before opening the next stream; earlier observers stay open.
+                awaitSseListeners(journal,connections.size());
+            }
             append.invoke(journal,"progress",Map.of("message","live observer event"));
             for(HttpURLConnection connection:connections) {
                 try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
@@ -268,7 +271,7 @@ class AuthenticationIntegrationTest {
                 }
             }
         } finally {
-            var finish=runtime.getClass().getDeclaredMethod("finish",jobType,String.class,int.class);finish.setAccessible(true);finish.invoke(runtime,job,"PASS",0);for(HttpURLConnection c:connections)c.disconnect();clients.shutdownNow();
+            var finish=runtime.getClass().getDeclaredMethod("finish",jobType,String.class,int.class);finish.setAccessible(true);finish.invoke(runtime,job,"PASS",0);for(HttpURLConnection c:connections)c.disconnect();
         }
     }
     private static void awaitSseListeners(Object journal,int expected)throws Exception {

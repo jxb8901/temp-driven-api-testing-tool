@@ -2,15 +2,25 @@ name: att-${project.version}-local
 main: att.sh
 mainWindows: att.bat
 java: CLI/Engine/Worker require JDK 8+
+layout: ATT_HOME install root with packages/default package root
 contents:
   - att.sh
   - att.bat
   - lib/att-${project.version}.jar
   - lib/
-  - config/
-  - templates/
-  - tools/
-  - testcase/
-  - sql/ (when present)
+  - packages/default/config/
+  - packages/default/templates/
+  - packages/default/tools/
+  - packages/default/testcase/
+  - packages/default/sql/ (when present)
+  - packages/default/schemas/
   - docs/
-  - schemas/
+  - config/att-server.example.yaml
+notes:
+  - ATT_HOME is the extracted install root (set by launchers; overridable via ATT_HOME / -Datt.home)
+  - Package root defaults to packages/default; override with ATT_PACKAGE_ROOT
+  - config/att-server.example.yaml is a template; no active config/att-server.yaml is shipped or overwritten on upgrade
+  - Optional Server config: ATT_HOME/config/att-server.yaml, discovered after -Datt.server.config and ATT_SERVER_CONFIG
+  - Optional Server data directory: ATT_HOME/data/ when disjoint from every package root; data/ is not shipped
+  - server.dataDir may be under ATT_HOME but must not equal, contain, or be inside a registered package root
+  - Tomcat owns and writes server.dataDir; package roots remain read-only to the Server

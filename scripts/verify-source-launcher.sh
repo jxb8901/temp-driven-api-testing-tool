@@ -74,14 +74,14 @@ write_debug_fixture() {
   fixture="$root/$fixture_relative"
   mkdir -p "$fixture/templates/SIMPLE"
   cat > "$fixture/config.yaml" <<EOF
-schemaVersion: att-config/v2.11
+schemaVersion: att-config/v2.12
 environment: SIT
 outputDirectory: $fixture_relative/output
 templates: {root: $fixture_relative/templates}
 testcase: {root: testcase}
 EOF
   cat > "$fixture/templates/SIMPLE/template.yaml" <<'EOF'
-schemaVersion: att-template/v3.4
+schemaVersion: att-template/v3.6
 name: SIMPLE
 description: Source launcher Debug execution smoke.
 actions:
@@ -179,7 +179,7 @@ tar -xzf "$PACKAGE_ARCHIVE" -C "$PACKAGE_PARENT"
 PACKAGE_ROOT="$PACKAGE_PARENT/att-$VERSION-local"
 run_commands "$PACKAGE_ROOT" "$MAVEN_PATH" "$MAVEN_LOG"
 run_commands "$PACKAGE_ROOT" "$NO_MAVEN_PATH" "$NO_MAVEN_LOG"
-PACKAGE_DEBUG_FIXTURE="$(write_debug_fixture "$PACKAGE_ROOT")"
+PACKAGE_DEBUG_FIXTURE="$(write_debug_fixture "$PACKAGE_ROOT/packages/default")"
 run_debug "$PACKAGE_ROOT" "$MAVEN_PATH" "$MAVEN_LOG" "$PACKAGE_DEBUG_FIXTURE"
 run_debug "$PACKAGE_ROOT" "$NO_MAVEN_PATH" "$MAVEN_LOG" "$PACKAGE_DEBUG_FIXTURE"
 rm -rf "$ROOT_DIR/$SOURCE_DEBUG_FIXTURE"

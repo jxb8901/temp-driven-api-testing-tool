@@ -65,7 +65,7 @@ DB operations run under ordinary `type: tool` Actions through `db.<helper>.<quer
 
 ## Repository modules
 
-The repository is a minimal Maven reactor while the runtime/package root stays compatible with earlier ATT releases:
+The repository is a Maven source checkout. Its top-level package directories are assembled under `packages/default/` in the Local release; the extracted release directory is `ATT_HOME`, which also holds the launchers and runtime libraries:
 
 ```text
 pom.xml       parent / aggregator
@@ -90,6 +90,8 @@ tools/        process-backed integration scripts/programs
 schemas/      published ATT schemas
 output/       run/debug/load evidence and reports
 ```
+
+In a Local archive, the tree above is rooted at `packages/default/`, while `att.sh`, `att.bat`, and `lib/` remain at the `ATT_HOME` root. ATT Server can register `$ATT_HOME/packages/default` directly. Its `server.dataDir` can be `$ATT_HOME/data` when that path is disjoint from every registered package root; the archive does not include Server data or an active `config/att-server.yaml`. See the [Server deployment guide](docs/server-deployment.md) for config discovery and flat-layout migration.
 
 ATT 4.1.0 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.2`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.6`. Current schemas live under `schemas/`; previous and older definitions are historical references under `schemas/history/`, not current runtime contracts.
 

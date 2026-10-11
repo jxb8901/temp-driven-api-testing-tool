@@ -52,7 +52,7 @@ class SchemaMigrationGuidanceTest {
         assertTrue(error.detail().contains("att-config/v2.12"));
         assertTrue(error.detail().contains("Upgrade schemaVersion"));
         assertTrue(error.detail().contains("Schema validation failed"));
-        assertEquals("$ATT_HOME/config/config.yaml", error.file());
+        assertEquals("$ATT_PACKAGE_ROOT/config/config.yaml", error.file());
         assertFalse(error.schemaViolations().isEmpty());
         assertNotNull(error.source());
     }

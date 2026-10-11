@@ -38,9 +38,9 @@ class FrameworkRunnerEventRenderingTest {
         render.setAccessible(true);
         String output = (String) render.invoke(null, event, root);
         assertTrue(output.contains("[WARNING] ATT-TEMPLATE-001: Invalid template expression\n    second line"), output);
-        assertTrue(output.contains("file=$ATT_HOME/templates/Pay/template.yaml"), output);
+        assertTrue(output.contains("file=$ATT_PACKAGE_ROOT/templates/Pay/template.yaml"), output);
         assertTrue(output.contains("sheet=Cases, row=12, column=4, template=Pay, action=invoke"), output);
-        assertTrue(output.contains("sourceFile=$ATT_HOME/templates/Pay/template.yaml, line=8, sourceColumn=11"), output);
+        assertTrue(output.contains("sourceFile=$ATT_PACKAGE_ROOT/templates/Pay/template.yaml, line=8, sourceColumn=11"), output);
         assertTrue(output.contains("caseId: Case-12"), output);
         assertTrue(output.contains("actions:\n      invoke: bad\n              ^"), output);
         assertTrue(output.contains("occurrences: 2"), output);

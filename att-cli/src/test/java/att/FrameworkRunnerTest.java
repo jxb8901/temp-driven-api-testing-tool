@@ -103,7 +103,7 @@ class FrameworkRunnerTest {
         assertEquals(java.util.Arrays.asList("total", "passed", "failed", "error", "skipped", "invalid", "report"),
                 new java.util.ArrayList<String>(json.keySet()));
         assertEquals(1L, ((Number) json.get("total")).longValue());
-        assertEquals("$ATT_HOME/output/run-1/report/index.html", json.get("report"));
+        assertEquals("$ATT_PACKAGE_ROOT/output/run-1/report/index.html", json.get("report"));
     }
 
     @Test void humanValidationDiagnosticsAreIndentedAndSeparated() throws Exception {

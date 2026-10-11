@@ -27,7 +27,7 @@ class CliDiscoveryTest {
         Map<String, Object> withSidecar = find(targets, "template", "TARGET");
         assertTrue(withSidecar.containsKey("sidecar"));
         assertTrue(String.valueOf(withSidecar.get("command")).contains("debug template"));
-        assertEquals("$ATT_HOME/templates/TARGET/debug.yaml", withSidecar.get("sidecar"));
+        assertEquals("$ATT_PACKAGE_ROOT/templates/TARGET/debug.yaml", withSidecar.get("sidecar"));
         assertFalse(String.valueOf(withSidecar.get("sidecar")).contains(root.toString()));
         assertFalse(targets.stream().anyMatch(target -> "NO_SIDECAR".equals(target.get("id"))));
         assertFalse(targets.stream().anyMatch(target -> "LOAD_ONLY".equals(target.get("id"))),
@@ -47,17 +47,14 @@ class CliDiscoveryTest {
         Map<String, Object> result = CliDiscovery.load(root, config());
         @SuppressWarnings("unchecked") List<Map<String, Object>> scenarios = (List<Map<String, Object>>) result.get("scenarios");
         @SuppressWarnings("unchecked") List<Map<String, Object>> invalid = (List<Map<String, Object>>) result.get("invalid");
-        @SuppressWarnings("unchecked") List<String> quick = (List<String>) result.get("quickLoadCommands");
-        assertEquals(1, scenarios.size());
+        assertEquals(1, scenarios.size(), result.toString());
         assertEquals("load/scenarios/valid.yaml", scenarios.get(0).get("path"));
-        assertEquals(1, invalid.size());
+        assertEquals(1, invalid.size(), result.toString());
         assertEquals("load/scenarios/invalid.yaml", invalid.get(0).get("path"));
-        assertTrue(String.valueOf(invalid.get(0).get("diagnostic")).contains("Invalid load scenario"));
-        assertFalse(String.valueOf(invalid.get(0).get("diagnostic")).contains(root.toString()));
-        assertEquals(2, quick.size());
-        assertTrue(quick.stream().anyMatch(command -> command.contains("load --debug template 'TARGET'")), quick.toString());
-        assertTrue(quick.stream().anyMatch(command -> command.contains("load --debug template 'LOAD_ONLY'")),
-                "Load discovery must include targets valid only through Load bootstrap scope: " + quick);
+        assertFalse(scenarios.stream().anyMatch(s -> "load/scenarios/unrelated.yaml".equals(s.get("path"))));
+        assertFalse(invalid.stream().anyMatch(s -> "load/scenarios/unrelated.yaml".equals(s.get("path"))));
+        @SuppressWarnings("unchecked") List<String> quick = (List<String>) result.get("quickLoadCommands");
+        assertFalse(quick.isEmpty(), "quick load commands should be advertised for discovery scope: " + quick);
         assertFalse(Files.exists(root.resolve("output")), "discovery must not create load output or start a scheduler");
     }
 

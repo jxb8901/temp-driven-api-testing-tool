@@ -34,14 +34,14 @@ public final class PathPresentation {
         if (root != null) {
             Path canonicalRoot = canonicalIfPresent(root);
             Path candidate = canonicalIfPresent(path);
-            if (path.equals(root) || candidate.equals(canonicalRoot)) return "$ATT_HOME";
+            if (path.equals(root) || candidate.equals(canonicalRoot)) return "$ATT_PACKAGE_ROOT";
             if (path.startsWith(root) && containedForDisplay(path, candidate, canonicalRoot)) {
                 String relative = root.relativize(path).toString().replace('\\', '/');
-                return relative.isEmpty() ? "$ATT_HOME" : "$ATT_HOME/" + relative;
+                return relative.isEmpty() ? "$ATT_PACKAGE_ROOT" : "$ATT_PACKAGE_ROOT/" + relative;
             }
             if (candidate.startsWith(canonicalRoot)) {
                 String relative = canonicalRoot.relativize(candidate).toString().replace('\\', '/');
-                return relative.isEmpty() ? "$ATT_HOME" : "$ATT_HOME/" + relative;
+                return relative.isEmpty() ? "$ATT_PACKAGE_ROOT" : "$ATT_PACKAGE_ROOT/" + relative;
             }
         }
         Path name = path.getFileName();
@@ -67,7 +67,7 @@ public final class PathPresentation {
                 value = replaceRoot(value, spelling);
             }
         }
-        return value.replace("$ATT_HOME\\", "$ATT_HOME/");
+        return value.replace("$ATT_PACKAGE_ROOT\\", "$ATT_PACKAGE_ROOT/");
     }
 
     /** Redacts external absolute paths when formatting diagnostic text, where they are not needed verbatim. */
@@ -193,8 +193,8 @@ public final class PathPresentation {
                 String path = slashForm(value);
                 String root = slashForm(projectRoot.toString());
                 while (root.length() > 2 && root.endsWith("/")) root = root.substring(0, root.length() - 1);
-                if (path.equals(root)) return "$ATT_HOME";
-                if (path.startsWith(root + "/")) return "$ATT_HOME/" + path.substring(root.length() + 1);
+                if (path.equals(root)) return "$ATT_PACKAGE_ROOT";
+                if (path.startsWith(root + "/")) return "$ATT_PACKAGE_ROOT/" + path.substring(root.length() + 1);
             }
             return externalBasename(value);
         }
@@ -260,7 +260,7 @@ public final class PathPresentation {
             boolean componentStart = match == 0 || !Character.isLetterOrDigit(value.charAt(match - 1))
                     && value.charAt(match - 1) != '_';
             if (componentStart && (end == value.length() || value.charAt(end) == '/' || value.charAt(end) == '\\')) {
-                result.append(value, cursor, match).append("$ATT_HOME");
+                result.append(value, cursor, match).append("$ATT_PACKAGE_ROOT");
                 cursor = end;
             } else {
                 result.append(value, cursor, end);

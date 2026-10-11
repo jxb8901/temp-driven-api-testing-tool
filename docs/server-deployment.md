@@ -4,13 +4,39 @@ ATT Server 4.1.0 provides a single-node control plane for submitting ATT Run, De
 
 ## Prepare the deployment
 
-1. Create a server-owned data directory, for example `/var/lib/att-server`, writable only by the Tomcat service account. Keep it separate from ATT installation files and package roots.
-2. Create package directories under an allowed root and ensure the Tomcat service account can read them.
-3. Copy `config/att-server.example.yaml` to a protected location, update its absolute paths, and keep credentials out of the file and package content.
-4. Set `-Datt.server.config=/etc/att/server.yaml` in Tomcat's Java options. The `ATT_SERVER_CONFIG` environment variable is also accepted when the system property is absent.
+1. Extract the Local archive into the installation root and set `ATT_HOME` to that directory. The default package root is `$ATT_HOME/packages/default`; it contains its own `config/config.yaml`, `schemas/`, `testcase/`, `templates/`, and top-level `tools/`.
+2. Register package roots beneath an allowed root and ensure the Tomcat service account can read them. The extracted default package can be registered directly as `$ATT_HOME/packages/default`.
+3. Create `server.dataDir` before startup and make it writable only by the Tomcat service account. The sample uses `$ATT_HOME/data`; it is supported when it does not equal, contain, or sit inside any registered package root. `/var/lib/att-server` is another option. Keep it out of package content.
+4. Copy `$ATT_HOME/config/att-server.example.yaml` to `$ATT_HOME/config/att-server.yaml` or a protected external path, update its absolute paths, and keep credentials out of package content. Do not replace an existing active config during an upgrade.
 5. Deploy `att-server-4.1.0.war` to Tomcat 10.1+. Keep Tomcat's `unpackWARs` enabled so the Server can launch the Worker from `WEB-INF/lib`.
 
-Tomcat owns listeners, TLS, access logs, and authentication. The WAR uses the Servlet container's configured authentication mechanism on package and job APIs and metrics, and preserves the container's challenge or redirect when authentication fails. Any authenticated Servlet Principal has the same API permissions in v1; no `ATT_USER` role assignment or ATT-specific RBAC is required. Health and version remain public. Terminate TLS before exposing BASIC credentials. The Server fails startup when its configuration, Java baseline, or package mappings are invalid.
+The Local archive's extracted directory is `ATT_HOME`, the shared installation and deployment root. It contains launchers and runtime libraries; executable package content lives beneath `packages/<id>/`; Server state lives in the separately configured `server.dataDir`. The archive includes `config/att-server.example.yaml` as a template, but never includes an active `config/att-server.yaml` or a `data/` directory.
+
+Server config discovery checks, in order, JVM property `-Datt.server.config`, environment variable `ATT_SERVER_CONFIG`, then `$ATT_HOME/config/att-server.yaml`. For the last candidate, the Server resolves `ATT_HOME` from `-Datt.home` first and then the `ATT_HOME` environment variable. A selected config that is missing, unreadable, or invalid stops startup with its path in the diagnostic; the Server does not fall back to another source. With no explicit source or usable default candidate, startup fails with setup guidance.
+
+Tomcat owns listeners, TLS, access logs, and authentication. Give its service account read access to ATT_HOME and package roots, and ownership or write access to `server.dataDir`. The WAR uses the Servlet container's configured authentication mechanism on package and job APIs and metrics, and preserves the container's challenge or redirect when authentication fails. Any authenticated Servlet Principal has the same API permissions in v1; no `ATT_USER` role assignment or ATT-specific RBAC is required. Health and version remain public. Terminate TLS before exposing BASIC credentials. The Server fails startup when its configuration, Java baseline, or package mappings are invalid.
+
+## ATT_HOME layout and migration
+
+A shared install can use this layout:
+
+```text
+att/                              # ATT_HOME
+  att.sh
+  att.bat
+  lib/
+  config/att-server.example.yaml  # template only
+  data/                           # optional server.dataDir; Tomcat-owned
+  packages/default/               # complete package root
+    config/config.yaml
+    config/tools/
+    schemas/
+    testcase/
+    templates/
+    tools/                        # tool scripts
+```
+
+To migrate a flat Local installation, back it up first and extract the new archive to a staging directory. Copy the old `config/` contents (excluding both `att-server.example.yaml` and `att-server.yaml`), `schemas/`, `testcase/`, `templates/`, top-level `tools/`, and optional `sql/` into the corresponding `packages/default/` directories. Merge without overwriting files already present in the destination; review conflicts in `config/config.yaml` and custom package files manually. Keep `config/tools/` (Tool configuration) distinct from top-level `tools/` (scripts). Keep any active Server config at `ATT_HOME/config/att-server.yaml` or its protected external path; never copy it into the package root or overwrite it during migration. Retain the old flat tree until the migrated package passes validation and execution. Update each Server registry entry to the resulting package root and set `ATT_HOME` or `-Datt.home` for Tomcat. Keep Server state outside package roots and preserve it when replacing or upgrading the install; the Local archive does not contain `data/` or an active Server config.
 
 ## Configuration
 

@@ -28,14 +28,21 @@ GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unkn
 (cd "$ROOT_DIR" && python3 tools/build_reference_manual.py)
 (cd "$ROOT_DIR" && mvn -B -ntp -Datt.gitCommit="$GIT_COMMIT" clean verify)
 (cd "$ROOT_DIR" && ./scripts/verify-source-launcher.sh)
-(cd "$ROOT_DIR" && ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}" ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-build-placeholder}" PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-build-placeholder}" PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-build-placeholder}" ./att.sh validate --package)
+(cd "$ROOT_DIR" && ATT_HOME="$ROOT_DIR" ATT_PACKAGE_ROOT="$ROOT_DIR" ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}" ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-build-placeholder}" PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-build-placeholder}" PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-build-placeholder}" ./att.sh validate --package)
 for archive in "$LOCAL_ARCHIVE" "$SERVER_ARCHIVE" "$SOURCE_ARCHIVE"; do
   if [ ! -f "$archive" ]; then echo "Maven distribution assembly did not produce: $archive" >&2; exit 2; fi
 done
 rm -rf "$ROOT_DIR/target/release"; mkdir -p "$LOCAL_WORK" "$SERVER_WORK" "$DIST_DIR"
 tar -xzf "$LOCAL_ARCHIVE" -C "$LOCAL_WORK"
 LOCAL_PACKAGE_DIR="$LOCAL_WORK/$LOCAL_PACKAGE_NAME"
-mkdir -p "$LOCAL_PACKAGE_DIR/output"
+LOCAL_PACKAGE_ROOT="$LOCAL_PACKAGE_DIR/packages/default"
+for required in att.sh att.bat lib config/att-server.example.yaml packages/default/config/config.yaml packages/default/config/tools packages/default/schemas packages/default/testcase packages/default/templates packages/default/tools; do
+  if [ ! -e "$LOCAL_PACKAGE_DIR/$required" ]; then echo "Local archive is missing required layout path: $required" >&2; exit 2; fi
+done
+if [ -e "$LOCAL_PACKAGE_DIR/config/att-server.yaml" ] || [ -e "$LOCAL_PACKAGE_ROOT/config/att-server.yaml" ] || [ -e "$LOCAL_PACKAGE_DIR/data" ]; then
+  echo "Local archive must not contain an active Server config or Server data directory" >&2; exit 2
+fi
+mkdir -p "$LOCAL_PACKAGE_ROOT/output"
 if tar -tzf "$LOCAL_ARCHIVE" | grep -F "server/att-server-${VERSION}.war" >/dev/null; then
   echo "Local package unexpectedly contains the Server WAR: $LOCAL_ARCHIVE" >&2; exit 2
 fi

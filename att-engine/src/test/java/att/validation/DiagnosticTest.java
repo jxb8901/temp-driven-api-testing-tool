@@ -53,9 +53,9 @@ class DiagnosticTest {
                 .withContext(new DiagnosticContext(physical, "case", null, null, null));
 
         DiagnosticException safe = error.forPackage(root);
-        assertEquals("$ATT_HOME/config/helpers/db.yaml", safe.file());
-        assertEquals("$ATT_HOME/config/helpers/db.yaml", safe.source().file());
-        assertEquals("$ATT_HOME/config/helpers/db.yaml", safe.context().caseFile());
+        assertEquals("$ATT_PACKAGE_ROOT/config/helpers/db.yaml", safe.file());
+        assertEquals("$ATT_PACKAGE_ROOT/config/helpers/db.yaml", safe.source().file());
+        assertEquals("$ATT_PACKAGE_ROOT/config/helpers/db.yaml", safe.context().caseFile());
         assertFalse(safe.getMessage().contains(root.toString()));
         assertFalse(safe.source().excerpt().contains(root.toString()));
     }
