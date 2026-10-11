@@ -11,7 +11,7 @@
         <file><source>${project.basedir}/../config/att-server.example.yaml</source><outputDirectory>config</outputDirectory><destName>att-server.example.yaml</destName><fileMode>0644</fileMode></file>
     </files>
     <fileSets>
-        <fileSet><directory>${project.basedir}/../config</directory><outputDirectory>packages/default/config</outputDirectory><excludes><exclude>att-server.example.yaml</exclude></excludes></fileSet>
+        <fileSet><directory>${project.basedir}/../config</directory><outputDirectory>packages/default/config</outputDirectory><excludes><exclude>att-server.example.yaml</exclude><exclude>att-server.yaml</exclude></excludes></fileSet>
         <fileSet><directory>${project.basedir}/../templates</directory><outputDirectory>packages/default/templates</outputDirectory></fileSet>
         <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>packages/default/tools</outputDirectory><excludes><exclude>**/*.sh</exclude></excludes></fileSet>
         <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>packages/default/tools</outputDirectory><includes><include>**/*.sh</include></includes><fileMode>0755</fileMode></fileSet>
