@@ -9,6 +9,74 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ServerConfigTest {
     @TempDir Path temp;
+
+    @Test void discoversServerConfigInDocumentedPrecedenceOrder() {
+        Path systemConfig=temp.resolve("system.yaml");
+        Path environmentConfig=temp.resolve("environment.yaml");
+        Path systemHome=temp.resolve("system-home");
+        Path environmentHome=temp.resolve("environment-home");
+        assertEquals(systemConfig.toAbsolutePath().normalize(),ServerConfig.configPath(
+                systemConfig.toString(),environmentConfig.toString(),systemHome.toString(),environmentHome.toString()));
+        assertEquals(environmentConfig.toAbsolutePath().normalize(),ServerConfig.configPath(
+                " ",environmentConfig.toString(),systemHome.toString(),environmentHome.toString()));
+        assertEquals(systemHome.resolve("config/att-server.yaml").toAbsolutePath().normalize(),
+                ServerConfig.configPath("","",""+systemHome,environmentHome.toString()));
+        assertEquals(environmentHome.resolve("config/att-server.yaml").toAbsolutePath().normalize(),
+                ServerConfig.configPath("","","",environmentHome.toString()));
+        assertNull(ServerConfig.configPath("","","",""));
+    }
+
+    @Test void missingExplicitConfigDoesNotFallBackToAttHomeCandidate() throws Exception {
+        Path home=Files.createDirectories(temp.resolve("config-home"));
+        Path fallback=Files.createDirectories(home.resolve("config")).resolve("att-server.yaml");
+        Files.writeString(fallback,"server: {}\\n");
+        Path missing=temp.resolve("missing-explicit.yaml");
+        Path selected=ServerConfig.configPath(missing.toString(),"",home.toString(),"");
+        assertEquals(missing.toAbsolutePath().normalize(),selected);
+        IllegalStateException error=assertThrows(IllegalStateException.class,()->ServerConfig.load(selected));
+        assertTrue(error.getMessage().contains(missing.toString()));
+    }
+
+    @Test void invalidConfigReportsItsPath() throws Exception {
+        Path invalid=Files.writeString(temp.resolve("invalid-server.yaml"),"server: [\\n");
+        IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(invalid));
+        assertTrue(error.getMessage().contains(invalid.toString()));
+    }
+
+    @Test void allowsServerDataUnderAttHomeWhenDisjointFromPackages() throws Exception {
+        Path home=Files.createDirectory(temp.resolve("install-home"));
+        Path allowed=Files.createDirectories(home.resolve("packages"));
+        Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path data=home.resolve("data");
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path file=temp.resolve("home-data-server.yaml");
+        Files.writeString(file,"server:\\n  dataDir: "+yaml(data)+"\\n  javaExecutable: "+yaml(java)
+                +"\\nworkers: {}\\npackages:\\n  allowedRoots:\\n    - "+yaml(allowed)+"\\n  entries:\\n    default: "+yaml(pkg)+"\\n");
+        String prior=System.getProperty("att.home");
+        try {
+            System.setProperty("att.home",home.toString());
+            ServerConfig config=ServerConfig.load(file);
+            assertEquals(data.toRealPath(),config.dataDir);
+            assertTrue(config.dataDir.startsWith(home.toRealPath()));
+        } finally {
+            if(prior==null)System.clearProperty("att.home");else System.setProperty("att.home",prior);
+        }
+    }
+
+    @Test void rejectsDataDirectoryEqualToOrOverlappingPackageRoot() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("overlap-allowed"));
+        Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        List<Path> overlapping=List.of(allowed,pkg,pkg.resolve("server-state"));
+        for(int i=0;i<overlapping.size();i++) {
+            Path data=overlapping.get(i);
+            Path file=temp.resolve("overlap-"+i+".yaml");
+            Files.writeString(file,"server:\\n  dataDir: "+yaml(data)+"\\n  javaExecutable: "+yaml(java)
+                    +"\\nworkers: {}\\npackages:\\n  allowedRoots:\\n    - "+yaml(allowed)+"\\n  entries:\\n    default: "+yaml(pkg)+"\\n");
+            IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file));
+            assertTrue(error.getMessage().contains("separate from configured package roots"),error.getMessage());
+        }
+    }
     @Test void loadsCanonicalReadOnlyPackageMappingsAndCreatesPrivateDataDirectory() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("packages"));Path pkg=Files.createDirectory(allowed.resolve("payments"));
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
