@@ -1,6 +1,8 @@
-# Copy to a protected deployment path and set -Datt.server.config=/etc/att/server.yaml.
+# Example for ATT_HOME=/opt/att. Replace these absolute paths for your installation.
+# YAML paths are filesystem paths; shell variables are not expanded.
+# Copy to ATT_HOME/config/att-server.yaml or a protected external path.
 server:
-  dataDir: /var/lib/att-server
+  dataDir: /opt/att/data
   # Disable only on an isolated network that permits anonymous API access.
   authenticationRequired: true
   # Optional. Defaults to the Java runtime hosting Tomcat.
@@ -21,7 +23,7 @@ server:
     maxSourceBytes: 65536
     # Optional Tool script source allowlist. Paths are package-relative.
     # safeTextSources:
-    #   payments:
+    #   default:
     #     - tools/payment-check.sh
   # Browser-submitted Quick and Advanced Load are disabled unless explicitly enabled.
   inlineLoad:
@@ -49,7 +51,6 @@ workers:
 
 packages:
   allowedRoots:
-    - /srv/att/packages
+    - /opt/att/packages
   entries:
-    payments: /srv/att/packages/payments
-    treasury: /srv/att/packages/treasury
+    default: /opt/att/packages/default
