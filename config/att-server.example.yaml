@@ -23,6 +23,16 @@ server:
     # safeTextSources:
     #   payments:
     #     - tools/payment-check.sh
+  # Browser-submitted Quick and Advanced Load are disabled unless explicitly enabled.
+  inlineLoad:
+    enabled: false
+    maxWorkloads: 10
+    maxTargets: 20
+    maxTotalUsers: 100
+    maxAggregateArrivalRatePerSecond: 100
+    maxConcurrentPerWorkload: 100
+    maxTotalConcurrent: 1000
+    maxDurationSeconds: 3600
 
 workers:
   maxConcurrent: 8

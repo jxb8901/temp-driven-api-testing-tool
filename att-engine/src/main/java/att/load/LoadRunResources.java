@@ -81,18 +81,21 @@ public final class LoadRunResources implements AutoCloseable {
         // Schedulers initialize before starting workers. Standalone executor
         // callers retain a lock-free fast path after that one-time validation.
         if (initializedExecutionNamespaces.contains(run)) return;
-        for (String name : new String[] {"samples", "failures", "executions"}) {
-            Path directory = run.resolve(name);
-            if (Files.exists(directory)) {
-                if (!Files.isDirectory(directory))
-                    throw new IllegalArgumentException("Load output namespace is not a directory: " + directory);
-                try (java.nio.file.DirectoryStream<Path> entries = Files.newDirectoryStream(directory)) {
-                    if (entries.iterator().hasNext())
-                        throw new IllegalArgumentException("Load output namespace already contains retained output: " + directory);
+        synchronized (initializedExecutionNamespaces) {
+            if (initializedExecutionNamespaces.contains(run)) return;
+            for (String name : new String[] {"samples", "failures", "executions"}) {
+                Path directory = run.resolve(name);
+                if (Files.exists(directory)) {
+                    if (!Files.isDirectory(directory))
+                        throw new IllegalArgumentException("Load output namespace is not a directory: " + directory);
+                    try (java.nio.file.DirectoryStream<Path> entries = Files.newDirectoryStream(directory)) {
+                        if (entries.iterator().hasNext())
+                            throw new IllegalArgumentException("Load output namespace already contains retained output: " + directory);
+                    }
                 }
             }
+            initializedExecutionNamespaces.add(run);
         }
-        initializedExecutionNamespaces.add(run);
     }
 
     /** Custom identities use atomic disk reservations so collision state does not grow in the JVM. */

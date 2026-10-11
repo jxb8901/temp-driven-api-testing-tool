@@ -1,0 +1,156 @@
+{
+  "schemaVersion" : "att-package-resource-discovery-benchmark/v1",
+  "version" : "4.1.0",
+  "sourceRevision" : "2ec9220894906635a5989e57a7a80d89179cff7b",
+  "dataset" : "att-repository-test-package",
+  "measurementScope" : "ServerRuntime.inspectResource through a one-shot Worker; excludes HTTP and Tomcat overhead",
+  "environment" : {
+    "javaVersion" : "26.0.1",
+    "javaVm" : "OpenJDK 64-Bit Server VM",
+    "os" : "Mac OS X 26.1",
+    "architecture" : "aarch64",
+    "processors" : 8,
+    "maxHeapBytes" : 2147483648,
+    "liveThreads" : 9,
+    "capturedAt" : "2026-10-10T13:13:41.692261Z"
+  },
+  "settings" : {
+    "runs" : 3,
+    "pageSize" : 100,
+    "workerTimeoutMs" : 120000,
+    "workerHeapMaxMb" : 512,
+    "warmups" : 1
+  },
+  "scenarios" : [ {
+    "type" : "all",
+    "measuredRuns" : 3,
+    "p50LatencyMs" : 848.408292,
+    "p95LatencyMs" : 854.515208
+  }, {
+    "type" : "case",
+    "measuredRuns" : 3,
+    "p50LatencyMs" : 836.354958,
+    "p95LatencyMs" : 862.257125
+  }, {
+    "type" : "template",
+    "measuredRuns" : 3,
+    "p50LatencyMs" : 863.257542,
+    "p95LatencyMs" : 995.289125
+  }, {
+    "type" : "flow",
+    "measuredRuns" : 3,
+    "p50LatencyMs" : 824.206167,
+    "p95LatencyMs" : 896.364792
+  }, {
+    "type" : "tool",
+    "measuredRuns" : 3,
+    "p50LatencyMs" : 817.992542,
+    "p95LatencyMs" : 873.802958
+  } ],
+  "samples" : [ {
+    "type" : "all",
+    "sample" : 1,
+    "latencyMs" : 848.408292,
+    "totalResources" : 60,
+    "returnedResources" : 60,
+    "hasNextPage" : false
+  }, {
+    "type" : "all",
+    "sample" : 2,
+    "latencyMs" : 834.63625,
+    "totalResources" : 60,
+    "returnedResources" : 60,
+    "hasNextPage" : false
+  }, {
+    "type" : "all",
+    "sample" : 3,
+    "latencyMs" : 854.515208,
+    "totalResources" : 60,
+    "returnedResources" : 60,
+    "hasNextPage" : false
+  }, {
+    "type" : "case",
+    "sample" : 1,
+    "latencyMs" : 836.354958,
+    "totalResources" : 26,
+    "returnedResources" : 26,
+    "hasNextPage" : false
+  }, {
+    "type" : "case",
+    "sample" : 2,
+    "latencyMs" : 806.321083,
+    "totalResources" : 26,
+    "returnedResources" : 26,
+    "hasNextPage" : false
+  }, {
+    "type" : "case",
+    "sample" : 3,
+    "latencyMs" : 862.257125,
+    "totalResources" : 26,
+    "returnedResources" : 26,
+    "hasNextPage" : false
+  }, {
+    "type" : "template",
+    "sample" : 1,
+    "latencyMs" : 863.257542,
+    "totalResources" : 10,
+    "returnedResources" : 10,
+    "hasNextPage" : false
+  }, {
+    "type" : "template",
+    "sample" : 2,
+    "latencyMs" : 995.289125,
+    "totalResources" : 10,
+    "returnedResources" : 10,
+    "hasNextPage" : false
+  }, {
+    "type" : "template",
+    "sample" : 3,
+    "latencyMs" : 827.268875,
+    "totalResources" : 10,
+    "returnedResources" : 10,
+    "hasNextPage" : false
+  }, {
+    "type" : "flow",
+    "sample" : 1,
+    "latencyMs" : 896.364792,
+    "totalResources" : 3,
+    "returnedResources" : 3,
+    "hasNextPage" : false
+  }, {
+    "type" : "flow",
+    "sample" : 2,
+    "latencyMs" : 819.982458,
+    "totalResources" : 3,
+    "returnedResources" : 3,
+    "hasNextPage" : false
+  }, {
+    "type" : "flow",
+    "sample" : 3,
+    "latencyMs" : 824.206167,
+    "totalResources" : 3,
+    "returnedResources" : 3,
+    "hasNextPage" : false
+  }, {
+    "type" : "tool",
+    "sample" : 1,
+    "latencyMs" : 794.482542,
+    "totalResources" : 21,
+    "returnedResources" : 21,
+    "hasNextPage" : false
+  }, {
+    "type" : "tool",
+    "sample" : 2,
+    "latencyMs" : 817.992542,
+    "totalResources" : 21,
+    "returnedResources" : 21,
+    "hasNextPage" : false
+  }, {
+    "type" : "tool",
+    "sample" : 3,
+    "latencyMs" : 873.802958,
+    "totalResources" : 21,
+    "returnedResources" : 21,
+    "hasNextPage" : false
+  } ]
+}

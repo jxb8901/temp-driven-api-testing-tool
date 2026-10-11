@@ -13,7 +13,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
 }
 function allText(node) { return [node.textContent || '', ...(node.children || []).map(allText)].join(' '); }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [], debugFormResponse = null, debugDraftResponses = [], debugSubmitErrors = [], quickLoadFormResponse = null, quickLoadDraftResponses = [] } = {}) {
+function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo = undefined, confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [], debugFormResponse = null, debugDraftResponses = [], debugSubmitErrors = [], quickLoadFormResponse = null, quickLoadDraftResponses = [] } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
@@ -114,7 +114,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
       return jsonResponse({ jobId: 'J_DEBUG' });
     }
     let result;
-    if (path === 'version') result = { apiVersion: version };
+    if (path === 'version') result = versionInfo === undefined ? { apiVersion: version, inlineLoadEnabled } : versionInfo;
     else if (path === 'packages') result = { items: [{ packageId: 'payments' }] };
     else if (/^packages\/[^/]+\/load-policy\?/.test(path)) {
       state.policyRequests.push(new URLSearchParams(path.split('?')[1]).get('environment'));
@@ -200,6 +200,23 @@ test('rejects an incompatible API before accessing packages', async () => {
   await waitFor(() => ui.node('message').textContent.includes('Incompatible ATT Server API version'), 'API version rejection');
   assert.match(ui.node('message').textContent, /Incompatible ATT Server API version/);
   assert.deepEqual(ui.calls.map(call => call.path), ['version']);
+});
+
+test('keeps browser-created Load disabled unless the version capability is exactly true', async () => {
+  for (const versionInfo of [
+    { apiVersion: '1' },
+    { apiVersion: '1', inlineLoadEnabled: null },
+    { apiVersion: '1', inlineLoadEnabled: false },
+    { apiVersion: '1', inlineLoadEnabled: true }
+  ]) {
+    const ui = boot({ versionInfo });
+    await waitFor(() => ui.node('packages').children.length === 1, 'home package list');
+    const button = ui.node('packages').children[0].children[2];
+    assert.equal(button.disabled, versionInfo.inlineLoadEnabled !== true);
+  }
+  const direct = boot({ hash: '#/advanced-load/payments', versionInfo: { apiVersion: '1' } });
+  await waitFor(() => direct.node('advanced-load-policy-status').textContent.includes('disabled by Server configuration'), 'disabled direct Advanced Load route');
+  assert.equal(direct.calls.some(call => call.path.includes('load-policy')), false);
 });
 
 test('submits logical package DTOs with a non-root Tomcat context', async () => {

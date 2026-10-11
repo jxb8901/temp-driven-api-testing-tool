@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Map;
 import java.util.List;
+import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
@@ -23,6 +24,55 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ServerRuntimeTest {
     @TempDir Path temp;
+
+    @Test void enforcesAggregateInlineLoadCapsWithoutOverflow() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("inline-limits-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
+        Path configFile=temp.resolve("inline-limits-server.yaml");Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("inline-limits-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 10\n    maxTargets: 20\n    maxTotalUsers: 100\n    maxAggregateArrivalRatePerSecond: 100\n    maxConcurrentPerWorkload: 100\n    maxTotalConcurrent: 100\n    maxDurationSeconds: 60\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        ServerConfig.InlineLoad limits=ServerConfig.load(configFile).inlineLoad;
+        assertDoesNotThrow(()->ServerRuntime.validateInlineLoadLimits(limits,inlineScenario(List.of(arrivalWorkload("one",2,"1/s"),arrivalWorkload("two",3,"1/s")))));
+        List<Map<String,Object>> maxWorkloads=new java.util.ArrayList<>();for(int i=0;i<10;i++)maxWorkloads.add(virtualUsersWorkload("at-workload-limit-"+i,1));
+        assertDoesNotThrow(()->ServerRuntime.validateInlineLoadLimits(limits,inlineScenario(maxWorkloads)));
+        assertDoesNotThrow(()->ServerRuntime.validateInlineLoadLimits(limits,inlineScenario(List.of(virtualUsersWorkload("at-user-limit",100)))));
+        assertDoesNotThrow(()->ServerRuntime.validateInlineLoadLimits(limits,inlineScenario(List.of(arrivalWorkload("at-arrival-limit",100,"100/s")))));
+        assertDoesNotThrow(()->ServerRuntime.validateInlineLoadLimits(limits,inlineScenario(List.of(virtualUsersWorkload("at-duration-limit",1,"60s")))));
+        Map<String,Object> twentyTargets=virtualUsersWorkload("at-target-limit",1);
+        twentyTargets.put("mix",Collections.nCopies(20,Map.of("target",Map.of("type","template","id","T"),"weight",1)));
+        twentyTargets.remove("target");assertDoesNotThrow(()->ServerRuntime.validateInlineLoadLimits(limits,inlineScenario(List.of(twentyTargets))));
+        assertDoesNotThrow(()->ServerRuntime.validateInlineLoadLimits(limits,inlineScenario(List.of(arrivalWorkload("at-workload-concurrency-limit",100,"1/s")))));
+        assertLimit(limits,List.of(arrivalWorkload("per-workload",101,"1/s")),"maxConcurrentPerWorkload");
+        assertLimit(limits,List.of(arrivalWorkload("one",51,"1/s"),arrivalWorkload("two",50,"1/s")),"maxTotalConcurrent");
+        List<Map<String,Object>> manySmall=new java.util.ArrayList<>();for(int i=0;i<10;i++)manySmall.add(arrivalWorkload("small-"+i,11,"1/s"));
+        assertLimit(limits,manySmall,"maxTotalConcurrent");
+        assertLimit(limits,List.of(virtualUsersWorkload("large",Long.MAX_VALUE),virtualUsersWorkload("small",1)),"maxTotalUsers");
+        assertLimit(limits,List.of(virtualUsersWorkload("over-user-limit",101)),"maxTotalUsers");
+        assertLimit(limits,List.of(arrivalWorkload("rate",1,"101/s")),"maxAggregateArrivalRatePerSecond");
+        assertLimit(limits,List.of(virtualUsersWorkload("duration",1,"61s")),"maxDurationSeconds");
+        List<Map<String,Object>> tooMany=new java.util.ArrayList<>();for(int i=0;i<11;i++)tooMany.add(virtualUsersWorkload("workload-"+i,1));
+        assertLimit(limits,tooMany,"maxWorkloads");
+        Map<String,Object> tooManyTargets=virtualUsersWorkload("targets",1);
+        tooManyTargets.put("mix",Collections.nCopies(21,Map.of("target",Map.of("type","template","id","T"),"weight",1)));
+        tooManyTargets.remove("target");assertLimit(limits,List.of(tooManyTargets),"maxTargets");
+    }
+
+    private static void assertLimit(ServerConfig.InlineLoad limits,List<Map<String,Object>> workloads,String message) {
+        ServerRuntime.InlineLoadLimitException error=assertThrows(ServerRuntime.InlineLoadLimitException.class,
+                ()->ServerRuntime.validateInlineLoadLimits(limits,inlineScenario(workloads)));
+        assertTrue(error.getMessage().contains(message),error.getMessage());
+    }
+    private static Map<String,Object> inlineScenario(List<Map<String,Object>> workloads) {return Map.of("schemaVersion","att-load/v1.6","workloads",workloads);}
+    private static Map<String,Object> virtualUsersWorkload(String id,long users) {return virtualUsersWorkload(id,users,"1s");}
+    private static Map<String,Object> virtualUsersWorkload(String id,long users,String duration) {
+        return inlineWorkload(id,Map.of("users",users,"duration",duration,"warmup","0s","rampUp","0s","rampDown","0s"));
+    }
+    private static Map<String,Object> arrivalWorkload(String id,long concurrent,String rate) {
+        return inlineWorkload(id,Map.of("arrivalRate",rate,"maxConcurrent",concurrent,"duration","1s","warmup","0s","rampUp","0s","rampDown","0s"));
+    }
+    private static Map<String,Object> inlineWorkload(String id,Map<String,Object> load) {
+        return new java.util.LinkedHashMap<>(Map.of("id",id,"target",Map.of("type","template","id","T"),"load",load));
+    }
+
     @Test void launchesOneStructuredWorkerProcessForAnAcceptedJob() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("packages"));Path pkg=Files.createDirectory(allowed.resolve("broken-package"));
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
@@ -200,7 +250,7 @@ class ServerRuntimeTest {
         Files.writeString(loadPolicy,"schemaVersion: att-load/v1.6\nload: {users: 1, duration: 1s}\n");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path configFile=temp.resolve("quick-load-server.yaml");Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("quick-load-data"))+"\n  javaExecutable: "+yaml(javaBin)
-                +"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
+                +"\n  inlineLoad:\n    enabled: true\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         Path libs=Files.createDirectory(temp.resolve("quick-load-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
@@ -254,6 +304,9 @@ class ServerRuntimeTest {
             String advancedJobId=String.valueOf(advancedAccepted.get("jobId"));long advancedDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);Map<String,Object> advancedRecord=runtime.jobRecord(advancedJobId);
             while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(advancedRecord.get("status"))&&System.nanoTime()<advancedDeadline){Thread.sleep(20);advancedRecord=runtime.jobRecord(advancedJobId);}
             assertEquals("PASS",advancedRecord.get("status"),"The executable Tool asserts it received both restored values: "+runtime.resultRecord(advancedJobId));
+            long advancedReleaseDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(((Number)runtime.counts().get("activeWorkers")).intValue()>0&&System.nanoTime()<advancedReleaseDeadline)Thread.sleep(10);
+            assertEquals(0,((Number)runtime.counts().get("activeWorkers")).intValue(),"The Advanced Load Worker must exit before the test temp directory is removed");
             assertArrayEquals(originalToolSidecar,Files.readAllBytes(toolSidecar));
             Map<String,Object> stale=runtime.createQuickLoadDraft(body,"alice");
             Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: changed\nactions:\n"

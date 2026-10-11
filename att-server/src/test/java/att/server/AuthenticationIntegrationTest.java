@@ -35,10 +35,12 @@ class AuthenticationIntegrationTest {
                 +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: authenticated debug form\nactions:\n"
                 +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");
+        Path loadDirectory=Files.createDirectories(debugPackage.resolve("load"));
+        Files.writeString(loadDirectory.resolve("path-based.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n- id: path-based\n  target:\n    type: template\n    id: FORM\n  load:\n    users: 1\n    duration: 1s\n");
         Files.writeString(template.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs:\n  value: safe\n"
                 +"  payload: {account: 'customer account 123456789', secret: 'temporary credential violet-123'}\n");
         Path users=Files.writeString(temp.resolve("tomcat-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"OTHER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"other\" password=\"secret\" roles=\"OTHER\"/></tomcat-users>");
-        Path config=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");
+        Path config=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");
         String old=System.getProperty("att.server.config");System.setProperty("att.server.config",config.toString());
         Tomcat tomcat=start(users,appDirectory("authenticated"),true);
         try {
@@ -63,6 +65,7 @@ class AuthenticationIntegrationTest {
             assertEquals(404,get(port,"/att/api/v1/drafts/"+draftId,other),"Drafts must be isolated by the authenticated principal");
             JsonNode loadPolicy=getJson(port,"/att/api/v1/packages/debug/load-policy?model=virtualUsers",basic);
             assertEquals("virtualUsers",loadPolicy.path("model").asText());
+            assertTrue(getJson(port,"/att/api/v1/version",basic).path("inlineLoadEnabled").asBoolean(false));
             JsonNode advancedScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6",
                     "load",Map.of("users",1,"duration","1s"),"workloads",List.of(Map.of("id","auth-load",
                             "load",Map.of("users",1),"target",Map.of("type","template","id","FORM"),
@@ -72,6 +75,16 @@ class AuthenticationIntegrationTest {
             String advancedDraftId=advancedDraft.path("draftId").asText();assertTrue(advancedDraftId.startsWith("A"));
             assertEquals(200,get(port,"/att/api/v1/drafts/"+advancedDraftId,basic));
             assertEquals(404,get(port,"/att/api/v1/drafts/"+advancedDraftId,other),"Advanced Load drafts must be isolated by the authenticated principal");
+            Map<String,Object> firstWorkload=Map.of("id","auth-load-one","load",Map.of("users",1),
+                    "target",Map.of("type","template","id","FORM"),"inputs",Map.of("value","within-limit"));
+            Map<String,Object> secondWorkload=Map.of("id","auth-load-two","load",Map.of("users",1),
+                    "target",Map.of("type","template","id","FORM"),"inputs",Map.of("value","over-limit"));
+            JsonNode overLimitScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6",
+                    "load",Map.of("users",1,"duration","1s"),"workloads",List.of(firstWorkload,secondWorkload)));
+            JsonNode limitError=postErrorJson(port,"/att/api/v1/drafts/load",basic,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","scenario",overLimitScenario)),400);
+            assertEquals("ATT-SERVER-INLINE-LOAD-LIMIT",limitError.path("error").path("code").asText());
+            assertTrue(limitError.path("error").path("summary").asText().contains("maxWorkloads"));
             JsonNode acceptedLoad=postJson(port,"/att/api/v1/jobs/load",basic,
                     ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","draftId",advancedDraftId)),202);
             String loadJobId=acceptedLoad.path("jobId").asText();long loadDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
@@ -96,6 +109,26 @@ class AuthenticationIntegrationTest {
             assertEquals(400,postBody(port,basic,"application/json",null,"{not-json"));
             assertFiveSseObserversReceiveLiveEvents(tomcat,port,basic);
         } finally {tomcat.stop();tomcat.destroy();restore(old);}
+
+        Path disabledConfig=Files.writeString(temp.resolve("inline-load-disabled.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("inline-load-disabled-data"))+"\n  authenticationRequired: true\n  inspection:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    debug: "+yaml(debugPackage)+"\n");
+        System.setProperty("att.server.config",disabledConfig.toString());
+        Tomcat inlineLoadDisabled=start(users,appDirectory("inline-load-disabled"));
+        try {
+            int port=inlineLoadDisabled.getConnector().getLocalPort();
+            String basic="Basic "+Base64.getEncoder().encodeToString("att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertFalse(getJson(port,"/att/api/v1/version",basic).path("inlineLoadEnabled").asBoolean(true));
+            assertEquals(403,get(port,"/att/api/v1/packages/debug/load-policy?model=virtualUsers",basic));
+            assertEquals(403,get(port,"/att/api/v1/packages/debug/resources/template/not-real/quick-load-form?model=virtualUsers",basic));
+            assertEquals(403,get(port,"/att/api/v1/drafts/L"+"0".repeat(32),basic));
+            assertEquals(403,get(port,"/att/api/v1/drafts/A"+"0".repeat(32),basic));
+            assertEquals(403,postStatus(port,basic,"/att/api/v1/drafts/quick-load",Map.of()));
+            assertEquals(403,postStatus(port,basic,"/att/api/v1/drafts/load",Map.of()));
+            assertEquals(403,postStatus(port,basic,"/att/api/v1/jobs/load",Map.of("packageId","debug","draftId","A"+"0".repeat(32))));
+            JsonNode pathBased=postJson(port,"/att/api/v1/jobs/load",basic,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","scenario","load/path-based.yaml")),202);
+            JsonNode pathBasedStatus=getJson(port,"/att/api/v1/jobs/"+pathBased.path("jobId").asText(),basic);
+            assertEquals("load",pathBasedStatus.path("command").asText(),"Disabling browser drafts must still admit the existing path-based Load API");
+        } finally {inlineLoadDisabled.stop();inlineLoadDisabled.destroy();restore(old);}
 
         Path openConfig=Files.writeString(temp.resolve("open-server.yaml"),"server:\n  dataDir: "+temp.resolve("open-data")+"\n  authenticationRequired: false\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+packages+"\n  entries:\n    p: "+packages.resolve("p")+"\n");System.setProperty("att.server.config",openConfig.toString());
         Tomcat open=start(users,appDirectory("anonymous"));
@@ -181,6 +214,18 @@ class AuthenticationIntegrationTest {
         connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Authorization",authorization);connection.setRequestProperty("Content-Type","application/json");
         try(var output=connection.getOutputStream()){output.write(ServerRuntime.JSON.writeValueAsBytes(body));}
         assertEquals(expectedStatus,connection.getResponseCode());try{return ServerRuntime.JSON.readTree(connection.getInputStream());}finally{connection.disconnect();}
+    }
+    private static JsonNode postErrorJson(int port,String uri,String authorization,JsonNode body,int expectedStatus)throws Exception {
+        HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(5000);connection.setReadTimeout(30000);
+        connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Authorization",authorization);connection.setRequestProperty("Content-Type","application/json");
+        try(var output=connection.getOutputStream()){output.write(ServerRuntime.JSON.writeValueAsBytes(body));}
+        assertEquals(expectedStatus,connection.getResponseCode());try{return ServerRuntime.JSON.readTree(connection.getErrorStream());}finally{connection.disconnect();}
+    }
+    private static int postStatus(int port,String authorization,String uri,Map<String,Object> body)throws Exception {
+        HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(5000);connection.setReadTimeout(30000);
+        connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Authorization",authorization);connection.setRequestProperty("Content-Type","application/json");
+        try(var output=connection.getOutputStream()){output.write(ServerRuntime.JSON.writeValueAsBytes(body));}
+        try{return connection.getResponseCode();}finally{connection.disconnect();}
     }
     private static void assertAnonymousInspectionIsRejected(int port)throws Exception {
         for(String path:List.of("/att/api/v1/packages/p/resources?type=case","/att/api/v1/packages/p/configuration?view=declared")) {
