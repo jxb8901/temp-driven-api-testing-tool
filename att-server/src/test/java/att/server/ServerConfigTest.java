@@ -20,7 +20,7 @@ class ServerConfigTest {
         assertEquals(environmentConfig.toAbsolutePath().normalize(),ServerConfig.configPath(
                 " ",environmentConfig.toString(),systemHome.toString(),environmentHome.toString()));
         assertEquals(systemHome.resolve("config/att-server.yaml").toAbsolutePath().normalize(),
-                ServerConfig.configPath("","",""+systemHome,environmentHome.toString()));
+                ServerConfig.configPath("","",systemHome.toString(),environmentHome.toString()));
         assertEquals(environmentHome.resolve("config/att-server.yaml").toAbsolutePath().normalize(),
                 ServerConfig.configPath("","","",environmentHome.toString()));
         assertNull(ServerConfig.configPath("","","",""));
@@ -29,7 +29,7 @@ class ServerConfigTest {
     @Test void missingExplicitConfigDoesNotFallBackToAttHomeCandidate() throws Exception {
         Path home=Files.createDirectories(temp.resolve("config-home"));
         Path fallback=Files.createDirectories(home.resolve("config")).resolve("att-server.yaml");
-        Files.writeString(fallback,"server: {}\\n");
+        Files.writeString(fallback,"server: {}\n");
         Path missing=temp.resolve("missing-explicit.yaml");
         Path selected=ServerConfig.configPath(missing.toString(),"",home.toString(),"");
         assertEquals(missing.toAbsolutePath().normalize(),selected);
@@ -38,7 +38,7 @@ class ServerConfigTest {
     }
 
     @Test void invalidConfigReportsItsPath() throws Exception {
-        Path invalid=Files.writeString(temp.resolve("invalid-server.yaml"),"server: [\\n");
+        Path invalid=Files.writeString(temp.resolve("invalid-server.yaml"),"server: [\n");
         IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(invalid));
         assertTrue(error.getMessage().contains(invalid.toString()));
     }
@@ -50,8 +50,8 @@ class ServerConfigTest {
         Path data=home.resolve("data");
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path file=temp.resolve("home-data-server.yaml");
-        Files.writeString(file,"server:\\n  dataDir: "+yaml(data)+"\\n  javaExecutable: "+yaml(java)
-                +"\\nworkers: {}\\npackages:\\n  allowedRoots:\\n    - "+yaml(allowed)+"\\n  entries:\\n    default: "+yaml(pkg)+"\\n");
+        Files.writeString(file,"server:\n  dataDir: "+yaml(data)+"\n  javaExecutable: "+yaml(java)
+                +"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    default: "+yaml(pkg)+"\n");
         String prior=System.getProperty("att.home");
         try {
             System.setProperty("att.home",home.toString());
@@ -71,8 +71,8 @@ class ServerConfigTest {
         for(int i=0;i<overlapping.size();i++) {
             Path data=overlapping.get(i);
             Path file=temp.resolve("overlap-"+i+".yaml");
-            Files.writeString(file,"server:\\n  dataDir: "+yaml(data)+"\\n  javaExecutable: "+yaml(java)
-                    +"\\nworkers: {}\\npackages:\\n  allowedRoots:\\n    - "+yaml(allowed)+"\\n  entries:\\n    default: "+yaml(pkg)+"\\n");
+            Files.writeString(file,"server:\n  dataDir: "+yaml(data)+"\n  javaExecutable: "+yaml(java)
+                    +"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    default: "+yaml(pkg)+"\n");
             IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file));
             assertTrue(error.getMessage().contains("separate from configured package roots"),error.getMessage());
         }
