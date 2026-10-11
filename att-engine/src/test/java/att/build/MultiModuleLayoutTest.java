@@ -97,7 +97,9 @@ class MultiModuleLayoutTest {
         assertTrue(build.contains("att-dist/target/$LOCAL_PACKAGE_NAME.tar.gz"), build);
         assertTrue(build.contains("att-dist/target/$SERVER_PACKAGE_NAME.tar.gz"), build);
         assertTrue(build.contains("MAX_BINARY_PACKAGE_BYTES=25000000"), build);
-        int outputDir = build.indexOf("mkdir -p \"$LOCAL_PACKAGE_DIR/output\"");
+        assertTrue(build.contains("LOCAL_PACKAGE_ROOT=\"$LOCAL_PACKAGE_DIR/packages/default\""), build);
+        assertTrue(build.contains("packages/default/config/config.yaml"), build);
+        int outputDir = build.indexOf("mkdir -p \"$LOCAL_PACKAGE_ROOT/output\"");
         int finalRepack = build.indexOf("tar --no-xattrs -czf \"$LOCAL_ARCHIVE\" \"$LOCAL_PACKAGE_NAME\"");
         int finalExtract = build.indexOf("tar -xzf \"$LOCAL_ARCHIVE\" -C \"$LOCAL_WORK\"", finalRepack);
         int smoke = build.indexOf("./att.sh version | grep -Fx");
