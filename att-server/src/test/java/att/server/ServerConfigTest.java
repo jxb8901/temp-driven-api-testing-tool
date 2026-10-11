@@ -94,6 +94,7 @@ class ServerConfigTest {
                     +"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    default: "+yaml(pkg)+"\n");
             IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file));
             assertTrue(error.getMessage().contains("separate from configured package roots"),error.getMessage());
+            if(data.startsWith(pkg)&&!data.equals(pkg))assertFalse(Files.exists(data));
         }
     }
     @Test void loadsCanonicalReadOnlyPackageMappingsAndCreatesPrivateDataDirectory() throws Exception {
