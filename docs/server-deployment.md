@@ -6,7 +6,7 @@ ATT Server 4.1.0 provides a single-node control plane for submitting ATT Run, De
 
 1. Extract the Local archive into the installation root and set `ATT_HOME` to that directory. The default package root is `$ATT_HOME/packages/default`; it contains its own `config/config.yaml`, `schemas/`, `testcase/`, `templates/`, and top-level `tools/`.
 2. Register package roots beneath an allowed root and ensure the Tomcat service account can read them. The extracted default package can be registered directly as `$ATT_HOME/packages/default`.
-3. Set `server.dataDir` to a directory writable only by the Tomcat service account. `$ATT_HOME/data` is supported when it does not equal, contain, or sit inside any registered package root; `/var/lib/att-server` is another option. Keep it out of package content.
+3. Create `server.dataDir` before startup and make it writable only by the Tomcat service account. The sample uses `$ATT_HOME/data`; it is supported when it does not equal, contain, or sit inside any registered package root. `/var/lib/att-server` is another option. Keep it out of package content.
 4. Copy `$ATT_HOME/config/att-server.example.yaml` to `$ATT_HOME/config/att-server.yaml` or a protected external path, update its absolute paths, and keep credentials out of package content. Do not replace an existing active config during an upgrade.
 5. Deploy `att-server-4.1.0.war` to Tomcat 10.1+. Keep Tomcat's `unpackWARs` enabled so the Server can launch the Worker from `WEB-INF/lib`.
 
