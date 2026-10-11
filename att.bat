@@ -2,11 +2,12 @@
 rem Author: Jeffrey + ChatGPT
 setlocal EnableExtensions DisableDelayedExpansion
 set "ROOT_DIR=%~dp0"
+if not defined ATT_HOME set "ATT_HOME=%ROOT_DIR%"
 cd /d "%ROOT_DIR%" || exit /b 2
 where java >nul 2>&1
 if errorlevel 1 (echo A Java 8 or later runtime is required. 1>&2& exit /b 2)
 set "APP_JAR="
-for %%F in ("%ROOT_DIR%lib\att-*.jar") do if exist "%%~fF" if not defined APP_JAR set "APP_JAR=%%~fF"
+for %%F in ("%ATT_HOME%lib\att-*.jar") do if exist "%%~fF" if not defined APP_JAR set "APP_JAR=%%~fF"
 if defined APP_JAR goto packaged
 set "MISSING_CLASSES="
 if not exist "%ROOT_DIR%att-cli\target\classes\att\FrameworkRunner.class" set "MISSING_CLASSES=%MISSING_CLASSES% att-cli/target/classes/att/FrameworkRunner.class"
@@ -48,8 +49,13 @@ set "CP=%CP%;%M2_REPO%\com\github\virtuald\curvesapi\1.08\curvesapi-1.08.jar"
 set "CP=%CP%;%M2_REPO%\org\yaml\snakeyaml\2.2\snakeyaml-2.2.jar"
 set "CP=%CP%;%M2_REPO%\org\apache\logging\log4j\log4j-api\2.21.1\log4j-api-2.21.1.jar"
 set "CP=%CP%;%ROOT_DIR%lib\*"
-java -cp "%CP%" att.FrameworkRunner %*
+java -Datt.home="%ATT_HOME%" -cp "%CP%" att.FrameworkRunner %*
 exit /b %ERRORLEVEL%
 :packaged
-java -cp "%ROOT_DIR%lib\*" att.FrameworkRunner %*
+if defined ATT_PACKAGE_ROOT (
+  cd /d "%ATT_PACKAGE_ROOT%" || exit /b 2
+) else if exist "%ATT_HOME%packages\default\" (
+  cd /d "%ATT_HOME%packages\default" || exit /b 2
+)
+java -Datt.home="%ATT_HOME%" -cp "%ATT_HOME%lib\*" att.FrameworkRunner %*
 exit /b %ERRORLEVEL%

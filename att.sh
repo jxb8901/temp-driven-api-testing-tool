@@ -2,6 +2,9 @@
 # Author: Jeffrey + ChatGPT
 set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# ATT_HOME is the installation/deployment root (launchers + lib/). Override via environment.
+ATT_HOME="${ATT_HOME:-$ROOT_DIR}"
+export ATT_HOME
 cd "$ROOT_DIR"
 if [ "${1:-}" = "validate" ]; then
   ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-validation-placeholder}"; ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-validation-placeholder}"
@@ -9,11 +12,19 @@ if [ "${1:-}" = "validate" ]; then
   export ORDERS_DB_USERNAME ORDERS_DB_PASSWORD PAYMENT_MQ_USERNAME PAYMENT_MQ_PASSWORD
 fi
 APP_JAR=""
-for candidate in "$ROOT_DIR"/lib/att-*.jar; do if [ -f "$candidate" ]; then APP_JAR="$candidate"; break; fi; done
+for candidate in "$ATT_HOME"/lib/att-*.jar; do if [ -f "$candidate" ]; then APP_JAR="$candidate"; break; fi; done
 if [ -n "$APP_JAR" ]; then
+  # Packaged install: run against a package root under ATT_HOME (default: packages/default).
+  PACKAGE_ROOT="${ATT_PACKAGE_ROOT:-}"
+  if [ -z "$PACKAGE_ROOT" ] && [ -d "$ATT_HOME/packages/default" ]; then
+    PACKAGE_ROOT="$ATT_HOME/packages/default"
+  fi
+  if [ -n "$PACKAGE_ROOT" ]; then
+    cd "$PACKAGE_ROOT"
+  fi
   CP="$APP_JAR"
-  for jar in "$ROOT_DIR"/lib/*.jar; do [ -f "$jar" ] || continue; [ "$jar" = "$APP_JAR" ] && continue; CP="$CP:$jar"; done
-  exec java -cp "$CP" att.FrameworkRunner "$@"
+  for jar in "$ATT_HOME"/lib/*.jar; do [ -f "$jar" ] || continue; [ "$jar" = "$APP_JAR" ] && continue; CP="$CP:$jar"; done
+  exec java -Datt.home="$ATT_HOME" -cp "$CP" att.FrameworkRunner "$@"
 fi
 CLI_DIR="$ROOT_DIR/att-cli"
 ENGINE_DIR="$ROOT_DIR/att-engine"
@@ -62,4 +73,4 @@ for jar in \
   "$HOME"/.m2/repository/org/yaml/snakeyaml/2.2/snakeyaml-2.2.jar \
   "$HOME"/.m2/repository/org/apache/logging/log4j/log4j-api/2.21.1/log4j-api-2.21.1.jar; do CP="$CP:$jar"; done
 for jar in "$ROOT_DIR"/lib/*.jar; do [ -f "$jar" ] || continue; CP="$CP:$jar"; done
-exec java -cp "$CP" att.FrameworkRunner "$@"
+exec java -Datt.home="$ATT_HOME" -cp "$CP" att.FrameworkRunner "$@"
