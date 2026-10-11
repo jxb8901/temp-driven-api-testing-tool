@@ -36,7 +36,7 @@ att/                              # ATT_HOME
     tools/                        # Tool script
 ```
 
-遷移舊版平面 Local 安裝前先備份，並將新版 archive 解壓到暫存目錄。把舊版 `config/` 內容（排除 `att-server.example.yaml`）、`schemas/`、`testcase/`、`templates/`、頂層 `tools/` 及選用的 `sql/` 複製至相對應的 `packages/default/` 目錄。合併時保留目的地已存在的檔案；手動檢查 `config/config.yaml` 及自訂 package 檔案的衝突。請分開保留 `config/tools/`（Tool 設定）及頂層 `tools/`（script）。在遷移後的 package 通過驗證及執行前，保留舊的平面目錄。將 Server registry entry 更新至新 package root，並為 Tomcat 設定 `ATT_HOME` 或 `-Datt.home`。Server state 必須留在 package root 以外，安裝替換或升級時須保留；Local archive 不包含 `data/` 或 active Server config。
+遷移舊版平面 Local 安裝前先備份，並將新版 archive 解壓到暫存目錄。把舊版 `config/` 內容（排除 `att-server.example.yaml` 及 `att-server.yaml`）、`schemas/`、`testcase/`、`templates/`、頂層 `tools/` 及選用的 `sql/` 複製至相對應的 `packages/default/` 目錄。合併時保留目的地已存在的檔案；手動檢查 `config/config.yaml` 及自訂 package 檔案的衝突。請分開保留 `config/tools/`（Tool 設定）及頂層 `tools/`（script）。既有 active Server config 應留在 `ATT_HOME/config/att-server.yaml` 或受保護的外部路徑；不可複製到 package root 或在遷移時覆寫。在遷移後的 package 通過驗證及執行前，保留舊的平面目錄。將 Server registry entry 更新至新 package root，並為 Tomcat 設定 `ATT_HOME` 或 `-Datt.home`。Server state 必須留在 package root 以外，安裝替換或升級時須保留；Local archive 不包含 `data/` 或 active Server config。
 
 ## 設定
 
