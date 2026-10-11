@@ -59,5 +59,7 @@ public final class ResourceInspection {
     public static final class Diagnostic {
         public String code;
         public String summary;
+        public String field;
+        public String resourceId;
     }
 }

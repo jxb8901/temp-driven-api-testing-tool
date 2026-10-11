@@ -10,10 +10,12 @@ public final class ServerApi {
     public static final String PACKAGE_RESOURCES = PACKAGES + "/{packageId}/resources";
     public static final String PACKAGE_RESOURCE = PACKAGE_RESOURCES + "/{kind}/{resourceId}";
     public static final String PACKAGE_RESOURCE_SOURCE = PACKAGE_RESOURCE + "/source";
+    public static final String PACKAGE_RESOURCE_DEBUG_FORM = PACKAGE_RESOURCE + "/debug-form";
     public static final String PACKAGE_CONFIGURATION = PACKAGES + "/{packageId}/configuration";
     public static final String PACKAGE_CONFIGURATION_EFFECTIVE = PACKAGE_CONFIGURATION + "/effective";
     public static final String PACKAGE_CONFIGURATION_COMPARE = PACKAGE_CONFIGURATION + "/compare";
     public static final String JOBS = PREFIX + "/jobs";
+    public static final String DEBUG_DRAFTS = PREFIX + "/drafts/debug";
     public static final String EVENTS_MEDIA_TYPE = "text/event-stream";
     private ServerApi() { }
 }

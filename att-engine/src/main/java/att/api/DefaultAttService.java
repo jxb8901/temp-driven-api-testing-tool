@@ -103,7 +103,8 @@ public final class DefaultAttService implements AttService {
         String requestedDebugId = request.debugId() == null || request.debugId().trim().isEmpty()
                 ? request.runId() : request.debugId();
         ExecutionOptions opts=options(request,"debug",null,null,null,null,null,false,false,false,false,"selected",request.targetType(),request.targetId(),request.input(),request.unsafeFailureDetails(),null,null,null,null,null,null,null,null,null,null,request.overrides())
-                .withRunId(requestedDebugId).withObserver(request.observer());
+                .withRunId(requestedDebugId).withObserver(request.observer())
+                .withInlineDebugInput(request.inlineInput());
         long configPhase=profile==null?0L:profile.begin();
         FrameworkConfig cfg=config(request);
         if(profile!=null)profile.end("configLoadMs",configPhase);

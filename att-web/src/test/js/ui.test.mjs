@@ -13,7 +13,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
 }
 function allText(node) { return [node.textContent || '', ...(node.children || []).map(allText)].join(' '); }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [] } = {}) {
+function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [], debugFormResponse = null, debugDraftResponses = [], debugSubmitErrors = [] } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
@@ -32,6 +32,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     if (!elements.has(id)) elements.set(id, new Element());
     return elements.get(id);
   };
+  node('submit-form').elements.environment = Object.assign(new Element(), { value: '' });
   const document = {
     baseURI: 'https://example.test/tools/att/ui/',
     getElementById: node,
@@ -42,7 +43,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     addEventListener(name, listener) { this.listeners[name] = listener; }
   };
   const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [], pendingHomeJobs = [], pendingResults = [], pendingConfigurations = [];
-  const state = { jobStatus, resourcePage: 0 };
+  const state = { jobStatus, resourcePage: 0, debugDraft: 0, debugSubmit: 0 };
   let rejectHome;
   const delayedHome = new Promise((_, reject) => { rejectHome = reject; });
   class EventSource {
@@ -72,12 +73,29 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
       return { ok: false, status: 404, headers: { get: () => 'application/json' },
         json: async () => ({ error: { summary: 'Job not found' } }) };
     }
+    if (path === 'jobs/debug' && options.method === 'POST') {
+      const failure = debugSubmitErrors[state.debugSubmit++];
+      if (failure) return { ok: false, status: failure.status, headers: { get: () => 'application/json' },
+        json: async () => ({ error: { code: failure.code || 'ATT-SERVER-DRAFT-STALE', summary: failure.summary || 'Debug draft is no longer available' } }) };
+      return jsonResponse({ jobId: 'J_DEBUG' });
+    }
     let result;
     if (path === 'version') result = { apiVersion: version };
     else if (path === 'packages') result = { items: [{ packageId: 'payments' }] };
     else if (/^packages\/[^/]+\/resources\?/.test(path)) result = resourcePages.length
       ? resourcePages[Math.min(state.resourcePage++, resourcePages.length - 1)]
       : { items: resourceItems, total: resourceItems.length, nextCursor: null };
+    else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+\/debug-form(?:\?|$)/.test(path)) result = debugFormResponse || {
+      input: { schemaVersion: 'att-debug/v1.2', inputs: { payload: { $attDebugKeepDefault: '/inputs/payload' } } },
+      target: { type: 'template', id: 'TEST' }, redacted: true
+    };
+    else if (path === 'drafts/debug' && options.method === 'POST') {
+      const index = state.debugDraft++;
+      result = debugDraftResponses[Math.min(index, debugDraftResponses.length - 1)] || {
+        draftId: `D${index + 1}`, preview: {}, previewYaml: 'schemaVersion: att-debug/v1.2',
+        redacted: true, expiresAt: new Date(Date.now() + 60000).toISOString()
+      };
+    }
     else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+\/source$/.test(path)) result = { available: true, text: '<img src=x onerror=alert(1)>', format: 'yaml' };
     else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+$/.test(path)) result = { resource: resourceItems[0], definition: { action: 'log' }, diagnostics: [] };
     else if (/^packages\/[^/]+\/configuration\/effective\?/.test(path)) result = configuration.effective || {};
@@ -107,6 +125,13 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     resolveResult: (index, response) => pendingResults[index](response),
     rejectCancellation: (index, error) => pendingCancellations[index].reject(error),
     failHome: error => rejectHome(error) };
+}
+
+async function openDebugForm(ui, resource) {
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'package resource index');
+  await ui.node('resource-list').children[0].children[0].listeners.click();
+  await ui.node('debug-resource').listeners.click();
+  await waitFor(() => ui.node('debug-form-editor').hidden === false, 'Debug form');
 }
 
 test('rejects an incompatible API before accessing packages', async () => {
@@ -153,6 +178,35 @@ test('shows invalid and source-unavailable resource states in the detail view', 
   assert.equal(ui.node('resource-state').textContent, 'Invalid resource: Flow definition is invalid');
   assert.equal(ui.node('resource-source-status').textContent, 'Source is not available for this resource.');
   assert.equal(ui.node('show-resource-source').hidden, true);
+});
+
+test('revalidates an expired Debug draft before submission', async () => {
+  const resource = { resourceId: 'template.test', type: 'template', logicalId: 'TEST', name: 'Test', state: 'ready', sourceAvailable: false };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [resource], debugDraftResponses: [
+    { draftId: 'D_EXPIRED', preview: {}, redacted: true, expiresAt: new Date(Date.now() + 5000).toISOString() },
+    { draftId: 'D_FRESH', preview: {}, redacted: true, expiresAt: new Date(Date.now() + 60000).toISOString() }
+  ] });
+  await openDebugForm(ui, resource);
+  await ui.node('preview-debug-form').listeners.click();
+  assert.equal(ui.calls.filter(call => call.path === 'drafts/debug').length, 1);
+  await ui.node('submit-debug-form').listeners.click();
+  await waitFor(() => ui.location.hash === '#/jobs/J_DEBUG', 'Debug job submission');
+  assert.equal(ui.calls.filter(call => call.path === 'drafts/debug').length, 2);
+  const submitted = ui.calls.filter(call => call.path === 'jobs/debug').map(call => JSON.parse(call.options.body));
+  assert.deepEqual(submitted, [{ packageId: 'payments', draftId: 'D_FRESH' }]);
+});
+
+test('clears a server-invalidated Debug draft and offers a fresh validation', async () => {
+  const resource = { resourceId: 'template.test', type: 'template', logicalId: 'TEST', name: 'Test', state: 'ready', sourceAvailable: false };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [resource], debugSubmitErrors: [{ status: 404 }] });
+  await openDebugForm(ui, resource);
+  await ui.node('preview-debug-form').listeners.click();
+  await ui.node('submit-debug-form').listeners.click();
+  await waitFor(() => ui.node('debug-form-status').textContent.includes('Server restarted'), 'stale draft message');
+  assert.equal(ui.calls.filter(call => call.path === 'drafts/debug').length, 1);
+  await ui.node('submit-debug-form').listeners.click();
+  await waitFor(() => ui.location.hash === '#/jobs/J_DEBUG', 'fresh Debug job submission');
+  assert.equal(ui.calls.filter(call => call.path === 'drafts/debug').length, 2);
 });
 
 test('shows safe index diagnostics when some package resources cannot be indexed', async () => {

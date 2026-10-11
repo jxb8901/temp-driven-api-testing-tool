@@ -2,6 +2,8 @@ package att.server;
 
 import att.Version;
 import att.server.api.ConfigurationInspection;
+import att.server.api.DebugDraft;
+import att.server.api.DebugForm;
 import att.server.api.ResourceInspection;
 import att.server.api.ServerApi;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -39,12 +41,14 @@ public final class ApiServlet extends HttpServlet {
             if("/version".equals(path)){json(res,200,Map.of("version",Version.PRODUCT,"apiVersion",ServerApi.VERSION,"buildTime",Version.BUILD_TIME,"gitCommit",Version.GIT_COMMIT,"javaMinimum",17,"requestId",requestId));return;}
             boolean resourceRequest=resourcePath(path);
             boolean configurationRequest=configurationPath(path);
-            boolean inspectionRequest=resourceRequest||configurationRequest;
+            boolean draftRequest=path.matches("/drafts/D[0-9A-F]{32}");
+            boolean inspectionRequest=resourceRequest||configurationRequest||draftRequest;
             if(inspectionRequest&&req.getUserPrincipal()==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
             String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
             if("/metrics".equals(path)){Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
             if(resourceRequest){resourceGet(req,res,path,requestId,req.getUserPrincipal().getName());return;}
             if(configurationRequest){configurationGet(req,res,path,requestId,req.getUserPrincipal().getName());return;}
+            if(draftRequest){DebugDraft response=ServerRuntime.JSON.convertValue(runtime.getDebugDraft(segment(path,2),req.getUserPrincipal().getName()),DebugDraft.class);response.requestId=requestId;json(res,200,response);return;}
             if("/packages".equals(path)){json(res,200,Map.of("items",runtime.packages(),"requestId",requestId));return;}
             if(path.startsWith("/packages/")){String id=segment(path,2);json(res,200,runtime.packageView(id));return;}
             if("/jobs".equals(path)){json(res,200,Map.of("items",runtime.store.list(100),"requestId",requestId));return;}
@@ -54,9 +58,12 @@ public final class ApiServlet extends HttpServlet {
             if(path.matches("/jobs/[^/]+/result")){Map<String,Object> result=runtime.resultRecord(segment(path,2));result.put("requestId",requestId);json(res,200,result);return;}
             if(path.matches("/jobs/[^/]+")){Map<String,Object> view=runtime.jobRecord(segment(path,2));view.put("requestId",requestId);json(res,200,view);return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
-        } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+        } catch(ServerRuntime.DebugValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
+          catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(ServerRuntime.StaleCursorException e){error(res,409,"ATT-RESOURCE-CURSOR-STALE","The package resources changed; refresh the Explorer",requestId);}
+          catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","Package content changed after preview; rebuild the Debug draft",requestId);}
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.DraftCapacityException e){error(res,429,"ATT-SERVER-DRAFT-CAPACITY","Debug draft capacity is full; retry after an existing draft expires",requestId);}
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
@@ -65,8 +72,10 @@ public final class ApiServlet extends HttpServlet {
     @Override protected void doPost(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req);String principal=principal(req);
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+        boolean createDebugDraft="/drafts/debug".equals(path);
         String command=path.startsWith("/jobs/")?path.substring("/jobs/".length()):"";
-        if(!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        if(!createDebugDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        if(createDebugDraft&&req.getUserPrincipal()==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         try {
             if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
             if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
@@ -75,8 +84,20 @@ public final class ApiServlet extends HttpServlet {
             JsonNode input;
             try{input=ServerRuntime.JSON.readTree(body);}catch(JsonProcessingException malformed){error(res,400,"ATT-SERVER-INVALID-REQUEST","Request body is not valid JSON",requestId);return;}
             if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
+            if(createDebugDraft){DebugDraft draft=ServerRuntime.JSON.convertValue(runtime.createDebugDraft(input,req.getUserPrincipal().getName()),DebugDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
+            if("debug".equals(command)&&input.has("draftId")){
+                if(req.getUserPrincipal()==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+                Map<String,Object> job=runtime.submitDebugDraft(input,req.getUserPrincipal().getName());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);return;
+            }
             Map<String,Object> job=runtime.submit(command,input,principal);job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);
         } catch(ServerRuntime.QueueFullException e){error(res,429,"ATT-SERVER-CAPACITY-EXCEEDED",e.getMessage(),requestId);}
+          catch(ServerRuntime.DebugValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
+          catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","Package content changed after preview; rebuild the Debug draft",requestId);}
+          catch(ServerRuntime.DraftCapacityException e){error(res,429,"ATT-SERVER-DRAFT-CAPACITY","Debug draft capacity is full; retry after an existing draft expires",requestId);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
+          catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The request could not be completed",requestId);getServletContext().log("ATT Server submission failed id="+requestId,e);}
     }
@@ -137,17 +158,22 @@ public final class ApiServlet extends HttpServlet {
             String packageId=parts[2],action,kind=null,resourceId=null;String query=req.getParameter("query"),cursor=req.getParameter("cursor");int limit=parseLimit(req.getParameter("limit"));
             if(parts.length==4)action="list";
             else if(parts.length==7&&"source".equals(parts[6])){action="source";kind=parts[4];resourceId=parts[5];}
+            else if(parts.length==7&&"debug-form".equals(parts[6])){action="debug-form";kind=parts[4];resourceId=parts[5];}
             else if(parts.length==6){action="detail";kind=parts[4];resourceId=parts[5];}
             else throw new ServerRuntime.NotFoundException();
             if("list".equals(action)){kind=req.getParameter("type");resourceId=null;}
             if(resourceId!=null&&(resourceId.isEmpty()||resourceId.length()>512))throw new IllegalArgumentException("resourceId is invalid");
-            Map<String,Object> result=runtime.inspectResource(packageId,action,kind,resourceId,query,limit,cursor,principal);
+            Map<String,Object> result="debug-form".equals(action)
+                    ?runtime.inspectDebugForm(packageId,kind,resourceId,req.getParameter("environment"),principal)
+                    :runtime.inspectResource(packageId,action,kind,resourceId,query,limit,cursor,principal);
             if("list".equals(action)) {
                 ResourceInspection.Page response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Page.class);
                 response.requestId=requestId;json(res,200,response);
             } else if("detail".equals(action)) {
                 ResourceInspection.Detail response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Detail.class);
                 response.requestId=requestId;json(res,200,response);
+            } else if("debug-form".equals(action)) {
+                DebugForm response=ServerRuntime.JSON.convertValue(result,DebugForm.class);response.requestId=requestId;json(res,200,response);
             } else {
                 ResourceInspection.Source response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Source.class);
                 response.requestId=requestId;json(res,200,response);
@@ -200,6 +226,10 @@ public final class ApiServlet extends HttpServlet {
     private static String requestId(HttpServletRequest req,HttpServletResponse res){String value=req.getHeader("X-Request-ID");if(value==null||!value.matches("[A-Za-z0-9._-]{1,80}"))value=UUID.randomUUID().toString();res.setHeader("X-Request-ID",value);return value;}
     private static void json(HttpServletResponse res,int status,Object body)throws IOException{res.setStatus(status);res.setCharacterEncoding("UTF-8");res.setContentType("application/json");ServerRuntime.JSON.writeValue(res.getOutputStream(),body);}
     private static void error(HttpServletResponse res,int status,String code,String summary,String requestId)throws IOException{Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);json(res,status,Map.of("error",e));}
+    private static void error(HttpServletResponse res,int status,String code,String summary,String requestId,List<Map<String,Object>> diagnostics)throws IOException{
+        Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);
+        Map<String,Object> response=new LinkedHashMap<>();response.put("error",e);response.put("diagnostics",diagnostics);json(res,status,response);
+    }
     private static String safeDetail(IllegalArgumentException e){String m=e.getMessage();return m==null?"Invalid request":m.length()>300?m.substring(0,300):m;}
 }
 

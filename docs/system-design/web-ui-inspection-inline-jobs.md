@@ -1,6 +1,6 @@
 # ATT Web UI inspection and inline job contracts
 
-Status: Issue #176 P0 contract baseline. P1 implements authenticated package resource discovery, safe projections, encrypted pagination, and the Package Resource Explorer. Configuration views, drafts, resource-scoped Debug, Quick Load, and Advanced Load remain follow-up phases.
+Status: Issue #176 P0 contract baseline. P1 implements authenticated package resource discovery and the Package Resource Explorer. P2 implements declared/effective configuration inspection. P3 adds target-scoped Debug forms, in-memory drafts, and typed inline Debug execution. Quick Load and Advanced Load remain follow-up phases.
 
 ## Purpose and scope
 
@@ -20,7 +20,7 @@ This design preserves the existing package-relative job API and CLI behavior. It
 
 ## API boundary
 
-The routes below define the public v1 contract. P1 implements the first three resource discovery routes and typed response DTOs in `att-server-api`. P2 implements the configuration inspection routes and typed response envelope. The `debug-form`, draft, and inline-job routes remain future work. The REST layer must not deserialize new UI requests directly into `att-worker.WorkerRequest`.
+The routes below define the public v1 contract. P1 implements resource discovery and P2 implements configuration inspection. P3 implements `debug-form`, Debug draft, and inline Debug routes with typed response DTOs in `att-server-api`. Load draft and inline-job routes remain future work. The REST layer must not deserialize new UI requests directly into `att-worker.WorkerRequest`.
 
 ### Resource discovery
 
@@ -36,6 +36,8 @@ List responses carry typed resource summaries, safe relationship references, and
 Details expose only fields supported by the resource type. Case details retain logical suite, group, Case ID, row or sheet provenance, tags, and mapped input/expected-value metadata. Template, Flow, and Tool details expose their parsed definitions and resolvable references. Unresolved references are diagnostics. Only Case details provide Run. Only Template, Flow, and Tool details provide Debug and Quick Load.
 
 Source responses are generated from a parsed, redacted projection. They are not arbitrary file reads. A Tool script is available only when its exact package-relative path appears in the server-side `server.inspection.safeTextSources` allowlist. Binary-only or unapproved source is reported as unavailable. A source response is limited to 64 KiB; a detail response is limited to 256 KiB; larger content is unavailable with a size-limit state. The private package-content digest is used to detect stale cursors and is never returned.
+
+The Debug form endpoint accepts only Template, Flow, or Tool resource IDs. It returns the target's typed `att-debug/v1.2` defaults from its optional sidecar; if the sidecar is absent, it returns valid empty defaults. Sensitive values are masked before serialization. The browser edits JSON objects for `inputs` on all targets, `vars` on Template/Flow targets, and `arguments` on Tool targets; it does not evaluate expressions. Tool `vars` and Template/Flow Tool arguments are rejected.
 
 ### Configuration inspection
 
@@ -57,11 +59,11 @@ POST /api/v1/jobs/debug
 POST /api/v1/jobs/load
 ```
 
-Draft creation validates the full typed request and its selected target closure. It returns a safe preview, validation diagnostics, the package revision, and an opaque draft ID. The draft store is in memory, bounded to 128 active drafts across the Server and 16 per authenticated principal, and expires drafts after 10 minutes. Server restart invalidates all drafts; clients must rebuild and revalidate them.
+Debug draft creation validates the typed request and selected target closure. It returns a safe YAML preview, validation diagnostics, and an opaque draft ID. Drafts are bound to the authenticated Servlet Principal, package, environment, target, and private package revision. The in-memory store is bounded to 128 active drafts across the Server and 16 per authenticated principal; each expires after 10 minutes. Server restart invalidates drafts, so clients must rebuild and revalidate them.
 
-A draft captures normalized values and an internal content digest for the target, sidecars, config, and referenced resource closure. The digest never leaves the Server. The Server checks the closure again when the draft is submitted and immediately before Worker start. A changed closure rejects the draft with HTTP 409 and `ATT-SERVER-DRAFT-STALE`. The submitted Worker input is the same immutable typed value validated for preview.
+A draft captures normalized values and an internal content digest for the target, sidecars, config, and referenced resource closure. The digest never leaves the Server. The Server checks the package revision when the draft is submitted and immediately before Worker start. A change detected during submission returns HTTP 409 and `ATT-SERVER-DRAFT-STALE`; a change detected after job acceptance marks the job `INVALID` with that diagnostic. The submitted Worker input is the same immutable typed value validated for preview.
 
-Debug and Load job submission accepts `packageId` and `draftId`; it does not accept an arbitrary file path. Load submission also requires `confirmed: true` as an explicit UI acknowledgement. This acknowledgement is not an authorization boundary and does not replace server-side limits. Existing path-based `debugInput` and `scenario` submissions remain available to compatible clients.
+P3 Debug job submission accepts `packageId` and `draftId`; it does not accept an arbitrary file path. Quick Load and Advanced Load drafts and inline submission are follow-up phases. Existing path-based `debugInput` and `scenario` submissions remain available to compatible clients.
 
 Example Debug draft request:
 
@@ -102,7 +104,7 @@ The Load draft response includes the complete normalized scenario when every fie
 
 ## Typed Debug and Load rules
 
-Debug is available only from a selected Template, Flow, or Tool detail and contains one fixed target. Template and Flow forms use typed `inputs` and `vars`; Tool forms use typed `arguments` and reject `vars`. The form reads safe defaults from the package-authored `debug.yaml` when present. When absent, the Server creates valid `att-debug/v1.2` defaults in memory. Sidecars remain unchanged. Expression strings and native scalar, map, and list values are preserved; the browser does not evaluate them.
+Debug is available only from a selected Template, Flow, or Tool detail and contains one fixed target. All forms use typed `inputs`; Template and Flow also use `vars`, while Tool uses `arguments` and rejects `vars`. The form reads safe defaults from the package-authored `debug.yaml` when present. When absent, the Server creates valid `att-debug/v1.2` defaults in memory. Sidecars remain unchanged. Expression strings and native scalar, map, and list values are preserved; the browser does not evaluate them.
 
 Quick Load uses one fixed selected target and composes one Workload. It reads `load.visualuser.yaml` or `load.arrivalrate.yaml` as a read-only package policy when present, otherwise it uses the bundled policy fallback. It does not require a stored Debug input or Load scenario. Advanced Load selects VU or Arrival Rate before adding Workloads. VU supports single-target or weighted-mix Workloads. Arrival Rate supports multiple single-target Workloads and rejects mixes. Every Workload uses the same model and timing envelope. Debug-only fields and Debug-local Testdata are not copied into Load; users configure supported Load-level fields explicitly.
 
@@ -119,7 +121,7 @@ authenticated browser
   -> Engine executes through the existing service and scheduler
 ```
 
-The Server alone supplies the package root, output directory, Worker executable, and classpath. Public DTOs cannot set them. The Worker protocol gains explicit typed inline Debug and Load fields; it does not accept arbitrary external paths for those fields. Engine input objects are immutable copies. Debug defaults use the existing `DebugEngine` sidecar rules, with blank typed defaults when a sidecar is absent. Load scenarios use the current `att-load/v1.6` schema and `LoadScenarioLoader` semantic checks.
+The Server alone supplies the package root, output directory, Worker executable, and classpath. Public DTOs cannot set them. P3 adds an explicit typed inline Debug field to the Worker protocol; later Load phases add their own typed fields without accepting arbitrary external paths. Engine input objects are immutable copies. Debug defaults use the existing `DebugEngine` sidecar rules, with blank typed defaults when a sidecar is absent. Load scenarios use the current `att-load/v1.6` schema and `LoadScenarioLoader` semantic checks.
 
 Job metadata continues to store the command and package ID summary, not the submitted input or draft contents. Drafts are not persisted. Temporary values exist only in Server and Worker memory and are cleared on expiry, cancellation, terminal completion, or Server shutdown.
 
@@ -172,6 +174,8 @@ The [4.1.0 capture](baselines/issue-176-resource-discovery-large-4.1.0.json) was
 
 The report preserves raw samples and package size. With five measured runs, p95 is the highest observed sample and is not a stable distribution estimate; timing results are descriptive, not portable pass/fail thresholds.
 
+The persistent inspector index also serves Debug form and draft validation requests. The execution Worker performs one fresh package revision check at the side-effect boundary. The opt-in `DebugDraftPipelinePerformanceBenchmark` measures form, draft creation, preview, submission, first-event, and completion latency against multiple Excel workbooks. Run it with `mvn -pl att-server -am -Dtest=DebugDraftPipelinePerformanceBenchmark -Datt.server.benchmark.debugDraft=true -Dsurefire.failIfNoSpecifiedTests=false test`; it writes JSON under `att-server/target/` by default. The recorded 4.1.0 baseline is [issue-176-debug-draft-pipeline-4.1.0.json](baselines/issue-176-debug-draft-pipeline-4.1.0.json). On its five-workbook, 1,500-Case fixture, three samples measured a p50 of 23.1 ms for draft creation, 0.31 ms for preview, 886 ms for submission, and 892 ms from draft creation through the first event (936 ms including form loading). The benchmark exercises ServerRuntime APIs without browser rendering; timings are descriptive for the recorded Mac OS X aarch64 / Java 26 host.
+
 New inspection and draft endpoints always require a Servlet Principal, even when a deployment enables anonymous access for the legacy API. Unknown packages and resources return the same not-found shape. New DTOs reject unknown fields and ambiguous combinations. Existing requests remain backward compatible.
 
 Inline Load is disabled by default. Enabling `server.inlineLoad.enabled` requires positive server-owned maxima for `maxWorkloads`, `maxTargets`, `maxTotalUsers`, `maxAggregateArrivalRatePerSecond`, `maxConcurrentPerWorkload`, and `maxDurationSeconds`. The Server enforces these caps after Engine validation and before queue admission. VU and Arrival Rate cannot mix; Arrival Rate cannot contain a weighted mix; workload timing envelopes must match; Engine validation remains authoritative. The existing `maxConcurrentLoad` and general Worker queue limits still apply.
@@ -186,13 +190,15 @@ New endpoints use the existing `error` envelope and stable codes:
 | 401 | `ATT-SERVER-AUTHENTICATION-REQUIRED` | No authenticated Servlet Principal |
 | 404 | `ATT-SERVER-NOT-FOUND` | Package, resource, or draft is unavailable |
 | 409 | `ATT-RESOURCE-CURSOR-STALE` | Package content changed while listing resources |
+| 409 | `ATT-SERVER-DRAFT-STALE` | Package content changed after Debug preview |
 | 413 | `ATT-SERVER-REQUEST-TOO-LARGE` | Request body exceeds its configured size limit |
 | 413 | `ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE` | Projected inspection response exceeds its configured size limit |
 | 429 | `ATT-SERVER-CAPACITY-EXCEEDED` | Normal job admission limit reached |
+| 429 | `ATT-SERVER-DRAFT-CAPACITY` | In-memory Debug draft limit reached |
 | 503 | `ATT-SERVER-INSPECTION-CAPACITY` | Bounded inspection queue is full |
 | 504 | `ATT-SERVER-INSPECTION-TIMEOUT` | Inspector Worker exceeded its time limit |
 
-Validation failures include structured field diagnostics with logical resource IDs. They never include source lines or physical paths. An oversized projected source is returned as unavailable with a size-limit state, not as a partial file. New request bodies also use the existing `maxRequestBytes` cap.
+Debug validation failures include a top-level `diagnostics` array with safe `code`, `summary`, `field`, and logical `resourceId` values. They never include source lines, parser excerpts, or physical paths. An oversized projected source is returned as unavailable with a size-limit state, not as a partial file. New request bodies also use the existing `maxRequestBytes` cap.
 
 ## Implementation and verification contract
 
@@ -201,7 +207,7 @@ Validation failures include structured field diagnostics with logical resource I
 | P0 | This public contract, visibility matrix, data flow, and security design | API examples and test matrix reviewed; no unresolved path, secret, or draft-consistency decision |
 | P1 | Bounded Package Resource Resolver adapter, public discovery DTOs/routes, Package Explorer | All resource types, references, provenance, pagination, stale refresh, auth, size, traversal, symlink, and redaction coverage |
 | P2 | Declared/effective configuration and profile comparison | Environment selection matches `FrameworkConfigLoader`; hidden fields do not leak through values or comparisons |
-| P3 | Typed Debug form and inline Debug execution | Sidecar and no-sidecar paths for Template, Flow, and Tool; Worker isolation; package unchanged |
+| P3 | Typed Debug form, bounded in-memory drafts, and inline Debug execution | Sidecar and no-sidecar paths for Template, Flow, and Tool; Worker isolation; package unchanged; draft principal binding and stale-revision rejection |
 | P4 | Quick Load and shared typed scenario composer | VU and Arrival Rate templates/fallbacks; one-workload execution without stored Debug or Load files |
 | P5 | Advanced multi-workload builder and inline Load execution | VU mix and single-target scenarios, Arrival Rate multi-single-target scenarios, invalid model combinations, preview-to-run identity, limits, SSE, and cancellation |
 | P6 | Security, compatibility, docs, packaging, and rollout gate | Full acceptance matrix, EN/ZH user docs, Java 8/17 compatibility, packaged WAR, and hosted CI |

@@ -113,11 +113,21 @@ public final class WorkerMain {
             else if(error instanceof PackageResourceInspector.ResourceNotFoundException) { code="ATT-RESOURCE-NOT-FOUND"; message="Package resource was not found"; }
             else if(error instanceof PackageResourceInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package resource response exceeded the configured limit"; }
             else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured limit"; }
+            else if(error instanceof PackageResourceInspector.StaleResourceCursorException&&"debug".equals(request.command)&&request.expectedRevisionDigest!=null) { code="ATT-SERVER-DRAFT-STALE"; message="Package content changed after preview; rebuild the Debug draft"; exit=2; status="INVALID"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException) { code="ATT-RESOURCE-CURSOR-STALE"; message="The package resources changed; refresh the Explorer"; }
             else if(error instanceof PackageConfigurationInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package configuration response exceeded the configured limit"; }
             else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
-            emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message)));
+            Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message));
+            if("inspect".equals(request.command)&&("debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction))
+                    &&error instanceof att.validation.DiagnosticException) {
+                att.validation.DiagnosticException typed=(att.validation.DiagnosticException)error;
+                diagnostic.put("summary",DiagnosticSanitizer.redactText(typed.summary()));
+                if(typed.field()!=null)diagnostic.put("field",DiagnosticSanitizer.redactText(typed.field()));
+                String resourceId=request.inspectionTargetId==null?request.inspectionResourceId:request.inspectionTargetId;
+                if(resourceId!=null)diagnostic.put("resourceId",DiagnosticSanitizer.redactText(resourceId));
+            }
+            emit(WorkerEvent.Type.DIAGNOSTIC,diagnostic);
             emitResult(fields("status",status,"exitCode",exit,"result",fields("executionId",null,"status",status,"exitCode",exit)));
             return exit;
         }
@@ -128,7 +138,11 @@ public final class WorkerMain {
         Path config=path(r.config); Path output=path(r.outputDirectory);
         AttService service=new DefaultAttService();
         if("run".equals(r.command)) return service.run(new RunRequest(root,config,r.environment,output,r.runId,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),bool(r.rerunFailed),bool(r.dryRun),bool(r.failFast),null,"reject",false,event -> emitExecution(event)));
-        if("debug".equals(r.command)) { Map<String,Object> t=requiredTarget(r); return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides)); }
+        if("debug".equals(r.command)) { Map<String,Object> t=requiredTarget(r);
+            if(r.expectedRevisionDigest!=null) new PackageResourceInspector(root,config,r.environment,
+                    r.safeTextSources,r.maxSourceBytes==null?65536:r.maxSourceBytes,
+                    r.maxResponseBytes==null?262144:r.maxResponseBytes).verifyRevision(r.expectedRevisionDigest);
+            return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides,false,null,r.inlineDebugInput)); }
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
             att.load.LoadEventListener observer = event -> { try { emit(WorkerEvent.Type.PROGRESS, event.toMap(root)); } catch(Exception error) { throw new IllegalStateException(error); } };
             return service.load(new LoadRequest(root,config,r.environment,output,r.runId,path(r.scenario),optionalText(t,"type"),optionalText(t,"id"),l.get("users"),l.get("arrivalRate"),l.get("warmup"),l.get("rampUp"),l.get("duration"),l.get("rampDown"),l.get("thinkTime"),l.get("maxConcurrent"),l.get("overloadPolicy"),r.overrides,observer)); }
@@ -146,6 +160,16 @@ public final class WorkerMain {
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
             PackageResourceInspector inspector = resourceInspector(root, config, r);
+            if("debug-form".equals(r.inspectionAction)) {
+                Map<String,Object> inspected=inspector.inspectDebugForm(r.inspectionType,r.inspectionResourceId,r.expectedRevisionDigest);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
+            if("debug-input".equals(r.inspectionAction)) {
+                Map<String,Object> inspected=inspector.validateDebugInput(r.inspectionType,r.inspectionTargetId,r.inlineDebugInput);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
             Map<String,Object> inspected = inspector.inspect(r.inspectionAction, r.inspectionType,
                     r.inspectionResourceId, r.inspectionQuery,
                     r.inspectionOffset == null ? 0 : r.inspectionOffset,

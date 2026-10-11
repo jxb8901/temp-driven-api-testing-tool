@@ -58,7 +58,7 @@ Server state is stored in `dataDir/db/`. Each job uses `dataDir/jobs/<jobId>/` f
 
 ## Authentication and identity
 
-Tomcat authenticates requests. ATT Server reads `HttpServletRequest.getUserPrincipal()` and requires a Principal on package, resource-inspection, job, result, event, and artifact endpoints. The new resource-inspection endpoints always require a real Servlet Principal, even when anonymous access is enabled for the legacy API. Health and version may be anonymous. The principal name is stored with job and audit metadata and is not sent to the Worker or exposed in ATT expression Context.
+Tomcat authenticates requests. ATT Server reads `HttpServletRequest.getUserPrincipal()` and requires a Principal on package, resource-inspection, Debug draft, job, result, event, and artifact endpoints. The new resource-inspection and Debug draft endpoints always require a real Servlet Principal, even when anonymous access is enabled for the legacy API. Health and version may be anonymous. The principal name is stored with job and audit metadata and is not sent to the Worker or exposed in ATT expression Context.
 
 State-changing requests require `application/json`; requests carrying an `Origin` must match the request origin. Behind a TLS-terminating proxy, configure Tomcat's `RemoteIpValve` to derive the Servlet scheme, host, and port from the proxy's forwarded headers. Set `internalProxies` to only the actual proxy addresses, and ensure the proxy removes client-supplied `Forwarded`/`X-Forwarded-*` headers before adding its own. For example, adapt these header names and trusted addresses to the proxy:
 
@@ -87,7 +87,11 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 | `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | List safe Case, Template, Flow, and Tool projections |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | Read one safe resource definition and references |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | Read a redacted YAML projection or allowlisted Tool script |
-| `POST` | `/jobs/run`, `/jobs/debug`, `/jobs/load`, `/jobs/validate` | Submit one job |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/debug-form?environment=SIT` | Read safe target-scoped Debug defaults |
+| `POST` | `/drafts/debug` | Validate a fixed-target Debug input and create an in-memory draft |
+| `GET` | `/drafts/{draftId}` | Read the safe preview for an owned Debug draft |
+| `POST` | `/jobs/debug` | Submit an owned Debug draft |
+| `POST` | `/jobs/run`, `/jobs/load`, `/jobs/validate` | Submit one path-based job |
 | `GET` | `/jobs`, `/jobs/{jobId}` | List recent jobs or read job status |
 | `GET` | `/jobs/{jobId}/result` | Read the canonical result and diagnostic |
 | `GET` | `/jobs/{jobId}/events` | Observe retained and live job events |
@@ -153,6 +157,38 @@ GET /api/v1/packages/payments/resources/template/{resourceId}/source
 The detail response contains `resource`, `definition`, `diagnostics`, and `requestId`. The source response contains `resource`, `available`, `format`, `text`, `redacted`, and `requestId`. For unavailable source, `available` is `false`, `reason` is `source-unavailable` or `size-limit`, and no partial text is returned. References with no matching resource have `resolution: "unresolved"` and a stable resource diagnostic.
 
 Invalid list parameters return `400`; unknown packages/resources return the same `404` shape. Stale cursors return `409`, oversized responses `413`, a full inspection queue `503`, and an inspector timeout `504`. Error responses use the existing `error.code`, `error.summary`, and `requestId` envelope; they do not include physical paths or parser exception messages.
+
+### Target-scoped Debug and drafts
+
+Debug form and draft endpoints require a real authenticated Servlet Principal, including when anonymous access is enabled for legacy jobs. Use a resource ID from the Package Resource Explorer; Cases cannot be Debug targets.
+
+```http
+GET /api/v1/packages/payments/resources/flow/{resourceId}/debug-form?environment=SIT
+```
+
+The response contains the selected resource, fixed logical target, safe `att-debug/v1.2` input defaults, a `redacted` flag, and `requestId`. A missing sidecar produces valid empty defaults. Sensitive fields are redacted before the response.
+
+Validate the typed input to create a server-issued draft:
+
+```http
+POST /api/v1/drafts/debug
+Content-Type: application/json
+
+{"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}}}
+```
+
+The response includes an opaque `draftId`, safe YAML preview, validation diagnostics, and expiry. `GET /api/v1/drafts/{draftId}` returns the same safe preview only to its owning Principal. Drafts live in memory for up to 10 minutes, with a limit of 128 active drafts per Server and 16 per Principal. Restart invalidates them. The Server never returns the internal package revision digest.
+
+Submit only the draft identity:
+
+```http
+POST /api/v1/jobs/debug
+Content-Type: application/json
+
+{"packageId":"payments","draftId":"D0123456789ABCDEF0123456789ABCDEF"}
+```
+
+The Server rechecks the package revision at submission and before Worker start. A change detected during submission returns `409 ATT-SERVER-DRAFT-STALE`; a change detected after job acceptance marks the job `INVALID` with that diagnostic. Validation failures return a top-level `diagnostics` array with safe `code`, `summary`, `field`, and logical `resourceId` values; source paths and parser snippets are omitted. Worker execution receives the same immutable typed values validated for the preview; inline values remain in memory and do not create files under the package root. Existing path-based Debug requests remain supported for compatible clients.
 
 ### Package configuration inspection
 
