@@ -1,4 +1,4 @@
-# ATT v4.0.1 快速入門
+# ATT v4.1.0 快速入門
 
 [English Quick Start](quick-start.md) · [Reference Manual](reference.zh.html)
 
@@ -40,7 +40,7 @@ Workbook 內有兩個 Testcase：
 
 ## 確認前置條件
 
-ATT CLI、Engine、Remote 及 Server API module 支援 Java 8 或以上版本。Source checkout 需要 JDK 和 Maven，並須明確編譯這些 module；`att.sh` 和 `att.bat` 只會執行已預先編譯的 classes。完整 4.0.1 release build 亦會編譯需要 Java 17 的 Server module。已打包的 release 內含 application JAR，只需要 Java runtime，無須 Maven。
+ATT CLI、Engine、Remote 及 Server API module 支援 Java 8 或以上版本。Source checkout 需要 JDK 和 Maven，並須明確編譯這些 module；`att.sh` 和 `att.bat` 只會執行已預先編譯的 classes。完整 4.1.0 release build 亦會編譯需要 Java 17 的 Server module。已打包的 release 內含 application JAR，只需要 Java runtime，無須 Maven。
 
 1. 在 macOS/Linux 上，如有需要先令 launcher 可執行：
    ```sh
@@ -298,4 +298,4 @@ Quick Start 不應變成第二本 Reference Manual。按你真正要做的工作
 
 Direct DB Action 的安全邊界是：`query` 可以針對 `ASSERTION` / `TIMEOUT` retry；`update` 可設定 `timeoutMs`，但會拒絕自動 retry。完整契約見 [DBHelper](reference.zh/resources/dbhelper.md)。
 
-需要查完整欄位與 public contract 時，直接使用生成的 [ATT V4.0.1 中文 Reference Manual](reference.zh.html)。
+需要查完整欄位與 public contract 時，直接使用生成的 [ATT V4.1.0 中文 Reference Manual](reference.zh.html)。

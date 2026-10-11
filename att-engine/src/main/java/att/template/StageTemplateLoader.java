@@ -173,7 +173,7 @@ public final class StageTemplateLoader {
             att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                     schemaVersion, Version.TEMPLATE_SCHEMA);
             throw new IllegalArgumentException("Unsupported template schemaVersion '" + schemaVersion
-                    + "'; ATT 4.0.1 supports only " + Version.TEMPLATE_SCHEMA
+                    + "'; ATT 4.1.0 supports only " + Version.TEMPLATE_SCHEMA
                     + ". Render now returns String, command Tool parsing uses stdoutFormat, and Log file/fields migrate to value. See docs/reference/appendices/migrations.md.");
         }
         Path schema = att.validation.SchemaFiles.resolve(projectRoot,

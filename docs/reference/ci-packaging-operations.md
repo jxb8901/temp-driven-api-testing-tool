@@ -11,7 +11,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven plus Python 3 and Pandoc for Reference generation. It outputs `att-4.0.1-local.tar.gz` for the CLI, `att-4.0.1-server.tar.gz` for the WAR and deployment guides, and `att-4.0.1-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
+`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven plus Python 3 and Pandoc for Reference generation. It outputs `att-4.1.0-local.tar.gz` for the CLI, `att-4.1.0-server.tar.gz` for the WAR and deployment guides, and `att-4.1.0-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
 
 ## Runtime dependencies
 
