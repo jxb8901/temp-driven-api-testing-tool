@@ -113,6 +113,50 @@ public final class DebugEngine {
         return projectInput(input, type, id);
     }
 
+    /** Projects and validates only business values supported by a Load workload. */
+    public Map<String, Object> projectLoadBusinessInput(String type, String id,
+                                                        Map<String, Object> values) throws Exception {
+        if (!"template".equals(type) && !"flow".equals(type) && !"tool".equals(type))
+            throw new IllegalArgumentException("Quick Load target must be a Template, Flow, or Tool");
+        DebugInput input;
+        if (values == null) {
+            Path sidecar = safeAutoInput(type, id);
+            if (Files.isRegularFile(sidecar) && !Files.isSymbolicLink(sidecar)) {
+                input = loadInput(targetOptions("load", type, id), type, id,
+                        att.core.ExecutionBootstrapVariables.Scope.LOAD);
+            } else {
+                Map<String, Object> empty = new LinkedHashMap<String, Object>();
+                empty.put("schemaVersion", Version.DEBUG_SCHEMA);
+                input = new DebugInput(sidecar, empty, type, id, config);
+            }
+        } else {
+            Map<String, Object> submitted = objectMap(values);
+            if (!submitted.containsKey("schemaVersion")) submitted.put("schemaVersion", Version.DEBUG_SCHEMA);
+            input = loadInput(targetOptions("load", type, id).withInlineDebugInput(submitted), type, id,
+                    att.core.ExecutionBootstrapVariables.Scope.LOAD);
+        }
+        Map<String, Object> business = new LinkedHashMap<String, Object>();
+        business.put("inputs", input.inputs);
+        if ("tool".equals(type)) business.put("arguments", input.arguments);
+        else business.put("vars", input.vars);
+        Map<String, Object> projection = new LinkedHashMap<String, Object>();
+        boolean[] redacted = new boolean[] { false };
+        projection.put("input", safeFormValue(business, null, "", redacted));
+        projection.put("redacted", Boolean.valueOf(redacted[0]));
+        projection.put("normalizedInput", business);
+        projection.put("debugLocalTestdataOmitted", Boolean.valueOf(!input.testdataDescriptors.isEmpty()));
+        return projection;
+    }
+
+    /** Returns a redacted projection for safe Load scenario previews. */
+    public Map<String, Object> projectSafeValue(Object value) {
+        boolean[] redacted = new boolean[] { false };
+        Map<String, Object> projection = new LinkedHashMap<String, Object>();
+        projection.put("value", safeFormValue(value, null, "", redacted));
+        projection.put("redacted", Boolean.valueOf(redacted[0]));
+        return projection;
+    }
+
     private void validateTargetInput(String type, String id, DebugInput input) throws Exception {
         ResolvedTarget resolved = resolveTarget(type, id, input);
         StageCaseData stage = input.stage(resolved.template.name());

@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -138,6 +139,67 @@ class PackageResourceInspectorTest {
         assertEquals("/inputs/payload/account",((Map<?,?>)payload.get("account")).get("$attDebugKeepDefault"));
     }
 
+    @Test void quickLoadOmitsDebugLocalTestdataAndAcceptsSeparateLoadImports() throws Exception {
+        Path root=packageWithTemplate("quick-load-testdata", "FORM", "description: safe");
+        Path debugData=Files.createDirectories(root.resolve("debug-data")).resolve("debug.yaml");
+        writeUtf8(debugData,"schemaVersion: att-testdata/v1.0\nid: debugAccounts\nrecords: [{id: 17}]\n");
+        Path loadData=Files.createDirectories(root.resolve("testdata")).resolve("load.yaml");
+        writeUtf8(loadData,"schemaVersion: att-testdata/v1.0\nid: loadAccounts\nrecords: [{id: 42}]\n");
+        Path sidecar=root.resolve("templates/FORM/debug.yaml");
+        writeUtf8(sidecar,"schemaVersion: att-debug/v1.2\ntestdata: [debug-data/debug.yaml]\ninputs: {amount: 7}\nvars: {reference: REF001}\n");
+        byte[] original=Files.readAllBytes(sidecar);
+        Files.createDirectories(root.resolve("load"));
+        writeUtf8(root.resolve("load/load.visualuser.yaml"),"schemaVersion: att-load/v1.6\nload: {users: 2, duration: 5s}\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        String resourceId=String.valueOf(items.get(0).get("resourceId"));
+        Map<String,Object> form=inspector.inspectQuickLoadForm("template",resourceId,"virtualUsers",null);
+        assertEquals(Boolean.TRUE,form.get("debugLocalTestdataOmitted"));
+        assertFalse(form.toString().contains("debug-data/debug.yaml"));
+        assertFalse(form.toString().contains("debugAccounts"));
+
+        Map<String,Object> draft=inspector.validateQuickLoadInput("template","FORM","virtualUsers",
+                mapOf("inputs",mapOf("amount",7),"vars",mapOf("reference","REF001")),
+                mapOf("users",3),mapOf(),Collections.singletonList("testdata/load.yaml"));
+        assertEquals(Boolean.FALSE,draft.get("debugLocalTestdataOmitted"),"Submitted Load input contains no Debug-local imports");
+        assertEquals(Collections.singletonList("testdata/load.yaml"),draft.get("loadTestdata"));
+        assertEquals(Collections.singletonList("testdata/load.yaml"),((Map<?,?>)draft.get("normalizedScenario")).get("testdata"));
+        assertTrue(String.valueOf(draft.get("previewYaml")).contains("users: 3"));
+        assertArrayEquals(original,Files.readAllBytes(sidecar),"Quick Load must not modify the Debug sidecar");
+    }
+
+    @Test void quickLoadFormsSupportEveryTargetWithAndWithoutDebugSidecars() throws Exception {
+        Path root=packageWithQuickLoadTargets("quick-load-targets");
+        for(String type:java.util.Arrays.asList("template","flow","tool")) {
+            PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list",type,null,null,0,20).get("items");
+            String logicalId="tool".equals(type)?"echo":"template".equals(type)?"FORM":"FLOW.v1";
+            String resourceId=String.valueOf(items.stream().filter(item->logicalId.equals(item.get("logicalId"))).findFirst().orElseThrow(()->new AssertionError(type+": "+items)).get("resourceId"));
+            Map<String,Object> empty=inspector.inspectQuickLoadForm(type,resourceId,"virtualUsers",null);
+            @SuppressWarnings("unchecked") Map<String,Object> emptyInput=(Map<String,Object>)empty.get("input");
+            assertEquals(Boolean.FALSE,empty.get("debugLocalTestdataOmitted"));
+            assertEquals(Collections.emptyMap(),emptyInput.get("inputs"));
+            if("tool".equals(type))assertEquals(Collections.emptyMap(),emptyInput.get("arguments"));
+            else assertEquals(Collections.emptyMap(),emptyInput.get("vars"));
+        }
+
+        writeUtf8(root.resolve("templates/FORM/debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {amount: 7}\nvars: {reference: REF001}\n");
+        writeUtf8(root.resolve("templates/flows/demo/flow.yaml").getParent().resolve("debug.yaml"),
+                "schemaVersion: att-debug/v1.2\ninputs: {flowValue: 9}\nvars: {flowRef: FLOW01}\n");
+        writeUtf8(root.resolve("config/tools/echo.debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {toolInput: 11}\narguments: {value: typed-argument}\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        for(String type:java.util.Arrays.asList("template","flow","tool")) {
+            @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list",type,null,null,0,20).get("items");
+            String logicalId="tool".equals(type)?"echo":"template".equals(type)?"FORM":"FLOW.v1";
+            String resourceId=String.valueOf(items.stream().filter(item->logicalId.equals(item.get("logicalId"))).findFirst().orElseThrow(AssertionError::new).get("resourceId"));
+            Map<String,Object> form=inspector.inspectQuickLoadForm(type,resourceId,"virtualUsers",null);
+            @SuppressWarnings("unchecked") Map<String,Object> safeInput=(Map<String,Object>)form.get("input");
+            assertTrue(safeInput.toString().contains("$attDebugKeepDefault"),safeInput.toString());
+            if("tool".equals(type))assertTrue(safeInput.containsKey("arguments"));
+            else assertTrue(safeInput.containsKey("vars"));
+        }
+    }
+
     @Test void hidesWorkbookBusinessValuesAndBoundsHighFanInSummaries() throws Exception {
         Path root=packageWithCaseWorkbook("case-data", 125);
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
@@ -216,13 +278,17 @@ class PackageResourceInspectorTest {
 
             long version=inspector.packageChangeVersion();
             writeUtf8(root.resolve("templates/PAYMENT/template.yaml"),templateYaml("PAYMENT","description: changed"));
+            assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
+                    ()->inspector.verifyRevision(revision));
+            assertTrue(inspector.indexBuildCount()>=2,
+                    "authoritative revision checks must rebuild content even when the cached snapshot appears current");
             long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
             while(inspector.packageChangeVersion()==version&&System.nanoTime()<deadline)Thread.sleep(20);
             assertNotEquals(version,inspector.packageChangeVersion(),"package file changes should invalidate the watched snapshot");
             assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
                     ()->inspector.inspect("list","template",null,null,1,1,revision));
             assertTrue(inspector.indexBuildCount()>=2,
-                    "a package change must rebuild the cached index before checking the cursor");
+                    "the cached package index must have been rebuilt before rejecting the stale cursor");
         } finally { inspector.close(); }
     }
 
@@ -283,6 +349,18 @@ class PackageResourceInspectorTest {
         return root;
     }
 
+    private Path packageWithQuickLoadTargets(String directory) throws Exception {
+        Path root=packageWithTemplate(directory,"FORM","description: Quick Load targets");
+        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  echo:\n    name: Echo\n    description: Quick Load Tool target\n"
+                +"    command: [echo, \"${input.value}\"]\n    stdoutFormat: text\n    arguments:\n      value:\n        name: Value\n        description: Value\n        required: false\n");
+        Path flow=Files.createDirectories(root.resolve("templates/flows/demo")).resolve("flow.yaml");
+        writeUtf8(flow,"schemaVersion: att-flow/v3.6\nid: FLOW.v1\nname: Flow target\ndescription: Quick Load Flow target\nactions:\n  log:\n"
+                +"    type: log\n    message: load-flow-smoke\n");
+        Files.createDirectories(root.resolve("config/tools"));
+        return root;
+    }
+
     private Path packageWithCaseWorkbook(String directory, int rows) throws Exception {
         Path root=packageWithTemplate(directory,"TARGET","description: harmless");
         Path suite=Files.createDirectories(root.resolve("testcase")).resolve("cases.xlsx");
@@ -301,6 +379,12 @@ class PackageResourceInspectorTest {
             workbook.write(output);
         }
         return root;
+    }
+
+    private static Map<String,Object> mapOf(Object... entries) {
+        Map<String,Object> values=new LinkedHashMap<>();
+        for(int i=0;i<entries.length;i+=2) values.put((String)entries[i],entries[i+1]);
+        return values;
     }
 
     private static String templateYaml(String name,String extraField) {

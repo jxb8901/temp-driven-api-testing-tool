@@ -13,7 +13,7 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
 }
 function allText(node) { return [node.textContent || '', ...(node.children || []).map(allText)].join(' '); }
 
-function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [], debugFormResponse = null, debugDraftResponses = [], debugSubmitErrors = [] } = {}) {
+function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [], debugFormResponse = null, debugDraftResponses = [], debugSubmitErrors = [], quickLoadFormResponse = null, quickLoadDraftResponses = [] } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
@@ -43,7 +43,7 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
     addEventListener(name, listener) { this.listeners[name] = listener; }
   };
   const calls = [], streams = [], pendingSubmissions = [], pendingCancellations = [], pendingArtifacts = [], pendingHomeJobs = [], pendingResults = [], pendingConfigurations = [];
-  const state = { jobStatus, resourcePage: 0, debugDraft: 0, debugSubmit: 0 };
+  const state = { jobStatus, resourcePage: 0, debugDraft: 0, debugSubmit: 0, quickLoadDraft: 0 };
   let rejectHome;
   const delayedHome = new Promise((_, reject) => { rejectHome = reject; });
   class EventSource {
@@ -89,11 +89,23 @@ function boot({ hash = '', version = '1', confirmCancel = true, jobMissing = fal
       input: { schemaVersion: 'att-debug/v1.2', inputs: { payload: { $attDebugKeepDefault: '/inputs/payload' } } },
       target: { type: 'template', id: 'TEST' }, redacted: true
     };
+    else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+\/quick-load-form\?/.test(path)) result = quickLoadFormResponse || {
+      input: { inputs: {}, vars: {} }, target: { type: 'template', id: 'TEST' }, model: 'virtualUsers',
+      preview: { load: { users: 1, duration: '10s' }, workloads: [{ execution: {} }] },
+      loadTestdata: [], debugLocalTestdataOmitted: false, redacted: false
+    };
     else if (path === 'drafts/debug' && options.method === 'POST') {
       const index = state.debugDraft++;
       result = debugDraftResponses[Math.min(index, debugDraftResponses.length - 1)] || {
         draftId: `D${index + 1}`, preview: {}, previewYaml: 'schemaVersion: att-debug/v1.2',
         redacted: true, expiresAt: new Date(Date.now() + 60000).toISOString()
+      };
+    }
+    else if (path === 'drafts/quick-load' && options.method === 'POST') {
+      const index = state.quickLoadDraft++;
+      result = quickLoadDraftResponses[Math.min(index, quickLoadDraftResponses.length - 1)] || {
+        draftId: `L${index + 1}`, target: { type: 'template', id: 'TEST' }, model: 'virtualUsers', preview: {}, previewYaml: 'schemaVersion: att-load/v1.6',
+        redacted: false, expiresAt: new Date(Date.now() + 60000).toISOString()
       };
     }
     else if (/^packages\/[^/]+\/resources\/[^/]+\/[^/]+\/source$/.test(path)) result = { available: true, text: '<img src=x onerror=alert(1)>', format: 'yaml' };
@@ -132,6 +144,13 @@ async function openDebugForm(ui, resource) {
   await ui.node('resource-list').children[0].children[0].listeners.click();
   await ui.node('debug-resource').listeners.click();
   await waitFor(() => ui.node('debug-form-editor').hidden === false, 'Debug form');
+}
+
+async function openQuickLoadForm(ui) {
+  await waitFor(() => ui.node('resource-count').textContent.includes('1 of 1'), 'package resource index');
+  await ui.node('resource-list').children[0].children[0].listeners.click();
+  await ui.node('quick-load-resource').listeners.click();
+  await waitFor(() => ui.node('quick-load-form-editor').hidden === false, 'Quick Load form');
 }
 
 test('rejects an incompatible API before accessing packages', async () => {
@@ -207,6 +226,39 @@ test('clears a server-invalidated Debug draft and offers a fresh validation', as
   await ui.node('submit-debug-form').listeners.click();
   await waitFor(() => ui.location.hash === '#/jobs/J_DEBUG', 'fresh Debug job submission');
   assert.equal(ui.calls.filter(call => call.path === 'drafts/debug').length, 2);
+});
+
+test('warns when Debug-local Testdata is omitted and submits separate Load imports', async () => {
+  const resource = { resourceId: 'template.form', type: 'template', logicalId: 'FORM', name: 'Form', state: 'ready', sourceAvailable: false };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [resource], quickLoadFormResponse: {
+    input: { inputs: { amount: 7 }, vars: { reference: 'REF001' } }, target: { type: 'template', id: 'FORM' }, model: 'virtualUsers',
+    preview: { load: { users: 1, duration: '10s' }, workloads: [{ execution: {} }] },
+    loadTestdata: [], debugLocalTestdataOmitted: true, redacted: false
+  } });
+  await openQuickLoadForm(ui);
+  assert.match(ui.node('quick-load-form-status').textContent, /Debug-local Testdata was omitted/);
+  ui.node('quick-load-testdata').value = '["testdata/load-accounts.yaml"]';
+  await ui.node('preview-quick-load-form').listeners.click();
+  await waitFor(() => ui.calls.some(call => call.path === 'drafts/quick-load'), 'Quick Load draft validation');
+  const submitted = JSON.parse(ui.calls.find(call => call.path === 'drafts/quick-load').options.body);
+  assert.deepEqual(submitted.testdata, ['testdata/load-accounts.yaml']);
+  assert.deepEqual(submitted.input, { inputs: { amount: 7 }, vars: { reference: 'REF001' } });
+  assert.match(ui.node('quick-load-form-status').textContent, /Debug-local Testdata remains omitted/);
+});
+
+test('revalidates an expired Quick Load draft before asking to start Load', async () => {
+  const resource = { resourceId: 'template.test', type: 'template', logicalId: 'TEST', name: 'Test', state: 'ready', sourceAvailable: false };
+  const ui = boot({ hash: '#/packages/payments', resourceItems: [resource], quickLoadDraftResponses: [
+    { draftId: 'L_EXPIRED', target: { type: 'template', id: 'TEST' }, model: 'virtualUsers', preview: {}, redacted: false, expiresAt: new Date(Date.now() - 1000).toISOString() },
+    { draftId: 'L_FRESH', target: { type: 'template', id: 'TEST' }, model: 'virtualUsers', preview: {}, redacted: false, expiresAt: new Date(Date.now() + 60000).toISOString() }
+  ] });
+  await openQuickLoadForm(ui);
+  await ui.node('preview-quick-load-form').listeners.click();
+  await ui.node('submit-quick-load-form').listeners.click();
+  assert.equal(ui.calls.filter(call => call.path === 'drafts/quick-load').length, 2, JSON.stringify(ui.calls.map(call => call.path)));
+  assert.equal(ui.calls.filter(call => call.path === 'jobs/load').length, 1, ui.node('quick-load-form-status').textContent);
+  await waitFor(() => ui.location.hash === '#/jobs/J1', 'Quick Load job submission');
+  assert.deepEqual(JSON.parse(ui.calls.find(call => call.path === 'jobs/load').options.body), { packageId: 'payments', draftId: 'L_FRESH' });
 });
 
 test('shows safe index diagnostics when some package resources cannot be indexed', async () => {

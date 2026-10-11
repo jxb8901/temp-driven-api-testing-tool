@@ -38,6 +38,7 @@
             <button id="resource-configuration-link" type="button" hidden>View Tool configuration</button>
             <button id="run-resource-case" type="button" hidden>Run this Case</button>
             <button id="debug-resource" type="button" hidden>Debug this target</button>
+            <button id="quick-load-resource" type="button" hidden>Quick Load this target</button>
             <h4>Identity and provenance</h4><pre id="resource-metadata"></pre>
             <h4>Definition</h4><pre id="resource-definition"></pre>
             <section id="resource-debug" hidden>
@@ -51,6 +52,32 @@
                 <button id="preview-debug-form" type="button">Validate and preview</button>
                 <button id="submit-debug-form" type="button">Start Debug</button>
                 <h5>Safe effective Debug YAML</h5><pre id="debug-preview"></pre>
+              </div>
+            </section>
+            <section id="resource-quick-load" hidden>
+              <h4>Quick Load</h4>
+              <p id="quick-load-form-status" role="status" aria-live="polite"></p>
+              <div id="quick-load-form-editor" hidden>
+                <label for="quick-load-model">Load model</label>
+                <select id="quick-load-model"><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select>
+                <div id="quick-load-users-fields">
+                  <label>Virtual users <input id="quick-load-users" inputmode="numeric"></label>
+                  <label>Think time <input id="quick-load-think-time" placeholder="e.g. 100ms"></label>
+                </div>
+                <div id="quick-load-arrival-fields" hidden>
+                  <label>Arrival rate <input id="quick-load-arrival-rate" placeholder="e.g. 2/s"></label>
+                  <label>Maximum concurrent <input id="quick-load-max-concurrent" inputmode="numeric"></label>
+                </div>
+                <label>Warmup <input id="quick-load-warmup" placeholder="e.g. 0s"></label>
+                <label>Ramp up <input id="quick-load-ramp-up" placeholder="e.g. 0s"></label>
+                <label>Duration <input id="quick-load-duration" placeholder="e.g. 10s"></label>
+                <label>Ramp down <input id="quick-load-ramp-down" placeholder="e.g. 0s"></label>
+                <label>Business inputs and variables (JSON object)<textarea id="quick-load-input" rows="8" spellcheck="false"></textarea></label>
+                <label>Additional Load-level Testdata descriptor paths (JSON array)<textarea id="quick-load-testdata" rows="3" spellcheck="false">[]</textarea></label>
+                <button id="reset-quick-load-form" type="button">Reset defaults</button>
+                <button id="preview-quick-load-form" type="button">Validate and preview</button>
+                <button id="submit-quick-load-form" type="button">Review and start Load</button>
+                <h5>Safe effective Load YAML</h5><pre id="quick-load-preview"></pre>
               </div>
             </section>
             <div class="resource-relations"><section><h4>References</h4><ul id="resource-references"></ul></section><section><h4>Referenced by</h4><ul id="resource-referenced-by"></ul></section></div>
