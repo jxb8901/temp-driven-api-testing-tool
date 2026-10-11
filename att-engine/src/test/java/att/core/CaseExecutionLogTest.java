@@ -244,8 +244,8 @@ class CaseExecutionLogTest {
         log.appendRaw("ERROR", "Unable to read " + tempDir.resolve("private/token.pem"));
         log.appendRaw("SSH application STDOUT", "remote=/srv/app/request.xml");
         String text = new String(Files.readAllBytes(file), "UTF-8");
-        assertTrue(text.contains("$ATT_PACKAGE_ROOT/templates/付款.xml"));
-        assertTrue(text.contains("$ATT_PACKAGE_ROOT/output/run 1"), text);
+        assertTrue(text.contains("$ATT_PACKAGE_ROOT/templates/付款.xml"), text);
+        assertTrue(text.replaceAll("\\s+", " ").contains("$ATT_PACKAGE_ROOT/output/run 1"), text);
         assertTrue(text.contains("$EXTERNAL/token.pem"));
         assertTrue(text.contains("remotePath: /srv/app/request.xml"));
         assertTrue(text.contains("diagnostic: Unable"));
