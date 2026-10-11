@@ -51,6 +51,9 @@ class WindowsLauncherTest {
         String manifest = new String(Files.readAllBytes(Paths.get("att-dist/src/release/local/RELEASE_MANIFEST.txt")), StandardCharsets.UTF_8);
         assertTrue(binary.contains("<source>${project.basedir}/../att.bat</source>"));
         assertTrue(binary.contains("<destName>att.bat</destName>"));
+        assertTrue(binary.contains("<outputDirectory>packages/default/config</outputDirectory>"));
+        assertTrue(binary.contains("<outputDirectory>packages/default/templates</outputDirectory>"));
+        assertTrue(binary.contains("<exclude>att-server.yaml</exclude>"));
         assertTrue(source.contains("<include>att.bat</include>"));
         assertTrue(manifest.contains("mainWindows: att.bat"));
     }
@@ -128,9 +131,10 @@ class WindowsLauncherTest {
             }
 
             for (Path root : roots) {
+                Path executionRoot = root.equals(sourceRoot) ? root : root.resolve("packages/default");
                 Path fixturePath = root.equals(sourceRoot) ? temp.resolve("source-debug-fixture")
-                        : root.resolve("target/launcher-debug-smoke");
-                Path debugFixture = createDebugFixture(root, fixturePath);
+                        : executionRoot.resolve("target/launcher-debug-smoke");
+                Path debugFixture = createDebugFixture(executionRoot, fixturePath);
                 for (Path path : paths) {
                     ProcessResult result = invokeWindows(root, path, buildToolLog,
                             "debug", "template", "SIMPLE", "--config", debugFixture.resolve("config.yaml").toString(),
@@ -194,16 +198,20 @@ class WindowsLauncherTest {
 
     private static Path createPackagedLauncherRoot(Path root) throws Exception {
         Path lib = root.resolve("lib");
+        Path packageRoot = root.resolve("packages/default");
         Files.createDirectories(lib);
+        Files.createDirectories(packageRoot);
         Files.copy(Paths.get("att.bat"), root.resolve("att.bat"));
         String version = projectVersion();
         createApplicationJar(lib.resolve("att-" + version + ".jar"));
         for (String directory : new String[]{"config", "templates", "testcase", "load", "tools", "schemas"}) {
             Path source = Paths.get(directory);
-            Path destination = root.resolve(directory);
+            Path destination = packageRoot.resolve(directory);
             if (Files.isDirectory(source)) copyTree(source, destination);
             else Files.createDirectories(destination);
         }
+        assertTrue(Files.isDirectory(packageRoot.resolve("config")));
+        assertFalse(Files.exists(root.resolve("config")));
 
         Path mavenRepository = Paths.get(System.getProperty("user.home"), ".m2", "repository");
         String[] runtimeJars = {
