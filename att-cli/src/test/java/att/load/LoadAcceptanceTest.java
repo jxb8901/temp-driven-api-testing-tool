@@ -65,7 +65,7 @@ class LoadAcceptanceTest {
         assertEquals(0, jsonCli.exitCode, jsonCli.stderr + "\n" + jsonCli.stdout);
         @SuppressWarnings("unchecked") Map<String, Object> json = JsonSupport.mapper().readValue(jsonCli.stdout, Map.class);
         assertEquals("PASS", json.get("status"));
-        assertEquals("$ATT_HOME/target/review-mix-json-" + suffix + "/load/" + jsonRun + "/report/index.html", json.get("report"));
+        assertEquals("$ATT_PACKAGE_ROOT/target/review-mix-json-" + suffix + "/load/" + jsonRun + "/report/index.html", json.get("report"));
         assertFalse(jsonCli.stdout.contains(root.toString()));
         @SuppressWarnings("unchecked") Map<String, Object> workloads = (Map<String, Object>) json.get("workloads");
         assertTrue(workloads.containsKey("checkout"));
@@ -74,7 +74,7 @@ class LoadAcceptanceTest {
         Path humanOutput = root.resolve("target").resolve("review-mix-human-" + suffix);
         CliOutput humanCli = executeCli(root, scenario, humanOutput, humanRun, "human", "--quiet");
         assertEquals(0, humanCli.exitCode, humanCli.stderr + "\n" + humanCli.stdout);
-        assertTrue(humanCli.stdout.contains("Report: $ATT_HOME/target/review-mix-human-" + suffix
+        assertTrue(humanCli.stdout.contains("Report: $ATT_PACKAGE_ROOT/target/review-mix-human-" + suffix
                 + "/load/" + humanRun + "/report/index.html"), humanCli.stdout);
         assertFalse(humanCli.stdout.contains("Metrics:"), humanCli.stdout);
         assertFalse(humanCli.stdout.contains(root.toString()));
@@ -85,7 +85,7 @@ class LoadAcceptanceTest {
         CliOutput diagnosticCli = executeCli(root, scenario, diagnosticOutput, duplicateRun, "json");
         assertEquals(2, diagnosticCli.exitCode, diagnosticCli.stderr + "\n" + diagnosticCli.stdout);
         assertFalse(diagnosticCli.stderr.contains(root.toString()), diagnosticCli.stderr);
-        assertTrue(diagnosticCli.stderr.contains("$ATT_HOME/target/review-mix-diagnostic-" + suffix
+        assertTrue(diagnosticCli.stderr.contains("$ATT_PACKAGE_ROOT/target/review-mix-diagnostic-" + suffix
                 + "/load/" + duplicateRun), diagnosticCli.stderr);
     }
 
