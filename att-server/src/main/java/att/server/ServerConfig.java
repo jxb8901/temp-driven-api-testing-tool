@@ -44,11 +44,22 @@ public final class ServerConfig {
     }
 
     public static ServerConfig load(Path file) throws Exception {
-        if (file == null || !Files.isRegularFile(file) || !Files.isReadable(file))
-            throw new IllegalStateException("ATT Server configuration is required; set -Datt.server.config to a readable YAML file");
+        if (file == null)
+            throw new IllegalStateException("ATT Server configuration was not found; set -Datt.server.config or ATT_SERVER_CONFIG, or provide ATT_HOME/config/att-server.yaml");
+        Path configFile=file.toAbsolutePath().normalize();
+        if (!Files.exists(configFile))
+            throw new IllegalStateException("ATT Server configuration does not exist: "+configFile);
+        if (!Files.isRegularFile(configFile))
+            throw new IllegalStateException("ATT Server configuration is not a regular file: "+configFile);
+        if (!Files.isReadable(configFile))
+            throw new IllegalStateException("ATT Server configuration is not readable: "+configFile);
         LoaderOptions options=new LoaderOptions(); options.setAllowDuplicateKeys(false); options.setMaxAliasesForCollections(20);
         Object raw;
-        try (InputStream in=Files.newInputStream(file)) { raw=new Yaml(new SafeConstructor(options)).load(in); }
+        try (InputStream in=Files.newInputStream(configFile)) {
+            raw=new Yaml(new SafeConstructor(options)).load(in);
+        } catch (Exception invalid) {
+            throw new IllegalArgumentException("Unable to read or parse ATT Server configuration at "+configFile+": "+invalid.getMessage(), invalid);
+        }
         if (!(raw instanceof Map<?,?> root)) throw new IllegalArgumentException("ATT Server configuration must be a YAML mapping");
         Map<?,?> server=map(root.get("server"),"server");
         Map<?,?> workers=map(root.get("workers"),"workers");
@@ -91,8 +102,6 @@ public final class ServerConfig {
         InlineLoad inlineLoad=inlineLoad(server.get("inlineLoad"));
         Files.createDirectories(data);
         Path realData=data.toRealPath();
-        String attHome=System.getProperty("att.home");if(attHome==null||attHome.isBlank())attHome=System.getenv("ATT_HOME");
-        if(attHome!=null&&!attHome.isBlank()&&Files.exists(Paths.get(attHome))){Path realHome=Paths.get(attHome).toRealPath();if(realData.startsWith(realHome)||realHome.startsWith(realData))throw new IllegalArgumentException("server.dataDir must be separate from ATT_HOME");}
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
@@ -100,9 +109,22 @@ public final class ServerConfig {
     }
 
     public static Path configPath() {
-        String configured=System.getProperty("att.server.config");
-        if(configured==null||configured.isBlank()) configured=System.getenv("ATT_SERVER_CONFIG");
-        return configured==null||configured.isBlank()?null:Paths.get(configured).toAbsolutePath().normalize();
+        return configPath(System.getProperty("att.server.config"), System.getenv("ATT_SERVER_CONFIG"),
+                System.getProperty("att.home"), System.getenv("ATT_HOME"));
+    }
+
+    static Path configPath(String systemProperty, String environmentVariable,
+                           String attHomeProperty, String attHomeEnvironment) {
+        String configured=firstNonBlank(systemProperty,environmentVariable);
+        if(configured!=null)return Paths.get(configured).toAbsolutePath().normalize();
+        String attHome=firstNonBlank(attHomeProperty,attHomeEnvironment);
+        return attHome==null?null:Paths.get(attHome,"config","att-server.yaml").toAbsolutePath().normalize();
+    }
+
+    private static String firstNonBlank(String first,String second) {
+        if(first!=null&&!first.isBlank())return first.trim();
+        if(second!=null&&!second.isBlank())return second.trim();
+        return null;
     }
     private static boolean isWindows(){ return System.getProperty("os.name","").toLowerCase().contains("win"); }
     private static Path canonicalRequired(String value,String field,boolean directory) throws Exception {
