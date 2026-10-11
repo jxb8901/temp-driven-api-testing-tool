@@ -100,6 +100,9 @@ public final class ServerConfig {
             artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
         Inspection inspection=inspection(server.get("inspection"),resolved);
         InlineLoad inlineLoad=inlineLoad(server.get("inlineLoad"));
+        Path candidateData=canonicalFuturePath(data);
+        for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(candidateData)||candidateData.startsWith(packageRoot))
+            throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         Files.createDirectories(data);
         Path realData=data.toRealPath();
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
@@ -127,6 +130,19 @@ public final class ServerConfig {
         return null;
     }
     private static boolean isWindows(){ return System.getProperty("os.name","").toLowerCase().contains("win"); }
+    private static Path canonicalFuturePath(Path path) throws Exception {
+        Path current=path.toAbsolutePath().normalize();
+        java.util.ArrayDeque<Path> missing=new java.util.ArrayDeque<>();
+        while(current!=null&&!Files.exists(current,java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            if(current.getFileName()!=null)missing.addFirst(current.getFileName());
+            current=current.getParent();
+        }
+        if(current==null)return path.toAbsolutePath().normalize();
+        Path resolved=current.toRealPath();
+        for(Path component:missing)resolved=resolved.resolve(component);
+        return resolved.normalize();
+    }
+
     private static Path canonicalRequired(String value,String field,boolean directory) throws Exception {
         Path path=Paths.get(value); if(!path.isAbsolute()) throw new IllegalArgumentException(field+" must be an absolute path");
         if(!Files.exists(path)) throw new IllegalArgumentException(field+" does not exist: "+path);
