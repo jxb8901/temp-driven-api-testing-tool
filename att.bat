@@ -3,11 +3,12 @@ rem Author: Jeffrey + ChatGPT
 setlocal EnableExtensions DisableDelayedExpansion
 set "ROOT_DIR=%~dp0"
 if not defined ATT_HOME set "ATT_HOME=%ROOT_DIR%"
+for %%I in ("%ATT_HOME%\.") do set "ATT_HOME=%%~fI"
 cd /d "%ROOT_DIR%" || exit /b 2
 where java >nul 2>&1
 if errorlevel 1 (echo A Java 8 or later runtime is required. 1>&2& exit /b 2)
 set "APP_JAR="
-for %%F in ("%ATT_HOME%lib\att-*.jar") do if exist "%%~fF" if not defined APP_JAR set "APP_JAR=%%~fF"
+for %%F in ("%ATT_HOME%\lib\att-*.jar") do if exist "%%~fF" if not defined APP_JAR set "APP_JAR=%%~fF"
 if defined APP_JAR goto packaged
 set "MISSING_CLASSES="
 if not exist "%ROOT_DIR%att-cli\target\classes\att\FrameworkRunner.class" set "MISSING_CLASSES=%MISSING_CLASSES% att-cli/target/classes/att/FrameworkRunner.class"
@@ -54,8 +55,8 @@ exit /b %ERRORLEVEL%
 :packaged
 if defined ATT_PACKAGE_ROOT (
   cd /d "%ATT_PACKAGE_ROOT%" || exit /b 2
-) else if exist "%ATT_HOME%packages\default\" (
-  cd /d "%ATT_HOME%packages\default" || exit /b 2
+) else if exist "%ATT_HOME%\packages\default\" (
+  cd /d "%ATT_HOME%\packages\default" || exit /b 2
 )
-java -Datt.home="%ATT_HOME%" -cp "%ATT_HOME%lib\*" att.FrameworkRunner %*
+java -Datt.home="%ATT_HOME%" -cp "%ATT_HOME%\lib\*" att.FrameworkRunner %*
 exit /b %ERRORLEVEL%
