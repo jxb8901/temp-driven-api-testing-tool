@@ -667,6 +667,20 @@ class PackageValidatorTest {
         assertThrows(java.lang.reflect.InvocationTargetException.class, () -> executable.invoke(validator, missing));
     }
 
+    @Test void packageRootDoesNotRequireInstallationLaunchers() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String, ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method layout = PackageValidator.class.getDeclaredMethod("validatePackageLayout", List.class);
+        layout.setAccessible(true);
+        List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
+
+        layout.invoke(validator, diagnostics);
+
+        assertFalse(diagnostics.stream().anyMatch(d -> d.message().contains("Missing required package path: att.sh")
+                || d.message().contains("Missing required package path: att.bat")), diagnostics.toString());
+    }
+
     @Test void windowsPackageValidationPublishesSkippedShellWarning() throws Exception {
         Path root = java.nio.file.Paths.get("").toAbsolutePath().normalize();
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
