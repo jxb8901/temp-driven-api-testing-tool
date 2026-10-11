@@ -47,9 +47,18 @@ class ServerConfigTest {
         assertTrue(error.getMessage().contains(missing.toString()));
     }
 
-    @Test void invalidConfigReportsItsPath() throws Exception {
+    @Test void invalidExplicitConfigDoesNotFallBackAndReportsItsPath() throws Exception {
         Path invalid=Files.writeString(temp.resolve("invalid-server.yaml"),"server: [\n");
-        IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(invalid));
+        Path allowed=Files.createDirectory(temp.resolve("fallback-packages"));
+        Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path fallback=temp.resolve("valid-fallback.yaml");
+        Files.writeString(fallback,"server:\n  dataDir: "+yaml(temp.resolve("fallback-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    default: "+yaml(pkg)+"\n");
+        assertEquals(pkg.toRealPath(),ServerConfig.load(fallback).packages.get("default"));
+        Path selected=ServerConfig.configPath(invalid.toString(),fallback.toString(),temp.toString(),"");
+        assertEquals(invalid.toAbsolutePath().normalize(),selected);
+        IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(selected));
         assertTrue(error.getMessage().contains(invalid.toString()));
     }
 
