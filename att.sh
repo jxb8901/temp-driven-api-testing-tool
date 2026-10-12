@@ -12,8 +12,16 @@ if [ "${1:-}" = "validate" ]; then
   export ORDERS_DB_USERNAME ORDERS_DB_PASSWORD PAYMENT_MQ_USERNAME PAYMENT_MQ_PASSWORD
 fi
 APP_JAR=""
-candidate="$ATT_HOME/lib/att-local.jar"
-if [ -f "$candidate" ]; then APP_JAR="$candidate"; fi
+APP_JAR_COUNT=0
+for candidate in "$ATT_HOME"/lib/att-local-*.jar; do
+  [ -f "$candidate" ] || continue
+  APP_JAR_COUNT=$((APP_JAR_COUNT + 1))
+  APP_JAR="$candidate"
+done
+if [ "$APP_JAR_COUNT" -gt 1 ]; then
+  echo "Multiple versioned ATT Local runtimes found under $ATT_HOME/lib; keep one att-local-<version>.jar per ATT_HOME." >&2
+  exit 2
+fi
 if [ -n "$APP_JAR" ]; then
   # Packaged install: run against a package root under ATT_HOME (default: packages/default).
   PACKAGE_ROOT="${ATT_PACKAGE_ROOT:-}"
@@ -24,7 +32,11 @@ if [ -n "$APP_JAR" ]; then
     cd "$PACKAGE_ROOT"
   fi
   CP="$APP_JAR"
-  for jar in "$ATT_HOME"/lib/*.jar; do [ -f "$jar" ] || continue; [ "$jar" = "$APP_JAR" ] && continue; CP="$CP:$jar"; done
+  for jar in "$ATT_HOME"/lib/*.jar; do
+    [ -f "$jar" ] || continue
+    case "${jar##*/}" in att-local-*.jar) continue ;; esac
+    CP="$CP:$jar"
+  done
   exec java -Datt.home="$ATT_HOME" -cp "$CP" att.FrameworkRunner "$@"
 fi
 CLI_DIR="$ROOT_DIR/att-cli"

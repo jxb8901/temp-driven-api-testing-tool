@@ -24,7 +24,7 @@ final class WorkerRuntimeClasspath {
         Path lib=root.resolve("lib");
         if(!Files.isDirectory(lib)||!Files.isReadable(lib))
             throw new IllegalStateException("ATT Worker runtime library directory is missing or unreadable: "+lib);
-        Path bundle=lib.resolve("att-local.jar");
+        Path bundle=lib.resolve("att-local-"+ServerBuildInfo.PRODUCT+".jar");
         if(!Files.isRegularFile(bundle)||!Files.isReadable(bundle))
             throw new IllegalStateException("ATT Worker runtime for Server "+ServerBuildInfo.PRODUCT+" is missing: expected "+bundle+"; install the matching ATT Local archive");
         try(JarFile jar=new JarFile(bundle.toFile())) {
@@ -49,7 +49,18 @@ final class WorkerRuntimeClasspath {
         if(lib==null||!Files.isDirectory(lib))
             throw new IllegalStateException("ATT Worker runtime library directory is unavailable; set -Datt.home or ATT_HOME to the matching Local installation");
         java.util.List<String> result=new java.util.ArrayList<>();
-        result.add(lib.resolve("*").toString());
+        Path runtime=lib.resolve("att-local-"+ServerBuildInfo.PRODUCT+".jar");
+        if(Files.isRegularFile(runtime))result.add(runtime.toString());
+        try(java.util.stream.Stream<Path> files=Files.list(lib)) {
+            files.filter(Files::isRegularFile)
+                    .filter(path->path.getFileName().toString().endsWith(".jar"))
+                    .filter(path->!path.getFileName().toString().startsWith("att-local-"))
+                    .sorted()
+                    .map(Path::toString)
+                    .forEach(result::add);
+        } catch(java.io.IOException error) {
+            throw new IllegalStateException("Unable to read ATT Worker runtime libraries: "+lib,error);
+        }
         for(Path directory:additionalDirectories)result.add(directory.resolve("*").toString());
         return result;
     }

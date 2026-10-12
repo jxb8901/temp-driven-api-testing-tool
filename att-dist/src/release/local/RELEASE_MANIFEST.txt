@@ -6,7 +6,7 @@ layout: ATT_HOME install root with packages/default package root
 contents:
   - att.sh
   - att.bat
-  - lib/att-local.jar
+  - lib/att-local-${project.version}.jar
   - lib/
   - packages/default/config/
   - packages/default/templates/
@@ -24,3 +24,4 @@ notes:
   - Optional Server data directory: ATT_HOME/data/ when disjoint from every package root; data/ is not shipped
   - server.dataDir may be under ATT_HOME but must not equal, contain, or be inside a registered package root
   - Tomcat owns and writes server.dataDir; package roots remain read-only to the Server
+  - Keep one versioned ATT Local runtime in ATT_HOME/lib; remove the previous att-local-*.jar when upgrading

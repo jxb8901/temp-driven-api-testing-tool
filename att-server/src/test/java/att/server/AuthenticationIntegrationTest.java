@@ -156,7 +156,7 @@ class AuthenticationIntegrationTest {
         Path home=Files.createDirectory(temp.resolve("local-runtime"));
         Path lib=Files.createDirectories(home.resolve("lib"));
         Set<String> added=new HashSet<>();
-        try(JarOutputStream jar=new JarOutputStream(Files.newOutputStream(lib.resolve("att-local.jar")))) {
+        try(JarOutputStream jar=new JarOutputStream(Files.newOutputStream(lib.resolve("att-local-"+ServerBuildInfo.PRODUCT+".jar")))) {
             for(String module:List.of("att-cli","att-engine","att-remote","att-server-api","att-worker")) {
                 Path classes=Path.of(module,"target/classes");
                 try(var paths=Files.walk(classes)) {

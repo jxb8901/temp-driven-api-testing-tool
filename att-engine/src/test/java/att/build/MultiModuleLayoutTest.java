@@ -61,7 +61,8 @@ class MultiModuleLayoutTest {
         assertTrue(server.contains("<release>17</release>"), server);
         assertTrue(server.contains("jakarta.servlet-api"), server);
         assertTrue(server.contains("WEB-INF/lib/att-server-api-*.jar"), server);
-        assertTrue(server.contains("<include>att-server.jar</include>"), server);
+        assertTrue(server.contains("<finalName>att-server-${project.version}</finalName>"), server);
+        assertTrue(server.contains("<include>att-server-${project.version}.jar</include>"), server);
         String serverApp = read(root.resolve("att-server/src/assembly/server-app.xml"));
         assertTrue(serverApp.contains("<include>att:att-server-api</include>"), serverApp);
         assertTrue(serverApp.contains("<include>att:att-web</include>"), serverApp);
@@ -75,7 +76,7 @@ class MultiModuleLayoutTest {
         Path root = Paths.get("").toAbsolutePath().normalize();
         String local = read(root.resolve("att-dist/src/assembly/local.xml"));
         assertTrue(local.contains("att-${project.version}-modules.jar"), local);
-        assertTrue(local.contains("<destName>att-local.jar</destName>"), local);
+        assertTrue(local.contains("<destName>att-local-${project.version}.jar</destName>"), local);
         assertTrue(local.contains("<unpack>false</unpack>"), local);
         for (String module : Arrays.asList("att-cli", "att-engine", "att-remote", "att-server-api", "att-worker"))
             assertTrue(local.contains("<exclude>att:" + module + "</exclude>"), local);

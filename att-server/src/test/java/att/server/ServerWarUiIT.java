@@ -29,7 +29,7 @@ class ServerWarUiIT {
         assertTrue(Files.isRegularFile(war), "Packaged server WAR must exist: " + war);
         Path localHome=Files.createDirectories(temp.resolve("att-home"));
         Path localLib=Files.createDirectories(localHome.resolve("lib"));
-        writeWorkerRuntime(localLib.resolve("att-local.jar"));
+        writeWorkerRuntime(localLib.resolve("att-local-"+ServerBuildInfo.PRODUCT+".jar"));
 
         assertServerApplicationJar(war);
 
@@ -92,13 +92,13 @@ class ServerWarUiIT {
 
     private static void assertServerApplicationJar(Path war) throws Exception {
         try (JarFile archive = new JarFile(war.toFile())) {
-            JarEntry application = archive.getJarEntry("WEB-INF/lib/att-server.jar");
+            JarEntry application = archive.getJarEntry("WEB-INF/lib/att-server-"+ServerBuildInfo.PRODUCT+".jar");
             assertNotNull(application, "WAR must contain the combined ATT Server application jar");
             assertNull(archive.getJarEntry("WEB-INF/classes/att/server/ApiServlet.class"),
                     "ATT application classes must not be duplicated in WEB-INF/classes");
             assertFalse(archive.stream().map(JarEntry::getName).anyMatch(name ->
                     name.matches("WEB-INF/lib/att-(server-api|web|worker|engine)-[^/]+\\.jar")),
-                    "ATT module jars must be combined into att-server.jar");
+                    "ATT module jars must be combined into the versioned att-server jar");
             Set<String> entries = new HashSet<>();
             try (JarInputStream app = new JarInputStream(archive.getInputStream(application))) {
                 JarEntry entry;

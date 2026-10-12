@@ -7371,12 +7371,14 @@ execution.</p>
 id="why-does-attbat-ask-for-maven-or-why-does-a-sh-tool-fail-on-windows">Why
 does <code>att.bat</code> ask for Maven, or why does a <code>.sh</code>
 Tool fail on windows?</h4>
-<p>In a binary release, <code>att.bat</code> finds
-<code>lib\att-local.jar</code> and only requires Java 8+. In a source
-tree it compiles with Maven when Maven is on <code>PATH</code>; without
-Maven, previously compiled <code>target\classes</code> must exist. Use
-<code>att.bat version</code> to confirm the launcher before validating
-the package.</p>
+<p>In a binary release, <code>att.bat</code> finds the versioned runtime
+JAR, such as <code>lib\att-local-4.1.1.jar</code>, and only requires
+Java 8+. Keep one <code>att-local-&lt;version&gt;.jar</code> in each
+<code>ATT_HOME/lib</code> so the launcher selects an unambiguous
+runtime. In a source tree it compiles with Maven when Maven is on
+<code>PATH</code>; without Maven, previously compiled
+<code>target\classes</code> must exist. Use <code>att.bat version</code>
+to confirm the launcher before validating the package.</p>
 <p>The launcher makes ATT itself cross-platform; it cannot translate
 external tool executables. Configure a Windows-compatible
 <code>.bat</code>, <code>.cmd</code>, PowerShell script (with an

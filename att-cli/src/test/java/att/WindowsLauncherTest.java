@@ -19,6 +19,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.UUID;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -31,8 +33,9 @@ class WindowsLauncherTest {
         assertTrue(Files.isRegularFile(launcher));
         String text = new String(Files.readAllBytes(launcher), StandardCharsets.UTF_8);
         assertTrue(text.contains("cd /d \"%ROOT_DIR%\""));
-        assertTrue(text.contains("lib\\att-local.jar"));
-        assertTrue(text.contains("lib\\*\" att.FrameworkRunner %*"));
+        assertTrue(text.contains("lib\\att-local-*.jar"));
+        assertTrue(text.contains(":select_app_jar"));
+        assertTrue(text.contains(":append_runtime_jar"));
         assertTrue(text.contains("target\\classes"));
         assertTrue(text.contains(";%M2_REPO%"));
         assertTrue(text.contains("mvn -DskipTests -pl att-cli -am compile"));
@@ -49,7 +52,7 @@ class WindowsLauncherTest {
         String manifest = new String(Files.readAllBytes(Paths.get("att-dist/src/release/local/RELEASE_MANIFEST.txt")), StandardCharsets.UTF_8);
         assertTrue(binary.contains("<source>${project.basedir}/../att.bat</source>"));
         assertTrue(binary.contains("<destName>att.bat</destName>"));
-        assertTrue(binary.contains("<destName>att-local.jar</destName>"));
+        assertTrue(binary.contains("<destName>att-local-${project.version}.jar</destName>"));
         assertTrue(binary.contains("<outputDirectory>packages/default/config</outputDirectory>"));
         assertTrue(binary.contains("<outputDirectory>packages/default/templates</outputDirectory>"));
         assertTrue(binary.contains("<exclude>att-server.yaml</exclude>"));
@@ -201,7 +204,7 @@ class WindowsLauncherTest {
         Files.createDirectories(lib);
         Files.createDirectories(packageRoot);
         Files.copy(Paths.get("att.bat"), root.resolve("att.bat"));
-        createApplicationJar(lib.resolve("att-local.jar"));
+        createApplicationJar(lib.resolve("att-local-"+projectVersion()+".jar"));
         for (String directory : new String[]{"config", "templates", "testcase", "load", "tools", "schemas"}) {
             Path source = Paths.get(directory);
             Path destination = packageRoot.resolve(directory);
@@ -244,6 +247,14 @@ class WindowsLauncherTest {
             if (Files.isRegularFile(source)) Files.copy(source, lib.resolve(source.getFileName()));
         }
         return root;
+    }
+
+    private static String projectVersion() throws Exception {
+        String pom = new String(Files.readAllBytes(Paths.get("pom.xml")), StandardCharsets.UTF_8);
+        Matcher matcher = Pattern.compile("<artifactId>template-driven-api-testing-tool</artifactId>\\s*<version>([^<]+)")
+                .matcher(pom);
+        assertTrue(matcher.find(), "Parent project version was not found in pom.xml");
+        return matcher.group(1);
     }
 
     private static void createApplicationJar(Path jarPath) throws Exception {

@@ -39,10 +39,11 @@ LOCAL_PACKAGE_ROOT="$LOCAL_PACKAGE_DIR/packages/default"
 for required in att.sh att.bat lib config/att-server.example.yaml packages/default/config/config.yaml packages/default/config/tools packages/default/schemas packages/default/testcase packages/default/templates packages/default/tools; do
   if [ ! -e "$LOCAL_PACKAGE_DIR/$required" ]; then echo "Local archive is missing required layout path: $required" >&2; exit 2; fi
 done
-if [ ! -f "$LOCAL_PACKAGE_DIR/lib/att-local.jar" ]; then
-  echo "Local archive is missing its combined ATT runtime: lib/att-local.jar" >&2; exit 2
+LOCAL_RUNTIME_JAR="$LOCAL_PACKAGE_DIR/lib/att-local-${VERSION}.jar"
+if [ ! -f "$LOCAL_RUNTIME_JAR" ]; then
+  echo "Local archive is missing its combined ATT runtime: lib/att-local-${VERSION}.jar" >&2; exit 2
 fi
-python3 - "$LOCAL_PACKAGE_DIR/lib/att-local.jar" <<'PYZIP'
+python3 - "$LOCAL_RUNTIME_JAR" <<'PYZIP'
 import sys, zipfile
 required = {"att-build.properties", "att/FrameworkRunner.class", "att/worker/WorkerMain.class"}
 with zipfile.ZipFile(sys.argv[1]) as archive:

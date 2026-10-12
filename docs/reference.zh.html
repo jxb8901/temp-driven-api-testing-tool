@@ -6694,12 +6694,14 @@ Tool/HTTP/MQ/DB 共用這條 logging path。</p>
 id="為什麼-attbat-會要求-maven或者為什麼-sh-tool-在-windows-上失敗">為什麼
 <code>Att.bat</code> 會要求 Maven，或者為什麼 <code>.sh</code> Tool 在
 windows 上失敗？</h4>
-<p>在二進制發布中，<code>att.bat</code> 會找到
-<code>lib\att-local.jar</code>，只需要 Java
-8+。源碼樹中，<code>att.bat</code> 會在 Maven 在 <code>PATH</code>
-上時使用 Maven；沒有 Maven 時，需要已有的
+<p>在二進制發布中，<code>att.bat</code> 會找到有版本號的 runtime
+JAR，例如 <code>lib\att-local-4.1.1.jar</code>，只需要 Java 8+。每個
+<code>ATT_HOME/lib</code> 只保留一個
+<code>att-local-&lt;version&gt;.jar</code>，讓啟動器能明確選取
+runtime。源碼樹中，<code>att.bat</code> 會在 Maven 位於
+<code>PATH</code> 時使用 Maven；沒有 Maven 時，需要已有的
 <code>target\classes</code>。先用 <code>att.bat version</code>
-確認啟動器後再校驗包。</p>
+確認啟動器後再校驗套件。</p>
 <p>啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows
 配置 <code>.bat</code>、<code>.cmd</code>、PowerShell 腳本（需要顯式
 <code>powershell</code>/<code>pwsh</code> argv）或原生可執行文件，而不是

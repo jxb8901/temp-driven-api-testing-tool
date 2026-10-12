@@ -19,7 +19,7 @@ python3 tools/benchmark_debug_startup.py \
   --output /tmp/att-debug-startup-4.0.1.json
 ```
 
-執行前請明確 build 每個 source tree，並解壓每個 binary distribution。Source tree 必須有已編譯 module `target/classes`（或舊式 root `target/classes`）。Harness 會以相應 binary package 的 non-ATT dependencies，以及 source `lib/` 內的其他 dependencies，搭配 source-built ATT classes；binary distribution 必須包含 `att.sh`/`att.bat` 和 `lib/att-local.jar`。如果 source tree 是沒有 Git metadata 的 archive，請傳入 source revision；報告亦會記錄 binary tree SHA-256、機器資訊、Java 和 Python 版本。Harness 會實際呼叫 launcher，因此 wall timing 包含 shell/batch launcher 和 JVM startup。四個 variants 應使用相同 Java runtime 和機器環境。這些量度用於比較，不保證固定延遲；檔案系統和主機負載都會影響結果。No-warmup samples 不會清除作業系統 file cache。
+執行前請明確 build 每個 source tree，並解壓每個 binary distribution。Source tree 必須有已編譯 module `target/classes`（或舊式 root `target/classes`）。Harness 會以相應 binary package 的 non-ATT dependencies，以及 source `lib/` 內的其他 dependencies，搭配 source-built ATT classes；binary distribution 必須包含 `att.sh`/`att.bat` 和一個有版本號的 runtime，例如 `lib/att-local-4.1.1.jar`。如果 source tree 是沒有 Git metadata 的 archive，請傳入 source revision；報告亦會記錄 binary tree SHA-256、機器資訊、Java 和 Python 版本。Harness 會實際呼叫 launcher，因此 wall timing 包含 shell/batch launcher 和 JVM startup。四個 variants 應使用相同 Java runtime 和機器環境。這些量度用於比較，不保證固定延遲；檔案系統和主機負載都會影響結果。No-warmup samples 不會清除作業系統 file cache。
 
 候選版本的 profile 會分開記錄 Java main entry 之後的 ATT timing，包括 `cliArgumentParseMs`、`processToFirstConsoleEventMs`、`processToFirstActionMs`、`debugResourceSetupMs`、`debugExecutionMs` 和 `debugFinalizationMs`。Java main entry 發生在 launcher 和 JVM startup 之後。每個 target 會額外執行一次 profile；這不是 percentile measurement。
 

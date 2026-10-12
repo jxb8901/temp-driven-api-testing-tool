@@ -31,7 +31,7 @@ class WorkerRuntimeClasspathTest {
 
     @Test void rejectsInvalidAndMismatchedRuntimeBundles() throws Exception {
         Path invalidHome=Files.createDirectories(temp.resolve("invalid/lib"));
-        Files.writeString(invalidHome.resolve("att-local.jar"),"not a jar");
+        Files.writeString(invalidHome.resolve(bundleName()),"not a jar");
         IllegalStateException invalid=assertThrows(IllegalStateException.class,
                 ()->WorkerRuntimeClasspath.resolve(invalidHome.getParent().toString(),null));
         assertTrue(invalid.getMessage().contains("invalid or unreadable"));
@@ -46,14 +46,18 @@ class WorkerRuntimeClasspathTest {
         Path localLib=Files.createDirectories(temp.resolve("att-home/lib"));
         Path jdbc=Files.createDirectories(temp.resolve("jdbc"));
         Path mq=Files.createDirectories(temp.resolve("mq"));
-        assertEquals(List.of(localLib.resolve("*").toString(),jdbc.resolve("*").toString(),mq.resolve("*").toString()),
+        Path runtime=Files.writeString(localLib.resolve(bundleName()),"runtime");
+        Path staleRuntime=Files.writeString(localLib.resolve("att-local-4.0.0.jar"),"stale runtime");
+        Path thirdParty=Files.writeString(localLib.resolve("jackson.jar"),"dependency");
+        assertEquals(List.of(runtime.toString(),thirdParty.toString(),jdbc.resolve("*").toString(),mq.resolve("*").toString()),
                 WorkerRuntimeClasspath.entries(localLib,List.of(jdbc,mq)));
+        assertFalse(WorkerRuntimeClasspath.entries(localLib,List.of()).contains(staleRuntime.toString()));
     }
 
     private Path runtimeHome(String name,String version) throws Exception {
         Path home=Files.createDirectories(temp.resolve(name));
         Path lib=Files.createDirectories(home.resolve("lib"));
-        Path bundle=lib.resolve("att-local.jar");
+        Path bundle=lib.resolve(bundleName());
         try(JarOutputStream jar=new JarOutputStream(Files.newOutputStream(bundle))) {
             add(jar,"att-build.properties",("att.version="+version+"\n").getBytes(StandardCharsets.UTF_8));
             add(jar,"att/worker/WorkerMain.class",new byte[]{0});
@@ -62,6 +66,8 @@ class WorkerRuntimeClasspathTest {
         }
         return home;
     }
+
+    private static String bundleName() { return "att-local-"+ServerBuildInfo.PRODUCT+".jar"; }
 
     private static void add(JarOutputStream jar,String name,byte[] content) throws Exception {
         jar.putNextEntry(new JarEntry(name));

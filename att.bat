@@ -8,7 +8,8 @@ cd /d "%ROOT_DIR%" || exit /b 2
 where java >nul 2>&1
 if errorlevel 1 (echo A Java 8 or later runtime is required. 1>&2& exit /b 2)
 set "APP_JAR="
-if exist "%ATT_HOME%\lib\att-local.jar" set "APP_JAR=%ATT_HOME%\lib\att-local.jar"
+for %%F in ("%ATT_HOME%\lib\att-local-*.jar") do call :select_app_jar "%%~fF"
+if errorlevel 1 exit /b 2
 if defined APP_JAR goto packaged
 set "MISSING_CLASSES="
 if not exist "%ROOT_DIR%att-cli\target\classes\att\FrameworkRunner.class" set "MISSING_CLASSES=%MISSING_CLASSES% att-cli/target/classes/att/FrameworkRunner.class"
@@ -58,5 +59,21 @@ if defined ATT_PACKAGE_ROOT (
 ) else if exist "%ATT_HOME%\packages\default\" (
   cd /d "%ATT_HOME%\packages\default" || exit /b 2
 )
-java -Datt.home="%ATT_HOME%" -cp "%ATT_HOME%\lib\*" att.FrameworkRunner %*
+set "CP=%APP_JAR%"
+for %%F in ("%ATT_HOME%\lib\*.jar") do call :append_runtime_jar "%%~fF"
+java -Datt.home="%ATT_HOME%" -cp "%CP%" att.FrameworkRunner %*
 exit /b %ERRORLEVEL%
+:select_app_jar
+if not exist "%~1" exit /b 0
+if defined APP_JAR (
+  echo Multiple versioned ATT Local runtimes found under %ATT_HOME%\lib; keep one att-local-^<version^>.jar per ATT_HOME. 1>&2
+  exit /b 2
+)
+set "APP_JAR=%~1"
+exit /b 0
+:append_runtime_jar
+if not exist "%~1" exit /b 0
+set "JAR_NAME=%~nx1"
+if /i "%JAR_NAME:~0,10%"=="att-local-" exit /b 0
+set "CP=%CP%;%~1"
+exit /b 0
