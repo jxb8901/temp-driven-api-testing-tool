@@ -1,16 +1,16 @@
 # ATT Server 部署與 API
 
-ATT Server 4.1.0 提供單節點控制平面，讓用戶透過版本化 REST API 提交 ATT Run、Debug、Load 及 Validate 工作。請將 WAR 部署至使用 Java 17 或更新版本的外部 Tomcat 10.1+。CLI、Engine 及 Worker 仍相容 Java 8。
+ATT Server 4.1.1 提供單節點控制平面，讓用戶透過版本化 REST API 提交 ATT Run、Debug、Load 及 Validate 工作。請將 WAR 部署至使用 Java 17 或更新版本的外部 Tomcat 10.1+。CLI、Engine 及 Worker 仍相容 Java 8。
 
 ## 準備部署
 
-1. 將 Local archive 解壓至安裝根目錄，並將 `ATT_HOME` 設為該目錄。預設 package root 為 `$ATT_HOME/packages/default`；其中包含自己的 `config/config.yaml`、`schemas/`、單數 `testcase/`、`templates/` 及頂層 `tools/`。
+1. 將 Local archive 解壓至安裝根目錄，並將 `ATT_HOME` 設為該目錄。升級時，先移除舊的 `lib/att-local-*.jar` 再解壓新 archive，確保 `ATT_HOME/lib` 只包含一個 runtime。預設 package root 為 `$ATT_HOME/packages/default`；其中包含自己的 `config/config.yaml`、`schemas/`、單數 `testcase/`、`templates/` 及頂層 `tools/`。
 2. 將 package root 設於 allowed root 之下，並確保 Tomcat 服務帳戶可讀取。解壓後的 `$ATT_HOME/packages/default` 可直接註冊為 package root。
 3. 啟動前先建立 `server.dataDir`，並只允許 Tomcat 服務帳戶寫入。範例使用 `$ATT_HOME/data`；只要它與所有已註冊 package root 不相等、互不包含，即可使用。亦可使用 `/var/lib/att-server`。Server data 不可放入 package 內容。
 4. 將 `$ATT_HOME/config/att-server.example.yaml` 複製至 `$ATT_HOME/config/att-server.yaml` 或受保護的外部路徑，更新絕對路徑，並勿將憑證放入 package。升級時不可覆寫既有的 active config。
-5. 將 `att-server-4.1.0.war` 部署至 Tomcat 10.1+。請保持 Tomcat 的 `unpackWARs` 啟用，讓 Server 可從 `WEB-INF/lib` 啟動 Worker。
+5. 將 `att-server-4.1.1.war` 部署至 Tomcat 10.1+。Tomcat 可直接部署 packed WAR；隔離的 Worker 會從 `$ATT_HOME/lib` 載入版本相符的 `att-local-4.1.1.jar`。
 
-Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 runtime library；可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
+Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.1.1.jar` 中共用的 Worker/Engine runtime；請在 Server WAR 旁安裝版本相符的 Local archive。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
 
 Server 依次尋找 JVM property `-Datt.server.config`、環境變數 `ATT_SERVER_CONFIG`，再尋找 `$ATT_HOME/config/att-server.yaml`。最後一個路徑的 `ATT_HOME` 先取自 `-Datt.home`，再取自 `ATT_HOME` 環境變數。若選定的 config 不存在、不可讀或無效，Server 會在診斷中指出其路徑並停止啟動，不會改用其他來源。沒有明確來源或可用的預設 config 時，啟動錯誤會提供設定指引。
 
@@ -353,13 +353,13 @@ Artifact 路徑必須相對於工作輸出目錄。絕對路徑、目錄 travers
 
 ## 發行與相容性
 
-Server binary 會以獨立的 `att-4.1.0-server.tar.gz` 發佈，內含 `server/att-server-4.1.0.war` 及部署指南。Local CLI 位於 `att-4.1.0-local.tar.gz`，並包含其 runtime library。兩個 archive 分開後，local package 不會再重複附帶 WAR 內的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
+Server binary 會以獨立的 `att-4.1.1-server.tar.gz` 發佈，內含 `server/att-server-4.1.1.war`（ATT application code 已合併至 `WEB-INF/lib/att-server-4.1.1.jar`）及部署指南。Local CLI 位於 `att-4.1.1-local.tar.gz`，其 `lib/att-local-4.1.1.jar` 提供共用 Worker/Engine runtime；Server 會載入相同版本的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
 
 ### Issue #176 rollout checklist
 
 1. 備份 Server `dataDir`，並保留目前 WAR 及部署設定以便回復。
 2. 保持 Tomcat 驗證啟用，並以 HTTPS 接收公開流量。確認 package root 與 Server data directory 分離，且只有服務帳戶可寫入。
-3. 將 Server WAR 以 exploded web application 部署，確保 Worker process 可使用 `WEB-INF/lib`。透過實際 Tomcat context path 檢查 `/api/v1/health` 及 `/api/v1/version`。
+3. 請將 `ATT_HOME` 或 `-Datt.home` 設為版本相符的 Local installation，讓 Worker process 使用 `$ATT_HOME/lib/*`。Tomcat 可直接部署 packed WAR；`workers.libraryDirs` 仍可額外加入外部 JDBC、MQ 或其他 library。透過實際 Tomcat context path 檢查 `/api/v1/health` 及 `/api/v1/version`。
 4. 初始維持 `server.inlineLoad.enabled: false`。先用非正式環境 package 檢視 Package 與 Configuration Explorer。只在核准的環境啟用瀏覽器 Load，並設定 workload 數、target、users 或 rate、並行數及完整時間窗口上限。
 5. 監察 Worker 與 Load 佇列容量、工作結果、取消及保留的 artifacts。Package 維持唯讀；回復時停用 inline Load，必要時還原前一版 WAR 及設定。
 

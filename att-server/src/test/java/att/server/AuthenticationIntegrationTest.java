@@ -5,6 +5,7 @@ import org.apache.catalina.realm.MemoryRealm;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.Context;
 import org.apache.catalina.valves.RemoteIpValve;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.net.HttpURLConnection;
@@ -16,6 +17,8 @@ import java.io.OutputStream;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.Base64;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -26,8 +29,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AuthenticationIntegrationTest {
     @TempDir Path temp;
+    private String previousAttHome;
+
+    @AfterEach void restoreAttHome() {
+        if (previousAttHome == null) System.clearProperty("att.home");
+        else System.setProperty("att.home", previousAttHome);
+    }
 
     @Test void tomcatBasicRealmProtectsServerApiAndSupportsConfiguredAnonymousMode() throws Exception {
+        previousAttHome=System.getProperty("att.home");
+        Path localHome=createLocalRuntime();
+        System.setProperty("att.home",localHome.toString());
         Path packages=Files.createDirectory(temp.resolve("packages"));Files.createDirectory(packages.resolve("p"));
         Path debugPackage=Files.createDirectory(packages.resolve("debug"));Path template=Files.createDirectories(debugPackage.resolve("templates/FORM"));
         Files.createDirectories(debugPackage.resolve("testcase"));Files.createDirectories(debugPackage.resolve("config"));copySchemas(debugPackage);
@@ -140,6 +152,34 @@ class AuthenticationIntegrationTest {
         finally {open.stop();open.destroy();restore(old);}
     }
 
+    private Path createLocalRuntime() throws Exception {
+        Path home=Files.createDirectory(temp.resolve("local-runtime"));
+        Path lib=Files.createDirectories(home.resolve("lib"));
+        Set<String> added=new HashSet<>();
+        try(JarOutputStream jar=new JarOutputStream(Files.newOutputStream(lib.resolve("att-local-"+ServerBuildInfo.PRODUCT+".jar")))) {
+            for(String module:List.of("att-cli","att-engine","att-remote","att-server-api","att-worker")) {
+                Path classes=Path.of(module,"target/classes");
+                try(var paths=Files.walk(classes)) {
+                    for(Path source:(Iterable<Path>)paths.filter(Files::isRegularFile)::iterator) {
+                        String name=classes.relativize(source).toString().replace(java.io.File.separatorChar,'/');
+                        if(!added.add(name))continue;
+                        jar.putNextEntry(new JarEntry(name));Files.copy(source,jar);jar.closeEntry();
+                    }
+                }
+            }
+        }
+        String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
+            Path dependency=Path.of(element);
+            if(!Files.isRegularFile(dependency)||!dependency.getFileName().toString().endsWith(".jar"))continue;
+            String name=dependency.getFileName().toString();
+            if(name.startsWith("att-")||name.startsWith("tomcat-")||name.contains("servlet-api"))continue;
+            Path target=lib.resolve(name);
+            if(!Files.exists(target))Files.copy(dependency,target);
+        }
+        return home;
+    }
+
     private Tomcat start(Path users,Path app) throws Exception {return start(users,app,false);}
     private Tomcat start(Path users,Path app,boolean trustedProxy) throws Exception {
         Tomcat tomcat=new Tomcat();tomcat.setBaseDir(temp.resolve("tomcat-"+System.nanoTime()).toString());tomcat.setPort(0);tomcat.getConnector();MemoryRealm realm=new MemoryRealm();realm.setPathname(users.toString());tomcat.getEngine().setRealm(realm);
@@ -247,7 +287,7 @@ class AuthenticationIntegrationTest {
         Object config=field(runtime,"config");Path dataDir=(Path)field(config,"dataDir");int maxEvents=(Integer)field(config,"maxEventsPerJob");
         String id="J"+java.util.UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();Path directory=Files.createDirectories(dataDir.resolve("jobs").resolve(id));
         Class<?> journalType=Class.forName("att.server.JobEvents",true,appLoader);var journalConstructor=journalType.getDeclaredConstructor(Path.class,int.class);journalConstructor.setAccessible(true);Object journal=journalConstructor.newInstance(directory.resolve("events.jsonl"),maxEvents);
-        Class<?> requestType=Class.forName("att.worker.WorkerRequest",true,appLoader);Object workerRequest=requestType.getConstructor().newInstance();
+        Class<?> requestType=Class.forName("att.server.api.WorkerRequest",true,appLoader);Object workerRequest=requestType.getConstructor().newInstance();
         Class<?> jobType=Class.forName("att.server.Job",true,appLoader);var jobConstructor=jobType.getDeclaredConstructor(String.class,String.class,String.class,String.class,requestType,journalType);jobConstructor.setAccessible(true);Object job=jobConstructor.newInstance(id,"run","p","observer-test",workerRequest,journal);
         Object store=field(runtime,"store");var insert=store.getClass().getDeclaredMethod("insert",jobType,String.class);insert.setAccessible(true);insert.invoke(store,job,"{}");
         @SuppressWarnings("unchecked") Map<String,Object> jobs=(Map<String,Object>)field(runtime,"jobs");jobs.put(id,job);

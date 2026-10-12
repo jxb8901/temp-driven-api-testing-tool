@@ -1,7 +1,6 @@
 package att.server;
 
-import att.worker.WorkerRequest;
-import att.Version;
+import att.server.api.WorkerRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.yaml.snakeyaml.DumperOptions;
@@ -53,6 +52,8 @@ final class ServerRuntime implements AutoCloseable {
     private static final Pattern INLINE_LOAD_DURATION=Pattern.compile("^([0-9]+)(ms|s|m|h)$");
     private static final Pattern INLINE_LOAD_RATE=Pattern.compile("^([1-9][0-9]*(?:\\.[0-9]+)?)/(s|m)$");
     static final int MAX_ACTIVE_DRAFTS=128, MAX_DRAFTS_PER_PRINCIPAL=16;
+    // Public inspection limits; keep aligned with PackageResourceInspector in the Local runtime.
+    private static final int RESOURCE_DEFAULT_PAGE_SIZE=50, RESOURCE_MAX_PAGE_SIZE=100;
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
     final ServerConfig config;
@@ -77,16 +78,16 @@ final class ServerRuntime implements AutoCloseable {
     private final AtomicLong inspectionWorkerSelection=new AtomicLong();
     private final byte[] cursorKey=new byte[32];
     private final SecureRandom cursorRandom=new SecureRandom();
-    private volatile String webInfLibs;
-    ServerRuntime(ServerConfig config,String webInfLibs) throws Exception {
-        this(config,webInfLibs,ProcessBuilder::start);
+    private final Path workerLibs;
+    ServerRuntime(ServerConfig config,String workerLibs) throws Exception {
+        this(config,workerLibs,ProcessBuilder::start);
     }
-    ServerRuntime(ServerConfig config,String webInfLibs,WorkerProcessLauncher processLauncher) throws Exception {
-        this(config,webInfLibs,processLauncher,Clock.systemUTC());
+    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher) throws Exception {
+        this(config,workerLibs,processLauncher,Clock.systemUTC());
     }
-    ServerRuntime(ServerConfig config,String webInfLibs,WorkerProcessLauncher processLauncher,Clock clock) throws Exception {
+    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.webInfLibs=webInfLibs;this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.config=config;this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -183,11 +184,8 @@ final class ServerRuntime implements AutoCloseable {
                 if(job.terminal())return;
                 transition(job,"PREPARING");
                 validatePackageRoot(config.packages.get(job.packageId));
-                Path libs=webInfLibs==null?null:Paths.get(webInfLibs);
-                if(libs==null||!Files.isDirectory(libs))throw new IllegalStateException("Tomcat must deploy the WAR as an exploded application so WEB-INF/lib is available to the Worker launcher");
                 job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
-                List<String> classpathEntries=new ArrayList<>();classpathEntries.add(libs.resolve("*").toString());
-                for(Path libraryDir:config.workerLibraryDirs)classpathEntries.add(libraryDir.resolve("*").toString());
+                List<String> classpathEntries=workerClasspath();
                 String cp=String.join(java.io.File.pathSeparator,classpathEntries);
                 List<String> command=new ArrayList<>();command.add(config.javaExecutable.toString());
                 if(config.workerHeapInitialMb>0)command.add("-Xms"+config.workerHeapInitialMb+"m");
@@ -207,6 +205,9 @@ final class ServerRuntime implements AutoCloseable {
           catch(Exception e){stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
         finally {if(job.process!=null&&!job.process.isAlive()){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;try{store.update(job);}catch(Exception ignored){}}tasks.remove(job.id);leases.remove(job.id);if(job.terminal())jobs.remove(job.id,job);lease.release();completed.incrementAndGet();}
     }
+    private List<String> workerClasspath() {
+        return WorkerRuntimeClasspath.entries(workerLibs,config.workerLibraryDirs);
+    }
     private void stopAfterFailure(Job job) {
         Process process=job.process;
         if(process==null||!process.isAlive())return;
@@ -216,7 +217,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     void handleWorkerEvent(Job job,String line) throws Exception {
         JsonNode event=JSON.readTree(line);if(event==null||!event.isObject())return;
-        String type=event.path("type").asText("").toUpperCase();Map<String,Object> data=JSON.convertValue(event,Map.class);data.remove("type");data.remove("jobId");Map<String,Object> safe=att.worker.internal.DiagnosticSanitizer.sanitize(data);
+        String type=event.path("type").asText("").toUpperCase();Map<String,Object> data=JSON.convertValue(event,Map.class);data.remove("type");data.remove("jobId");Map<String,Object> safe=att.server.api.internal.DiagnosticSanitizer.sanitize(data);
         long eventNanos=System.nanoTime();
         if("STATUS".equals(type)&&job.workerReadyNanos==0)job.workerReadyNanos=eventNanos;
         if(("PROGRESS".equals(type)||"LOG".equals(type))&&job.executionReadyNanos==0)job.executionReadyNanos=eventNanos;
@@ -244,8 +245,8 @@ final class ServerRuntime implements AutoCloseable {
         if(!List.of("list","detail","source").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
         if(type!=null&&!List.of("case","template","flow","tool").contains(type))throw new IllegalArgumentException("Unsupported resource type");
         String normalizedQuery=query==null?"":query.trim();if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
-        int limit=requestedLimit==0?att.resource.PackageResourceInspector.DEFAULT_PAGE_SIZE:requestedLimit;
-        if(limit<1||limit>att.resource.PackageResourceInspector.MAX_PAGE_SIZE)throw new IllegalArgumentException("limit must be between 1 and 100");
+        int limit=requestedLimit==0?RESOURCE_DEFAULT_PAGE_SIZE:requestedLimit;
+        if(limit<1||limit>RESOURCE_MAX_PAGE_SIZE)throw new IllegalArgumentException("limit must be between 1 and 100");
         Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,type,normalizedQuery,principal);
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";request.packageRoot=root.toString();request.config="config/config.yaml";
         request.inspectionAction=action;request.inspectionType=type;request.inspectionResourceId=resourceId;request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
@@ -311,7 +312,7 @@ final class ServerRuntime implements AutoCloseable {
             throw new IllegalArgumentException("target is invalid");
         JsonNode inputNode=input.get("input");requireObject(inputNode,"input must be a JSON object");
         Map<String,Object> submitted=JSON.convertValue(inputNode,Map.class);
-        if(!submitted.containsKey("schemaVersion"))submitted.put("schemaVersion",Version.DEBUG_SCHEMA);
+        if(!submitted.containsKey("schemaVersion"))submitted.put("schemaVersion","att-debug/v1.2");
         WorkerRequest request=inspectionRequest(packageId,root,environment);
         request.inspectionAction="debug-input";request.inspectionType=type;request.inspectionTargetId=logicalId;
         request.inlineDebugInput=submitted;
@@ -765,7 +766,7 @@ final class ServerRuntime implements AutoCloseable {
                 Map<String,Object> safe=new LinkedHashMap<String,Object>();
                 for(String key:List.of("code","summary","field","resourceId")) {
                     Object item=value.get(key);
-                    if(item instanceof String)safe.put(key,att.worker.internal.DiagnosticSanitizer.redactText((String)item));
+                    if(item instanceof String)safe.put(key,att.server.api.internal.DiagnosticSanitizer.redactText((String)item));
                 }
                 if(!safe.isEmpty())diagnostics.add(safe);
             }
@@ -873,12 +874,7 @@ final class ServerRuntime implements AutoCloseable {
             if(current!=null&&current.isAlive())return;
             discard();
             validatePackageRoot(root);
-            Path libs=webInfLibs==null?null:Paths.get(webInfLibs);
-            if(libs==null||!Files.isDirectory(libs))
-                throw new IllegalStateException("Tomcat must deploy the WAR as an exploded application so WEB-INF/lib is available to the Worker launcher");
-            List<String> classpathEntries=new ArrayList<>();
-            classpathEntries.add(libs.resolve("*").toString());
-            for(Path libraryDir:config.workerLibraryDirs)classpathEntries.add(libraryDir.resolve("*").toString());
+            List<String> classpathEntries=workerClasspath();
             String cp=String.join(java.io.File.pathSeparator,classpathEntries);
             ProcessBuilder builder=new ProcessBuilder(config.javaExecutable.toString(),"-Xmx"+config.inspection.heapMaxMb+"m",
                     "-cp",cp,"att.worker.WorkerMain","--inspection-daemon");
@@ -973,11 +969,11 @@ final class ServerRuntime implements AutoCloseable {
         return config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
     }
     Object publicEventData(Object data,Path output,Path packageRoot) throws Exception {
-        JsonNode node=JSON.valueToTree(att.worker.internal.DiagnosticSanitizer.sanitizeValue(data));
+        JsonNode node=JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(data));
         return sanitize(node,output,packageRoot);
     }
     private JsonNode publicJson(String id,String json) throws Exception {
-        JsonNode node=JSON.readTree(json);Object safe=att.worker.internal.DiagnosticSanitizer.sanitizeValue(JSON.convertValue(node,Object.class));node=JSON.valueToTree(safe);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
+        JsonNode node=JSON.readTree(json);Object safe=att.server.api.internal.DiagnosticSanitizer.sanitizeValue(JSON.convertValue(node,Object.class));node=JSON.valueToTree(safe);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
         return sanitize(node,output,packageRootForJob(id));
     }
     private JsonNode sanitize(JsonNode node,Path output,Path packageRoot) {
@@ -988,7 +984,7 @@ final class ServerRuntime implements AutoCloseable {
         return node.deepCopy();
     }
     private static String replacePathPrefix(String value,String prefix,String logical){if(value.equals(prefix))return logical+":";String separator=java.io.File.separator;value=value.replace(prefix+separator,logical+":");if("\\".equals(separator))value=value.replace(prefix+"/",logical+":");else value=value.replace(prefix+"\\",logical+":");return value;}
-    private static String safeMessage(Exception e){String m=att.worker.internal.DiagnosticSanitizer.redactText(e.getMessage());return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
+    private static String safeMessage(Exception e){String m=att.server.api.internal.DiagnosticSanitizer.redactText(e.getMessage());return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
     private static String readBoundedLine(BufferedReader reader,int limit) throws java.io.IOException {StringBuilder line=new StringBuilder();boolean oversized=false;int c;while((c=reader.read())!=-1){if(c=='\n')break;if(c=='\r')continue;if(line.length()<limit)line.append((char)c);else oversized=true;}if(c==-1&&line.isEmpty()&&!oversized)return null;return oversized?"\u0000OVERSIZED":line.toString();}
     JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob):active.events;}
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}

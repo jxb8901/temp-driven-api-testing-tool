@@ -1,5 +1,11 @@
 # Changelog
 
+# ATT 4.1.1 - 2026-10-12
+
+- Launch normal and inspection Workers from the matching `$ATT_HOME/lib/att-local-4.1.1.jar`; keep `workers.libraryDirs` additive.
+- Combine Local ATT modules into `att-local-4.1.1.jar` and Server, Server API, and Web UI modules into `WEB-INF/lib/att-server-4.1.1.jar`; keep third-party libraries separate.
+- Support packed WAR deployment and document the shared runtime requirement.
+
 # ATT 4.1.0 - 2026-10-10
 
 - Upgrade the ATT product version to 4.1.0.

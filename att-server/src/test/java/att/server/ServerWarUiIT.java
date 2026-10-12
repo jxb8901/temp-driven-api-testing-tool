@@ -1,5 +1,6 @@
 package att.server;
 
+import org.apache.catalina.core.StandardHost;
 import org.apache.catalina.realm.MemoryRealm;
 import org.apache.catalina.startup.Tomcat;
 import org.junit.jupiter.api.Test;
@@ -9,10 +10,13 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Base64;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.jar.JarInputStream;
+import java.util.jar.JarOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -23,7 +27,11 @@ class ServerWarUiIT {
     void packagedWarServesAuthenticatedUiAssetsUnderNonRootContext() throws Exception {
         Path war = Path.of(System.getProperty("att.server.war"));
         assertTrue(Files.isRegularFile(war), "Packaged server WAR must exist: " + war);
-        Path explodedWar = unpackWar(war, temp.resolve("exploded-war"));
+        Path localHome=Files.createDirectories(temp.resolve("att-home"));
+        Path localLib=Files.createDirectories(localHome.resolve("lib"));
+        writeWorkerRuntime(localLib.resolve("att-local-"+ServerBuildInfo.PRODUCT+".jar"));
+
+        assertServerApplicationJar(war);
 
         Path users = Files.writeString(temp.resolve("tomcat-users.xml"),
                 "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
@@ -34,7 +42,9 @@ class ServerWarUiIT {
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"
                         + "packages:\n  allowedRoots:\n    - " + packages + "\n  entries:\n    dummy: " + dummyPackage + "\n");
         String oldConfig = System.getProperty("att.server.config");
+        String oldHome = System.getProperty("att.home");
         System.setProperty("att.server.config", config.toString());
+        System.setProperty("att.home", localHome.toString());
 
         Tomcat tomcat = new Tomcat();
         tomcat.setBaseDir(temp.resolve("tomcat").toString());
@@ -43,7 +53,8 @@ class ServerWarUiIT {
         MemoryRealm realm = new MemoryRealm();
         realm.setPathname(users.toString());
         tomcat.getEngine().setRealm(realm);
-        tomcat.addWebapp("/tools/att", explodedWar.toString());
+        ((StandardHost) tomcat.getHost()).setUnpackWARs(false);
+        tomcat.addWebapp("/tools/att", war.toString());
         try {
             tomcat.start();
             int port = tomcat.getConnector().getLocalPort();
@@ -72,28 +83,52 @@ class ServerWarUiIT {
             try { tomcat.stop(); } finally { tomcat.destroy(); }
             if (oldConfig == null) System.clearProperty("att.server.config");
             else System.setProperty("att.server.config", oldConfig);
+            if (oldHome == null) System.clearProperty("att.home");
+            else System.setProperty("att.home", oldHome);
         }
     }
 
 
 
-    private static Path unpackWar(Path war, Path destination) throws Exception {
-        Path root = Files.createDirectories(destination).toAbsolutePath().normalize();
-        try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(war))) {
-            ZipEntry entry;
-            while ((entry = zip.getNextEntry()) != null) {
-                Path target = root.resolve(entry.getName()).normalize();
-                assertTrue(target.startsWith(root), "WAR entry must stay inside the exploded directory");
-                if (entry.isDirectory()) {
-                    Files.createDirectories(target);
-                } else {
-                    Files.createDirectories(target.getParent());
-                    Files.copy(zip, target, StandardCopyOption.REPLACE_EXISTING);
-                }
-                zip.closeEntry();
+    private static void assertServerApplicationJar(Path war) throws Exception {
+        try (JarFile archive = new JarFile(war.toFile())) {
+            JarEntry application = archive.getJarEntry("WEB-INF/lib/att-server-"+ServerBuildInfo.PRODUCT+".jar");
+            assertNotNull(application, "WAR must contain the combined ATT Server application jar");
+            assertNull(archive.getJarEntry("WEB-INF/classes/att/server/ApiServlet.class"),
+                    "ATT application classes must not be duplicated in WEB-INF/classes");
+            assertFalse(archive.stream().map(JarEntry::getName).anyMatch(name ->
+                    name.matches("WEB-INF/lib/att-(server-api|web|worker|engine)-[^/]+\\.jar")),
+                    "ATT module jars must be combined into the versioned att-server jar");
+            Set<String> entries = new HashSet<>();
+            try (JarInputStream app = new JarInputStream(archive.getInputStream(application))) {
+                JarEntry entry;
+                while ((entry = app.getNextJarEntry()) != null) entries.add(entry.getName());
+            }
+            assertTrue(entries.contains("att/server/ApiServlet.class"));
+            assertTrue(entries.contains("att/server/api/ServerApi.class"));
+            assertTrue(entries.contains("META-INF/resources/ui/index.html"));
+            assertTrue(entries.contains("att-build.properties"));
+            assertFalse(entries.contains("att/worker/WorkerMain.class"),
+                    "Worker classes belong only in the Local runtime jar");
+        }
+    }
+
+    private static void writeWorkerRuntime(Path jarPath) throws Exception {
+        try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(jarPath))) {
+            for (String name : new String[] {
+                    "att/worker/WorkerMain.class",
+                    "att/server/api/WorkerRequest.class",
+                    "att/server/api/internal/DiagnosticSanitizer.class",
+                    "att-build.properties"
+            }) {
+                jar.putNextEntry(new JarEntry(name));
+                if (name.equals("att-build.properties"))
+                    jar.write("att.version=4.1.1\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                else
+                    jar.write(0);
+                jar.closeEntry();
             }
         }
-        return root;
     }
 
     private static void assertJobDeepLink(int port, String authorization) throws Exception {

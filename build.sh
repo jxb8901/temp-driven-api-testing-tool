@@ -6,7 +6,7 @@ if [ "${1:-}" = "clean" ]; then
   rm -rf "$ROOT_DIR/target" "$ROOT_DIR/dist" "$ROOT_DIR/att-engine/target" "$ROOT_DIR/att-cli/target" "$ROOT_DIR/att-worker/target" "$ROOT_DIR/att-web/target" "$ROOT_DIR/att-server/target" "$ROOT_DIR/att-dist/target"
   exit 0
 fi
-for required in pom.xml att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-web/pom.xml att-web/src/main/resources/META-INF/resources/ui/index.html att-server/pom.xml att-dist/pom.xml att-dist/src/assembly/local.xml att-dist/src/assembly/server.xml att-dist/src/release/local/RELEASE_MANIFEST.txt att-dist/src/release/server/RELEASE_MANIFEST.txt config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md docs/server-deployment.md docs/server-deployment.zh.md docs/att-server-web-ui.md docs/att-server-web-ui.zh.md; do
+for required in pom.xml att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-web/pom.xml att-web/src/main/resources/META-INF/resources/ui/index.html att-server/pom.xml att-dist/pom.xml att-dist/src/assembly/local.xml att-dist/src/assembly/server.xml att-server/src/assembly/server-app.xml att-dist/src/release/local/RELEASE_MANIFEST.txt att-dist/src/release/server/RELEASE_MANIFEST.txt config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md docs/server-deployment.md docs/server-deployment.zh.md docs/att-server-web-ui.md docs/att-server-web-ui.zh.md; do
   if [ ! -e "$ROOT_DIR/$required" ]; then echo "Missing required package path: $ROOT_DIR/$required" >&2; exit 2; fi
 done
 VERSION="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' "$ROOT_DIR/pom.xml" | head -n 1)"
@@ -39,6 +39,18 @@ LOCAL_PACKAGE_ROOT="$LOCAL_PACKAGE_DIR/packages/default"
 for required in att.sh att.bat lib config/att-server.example.yaml packages/default/config/config.yaml packages/default/config/tools packages/default/schemas packages/default/testcase packages/default/templates packages/default/tools; do
   if [ ! -e "$LOCAL_PACKAGE_DIR/$required" ]; then echo "Local archive is missing required layout path: $required" >&2; exit 2; fi
 done
+LOCAL_RUNTIME_JAR="$LOCAL_PACKAGE_DIR/lib/att-local-${VERSION}.jar"
+if [ ! -f "$LOCAL_RUNTIME_JAR" ]; then
+  echo "Local archive is missing its combined ATT runtime: lib/att-local-${VERSION}.jar" >&2; exit 2
+fi
+python3 - "$LOCAL_RUNTIME_JAR" <<'PYZIP'
+import sys, zipfile
+required = {"att-build.properties", "att/FrameworkRunner.class", "att/worker/WorkerMain.class"}
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    missing = required.difference(archive.namelist())
+if missing:
+    raise SystemExit("Local runtime jar is incomplete: " + ", ".join(sorted(missing)))
+PYZIP
 if [ -e "$LOCAL_PACKAGE_DIR/config/att-server.yaml" ] || [ -e "$LOCAL_PACKAGE_ROOT/config/att-server.yaml" ] || [ -e "$LOCAL_PACKAGE_DIR/data" ]; then
   echo "Local archive must not contain an active Server config or Server data directory" >&2; exit 2
 fi

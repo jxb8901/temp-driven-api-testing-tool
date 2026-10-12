@@ -1,6 +1,6 @@
 package att.server;
 
-import att.worker.WorkerRequest;
+import att.server.api.WorkerRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
