@@ -19,8 +19,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.UUID;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -203,8 +201,7 @@ class WindowsLauncherTest {
         Files.createDirectories(lib);
         Files.createDirectories(packageRoot);
         Files.copy(Paths.get("att.bat"), root.resolve("att.bat"));
-        String version = projectVersion();
-        createApplicationJar(lib.resolve("att-" + version + ".jar"));
+        createApplicationJar(lib.resolve("att-local.jar"));
         for (String directory : new String[]{"config", "templates", "testcase", "load", "tools", "schemas"}) {
             Path source = Paths.get(directory);
             Path destination = packageRoot.resolve(directory);
@@ -247,14 +244,6 @@ class WindowsLauncherTest {
             if (Files.isRegularFile(source)) Files.copy(source, lib.resolve(source.getFileName()));
         }
         return root;
-    }
-
-    private static String projectVersion() throws Exception {
-        String pom = new String(Files.readAllBytes(Paths.get("pom.xml")), StandardCharsets.UTF_8);
-        Matcher matcher = Pattern.compile("<artifactId>template-driven-api-testing-tool</artifactId>\\s*<version>([^<]+)")
-                .matcher(pom);
-        assertTrue(matcher.find(), "Parent project version was not found in pom.xml");
-        return matcher.group(1);
     }
 
     private static void createApplicationJar(Path jarPath) throws Exception {
