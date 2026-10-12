@@ -13,7 +13,11 @@ final class WorkerRuntimeClasspath {
     private WorkerRuntimeClasspath() { }
 
     static Path resolve() throws Exception {
-        String home=firstNonBlank(System.getProperty("att.home"),System.getenv("ATT_HOME"));
+        return resolve(System.getProperty("att.home"),System.getenv("ATT_HOME"));
+    }
+
+    static Path resolve(String attHomeProperty,String attHomeEnvironment) throws Exception {
+        String home=firstNonBlank(attHomeProperty,attHomeEnvironment);
         if(home==null)throw new IllegalStateException("ATT_HOME is required to launch Workers; set -Datt.home or the ATT_HOME environment variable to the matching Local installation");
         Path root=Paths.get(home).toAbsolutePath().normalize();
         Path lib=root.resolve("lib");
@@ -38,6 +42,15 @@ final class WorkerRuntimeClasspath {
             throw new IllegalStateException("ATT Worker runtime is invalid or unreadable: "+bundle+"; reinstall the matching ATT Local archive",invalid);
         }
         return lib;
+    }
+
+    static java.util.List<String> entries(Path lib,List<Path> additionalDirectories) {
+        if(lib==null||!Files.isDirectory(lib))
+            throw new IllegalStateException("ATT Worker runtime library directory is unavailable; set -Datt.home or ATT_HOME to the matching Local installation");
+        java.util.List<String> result=new java.util.ArrayList<>();
+        result.add(lib.resolve("*").toString());
+        for(Path directory:additionalDirectories)result.add(directory.resolve("*").toString());
+        return result;
     }
 
     private static String firstNonBlank(String preferred,String fallback) {

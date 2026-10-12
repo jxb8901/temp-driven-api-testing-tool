@@ -204,11 +204,7 @@ final class ServerRuntime implements AutoCloseable {
         finally {if(job.process!=null&&!job.process.isAlive()){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;try{store.update(job);}catch(Exception ignored){}}tasks.remove(job.id);leases.remove(job.id);if(job.terminal())jobs.remove(job.id,job);lease.release();completed.incrementAndGet();}
     }
     private List<String> workerClasspath() {
-        if(workerLibs==null||!Files.isDirectory(workerLibs))
-            throw new IllegalStateException("ATT Worker runtime library directory is unavailable; set -Datt.home or ATT_HOME to the matching Local installation");
-        List<String> entries=new ArrayList<>();entries.add(workerLibs.resolve("*").toString());
-        for(Path libraryDir:config.workerLibraryDirs)entries.add(libraryDir.resolve("*").toString());
-        return entries;
+        return WorkerRuntimeClasspath.entries(workerLibs,config.workerLibraryDirs);
     }
     private void stopAfterFailure(Job job) {
         Process process=job.process;
