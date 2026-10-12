@@ -6145,7 +6145,7 @@ package 模式。</p>
 <div class="sourceCode" id="cb94"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb94-1"><a href="#cb94-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
 <span id="cb94-2"><a href="#cb94-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb94-3"><a href="#cb94-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;4.1.0&quot;</span><span class="fu">,</span></span>
+<span id="cb94-3"><a href="#cb94-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;4.1.1&quot;</span><span class="fu">,</span></span>
 <span id="cb94-4"><a href="#cb94-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
 <span id="cb94-5"><a href="#cb94-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
 <span id="cb94-6"><a href="#cb94-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
@@ -6199,9 +6199,9 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb95-1"><a href="#
 <p><code>build.sh</code> 會執行 release gate、重新生成 modular Reference
 Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的
 local package。Reference generation 另外需要 Python 3 與
-Pandoc。它會輸出供 CLI 使用的 <code>att-4.1.0-local.tar.gz</code>、包含
-WAR 和部署指南的 <code>att-4.1.0-server.tar.gz</code>，以及 source
-archive <code>att-4.1.0-src.tar.gz</code>。每個 binary archive 均須小於
+Pandoc。它會輸出供 CLI 使用的 <code>att-4.1.1-local.tar.gz</code>、包含
+WAR 和部署指南的 <code>att-4.1.1-server.tar.gz</code>，以及 source
+archive <code>att-4.1.1-src.tar.gz</code>。每個 binary archive 均須小於
 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。</p>
 <h3 id="runtime-dependencies">Runtime dependencies</h3>
 <p>CLI、Engine 及 Worker 仍相容 Java 8。ATT Server WAR 需要 Java 17+
