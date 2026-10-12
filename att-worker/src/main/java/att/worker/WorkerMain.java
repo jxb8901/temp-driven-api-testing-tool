@@ -3,7 +3,7 @@ package att.worker;
 import att.api.*;
 import att.resource.PackageResourceInspector;
 import att.resource.PackageConfigurationInspector;
-import att.worker.internal.DiagnosticSanitizer;
+import att.server.api.internal.DiagnosticSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonParser;

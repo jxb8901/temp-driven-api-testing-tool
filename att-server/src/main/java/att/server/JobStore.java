@@ -26,14 +26,14 @@ final class JobStore implements AutoCloseable {
     }
     synchronized void insert(Job job,String summary) throws Exception {
         try(Connection c=connect(); PreparedStatement p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary) VALUES(?,?,?,?,?,?,?,?)")) {
-            p.setString(1,job.id);p.setString(2,job.command);p.setString(3,job.packageId);p.setString(4,job.principal);p.setString(5,job.status);p.setString(6,job.createdAt.toString());p.setString(7,att.Version.PRODUCT);p.setString(8,summary);p.executeUpdate();
+            p.setString(1,job.id);p.setString(2,job.command);p.setString(3,job.packageId);p.setString(4,job.principal);p.setString(5,job.status);p.setString(6,job.createdAt.toString());p.setString(7,ServerBuildInfo.PRODUCT);p.setString(8,summary);p.executeUpdate();
         }
     }
     synchronized void update(Job j) throws Exception {
         try(Connection c=connect(); PreparedStatement p=c.prepareStatement("UPDATE jobs SET status=?,started_at=?,finished_at=?,worker_pid=?,worker_start_time=?,att_version=?,exit_code=?,result_json=?,diagnostic_json=?,performance_json=? WHERE job_id=?")) {
             p.setString(1,j.status);p.setString(2,text(j.startedAt));p.setString(3,text(j.finishedAt));
             if(j.workerPid==null)p.setNull(4,java.sql.Types.BIGINT);else p.setLong(4,j.workerPid);
-            p.setString(5,text(j.workerStartTime));p.setString(6,att.Version.PRODUCT);
+            p.setString(5,text(j.workerStartTime));p.setString(6,ServerBuildInfo.PRODUCT);
             if(j.exitCode==null)p.setNull(7,java.sql.Types.INTEGER);else p.setInt(7,j.exitCode);
             p.setString(8,j.resultJson);p.setString(9,j.diagnosticJson);p.setString(10,ServerRuntime.JSON.writeValueAsString(j.performance()));p.setString(11,j.id);p.executeUpdate();
         }

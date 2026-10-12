@@ -1,6 +1,5 @@
 package att.server;
 
-import att.Version;
 import jakarta.servlet.ServletContextEvent;
 import jakarta.servlet.ServletContextListener;
 import jakarta.servlet.annotation.WebListener;
@@ -13,11 +12,10 @@ public final class ServerBootstrap implements ServletContextListener {
         try {
             Path configured=ServerConfig.configPath();
             ServerConfig config=ServerConfig.load(configured);
-            String libs=event.getServletContext().getRealPath("/WEB-INF/lib");
-            if(libs==null||!java.nio.file.Files.isDirectory(java.nio.file.Paths.get(libs)))throw new IllegalStateException("Tomcat must deploy an exploded WAR (enable unpackWARs) to launch isolated Workers");
-            ServerRuntime runtime=new ServerRuntime(config,libs);
+            Path libs=WorkerRuntimeClasspath.resolve();
+            ServerRuntime runtime=new ServerRuntime(config,libs.toString());
             event.getServletContext().setAttribute(RUNTIME,runtime);
-            event.getServletContext().log("ATT Server "+Version.PRODUCT+" started; packageIds="+config.packages.keySet().size()+" maxConcurrent="+config.maxConcurrent);
+            event.getServletContext().log("ATT Server "+ServerBuildInfo.PRODUCT+" started; packageIds="+config.packages.keySet().size()+" maxConcurrent="+config.maxConcurrent);
         } catch(Exception e) {
             throw new IllegalStateException("ATT Server startup failed: "+e.getMessage(),e);
         }

@@ -1,6 +1,6 @@
 package att.server;
 
-import att.worker.WorkerRequest;
+import att.server.api.WorkerRequest;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;

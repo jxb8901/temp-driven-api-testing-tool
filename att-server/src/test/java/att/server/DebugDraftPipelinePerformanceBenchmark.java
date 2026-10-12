@@ -70,7 +70,7 @@ class DebugDraftPipelinePerformanceBenchmark {
             report.put("schemaVersion", "att-server-debug-draft-pipeline-benchmark/v1");
             report.put("measuredAtUtc", Instant.now().toString());
             report.put("sourceRevision", System.getProperty("att.server.benchmark.debugDraft.revision", "unspecified"));
-            report.put("runtime", Map.of("attVersion", att.Version.PRODUCT,
+            report.put("runtime", Map.of("attVersion", ServerBuildInfo.PRODUCT,
                     "javaVersion", System.getProperty("java.version"),
                     "os", System.getProperty("os.name"),
                     "architecture", System.getProperty("os.arch"),

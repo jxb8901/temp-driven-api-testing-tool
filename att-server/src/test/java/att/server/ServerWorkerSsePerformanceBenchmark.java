@@ -83,7 +83,7 @@ class ServerWorkerSsePerformanceBenchmark {
             server = startServer(exploded, temp.resolve("tomcat-first"));
             Map<String, Object> report = new LinkedHashMap<>();
             report.put("schemaVersion", "att-server-worker-sse-benchmark/v1");
-            report.put("runtime", Map.of("version", att.Version.PRODUCT, "warSha256", sha256(war)));
+            report.put("runtime", Map.of("version", ServerBuildInfo.PRODUCT, "warSha256", sha256(war)));
             report.put("environment", environment());
             report.put("settings", Map.of("caseCount", caseCount, "warmups", warmups, "runs", runs,
                     "workerConcurrency", Arrays.stream(concurrency).boxed().toList(),

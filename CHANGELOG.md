@@ -1,5 +1,10 @@
 # Changelog
 
+# ATT 4.1.1 - 2026-10-12
+
+- Launch normal and inspection Workers from the matching Local runtime in `$ATT_HOME/lib`; keep `workers.libraryDirs` additive.
+- Remove Engine and Worker modules from the Server WAR, support packed WAR deployment, and document the shared runtime requirement.
+
 # ATT 4.1.0 - 2026-10-10
 
 - Upgrade the ATT product version to 4.1.0.
