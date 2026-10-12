@@ -1,9 +1,9 @@
 name: att-${project.version}-server
 main: server/att-server-${project.version}.war
 java: ATT Server requires JDK 17+ and external Tomcat 10.1+
-workerRuntime: matching ATT Local installation at ATT_HOME/lib/att-${project.version}.jar
+workerRuntime: matching ATT Local installation at ATT_HOME/lib/att-local.jar
 contents:
-  - server/att-server-${project.version}.war
+  - server/att-server-${project.version}.war (contains WEB-INF/lib/att-server.jar)
   - docs/server-deployment.md
   - docs/server-deployment.zh.md
   - docs/att-server-web-ui.md

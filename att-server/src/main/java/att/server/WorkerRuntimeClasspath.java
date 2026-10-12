@@ -4,6 +4,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.Properties;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -23,7 +24,7 @@ final class WorkerRuntimeClasspath {
         Path lib=root.resolve("lib");
         if(!Files.isDirectory(lib)||!Files.isReadable(lib))
             throw new IllegalStateException("ATT Worker runtime library directory is missing or unreadable: "+lib);
-        Path bundle=lib.resolve("att-"+ServerBuildInfo.PRODUCT+".jar");
+        Path bundle=lib.resolve("att-local.jar");
         if(!Files.isRegularFile(bundle)||!Files.isReadable(bundle))
             throw new IllegalStateException("ATT Worker runtime for Server "+ServerBuildInfo.PRODUCT+" is missing: expected "+bundle+"; install the matching ATT Local archive");
         try(JarFile jar=new JarFile(bundle.toFile())) {

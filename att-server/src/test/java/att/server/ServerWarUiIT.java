@@ -1,5 +1,6 @@
 package att.server;
 
+import org.apache.catalina.core.StandardHost;
 import org.apache.catalina.realm.MemoryRealm;
 import org.apache.catalina.startup.Tomcat;
 import org.junit.jupiter.api.Test;
@@ -10,7 +11,11 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.jar.JarInputStream;
 import java.util.jar.JarOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -24,7 +29,9 @@ class ServerWarUiIT {
         assertTrue(Files.isRegularFile(war), "Packaged server WAR must exist: " + war);
         Path localHome=Files.createDirectories(temp.resolve("att-home"));
         Path localLib=Files.createDirectories(localHome.resolve("lib"));
-        writeWorkerRuntime(localLib.resolve("att-4.1.1.jar"));
+        writeWorkerRuntime(localLib.resolve("att-local.jar"));
+
+        assertServerApplicationJar(war);
 
         Path users = Files.writeString(temp.resolve("tomcat-users.xml"),
                 "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
@@ -46,7 +53,7 @@ class ServerWarUiIT {
         MemoryRealm realm = new MemoryRealm();
         realm.setPathname(users.toString());
         tomcat.getEngine().setRealm(realm);
-        tomcat.getHost().setUnpackWARs(false);
+        ((StandardHost) tomcat.getHost()).setUnpackWARs(false);
         tomcat.addWebapp("/tools/att", war.toString());
         try {
             tomcat.start();
@@ -82,6 +89,29 @@ class ServerWarUiIT {
     }
 
 
+
+    private static void assertServerApplicationJar(Path war) throws Exception {
+        try (JarFile archive = new JarFile(war.toFile())) {
+            JarEntry application = archive.getJarEntry("WEB-INF/lib/att-server.jar");
+            assertNotNull(application, "WAR must contain the combined ATT Server application jar");
+            assertNull(archive.getJarEntry("WEB-INF/classes/att/server/ApiServlet.class"),
+                    "ATT application classes must not be duplicated in WEB-INF/classes");
+            assertFalse(archive.stream().map(JarEntry::getName).anyMatch(name ->
+                    name.matches("WEB-INF/lib/att-(server-api|web|worker|engine)-[^/]+\\.jar")),
+                    "ATT module jars must be combined into att-server.jar");
+            Set<String> entries = new HashSet<>();
+            try (JarInputStream app = new JarInputStream(archive.getInputStream(application))) {
+                JarEntry entry;
+                while ((entry = app.getNextJarEntry()) != null) entries.add(entry.getName());
+            }
+            assertTrue(entries.contains("att/server/ApiServlet.class"));
+            assertTrue(entries.contains("att/server/api/ServerApi.class"));
+            assertTrue(entries.contains("META-INF/resources/ui/index.html"));
+            assertTrue(entries.contains("att-build.properties"));
+            assertFalse(entries.contains("att/worker/WorkerMain.class"),
+                    "Worker classes belong only in the Local runtime jar");
+        }
+    }
 
     private static void writeWorkerRuntime(Path jarPath) throws Exception {
         try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(jarPath))) {

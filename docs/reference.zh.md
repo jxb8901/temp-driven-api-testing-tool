@@ -1,7 +1,7 @@
-# ATT v4.1.0 使用手冊與參考
+# ATT v4.1.1 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.1.0
+Version: 4.1.1
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -3055,7 +3055,7 @@ Timeout range、evidence sample bound、result limit、pool size 等 operational
 
 #### 為什麼 `Att.bat` 會要求 Maven，或者為什麼 `.sh` Tool 在 windows 上失敗？
 
-在二進制發布中，`att.bat` 會找到 `lib\att-*.jar`，只需要 Java 8+。源碼樹中，`att.bat` 會在 Maven 在 `PATH` 上時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗包。
+在二進制發布中，`att.bat` 會找到 `lib\att-local.jar`，只需要 Java 8+。源碼樹中，`att.bat` 會在 Maven 在 `PATH` 上時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗包。
 
 啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名稱可解析為 `pwsh.exe`。維護多平臺版本時，請保持參數契約和 stdout 輸出格式一致。
 

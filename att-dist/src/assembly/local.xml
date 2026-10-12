@@ -7,7 +7,7 @@
         <file><source>${project.basedir}/../README.md</source><outputDirectory>/</outputDirectory><destName>README.md</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/../CHANGELOG.md</source><outputDirectory>/</outputDirectory><destName>CHANGELOG.md</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/src/release/local/RELEASE_MANIFEST.txt</source><outputDirectory>/</outputDirectory><destName>RELEASE_MANIFEST.txt</destName><fileMode>0644</fileMode><filtered>true</filtered></file>
-        <file><source>${project.build.directory}/att-${project.version}-modules.jar</source><outputDirectory>lib</outputDirectory><destName>att-${project.version}.jar</destName><fileMode>0644</fileMode></file>
+        <file><source>${project.build.directory}/att-${project.version}-modules.jar</source><outputDirectory>lib</outputDirectory><destName>att-local.jar</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/../config/att-server.example.yaml</source><outputDirectory>config</outputDirectory><destName>att-server.example.yaml</destName><fileMode>0644</fileMode></file>
     </files>
     <fileSets>

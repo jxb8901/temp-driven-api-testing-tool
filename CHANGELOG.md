@@ -2,8 +2,9 @@
 
 # ATT 4.1.1 - 2026-10-12
 
-- Launch normal and inspection Workers from the matching Local runtime in `$ATT_HOME/lib`; keep `workers.libraryDirs` additive.
-- Remove Engine and Worker modules from the Server WAR, support packed WAR deployment, and document the shared runtime requirement.
+- Launch normal and inspection Workers from `$ATT_HOME/lib/att-local.jar`; keep `workers.libraryDirs` additive.
+- Combine Local ATT modules into `att-local.jar` and Server, Server API, and Web UI modules into `WEB-INF/lib/att-server.jar`; keep third-party libraries separate.
+- Support packed WAR deployment and document the shared runtime requirement.
 
 # ATT 4.1.0 - 2026-10-10
 

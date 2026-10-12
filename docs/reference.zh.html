@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT v4.1.0 使用手冊與參考</title>
+  <title>ATT v4.1.1 使用手冊與參考</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,12 +233,12 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT v4.1.0 使用手冊與參考</h1>
+<h1 class="title">ATT v4.1.1 使用手冊與參考</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
-<li><a href="#att-v410-使用手冊與參考"
-id="toc-att-v410-使用手冊與參考">ATT v4.1.0 使用手冊與參考</a>
+<li><a href="#att-v411-使用手冊與參考"
+id="toc-att-v411-使用手冊與參考">ATT v4.1.1 使用手冊與參考</a>
 <ul>
 <li><a href="#概覽與-product-model" id="toc-概覽與-product-model">概覽與
 Product model</a>
@@ -531,8 +531,8 @@ id="toc-advanced-diagnostics">Advanced diagnostics</a></li>
 </ul></li>
 </ul>
 </nav>
-<h1 id="att-v410-使用手冊與參考">ATT v4.1.0 使用手冊與參考</h1>
-<p>Author: Jeffrey + ChatGPT Version: 4.1.0 Status:
+<h1 id="att-v411-使用手冊與參考">ATT v4.1.1 使用手冊與參考</h1>
+<p>Author: Jeffrey + ChatGPT Version: 4.1.1 Status:
 規範性使用者文件；由模組化來源自動生成</p>
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
 
@@ -6695,7 +6695,7 @@ id="為什麼-attbat-會要求-maven或者為什麼-sh-tool-在-windows-上失�
 <code>Att.bat</code> 會要求 Maven，或者為什麼 <code>.sh</code> Tool 在
 windows 上失敗？</h4>
 <p>在二進制發布中，<code>att.bat</code> 會找到
-<code>lib\att-*.jar</code>，只需要 Java
+<code>lib\att-local.jar</code>，只需要 Java
 8+。源碼樹中，<code>att.bat</code> 會在 Maven 在 <code>PATH</code>
 上時使用 Maven；沒有 Maven 時，需要已有的
 <code>target\classes</code>。先用 <code>att.bat version</code>

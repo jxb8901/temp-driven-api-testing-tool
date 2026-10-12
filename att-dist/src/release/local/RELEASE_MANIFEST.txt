@@ -6,7 +6,7 @@ layout: ATT_HOME install root with packages/default package root
 contents:
   - att.sh
   - att.bat
-  - lib/att-${project.version}.jar
+  - lib/att-local.jar
   - lib/
   - packages/default/config/
   - packages/default/templates/

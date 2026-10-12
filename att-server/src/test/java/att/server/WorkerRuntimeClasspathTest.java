@@ -31,7 +31,7 @@ class WorkerRuntimeClasspathTest {
 
     @Test void rejectsInvalidAndMismatchedRuntimeBundles() throws Exception {
         Path invalidHome=Files.createDirectories(temp.resolve("invalid/lib"));
-        Files.writeString(invalidHome.resolve("att-"+ServerBuildInfo.PRODUCT+".jar"),"not a jar");
+        Files.writeString(invalidHome.resolve("att-local.jar"),"not a jar");
         IllegalStateException invalid=assertThrows(IllegalStateException.class,
                 ()->WorkerRuntimeClasspath.resolve(invalidHome.getParent().toString(),null));
         assertTrue(invalid.getMessage().contains("invalid or unreadable"));
@@ -53,7 +53,7 @@ class WorkerRuntimeClasspathTest {
     private Path runtimeHome(String name,String version) throws Exception {
         Path home=Files.createDirectories(temp.resolve(name));
         Path lib=Files.createDirectories(home.resolve("lib"));
-        Path bundle=lib.resolve("att-"+ServerBuildInfo.PRODUCT+".jar");
+        Path bundle=lib.resolve("att-local.jar");
         try(JarOutputStream jar=new JarOutputStream(Files.newOutputStream(bundle))) {
             add(jar,"att-build.properties",("att.version="+version+"\n").getBytes(StandardCharsets.UTF_8));
             add(jar,"att/worker/WorkerMain.class",new byte[]{0});

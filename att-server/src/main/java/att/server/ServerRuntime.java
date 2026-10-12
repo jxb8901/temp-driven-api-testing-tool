@@ -52,6 +52,8 @@ final class ServerRuntime implements AutoCloseable {
     private static final Pattern INLINE_LOAD_DURATION=Pattern.compile("^([0-9]+)(ms|s|m|h)$");
     private static final Pattern INLINE_LOAD_RATE=Pattern.compile("^([1-9][0-9]*(?:\\.[0-9]+)?)/(s|m)$");
     static final int MAX_ACTIVE_DRAFTS=128, MAX_DRAFTS_PER_PRINCIPAL=16;
+    // Public inspection limits; keep aligned with PackageResourceInspector in the Local runtime.
+    private static final int RESOURCE_DEFAULT_PAGE_SIZE=50, RESOURCE_MAX_PAGE_SIZE=100;
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
     final ServerConfig config;
@@ -243,8 +245,8 @@ final class ServerRuntime implements AutoCloseable {
         if(!List.of("list","detail","source").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
         if(type!=null&&!List.of("case","template","flow","tool").contains(type))throw new IllegalArgumentException("Unsupported resource type");
         String normalizedQuery=query==null?"":query.trim();if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
-        int limit=requestedLimit==0?att.resource.PackageResourceInspector.DEFAULT_PAGE_SIZE:requestedLimit;
-        if(limit<1||limit>att.resource.PackageResourceInspector.MAX_PAGE_SIZE)throw new IllegalArgumentException("limit must be between 1 and 100");
+        int limit=requestedLimit==0?RESOURCE_DEFAULT_PAGE_SIZE:requestedLimit;
+        if(limit<1||limit>RESOURCE_MAX_PAGE_SIZE)throw new IllegalArgumentException("limit must be between 1 and 100");
         Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,type,normalizedQuery,principal);
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";request.packageRoot=root.toString();request.config="config/config.yaml";
         request.inspectionAction=action;request.inspectionType=type;request.inspectionResourceId=resourceId;request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;

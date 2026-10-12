@@ -1,7 +1,7 @@
-# ATT v4.1.0 reference manual
+# ATT v4.1.1 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 4.1.0
+Version: 4.1.1
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -3136,7 +3136,7 @@ Unexpected internal failures such as `NullPointerException`, `ClassCastException
 
 #### Why does `att.bat` ask for Maven, or why does a `.sh` Tool fail on windows?
 
-In a binary release, `att.bat` finds `lib\att-*.jar` and only requires Java 8+. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
+In a binary release, `att.bat` finds `lib\att-local.jar` and only requires Java 8+. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
 
 The launcher makes ATT itself cross-platform; it cannot translate external tool executables. Configure a Windows-compatible `.bat`, `.cmd`, PowerShell script (with an explicit `powershell`/`pwsh` argv), or native executable instead of a POSIX-only `.sh` command. PATH validation follows Windows `PATHEXT`, so names such as `pwsh` can resolve `pwsh.exe`. Keep argument contracts and stdout output formats identical when maintaining platform variants.
 

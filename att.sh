@@ -12,7 +12,8 @@ if [ "${1:-}" = "validate" ]; then
   export ORDERS_DB_USERNAME ORDERS_DB_PASSWORD PAYMENT_MQ_USERNAME PAYMENT_MQ_PASSWORD
 fi
 APP_JAR=""
-for candidate in "$ATT_HOME"/lib/att-*.jar; do if [ -f "$candidate" ]; then APP_JAR="$candidate"; break; fi; done
+candidate="$ATT_HOME/lib/att-local.jar"
+if [ -f "$candidate" ]; then APP_JAR="$candidate"; fi
 if [ -n "$APP_JAR" ]; then
   # Packaged install: run against a package root under ATT_HOME (default: packages/default).
   PACKAGE_ROOT="${ATT_PACKAGE_ROOT:-}"
