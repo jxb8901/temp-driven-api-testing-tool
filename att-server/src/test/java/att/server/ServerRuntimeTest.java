@@ -95,6 +95,71 @@ class ServerRuntimeTest {
         } finally {runtime.close();}
     }
 
+    @Test void persistedScheduleSubmitsAStandardLoadJobAfterRestartAndRejectsInvalidOrUnavailablePackages() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("scheduled-load-packages"));Path packageRoot=Files.createDirectory(allowed.resolve("p"));
+        Path templates=Files.createDirectories(packageRoot.resolve("templates/SCHEDULED"));Path loads=Files.createDirectories(packageRoot.resolve("load"));
+        Files.createDirectories(packageRoot.resolve("testcase"));Files.createDirectories(packageRoot.resolve("config"));copySchemas(packageRoot);
+        Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: SCHEDULED\ndescription: scheduled Load smoke target\nactions:\n"
+                +"  message:\n    type: log\n    message: scheduled Load passed\n");
+        Files.writeString(loads.resolve("scenario.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n  - id: scheduled-smoke\n    target:\n      type: template\n      id: SCHEDULED\n    load:\n      users: 1\n      duration: 1s\n");
+        Files.writeString(loads.resolve("bad.yaml"),"schemaVersion: att-load/invalid\nworkloads: []\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path data=temp.resolve("scheduled-load-data");Path configFile=temp.resolve("scheduled-load-server.yaml");
+        Files.writeString(configFile,"server:\n  dataDir: "+yaml(data)+"\n  javaExecutable: "+yaml(javaBin)
+                +"\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    maxConcurrentRuns: 1\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
+        ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("scheduled-load-WEB-INF-lib"));
+        addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
+        addWorkerClasspathJars(libs);
+        MutableClock clock=new MutableClock(Instant.parse("2026-10-12T17:50:00Z"));
+        JsonNode request=ServerRuntime.JSON.readTree("""
+                {"name":"Nightly SIT","packageId":"p","scenario":"load/scenario.yaml","environment":"SIT",
+                 "timezone":"Asia/Hong_Kong","cron":"0 2 * * *","enabled":false}
+                """);
+        ServerRuntime setupRuntime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
+        String scheduleId;
+        try {
+            Map<String,Object> preview=setupRuntime.previewLoadSchedule(ServerRuntime.JSON.readTree("{\"timezone\":\"Asia/Hong_Kong\",\"cron\":\"0 2 * * *\"}"));
+            assertEquals("Asia/Hong_Kong",preview.get("timezone"));assertEquals("2026-10-12T18:00:00Z",preview.get("nextRunAt"));
+            ServerRuntime.DraftValidationException invalid=assertThrows(ServerRuntime.DraftValidationException.class,()->setupRuntime.createLoadSchedule(
+                    ServerRuntime.JSON.readTree("{\"name\":\"Bad scenario\",\"packageId\":\"p\",\"scenario\":\"load/bad.yaml\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}"),"operator"));
+            assertFalse(invalid.diagnostics.isEmpty());
+            assertThrows(IllegalArgumentException.class,()->setupRuntime.createLoadSchedule(ServerRuntime.JSON.readTree(
+                    "{\"name\":\"Over cap\",\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\",\"maxConcurrentRuns\":2}"),"operator"));
+            scheduleId=setupRuntime.createLoadSchedule(request,"alice").id;
+        } finally {setupRuntime.close();}
+
+        ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
+        try {
+            LoadSchedule restored=runtime.loadSchedule(scheduleId);
+            assertEquals("alice",restored.createdBy);assertEquals("2026-10-12T18:00:00Z",restored.nextRunAt);
+            Map<String,Object> occurrence=runtime.triggerLoadSchedule(scheduleId,"operator");
+            assertEquals("submitted",occurrence.get("status"));String jobId=String.valueOf(occurrence.get("jobId"));
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);Map<String,Object> record=runtime.jobRecord(jobId);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status"))&&System.nanoTime()<deadline) {
+                Thread.sleep(20);record=runtime.jobRecord(jobId);
+            }
+            assertEquals("PASS",record.get("status"),"Scheduled execution must use the standard Worker and Load path; result="+runtime.resultRecord(jobId));
+            assertEquals("load",record.get("command"));assertEquals("load-schedule:"+scheduleId,record.get("principal"));
+            Map<String,Object> report=runtime.resultRecord(jobId);
+            assertEquals("PASS",((Map<?,?>)report.get("job")).get("status"));assertNotNull(report.get("result"));
+            Path output=data.resolve("jobs").resolve(jobId).resolve("output");
+            assertTrue(Files.isDirectory(output));
+            try(var files=Files.walk(output)){assertTrue(files.anyMatch(Files::isRegularFile),"A standard Load run should produce artifacts");}
+
+            JsonNode unavailableRequest=ServerRuntime.JSON.readTree("{\"name\":\"Unavailable package\",\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}");
+            String unavailableId=runtime.createLoadSchedule(unavailableRequest,"alice").id;
+            try(var paths=Files.walk(packageRoot)) {
+                for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toList())Files.delete(path);
+            }
+            Map<String,Object> rejected=runtime.triggerLoadSchedule(unavailableId,"operator");
+            assertEquals("failed-to-submit",rejected.get("status"));
+            assertTrue(String.valueOf(rejected.get("reason")).contains("no longer available"));
+        } finally {runtime.close();}
+    }
+
     @Test void listsPackageResourcesThroughTheBoundedInspectorWorkerAndSignsPaginationCursors() throws Exception {
         Path packageRoot=Path.of("").toRealPath();Path allowed=packageRoot;
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
@@ -518,8 +583,19 @@ class ServerRuntimeTest {
             paths.filter(Files::isRegularFile).forEach(path->{try{jar.putNextEntry(new JarEntry(classes.relativize(path).toString().replace('\\','/')));Files.copy(path,jar);jar.closeEntry();}catch(Exception e){throw new IllegalStateException(e);}});
         }
     }
+    private static void addWorkerClasspathJars(Path libs)throws Exception {
+        String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
+            Path candidate=Path.of(element);
+            if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
+                Path target=libs.resolve(candidate.getFileName());if(!Files.exists(target))try{Files.createSymbolicLink(target,candidate);}catch(Exception unsupported){Files.copy(candidate,target);}
+            }
+        }
+    }
     private static final class MutableClock extends Clock {
         private Instant current=Instant.now();
+        MutableClock(){}
+        MutableClock(Instant initial){current=initial;}
         @Override public ZoneId getZone(){return java.time.ZoneOffset.UTC;}
         @Override public Clock withZone(ZoneId zone){return this;}
         @Override public Instant instant(){return current;}

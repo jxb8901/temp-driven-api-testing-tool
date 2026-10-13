@@ -13,11 +13,11 @@ async function waitFor(predicate, description, timeoutMs = 2000) {
 }
 function allText(node) { return [node.textContent || '', ...(node.children || []).map(allText)].join(' '); }
 
-function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo = undefined, confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [], debugFormResponse = null, debugDraftResponses = [], debugSubmitErrors = [], quickLoadFormResponse = null, quickLoadDraftResponses = [] } = {}) {
+function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo = undefined, confirmCancel = true, jobMissing = false, deferHome = false, deferSubmit = false, deferCancel = false, postForbidden = false, deferArtifacts = false, deferJobLists = false, deferResult = false, deferConfiguration = false, configuration = {}, jobStatus = 'RUNNING', artifactItems = [], resourceItems = [], resourcePages = [], debugFormResponse = null, debugDraftResponses = [], debugSubmitErrors = [], quickLoadFormResponse = null, quickLoadDraftResponses = [], scheduledItems = [], schedulePreview = { timezone: 'Asia/Hong_Kong', nextRunAt: '2026-10-14T18:00:00Z' } } = {}) {
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
-      this.textContent = ''; this.hidden = false; this.disabled = false; this.value = ''; this.options = [];
+      this.textContent = ''; this.hidden = false; this.disabled = false; this.value = ''; this.options = []; this.checked = false; this.required = false;
       this.submitButton = { disabled: false };
     }
     addEventListener(name, listener) { this.listeners[name] = listener; }
@@ -39,7 +39,8 @@ function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo 
       if (selector === '[data-field="targetType"]') return this.fields && this.fields.targetType ? [this.fields.targetType] : [];
       return [];
     }
-    reset() { this.formValues = []; }
+    reset() { this.formValues = []; for (const field of Object.values(this.elements)) { field.value = field.initialValue || ''; field.checked = field.initialChecked || false; } }
+    scrollIntoView() {}
   }
   const makeAdvancedWorkload = () => {
     const article = new Element(); article.className = 'advanced-workload'; article.fields = {}; article.roles = {};
@@ -67,10 +68,19 @@ function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo 
     return elements.get(id);
   };
   node('submit-form').elements.environment = Object.assign(new Element(), { value: '' });
+  const scheduleField = (value = '') => Object.assign(new Element(), { value, initialValue: value });
+  const scheduleForm = node('load-schedule-form');
+  scheduleForm.elements = {
+    name: scheduleField(), description: scheduleField(), tags: scheduleField(), packageId: scheduleField(), scenario: scheduleField(),
+    config: scheduleField(), environment: scheduleField(), timezone: scheduleField('UTC'), recurrence: scheduleField('daily'),
+    timeOfDay: scheduleField('02:00'), dayOfWeek: scheduleField('1-5'), cron: scheduleField(), maxConcurrentRuns: scheduleField('1'),
+    load: scheduleField('{}'), enabled: Object.assign(scheduleField(), { checked: false, initialChecked: false })
+  };
   const document = {
     baseURI: 'https://example.test/tools/att/ui/',
     getElementById: node,
-    createElement: () => new Element()
+    createElement: () => new Element(),
+    createTextNode: value => Object.assign(new Element(), { textContent: String(value) })
   };
   const location = { hash };
   const window = { listeners: {}, confirm: () => confirmCancel,
@@ -115,6 +125,9 @@ function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo 
     }
     let result;
     if (path === 'version') result = versionInfo === undefined ? { apiVersion: version, inlineLoadEnabled } : versionInfo;
+    else if (path === 'load-schedules/preview' && options.method === 'POST') result = schedulePreview;
+    else if (path === 'load-schedules' && options.method === 'POST') result = { id: 'S1', ...JSON.parse(options.body), nextRunAt: schedulePreview.nextRunAt };
+    else if (path === 'load-schedules' && !options.method) result = { items: scheduledItems };
     else if (path === 'packages') result = { items: [{ packageId: 'payments' }] };
     else if (/^packages\/[^/]+\/load-policy\?/.test(path)) {
       state.policyRequests.push(new URLSearchParams(path.split('?')[1]).get('environment'));
@@ -217,6 +230,37 @@ test('keeps browser-created Load disabled unless the version capability is exact
   const direct = boot({ hash: '#/advanced-load/payments', versionInfo: { apiVersion: '1' } });
   await waitFor(() => direct.node('advanced-load-policy-status').textContent.includes('disabled by Server configuration'), 'disabled direct Advanced Load route');
   assert.equal(direct.calls.some(call => call.path.includes('load-policy')), false);
+});
+
+test('previews daily, weekly and cron schedules in the selected timezone and submits weekly recurrence', async () => {
+  const ui = boot({ hash: '#/load-schedules', versionInfo: { apiVersion: '1', loadSchedulingEnabled: true } });
+  await waitFor(() => ui.node('schedule-status').textContent.includes('schedule(s)'), 'Scheduled Load page');
+  const form = ui.node('load-schedule-form');
+  form.elements.timezone.value = 'Asia/Hong_Kong';
+
+  for (const recurrence of [
+    { name: 'daily', cron: '0 2 * * *' },
+    { name: 'weekly', cron: '0 2 * * 1-5' },
+    { name: 'cron', cron: '15 3 * * 0' }
+  ]) {
+    form.elements.recurrence.value = recurrence.name;
+    if (recurrence.name === 'cron') form.elements.cron.value = recurrence.cron;
+    else { form.elements.timeOfDay.value = '02:00'; form.elements.dayOfWeek.value = '1-5'; }
+    form.elements.recurrence.listeners.change();
+    await waitFor(() => ui.calls.some(call => call.path === 'load-schedules/preview'
+      && JSON.parse(call.options.body).cron === recurrence.cron), `${recurrence.name} preview request`);
+  }
+  await waitFor(() => ui.node('schedule-next-run-preview').textContent.includes('(Asia/Hong_Kong)'), 'timezone-aware next-run preview');
+
+  form.elements.recurrence.value = 'weekly'; form.elements.timeOfDay.value = '02:00'; form.elements.dayOfWeek.value = '1-5';
+  form.elements.name.value = 'Weekday payments'; form.elements.packageId.value = 'payments'; form.elements.scenario.value = 'load/weekday.yaml';
+  await form.listeners.submit({ preventDefault() {}, currentTarget: form });
+  const posted = ui.calls.find(call => call.path === 'load-schedules' && call.options.method === 'POST');
+  assert.ok(posted);
+  assert.deepEqual(JSON.parse(posted.options.body), {
+    name: 'Weekday payments', description: '', tags: [], packageId: 'payments', scenario: 'load/weekday.yaml', config: '',
+    environment: '', timezone: 'Asia/Hong_Kong', cron: '0 2 * * 1-5', maxConcurrentRuns: 1, load: {}, enabled: false
+  });
 });
 
 test('submits logical package DTOs with a non-root Tomcat context', async () => {

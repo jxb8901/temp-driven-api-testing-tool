@@ -64,6 +64,8 @@
   const advancedTargetCatalogs = new Map();
   let advancedSubmitting = false;
   let scheduleRequestSequence = 0;
+  let schedulePreviewSequence = 0;
+  let schedulePreviewTimer = null;
   let resourceConfigurationTarget = null;
   let cancelRequested = false;
   let versionPromise = null;
@@ -196,6 +198,46 @@
     try { return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: schedule.timezone }).format(new Date(schedule.nextRunAt)); }
     catch (_) { return schedule.nextRunAt; }
   }
+  function scheduleCron(form) {
+    const recurrence = form.elements.recurrence.value;
+    if (recurrence === 'cron') return String(form.elements.cron.value || '').trim();
+    const time = String(form.elements.timeOfDay.value || '');
+    const match = /^(\d{2}):(\d{2})$/.exec(time);
+    if (!match) return '';
+    const minute = String(Number(match[2])), hour = String(Number(match[1]));
+    return `${minute} ${hour} * * ${recurrence === 'weekly' ? form.elements.dayOfWeek.value : '*'}`;
+  }
+  function syncScheduleRecurrence(form) {
+    const simple = form.elements.recurrence.value !== 'cron';
+    byId('simple-recurrence').hidden = !simple;
+    byId('weekly-day-field').hidden = form.elements.recurrence.value !== 'weekly';
+    byId('cron-field').hidden = simple;
+    form.elements.timeOfDay.required = simple;
+    form.elements.cron.required = !simple;
+    schedulePreview();
+  }
+  function schedulePreview() {
+    if (schedulePreviewTimer !== null) clearTimeout(schedulePreviewTimer);
+    const sequence = ++schedulePreviewSequence;
+    schedulePreviewTimer = setTimeout(async () => {
+      const form = byId('load-schedule-form'), timezone = String(form.elements.timezone.value || '').trim(), cron = scheduleCron(form);
+      if (!timezone || !cron) { text(byId('schedule-next-run-preview'), 'Choose a valid timezone and recurrence to preview the next run.'); return; }
+      try {
+        const preview = await request('load-schedules/preview', { method: 'POST', body: JSON.stringify({ timezone, cron }) });
+        if (sequence !== schedulePreviewSequence) return;
+        text(byId('schedule-next-run-preview'), `Next run: ${scheduleLocalTime(preview)} (${preview.timezone})`);
+      } catch (error) {
+        if (sequence === schedulePreviewSequence) text(byId('schedule-next-run-preview'), `Preview unavailable: ${error.message}`);
+      }
+    }, 250);
+  }
+  function recurrenceForCron(cron) {
+    let match = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(cron || '');
+    if (match) return { recurrence: 'daily', timeOfDay: `${String(Number(match[2])).padStart(2, '0')}:${String(Number(match[1])).padStart(2, '0')}` };
+    match = /^(\d{1,2}) (\d{1,2}) \* \* (1-5|0,6|[0-6])$/.exec(cron || '');
+    if (match) return { recurrence: 'weekly', timeOfDay: `${String(Number(match[2])).padStart(2, '0')}:${String(Number(match[1])).padStart(2, '0')}`, dayOfWeek: match[3] };
+    return { recurrence: 'cron' };
+  }
   function scheduleAction(label, action, schedule) {
     const button = el('button', label); button.type = 'button';
     button.addEventListener('click', action); return button;
@@ -254,13 +296,18 @@
     form.elements.packageId.value = schedule.packageId || ''; form.elements.scenario.value = schedule.scenario || '';
     form.elements.config.value = schedule.config || ''; form.elements.environment.value = schedule.environment || '';
     form.elements.timezone.value = schedule.timezone || 'UTC'; form.elements.cron.value = schedule.cron || '';
+    const recurrence = recurrenceForCron(schedule.cron || '');form.elements.recurrence.value=recurrence.recurrence;
+    if (recurrence.timeOfDay) form.elements.timeOfDay.value=recurrence.timeOfDay;
+    if (recurrence.dayOfWeek) form.elements.dayOfWeek.value=recurrence.dayOfWeek;
     form.elements.load.value = JSON.stringify(schedule.load || {}, null, 2); form.elements.enabled.checked = schedule.enabled === true;
+    form.elements.maxConcurrentRuns.value=String(schedule.maxConcurrentRuns || 1);syncScheduleRecurrence(form);
     text(byId('schedule-form-heading'), `Edit schedule: ${schedule.name}`); byId('cancel-schedule-edit').hidden = false;
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function resetScheduleForm() {
     const form = byId('load-schedule-form'); form.reset(); delete form.dataset.scheduleId;
     form.elements.timezone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    form.elements.recurrence.value='daily';form.elements.timeOfDay.value='02:00';form.elements.dayOfWeek.value='1-5';form.elements.maxConcurrentRuns.value='1';syncScheduleRecurrence(form);
     text(byId('schedule-form-heading'), 'Create schedule'); byId('cancel-schedule-edit').hidden = true;
   }
   async function showScheduleHistory(schedule, generation = navigation) {
@@ -1616,7 +1663,8 @@
         tags: String(form.elements.tags.value || '').split(',').map(tag => tag.trim()).filter(Boolean),
         packageId: String(form.elements.packageId.value || ''), scenario: String(form.elements.scenario.value || '').trim(),
         config: String(form.elements.config.value || '').trim(), environment: String(form.elements.environment.value || '').trim(),
-        timezone: String(form.elements.timezone.value || '').trim(), cron: String(form.elements.cron.value || '').trim(),
+        timezone: String(form.elements.timezone.value || '').trim(), cron: scheduleCron(form),
+        maxConcurrentRuns: Number(form.elements.maxConcurrentRuns.value || 1),
         load, enabled: form.elements.enabled.checked
       };
       const id = form.dataset.scheduleId;
@@ -1627,6 +1675,11 @@
       await loadSchedules();
     } catch (error) { text(byId('schedule-status'), error.message); }
   });
+  byId('load-schedule-form').elements.recurrence.addEventListener('change', () => syncScheduleRecurrence(byId('load-schedule-form')));
+  for (const field of ['timezone', 'timeOfDay', 'dayOfWeek', 'cron']) {
+    byId('load-schedule-form').elements[field].addEventListener('input', schedulePreview);
+    byId('load-schedule-form').elements[field].addEventListener('change', schedulePreview);
+  }
   byId('cancel-schedule-edit').addEventListener('click', resetScheduleForm);
   window.addEventListener('hashchange', route);
   route();

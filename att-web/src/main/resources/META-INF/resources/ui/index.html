@@ -38,7 +38,14 @@
         <label>Config path (optional, package relative) <input name="config" maxlength="512"></label>
         <label>Environment <input name="environment" maxlength="128"></label>
         <label>Timezone (IANA) <input name="timezone" maxlength="80" required></label>
-        <label>Cron (minute hour day-of-month month day-of-week) <input name="cron" maxlength="120" placeholder="0 2 * * *" required></label>
+        <label>Recurrence <select name="recurrence"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="cron">Cron</option></select></label>
+        <div id="simple-recurrence">
+          <label>Time <input name="timeOfDay" type="time" value="02:00" required></label>
+          <label id="weekly-day-field">Day(s) of week <select name="dayOfWeek"><option value="1-5">Monday–Friday</option><option value="0,6">Weekends</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></label>
+        </div>
+        <label id="cron-field">Cron (minute hour day-of-month month day-of-week) <input name="cron" maxlength="120" placeholder="0 2 * * *"></label>
+        <p id="schedule-next-run-preview" role="status" aria-live="polite">Choose a timezone and recurrence to preview the next run.</p>
+        <label>Maximum overlapping runs <input name="maxConcurrentRuns" type="number" min="1" value="1" required></label>
         <label>Load options (JSON object, optional)<textarea name="load" rows="4" spellcheck="false">{}</textarea></label>
         <label><input name="enabled" type="checkbox"> Enable after saving</label>
         <div><button type="submit">Save schedule</button> <button id="cancel-schedule-edit" type="button" hidden>Cancel edit</button></div>

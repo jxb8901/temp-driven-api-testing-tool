@@ -19,6 +19,7 @@ final class LoadSchedule {
     public String timezone;
     public String cron;
     public Map<String,String> load=new LinkedHashMap<>();
+    public int maxConcurrentRuns=1;
     public boolean enabled;
     public String createdBy;
     public String createdAt;
@@ -31,7 +32,7 @@ final class LoadSchedule {
         copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.scenario=scenario;copy.loadModel=loadModel;
         copy.tags=tags==null?List.of():List.copyOf(tags);
         copy.config=config;copy.environment=environment;copy.timezone=timezone;copy.cron=cron;
-        copy.load=load==null?new LinkedHashMap<>():new LinkedHashMap<>(load);copy.enabled=enabled;
+        copy.load=load==null?new LinkedHashMap<>():new LinkedHashMap<>(load);copy.maxConcurrentRuns=maxConcurrentRuns;copy.enabled=enabled;
         copy.createdBy=createdBy;copy.createdAt=createdAt;copy.updatedBy=updatedBy;copy.updatedAt=updatedAt;copy.nextRunAt=nextRunAt;
         return copy;
     }

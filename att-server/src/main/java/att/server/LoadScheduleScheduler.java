@@ -37,41 +37,58 @@ final class LoadScheduleScheduler implements AutoCloseable {
         catch(Exception failure) { LOG.log(Level.WARNING,"Scheduled Load polling failed",failure); }
     }
 
-    private void processDue() throws Exception {
+    void processDue() throws Exception {
         Instant now=clock.instant();
         for(LoadSchedule original:store.dueSchedules(now)) {
             LoadSchedule schedule=original;
-            int recorded=0;
-            while(schedule.enabled&&schedule.nextRunAt!=null&&schedule.nextRunInstant().compareTo(now)<=0&&recorded<10000) {
-                Instant fire=schedule.nextRunInstant();ZoneId zone=ZoneId.of(schedule.timezone);
-                Instant next=CronExpression.parse(schedule.cron,config.minimumIntervalMinutes).nextAfter(fire,zone);
-                String occurrenceId=occurrenceId(schedule.id,fire);
-                boolean claimed=store.advanceAndClaim(schedule,occurrenceId,next.toString());
-                if(!claimed)break;
-                schedule.nextRunAt=next.toString();recorded++;
-                long grace=Math.max(30L,config.pollIntervalSeconds*3L);
-                if(fire.isBefore(startedAt)||Duration.between(fire,now).getSeconds()>grace) {
-                    store.updateOccurrence(occurrenceId,"skipped","misfire-no-backfill",null);
-                    continue;
-                }
-                submitOrSkip(schedule,occurrenceId);
-                LoadSchedule latest=store.schedule(schedule.id);
-                if(latest==null||!latest.enabled)break;
-                schedule=latest;
+            if(!schedule.enabled||schedule.nextRunAt==null||schedule.nextRunInstant().isAfter(now))continue;
+            Instant fire=schedule.nextRunInstant();ZoneId zone=ZoneId.of(schedule.timezone);
+            CronExpression cron=CronExpression.parse(schedule.cron,config.minimumIntervalMinutes);
+            long grace=Math.max(30L,config.pollIntervalSeconds*3L);
+            if(fire.isBefore(startedAt)||Duration.between(fire,now).getSeconds()>grace) {
+                skipOverdue(schedule,fire,now,cron,zone);
+                continue;
             }
-            if(recorded>=10000)LOG.warning("Scheduled Load misfire history catch-up reached its per-schedule safety limit");
+            Instant next=cron.nextAfter(fire,zone);String occurrenceId=occurrenceId(schedule.id,fire);
+            if(!store.advanceAndClaim(schedule,occurrenceId,next.toString()))continue;
+            schedule.nextRunAt=next.toString();
+            submitOrSkip(schedule,occurrenceId);
+
+            // One polling tick submits at most one occurrence per schedule. If a delayed poll
+            // leaves more firings due, move directly to the next future instant and retain a
+            // single audit/history row for the coalesced misses.
+            LoadSchedule latest=store.schedule(schedule.id);
+            if(latest!=null&&latest.enabled&&latest.nextRunAt!=null&&latest.nextRunInstant().compareTo(now)<=0) {
+                Instant firstMissed=latest.nextRunInstant();
+                skipOverdue(latest,firstMissed,now,CronExpression.parse(latest.cron,config.minimumIntervalMinutes),ZoneId.of(latest.timezone));
+            }
+        }
+    }
+
+    private void skipOverdue(LoadSchedule schedule,Instant firstFire,Instant now,CronExpression cron,ZoneId zone)throws Exception {
+        Instant next=cron.nextAfter(now,zone);
+        String occurrenceId=occurrenceId(schedule.id,firstFire);
+        String reason="misfire-no-backfill; coalesced-through="+now;
+        if(store.advanceAndRecordMisfire(schedule,occurrenceId,firstFire,next.toString(),reason)) {
+            schedule.nextRunAt=next.toString();
+            store.updateOccurrence(occurrenceId,"skipped",reason,null);
         }
     }
 
     synchronized Map<String,Object> trigger(LoadSchedule schedule) throws Exception {
         Instant now=clock.instant();String occurrence= schedule.id+"-manual-"+UUID.randomUUID().toString().replace("-","");
+        Instant previous=store.lastManualTrigger(schedule.id);
         store.insertManualOccurrence(schedule.id,occurrence,now);
+        if(previous!=null&&Duration.between(previous,now).compareTo(Duration.ofMinutes(config.minimumIntervalMinutes))<0) {
+            store.updateOccurrence(occurrence,"skipped","manual-trigger-rate-limit",null);
+            return store.scheduleExecution(occurrence);
+        }
         submitOrSkip(schedule,occurrence);
         Map<String,Object> result=store.scheduleExecution(occurrence);return result==null?Map.of("occurrenceId",occurrence):result;
     }
 
     private synchronized void submitOrSkip(LoadSchedule schedule,String occurrenceId) throws Exception {
-        if(store.activeScheduledCount(schedule.id)>0) {
+        if(store.activeScheduledCount(schedule.id)>=Math.max(1,schedule.maxConcurrentRuns)) {
             store.updateOccurrence(occurrenceId,"skipped","schedule-overlap-limit",null);return;
         }
         if(store.activeScheduledCount(null)>=config.maxConcurrentRuns) {

@@ -803,8 +803,14 @@ final class ServerRuntime implements AutoCloseable {
                 }
                 if(!safe.isEmpty())diagnostics.add(safe);
             }
-            if(diagnostics.isEmpty())diagnostics.add(Map.of("code",workerError,"summary","Load or Debug input failed schema or target validation",
-                    "resourceId",request.inspectionTargetId==null?request.inspectionResourceId:request.inspectionTargetId));
+            if(diagnostics.isEmpty()) {
+                Map<String,Object> fallback=new LinkedHashMap<>();
+                fallback.put("code",workerError==null?"ATT-SERVER-DRAFT-INVALID":workerError);
+                fallback.put("summary","Load or Debug input failed schema or target validation");
+                String resourceId=request.inspectionTargetId==null?request.inspectionResourceId:request.inspectionTargetId;
+                if(resourceId!=null)fallback.put("resourceId",resourceId);
+                diagnostics.add(fallback);
+            }
             throw new DraftValidationException(diagnostics);
         }
         if("ATT-RESOURCE-RESPONSE-TOO-LARGE".equals(workerError))throw new InspectionResponseTooLargeException();
@@ -974,6 +980,14 @@ final class ServerRuntime implements AutoCloseable {
         LoadSchedule schedule=buildLoadSchedule(input,null,principal);schedule.id="S"+UUID.randomUUID().toString().replace("-","").toUpperCase();schedule.createdBy=principal;schedule.createdAt=clock.instant().toString();
         store.createSchedule(schedule,config.scheduling.maxSchedules);store.audit(principal,"SCHEDULE_CREATE",null,schedule.packageId,"CREATED");return schedule;
     }
+    Map<String,Object> previewLoadSchedule(JsonNode input) {
+        if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
+        input.fieldNames().forEachRemaining(key->{if(!Set.of("timezone","cron").contains(key))throw new IllegalArgumentException("Unknown preview field: "+key);});
+        String timezone=fieldText(input,"timezone",null,true),cronText=fieldText(input,"cron",null,true);
+        java.time.ZoneId zone=scheduleZone(timezone);CronExpression cron=CronExpression.parse(cronText,config.scheduling.minimumIntervalMinutes);
+        cron.validateTimezoneMinimumInterval(zone,config.scheduling.minimumIntervalMinutes,clock.instant());
+        return Map.of("timezone",timezone,"cron",cronText,"nextRunAt",cron.nextAfter(clock.instant(),zone).toString());
+    }
     LoadSchedule updateLoadSchedule(String id,JsonNode input,String principal) throws Exception {
         requireSchedulingEnabled();LoadSchedule prior=store.schedule(id);if(prior==null)throw new NotFoundException();
         LoadSchedule schedule=buildLoadSchedule(input,prior,principal);schedule.id=id;schedule.createdBy=prior.createdBy;schedule.createdAt=prior.createdAt;
@@ -999,7 +1013,10 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> triggerLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule);store.audit(principal,"SCHEDULE_TRIGGER",String.valueOf(occurrence.get("jobId")),schedule.packageId,String.valueOf(occurrence.get("status")));return occurrence;}
 
     private Map<String,Object> submitScheduledLoad(LoadSchedule schedule,String occurrenceId) throws Exception {
-        Path root=config.packages.get(schedule.packageId);if(root==null)throw new IllegalArgumentException("Configured schedule package is no longer available");validatePackageRoot(root);
+        Path root=config.packages.get(schedule.packageId);
+        if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            throw new IllegalArgumentException("Configured schedule package is no longer available");
+        validatePackageRoot(root);
         ValidatedScheduledScenario validated=validateScheduleScenario(root,schedule);Map<String,Object> scenario=validated.scenario;
         com.fasterxml.jackson.databind.node.ObjectNode input=JSON.createObjectNode();input.put("packageId",schedule.packageId);
         if(schedule.config!=null)input.put("config",schedule.config);if(schedule.environment!=null)input.put("environment",schedule.environment);
@@ -1059,7 +1076,7 @@ final class ServerRuntime implements AutoCloseable {
 
     private LoadSchedule buildLoadSchedule(JsonNode input,LoadSchedule prior,String principal) throws Exception {
         if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
-        Set<String> allowed=Set.of("name","description","tags","packageId","scenario","config","environment","timezone","cron","load","enabled");
+        Set<String> allowed=Set.of("name","description","tags","packageId","scenario","config","environment","timezone","cron","load","maxConcurrentRuns","enabled");
         input.fieldNames().forEachRemaining(key->{if(!allowed.contains(key))throw new IllegalArgumentException("Unknown schedule field: "+key);});
         LoadSchedule s=prior==null?new LoadSchedule():prior.copy();
         s.name=fieldText(input,"name",s.name,true);s.description=fieldText(input,"description",s.description,false);
@@ -1068,6 +1085,10 @@ final class ServerRuntime implements AutoCloseable {
         s.config=fieldText(input,"config",s.config,false);s.environment=fieldText(input,"environment",s.environment,false);
         s.timezone=fieldText(input,"timezone",s.timezone,true);s.cron=fieldText(input,"cron",s.cron,true);
         if(input.has("enabled")){if(!input.get("enabled").isBoolean())throw new IllegalArgumentException("enabled must be true or false");s.enabled=input.get("enabled").booleanValue();}
+        if(input.has("maxConcurrentRuns")){
+            JsonNode limit=input.get("maxConcurrentRuns");if(!limit.isIntegralNumber()||!limit.canConvertToInt())throw new IllegalArgumentException("maxConcurrentRuns must be an integer");
+            int maximum=limit.intValue();if(maximum<1||maximum>config.scheduling.maxConcurrentRuns)throw new IllegalArgumentException("maxConcurrentRuns must be between 1 and server.scheduling.maxConcurrentRuns");s.maxConcurrentRuns=maximum;
+        }
         if(input.has("load"))s.load=loadOptions(input.get("load"));else if(s.load==null)s.load=new LinkedHashMap<>();
         if(s.name.isBlank()||s.name.length()>120||containsControl(s.name))throw new IllegalArgumentException("name must be 1 to 120 characters without control characters");
         if(s.description!=null&&(s.description.length()>500||containsControl(s.description)))throw new IllegalArgumentException("description must be at most 500 characters without control characters");
@@ -1078,12 +1099,16 @@ final class ServerRuntime implements AutoCloseable {
         if(!Files.isRegularFile(scenarioPath)||!scenarioPath.toRealPath().startsWith(root.toRealPath()))throw new IllegalArgumentException("scenario must be a regular file inside the configured package");
         s.config=safeRelative(s.config,"config");validatePackagePath(root,s.config,"config");
         s.environment=s.environment==null||s.environment.isBlank()?null:safeText(s.environment,128,"environment");
-        java.time.ZoneId zone;try{zone=java.time.ZoneId.of(s.timezone);if(!java.time.ZoneId.getAvailableZoneIds().contains(s.timezone))throw new IllegalArgumentException();}catch(Exception invalid){throw new IllegalArgumentException("timezone must be a valid IANA timezone");}
+        java.time.ZoneId zone=scheduleZone(s.timezone);
         CronExpression cron=CronExpression.parse(s.cron,config.scheduling.minimumIntervalMinutes);
         cron.validateTimezoneMinimumInterval(zone,config.scheduling.minimumIntervalMinutes,clock.instant());
         validateScheduleScenario(root,s);
         s.nextRunAt=nextRun(s.cron,s.timezone,clock.instant()).toString();
         s.updatedBy=principal;s.updatedAt=clock.instant().toString();return s;
+    }
+    private static java.time.ZoneId scheduleZone(String timezone) {
+        try{java.time.ZoneId zone=java.time.ZoneId.of(timezone);if(!java.time.ZoneId.getAvailableZoneIds().contains(timezone))throw new IllegalArgumentException();return zone;}
+        catch(Exception invalid){throw new IllegalArgumentException("timezone must be a valid IANA timezone");}
     }
     private static String fieldText(JsonNode input,String name,String prior,boolean required) {
         if(!input.has(name)) {if(required&&(prior==null||prior.isBlank()))throw new IllegalArgumentException(name+" is required");return prior;}

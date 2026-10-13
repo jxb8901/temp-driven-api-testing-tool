@@ -34,11 +34,12 @@ class ServerWarUiIT {
         assertServerApplicationJar(war);
 
         Path users = Files.writeString(temp.resolve("tomcat-users.xml"),
-                "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
+                "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/>"
+                        +"<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER,ATT_ADMIN\"/></tomcat-users>");
         Path packages = Files.createDirectories(temp.resolve("packages"));
         Path dummyPackage = Files.createDirectories(packages.resolve("dummy"));
         Path config = Files.writeString(temp.resolve("server.yaml"),
-                "server:\n  dataDir: " + temp.resolve("data") + "\n  authenticationRequired: true\n"
+                "server:\n  dataDir: " + temp.resolve("data") + "\n  authenticationRequired: true\n  scheduling:\n    enabled: true\n    adminRole: ATT_ADMIN\n"
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"
                         + "packages:\n  allowedRoots:\n    - " + packages + "\n  entries:\n    dummy: " + dummyPackage + "\n");
         String oldConfig = System.getProperty("att.server.config");
@@ -61,6 +62,10 @@ class ServerWarUiIT {
             assertEquals(401, get(port, "/tools/att/ui/index.html", null));
             String auth = "Basic " + Base64.getEncoder().encodeToString(
                     "att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String scheduleAdminAuth="Basic "+Base64.getEncoder().encodeToString("schedule-admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(401,get(port,"/tools/att/api/v1/load-schedules",null));
+            assertEquals(403,get(port,"/tools/att/api/v1/load-schedules",auth),"ordinary ATT_USER role must not manage schedules");
+            assertEquals(200,get(port,"/tools/att/api/v1/load-schedules",scheduleAdminAuth),"configured schedule admin role may list schedules");
             assertJobDeepLink(port, auth);
 
             for (String asset : new String[]{"index.html", "app.js", "app.css"}) {

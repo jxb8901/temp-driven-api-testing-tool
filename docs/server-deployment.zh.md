@@ -48,9 +48,9 @@ att/                              # ATT_HOME
 
 排程以 package ID 及 package-relative Load scenario 檔案為輸入。建立/編輯及每次 occurrence 前，有界 Inspector 會驗證和正規化完整 scenario 及 target closure；即使瀏覽器建立的 Load draft 停用，Server 的 Load users、rate、duration、workload 及 target 上限仍然適用。每個工作都使用檢查所得的 immutable scenario 及 package revision，再經標準 Worker 和 Server Load admission 路徑提交；既有 Load concurrency 及 queue 上限仍然適用。排程 API 只接受 scenario、選填 config/environment 及現有的字串型 Load options；options 會在儲存和提交前以 Server 上限及 Engine 驗證。不接受輸出路徑、package root、Worker 設定、憑證或 caller 提供的 principal。工作使用 Server 建立的 `load-schedule:<id>` principal。提交失敗會記錄且不重試。已接納工作的狀態與 evidence 維持標準 job 生命週期，與 schedule occurrence 分開。
 
-Cron 使用五個數字欄位（`minute hour day-of-month month day-of-week`），支援 `*`、清單、範圍及 `/step`；不接受月份/星期名稱或擴充 cron 語法。日及星期欄位同時受限時，任一欄位匹配即算符合。Timezone 必須是 IANA zone ID。春季 DST 跳時中不存在的本地分鐘會略過；秋季重複時段中，每個實際 instant 都會執行一次。Occurrence 間隔至少為 `minimumIntervalMinutes`（預設 15，範圍 1–10080）。重啟後或錯過 poll 的逾期 occurrence 會以 `skipped` 及 `misfire-no-backfill` 記錄，不會補跑。預設 overlap policy 會在同一排程的前一個 occurrence 執行中時略過新 occurrence。全域 `maxConcurrentRuns`（預設 1，且不可高於 `workers.maxConcurrentLoad`）限制由 scheduler 提交的工作。容量或 package 驗證拒絕會記錄為 `failed-to-submit`，不會重試。`failurePolicy: continue`（預設值）會讓排程繼續啟用；`pauseAfterSubmitFailure` 會在首次提交失敗後暫停排程。此設定只處理提交錯誤；已提交工作的後續結果仍是標準 job outcome。暫停、編輯或刪除排程不會取消已接納的工作。
+UI 提供每日及每週本地時間選項，亦支援五欄位 cron（`minute hour day-of-month month day-of-week`），包括 `*`、清單、範圍及 `/step`；不接受月份/星期名稱或擴充 cron 語法。日及星期欄位同時受限時，任一欄位匹配即算符合。Timezone 必須是 IANA zone ID。春季 DST 跳時中不存在的本地分鐘會略過；秋季重複時段中，每個實際 instant 都會執行一次。Occurrence 間隔至少為 `minimumIntervalMinutes`（預設 15，範圍 1–10080）。重啟或延遲 poll 錯過的 firing 會直接推進至下一個未來 instant，並按每個排程及每次 poll 合併為一筆 `skipped` history/audit 記錄，原因為 `misfire-no-backfill`；不會補跑 Load。每次 poll 對每個排程最多提交一個 occurrence。每個排程的 `maxConcurrentRuns` 預設為 1，並且不可高於全域 `server.scheduling.maxConcurrentRuns`；達到排程自己的執行中上限時會略過新 occurrence。全域 `maxConcurrentRuns`（預設 1，且不可高於 `workers.maxConcurrentLoad`）限制由 scheduler 提交的工作。容量或 package 驗證拒絕會記錄為 `failed-to-submit`，不會重試。`failurePolicy: continue`（預設值）會讓排程繼續啟用；`pauseAfterSubmitFailure` 會在首次提交失敗後暫停排程。此設定只處理提交錯誤；已提交工作的後續結果仍是標準 job outcome。暫停、編輯或刪除排程不會取消已接納的工作。
 
-內建 Scheduled Load 頁面支援建立、編輯、暫停/恢復、手動觸發、刪除、時區感知的 next-run 顯示，以及連結標準工作記錄的 occurrence history。手動觸發需要瀏覽器確認，並遵守相同的 active-run 及容量上限。
+內建 Scheduled Load 頁面支援建立、編輯、暫停/恢復、手動觸發、刪除、每日/每週/cron recurrence、時區感知的 next-run 預覽，以及連結標準工作記錄的 occurrence history。手動觸發需要瀏覽器確認，並遵守每排程及全域 active-run、容量上限和最短間隔 rate limit。
 
 啟用後的 `/metrics` 會包含下一次到期時間、執行中的排程 Load 數量，以及依狀態統計的保留 occurrence 數。Occurrence history 和 audit table 會記錄提交、略過、容量及 misfire 結果；變更及手動觸發動作會記錄已解析的 caller。Scheduler 使用 Server 主機的 wall clock 及排程的 IANA timezone；請以 NTP 保持主機時間同步。時鐘向前調整會按 misfire 處理並記錄，不會補跑；時鐘向後調整會等候 wall clock 追上已儲存的 next instant。更新 WAR 或重啟 Tomcat 時，請採用單一 instance 的標準部署流程：runtime 停止時 scheduler 一併停止，已接納工作依標準 shutdown recovery 處理，重啟後略過錯過的 occurrence。不要讓新舊 Server 程序同時使用相同 `server.dataDir`，也不要為此單節點 scheduler 使用 rolling multi-instance deployment。
 
@@ -173,6 +173,7 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 | `GET` | `/jobs/{jobId}/artifacts/{path}` | 下載輸出檔案 |
 | `DELETE` | `/jobs/{jobId}` | 取消執行中工作並保留歷史 |
 | `GET`、`POST` | `/load-schedules` | 列出或建立排程（僅管理員） |
+| `POST` | `/load-schedules/preview` | 驗證 recurrence 並預覽下一次執行時間（僅管理員） |
 | `GET`、`PATCH`、`DELETE` | `/load-schedules/{scheduleId}` | 讀取、編輯或刪除排程（僅管理員） |
 | `POST` | `/load-schedules/{scheduleId}/pause`、`resume`、`trigger` | 暫停、恢復或手動觸發（僅管理員） |
 | `GET` | `/load-schedules/{scheduleId}/executions?limit=100` | 讀取 occurrence history 及已接納工作連結 |
@@ -189,6 +190,7 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
   "timezone": "Asia/Hong_Kong",
   "cron": "0 2 * * *",
   "load": { "duration": "10m" },
+  "maxConcurrentRuns": 1,
   "enabled": false
 }
 ```

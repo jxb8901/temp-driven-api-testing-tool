@@ -152,7 +152,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
-          catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule request could not be completed",requestId);}
+          catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule request could not be completed",requestId);getServletContext().log("ATT Server schedule read failed id="+requestId,e);}
     }
 
     private void schedulePost(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
@@ -161,6 +161,7 @@ public final class ApiServlet extends HttpServlet {
         String[] parts=path.split("/");
         try {
             if(parts.length==2){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;LoadSchedule item=runtime.createLoadSchedule(body,principal);res.setHeader("Location",req.getContextPath()+"/api/v1/load-schedules/"+item.id);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,201,view);return;}
+            if(parts.length==3&&"preview".equals(parts[2])){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;Map<String,Object> preview=runtime.previewLoadSchedule(body);preview.put("requestId",requestId);json(res,200,preview);return;}
             if(parts.length==4&&"trigger".equals(parts[3])){Map<String,Object> result=runtime.triggerLoadSchedule(parts[2],principal);result.put("requestId",requestId);json(res,202,result);return;}
             if(parts.length==4&&("pause".equals(parts[3])||"resume".equals(parts[3]))) {
                 LoadSchedule item=runtime.setLoadScheduleEnabled(parts[2],"resume".equals(parts[3]),principal);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,200,view);return;
@@ -172,7 +173,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
-          catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule request could not be completed",requestId);}
+          catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule request could not be completed",requestId);getServletContext().log("ATT Server schedule action failed id="+requestId,e);}
     }
 
     private void schedulePatch(HttpServletRequest req,HttpServletResponse res)throws IOException {
@@ -191,7 +192,7 @@ public final class ApiServlet extends HttpServlet {
         catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
         catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
         catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
-        catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule could not be updated",requestId);}
+        catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule could not be updated",requestId);getServletContext().log("ATT Server schedule update failed id="+requestId,e);}
     }
 
     private void scheduleDelete(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
@@ -200,7 +201,7 @@ public final class ApiServlet extends HttpServlet {
         String[] parts=path.split("/");if(parts.length!=3){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try{runtime.deleteLoadSchedule(parts[2],principal);json(res,200,Map.of("scheduleId",parts[2],"status","DELETED","requestId",requestId));}
         catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
-        catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule could not be deleted",requestId);}
+        catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule could not be deleted",requestId);getServletContext().log("ATT Server schedule delete failed id="+requestId,e);}
     }
 
     private boolean scheduleAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {

@@ -131,9 +131,35 @@ final class JobStore implements AutoCloseable {
             c.commit();return true;
         }
     }
+    synchronized boolean advanceAndRecordMisfire(LoadSchedule expected,String occurrenceId,Instant firstMissed,String nextFire,String reason) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try(PreparedStatement p=c.prepareStatement("SELECT schedule_json,next_run_at,enabled FROM load_schedules WHERE schedule_id=? FOR UPDATE")) {
+                p.setString(1,expected.id);try(ResultSet r=p.executeQuery()) {
+                    if(!r.next()||!r.getBoolean(3)||!expected.nextRunAt.equals(r.getString(2))){c.rollback();return false;}
+                    LoadSchedule schedule=ServerRuntime.JSON.readValue(r.getString(1),LoadSchedule.class);
+                    if(!java.util.Objects.equals(schedule.cron,expected.cron)||!java.util.Objects.equals(schedule.timezone,expected.timezone)
+                            ||!java.util.Objects.equals(schedule.updatedAt,expected.updatedAt)){c.rollback();return false;}
+                    schedule.nextRunAt=nextFire;
+                    try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=?,next_run_at=?,updated_at=? WHERE schedule_id=?")) {
+                        update.setString(1,ServerRuntime.JSON.writeValueAsString(schedule));update.setString(2,nextFire);update.setString(3,schedule.updatedAt);update.setString(4,expected.id);update.executeUpdate();
+                    }
+                    try(PreparedStatement occurrence=c.prepareStatement("INSERT INTO load_schedule_executions(occurrence_id,schedule_id,scheduled_for,status,reason,trigger_type,created_at) VALUES(?,?,?,'skipped',?,'cron',?)")) {
+                        occurrence.setString(1,occurrenceId);occurrence.setString(2,expected.id);occurrence.setString(3,firstMissed.toString());occurrence.setString(4,reason);occurrence.setString(5,Instant.now().toString());occurrence.executeUpdate();
+                    }
+                }
+            }
+            c.commit();return true;
+        }
+    }
     synchronized void insertManualOccurrence(String scheduleId,String occurrenceId,Instant at) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO load_schedule_executions(occurrence_id,schedule_id,scheduled_for,status,trigger_type,created_at) VALUES(?,?,?,'scheduled','manual',?)")){
             p.setString(1,occurrenceId);p.setString(2,scheduleId);p.setString(3,at.toString());p.setString(4,Instant.now().toString());p.executeUpdate();
+        }
+    }
+    synchronized Instant lastManualTrigger(String scheduleId) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT scheduled_for FROM load_schedule_executions WHERE schedule_id=? AND trigger_type='manual' AND NOT (status='skipped' AND reason='manual-trigger-rate-limit') ORDER BY scheduled_for DESC LIMIT 1")){
+            p.setString(1,scheduleId);try(ResultSet r=p.executeQuery()){return r.next()?Instant.parse(r.getString(1)):null;}
         }
     }
     synchronized void updateOccurrence(String occurrenceId,String status,String reason,String jobId) throws Exception {
