@@ -268,7 +268,7 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> inspectQuickLoadForm(String packageId,String type,String resourceId,String model,String environment,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!"virtualUsers".equals(model)&&!"arrivalRate".equals(model))throw new IllegalArgumentException("model is invalid");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(resourceId==null||resourceId.isBlank()||resourceId.length()>512)throw new IllegalArgumentException("resourceId is invalid");
@@ -280,7 +280,7 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> inspectQuickLoadPolicy(String packageId,String model,String environment,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!"virtualUsers".equals(model)&&!"arrivalRate".equals(model))throw new IllegalArgumentException("model is invalid");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
@@ -291,7 +291,7 @@ final class ServerRuntime implements AutoCloseable {
     private Map<String,Object> inspectDebugFormInternal(String packageId,String type,String resourceId,String environment,
                                                         String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(resourceId==null||resourceId.isBlank()||resourceId.length()>512)throw new IllegalArgumentException("resourceId is invalid");
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
@@ -300,7 +300,7 @@ final class ServerRuntime implements AutoCloseable {
         return executeInspection(root,request);
     }
     Map<String,Object> createDebugDraft(JsonNode input,String principal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         requireObject(input,"A JSON object is required");
         requireOnlyFields(input,"packageId","environment","target","input");
@@ -341,7 +341,7 @@ final class ServerRuntime implements AutoCloseable {
         return debugDraftView(draft);
     }
     Map<String,Object> createQuickLoadDraft(JsonNode input,String principal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
         requireObject(input,"A JSON object is required");
@@ -391,7 +391,7 @@ final class ServerRuntime implements AutoCloseable {
         return quickLoadDraftView(draft);
     }
     Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
         requireObject(input,"A JSON object is required");requireOnlyFields(input,"packageId","environment","scenario");
@@ -455,8 +455,11 @@ final class ServerRuntime implements AutoCloseable {
         throw new NotFoundException();
     }
     Map<String,Object> submitDebugDraft(JsonNode body,String principal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
-        requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId");
+        return submitDebugDraft(body,principal,principal);
+    }
+    Map<String,Object> submitDebugDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId","principal");
         String packageId=required(body,"packageId"),draftId=required(body,"draftId");
         DebugDraft draft;
         synchronized(draftLock) {
@@ -475,7 +478,7 @@ final class ServerRuntime implements AutoCloseable {
             internal.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(draft.packageId)));
             internal.put("maxSourceBytes",config.inspection.maxSourceBytes);internal.put("maxResponseBytes",config.inspection.maxResponseBytes);
             requireLiveDraft(draft);
-            Map<String,Object> accepted=submit("debug",internal,principal,true);
+            Map<String,Object> accepted=submit("debug",internal,persistedPrincipal,true);
             debugDrafts.remove(draft.id,draft);submitted=true;return accepted;
         } catch(StaleDraftException stale) {
             debugDrafts.remove(draft.id,draft);throw stale;
@@ -486,9 +489,12 @@ final class ServerRuntime implements AutoCloseable {
         }
     }
     Map<String,Object> submitQuickLoadDraft(JsonNode body,String principal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        return submitQuickLoadDraft(body,principal,principal);
+    }
+    Map<String,Object> submitQuickLoadDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         requireInlineLoadEnabled();
-        requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId");
+        requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId","principal");
         String packageId=required(body,"packageId"),draftId=required(body,"draftId");
         QuickLoadDraft draft;
         synchronized(draftLock) {
@@ -508,7 +514,7 @@ final class ServerRuntime implements AutoCloseable {
             internal.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(draft.packageId)));
             internal.put("maxSourceBytes",config.inspection.maxSourceBytes);internal.put("maxResponseBytes",config.inspection.maxResponseBytes);
             requireLiveDraft(draft.expiresAt);
-            Map<String,Object> accepted=submit("load",internal,principal,true);
+            Map<String,Object> accepted=submit("load",internal,persistedPrincipal,true);
             quickLoadDrafts.remove(draft.id,draft);submitted=true;return accepted;
         } catch(StaleDraftException stale) {
             quickLoadDrafts.remove(draft.id,draft);throw stale;
@@ -519,9 +525,12 @@ final class ServerRuntime implements AutoCloseable {
         }
     }
     Map<String,Object> submitAdvancedLoadDraft(JsonNode body,String principal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        return submitAdvancedLoadDraft(body,principal,principal);
+    }
+    Map<String,Object> submitAdvancedLoadDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         requireInlineLoadEnabled();
-        requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId");
+        requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId","principal");
         String packageId=required(body,"packageId"),draftId=required(body,"draftId");
         AdvancedLoadDraftState draft;
         synchronized(draftLock) {
@@ -540,7 +549,7 @@ final class ServerRuntime implements AutoCloseable {
             internal.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(draft.packageId)));
             internal.put("maxSourceBytes",config.inspection.maxSourceBytes);internal.put("maxResponseBytes",config.inspection.maxResponseBytes);
             requireLiveDraft(draft.expiresAt);
-            Map<String,Object> accepted=submit("load",internal,principal,true);
+            Map<String,Object> accepted=submit("load",internal,persistedPrincipal,true);
             advancedLoadDrafts.remove(draft.id,draft);submitted=true;return accepted;
         } catch(StaleDraftException stale) {
             advancedLoadDrafts.remove(draft.id,draft);throw stale;
@@ -551,10 +560,13 @@ final class ServerRuntime implements AutoCloseable {
         }
     }
     Map<String,Object> submitLoadDraft(JsonNode body,String principal) throws Exception {
+        return submitLoadDraft(body,principal,principal);
+    }
+    Map<String,Object> submitLoadDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
         requireObject(body,"A JSON object is required");
         String draftId=required(body,"draftId");
-        if(QUICK_LOAD_DRAFT_ID.matcher(draftId).matches())return submitQuickLoadDraft(body,principal);
-        if(ADVANCED_LOAD_DRAFT_ID.matcher(draftId).matches())return submitAdvancedLoadDraft(body,principal);
+        if(QUICK_LOAD_DRAFT_ID.matcher(draftId).matches())return submitQuickLoadDraft(body,principal,persistedPrincipal);
+        if(ADVANCED_LOAD_DRAFT_ID.matcher(draftId).matches())return submitAdvancedLoadDraft(body,principal,persistedPrincipal);
         throw new NotFoundException();
     }
     private void verifyQuickLoadDraftRevision(QuickLoadDraft draft) throws Exception {
@@ -726,7 +738,7 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
                                             String section,int offset,int limit,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("An authenticated Servlet Principal is required");
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(!List.of("declared","effective","compare").contains(action))throw new IllegalArgumentException("Unsupported configuration inspection action");
         String selected=null,other=null;

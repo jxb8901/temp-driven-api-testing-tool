@@ -3,7 +3,9 @@
 # Copy to ATT_HOME/config/att-server.yaml or a protected external path.
 server:
   dataDir: /opt/att/data
-  # Disable only on an isolated network that permits anonymous API access.
+  # true keeps Tomcat authentication. false enables full anonymous UI/API access:
+  # every caller shares identity "anonymous" and shared drafts/jobs, with no user isolation.
+  # Use false only on a trusted isolated network; see the deployment guide warning.
   authenticationRequired: true
   # Optional. Defaults to the Java runtime hosting Tomcat.
   # javaExecutable: /usr/lib/jvm/java-17/bin/java

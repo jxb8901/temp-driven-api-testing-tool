@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ATT v4.1.1 reference manual</title>
+  <title>ATT v4.1.2 reference manual</title>
   <style>
     html {
       color: #1a1a1a;
@@ -233,12 +233,12 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">ATT v4.1.1 reference manual</h1>
+<h1 class="title">ATT v4.1.2 reference manual</h1>
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
-<li><a href="#att-v411-reference-manual"
-id="toc-att-v411-reference-manual">ATT v4.1.1 reference manual</a>
+<li><a href="#att-v412-reference-manual"
+id="toc-att-v412-reference-manual">ATT v4.1.2 reference manual</a>
 <ul>
 <li><a href="#overview-and-product-model"
 id="toc-overview-and-product-model">Overview and product model</a>
@@ -557,8 +557,8 @@ id="toc-advanced-diagnostics">Advanced diagnostics</a></li>
 </ul></li>
 </ul>
 </nav>
-<h1 id="att-v411-reference-manual">ATT v4.1.1 reference manual</h1>
-<p>Author: Jeffrey + ChatGPT Version: 4.1.1 Status: Normative end-user
+<h1 id="att-v412-reference-manual">ATT v4.1.2 reference manual</h1>
+<p>Author: Jeffrey + ChatGPT Version: 4.1.2 Status: Normative end-user
 documentation; generated from modular sources</p>
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
 
@@ -6055,11 +6055,14 @@ contract. Existing commands such as <code>run</code>,
 local unless you explicitly add <code>remote</code>.</p>
 <div class="sourceCode" id="cb91"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb91-1"><a href="#cb91-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit packages</span>
-<span id="cb91-2"><a href="#cb91-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit run payments <span class="at">--suite</span> testcase/smoke.xlsx <span class="at">--env</span> SIT <span class="at">--tag</span> smoke</span>
-<span id="cb91-3"><a href="#cb91-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> ci run payments <span class="at">--all</span> <span class="at">--detach</span></span>
-<span id="cb91-4"><a href="#cb91-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit watch J0123456789ABCDEF</span>
-<span id="cb91-5"><a href="#cb91-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit load payments <span class="at">--scenario</span> load/payment.yaml <span class="at">--users</span> 2 <span class="at">--duration</span> 30s</span>
-<span id="cb91-6"><a href="#cb91-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit artifacts J0123456789ABCDEF <span class="at">--download</span> ./results</span></code></pre></div>
+<span id="cb91-2"><a href="#cb91-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit <span class="at">--no-auth</span> packages</span>
+<span id="cb91-3"><a href="#cb91-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit run payments <span class="at">--suite</span> testcase/smoke.xlsx <span class="at">--env</span> SIT <span class="at">--tag</span> smoke</span>
+<span id="cb91-4"><a href="#cb91-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit <span class="at">--no-auth</span> run payments <span class="at">--all</span> <span class="at">--principal</span> Bob</span>
+<span id="cb91-5"><a href="#cb91-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit jobs <span class="at">--principal</span> <span class="st">&#39;Bob(anonym)&#39;</span></span>
+<span id="cb91-6"><a href="#cb91-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> ci run payments <span class="at">--all</span> <span class="at">--detach</span></span>
+<span id="cb91-7"><a href="#cb91-7" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit watch J0123456789ABCDEF</span>
+<span id="cb91-8"><a href="#cb91-8" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit load payments <span class="at">--scenario</span> load/payment.yaml <span class="at">--users</span> 2 <span class="at">--duration</span> 30s</span>
+<span id="cb91-9"><a href="#cb91-9" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit artifacts J0123456789ABCDEF <span class="at">--download</span> ./results</span></code></pre></div>
 <p>The <code>--server</code> value selects an entry from
 <code>~/.att/servers.yaml</code>; set <code>ATT_REMOTE_CONFIG</code> to
 select another profile file. <code>ATT_SERVER_CONFIG</code> is reserved
@@ -6086,13 +6089,22 @@ ERROR/CANCELLED, and <code>4</code> when the client cannot establish a
 trustworthy result because of connection, authentication, or protocol
 failure. See <a href="remote-client.md">ATT Remote client</a> for
 profiles, command options, reconnect behavior, and troubleshooting.</p>
-<p>Remote-only options are <code>--server &lt;profile&gt;</code>,
+<p>Remote-only options include <code>--server &lt;profile&gt;</code>,
+<code>--no-auth</code>, <code>--principal &lt;name&gt;</code>,
 <code>--detach</code>, <code>--download &lt;directory&gt;</code>, and
 <code>--scenario &lt;package-relative-path&gt;</code>.
-<code>--format human|json</code> and the documented ATT selection,
-environment, Debug, and Load options are accepted where they map to the
-remote job contract. See the linked guide for the remote command
-list.</p>
+<code>--no-auth</code> bypasses profile credentials only when the Server
+explicitly permits anonymous access. In anonymous mode,
+<code>--principal</code> supplies a self-declared label that the Server
+stores in the existing <code>principal</code> field as
+<code>&lt;name&gt;(anonym)</code>; it does not affect access or
+authorization. Authenticated mode ignores it.
+<code>jobs --principal &lt;text&gt;</code> searches that field by
+case-insensitive substring, so searching for <code>alice</code> also
+matches <code>alice(anonym)</code>. <code>--format human|json</code> and
+the documented ATT selection, environment, Debug, and Load options are
+accepted where they map to the remote job contract. See the linked guide
+for the remote command list.</p>
 <p>Options are command-specific. Unknown commands/options and missing
 option values are errors. <code>--package</code> and
 <code>--selected</code> are mutually exclusive. Selected validation and
@@ -6768,7 +6780,7 @@ reports and archives before sharing.</p>
 <div class="sourceCode" id="cb99"><pre
 class="sourceCode json"><code class="sourceCode json"><span id="cb99-1"><a href="#cb99-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
 <span id="cb99-2"><a href="#cb99-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schemaVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;att-validation/v2.1&quot;</span><span class="fu">,</span></span>
-<span id="cb99-3"><a href="#cb99-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;4.1.1&quot;</span><span class="fu">,</span></span>
+<span id="cb99-3"><a href="#cb99-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;attVersion&quot;</span><span class="fu">:</span> <span class="st">&quot;4.1.2&quot;</span><span class="fu">,</span></span>
 <span id="cb99-4"><a href="#cb99-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;valid&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
 <span id="cb99-5"><a href="#cb99-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;package&quot;</span><span class="fu">,</span></span>
 <span id="cb99-6"><a href="#cb99-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;summary&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;errors&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;warnings&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;suites&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;cases&quot;</span><span class="fu">:</span> <span class="dv">22</span><span class="fu">,</span> <span class="dt">&quot;templates&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">,</span> <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="dv">7</span><span class="fu">},</span></span>
@@ -6833,9 +6845,9 @@ class="sourceCode sh"><code class="sourceCode bash"><span id="cb100-1"><a href="
 Reference Manual, builds the application jar and release archives, and
 smoke-tests the extracted local package. It requires Java/Maven plus
 Python 3 and Pandoc for Reference generation. It outputs
-<code>att-4.1.1-local.tar.gz</code> for the CLI,
-<code>att-4.1.1-server.tar.gz</code> for the WAR and deployment guides,
-and <code>att-4.1.1-src.tar.gz</code> for source. Each binary archive
+<code>att-4.1.2-local.tar.gz</code> for the CLI,
+<code>att-4.1.2-server.tar.gz</code> for the WAR and deployment guides,
+and <code>att-4.1.2-src.tar.gz</code> for source. Each binary archive
 must be smaller than 25 MB. The local package no longer includes the WAR
 or its duplicate runtime libraries.</p>
 <h3 id="runtime-dependencies">Runtime dependencies</h3>
@@ -7372,7 +7384,7 @@ id="why-does-attbat-ask-for-maven-or-why-does-a-sh-tool-fail-on-windows">Why
 does <code>att.bat</code> ask for Maven, or why does a <code>.sh</code>
 Tool fail on windows?</h4>
 <p>In a binary release, <code>att.bat</code> finds the versioned runtime
-JAR, such as <code>lib\att-local-4.1.1.jar</code>, and only requires
+JAR, such as <code>lib\att-local-4.1.2.jar</code>, and only requires
 Java 8+. Keep one <code>att-local-&lt;version&gt;.jar</code> in each
 <code>ATT_HOME/lib</code> so the launcher selects an unambiguous
 runtime. In a source tree it compiles with Maven when Maven is on

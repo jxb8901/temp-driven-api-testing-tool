@@ -1,6 +1,6 @@
 # ATT Server deployment and API
 
-ATT Server 4.1.1 provides a single-node control plane for submitting ATT Run, Debug, Load, and Validate jobs over a versioned REST API. Deploy its WAR to an external Tomcat 10.1+ instance running Java 17 or later. The CLI, Engine, and Worker remain Java 8-compatible.
+ATT Server 4.1.2 provides a single-node control plane for submitting ATT Run, Debug, Load, and Validate jobs over a versioned REST API. Deploy its WAR to an external Tomcat 10.1+ instance running Java 17 or later. The CLI, Engine, and Worker remain Java 8-compatible.
 
 ## Prepare the deployment
 
@@ -8,9 +8,9 @@ ATT Server 4.1.1 provides a single-node control plane for submitting ATT Run, De
 2. Register package roots beneath an allowed root and ensure the Tomcat service account can read them. The extracted default package can be registered directly as `$ATT_HOME/packages/default`.
 3. Create `server.dataDir` before startup and make it writable only by the Tomcat service account. The sample uses `$ATT_HOME/data`; it is supported when it does not equal, contain, or sit inside any registered package root. `/var/lib/att-server` is another option. Keep it out of package content.
 4. Copy `$ATT_HOME/config/att-server.example.yaml` to `$ATT_HOME/config/att-server.yaml` or a protected external path, update its absolute paths, and keep credentials out of package content. Do not replace an existing active config during an upgrade.
-5. Deploy `att-server-4.1.1.war` to Tomcat 10.1+. Tomcat may run the WAR packed; isolated Workers load the matching `att-local-4.1.1.jar` from `$ATT_HOME/lib`.
+5. Deploy `att-server-4.1.2.war` to Tomcat 10.1+. Tomcat may run the WAR packed; isolated Workers load the matching `att-local-4.1.2.jar` from `$ATT_HOME/lib`.
 
-The Local archive's extracted directory is `ATT_HOME`, the shared installation and deployment root. It contains launchers and the shared Worker/Engine runtime at `lib/att-local-4.1.1.jar`; install the matching Local archive beside the Server WAR. Keep one versioned `att-local-<version>.jar` in each `ATT_HOME/lib`. Executable package content lives beneath `packages/<id>/`; Server state lives in the separately configured `server.dataDir`. The archive includes `config/att-server.example.yaml` as a template, but never includes an active `config/att-server.yaml` or a `data/` directory.
+The Local archive's extracted directory is `ATT_HOME`, the shared installation and deployment root. It contains launchers and the shared Worker/Engine runtime at `lib/att-local-4.1.2.jar`; install the matching Local archive beside the Server WAR. Keep one versioned `att-local-<version>.jar` in each `ATT_HOME/lib`. Executable package content lives beneath `packages/<id>/`; Server state lives in the separately configured `server.dataDir`. The archive includes `config/att-server.example.yaml` as a template, but never includes an active `config/att-server.yaml` or a `data/` directory.
 
 Server config discovery checks, in order, JVM property `-Datt.server.config`, environment variable `ATT_SERVER_CONFIG`, then `$ATT_HOME/config/att-server.yaml`. For the last candidate, the Server resolves `ATT_HOME` from `-Datt.home` first and then the `ATT_HOME` environment variable. A selected config that is missing, unreadable, or invalid stops startup with its path in the diagnostic; the Server does not fall back to another source. With no explicit source or usable default candidate, startup fails with setup guidance.
 
@@ -106,7 +106,9 @@ Server state is stored in `dataDir/db/`. Each job uses `dataDir/jobs/<jobId>/` f
 
 ## Authentication and identity
 
-Tomcat authenticates requests. ATT Server reads `HttpServletRequest.getUserPrincipal()` and requires a Principal on package, resource-inspection, Debug/Quick Load draft, job, result, event, and artifact endpoints. The new resource-inspection and Debug/Quick Load draft endpoints always require a real Servlet Principal, even when anonymous access is enabled for the legacy API. Health and version may be anonymous. The principal name is stored with job and audit metadata and is not sent to the Worker or exposed in ATT expression Context.
+With `server.authenticationRequired: true` (the default), Tomcat authenticates requests and ATT Server uses the Servlet Principal for the Web UI and protected API operations. Health and version remain public. With `false`, the complete Web UI and REST/Remote API accepts requests without a Servlet Principal and resolves every caller to the shared authorization identity `anonymous`, even if a container Principal is also present. All anonymous callers share drafts, jobs, and artifacts; there is no per-user isolation or accountability. ATT logs a startup warning when this mode is enabled. This setting does not bypass Tomcat security constraints configured in `web.xml`; the container enforces those constraints before ATT handles a request.
+
+Anonymous job submissions may include an optional top-level `principal` label, for display and audit only. The Server trims and Unicode-normalizes the label, validates its length and characters, and stores it in the existing job/audit `principal` field with the suffix `(anonym)`, such as `Bob(anonym)`. Omitting it keeps the existing value `anonymous`; callers cannot supply the reserved suffix themselves. This label is self-declared and never changes authorization, draft access, job visibility, artifact access, cancellation, or scheduling. Authenticated mode always stores the Servlet Principal and ignores a submitted label. Attribution is not sent to the Worker or exposed in ATT expression Context; no additional persisted or response field is introduced.
 
 State-changing requests require `application/json`; requests carrying an `Origin` must match the request origin. Behind a TLS-terminating proxy, configure Tomcat's `RemoteIpValve` to derive the Servlet scheme, host, and port from the proxy's forwarded headers. Set `internalProxies` to only the actual proxy addresses, and ensure the proxy removes client-supplied `Forwarded`/`X-Forwarded-*` headers before adding its own. For example, adapt these header names and trusted addresses to the proxy:
 
@@ -119,7 +121,7 @@ State-changing requests require `application/json`; requests carrying an `Origin
        portHeader="X-Forwarded-Port" />
 ```
 
-All authenticated Servlet Principals have the same permissions in v1; ATT does not require a particular container role or provide ATT-specific RBAC. For an intentionally isolated network, set `server.authenticationRequired: false` to accept anonymous API requests; this bypasses authentication for every API operation and should not be used on an untrusted network. ATT Server does not implement passwords, JWT/OIDC validation, LDAP authentication, or login flows. The Servlet container owns authentication challenges and redirects. Do not put credentials in API payloads or package files.
+All authenticated Servlet Principals have the same permissions in v1; ATT does not require a particular container role or provide ATT-specific RBAC. Anonymous mode bypasses authentication for the entire UI and API, so enable it only for trusted SIT/development deployments. Bind Tomcat to loopback or a private interface. If a reverse proxy is used, protect it with a VPN, firewall, or IP allowlist and prevent it from exposing the API to untrusted networks. Use TLS for traffic leaving localhost. Drafts are held in memory and are cleared on Server restart; changing authentication mode requires a restart, so drafts are discarded rather than transferred to authenticated identities. ATT Server does not implement passwords, JWT/OIDC validation, LDAP authentication, or login flows. The Servlet container owns authentication challenges and redirects. Do not put credentials in API payloads or package files.
 
 The bundled browser console is served at `<context path>/ui/` and uses the same container-managed authentication policy as the API. See [ATT Server Web UI](att-server-web-ui.md).
 
@@ -157,8 +159,10 @@ Submit a job with a stable package ID and command-specific ATT Worker fields:
 POST /api/v1/jobs/run
 Content-Type: application/json
 
-{"packageId":"payments","all":true}
+{"packageId":"payments","all":true,"principal":"Bob"}
 ```
+
+The optional `principal` input is honored only when anonymous mode is enabled. The submitted value remains raw in the request; the Server applies `(anonym)` and persists the result in the existing `principal` property. The default remains `anonymous`.
 
 The API returns `202 Accepted` and a job ID. Jobs move through `QUEUED`, `PREPARING`, and `RUNNING`, then finish as `PASS`, `FAIL`, `ERROR`, `INVALID`, or `CANCELLED`. Capacity overflow returns `429` with an `ATT-SERVER-CAPACITY-EXCEEDED` error. Errors use an `error` object with `code`, `summary`, `detail`, and `requestId`; server stack traces are not returned.
 
@@ -166,13 +170,13 @@ Browser Quick and Advanced Load endpoints return `403 ATT-SERVER-INLINE-LOAD-DIS
 
 Job records include an additive `performance` object when measurements are available. `performance.timings` uses monotonic elapsed time for admission, queue wait, Worker preparation/spawn, Worker-ready (first `STATUS`), execution-ready (first `PROGRESS` or `LOG`), Worker lifetime, and result-to-termination. `performance.worker` records heap, live-thread, GC, process CPU, and sampled peak RSS metrics from the isolated Worker. Sampling is event-triggered and limited to one sample per 100 ms; brief peaks can be missed. RSS is available on Linux `/proc` systems only. Worker resource metrics are included in the canonical job record and survive Server restart.
 
-`GET /jobs` returns the latest 100 jobs. Submission payloads are not persisted; metadata stores only the command and package ID summary. Engine results and diagnostics are persisted as control-plane metadata. Larger reports, logs, and other evidence remain under the job output directory.
+`GET /jobs` returns the latest 100 jobs. Add `?principal=<text>` to search case-insensitively within the existing `principal` property; matching is applied before the 100-row limit. Search uses substring matching, so `alice` also matches `alice(anonym)`. The Web UI and `att remote jobs --principal <text>` use this filter. Historical rows retain their saved value, including older `anonymous` rows. Submission payloads are not persisted; metadata stores only the command and package ID summary. Engine results and diagnostics are persisted as control-plane metadata. Larger reports, logs, and other evidence remain under the job output directory.
 
-Resource discovery accepts `case`, `template`, `flow`, or `tool` as the optional `type`. List pages default to 50 items and allow up to 100; continuation cursors are encrypted, bound to the authenticated principal and query, and rejected with `409` if package content changes. The explorer returns logical resource IDs, safe projections, provenance, relationships, and stable diagnostics. YAML source responses are parsed and redacted projections, not original file bytes. Tool script source is returned only when the exact package-relative script path is explicitly allowlisted. Discovery never executes Tools and does not expose a filesystem browser. Inspection requires an authenticated Servlet Principal even when `server.authenticationRequired: false`; the inspection queue, Worker heap, timeout, and response bounds are independent of normal job execution.
+Resource discovery accepts `case`, `template`, `flow`, or `tool` as the optional `type`. List pages default to 50 items and allow up to 100; continuation cursors are encrypted, bound to the resolved request identity and query, and rejected with `409` if package content changes. In anonymous mode, all callers share the same cursor identity. The explorer returns logical resource IDs, safe projections, provenance, relationships, and stable diagnostics. YAML source responses are parsed and redacted projections, not original file bytes. Tool script source is returned only when the exact package-relative script path is explicitly allowlisted. Discovery never executes Tools and does not expose a filesystem browser. The inspection queue, Worker heap, timeout, and response bounds are independent of normal job execution.
 
 ### Package resource inspection
 
-Use the public read-only endpoints with an authenticated Servlet Principal. `kind` is `case`, `template`, `flow`, or `tool`; `resourceId` is the opaque package-scoped ID returned by the list endpoint. The list `query` matches logical IDs, names, descriptions, and tags. Omit `type`, `query`, or `limit` to use the defaults. A continuation cursor is valid only for the same package, principal, type, and query.
+Use the public read-only endpoints with the identity resolved by the Server: a Servlet Principal in authenticated mode or the shared `anonymous` identity in anonymous mode. `kind` is `case`, `template`, `flow`, or `tool`; `resourceId` is the opaque package-scoped ID returned by the list endpoint. The list `query` matches logical IDs, names, descriptions, and tags. Omit `type`, `query`, or `limit` to use the defaults. A continuation cursor is valid only for the same package, identity, type, and query.
 
 ```http
 GET /api/v1/packages/payments/resources?type=case&query=refund&limit=50
@@ -214,7 +218,7 @@ Invalid list parameters return `400`; unknown packages/resources return the same
 
 ### Target-scoped Debug and drafts
 
-Debug form, Quick Load form, Load policy, and draft endpoints require a real authenticated Servlet Principal, including when anonymous access is enabled for legacy jobs. Use a resource ID from the Package Resource Explorer; Cases cannot be Debug or Quick Load targets.
+Debug form, Quick Load form, Load policy, and draft endpoints use the same resolved identity as the rest of the API. In anonymous mode, drafts created by one caller are available to every other anonymous caller. Use a resource ID from the Package Resource Explorer; Cases cannot be Debug or Quick Load targets.
 
 ```http
 GET /api/v1/packages/payments/resources/flow/{resourceId}/debug-form?environment=SIT
@@ -231,7 +235,7 @@ Content-Type: application/json
 {"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}}}
 ```
 
-The response includes an opaque `draftId`, safe YAML preview, validation diagnostics, and expiry. `GET /api/v1/drafts/{draftId}` returns the same safe preview only to its owning Principal. Drafts live in memory for up to 10 minutes, with a limit of 128 active drafts per Server and 16 per Principal. Restart invalidates them. The Server never returns the internal package revision digest.
+The response includes an opaque `draftId`, safe YAML preview, validation diagnostics, and expiry. `GET /api/v1/drafts/{draftId}` returns the same safe preview only to its owning resolved identity. Drafts live in memory for up to 10 minutes, with a limit of 128 active drafts per Server and 16 per identity. In anonymous mode every caller shares that identity and draft limit. Restart invalidates drafts. The Server never returns the internal package revision digest.
 
 Submit only the draft identity:
 
@@ -265,7 +269,7 @@ Content-Type: application/json
 {"packageId":"payments","environment":"SIT","target":{"type":"flow","id":"PAYMENT.submit"},"model":"virtualUsers","input":{"inputs":{"channel":"WEB"},"vars":{"reference":"REF001"}},"load":{"users":4,"duration":"30s"},"execution":{"thinkTime":"100ms"},"testdata":["testdata/load-accounts.yaml"]}
 ```
 
-`load` accepts only pacing fields supported by the selected model. `execution` accepts the optional closed-workload `thinkTime`. `testdata` is an optional array of additional package-relative Load descriptor paths; it is kept separate from Debug-local imports and the model policy's existing descriptors. The response returns a principal-bound opaque `draftId` beginning with `L`, the safe effective YAML preview, redaction state, and expiry. Debug and Quick Load drafts share the 128-active-per-Server, 16-per-Principal, 10-minute in-memory limits.
+`load` accepts only pacing fields supported by the selected model. `execution` accepts the optional closed-workload `thinkTime`. `testdata` is an optional array of additional package-relative Load descriptor paths; it is kept separate from Debug-local imports and the model policy's existing descriptors. The response returns an identity-bound opaque `draftId` beginning with `L`, the safe effective YAML preview, redaction state, and expiry. Debug and Quick Load drafts share the 128-active-per-Server, 16-per-identity, 10-minute in-memory limits.
 
 After reviewing the preview, submit only the draft identity:
 
@@ -310,13 +314,13 @@ Content-Type: application/json
 }
 ```
 
-The Server validates the full scenario and resolves every target without scheduling traffic. It restores redacted values only from each selected target's package-local `debug.yaml` business fields; Debug `case`, `stage`, and local Testdata are excluded. The response contains an opaque draft ID beginning with `A`, a safe effective YAML preview, the selected model, a redaction flag, and expiry. Advanced Load shares the 128-active-draft Server limit, 16-draft per-Principal limit, and 10-minute expiry with Debug and Quick Load.
+The Server validates the full scenario and resolves every target without scheduling traffic. It restores redacted values only from each selected target's package-local `debug.yaml` business fields; Debug `case`, `stage`, and local Testdata are excluded. The response contains an opaque draft ID beginning with `A`, a safe effective YAML preview, the selected model, a redaction flag, and expiry. Advanced Load shares the 128-active-draft Server limit, 16-draft per-identity limit, and 10-minute expiry with Debug and Quick Load.
 
 Submit only the package and draft ID to `POST /api/v1/jobs/load`. The Server checks the package revision at submission and before Worker start, then passes the same immutable normalized scenario validated for preview through the existing Worker, Engine, scheduler, event, and evidence paths. A stale draft returns `409 ATT-SERVER-DRAFT-STALE`; a change detected after job acceptance marks the job `INVALID`. The browser disables YAML copy and export when any preview field is redacted. Existing path-based Load requests remain supported.
 
 ### Package configuration inspection
 
-Configuration inspection uses the same authenticated, bounded inspection Worker as package resources. These read-only endpoints require an authenticated Servlet Principal, including when `server.authenticationRequired: false`:
+Configuration inspection uses the same bounded inspection Worker as package resources. These read-only endpoints use the resolved authenticated or anonymous identity:
 
 ```http
 GET /api/v1/packages/payments/configuration?view=declared
@@ -353,7 +357,7 @@ Artifact paths are relative to the job output directory. Absolute paths, travers
 
 ## Distribution and compatibility
 
-The Server binary is distributed separately as `att-4.1.1-server.tar.gz`, containing `server/att-server-4.1.1.war` (with ATT application code combined in `WEB-INF/lib/att-server-4.1.1.jar`) and the deployment guides. The local CLI is in `att-4.1.1-local.tar.gz` with the shared Worker/Engine runtime at `lib/att-local-4.1.1.jar`; the Server uses that same version-matched library. Tomcat provides the HTTP listener and Servlet API. The Server requires Java 17; the CLI, Engine, and Worker continue to target Java 8.
+The Server binary is distributed separately as `att-4.1.2-server.tar.gz`, containing `server/att-server-4.1.2.war` (with ATT application code combined in `WEB-INF/lib/att-server-4.1.2.jar`) and the deployment guides. The local CLI is in `att-4.1.2-local.tar.gz` with the shared Worker/Engine runtime at `lib/att-local-4.1.2.jar`; the Server uses that same version-matched library. Tomcat provides the HTTP listener and Servlet API. The Server requires Java 17; the CLI, Engine, and Worker continue to target Java 8.
 
 ### Issue #176 rollout checklist
 

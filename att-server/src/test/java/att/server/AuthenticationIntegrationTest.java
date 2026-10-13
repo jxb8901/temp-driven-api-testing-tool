@@ -67,6 +67,7 @@ class AuthenticationIntegrationTest {
             String resourceId=resources.path("items").get(0).path("resourceId").asText();
             String formPath="/att/api/v1/packages/debug/resources/template/"+resourceId+"/debug-form";
             assertEquals(401,get(port,formPath,null),"Debug defaults must remain behind container authentication");
+            assertEquals(401,postStatus(port,null,"/att/api/v1/drafts/debug",Map.of("packageId","debug")),"Draft creation must remain behind container authentication");
             JsonNode form=getJson(port,formPath,basic);
             assertFalse(form.toString().contains("123456789"));assertFalse(form.toString().contains("violet-123"));
             JsonNode draftBody=ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","target",Map.of("type","template","id","FORM"),"input",form.path("input")));
@@ -98,13 +99,15 @@ class AuthenticationIntegrationTest {
             assertEquals("ATT-SERVER-INLINE-LOAD-LIMIT",limitError.path("error").path("code").asText());
             assertTrue(limitError.path("error").path("summary").asText().contains("maxWorkloads"));
             JsonNode acceptedLoad=postJson(port,"/att/api/v1/jobs/load",basic,
-                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","draftId",advancedDraftId)),202);
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","draftId",advancedDraftId,"principal","Spoofed(anonym)")),202);
             String loadJobId=acceptedLoad.path("jobId").asText();long loadDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
             JsonNode loadJob=getJson(port,"/att/api/v1/jobs/"+loadJobId,basic);
             while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(loadJob.path("status").asText())&&System.nanoTime()<loadDeadline) {
                 Thread.sleep(20);loadJob=getJson(port,"/att/api/v1/jobs/"+loadJobId,basic);
             }
             assertEquals("PASS",loadJob.path("status").asText(),"The authenticated Advanced Load REST route must validate and submit its immutable Worker scenario");
+            assertEquals("att",loadJob.path("principal").asText(),"Authenticated requests must ignore caller-supplied attribution labels");
+            assertFalse(loadJob.has("attributionPrincipal"),"Attribution reuses the existing principal property");
             // Exercise the real public API behind the authenticated browser console.
             String jobId=submitJob(port,basic);
             assertEquals(200,get(port,"/att/api/v1/jobs/"+jobId,basic));
@@ -142,14 +145,119 @@ class AuthenticationIntegrationTest {
             assertEquals("load",pathBasedStatus.path("command").asText(),"Disabling browser drafts must still admit the existing path-based Load API");
         } finally {inlineLoadDisabled.stop();inlineLoadDisabled.destroy();restore(old);}
 
-        Path openConfig=Files.writeString(temp.resolve("open-server.yaml"),"server:\n  dataDir: "+temp.resolve("open-data")+"\n  authenticationRequired: false\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+packages+"\n  entries:\n    p: "+packages.resolve("p")+"\n");System.setProperty("att.server.config",openConfig.toString());
-        Tomcat open=start(users,appDirectory("anonymous"));
+        Path openConfig=Files.writeString(temp.resolve("open-server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("open-data"))+"\n  authenticationRequired: false\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\n  inspection:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");System.setProperty("att.server.config",openConfig.toString());
+        Tomcat open=start(users,appDirectory("anonymous"),true);
+        String anonymousDraftToInvalidate=null;
         try {
             int port=open.getConnector().getLocalPort();
             assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
-            assertAnonymousInspectionIsRejected(port);
+            assertEquals(200,get(port,"/att/ui/app.js",null));
+            assertEquals(200,get(port,"/att/api/v1/health",null));
+            assertEquals("4.1.2",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            assertEquals("debug",getJson(port,"/att/api/v1/packages/debug",null).path("packageId").asText());
+            JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",null);
+            String resourceId=resources.path("items").get(0).path("resourceId").asText();
+            String resourcePath="/att/api/v1/packages/debug/resources/template/"+resourceId;
+            JsonNode form=getJson(port,resourcePath+"/debug-form",null);
+            assertEquals("FORM",form.path("target").path("id").asText());
+            assertEquals("declared",getJson(port,"/att/api/v1/packages/debug/configuration?view=declared",null).path("view").asText());
+            assertEquals("virtualUsers",getJson(port,"/att/api/v1/packages/debug/load-policy?model=virtualUsers",null).path("model").asText());
+
+            // Browser requests pass through the reverse-proxy context path and retain same-origin checks.
+            JsonNode debugDraft=postJsonViaTrustedProxy(port,"/att/api/v1/drafts/debug",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","target",Map.of("type","template","id","FORM"),"input",form.path("input"))),201);
+            String debugDraftId=debugDraft.path("draftId").asText();
+            assertTrue(debugDraftId.startsWith("D"));
+            assertEquals(200,get(port,"/att/api/v1/drafts/"+debugDraftId,null),"Anonymous callers share one draft identity");
+            JsonNode debugAccepted=postJsonViaTrustedProxy(port,"/att/api/v1/jobs/debug",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","draftId",debugDraftId,"principal","Debug User")),202);
+            JsonNode debugJob=waitForTerminalJob(port,debugAccepted.path("jobId").asText());
+            assertEquals("Debug User(anonym)",debugJob.path("principal").asText());
+            assertEquals("PASS",debugJob.path("status").asText());
+
+            JsonNode quickForm=getJson(port,resourcePath+"/quick-load-form?model=virtualUsers",null);
+            JsonNode quickDraft=postJsonViaTrustedProxy(port,"/att/api/v1/drafts/quick-load",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","target",Map.of("type","template","id","FORM"),"model","virtualUsers",
+                            "input",quickForm.path("input"),"load",Map.of("users",1,"duration","1s"),"execution",Map.of(),"testdata",List.of())),201);
+            String quickDraftId=quickDraft.path("draftId").asText();
+            assertTrue(quickDraftId.startsWith("L"));
+            assertEquals(200,get(port,"/att/api/v1/drafts/"+quickDraftId,null));
+            JsonNode quickAccepted=postJsonViaTrustedProxy(port,"/att/api/v1/jobs/load",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","draftId",quickDraftId,"principal","Quick User")),202);
+            JsonNode quickJob=waitForTerminalJob(port,quickAccepted.path("jobId").asText());
+            assertEquals("Quick User(anonym)",quickJob.path("principal").asText());
+            assertEquals("PASS",quickJob.path("status").asText());
+
+            JsonNode advancedScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6",
+                    "load",Map.of("users",1,"duration","1s"),"workloads",List.of(Map.of("id","anonymous-load",
+                            "load",Map.of("users",1),"target",Map.of("type","template","id","FORM"),"inputs",Map.of("value","anonymous")))));
+            JsonNode advancedDraft=postJsonViaTrustedProxy(port,"/att/api/v1/drafts/load",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","scenario",advancedScenario)),201);
+            String advancedDraftId=advancedDraft.path("draftId").asText();
+            assertTrue(advancedDraftId.startsWith("A"));
+            assertEquals(200,get(port,"/att/api/v1/drafts/"+advancedDraftId,null));
+            JsonNode advancedAccepted=postJsonViaTrustedProxy(port,"/att/api/v1/jobs/load",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","draftId",advancedDraftId,"principal","Advanced User")),202);
+            JsonNode advancedJob=waitForTerminalJob(port,advancedAccepted.path("jobId").asText());
+            assertEquals("Advanced User(anonym)",advancedJob.path("principal").asText());
+            assertEquals("PASS",advancedJob.path("status").asText());
+
+            // ATT Remote's no-auth request flow uses the same Server identity for each legacy operation.
+            JsonNode invalidName=postErrorJson(port,"/att/api/v1/jobs/run",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","p","all",true,"principal","Bob(anonym)")),400);
+            assertEquals("ATT-SERVER-INVALID-REQUEST",invalidName.path("error").path("code").asText(),"Callers cannot supply or double the reserved anonymous suffix");
+            JsonNode remoteAccepted=postJson(port,"/att/api/v1/jobs/run",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","p","all",true,"principal","Bob")),202);
+            String remoteJobId=remoteAccepted.path("jobId").asText();
+            JsonNode remoteJob=waitForTerminalJob(port,remoteJobId);
+            assertEquals("Bob(anonym)",remoteJob.path("principal").asText());
+            JsonNode validateAccepted=postJson(port,"/att/api/v1/jobs/validate",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","validationScope","package","principal","Alice")),202);
+            assertEquals("Alice(anonym)",waitForTerminalJob(port,validateAccepted.path("jobId").asText()).path("principal").asText());
+            JsonNode remoteDebugAccepted=postJson(port,"/att/api/v1/jobs/debug",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","target",Map.of("type","template","id","FORM"),"principal","Carol")),202);
+            assertEquals("Carol(anonym)",waitForTerminalJob(port,remoteDebugAccepted.path("jobId").asText()).path("principal").asText());
+            JsonNode remoteLoadAccepted=postJson(port,"/att/api/v1/jobs/load",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","scenario","load/path-based.yaml","principal","Dan")),202);
+            assertEquals("Dan(anonym)",waitForTerminalJob(port,remoteLoadAccepted.path("jobId").asText()).path("principal").asText());
+            assertEquals(200,get(port,"/att/api/v1/jobs",null));
+            JsonNode namedJobs=getJson(port,"/att/api/v1/jobs?principal=Bob%28anonym%29",null).path("items");
+            assertEquals(1,namedJobs.size(),"Principal search filters on the existing persisted principal column");
+            assertEquals("Bob(anonym)",namedJobs.get(0).path("principal").asText());
+            assertEquals(200,get(port,"/att/api/v1/jobs/"+remoteJobId+"/artifacts",null));
+            assertRetainedSseEvent(port,null,remoteJobId);
+            assertEquals(200,cancelJob(port,null,remoteJobId));
+            assertEquals(200,get(port,"/att/api/v1/jobs/"+remoteJobId+"/result",null));
+            assertEquals(403,post(port,null,"application/json","https://attacker.example",Map.of(
+                    "X-Forwarded-For","203.0.113.10","X-Forwarded-Proto","https",
+                    "X-Forwarded-Host","att.example.test","X-Forwarded-Port","443")),
+                    "Anonymous mode must keep same-origin protection for browser POSTs");
+            JsonNode unlabelledAccepted=postJson(port,"/att/api/v1/jobs/run",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","p","all",true)),202);
+            JsonNode unlabelledJob=waitForTerminalJob(port,unlabelledAccepted.path("jobId").asText());
+            assertEquals("anonymous",unlabelledJob.path("principal").asText(),"Omitting the label keeps the shared default identity");
+            JsonNode blankLabelAccepted=postJson(port,"/att/api/v1/jobs/run",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","p","all",true,"principal"," \t ")),202);
+            JsonNode blankLabelJob=waitForTerminalJob(port,blankLabelAccepted.path("jobId").asText());
+            assertEquals("anonymous",blankLabelJob.path("principal").asText(),"A blank label uses the same stable default as an omitted label");
+            assertRemoteNoAuthCommands(port);
+            assertTrue(auditCount(temp.resolve("open-data"),"anonymous")>0,"Unlabelled anonymous jobs keep the shared default identity in audit records");
+            assertTrue(auditCount(temp.resolve("open-data"),"Bob(anonym)")>0,"Named anonymous job submissions use their server-formatted principal in audit records");
+            JsonNode pendingDraft=postJsonViaTrustedProxy(port,"/att/api/v1/drafts/debug",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","target",Map.of("type","template","id","FORM"),"input",form.path("input"))),201);
+            anonymousDraftToInvalidate=pendingDraft.path("draftId").asText();
         }
         finally {open.stop();open.destroy();restore(old);}
+
+        Files.writeString(openConfig,Files.readString(openConfig).replace("authenticationRequired: false","authenticationRequired: true"));
+        System.setProperty("att.server.config",openConfig.toString());
+        Tomcat restarted=start(users,appDirectory("anonymous-restart-authenticated"));
+        try {
+            int port=restarted.getConnector().getLocalPort();String path="/att/api/v1/drafts/"+anonymousDraftToInvalidate;
+            String basic="Basic "+Base64.getEncoder().encodeToString("att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(401,get(port,path,null),"Enabling authentication on restart must protect the former anonymous draft");
+            assertEquals(404,get(port,path,basic),"Anonymous drafts are discarded on restart and never transferred to authenticated users");
+        } finally {restarted.stop();restarted.destroy();restore(old);}
     }
 
     private Path createLocalRuntime() throws Exception {
@@ -222,7 +330,7 @@ class AuthenticationIntegrationTest {
     }
     private static void assertRetainedSseEvent(int port,String authorization,String id)throws Exception {
         HttpURLConnection c=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();
-        c.setReadTimeout(5000);c.setRequestProperty("Authorization",authorization);
+        c.setReadTimeout(5000);if(authorization!=null)c.setRequestProperty("Authorization",authorization);
         assertEquals(200,c.getResponseCode());assertTrue(c.getHeaderField("Content-Type").startsWith("text/event-stream"));
         try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(c.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
             assertTrue(reader.readLine().startsWith("id: "),"SSE must replay retained job events");
@@ -230,12 +338,12 @@ class AuthenticationIntegrationTest {
     }
     private static int cancelJob(int port,String authorization,String id)throws Exception {
         HttpURLConnection c=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id).openConnection();
-        c.setRequestMethod("DELETE");c.setRequestProperty("Authorization",authorization);c.setReadTimeout(5000);
+        c.setRequestMethod("DELETE");if(authorization!=null)c.setRequestProperty("Authorization",authorization);c.setReadTimeout(5000);
         try{return c.getResponseCode();}finally{c.disconnect();}
     }
     private static int post(int port,String authorization,String contentType,String origin)throws Exception {return post(port,authorization,contentType,origin,java.util.Map.of());}
     private static int post(int port,String authorization,String contentType,String origin,java.util.Map<String,String> extraHeaders)throws Exception {
-        try(java.net.Socket socket=new java.net.Socket("127.0.0.1",port)) {socket.setSoTimeout(3000);java.io.OutputStream out=socket.getOutputStream();String body="{}";StringBuilder request=new StringBuilder("POST /att/api/v1/jobs/run HTTP/1.1\r\nHost: 127.0.0.1:").append(port).append("\r\nConnection: close\r\nAuthorization: ").append(authorization).append("\r\nContent-Type: ").append(contentType).append("\r\nContent-Length: ").append(body.length()).append("\r\n");if(origin!=null)request.append("Origin: ").append(origin).append("\r\n");extraHeaders.forEach((name,value)->request.append(name).append(": ").append(value).append("\r\n"));request.append("\r\n").append(body);out.write(request.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));out.flush();String status=new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(),java.nio.charset.StandardCharsets.UTF_8)).readLine();return Integer.parseInt(status.split(" ")[1]);}
+        try(java.net.Socket socket=new java.net.Socket("127.0.0.1",port)) {socket.setSoTimeout(3000);java.io.OutputStream out=socket.getOutputStream();String body="{}";StringBuilder request=new StringBuilder("POST /att/api/v1/jobs/run HTTP/1.1\r\nHost: 127.0.0.1:").append(port).append("\r\nConnection: close\r\n");if(authorization!=null)request.append("Authorization: ").append(authorization).append("\r\n");request.append("Content-Type: ").append(contentType).append("\r\nContent-Length: ").append(body.length()).append("\r\n");if(origin!=null)request.append("Origin: ").append(origin).append("\r\n");extraHeaders.forEach((name,value)->request.append(name).append(": ").append(value).append("\r\n"));request.append("\r\n").append(body);out.write(request.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));out.flush();String status=new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(),java.nio.charset.StandardCharsets.UTF_8)).readLine();return Integer.parseInt(status.split(" ")[1]);}
     }
     private static int request(int port,String authorization)throws Exception {return get(port,"/att/api/v1/packages",authorization);}
     private static int get(int port,String uri,String authorization)throws Exception {HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(3000);connection.setReadTimeout(3000);if(authorization!=null)connection.setRequestProperty("Authorization",authorization);int code=connection.getResponseCode();if(code==401)assertTrue(connection.getHeaderField("WWW-Authenticate").startsWith("Basic"));
@@ -251,32 +359,89 @@ class AuthenticationIntegrationTest {
     }
     private static JsonNode postJson(int port,String uri,String authorization,JsonNode body,int expectedStatus)throws Exception {
         HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(5000);connection.setReadTimeout(30000);
-        connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Authorization",authorization);connection.setRequestProperty("Content-Type","application/json");
+        connection.setRequestMethod("POST");connection.setDoOutput(true);if(authorization!=null)connection.setRequestProperty("Authorization",authorization);connection.setRequestProperty("Content-Type","application/json");
         try(var output=connection.getOutputStream()){output.write(ServerRuntime.JSON.writeValueAsBytes(body));}
-        assertEquals(expectedStatus,connection.getResponseCode());try{return ServerRuntime.JSON.readTree(connection.getInputStream());}finally{connection.disconnect();}
+        int actualStatus=connection.getResponseCode();if(actualStatus!=expectedStatus){java.io.InputStream error=connection.getErrorStream();String detail=error==null?"":new String(error.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);assertEquals(expectedStatus,actualStatus,detail);}try{return ServerRuntime.JSON.readTree(connection.getInputStream());}finally{connection.disconnect();}
+    }
+    private static JsonNode postJsonViaTrustedProxy(int port,String uri,String authorization,JsonNode body,int expectedStatus)throws Exception {
+        HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(5000);connection.setReadTimeout(30000);
+        connection.setRequestMethod("POST");connection.setDoOutput(true);if(authorization!=null)connection.setRequestProperty("Authorization",authorization);
+        connection.setRequestProperty("Content-Type","application/json");connection.setRequestProperty("Origin","https://att.example.test");
+        connection.setRequestProperty("X-Forwarded-For","203.0.113.10");connection.setRequestProperty("X-Forwarded-Proto","https");
+        connection.setRequestProperty("X-Forwarded-Host","att.example.test");connection.setRequestProperty("X-Forwarded-Port","443");
+        try(var output=connection.getOutputStream()){output.write(ServerRuntime.JSON.writeValueAsBytes(body));}
+        int actualStatus=connection.getResponseCode();if(actualStatus!=expectedStatus){java.io.InputStream error=connection.getErrorStream();String detail=error==null?"":new String(error.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);assertEquals(expectedStatus,actualStatus,detail);}try{return ServerRuntime.JSON.readTree(connection.getInputStream());}finally{connection.disconnect();}
+    }
+    private static JsonNode waitForTerminalJob(int port,String id)throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);JsonNode job=getJson(port,"/att/api/v1/jobs/"+id,null);
+        while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(job.path("status").asText())&&System.nanoTime()<deadline) {
+            Thread.sleep(20);job=getJson(port,"/att/api/v1/jobs/"+id,null);
+        }
+        assertTrue(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(job.path("status").asText()),"Job did not reach a terminal state: "+id);
+        waitForWorkersIdle(port);
+        return job;
+    }
+    private static void waitForWorkersIdle(int port)throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);JsonNode metrics=getJson(port,"/att/api/v1/metrics",null);
+        while(metrics.path("activeWorkers").asInt(-1)>0&&System.nanoTime()<deadline) {
+            Thread.sleep(20);metrics=getJson(port,"/att/api/v1/metrics",null);
+        }
+        assertEquals(0,metrics.path("activeWorkers").asInt(-1),"Worker admission must be released before the next job");
     }
     private static JsonNode postErrorJson(int port,String uri,String authorization,JsonNode body,int expectedStatus)throws Exception {
         HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(5000);connection.setReadTimeout(30000);
-        connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Authorization",authorization);connection.setRequestProperty("Content-Type","application/json");
+        connection.setRequestMethod("POST");connection.setDoOutput(true);if(authorization!=null)connection.setRequestProperty("Authorization",authorization);connection.setRequestProperty("Content-Type","application/json");
         try(var output=connection.getOutputStream()){output.write(ServerRuntime.JSON.writeValueAsBytes(body));}
         assertEquals(expectedStatus,connection.getResponseCode());try{return ServerRuntime.JSON.readTree(connection.getErrorStream());}finally{connection.disconnect();}
     }
     private static int postStatus(int port,String authorization,String uri,Map<String,Object> body)throws Exception {
         HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(5000);connection.setReadTimeout(30000);
-        connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Authorization",authorization);connection.setRequestProperty("Content-Type","application/json");
+        connection.setRequestMethod("POST");connection.setDoOutput(true);if(authorization!=null)connection.setRequestProperty("Authorization",authorization);connection.setRequestProperty("Content-Type","application/json");
         try(var output=connection.getOutputStream()){output.write(ServerRuntime.JSON.writeValueAsBytes(body));}
         try{return connection.getResponseCode();}finally{connection.disconnect();}
     }
-    private static void assertAnonymousInspectionIsRejected(int port)throws Exception {
-        for(String path:List.of("/att/api/v1/packages/p/resources?type=case","/att/api/v1/packages/p/configuration?view=declared")) {
-            HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+path).openConnection();
-            connection.setConnectTimeout(3000);connection.setReadTimeout(3000);
-            try {
-                assertEquals(401,connection.getResponseCode(),"Inspection still requires a real Servlet Principal in anonymous legacy mode");
-                com.fasterxml.jackson.databind.JsonNode body=ServerRuntime.JSON.readTree(connection.getErrorStream().readAllBytes());
-                assertEquals("ATT-SERVER-AUTHENTICATION-REQUIRED",body.path("error").path("code").asText());
-            } finally {connection.disconnect();}
+    private static int auditCount(Path dataDir,String principal)throws Exception {
+        Class.forName("org.h2.Driver");
+        String url="jdbc:h2:file:"+dataDir.resolve("db/att-server").toAbsolutePath().toString().replace('\\','/');
+        try(var connection=java.sql.DriverManager.getConnection(url,"sa","");var query=connection.prepareStatement("SELECT COUNT(*) FROM audit WHERE principal=?")) {
+            query.setString(1,principal);try(var rows=query.executeQuery()){rows.next();return rows.getInt(1);}
         }
+    }
+    private void assertRemoteNoAuthCommands(int port)throws Exception {
+        Path home=Files.createDirectories(temp.resolve("remote-home/.att"));
+        Files.writeString(home.resolve("servers.yaml"),"default: anonymous\nservers:\n  anonymous:\n    url: http://127.0.0.1:"+port+"/att\n    auth:\n      type: basic\n      username: configured-user\n      passwordEnv: ATT_TEST_PASSWORD\n");
+        String previousHome=System.getProperty("user.home");java.io.PrintStream previousOut=System.out;
+        java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();
+        System.setProperty("user.home",temp.resolve("remote-home").toString());
+        try {
+            System.setOut(new java.io.PrintStream(output,true,java.nio.charset.StandardCharsets.UTF_8));
+            for(String[] command:List.of(
+                    new String[]{"--server","anonymous","--no-auth","ping"},
+                    new String[]{"--server","anonymous","--no-auth","packages"},
+                    new String[]{"--server","anonymous","--no-auth","run","p","--all","--principal","Remote Run","--detach"},
+                    new String[]{"--server","anonymous","--no-auth","validate","debug","--package","--principal","Remote Validate","--detach"},
+                    new String[]{"--server","anonymous","--no-auth","debug","debug","template","FORM","--principal","Remote Debug","--detach"},
+                    new String[]{"--server","anonymous","--no-auth","load","debug","load/path-based.yaml","--users","1","--duration","1s","--principal","Remote Load","--detach"})) {
+                assertEquals(0,att.remote.RemoteCommand.run(command),"ATT Remote --no-auth command should succeed: "+String.join(" ",command));
+                if(command.length>4) {
+                    JsonNode jobs=getJson(port,"/att/api/v1/jobs",null).path("items");
+                    waitForTerminalJob(port,jobs.get(0).path("jobId").asText());
+                    int principalOption=java.util.Arrays.asList(command).indexOf("--principal");
+                    if(principalOption>=0) {
+                        String expected=command[principalOption+1]+"(anonym)";
+                        JsonNode named=getJson(port,"/att/api/v1/jobs?principal="+java.net.URLEncoder.encode(expected,java.nio.charset.StandardCharsets.UTF_8).replace("+","%20"),null).path("items");
+                        assertEquals(1,named.size(),"Remote --principal must be sent raw and formatted once by the Server");
+                        assertEquals(expected,named.get(0).path("principal").asText());
+                    }
+                }
+            }
+            assertEquals(0,att.remote.RemoteCommand.run(new String[]{"--server","anonymous","--no-auth","jobs","--principal","Remote Run(anonym)"}),"Remote job search should filter the existing principal field");
+        } finally {
+            System.setOut(previousOut);
+            if(previousHome==null)System.clearProperty("user.home");else System.setProperty("user.home",previousHome);
+        }
+        assertFalse(output.toString(java.nio.charset.StandardCharsets.UTF_8).contains("rejected authentication"));
+        assertTrue(output.toString(java.nio.charset.StandardCharsets.UTF_8).contains("Remote Run(anonym)"),"Remote job output displays the Server-formatted principal");
     }
     private static void restore(String old){if(old==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",old);}
     private static int postBody(int port,String authorization,String contentType,String origin,String body)throws Exception {

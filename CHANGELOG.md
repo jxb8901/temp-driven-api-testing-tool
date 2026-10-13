@@ -1,5 +1,11 @@
 # Changelog
 
+# ATT 4.1.2 - 2026-10-13
+
+- Support fully anonymous Web UI, REST, and Remote operations when `server.authenticationRequired: false`, keeping one shared authorization identity across inspection, drafts, jobs, and audit (#199).
+- Add optional self-declared anonymous job labels stored as `Name(anonym)` in the existing `principal` field; support UI/Remote entry and principal search without changing authorization.
+- Warn at Server startup and document the shared-access limitations and network restrictions for anonymous mode.
+
 # ATT 4.1.1 - 2026-10-12
 
 - Launch normal and inspection Workers from the matching `$ATT_HOME/lib/att-local-4.1.1.jar`; keep `workers.libraryDirs` additive.

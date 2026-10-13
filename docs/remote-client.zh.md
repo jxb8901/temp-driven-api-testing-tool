@@ -31,6 +31,8 @@ servers:
 
 若 Server 明確允許匿名存取，可使用 `--no-auth` 略過 profile credentials 及 password prompt。Basic authentication 只可透過 HTTPS 使用。Client 採用 JVM 預設 TLS trust 及 hostname verification，沒有 insecure TLS 選項。每項操作開始前均會檢查 health/version；Server 必須宣告 API version `1`。
 
+匿名模式只適用於隔離的 SIT/development 部署。所有 caller 共用相同授權身份，亦可存取相同 jobs 及 drafts；只有部署方明確啟用並保護網絡邊界時才使用 `--no-auth`。Run、Debug、Load 或 Validate 可加上 `--principal <name>` 提交自我聲稱的顯示/audit label。Server 會將其存入既有 `principal` 欄位並格式化為 `<name>(anonym)`；不會產生個別用戶存取或授權。驗證模式會忽略此 option。
+
 ## 發現 package
 
 使用 Server 設定的 package ID。Client 不會要求或顯示 package root 路徑。
@@ -40,6 +42,8 @@ servers:
 ./att.sh remote --server sit version
 ./att.sh remote --server sit packages
 ./att.sh remote --server sit package payments
+./att.sh remote --server sit --no-auth ping
+./att.sh remote --server sit --no-auth packages
 ```
 
 ## 提交 Run、Debug、Load 及 Validate 工作
@@ -49,13 +53,15 @@ servers:
 ```sh
 ./att.sh remote --server sit run payments --suite testcase/payment.xlsx --tag smoke --env SIT
 ./att.sh remote --server sit debug payments flow PAYMENT.submit --set vars.Channel=WEB
+./att.sh remote --server sit --no-auth run payments --all --principal Bob
 ./att.sh remote --server sit load payments load/payment.yaml --users 2 --duration 30s
 ./att.sh remote --server sit validate payments --package
+./att.sh remote --server sit jobs --principal 'Bob(anonym)'
 ```
 
 `--suite`、`--suite-dir`、`--config`、`--input` 及 Load scenario 等路徑，均指 Server package 內的邏輯相對路徑。Client 會拒絕絕對路徑及 parent-directory traversal。請求只包含 `packageId`，不會包含 `PACKAGE_ROOT`、`SERVER_DATA_DIR`、Worker 路徑或 client 輸出目錄。
 
-命令預設會等待終端結果。Client 只提交一次工作，接收排序後的 status/progress/log/diagnostic event，再取得 result 及退出。它不會在本機調用 `att-engine`。
+命令預設會等待終端結果。Client 只提交一次工作，接收排序後的 status/progress/log/diagnostic event，再取得 result 及退出。它不會在本機調用 `att-engine`。`jobs --principal <text>` 會以不區分大小寫的子字串搜尋既有 principal 欄位，包括 Server 格式化後的匿名 label；搜尋 `alice` 亦會匹配 `alice(anonym)`，並可搜尋歷史 `anonymous` 紀錄。
 
 使用 `--detach` 回傳 job ID，不會保留背景 process：
 

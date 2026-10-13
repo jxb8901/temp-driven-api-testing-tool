@@ -285,7 +285,7 @@ def check_schema_references():
 def check_cli_documentation():
     source = read(ROOT / "att-cli/src/main/java/att/CliOptions.java")
     supported_options = set(re.findall(r'"(--[a-z][a-z0-9-]*)"', source))
-    supported_options.update(("--server", "--detach", "--download", "--scenario"))
+    supported_options.update(("--server", "--no-auth", "--principal", "--detach", "--download", "--scenario"))
     public_commands = set(("run", "validate", "snapshot", "docs", "report",
                            "build", "clean", "version", "debug", "load", "help", "remote"))
 

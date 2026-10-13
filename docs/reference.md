@@ -1,7 +1,7 @@
-# ATT v4.1.1 reference manual
+# ATT v4.1.2 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 4.1.1
+Version: 4.1.2
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -2626,7 +2626,10 @@ Remote commands use the public ATT Server `/api/v1` contract. Existing commands 
 
 ```sh
 ./att.sh remote --server sit packages
+./att.sh remote --server sit --no-auth packages
 ./att.sh remote --server sit run payments --suite testcase/smoke.xlsx --env SIT --tag smoke
+./att.sh remote --server sit --no-auth run payments --all --principal Bob
+./att.sh remote --server sit jobs --principal 'Bob(anonym)'
 ./att.sh remote --server ci run payments --all --detach
 ./att.sh remote --server sit watch J0123456789ABCDEF
 ./att.sh remote --server sit load payments --scenario load/payment.yaml --users 2 --duration 30s
@@ -2641,7 +2644,7 @@ Attached Run, Debug, Load, and Validate commands submit once, follow SSE, reconn
 
 Remote exit codes are `0` for PASS/success, `1` for ATT FAIL, `2` for INVALID, `3` for ATT ERROR/CANCELLED, and `4` when the client cannot establish a trustworthy result because of connection, authentication, or protocol failure. See [ATT Remote client](remote-client.md) for profiles, command options, reconnect behavior, and troubleshooting.
 
-Remote-only options are `--server <profile>`, `--detach`, `--download <directory>`, and `--scenario <package-relative-path>`. `--format human|json` and the documented ATT selection, environment, Debug, and Load options are accepted where they map to the remote job contract. See the linked guide for the remote command list.
+Remote-only options include `--server <profile>`, `--no-auth`, `--principal <name>`, `--detach`, `--download <directory>`, and `--scenario <package-relative-path>`. `--no-auth` bypasses profile credentials only when the Server explicitly permits anonymous access. In anonymous mode, `--principal` supplies a self-declared label that the Server stores in the existing `principal` field as `<name>(anonym)`; it does not affect access or authorization. Authenticated mode ignores it. `jobs --principal <text>` searches that field by case-insensitive substring, so searching for `alice` also matches `alice(anonym)`. `--format human|json` and the documented ATT selection, environment, Debug, and Load options are accepted where they map to the remote job contract. See the linked guide for the remote command list.
 
 
 Options are command-specific. Unknown commands/options and missing option values are errors. `--package` and `--selected` are mutually exclusive. Selected validation and run require an explicit selection.
@@ -2919,7 +2922,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.1.1",
+  "attVersion": "4.1.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2958,7 +2961,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven plus Python 3 and Pandoc for Reference generation. It outputs `att-4.1.1-local.tar.gz` for the CLI, `att-4.1.1-server.tar.gz` for the WAR and deployment guides, and `att-4.1.1-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
+`build.sh` runs the release gate, regenerates the modular Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven plus Python 3 and Pandoc for Reference generation. It outputs `att-4.1.2-local.tar.gz` for the CLI, `att-4.1.2-server.tar.gz` for the WAR and deployment guides, and `att-4.1.2-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
 
 ### Runtime dependencies
 
@@ -3136,7 +3139,7 @@ Unexpected internal failures such as `NullPointerException`, `ClassCastException
 
 #### Why does `att.bat` ask for Maven, or why does a `.sh` Tool fail on windows?
 
-In a binary release, `att.bat` finds the versioned runtime JAR, such as `lib\att-local-4.1.1.jar`, and only requires Java 8+. Keep one `att-local-<version>.jar` in each `ATT_HOME/lib` so the launcher selects an unambiguous runtime. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
+In a binary release, `att.bat` finds the versioned runtime JAR, such as `lib\att-local-4.1.2.jar`, and only requires Java 8+. Keep one `att-local-<version>.jar` in each `ATT_HOME/lib` so the launcher selects an unambiguous runtime. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
 
 The launcher makes ATT itself cross-platform; it cannot translate external tool executables. Configure a Windows-compatible `.bat`, `.cmd`, PowerShell script (with an explicit `powershell`/`pwsh` argv), or native executable instead of a POSIX-only `.sh` command. PATH validation follows Windows `PATHEXT`, so names such as `pwsh` can resolve `pwsh.exe`. Keep argument contracts and stdout output formats identical when maintaining platform variants.
 

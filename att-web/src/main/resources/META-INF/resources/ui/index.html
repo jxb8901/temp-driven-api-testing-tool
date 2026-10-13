@@ -17,7 +17,7 @@
       <p>Open a package explorer or start an Advanced Load scenario from a configured package.</p>
       <div class="columns">
         <section><h2>Configured packages</h2><ul id="packages" class="package-list"></ul></section>
-        <section><h2>Recent jobs</h2><button id="refresh-jobs" type="button">Refresh jobs</button><div class="table-wrap"><table><thead><tr><th>Job</th><th>Package</th><th>Command</th><th>Status</th><th>Created</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
+        <section><h2>Recent jobs</h2><label for="job-principal-search">Search jobs by principal</label><input id="job-principal-search" type="search" maxlength="120"><button id="refresh-jobs" type="button">Refresh jobs</button><div class="table-wrap"><table><thead><tr><th>Job</th><th>Package</th><th>Command</th><th>Principal</th><th>Status</th><th>Created</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
       </div>
     </section>
     <section id="advanced-load" hidden>
@@ -25,6 +25,7 @@
       <h1>Advanced Load</h1>
       <p id="advanced-load-package"></p>
       <label for="advanced-load-environment">Environment</label><input id="advanced-load-environment" maxlength="32">
+      <label for="advanced-load-principal">Principal label (anonymous mode only)</label><input id="advanced-load-principal" maxlength="120" autocomplete="off"><p>Optional self-declared label. Anonymous users still share access; the Server displays this as Name(anonym).</p>
       <label for="advanced-load-model">Choose the scenario model first</label>
       <select id="advanced-load-model"><option value="">Choose a model</option><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select>
       <p id="advanced-load-policy-status" role="status" aria-live="polite"></p>
@@ -137,6 +138,7 @@
       </section>
       <form id="submit-form">
         <label>Command <select name="command"><option>run</option><option>load</option><option>validate</option></select></label>
+        <label>Principal label (anonymous mode only) <input id="job-principal" name="principal" maxlength="120" autocomplete="off"></label><p>Optional self-declared label. Anonymous users still share access; the Server displays this as Name(anonym).</p>
         <label>Environment <input name="environment" maxlength="128"></label>
         <label>Config (logical package path) <input name="config"></label>
         <label>Run ID <input name="runId" maxlength="128"></label>
