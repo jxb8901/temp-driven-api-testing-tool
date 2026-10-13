@@ -186,7 +186,7 @@ h2 { margin: 0; font-size: 1.05rem; letter-spacing: -0.02em; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 820px) {
-  .skip-link { top: var(--att-space-2); left: var(--att-space-2); }
+  .skip-link { top: 74px; left: var(--att-space-2); transform: translateY(-300%); }
   .app-sidebar { z-index: 40; width: min(82vw, 290px); transform: translateX(-105%); box-shadow: none; }
   .app-layout.mobile-nav-open .app-sidebar { transform: translateX(0); box-shadow: 14px 0 38px rgba(10, 20, 40, 0.16); }
   .app-frame, .app-layout.is-collapsed .app-frame { margin-left: 0; }
