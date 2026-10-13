@@ -5,6 +5,7 @@
   "description": "Development-only browser smoke, accessibility, and screenshot checks for ATT's static UI.",
   "scripts": {
     "smoke": "node smoke.cjs",
+    "smoke:explorer": "node explorer-smoke.cjs",
     "screenshots": "node screenshots.cjs"
   },
   "devDependencies": {
