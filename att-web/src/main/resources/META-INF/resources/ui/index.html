@@ -6,18 +6,69 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'">
   <title>ATT Server</title>
   <link rel="stylesheet" href="app.css">
+  <script defer src="app-shell.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
-  <header><a href="#/" class="brand">ATT Server</a><span id="connection" role="status">Connecting…</span></header>
-  <main>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div id="app-layout" class="app-layout">
+    <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Close navigation" tabindex="-1"></button>
+    <aside id="app-sidebar" class="app-sidebar" aria-label="Application sidebar">
+      <div class="sidebar-brand-row">
+        <a href="#/" class="sidebar-brand" aria-label="ATT Studio home"><span class="brand-mark" aria-hidden="true">A</span><span class="brand-name">ATT Studio</span></a>
+        <button id="sidebar-collapse" class="icon-button sidebar-collapse" type="button" aria-label="Collapse navigation" aria-controls="primary-navigation" aria-expanded="true" title="Collapse navigation"><span aria-hidden="true">‹</span></button>
+      </div>
+      <nav id="primary-navigation" class="primary-navigation" aria-label="Primary navigation">
+        <p class="nav-group-label">Workspace</p>
+        <a class="nav-link" href="#/" data-nav="dashboard" aria-current="page"><span class="nav-icon" aria-hidden="true">⌂</span><span class="nav-label">Dashboard</span></a>
+        <a class="nav-link" href="#/packages" data-nav="packages"><span class="nav-icon" aria-hidden="true">▦</span><span class="nav-label">Packages</span></a>
+        <a class="nav-link" href="#/packages" data-nav="explorer"><span class="nav-icon" aria-hidden="true">⌕</span><span class="nav-label">Explorer and Run</span></a>
+        <a class="nav-link" href="#/advanced-load" data-nav="load-testing"><span class="nav-icon" aria-hidden="true">⌁</span><span class="nav-label">Load testing</span></a>
+        <a class="nav-link" href="#/jobs" data-nav="jobs"><span class="nav-icon" aria-hidden="true">▤</span><span class="nav-label">Jobs and results</span></a>
+      </nav>
+      <div class="sidebar-footer"><span>ATT Server</span><span class="sidebar-version">4.1.3</span></div>
+    </aside>
+    <div id="app-frame" class="app-frame">
+      <header class="topbar">
+        <button id="sidebar-toggle" class="icon-button mobile-menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded="false"><span aria-hidden="true">☰</span></button>
+        <a href="#/" class="topbar-brand"><span class="brand-mark" aria-hidden="true">A</span><span>ATT Studio</span></a>
+        <div class="topbar-spacer"></div>
+        <div class="topbar-status"><span class="topbar-status-label">Server</span><span id="connection" class="connection-status" role="status" aria-live="polite">Connecting…</span></div>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false" aria-label="Switch to dark theme"><span class="theme-icon" aria-hidden="true">◐</span><span class="theme-label">Theme</span></button>
+      </header>
+      <div class="page-chrome">
+        <nav class="breadcrumbs" aria-label="Breadcrumb"><ol id="breadcrumbs"><li><span aria-current="page">Dashboard</span></li></ol></nav>
+        <div class="context-toolbar" role="group" aria-label="Workspace context and actions">
+          <div class="context-chip"><span>Package</span><strong id="context-package">All packages</strong></div>
+          <div class="context-chip"><span>Environment</span><strong id="context-environment">Per run</strong></div>
+          <div class="context-chip context-identity"><span>Identity</span><strong id="context-identity">Server managed</strong><small>not exposed by API</small></div>
+          <a id="context-action" class="button button-primary context-action" href="#/packages">Browse packages</a>
+        </div>
+      </div>
+      <main id="main-content" tabindex="-1">
     <p id="message" role="status" aria-live="polite"></p>
     <section id="home">
-      <h1>Packages</h1>
-      <p>Open a package explorer or start an Advanced Load scenario from a configured package.</p>
-      <div class="columns">
-        <section><h2>Configured packages</h2><ul id="packages" class="package-list"></ul></section>
-        <section><h2>Recent jobs</h2><label for="job-principal-search">Search jobs by principal</label><input id="job-principal-search" type="search" maxlength="120"><button id="refresh-jobs" type="button">Refresh jobs</button><div class="table-wrap"><table><thead><tr><th>Job</th><th>Package</th><th>Command</th><th>Principal</th><th>Status</th><th>Created</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
+      <div class="page-heading">
+        <div><p class="eyebrow">Workspace</p><h1 id="home-title">Dashboard</h1><p id="home-description" class="page-description">Monitor recent ATT activity and open a package workspace.</p></div>
+      </div>
+      <section id="dashboard-overview" class="dashboard-overview" aria-label="Dashboard summary">
+        <article class="summary-card"><span class="summary-label">Configured packages</span><strong id="summary-package-count" class="summary-value" aria-live="polite">—</strong><span class="summary-detail">Available to this Server</span></article>
+        <article class="summary-card"><span class="summary-label">Active jobs in results</span><strong id="summary-active-jobs" class="summary-value" aria-live="polite">—</strong><span id="summary-active-detail" class="summary-detail">From the latest job rows</span></article>
+        <article class="summary-card"><span class="summary-label">Latest job</span><strong id="summary-latest-job" class="summary-value summary-value-text" aria-live="polite">—</strong><span id="summary-latest-detail" class="summary-detail">No job status loaded</span></article>
+        <article class="summary-card"><span class="summary-label">Server status</span><strong id="summary-server-status" class="summary-value summary-value-text">Connecting…</strong><span class="summary-detail">ATT API v1</span></article>
+      </section>
+      <div class="columns dashboard-columns">
+        <section id="home-packages-section" class="panel" aria-labelledby="packages-heading">
+          <div class="section-heading"><div><h2 id="packages-heading">Configured packages</h2><p class="section-description">Open a package to inspect resources, run tests, or build a Load scenario.</p></div><button id="retry-packages" class="button button-quiet" type="button" hidden>Retry</button></div>
+          <p id="packages-state" class="section-state" role="status" aria-live="polite" aria-busy="true">Loading configured packages…</p>
+          <ul id="packages" class="package-list" aria-label="Configured packages"></ul>
+        </section>
+        <section id="home-jobs-section" class="panel" aria-labelledby="jobs-heading">
+          <div class="section-heading"><div><h2 id="jobs-heading">Recent activity</h2><p class="section-description">The Server returns the latest 100 jobs. Search narrows those rows by principal.</p></div><button id="refresh-jobs" class="button button-quiet" type="button">Refresh</button></div>
+          <div class="job-filters"><label for="job-principal-search">Search by principal</label><input id="job-principal-search" type="search" maxlength="120" autocomplete="off" placeholder="Filter recent jobs"></div>
+          <p id="jobs-state" class="section-state" role="status" aria-live="polite" aria-busy="true">Loading recent jobs…</p>
+          <div class="table-wrap"><table aria-label="Recent jobs"><thead><tr><th scope="col">Job</th><th scope="col">Package</th><th scope="col">Command</th><th scope="col">Principal</th><th scope="col">Status</th><th scope="col">Created</th></tr></thead><tbody id="jobs"></tbody></table></div>
+        </section>
       </div>
     </section>
     <section id="advanced-load" hidden>
@@ -221,7 +272,19 @@
       <h2>Progress</h2><pre id="progress" role="status"></pre>
       <h2>Live events</h2><p id="stream-state" role="status"></p><ol id="events" class="events" aria-live="polite"></ol>
     </section>
-  </main>
-  <footer>ATT Web UI uses the public /api/v1 REST and SSE API. Sign in through the configured Tomcat authentication.</footer>
+      <footer>ATT Web UI uses the same-origin /api/v1 REST and SSE API. Access is managed by the configured Tomcat authentication or anonymous-access mode.</footer>
+      </main>
+    </div>
+  </div>
+  <dialog id="confirmation-dialog" class="confirmation-dialog" aria-labelledby="confirmation-title" aria-describedby="confirmation-message">
+    <div class="confirmation-dialog-content">
+      <h2 id="confirmation-title">Confirm action</h2>
+      <p id="confirmation-message"></p>
+      <form method="dialog" class="confirmation-dialog-actions">
+        <button id="confirmation-cancel" class="button button-quiet" type="submit" value="cancel">Keep editing</button>
+        <button id="confirmation-accept" class="button button-danger" type="submit" value="confirm">Confirm</button>
+      </form>
+    </div>
+  </dialog>
 </body>
 </html>

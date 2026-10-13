@@ -63,7 +63,7 @@ class ServerWarUiIT {
                     "att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             assertJobDeepLink(port, auth);
 
-            for (String asset : new String[]{"index.html", "app.js", "app.css"}) {
+            for (String asset : new String[]{"index.html", "app.js", "app-shell.js", "app.css"}) {
                 HttpURLConnection connection = open(port, "/tools/att/ui/" + asset, auth);
                 try {
                     assertEquals(200, connection.getResponseCode(), asset);
@@ -74,6 +74,27 @@ class ServerWarUiIT {
                     if (asset.equals("app.js")) {
                         assertTrue(body.contains("new URL('../api/v1/', document.baseURI)"),
                                 "API URL must work below a non-root context path");
+                        assertTrue(body.contains("parts[0] === 'packages' && !parts[1]"),
+                                "The package collection route must resolve without an ID");
+                        assertTrue(body.contains("parts[0] === 'jobs' && !parts[1]"),
+                                "The recent-jobs route must resolve without an ID");
+                        assertTrue(body.contains("parts[0] === 'advanced-load' && !parts[1]"),
+                                "The Load package-selection route must resolve without an ID");
+                    } else if (asset.equals("index.html")) {
+                        assertTrue(body.contains("app-shell.js"), "The shell controller must ship with the WAR");
+                        assertTrue(body.indexOf("app-shell.js") < body.indexOf("app.js"),
+                                "The shell controller must load before the feature controller");
+                        assertTrue(body.contains("id=\"app-sidebar\""), "The persistent navigation shell must be present");
+                        assertTrue(body.contains("Server managed") && body.contains("not exposed by API"),
+                                "The shell must not imply a principal that the API does not expose");
+                        assertTrue(body.contains("id=\"confirmation-dialog\""),
+                                "Destructive and Load confirmations must use the accessible dialog");
+                        assertTrue(body.contains("href=\"#/packages\""), "The package collection must be linked from navigation");
+                        assertTrue(body.contains("href=\"#/jobs\""), "The jobs collection must be linked from navigation");
+                        assertTrue(body.contains("href=\"#/advanced-load\""), "Load testing must have a useful no-package route");
+                    } else if (asset.equals("app.css")) {
+                        assertTrue(body.contains("--att-color-primary") && body.contains("--att-focus-ring"),
+                                "The shared shell tokens must be served with the stylesheet");
                     }
                 } finally {
                     connection.disconnect();
@@ -123,7 +144,7 @@ class ServerWarUiIT {
             }) {
                 jar.putNextEntry(new JarEntry(name));
                 if (name.equals("att-build.properties"))
-                    jar.write("att.version=4.1.2\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    jar.write("att.version=4.1.3\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 else
                     jar.write(0);
                 jar.closeEntry();

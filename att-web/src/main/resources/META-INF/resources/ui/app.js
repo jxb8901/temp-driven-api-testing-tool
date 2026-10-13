@@ -16,6 +16,9 @@
   let selectedPackage = '';
   let formPackage = '';
   let activeJob = '';
+  let activeJobPackage = '';
+  let dashboardPackages = null;
+  let dashboardJobs = null;
   let source = null;
   let lastEventId = 0;
   let artifactRequestSequence = 0;
@@ -70,6 +73,96 @@
   let navigation = 0;
   const submitting = new Set();
 
+  function setConnectionStatus(value) {
+    text(byId('connection'), value);
+    text(byId('summary-server-status'), value);
+    byId('connection').dataset.state = String(value || '').toLowerCase();
+  }
+
+  function updateDashboardSummary() {
+    text(byId('summary-package-count'), dashboardPackages === null ? '—' : String(dashboardPackages.length));
+    text(byId('summary-active-jobs'), dashboardJobs === null ? '—' : String(dashboardJobs.filter(job => ['QUEUED','PREPARING','RUNNING','CANCEL_REQUESTED'].includes(String(job.status || '').toUpperCase())).length));
+    text(byId('summary-active-detail'), dashboardJobs === null ? 'Waiting for recent jobs' : `In ${dashboardJobs.length} returned job row${dashboardJobs.length === 1 ? '' : 's'}`);
+    const latest = dashboardJobs && dashboardJobs[0];
+    text(byId('summary-latest-job'), latest ? String(latest.status || 'Unknown') : dashboardJobs === null ? '—' : 'No jobs yet');
+    text(byId('summary-latest-detail'), latest ? `Job ${latest.jobId || ''}` : dashboardJobs === null ? 'Waiting for recent jobs' : 'Submit a Run, Debug, or Load job from a package.');
+  }
+
+  function statusBadge(value) {
+    const status = String(value || 'UNKNOWN').toUpperCase();
+    const badge = el('span', status);
+    badge.className = `status-badge status-${status.toLowerCase().replace(/_/g, '-')}`;
+    return badge;
+  }
+
+  function updateShellContext(parts) {
+    const mode = parts[0] || 'dashboard';
+    const routePackage = (mode === 'packages' || mode === 'advanced-load') ? (parts[1] || '') : '';
+    const contextPackage = routePackage || activeJobPackage;
+    const packageLabel = contextPackage || 'All packages';
+    text(byId('context-package'), packageLabel);
+    const environment = mode === 'advanced-load' && routePackage
+      ? String(byId('advanced-load-environment').value || '').trim()
+      : mode === 'packages' && routePackage
+        ? String(byId('submit-form').elements.environment.value || '').trim()
+        : '';
+    text(byId('context-environment'), environment || 'Per run');
+
+    const crumbs = byId('breadcrumbs');
+    crumbs.replaceChildren();
+    const addCrumb = (label, href = '') => {
+      const item = document.createElement('li');
+      const node = href ? link(href, label) : el('span', label);
+      if (!href) node.setAttribute('aria-current', 'page');
+      item.append(node); crumbs.append(item);
+    };
+    addCrumb('Dashboard', mode === 'dashboard' ? '' : '#/');
+    if (mode === 'packages') {
+      addCrumb('Packages', routePackage ? '#/packages' : '');
+      if (routePackage) addCrumb(routePackage);
+    } else if (mode === 'advanced-load') {
+      addCrumb('Load testing', routePackage ? '#/advanced-load' : '');
+      if (routePackage) { addCrumb(routePackage, `#/packages/${encodeURIComponent(routePackage)}`); addCrumb('Advanced Load'); }
+    } else if (mode === 'jobs') {
+      addCrumb('Jobs and results', activeJob ? '#/jobs' : '');
+      if (activeJob) addCrumb(`Job ${activeJob}`);
+    }
+
+    const navMode = mode === 'packages' ? (routePackage ? 'explorer' : 'packages')
+      : mode === 'advanced-load' ? 'load-testing'
+        : mode === 'jobs' ? 'jobs' : 'dashboard';
+    document.querySelectorAll('[data-nav]').forEach(node => {
+      if (node.dataset.nav === navMode) node.setAttribute('aria-current', 'page');
+      else node.removeAttribute('aria-current');
+    });
+    const packageRoute = routePackage ? `#/packages/${encodeURIComponent(routePackage)}` : '#/packages';
+    const loadRoute = routePackage ? `#/advanced-load/${encodeURIComponent(routePackage)}` : '#/advanced-load';
+    const explorerLink = document.querySelector('[data-nav="explorer"]');
+    const loadLink = document.querySelector('[data-nav="load-testing"]');
+    explorerLink.href = packageRoute;
+    loadLink.href = loadRoute;
+
+    const action = byId('context-action');
+    if (mode === 'advanced-load' && routePackage) {
+      action.href = packageRoute; text(action, 'Open package'); action.hidden = false;
+    } else if (mode === 'advanced-load') {
+      action.href = '#/packages'; text(action, 'Choose a package'); action.hidden = false;
+    } else if (mode === 'packages' && routePackage) {
+      action.href = loadRoute; text(action, 'Start Load'); action.hidden = false;
+    } else if (mode === 'jobs' && activeJob) {
+      action.href = '#/jobs'; text(action, 'All jobs'); action.hidden = false;
+    } else if (mode === 'jobs') {
+      action.href = '#/packages'; text(action, 'Browse packages'); action.hidden = false;
+    } else if (mode === 'packages' && dashboardPackages && dashboardPackages.length) {
+      action.href = `#/packages/${encodeURIComponent(dashboardPackages[0].packageId)}`;
+      text(action, 'Open first package'); action.hidden = false;
+    } else if (mode === 'packages') {
+      action.hidden = true;
+    } else {
+      action.href = '#/packages'; text(action, 'View packages'); action.hidden = false;
+    }
+  }
+
   async function request(path, options = {}) {
     const headers = new Headers(options.headers || {});
     if (options.body) headers.set('Content-Type', 'application/json');
@@ -94,7 +187,7 @@
       versionPromise = request('version').then(info => {
         if (String(info.apiVersion) !== '1') throw new Error('Incompatible ATT Server API version; this Web UI requires /api/v1.');
         inlineLoadEnabled = info.inlineLoadEnabled === true;
-        text(byId('connection'), 'Connected');
+        setConnectionStatus('Connected');
       }).catch(error => { versionPromise = null; throw error; });
     }
     return versionPromise;
@@ -118,17 +211,31 @@
     }
     const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
     closeStream();
-    byId('home').hidden = parts.length > 0;
+    const homeRoute = parts.length === 0 || (parts[0] === 'packages' && !parts[1]) || (parts[0] === 'jobs' && !parts[1]) || (parts[0] === 'advanced-load' && !parts[1]);
+    byId('home').hidden = !homeRoute;
     byId('package-view').hidden = parts[0] !== 'packages' || !parts[1];
     byId('advanced-load').hidden = parts[0] !== 'advanced-load' || !parts[1];
     byId('job-view').hidden = parts[0] !== 'jobs' || !parts[1];
     message('');
+    activeJobPackage = '';
     selectedPackage = (parts[0] === 'packages' || parts[0] === 'advanced-load') ? (parts[1] || '') : '';
+    if (homeRoute) {
+      const mode = parts[0] || 'dashboard';
+      byId('home-title').textContent = mode === 'packages' ? 'Packages' : mode === 'jobs' ? 'Jobs and results' : mode === 'advanced-load' ? 'Load testing' : 'Dashboard';
+      byId('home-description').textContent = mode === 'packages' ? 'Choose a configured package to inspect and run its resources.'
+        : mode === 'jobs' ? 'Review recent job status and open detailed results.'
+          : mode === 'advanced-load' ? 'Choose a configured package to build and start an Advanced Load scenario.'
+            : 'Monitor recent ATT activity and open a package workspace.';
+      byId('dashboard-overview').hidden = mode !== 'dashboard';
+      byId('home-packages-section').hidden = mode === 'jobs';
+      byId('home-jobs-section').hidden = mode === 'packages' || mode === 'advanced-load';
+    }
     if (selectedPackage && selectedPackage !== formPackage) {
       byId('submit-form').reset();
       formPackage = selectedPackage;
     }
     activeJob = parts[0] === 'jobs' ? (parts[1] || '') : '';
+    updateShellContext(parts);
     const submitButton = byId('submit-form').querySelector('button[type="submit"]');
     if (submitButton) submitButton.disabled = selectedPackage !== '' && submitting.has(selectedPackage);
     ensureCompatible().then(() => {
@@ -136,56 +243,106 @@
       if (parts[0] === 'packages' && selectedPackage) showPackage(selectedPackage, generation);
       else if (parts[0] === 'advanced-load' && selectedPackage) showAdvancedLoadPackage(selectedPackage, generation);
       else if (activeJob) showJob(activeJob, generation);
-      else loadHome(generation);
-    }).catch(error => { if (generation === navigation) { text(byId('connection'), 'Unavailable'); message(error.message); } });
+      else loadHome(generation, parts[0] || 'dashboard');
+    }).catch(error => { if (generation === navigation) { setConnectionStatus('Unavailable'); message(error.message); } });
   }
-  async function loadHomePackages(generation) {
+  async function loadHomePackages(generation = navigation) {
+    dashboardPackages = null;
+    updateDashboardSummary();
+    byId('packages-state').setAttribute('aria-busy', 'true');
+    text(byId('packages-state'), 'Loading configured packages…');
+    byId('retry-packages').hidden = true;
     try {
       const packages = await request('packages');
       if (generation !== navigation) return false;
+      dashboardPackages = listItems(packages);
+      updateDashboardSummary();
       const packageList = byId('packages'); packageList.replaceChildren();
-      listItems(packages).forEach(item => {
+      dashboardPackages.forEach(item => {
         const li = document.createElement('li');
         li.append(link(`#/packages/${encodeURIComponent(item.packageId)}`, item.packageId));
-        const advanced = el('button', inlineLoadEnabled ? 'Advanced Load' : 'Advanced Load (disabled)'); advanced.type = 'button';
+        const actions = document.createElement('span'); actions.className = 'package-actions';
+        const explorer = link(`#/packages/${encodeURIComponent(item.packageId)}`, 'Open explorer'); explorer.className = 'button button-quiet';
+        actions.append(explorer);
+        const advanced = el('button', inlineLoadEnabled ? 'Advanced Load' : 'Advanced Load (disabled)'); advanced.type = 'button'; advanced.className = 'button button-quiet';
         advanced.disabled = !inlineLoadEnabled;
         if (inlineLoadEnabled) advanced.addEventListener('click', () => { location.hash = `#/advanced-load/${encodeURIComponent(item.packageId)}`; });
         else advanced.title = 'The Server administrator has disabled browser-created Load drafts.';
-        li.append(el('span', ' '), advanced); packageList.append(li);
+        actions.append(advanced); li.append(actions); packageList.append(li);
       });
+      byId('packages-state').setAttribute('aria-busy', 'false');
+      text(byId('packages-state'), dashboardPackages.length ? `${dashboardPackages.length} configured package${dashboardPackages.length === 1 ? '' : 's'} available.` : 'No packages are configured yet. Ask a Server administrator to register a package.');
+      updateShellContext(location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent));
+      setConnectionStatus('Connected');
       return true;
     } catch (error) {
       if (generation === navigation) {
-        byId('connection').textContent = 'Unavailable'; message(error.message);
+        dashboardPackages = null;
+        updateDashboardSummary();
+        byId('packages-state').setAttribute('aria-busy', 'false');
+        text(byId('packages-state'), 'Could not load packages. Retry to try again.');
+        byId('retry-packages').hidden = false;
+        setConnectionStatus('Unavailable'); message(error.message);
       }
       return false;
     }
   }
   async function loadHomeJobs(generation = navigation) {
     const requestSequence = ++homeRequestSequence;
+    dashboardJobs = null;
+    updateDashboardSummary();
+    byId('jobs-state').setAttribute('aria-busy', 'true');
+    text(byId('jobs-state'), 'Loading recent jobs…');
     try {
       const principalSearch = String(byId('job-principal-search').value || '').trim();
       const jobsPath = principalSearch ? `jobs?principal=${encodeURIComponent(principalSearch)}` : 'jobs';
       const jobs = await request(jobsPath);
       if (requestSequence !== homeRequestSequence || generation !== navigation) return false;
       const tbody = byId('jobs'); tbody.replaceChildren();
-      listItems(jobs).forEach(job => {
+      dashboardJobs = listItems(jobs);
+      updateDashboardSummary();
+      dashboardJobs.forEach(job => {
         const row = document.createElement('tr');
-        [job.jobId, job.packageId, job.command, job.principal, job.status, job.createdAt].forEach((value, i) => { const cell = document.createElement('td'); if (i === 0) cell.append(link(`#/jobs/${encodeURIComponent(job.jobId)}`, value)); else text(cell, value); row.append(cell); });
+        [job.jobId, job.packageId, job.command, job.principal, job.status, job.createdAt].forEach((value, i) => {
+          const cell = document.createElement('td');
+          if (i === 0) cell.append(link(`#/jobs/${encodeURIComponent(job.jobId)}`, value));
+          else if (i === 4) cell.append(statusBadge(value));
+          else text(cell, value);
+          row.append(cell);
+        });
         tbody.append(row);
       });
-      byId('connection').textContent = 'Connected';
+      byId('jobs-state').setAttribute('aria-busy', 'false');
+      text(byId('jobs-state'), dashboardJobs.length ? `Showing ${dashboardJobs.length} recent job row${dashboardJobs.length === 1 ? '' : 's'}.` : 'No jobs yet. Submit a Run, Debug, or Load job from a package.');
+      setConnectionStatus('Connected');
       return true;
     } catch (error) {
       if (requestSequence === homeRequestSequence && generation === navigation) {
-        byId('connection').textContent = 'Unavailable'; message(error.message);
+        dashboardJobs = null;
+        updateDashboardSummary();
+        byId('jobs-state').setAttribute('aria-busy', 'false');
+        text(byId('jobs-state'), 'Could not load recent jobs. Use Refresh to try again.');
+        setConnectionStatus('Unavailable'); message(error.message);
       }
       return false;
     }
   }
-  async function loadHome(generation = navigation) {
+  async function loadHome(generation = navigation, mode = 'dashboard') {
+    if (mode === 'packages' || mode === 'advanced-load') return loadHomePackages(generation);
+    if (mode === 'jobs') return loadHomeJobs(generation);
     const results = await Promise.all([loadHomePackages(generation), loadHomeJobs(generation)]);
     return results.every(Boolean);
+  }
+  function confirmAction(prompt, title, acceptLabel = 'Confirm') {
+    const dialog = byId('confirmation-dialog');
+    text(byId('confirmation-title'), title || 'Confirm action');
+    text(byId('confirmation-message'), prompt);
+    text(byId('confirmation-accept'), acceptLabel);
+    dialog.returnValue = 'cancel';
+    return new Promise(resolve => {
+      dialog.addEventListener('close', () => resolve(dialog.returnValue === 'confirm'), { once: true });
+      dialog.showModal();
+    });
   }
   function schedulePrincipalSearch() {
     if (principalSearchTimer !== null) clearTimeout(principalSearchTimer);
@@ -203,6 +360,7 @@
       byId('advanced-load-editor').hidden = true; byId('advanced-load-workloads').replaceChildren();
       text(byId('advanced-load-policy-status'), 'Choose the scenario model before configuring workloads.');
       text(byId('advanced-load-status'), ''); text(byId('advanced-load-preview'), ''); clearAdvancedLoadDraft();
+      updateShellContext(location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent));
     }
     if (!inlineLoadEnabled) {
       advancedLoadModel = ''; advancedLoadPolicy = null;
@@ -572,7 +730,7 @@
       if (JSON.stringify(currentAdvancedLoadBody()) !== advancedLoadDraftFingerprint) return;
       const model = draft.model === 'arrivalRate' ? 'Arrival Rate' : 'Virtual Users';
       const count = Array.from(byId('advanced-load-workloads').querySelectorAll('.advanced-workload')).length;
-      if (!window.confirm(`Start ${model} Load with ${count} workload${count === 1 ? '' : 's'}? Review the validated full scenario above before confirming.`)) return;
+      if (!await confirmAction(`Start ${model} Load with ${count} workload${count === 1 ? '' : 's'}? Review the validated full scenario above before confirming.`, 'Start Advanced Load', 'Start Load')) return;
       const accepted = await request('jobs/load', { method: 'POST', body: JSON.stringify(addPrincipalLabel({ packageId, draftId: draft.draftId }, 'advanced-load-principal')) });
       clearAdvancedLoadDraft();
       if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
@@ -1220,7 +1378,7 @@
       if (!draft || generation !== navigation || selectedPackage !== packageId) return;
       const modelLabel = draft.model === 'arrivalRate' ? 'Arrival Rate' : 'Virtual Users';
       if (JSON.stringify(currentQuickLoadBody()) !== quickLoadDraftFingerprint) return;
-      if (!window.confirm(`Start ${modelLabel} Load for ${draft.target.type} ${draft.target.id}? Review the validated YAML preview before confirming.`)) return;
+      if (!await confirmAction(`Start ${modelLabel} Load for ${draft.target.type} ${draft.target.id}? Review the validated YAML preview before confirming.`, 'Start Quick Load', 'Start Load')) return;
       const accepted = await request('jobs/load', { method: 'POST', body: JSON.stringify(addPrincipalLabel({ packageId, draftId: draft.draftId })) });
       quickLoadDraft = null; quickLoadDraftFingerprint = '';
       if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
@@ -1344,6 +1502,8 @@
       const job = await request(`jobs/${encodeURIComponent(id)}`);
       if (generation !== navigation || activeJob !== id) return false;
       loaded = true;
+      activeJobPackage = String(job.packageId || '');
+      updateShellContext(location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent));
       const summary = byId('job-summary'); summary.replaceChildren();
       [['Package',job.packageId],['Command',job.command],['Principal',job.principal],['Status',job.status],['Created',job.createdAt],['Started',job.startedAt],['Finished',job.finishedAt]].forEach(([label,value]) => {
         if (value) summary.append(el('dt',label),el('dd',value));
@@ -1383,7 +1543,7 @@
   byId('cancel-job').addEventListener('click', async () => {
     const jobId = activeJob;
     const generation = navigation;
-    if (!jobId || !window.confirm(`Cancel job ${jobId}?`)) return;
+    if (!jobId || !await confirmAction(`Cancel job ${jobId}?`, 'Cancel job', 'Cancel job')) return;
     cancelRequested = true; byId('cancel-job').disabled = true; text(byId('cancel-state'), 'Cancellation requested; waiting for Server confirmation.');
     try {
       await request(`jobs/${encodeURIComponent(jobId)}`, { method:'DELETE' });
@@ -1413,7 +1573,10 @@
   byId('debug-resource').addEventListener('click', loadDebugForm);
   byId('quick-load-resource').addEventListener('click', loadQuickLoadForm);
   byId('advanced-load-model').addEventListener('change', loadAdvancedLoadPolicy);
-  byId('advanced-load-environment').addEventListener('input', markAdvancedLoadDirty);
+  byId('advanced-load-environment').addEventListener('input', () => {
+    markAdvancedLoadDirty();
+    updateShellContext(location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent));
+  });
   byId('advanced-load-environment').addEventListener('change', () => { if (advancedLoadModel) loadAdvancedLoadPolicy({ preserveScenario: true }); });
   ['advanced-load-warmup','advanced-load-ramp-up','advanced-load-duration','advanced-load-ramp-down',
     'advanced-load-seed','advanced-load-execution','advanced-load-testdata','advanced-load-thresholds','advanced-load-evidence']
@@ -1463,6 +1626,7 @@
   if (debugEnvironment) debugEnvironment.addEventListener('input', () => {
     debugDraft = null; debugDraftFingerprint = ''; text(byId('debug-preview'), '');
     quickLoadDraft = null; quickLoadDraftFingerprint = ''; text(byId('quick-load-preview'), '');
+    updateShellContext(location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent));
   });
   byId('preview-debug-form').addEventListener('click', async () => {
     try { await previewDebugDraft(); }
@@ -1513,6 +1677,7 @@
   byId('load-more-configuration').addEventListener('click', loadMoreConfiguration);
   byId('refresh-configuration').addEventListener('click', () => { if (selectedPackage) loadDeclaredConfiguration(selectedPackage); });
   byId('refresh-jobs').addEventListener('click', () => loadHomeJobs());
+  byId('retry-packages').addEventListener('click', () => loadHomePackages());
   byId('job-principal-search').addEventListener('input', schedulePrincipalSearch);
   window.addEventListener('hashchange', route);
   route();
