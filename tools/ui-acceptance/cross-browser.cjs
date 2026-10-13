@@ -21,6 +21,12 @@ async function assertAxe(page, engine, theme, width) {
 }
 
 async function main() {
+  if (!updateVisualBaselines) {
+    assert.ok(['darwin', 'linux'].includes(process.platform), `No committed Scheduled Load screenshot baseline exists for ${process.platform}.`);
+    const baselineManifest = JSON.parse(await fs.readFile(path.join(visualBaselineDirectory, 'manifest.json'), 'utf8'));
+    assert.equal(baselineManifest.platform, process.platform, `Scheduled Load screenshots must use the ${process.platform} baseline, not another platform's captures.`);
+    assert.equal(baselineManifest.captures?.length, 18, `The ${process.platform} baseline must describe all 18 browser, viewport, and theme captures.`);
+  }
   await fs.mkdir(outputDirectory, { recursive: true });
   const fixture = await startFixture();
   const manifest = [];
@@ -98,7 +104,8 @@ async function main() {
       }
     }
     await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
-      repositoryVersion: '4.1.3', generatedAt: new Date().toISOString(), captures: manifest,
+      repositoryVersion: '4.1.3', generatedAt: new Date().toISOString(), platform: process.platform,
+      architecture: process.arch, captures: manifest,
     }, null, 2)}\n`);
     if (updateVisualBaselines) {
       await fs.writeFile(path.join(visualBaselineDirectory, 'manifest.json'), `${JSON.stringify({

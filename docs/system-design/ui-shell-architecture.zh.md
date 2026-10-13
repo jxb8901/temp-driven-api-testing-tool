@@ -43,6 +43,8 @@ Vite 產生的 `index.html` 和 bundles 是 active app entry。舊版會直接�
 
 Development-only fixture 和 browser commands 記錄於 [`tools/ui-acceptance/README.md`](../../tools/ui-acceptance/README.md)。Harness 會在 `/att/ui/` 測試已 build 的 Vite output、提供 deterministic API responses，並以 axe 檢查 Dashboard、Settings、Explorer、Load/Jobs 及 Scheduled Load flows。Cross-browser suite 在 desktop、tablet 和 phone widths 以 light/dark themes 覆蓋 Chromium、Firefox 及 WebKit，檢查 responsive layout 與 overflow，在每個 viewport 執行 axe，並把截圖與各 browser/viewport/theme 的 Scheduled Load baseline 比較；截圖亦會保存為 CI artifacts。Dashboard 參考截圖仍保留於 [`ui-shell-baseline/`](ui-shell-baseline/)，Scheduled Load visual baselines 位於 [`tools/ui-acceptance/visual-baselines/scheduled-load/`](../../tools/ui-acceptance/visual-baselines/scheduled-load/)。Browser screenshots 和 axe checks 不能取代 Java WAR packaging 或 non-root Tomcat tests。
 
+Cross-browser job 於 `ubuntu-latest` 執行，並比對 `linux` baseline；本機 macOS 使用 `darwin`。Harness 會核對所選 manifest 的 platform；該平台缺少 manifest 或 captures 時會令檢查失敗，不會改用其他平台的截圖。
+
 Scheduled Load 使用 lazy-loaded React route。只有 `/api/v1/version` 回報 `loadSchedulingEnabled` 時，Shell 才會顯示入口；直接導覽時仍會顯示 server-disabled 狀態。頁面呼叫 typed `load-schedules` API，儲存前要求有效的 Server preview，新排程預設暫停，Run Now 或刪除前要求確認。Occurrence history 同時顯示 skipped、failed submissions 及連結工作。Cron 驗證、timezone 和 DST 行為、最短間隔、並行上限及授權仍由 Server 決定。
 
 Shell 會跟隨 `prefers-color-scheme`，直到使用者選擇主題。Settings 頁提供 System、Light 和 Dark 選項；明確選擇會保存在此 browser，System 則移除 override。按 `/` 或 `Ctrl K`/`⌘ K` 開啟頁面 palette，按 `?` 開啟快捷鍵說明，Escape 關閉對話框及手機導覽。在 Advanced Load 頁面，`Ctrl Enter`/`⌘ Enter` 會對有效且已驗證的 draft 呼叫既有確認流程。

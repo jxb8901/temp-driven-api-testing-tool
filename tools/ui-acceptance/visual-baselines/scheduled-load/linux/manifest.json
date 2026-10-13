@@ -1,6 +1,10 @@
 {
   "repositoryVersion": "4.1.3",
   "generatedAt": "2026-10-13T19:07:32.986Z",
+  "platform": "linux",
+  "architecture": "x64",
+  "maxChangedPixelRatio": 0.04,
+  "channelTolerance": 32,
   "captures": [
     {
       "browser": "chromium",

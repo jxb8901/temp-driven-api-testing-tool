@@ -106,6 +106,7 @@ describe('ScheduledLoadPage', () => {
     const api = makeApi();
     await render(api);
     expect(host.textContent).toContain('No schedules have been created');
+    expect(host.textContent).toContain('This preview calculates only the next run time from timezone and cron. It does not validate the package, scenario, or Load options.');
     const save = [...host.querySelectorAll('button')].find(button => button.textContent === 'Save schedule') as HTMLButtonElement;
     expect(save.disabled).toBe(false);
     expect((host.querySelector('.att-schedule-enable input') as HTMLInputElement).checked).toBe(false);
@@ -124,6 +125,7 @@ describe('ScheduledLoadPage', () => {
     }));
     expect(host.textContent).toContain('Saved Nightly payments. Next run:');
     expect(api.previewLoadSchedule).toHaveBeenCalled();
+    expect(vi.mocked(api.previewLoadSchedule).mock.calls.at(-1)?.[0]).toEqual({ timezone: expect.any(String), cron: '0 2 * * *' });
     expect(navigation.registerUnsavedChanges).toHaveBeenCalledWith(true, 'Scheduled Load changes');
   });
 

@@ -63,10 +63,23 @@ export function cronForDraft(draft: ScheduleDraft): string {
 export function recurrenceFromCron(cron: string): Pick<ScheduleDraft, 'recurrence' | 'timeOfDay' | 'dayOfWeek'> {
   const normalized = cron.trim().replace(/\s+/g, ' ');
   let match = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(normalized);
-  if (match) return { recurrence: 'daily', timeOfDay: `${String(Number(match[2])).padStart(2, '0')}:${String(Number(match[1])).padStart(2, '0')}`, dayOfWeek: '1-5' };
+  if (match) {
+    const time = cronTime(match);
+    if (time) return { recurrence: 'daily', timeOfDay: time, dayOfWeek: '1-5' };
+  }
   match = /^(\d{1,2}) (\d{1,2}) \* \* (1-5|0,6|[0-6])$/.exec(normalized);
-  if (match) return { recurrence: 'weekly', timeOfDay: `${String(Number(match[2])).padStart(2, '0')}:${String(Number(match[1])).padStart(2, '0')}`, dayOfWeek: match[3] };
+  if (match) {
+    const time = cronTime(match);
+    if (time) return { recurrence: 'weekly', timeOfDay: time, dayOfWeek: match[3] };
+  }
   return { recurrence: 'cron', timeOfDay: '02:00', dayOfWeek: '1-5' };
+}
+
+function cronTime(match: RegExpExecArray): string | null {
+  const minute = Number(match[1]);
+  const hour = Number(match[2]);
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59 || !Number.isInteger(hour) || hour < 0 || hour > 23) return null;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
 export function draftFromSchedule(schedule: LoadSchedule): ScheduleDraft {

@@ -442,7 +442,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
           </label>
         </div>
         <section className="att-schedule-preview" aria-labelledby="schedule-preview-title">
-          <h3 id="schedule-preview-title">Next-run preview</h3>
+          <h3 id="schedule-preview-title">Next-run time preview</h3>
           <p role="status" aria-live="polite" aria-busy={preview.status === 'loading'}>
             {preview.status === 'loading' ? 'Calculating the next occurrence on the Server…'
               : preview.status === 'ready' ? `Next run: ${formatScheduleTime(preview.nextRunAt, draft.timezone)} · ${draft.timezone}`
@@ -450,7 +450,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
                   : !isIanaTimeZone(draft.timezone) ? 'Enter a valid IANA timezone to preview this schedule.'
                     : 'Enter a valid recurrence to preview the next run.'}
           </p>
-          <p className="att-schedule-hint">This preview is for the next occurrence only. The Server applies timezone and DST rules and records each actual occurrence in UTC.</p>
+          <p className="att-schedule-hint">This preview calculates only the next run time from timezone and cron. It does not validate the package, scenario, or Load options. The Server validates the full schedule when you save and validates it again before submitting each occurrence; it applies timezone and DST rules and records actual occurrences in UTC.</p>
         </section>
         <label className="att-schedule-enable"><input type="checkbox" checked={draft.enabled} onChange={event => updateDraft('enabled', event.currentTarget.checked)} /> Enable after saving</label>
         <div className="att-schedule-form-actions">

@@ -13,6 +13,14 @@ describe('Scheduled Load draft helpers', () => {
     expect(cronForDraft({ ...draft, recurrence: 'cron', cron: '*/15 8-17 * * 1-5' })).toBe('*/15 8-17 * * 1-5');
     expect(recurrenceFromCron('30 6 * * 0,6')).toEqual({ recurrence: 'weekly', timeOfDay: '06:30', dayOfWeek: '0,6' });
     expect(recurrenceFromCron('0 2 1 * *').recurrence).toBe('cron');
+    expect(recurrenceFromCron('99 99 * * *').recurrence).toBe('cron');
+    expect(recurrenceFromCron('60 10 * * 1-5').recurrence).toBe('cron');
+    expect(recurrenceFromCron('59 23 * * *')).toMatchObject({ recurrence: 'daily', timeOfDay: '23:59' });
+    const malformed = draftFromSchedule({
+      id: 'S-INVALID-CRON', name: 'Legacy schedule', packageId: 'payments', scenario: 'load/nightly.yaml',
+      timezone: 'UTC', cron: '99 99 * * *', maxConcurrentRuns: 1, enabled: false,
+    });
+    expect(scheduleInputFromDraft(malformed).cron).toBe('99 99 * * *');
   });
 
   it('validates IANA timezones and formats server instants in the selected zone', () => {
