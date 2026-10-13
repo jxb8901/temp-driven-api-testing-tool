@@ -47,9 +47,17 @@ Scheduled Load is a lazily loaded React route. The shell advertises it only when
 
 The shell follows `prefers-color-scheme` until a user selects a theme. The Settings route offers System, Light, and Dark preferences; explicit choices are stored in this browser, while System removes the override. `/` and `Ctrl K`/`⌘ K` open the page palette, `?` opens shortcut help, and Escape closes dialogs and mobile navigation. On Advanced Load, `Ctrl Enter`/`⌘ Enter` invokes the existing confirmation for a live validated draft.
 
-| Viewport | Light | Dark |
+## Phase screenshots
+
+The gallery uses synthetic fixture responses and shows the same design system across each phase. Each link opens a 1440 × 1000 PNG capture.
+
+| Phase and screen | Light | Dark |
 |---|---|---|
-| 1440 × 1000 | [Dashboard](ui-shell-baseline/dashboard-1440-light.png) | [Dashboard](ui-shell-baseline/dashboard-1440-dark.png) |
-| 768 × 1000 | [Dashboard](ui-shell-baseline/dashboard-768-light.png) | [Dashboard](ui-shell-baseline/dashboard-768-dark.png) |
+| Phase 1: Dashboard | [Screenshot](ui-shell-baseline/dashboard-1440-light.png) | [Screenshot](ui-shell-baseline/dashboard-1440-dark.png) |
+| Phase 2: Explorer and Debug | [Screenshot](ui-shell-baseline/explorer-debug-1440-light.png) | [Screenshot](ui-shell-baseline/explorer-debug-1440-dark.png) |
+| Phase 3: Load Builder | [Screenshot](ui-shell-baseline/load-builder-1440-light.png) | [Screenshot](ui-shell-baseline/load-builder-1440-dark.png) |
+| Phase 3: Job Results | [Screenshot](ui-shell-baseline/job-results-1440-light.png) | [Screenshot](ui-shell-baseline/job-results-1440-dark.png) |
+| Phase 4: Scheduled Load | [Screenshot](ui-shell-baseline/scheduled-load-1440-light.png) | [Screenshot](ui-shell-baseline/scheduled-load-1440-dark.png) |
+The [screenshot manifest](ui-shell-baseline/manifest.json) records each route, fixture, browser, viewport, and theme.
 
 To remove the acceptance harness, revert `tools/ui-acceptance/` and `docs/system-design/ui-shell-baseline/`. Keep that artifact rollback separate from the application rollback above.

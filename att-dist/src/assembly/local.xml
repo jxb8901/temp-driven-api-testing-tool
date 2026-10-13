@@ -13,8 +13,8 @@
     <fileSets>
         <fileSet><directory>${project.basedir}/../config</directory><outputDirectory>packages/default/config</outputDirectory><excludes><exclude>att-server.example.yaml</exclude><exclude>att-server.yaml</exclude></excludes></fileSet>
         <fileSet><directory>${project.basedir}/../templates</directory><outputDirectory>packages/default/templates</outputDirectory></fileSet>
-        <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>packages/default/tools</outputDirectory><excludes><exclude>**/*.sh</exclude><exclude>**/node_modules/**</exclude></excludes></fileSet>
-        <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>packages/default/tools</outputDirectory><includes><include>**/*.sh</include></includes><excludes><exclude>**/node_modules/**</exclude></excludes><fileMode>0755</fileMode></fileSet>
+        <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>packages/default/tools</outputDirectory><excludes><exclude>**/*.sh</exclude><exclude>**/node_modules/**</exclude><exclude>ui-acceptance/**</exclude></excludes></fileSet>
+        <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>packages/default/tools</outputDirectory><includes><include>**/*.sh</include></includes><excludes><exclude>**/node_modules/**</exclude><exclude>ui-acceptance/**</exclude></excludes><fileMode>0755</fileMode></fileSet>
         <fileSet><directory>${project.basedir}/../testcase</directory><outputDirectory>packages/default/testcase</outputDirectory></fileSet>
         <fileSet><directory>${project.basedir}/../sql</directory><outputDirectory>packages/default/sql</outputDirectory></fileSet>
         <fileSet><directory>${project.basedir}/../docs</directory><outputDirectory>docs</outputDirectory></fileSet>

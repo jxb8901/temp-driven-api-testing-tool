@@ -47,9 +47,17 @@ Scheduled Load 使用 lazy-loaded React route。只有 `/api/v1/version` 回報 
 
 Shell 會跟隨 `prefers-color-scheme`，直到使用者選擇主題。Settings 頁提供 System、Light 和 Dark 選項；明確選擇會保存在此 browser，System 則移除 override。按 `/` 或 `Ctrl K`/`⌘ K` 開啟頁面 palette，按 `?` 開啟快捷鍵說明，Escape 關閉對話框及手機導覽。在 Advanced Load 頁面，`Ctrl Enter`/`⌘ Enter` 會對有效且已驗證的 draft 呼叫既有確認流程。
 
-| Viewport | Light | Dark |
+## 各 Phase 截圖
+
+Gallery 使用 synthetic fixture responses，展示各個 phase 共用的 design system。每個連結會開啟 1440 × 1000 PNG 截圖。
+
+| Phase 和畫面 | Light | Dark |
 |---|---|---|
-| 1440 × 1000 | [Dashboard](ui-shell-baseline/dashboard-1440-light.png) | [Dashboard](ui-shell-baseline/dashboard-1440-dark.png) |
-| 768 × 1000 | [Dashboard](ui-shell-baseline/dashboard-768-light.png) | [Dashboard](ui-shell-baseline/dashboard-768-dark.png) |
+| Phase 1：Dashboard | [截圖](ui-shell-baseline/dashboard-1440-light.png) | [截圖](ui-shell-baseline/dashboard-1440-dark.png) |
+| Phase 2：Explorer 和 Debug | [截圖](ui-shell-baseline/explorer-debug-1440-light.png) | [截圖](ui-shell-baseline/explorer-debug-1440-dark.png) |
+| Phase 3：Load Builder | [截圖](ui-shell-baseline/load-builder-1440-light.png) | [截圖](ui-shell-baseline/load-builder-1440-dark.png) |
+| Phase 3：Job Results | [截圖](ui-shell-baseline/job-results-1440-light.png) | [截圖](ui-shell-baseline/job-results-1440-dark.png) |
+| Phase 4：Scheduled Load | [截圖](ui-shell-baseline/scheduled-load-1440-light.png) | [截圖](ui-shell-baseline/scheduled-load-1440-dark.png) |
+[Screenshot manifest](ui-shell-baseline/manifest.json) 記錄每張截圖的 route、fixture、browser、viewport 和 theme。
 
 如需移除 acceptance harness，回復 `tools/ui-acceptance/` 和 `docs/system-design/ui-shell-baseline/`。請將測試 artifact rollback 與 app rollback 分開處理。

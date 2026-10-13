@@ -51,9 +51,9 @@ Run the screenshot capture separately:
 npm run screenshots
 ```
 
-It writes 1440 × 1000 and 768 × 1000 light/dark browser viewport captures and a metadata manifest under `docs/system-design/ui-shell-baseline/`. The images use explicit synthetic fixture data and are comparison baselines, not production data or evidence that Tomcat was launched.
+It writes 10 desktop screenshots at 1440 × 1000 in light and dark themes. The gallery covers the Dashboard, Explorer/Debug, Load Builder, Job Results, and Scheduled Load across all four delivery phases. A metadata manifest records each route, viewport, theme, fixture, browser, and Playwright version under `docs/system-design/ui-shell-baseline/`. These are synthetic demo captures, not production data or evidence that Tomcat was launched.
 
-The current baselines are [`dashboard-1440-light.png`](../../docs/system-design/ui-shell-baseline/dashboard-1440-light.png), [`dashboard-1440-dark.png`](../../docs/system-design/ui-shell-baseline/dashboard-1440-dark.png), [`dashboard-768-light.png`](../../docs/system-design/ui-shell-baseline/dashboard-768-light.png), and [`dashboard-768-dark.png`](../../docs/system-design/ui-shell-baseline/dashboard-768-dark.png).
+The phase screenshot gallery is linked from [`ui-shell-architecture.md`](../../docs/system-design/ui-shell-architecture.md#phase-screenshots), with each capture stored beside the manifest.
 
 ## Baseline and rollback
 
