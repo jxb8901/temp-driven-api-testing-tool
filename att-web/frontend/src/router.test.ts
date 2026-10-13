@@ -7,6 +7,9 @@ describe('ATT hash route contract', () => {
     expect(parseRoute('#/packages')).toEqual({ kind: 'packages' });
     expect(parseRoute('#/jobs')).toEqual({ kind: 'jobs' });
     expect(parseRoute('#/advanced-load')).toEqual({ kind: 'load' });
+    expect(parseRoute('#/load-schedules')).toEqual({ kind: 'schedules' });
+    expect(parseRoute('#/scheduled-load')).toEqual({ kind: 'schedules' });
+    expect(parseRoute('#/settings')).toEqual({ kind: 'settings' });
   });
 
   it('round-trips package resource, Load, and job deep links', () => {
@@ -14,5 +17,7 @@ describe('ATT hash route contract', () => {
     expect(parseRoute(formatRoute(resource))).toEqual(resource);
     expect(parseRoute('#/advanced-load/payments')).toEqual({ kind: 'load', packageId: 'payments' });
     expect(parseRoute('#/jobs/J10045')).toEqual({ kind: 'jobs', jobId: 'J10045' });
+    expect(parseRoute(formatRoute({ kind: 'schedules' }))).toEqual({ kind: 'schedules' });
+    expect(parseRoute(formatRoute({ kind: 'settings' }))).toEqual({ kind: 'settings' });
   });
 });

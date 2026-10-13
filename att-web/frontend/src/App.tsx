@@ -1,49 +1,107 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
-import { api, request } from './api';
-import { AppShell } from './AppShell';
-import { DashboardPage, LoadLanding, PackageLanding } from './DashboardPage';
-import { useRouteState } from './router';
+import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { api } from './api';
+import { AppShell, useAppShellContext } from './AppShell';
+import { DashboardPage, LoadLanding } from './DashboardPage';
+import { useNavigationGuard, useRouteState } from './router';
 import { appReducer, initialAppState, serverCapabilities } from './state';
-import type { AsyncState, JobSummary } from './types';
+import { ExplorerPage } from './features/explorer/ExplorerPage';
+import './features/explorer/explorer.css';
+import type { ExplorerPageProps } from './features/explorer/types';
+import { LoadPage } from './features/load/LoadPage';
+import { JobsPage } from './features/load/JobsPage';
+import type { LoadJobsApi, PackageOption } from './features/load/types';
+import { SettingsPage } from './SettingsPage';
+
+const ScheduledLoadPage = lazy(() => import('./features/schedules/ScheduledLoadPage').then(module => ({ default: module.ScheduledLoadPage })));
 
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error('The ATT Server request could not be completed.');
 }
 
-function JobDetailPage({ jobId }: { jobId: string }) {
-  const [job, setJob] = useState<AsyncState<JobSummary>>({ status: 'loading' });
-  const [refresh, setRefresh] = useState(0);
+const loadJobsApi: LoadJobsApi = api;
+
+function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled }: {
+  packageId: string;
+  resourceRoute: ExplorerPageProps['resourceRoute'];
+  inlineLoadEnabled: boolean;
+}) {
+  const workspace = useAppShellContext();
+  const navigation = useNavigationGuard();
+  const onResourceRouteChange = useCallback((resource: ExplorerPageProps['resourceRoute']) => {
+    navigation.navigate(resource
+      ? { kind: 'package', packageId, resource }
+      : { kind: 'package', packageId });
+  }, [navigation.navigate, packageId]);
+  const onJobAccepted = useCallback((jobId: string) => {
+    workspace.onJobAccepted({ jobId, packageId });
+  }, [packageId, workspace.onJobAccepted]);
+  const onOpenQuickLoad = useCallback((identity: { packageId: string }) => {
+    navigation.navigate({ kind: 'load', packageId: identity.packageId });
+  }, [navigation.navigate]);
+
+  return <ExplorerPage
+    api={api}
+    packageId={packageId}
+    resourceRoute={resourceRoute}
+    environment={workspace.selectedEnvironment}
+    registerUnsavedChanges={navigation.registerUnsavedChanges}
+    onResourceRouteChange={onResourceRouteChange}
+    onEnvironmentChange={workspace.onEnvironmentChange}
+    onJobAccepted={onJobAccepted}
+    onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
+  />;
+}
+
+function LoadRouteView({ packageId, inlineLoadEnabled, packages }: {
+  packageId: string;
+  inlineLoadEnabled: boolean;
+  packages: PackageOption[];
+}) {
+  const workspace = useAppShellContext();
+  const navigation = useNavigationGuard();
+  const selectedEnvironment = useRef(workspace.selectedEnvironment);
+  selectedEnvironment.current = workspace.selectedEnvironment;
+  const [environments, setEnvironments] = useState<string[]>([]);
+  const [environmentState, setEnvironmentState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const onPackageChange = useCallback((nextPackageId: string) => {
+    navigation.navigate({ kind: 'load', packageId: nextPackageId });
+  }, [navigation.navigate]);
+  const onJobAccepted = useCallback((jobId: string) => {
+    workspace.onJobAccepted({ jobId, packageId });
+  }, [packageId, workspace.onJobAccepted]);
 
   useEffect(() => {
     const controller = new AbortController();
-    setJob({ status: 'loading' });
-    request<JobSummary>('jobs/' + encodeURIComponent(jobId), { signal: controller.signal })
-      .then(data => setJob({ status: 'ready', data }))
-      .catch(error => {
-        if (!controller.signal.aborted) setJob({ status: 'error', error: asError(error) });
-      });
+    setEnvironmentState('loading');
+    api.getDeclaredConfiguration(packageId, controller.signal).then(configuration => {
+      if (controller.signal.aborted) return;
+      const names = (configuration.environments || []).map(profile => profile.name).filter(Boolean);
+      setEnvironments(names);
+      setEnvironmentState('ready');
+      if (selectedEnvironment.current && !names.includes(selectedEnvironment.current)) {
+        workspace.onEnvironmentChange('');
+      }
+    }).catch(() => {
+      if (!controller.signal.aborted) {
+        setEnvironments([]);
+        setEnvironmentState('error');
+      }
+    });
     return () => controller.abort();
-  }, [jobId, refresh]);
+  }, [packageId, workspace.onEnvironmentChange]);
 
-  return (
-    <div className="page-content">
-      <div className="page-heading"><div><p className="eyebrow">Jobs and results</p><h1 id="home-title">Job {jobId}</h1><p className="page-description">Job detail from the ATT Server API.</p></div></div>
-      <section className="panel" aria-labelledby="job-detail-heading">
-        <div className="section-heading"><div><h2 id="job-detail-heading">Job status</h2><p className="section-description">The detail route remains addressable by job ID.</p></div>
-          {job.status === 'error' && <button className="button button-quiet" type="button" onClick={() => setRefresh(value => value + 1)}>Retry</button>}
-        </div>
-        {job.status === 'loading' && <p className="section-state" role="status" aria-busy="true">Loading job {jobId}…</p>}
-        {job.status === 'error' && <p className="section-state state-error" role="status">Could not load job: {job.error.message}</p>}
-        {job.status === 'ready' && <dl className="detail-grid">
-          <div><dt>Job ID</dt><dd>{job.data.jobId}</dd></div>
-          <div><dt>Status</dt><dd><span className={'status-badge status-' + String(job.data.status).toLowerCase().replace(/_/g, '-')}>{job.data.status}</span></dd></div>
-          <div><dt>Command</dt><dd>{job.data.command}</dd></div>
-          <div><dt>Package</dt><dd>{job.data.packageId}</dd></div>
-          <div><dt>Created</dt><dd>{job.data.createdAt || 'Not available'}</dd></div>
-        </dl>}
-      </section>
-    </div>
-  );
+  return <LoadPage
+    api={loadJobsApi}
+    packages={packages}
+    selectedPackage={packageId}
+    selectedEnvironment={workspace.selectedEnvironment}
+    environments={environments}
+    environmentState={environmentState}
+    inlineLoadEnabled={inlineLoadEnabled}
+    onPackageChange={onPackageChange}
+    onEnvironmentChange={workspace.onEnvironmentChange}
+    onJobAccepted={onJobAccepted}
+  />;
 }
 
 export default function App() {
@@ -116,13 +174,33 @@ export default function App() {
   } else if (navigation.route.kind === 'packages') {
     content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} />;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {
-    content = <JobDetailPage jobId={navigation.route.jobId} />;
+    content = <JobsPage api={loadJobsApi} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} />;
   } else if (navigation.route.kind === 'jobs') {
-    content = <DashboardPage view="jobs" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} />;
+    content = <JobsPage api={loadJobsApi} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} />;
+  } else if (navigation.route.kind === 'schedules') {
+    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Scheduled Load…</div>}>
+      <ScheduledLoadPage
+        api={api}
+        packages={state.packages}
+        enabled={capabilities.loadSchedulingEnabled}
+        onOpenJob={onJobChange}
+      />
+    </Suspense>;
+  } else if (navigation.route.kind === 'settings') {
+    content = <SettingsPage />;
   } else if (navigation.route.kind === 'package') {
-    content = <PackageLanding packageId={navigation.route.packageId} resourceId={navigation.route.resource?.resourceId} enabled={capabilities.inlineLoadEnabled} />;
+    content = <ExplorerRouteView
+      packageId={navigation.route.packageId}
+      resourceRoute={navigation.route.resource || null}
+      inlineLoadEnabled={capabilities.inlineLoadEnabled}
+    />;
   } else {
-    content = <LoadLanding state={state.packages} enabled={capabilities.inlineLoadEnabled} packageId={navigation.route.packageId} onSelectPackage={onLoadPackageChange} />;
+    const packageOptions = state.packages.status === 'ready'
+      ? state.packages.data.map(item => ({ packageId: item.packageId, displayName: item.name }))
+      : [];
+    content = navigation.route.packageId
+      ? <LoadRouteView packageId={navigation.route.packageId} inlineLoadEnabled={capabilities.inlineLoadEnabled} packages={packageOptions} />
+      : <LoadLanding state={state.packages} enabled={capabilities.inlineLoadEnabled} onSelectPackage={onLoadPackageChange} />;
   }
 
   return (
@@ -130,6 +208,7 @@ export default function App() {
       route={navigation.route}
       navigation={navigation}
       serverVersion={state.serverVersion}
+      showScheduledLoad={capabilities.loadSchedulingEnabled}
       selectedPackage={selectedPackage}
       selectedEnvironment={selectedEnvironment}
       onPackageChange={onPackageChange}

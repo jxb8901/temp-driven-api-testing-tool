@@ -1,6 +1,6 @@
 # ATT UI browser acceptance checks
 
-This development-only harness serves the built Vite UI at `/att/ui/` and provides synthetic responses for the existing `/att/api/v1/` endpoints. Build the static assets first with `mvn -B -ntp -pl att-web -am package`. It needs Python 3 and a local Chrome/Chromium browser. Node.js and npm are needed only to build or run these workstation checks; they are not part of ATT's WAR, installation, or production runtime.
+This development-only harness serves the built Vite UI at `/att/ui/` and provides synthetic responses for the existing `/att/api/v1/` endpoints. Build the static assets first with `mvn -B -ntp -pl att-web -am package`. It needs Python 3 and local Chromium, Firefox, and WebKit browsers. Node.js and npm are needed only to build or run these workstation checks; they are not part of ATT's WAR, installation, or production runtime.
 
 ## Install the development dependencies
 
@@ -8,7 +8,7 @@ From this directory, install the pinned test-only packages:
 
 ```sh
 npm ci
-npx playwright install chromium
+npx playwright install chromium firefox webkit
 ```
 
 The acceptance harness pins direct and transitive dependencies in `package.json` and `package-lock.json`. `npm ci` installs the test-only tools reproducibly. This is a workstation/CI dependency only; the WAR and Tomcat startup do not run npm.
@@ -25,15 +25,37 @@ npm run smoke
 
 The script covers static resources below the non-root `/att/` context, loaded/empty/error/loading dashboard states, the package/jobs/load route aliases, selected navigation and breadcrumb state, skip-link keyboard behavior, uncaught browser errors, and axe-core WCAG 2.0/2.1/2.2 A/AA rules. It reports selectors for any axe violations.
 
+The fixture prefers the packaged Maven UI, then `att-web/frontend/dist`. Set `ATT_UI_DIST` to a built Vite output directory to test a build stored outside the repository worktree.
+
+Run the Scheduled Load workflow and accessibility check with:
+
+```sh
+npm run smoke:scheduled-load
+```
+
+This flow covers server-computed previews, create/edit/pause/resume, explicit Run Now and delete confirmation, occurrence history and job links, disabled/authentication/role-error states, keyboard palette and shortcuts, light/dark preference, and 1280/768/390-pixel layouts.
+
+Run the cross-browser responsive and screenshot check with:
+
+```sh
+npm run smoke:cross-browser
+```
+
+It exercises Chromium, Firefox, and WebKit at 1280, 768, and 390 pixels in light and dark themes, checks horizontal overflow and the tablet/phone schedule cards, runs axe at every viewport, and compares each capture with its committed browser/viewport/theme baseline for the current OS. Separate macOS and Linux baselines avoid treating platform font metrics as UI regressions. CI also uploads the generated screenshots under `tools/ui-acceptance/artifacts/scheduled-load/` for review. The comparison ignores per-channel pixel differences up to 32 and allows up to 4% of pixels to differ; larger differences fail with per-capture counts.
+
+The hosted CI workflow runs on `ubuntu-latest`, which selects the committed `linux` baseline. Local macOS runs select `darwin`. The harness checks the selected baseline manifest's platform and requires all 18 captures; a missing or mismatched platform baseline fails instead of falling back to another platform. Baseline updates write only to the directory for the current Node.js platform.
+
+After an intentional Scheduled Load visual change, inspect the generated captures and update the 18 baselines for the current OS with `ATT_UI_UPDATE_VISUAL_BASELINES=1 npm run smoke:cross-browser`. Review the resulting PNGs and manifest before committing the matching platform directory under `tools/ui-acceptance/visual-baselines/scheduled-load/`.
+
 Run the screenshot capture separately:
 
 ```sh
 npm run screenshots
 ```
 
-It writes 1440 × 1000 and 768 × 1000 light/dark browser viewport captures and a metadata manifest under `docs/system-design/ui-shell-baseline/`. The images use explicit synthetic fixture data and are comparison baselines, not production data or evidence that Tomcat was launched.
+It writes 10 desktop screenshots at 1440 × 1000 in light and dark themes. The gallery covers the Dashboard, Explorer/Debug, Load Builder, Job Results, and Scheduled Load across all four delivery phases. A metadata manifest records each route, viewport, theme, fixture, browser, and Playwright version under `docs/system-design/ui-shell-baseline/`. These are synthetic demo captures, not production data or evidence that Tomcat was launched.
 
-The current baselines are [`dashboard-1440-light.png`](../../docs/system-design/ui-shell-baseline/dashboard-1440-light.png), [`dashboard-1440-dark.png`](../../docs/system-design/ui-shell-baseline/dashboard-1440-dark.png), [`dashboard-768-light.png`](../../docs/system-design/ui-shell-baseline/dashboard-768-light.png), and [`dashboard-768-dark.png`](../../docs/system-design/ui-shell-baseline/dashboard-768-dark.png).
+The phase screenshot gallery is linked from [`ui-shell-architecture.md`](../../docs/system-design/ui-shell-architecture.md#phase-screenshots), with each capture stored beside the manifest.
 
 ## Baseline and rollback
 

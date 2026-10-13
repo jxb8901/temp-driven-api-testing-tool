@@ -25,7 +25,7 @@
 |---|---|
 | A | Home link 和 sidebar collapse control。Sidebar 狀態保存在此 browser。 |
 | B | Server connection status，以及系統、light、dark theme control。Identity chip 會說明 API 沒有提供目前 principal。 |
-| C | 已實作 Dashboard、package、explorer/run、Load 和 job routes 的固定 links。 |
+| C | 已實作 Dashboard、package、explorer/run、Load、job、Scheduled Load 和 Settings routes 的固定 links。 |
 | D–F | Summary cards 使用 configured package 數量、回傳 job rows 中的 active statuses、最新回傳 job，以及 API version check。 |
 | G | Configured package 清單，提供 explorer 和 Advanced Load 直接操作。 |
 | H | 可搜尋的 latest-job table；每個 status 都有文字標籤。 |

@@ -1,49 +1,119 @@
 {
-  "generatedAt": "2026-10-13T15:36:45.799Z",
+  "generatedAt": "2026-10-13T19:46:59.643Z",
   "repositoryVersion": "4.1.3",
   "browser": "155.0.8059.40",
   "playwright": "1.62.1",
-  "fixtureOrigin": "http://127.0.0.1:50483",
+  "fixtureOrigin": "http://127.0.0.1:61148",
   "captures": [
     {
       "file": "dashboard-1440-light.png",
+      "screen": "dashboard",
       "viewport": {
         "width": 1440,
         "height": 1000
       },
       "theme": "light",
-      "fixture": "loaded synthetic package and job rows",
+      "fixture": "loaded synthetic API data",
       "page": "/att/ui/"
     },
     {
       "file": "dashboard-1440-dark.png",
+      "screen": "dashboard",
       "viewport": {
         "width": 1440,
         "height": 1000
       },
       "theme": "dark",
-      "fixture": "loaded synthetic package and job rows",
+      "fixture": "loaded synthetic API data",
       "page": "/att/ui/"
     },
     {
-      "file": "dashboard-768-light.png",
+      "file": "explorer-debug-1440-light.png",
+      "screen": "explorer-debug",
       "viewport": {
-        "width": 768,
+        "width": 1440,
         "height": 1000
       },
       "theme": "light",
-      "fixture": "loaded synthetic package and job rows",
-      "page": "/att/ui/"
+      "fixture": "explorer-workspace synthetic API data",
+      "page": "/att/ui/#/packages/payments/resources/template/checkout"
     },
     {
-      "file": "dashboard-768-dark.png",
+      "file": "explorer-debug-1440-dark.png",
+      "screen": "explorer-debug",
       "viewport": {
-        "width": 768,
+        "width": 1440,
         "height": 1000
       },
       "theme": "dark",
-      "fixture": "loaded synthetic package and job rows",
-      "page": "/att/ui/"
+      "fixture": "explorer-workspace synthetic API data",
+      "page": "/att/ui/#/packages/payments/resources/template/checkout"
+    },
+    {
+      "file": "load-builder-1440-light.png",
+      "screen": "load-builder",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "light",
+      "fixture": "load-workspace synthetic API data",
+      "page": "/att/ui/#/advanced-load/payments"
+    },
+    {
+      "file": "load-builder-1440-dark.png",
+      "screen": "load-builder",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "fixture": "load-workspace synthetic API data",
+      "page": "/att/ui/#/advanced-load/payments"
+    },
+    {
+      "file": "job-results-1440-light.png",
+      "screen": "job-results",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "light",
+      "fixture": "load-workspace synthetic API data",
+      "page": "/att/ui/#/jobs/JOB-LOAD-204"
+    },
+    {
+      "file": "job-results-1440-dark.png",
+      "screen": "job-results",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "fixture": "load-workspace synthetic API data",
+      "page": "/att/ui/#/jobs/JOB-LOAD-204"
+    },
+    {
+      "file": "scheduled-load-1440-light.png",
+      "screen": "scheduled-load",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "light",
+      "fixture": "scheduled-workspace synthetic API data",
+      "page": "/att/ui/#/load-schedules"
+    },
+    {
+      "file": "scheduled-load-1440-dark.png",
+      "screen": "scheduled-load",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "fixture": "scheduled-workspace synthetic API data",
+      "page": "/att/ui/#/load-schedules"
     }
   ]
 }
