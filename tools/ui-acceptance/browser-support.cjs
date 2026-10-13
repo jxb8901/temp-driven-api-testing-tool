@@ -2,7 +2,7 @@ const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const path = require('node:path');
 const readline = require('node:readline');
-const { chromium } = require('playwright');
+const { chromium, firefox, webkit } = require('playwright');
 
 const harnessRoot = __dirname;
 const repositoryRoot = path.resolve(harnessRoot, '../..');
@@ -30,12 +30,15 @@ async function startFixture() {
   return { fixture, lines, origin: await ready };
 }
 
-async function launchBrowser() {
-  const executablePath = process.env.ATT_UI_CHROME_PATH || (require('node:fs').existsSync(defaultChrome) ? defaultChrome : undefined);
-  return chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+async function launchBrowser(browserType = chromium) {
+  const executablePath = browserType === chromium
+    ? process.env.ATT_UI_CHROME_PATH || (require('node:fs').existsSync(defaultChrome) ? defaultChrome : undefined)
+    : undefined;
+  return browserType.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
 }
 
 async function selectFixture(context, origin, scenario) {
+  await context.clearCookies({ name: 'att-ui-fixture' });
   await context.addCookies([{ name: 'att-ui-fixture', value: scenario, url: `${origin}/att/` }]);
 }
 
@@ -46,4 +49,4 @@ async function stopFixture(handle) {
   handle.lines.close();
 }
 
-module.exports = { launchBrowser, selectFixture, startFixture, stopFixture };
+module.exports = { chromium, firefox, webkit, launchBrowser, selectFixture, startFixture, stopFixture };

@@ -51,6 +51,44 @@ async function click(element: Element) {
 }
 
 describe('LoadPage React feature', () => {
+  it('uses the keyboard submit shortcut only for a live draft and preserves confirmation', async () => {
+    const api = makeApi();
+    const confirmStart = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await act(async () => root.render(<LoadPage
+      api={api}
+      packages={[{ packageId: 'payments', displayName: 'Payments' }]}
+      selectedPackage="payments"
+      selectedEnvironment=""
+      environments={['SIT']}
+      inlineLoadEnabled
+      onPackageChange={vi.fn()}
+      onEnvironmentChange={vi.fn()}
+      onJobAccepted={vi.fn()}
+      confirmStart={confirmStart}
+    />));
+    await flush();
+    const targetInput = host.querySelector('.att-target-editor input[list]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(targetInput, 'Payments.create');
+      targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Validate scenario')!);
+    await flush();
+    expect(api.createLoadDraft).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain('Server validation passed');
+
+    await act(async () => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true })));
+    await flush();
+    expect(confirmStart).toHaveBeenCalledTimes(1);
+    expect(api.submitLoadDraft).not.toHaveBeenCalled();
+
+    await act(async () => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true })));
+    await flush();
+    expect(confirmStart).toHaveBeenCalledTimes(2);
+    expect(api.submitLoadDraft).toHaveBeenCalledTimes(1);
+  });
+
   it('uses section navigation, typed workload controls, and typed sidecar fields before Server validation', async () => {
     const api = makeApi();
     const onJobAccepted = vi.fn();

@@ -373,6 +373,9 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     }
   }
 
+  const startLoadRef = useRef(startLoad);
+  startLoadRef.current = startLoad;
+
   async function copyYaml() {
     if (!draft?.previewYaml || draft.redacted) return;
     try { await navigator.clipboard.writeText(draft.previewYaml); setDraftMessage('Validated YAML copied.'); }
@@ -393,6 +396,17 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
 
   const preview = draft?.previewYaml || (draft?.preview ? JSON.stringify(draft.preview, null, 2) : '');
   const hasLiveDraft = Boolean(draft && Date.parse(draft.expiresAt) > Date.now());
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter'
+        && hasLiveDraft && draftState !== 'submitting' && !confirmationPending && inlineLoadEnabled) {
+        event.preventDefault();
+        void startLoadRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [confirmationPending, draftState, hasLiveDraft, inlineLoadEnabled]);
   const navigateSection = (id: string) => {
     const section = document.getElementById(id);
     section?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { api } from './api';
 import { AppShell, useAppShellContext } from './AppShell';
 import { DashboardPage, LoadLanding } from './DashboardPage';
@@ -10,6 +10,9 @@ import type { ExplorerPageProps } from './features/explorer/types';
 import { LoadPage } from './features/load/LoadPage';
 import { JobsPage } from './features/load/JobsPage';
 import type { LoadJobsApi, PackageOption } from './features/load/types';
+import { SettingsPage } from './SettingsPage';
+
+const ScheduledLoadPage = lazy(() => import('./features/schedules/ScheduledLoadPage').then(module => ({ default: module.ScheduledLoadPage })));
 
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error('The ATT Server request could not be completed.');
@@ -174,6 +177,17 @@ export default function App() {
     content = <JobsPage api={loadJobsApi} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} />;
   } else if (navigation.route.kind === 'jobs') {
     content = <JobsPage api={loadJobsApi} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} />;
+  } else if (navigation.route.kind === 'schedules') {
+    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Scheduled Load…</div>}>
+      <ScheduledLoadPage
+        api={api}
+        packages={state.packages}
+        enabled={capabilities.loadSchedulingEnabled}
+        onOpenJob={onJobChange}
+      />
+    </Suspense>;
+  } else if (navigation.route.kind === 'settings') {
+    content = <SettingsPage />;
   } else if (navigation.route.kind === 'package') {
     content = <ExplorerRouteView
       packageId={navigation.route.packageId}
@@ -194,6 +208,7 @@ export default function App() {
       route={navigation.route}
       navigation={navigation}
       serverVersion={state.serverVersion}
+      showScheduledLoad={capabilities.loadSchedulingEnabled}
       selectedPackage={selectedPackage}
       selectedEnvironment={selectedEnvironment}
       onPackageChange={onPackageChange}

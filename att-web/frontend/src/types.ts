@@ -34,6 +34,7 @@ export interface ServerVersion {
   gitCommit?: string;
   javaMinimum?: number;
   inlineLoadEnabled: boolean;
+  loadSchedulingEnabled?: boolean;
 }
 
 export interface PackageSummary {
@@ -73,4 +74,5 @@ export type AsyncState<T> =
 export interface ServerCapabilities {
   apiVersion: string | null;
   inlineLoadEnabled: boolean;
+  loadSchedulingEnabled: boolean;
 }
