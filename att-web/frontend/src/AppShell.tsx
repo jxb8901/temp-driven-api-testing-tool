@@ -3,6 +3,8 @@ import type { AsyncState, ServerVersion } from './types';
 import type { AppRoute, RouteState } from './router';
 import { NavigationGuardContext } from './router';
 
+export type ThemePreference = 'system' | 'light' | 'dark';
+
 export interface AppShellProps {
   route: AppRoute;
   navigation: RouteState;
@@ -19,8 +21,10 @@ export interface AppShellProps {
 export interface AppShellContextValue {
   selectedPackage: string;
   selectedEnvironment: string;
+  themePreference: ThemePreference;
   onPackageChange(packageId: string): void;
   onEnvironmentChange(environment: string): void;
+  onThemePreferenceChange(preference: ThemePreference): void;
   onJobAccepted(job: { jobId: string; packageId?: string }): void;
 }
 
@@ -45,6 +49,7 @@ function routeTitle(route: AppRoute): string {
   if (route.kind === 'jobs') return route.jobId ? 'Job ' + route.jobId : 'Jobs and results';
   if (route.kind === 'load') return route.packageId ? 'Advanced Load' : 'Load testing';
   if (route.kind === 'schedules') return 'Scheduled Load';
+  if (route.kind === 'settings') return 'Settings';
   return 'Dashboard';
 }
 
@@ -54,6 +59,7 @@ function activeNavigation(route: AppRoute): string {
   if (route.kind === 'jobs') return 'jobs';
   if (route.kind === 'load') return 'load-testing';
   if (route.kind === 'schedules') return 'scheduled-load';
+  if (route.kind === 'settings') return 'settings';
   return 'dashboard';
 }
 
@@ -76,6 +82,7 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, onClos
     { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
     { label: 'Jobs and results', description: 'Inspect recent jobs', route: { kind: 'jobs' } },
     ...(showScheduledLoad ? [{ label: 'Scheduled Load', description: 'Manage recurring Load schedules', route: { kind: 'schedules' } as AppRoute }] : []),
+    { label: 'Settings', description: 'Appearance and keyboard help', route: { kind: 'settings' } },
   ];
   const matches = commands.filter(command => `${command.label} ${command.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
 
@@ -178,9 +185,13 @@ export function AppShell({
       return 'light';
     }
   });
-  const [themeOverridden, setThemeOverridden] = useState(() => {
-    try { return localStorage.getItem('att-ui-theme') === 'dark' || localStorage.getItem('att-ui-theme') === 'light'; }
-    catch { return false; }
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
+    try {
+      const saved = localStorage.getItem('att-ui-theme');
+      return saved === 'dark' || saved === 'light' ? saved : 'system';
+    } catch {
+      return 'system';
+    }
   });
   const [collapsed, setCollapsed] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
@@ -208,7 +219,7 @@ export function AppShell({
 
   useEffect(() => {
     const media = window.matchMedia?.('(prefers-color-scheme: dark)');
-    if (!media || themeOverridden) return;
+    if (!media || themePreference !== 'system') return;
     const update = () => setTheme(media.matches ? 'dark' : 'light');
     update();
     media.addEventListener?.('change', update);
@@ -217,7 +228,7 @@ export function AppShell({
       media.removeEventListener?.('change', update);
       if (!media.removeEventListener) media.removeListener?.(update);
     };
-  }, [themeOverridden]);
+  }, [themePreference]);
 
   useEffect(() => {
     const media = window.matchMedia?.('(max-width: 820px)');
@@ -278,15 +289,21 @@ export function AppShell({
   });
   const packageHref = selectedPackage ? '#/packages/' + encodeURIComponent(selectedPackage) : '#/packages';
   const loadHref = selectedPackage ? '#/advanced-load/' + encodeURIComponent(selectedPackage) : '#/advanced-load';
-  const changeTheme = () => {
-    setTheme(value => value === 'dark' ? 'light' : 'dark');
-    setThemeOverridden(true);
-    try { localStorage.setItem('att-ui-theme', theme === 'dark' ? 'light' : 'dark'); } catch { /* Storage can be unavailable in private browsing. */ }
+  const changeThemePreference = (preference: ThemePreference) => {
+    setThemePreference(preference);
+    if (preference === 'system') {
+      try { localStorage.removeItem('att-ui-theme'); } catch { /* Storage can be unavailable in private browsing. */ }
+      setTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      return;
+    }
+    setTheme(preference);
+    try { localStorage.setItem('att-ui-theme', preference); } catch { /* Storage can be unavailable in private browsing. */ }
   };
+  const changeTheme = () => changeThemePreference(theme === 'dark' ? 'light' : 'dark');
 
   return (
     <NavigationGuardContext.Provider value={navigation}>
-      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, onPackageChange, onEnvironmentChange, onJobAccepted }}>
+      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onJobAccepted }}>
       <div className={'app-layout' + (collapsed ? ' is-collapsed' : '') + (mobileNavigationOpen ? ' mobile-nav-open' : '')} data-page={currentPage}>
         <a className="skip-link" href="#main-content">Skip to main content</a>
         <button className="sidebar-backdrop" type="button" aria-label="Close navigation" aria-hidden={!mobileNavigationOpen} onClick={() => setMobileNavigationOpen(false)} tabIndex={-1} />
@@ -321,6 +338,9 @@ export function AppShell({
             {showScheduledLoad && <a className="nav-link" href="#/load-schedules" data-nav="scheduled-load" aria-current={activeNav === 'scheduled-load' ? 'page' : undefined} onClick={link('#/load-schedules')}>
               <span className="nav-icon" aria-hidden="true">◷</span><span className="nav-label">Scheduled Load</span>
             </a>}
+            <a className="nav-link" href="#/settings" data-nav="settings" aria-current={activeNav === 'settings' ? 'page' : undefined} onClick={link('#/settings')}>
+              <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span>
+            </a>
           </nav>
           <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.1.3'}</span></div>
         </aside>
@@ -362,6 +382,7 @@ export function AppShell({
                   {route.jobId && <Breadcrumb label={'Job ' + route.jobId} navigate={navigate} />}
                 </>}
                 {route.kind === 'schedules' && <Breadcrumb label="Scheduled Load" navigate={navigate} />}
+                {route.kind === 'settings' && <Breadcrumb label="Settings" navigate={navigate} />}
               </ol>
             </nav>
             <div className="context-toolbar" role="group" aria-label="Workspace context and actions">

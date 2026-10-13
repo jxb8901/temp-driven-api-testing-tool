@@ -16,9 +16,12 @@ from urllib.parse import parse_qs, unquote, urlsplit
 REPOSITORY = Path(__file__).resolve().parents[2]
 BUILT_UI_ROOT = REPOSITORY / "att-web/target/classes/META-INF/resources/ui"
 BUILT_FRONTEND_ROOT = REPOSITORY / "att-web/frontend/dist"
-UI_ROOT = BUILT_UI_ROOT if (BUILT_UI_ROOT / "index.html").is_file() else (
-    BUILT_FRONTEND_ROOT if (BUILT_FRONTEND_ROOT / "index.html").is_file()
-    else REPOSITORY / "att-web/src/main/resources/META-INF/resources/ui"
+OVERRIDE_UI_ROOT = os.environ.get("ATT_UI_DIST")
+UI_ROOT = Path(OVERRIDE_UI_ROOT).expanduser().resolve() if OVERRIDE_UI_ROOT else (
+    BUILT_UI_ROOT if (BUILT_UI_ROOT / "index.html").is_file() else (
+        BUILT_FRONTEND_ROOT if (BUILT_FRONTEND_ROOT / "index.html").is_file()
+        else REPOSITORY / "att-web/src/main/resources/META-INF/resources/ui"
+    )
 )
 PACKAGES = [
     {"packageId": "payments"},

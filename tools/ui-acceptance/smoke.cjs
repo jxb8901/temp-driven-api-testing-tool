@@ -25,13 +25,30 @@ async function main() {
       ['#/packages', 'Packages', 'packages'],
       ['#/jobs', 'Jobs', 'jobs'],
       ['#/advanced-load', 'Load testing', 'load-testing'],
+      ['#/settings', 'Settings', 'settings'],
     ]) {
       await page.goto(`${base}${route}`);
-      if (route === '#/jobs') await page.getByRole('heading', { name: title, exact: true }).waitFor();
+      if (route === '#/jobs' || route === '#/settings') await page.getByRole('heading', { name: title, exact: true }).waitFor();
       else await page.locator('#home-title').getByText(title, { exact: true }).waitFor();
       assert.equal(await page.locator(`[data-nav="${activeNav}"]`).getAttribute('aria-current'), 'page');
       assert.equal(await page.locator('#breadcrumbs [aria-current="page"]').count(), 1);
     }
+
+    await page.getByRole('radio', { name: /Dark/ }).check();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark', 'Settings should apply the selected theme');
+    await page.reload();
+    await page.getByRole('heading', { name: 'Settings', exact: true }).waitFor();
+    assert.equal(await page.getByRole('radio', { name: /Dark/ }).isChecked(), true, 'an explicit theme preference should persist in this browser');
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+    await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+    const settingsAudit = await page.evaluate(async () => window.axe.run(document, {
+      runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+    }));
+    assert.deepEqual(settingsAudit.violations.map(({ id, impact, nodes }) => ({
+      id, impact, selectors: nodes.map(node => node.target),
+    })), [], 'Settings should pass the configured WCAG accessibility rules');
+    await page.getByRole('radio', { name: /System/ }).check();
+    assert.equal(await page.evaluate(() => localStorage.getItem('att-ui-theme')), null, 'System should remove the explicit browser override');
 
     for (const [scenario, headers] of [
       ['authenticated', { Authorization: 'Basic YXR0LWZpeHR1cmU6cGFzcw==' }],

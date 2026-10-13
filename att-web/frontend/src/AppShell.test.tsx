@@ -50,6 +50,7 @@ describe('AppShell', () => {
 
     expect(host.querySelector('nav[aria-label="Primary navigation"]')).not.toBeNull();
     expect(host.querySelector('[data-nav="explorer"]')?.getAttribute('aria-current')).toBe('page');
+    expect(host.querySelector('[data-nav="settings"]')).not.toBeNull();
     expect(host.textContent).toContain('Server managed');
     expect(host.textContent).toContain('not exposed by API');
     expect(host.textContent).toContain('payments');

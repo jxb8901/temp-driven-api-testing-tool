@@ -11,7 +11,8 @@ export type AppRoute =
   | { kind: 'package'; packageId: string; resource?: ResourceRoute }
   | { kind: 'jobs'; jobId?: string }
   | { kind: 'load'; packageId?: string }
-  | { kind: 'schedules' };
+  | { kind: 'schedules' }
+  | { kind: 'settings' };
 
 export function parseRoute(hash: string): AppRoute {
   let parts: string[];
@@ -31,6 +32,7 @@ export function parseRoute(hash: string): AppRoute {
   if (parts[0] === 'jobs') return parts[1] ? { kind: 'jobs', jobId: parts[1] } : { kind: 'jobs' };
   if (parts[0] === 'advanced-load') return parts[1] ? { kind: 'load', packageId: parts[1] } : { kind: 'load' };
   if (parts[0] === 'load-schedules' || parts[0] === 'scheduled-load') return { kind: 'schedules' };
+  if (parts[0] === 'settings' && parts.length === 1) return { kind: 'settings' };
   return { kind: 'dashboard' };
 }
 
@@ -47,6 +49,7 @@ export function formatRoute(route: AppRoute): string {
     case 'jobs': return route.jobId ? '#/jobs/' + encodeURIComponent(route.jobId) : '#/jobs';
     case 'load': return route.packageId ? '#/advanced-load/' + encodeURIComponent(route.packageId) : '#/advanced-load';
     case 'schedules': return '#/load-schedules';
+    case 'settings': return '#/settings';
   }
 }
 

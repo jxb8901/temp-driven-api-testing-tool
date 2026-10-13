@@ -10,6 +10,7 @@ import type { ExplorerPageProps } from './features/explorer/types';
 import { LoadPage } from './features/load/LoadPage';
 import { JobsPage } from './features/load/JobsPage';
 import type { LoadJobsApi, PackageOption } from './features/load/types';
+import { SettingsPage } from './SettingsPage';
 
 const ScheduledLoadPage = lazy(() => import('./features/schedules/ScheduledLoadPage').then(module => ({ default: module.ScheduledLoadPage })));
 
@@ -185,6 +186,8 @@ export default function App() {
         onOpenJob={onJobChange}
       />
     </Suspense>;
+  } else if (navigation.route.kind === 'settings') {
+    content = <SettingsPage />;
   } else if (navigation.route.kind === 'package') {
     content = <ExplorerRouteView
       packageId={navigation.route.packageId}

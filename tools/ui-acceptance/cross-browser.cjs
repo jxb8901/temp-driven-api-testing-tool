@@ -2,8 +2,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { chromium, firefox, webkit, launchBrowser, selectFixture, startFixture, stopFixture } = require('./browser-support.cjs');
+const { comparePng } = require('./png-compare.cjs');
 
 const outputDirectory = path.join(__dirname, 'artifacts', 'scheduled-load');
+const visualBaselineDirectory = path.join(__dirname, 'visual-baselines', 'scheduled-load');
+const updateVisualBaselines = process.env.ATT_UI_UPDATE_VISUAL_BASELINES === '1';
+const visualDifferenceLimit = 0.04;
 
 async function assertAxe(page, engine, theme, width) {
   await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
@@ -71,7 +75,19 @@ async function main() {
             }
             assert.deepEqual(pageErrors, [], `${engineName} should not report browser errors`);
             const file = `${engineName}-scheduled-${width}-${theme}.png`;
-            await page.screenshot({ path: path.join(outputDirectory, file), animations: 'disabled' });
+            const screenshot = await page.screenshot({ path: path.join(outputDirectory, file), animations: 'disabled' });
+            const baselinePath = path.join(visualBaselineDirectory, file);
+            if (updateVisualBaselines) {
+              await fs.mkdir(visualBaselineDirectory, { recursive: true });
+              await fs.writeFile(baselinePath, screenshot);
+            } else {
+              const baseline = await fs.readFile(baselinePath);
+              const comparison = comparePng(baseline, screenshot);
+              assert.ok(comparison.changedRatio <= visualDifferenceLimit,
+                `${file} changed ${comparison.changedPixels}/${comparison.width * comparison.height} pixels ` +
+                `(${(comparison.changedRatio * 100).toFixed(2)}%; limit ${(visualDifferenceLimit * 100).toFixed(0)}%). ` +
+                'Review the capture and update ATT_UI_UPDATE_VISUAL_BASELINES only for an intentional UI change.');
+            }
             manifest.push({ browser: engineName, version: browser.version(), width, height: 900, theme, route: '#/load-schedules', file });
             await context.close();
           }
@@ -83,6 +99,13 @@ async function main() {
     await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
       repositoryVersion: '4.1.3', generatedAt: new Date().toISOString(), captures: manifest,
     }, null, 2)}\n`);
+    if (updateVisualBaselines) {
+      await fs.writeFile(path.join(visualBaselineDirectory, 'manifest.json'), `${JSON.stringify({
+        repositoryVersion: '4.1.3', generatedAt: new Date().toISOString(), platform: process.platform,
+        architecture: process.arch,
+        maxChangedPixelRatio: visualDifferenceLimit, channelTolerance: 32, captures: manifest,
+      }, null, 2)}\n`);
+    }
     console.log(`Scheduled Load cross-browser checks passed; captured ${manifest.length} screenshots.`);
   } finally {
     await stopFixture(fixture);

@@ -25,6 +25,8 @@ npm run smoke
 
 The script covers static resources below the non-root `/att/` context, loaded/empty/error/loading dashboard states, the package/jobs/load route aliases, selected navigation and breadcrumb state, skip-link keyboard behavior, uncaught browser errors, and axe-core WCAG 2.0/2.1/2.2 A/AA rules. It reports selectors for any axe violations.
 
+The fixture prefers the packaged Maven UI, then `att-web/frontend/dist`. Set `ATT_UI_DIST` to a built Vite output directory to test a build stored outside the repository worktree.
+
 Run the Scheduled Load workflow and accessibility check with:
 
 ```sh
@@ -39,7 +41,9 @@ Run the cross-browser responsive and screenshot check with:
 npm run smoke:cross-browser
 ```
 
-It exercises Chromium, Firefox, and WebKit at 1280, 768, and 390 pixels in light and dark themes, checks horizontal overflow and the tablet/phone schedule cards, runs axe at desktop width, and captures per-browser screenshots under `tools/ui-acceptance/artifacts/scheduled-load/`. CI uploads those generated screenshots for review; they are not committed baselines.
+It exercises Chromium, Firefox, and WebKit at 1280, 768, and 390 pixels in light and dark themes, checks horizontal overflow and the tablet/phone schedule cards, runs axe at every viewport, and compares each capture with its committed browser/viewport/theme baseline. CI also uploads the generated screenshots under `tools/ui-acceptance/artifacts/scheduled-load/` for review. The comparison ignores per-channel pixel differences up to 32 and allows up to 4% of pixels to differ for browser rendering variation.
+
+After an intentional Scheduled Load visual change, inspect the generated captures and update the 18 baselines with `ATT_UI_UPDATE_VISUAL_BASELINES=1 npm run smoke:cross-browser`. Review the resulting PNGs and manifest before committing `tools/ui-acceptance/visual-baselines/scheduled-load/`.
 
 Run the screenshot capture separately:
 

@@ -25,7 +25,7 @@ This annotated wireframe describes the 4.1.3 Phase 1 shell and dashboard. It is 
 |---|---|
 | A | Home link and sidebar collapse control. The sidebar keeps its state on this browser. |
 | B | Server connection status and a persistent system/light/dark theme control. The identity chip says that the current principal is not exposed by the API. |
-| C | Stable links for implemented dashboard, package, explorer/run, Load, and job routes. |
+| C | Stable links for implemented dashboard, package, explorer/run, Load, job, Scheduled Load, and Settings routes. |
 | D–F | Summary cards use configured package count, active statuses in returned job rows, latest returned job, and the API version check. |
 | G | Configured package list with direct explorer and Advanced Load actions. |
 | H | Searchable latest-job table; each status has a readable label as well as color. |
