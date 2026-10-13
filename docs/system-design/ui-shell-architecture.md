@@ -1,7 +1,9 @@
 # ATT Web UI shell architecture decision
 
-**Status:** Accepted for ATT 4.1.3 Phase 1  
-**Date:** 2026-10-13  
+**Status:** Accepted for ATT 4.1.3 Phase 1
+
+**Date:** 2026-10-13
+
 **Scope:** The static UI under `att-web` and its delivery in the existing Server WAR.
 
 ## Decision
