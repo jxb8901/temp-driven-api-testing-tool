@@ -130,4 +130,16 @@ describe('JobsPage React feature', () => {
     expect(host.textContent).toContain('at most 100 jobs');
     expect(listJobs).toHaveBeenCalledTimes(2);
   });
+
+  it('shows an explicit unavailable state instead of inventing Load metrics or charts', async () => {
+    const api = makeApi({ getJobResult: vi.fn(async () => ({ job: sampleJob, result: { status: 'PASS' } })) });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await click(host.querySelector('#job-tab-metrics')!);
+
+    const panel = host.querySelector('#job-panel-metrics')!;
+    expect(panel.textContent).toContain('No Load metrics summary was returned. No chart or derived metric is shown.');
+    expect(panel.querySelector('[aria-label="Returned Load time-series buckets"]')).toBeNull();
+    expect(panel.querySelector('canvas, svg')).toBeNull();
+  });
 });

@@ -212,6 +212,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const [advanced, setAdvanced] = useState({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '' });
   const [draft, setDraft] = useState<import('./types').LoadDraftResponse | null>(null);
   const [draftState, setDraftState] = useState<'idle' | 'validating' | 'valid' | 'error' | 'submitting'>('idle');
+  const [confirmationPending, setConfirmationPending] = useState(false);
   const [draftMessage, setDraftMessage] = useState('Validate to review the Server-normalized scenario.');
   const [diagnostics, setDiagnostics] = useState<ServerDiagnostic[]>([]);
   const [requestError, setRequestError] = useState('');
@@ -336,11 +337,23 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     if (Date.parse(draft.expiresAt) <= Date.now()) {
       setDraft(null); setDraftState('error'); setDraftMessage('This validated draft expired. Validate the scenario again.'); return;
     }
-    const accepted = await (confirmStart || (message => window.confirm(message)))(
-      `Start ${model === 'arrivalRate' ? 'Arrival Rate' : 'Virtual Users'} Load with ${workloads.length} workload${workloads.length === 1 ? '' : 's'} for ${packageName}?`,
-    );
-    if (!accepted) return;
     submitLock.current = true;
+    setConfirmationPending(true);
+    let accepted: boolean;
+    try {
+      accepted = await (confirmStart || (message => window.confirm(message)))(
+        `Start ${model === 'arrivalRate' ? 'Arrival Rate' : 'Virtual Users'} Load with ${workloads.length} workload${workloads.length === 1 ? '' : 's'} for ${packageName}?`,
+      );
+    } catch (error) {
+      submitLock.current = false;
+      setDraftMessage(error instanceof Error ? error.message : 'Load start confirmation failed.');
+      setRequestError(error instanceof Error ? error.message : 'Load start confirmation failed.');
+      setDraftState('error');
+      setConfirmationPending(false);
+      return;
+    }
+    setConfirmationPending(false);
+    if (!accepted) { submitLock.current = false; return; }
     setDraftState('submitting');
     setDraftMessage('Submitting the Server-validated Load draft…');
     try {
@@ -491,8 +504,8 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
           <button type="button" onClick={() => void validateScenario()} disabled={!policy || !inlineLoadEnabled || draftState === 'validating' || draftState === 'submitting'}>Validate scenario</button>
           <button type="button" onClick={() => void copyYaml()} disabled={!draft?.previewYaml || Boolean(draft.redacted)}>Copy YAML</button>
           <button type="button" onClick={exportYaml} disabled={!draft?.previewYaml || Boolean(draft.redacted)}>Export YAML</button>
-          <button type="button" className="att-primary-action" onClick={() => void startLoad()} disabled={!hasLiveDraft || draftState === 'submitting' || !inlineLoadEnabled}>
-            {draftState === 'submitting' ? 'Starting…' : 'Review and start Load'}
+          <button type="button" className="att-primary-action" onClick={() => void startLoad()} disabled={!hasLiveDraft || draftState === 'submitting' || confirmationPending || !inlineLoadEnabled}>
+            {confirmationPending ? 'Waiting for confirmation…' : draftState === 'submitting' ? 'Starting…' : 'Review and start Load'}
           </button>
         </div>
       </section>

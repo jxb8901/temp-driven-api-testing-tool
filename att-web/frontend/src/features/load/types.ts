@@ -84,13 +84,21 @@ export interface JobSummary {
 
 export interface JobView extends JobSummary {
   performance?: {
-    timings?: Record<string, number>;
-    worker?: Record<string, number>;
+    timings?: Record<string, unknown>;
+    worker?: Record<string, unknown>;
   };
 }
 
+export interface JobResultSummary {
+  jobId: string;
+  command?: string;
+  packageId?: string;
+  status?: JobStatus;
+  exitCode?: number | null;
+}
+
 export interface JobResultResponse {
-  job: JobView;
+  job: JobResultSummary;
   result: Record<string, unknown> | null;
   diagnostic?: Record<string, unknown> | null;
 }

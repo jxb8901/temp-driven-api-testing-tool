@@ -54,6 +54,7 @@ describe('LoadPage React feature', () => {
   it('uses section navigation, typed workload controls, and typed sidecar fields before Server validation', async () => {
     const api = makeApi();
     const onJobAccepted = vi.fn();
+    const confirmStart = vi.fn(() => true);
     await act(async () => root.render(<LoadPage
       api={api}
       packages={[{ packageId: 'payments', displayName: 'Payments' }]}
@@ -64,7 +65,7 @@ describe('LoadPage React feature', () => {
       onPackageChange={vi.fn()}
       onEnvironmentChange={vi.fn()}
       onJobAccepted={onJobAccepted}
-      confirmStart={() => true}
+      confirmStart={confirmStart}
     />));
     await flush();
 
@@ -121,5 +122,16 @@ describe('LoadPage React feature', () => {
     expect(scenario.workloads[0].target.id).toBe('Payments.create');
     expect(scenario.workloads[0].inputs.accountId).toBe('acct-1');
     expect(scenario.workloads[0].vars.token).toEqual({ $attDebugKeepDefault: 'hidden' });
+
+    const start = [...host.querySelectorAll('button')].find(button => button.textContent === 'Review and start Load');
+    expect(start).toBeDefined();
+    await act(async () => {
+      start!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      start!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    expect(confirmStart).toHaveBeenCalledTimes(1);
+    expect(api.submitLoadDraft).toHaveBeenCalledTimes(1);
+    expect(onJobAccepted).toHaveBeenCalledWith('JOB-LOAD');
   });
 });
