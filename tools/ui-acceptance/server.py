@@ -295,7 +295,13 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(200, job)
                     return
                 if parts[2] == "result":
-                    self._json(200, {"job": LOAD_JOB, "result": {"status": "PASS", "metrics": {"completedThroughput": 120, "p95Ms": 85, "buckets": [{"second": 1, "requests": 120}]}}, "diagnostic": None})
+                    self._json(200, {"job": LOAD_JOB, "result": {"status": "PASS", "metrics": {
+                        "completedThroughput": 120, "p95Ms": 85,
+                        "buckets": {
+                            "1791885002000": {"bucketStartEpochMs": 1791885002000, "bucketStart": "2026-10-13T09:50:02Z", "completedTps": 120, "p95Ms": 85, "p99Ms": 110},
+                            "1791885001000": {"bucketStartEpochMs": 1791885001000, "bucketStart": "2026-10-13T09:50:01Z", "completedTps": 96, "p95Ms": 74, "p99Ms": 99},
+                        },
+                    }}, "diagnostic": None})
                     return
                 if parts[2] == "artifacts" and len(parts) == 3:
                     self._json(200, {"items": [{"path": "load-summary.json", "size": 512}]})

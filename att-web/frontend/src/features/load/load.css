@@ -193,6 +193,14 @@
 .att-metric-section { margin-block: var(--att-space-3, .75rem); padding: var(--att-space-3, .75rem); }
 .att-metric-section h3 { margin-top: 0; }
 .att-metric-section th[scope="row"] { font-weight: 600; }
+.att-metric-chart { min-width: 0; margin: var(--att-space-3, .75rem) 0; padding: var(--att-space-3, .75rem); border: 1px solid var(--att-color-border, #dce2ec); border-radius: var(--att-radius-control, .55rem); background: var(--att-color-surface, #fff); }
+.att-metric-chart h3 { margin: 0; }
+.att-metric-chart figcaption p { margin-block: var(--att-space-1, .25rem); color: var(--att-color-muted, #637087); font-size: .9rem; }
+.att-metric-chart-svg { display: block; width: 100%; height: auto; overflow: visible; color: var(--att-color-primary, #3157c8); }
+.att-metric-chart-grid line { stroke: var(--att-color-border, #dce2ec); stroke-dasharray: 3 4; }
+.att-metric-chart-grid text, .att-metric-chart-time { fill: var(--att-color-muted, #637087); font: 12px system-ui, sans-serif; }
+.att-metric-chart-axis { stroke: var(--att-color-muted, #637087); stroke-width: 1; }
+.att-metric-chart-line { fill: none; stroke: var(--att-color-primary, #3157c8); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 
 @media (max-width: 42rem) {
   .att-feature-header { align-items: flex-start; }

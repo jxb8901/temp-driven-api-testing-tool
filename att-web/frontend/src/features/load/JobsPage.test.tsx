@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobsPage } from './JobsPage';
-import type { JobEventHandlers, JobResultResponse, JobSummary, JobView, LoadJobsApi } from './types';
+import type { JobEventHandlers, JobResultResponse, JobStatus, JobSummary, JobView, LoadJobsApi } from './types';
 
 const sampleJob: JobView = {
   jobId: 'JOB-204', command: 'load', packageId: 'payments', principal: 'qa', status: 'RUNNING',
@@ -11,9 +11,14 @@ const sampleJob: JobView = {
   performance: { timings: { apiMs: 12 }, worker: { heapUsedBytes: 512 } },
 };
 
+const earlyBucket = Date.parse('2026-10-13T09:42:01.000Z');
+const lateBucket = Date.parse('2026-10-13T09:42:02.000Z');
 const sampleResult: JobResultResponse = {
   job: sampleJob,
-  result: { status: 'PASS', metrics: { completedThroughput: 4.25, p95Ms: 81, buckets: [{ elapsedSeconds: 1, completed: 4 }] } },
+  result: { status: 'PASS', metrics: { completedThroughput: 4.25, p95Ms: 81, buckets: {
+    [String(lateBucket)]: { bucketStartEpochMs: lateBucket, bucketStart: new Date(lateBucket).toISOString(), completedTps: 5, p95Ms: 81, p99Ms: 98 },
+    [String(earlyBucket)]: { bucketStartEpochMs: earlyBucket, bucketStart: new Date(earlyBucket).toISOString(), completedTps: 4, p95Ms: 72, p99Ms: 91 },
+  } } },
 };
 
 function deferred<T>() {
@@ -78,7 +83,13 @@ describe('JobsPage React feature', () => {
     expect(host.querySelector('#job-panel-overview')?.textContent).toContain('RUNNING');
     expect(host.querySelector('#job-panel-results')?.textContent).toContain('Raw result payload');
     expect(host.querySelector('#job-panel-artifacts')?.textContent).toContain('load-summary.json');
-    expect(host.querySelector('#job-panel-metrics')?.textContent).toContain('p95Ms');
+    const metricsPanel = host.querySelector('#job-panel-metrics')!;
+    expect(metricsPanel.textContent).toContain('p95Ms');
+    expect(metricsPanel.querySelectorAll('svg[role="img"]')).toHaveLength(3);
+    expect(metricsPanel.querySelector('svg[aria-label*="Completed throughput"]')?.textContent).toContain('Completed throughput by bucket start time');
+    const bucketTimes = [...metricsPanel.querySelectorAll('[aria-label="Returned Load time-series buckets"] tbody time')]
+      .map(time => time.getAttribute('datetime'));
+    expect(bucketTimes).toEqual([new Date(earlyBucket).toISOString(), new Date(lateBucket).toISOString()]);
 
     const subscribe = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
     expect(subscribe).toBeDefined();
@@ -131,6 +142,25 @@ describe('JobsPage React feature', () => {
     expect(host.textContent).not.toContain('JOB-NEW');
     expect(host.textContent).toContain('at most 100 jobs');
     expect(listJobs).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not overwrite a terminal SSE event with a delayed cancel response', async () => {
+    const cancellation = deferred<{ jobId: string; status: JobStatus }>();
+    const cancelJob = vi.fn<LoadJobsApi['cancelJob']>(() => cancellation.promise);
+    const api = makeApi({ cancelJob });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    await click(host.querySelector('.att-job-actions button.att-button-danger')!);
+    await act(async () => { await Promise.resolve(); });
+    expect(cancelJob).toHaveBeenCalledOnce();
+
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
+    await act(async () => handlers?.onEvent({ id: 'evt-terminal', type: 'status', data: { status: 'CANCELLED' } }));
+    expect(host.querySelector('.att-job-actions')?.textContent).toContain('CANCELLED');
+
+    await act(async () => cancellation.resolve({ jobId: sampleJob.jobId, status: 'CANCEL_REQUESTED' }));
+    expect(host.querySelector('.att-job-actions')?.textContent).toContain('CANCELLED');
   });
 
   it('shows an explicit unavailable state instead of inventing Load metrics or charts', async () => {
