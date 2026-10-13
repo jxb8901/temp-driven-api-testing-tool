@@ -29,7 +29,7 @@ servers:
 
 `--server` 可選擇 profile 或直接接受 HTTP(S) base URL。`ATT_SERVER` 同樣接受 profile 名稱或 URL。選擇優先次序為明確指定的 `--server`、`ATT_SERVER`、YAML `default` profile。直接選擇 URL 時不會沿用其他 profile 的 credentials，並會保留 context path。URL validation 會拒絕 embedded credentials、query、fragment 及不支援的 scheme。
 
-Profile 預設使用 `auth.type: auto`。每項命令開始前，ATT Remote 會呼叫受保護且唯讀的 `GET /packages`；公開的 `/version` 或 `/health` 不會用來判斷 authentication mode。若匿名存取成功，便不會傳送 credentials。若 Server 回覆 HTTP Basic challenge，ATT Remote 會使用所選 profile 的 credentials，或安全地提示輸入。使用 `auth.type: basic` 會預先傳送 profile credentials；使用 `auth.type: none` 或 `--no-auth` 則不傳送 credentials。Basic authentication 必須使用 HTTPS，並維持 JVM 的 TLS certificate 及 hostname 檢查。
+Profile 預設使用 `auth.type: auto`。Run、Debug、Load、Validate 或 cancel 等改變狀態的命令執行前，ATT Remote 會呼叫受保護且唯讀的 `GET /packages`，先取得 credentials 再提交狀態變更請求。唯讀命令會在自身的 `GET` 遇到 Basic challenge 時處理；`ping` 和 `version` 不依賴 package list 存取。此 probe 假設 package list 與狀態變更 API 使用相同的驗證邊界。若 `/packages` 公開但狀態變更操作仍要求驗證，請為該 profile 設定 `auth.type: basic`。若匿名存取成功，ATT Remote 不會傳送 credentials。若受保護的 `GET` 回覆 HTTP Basic challenge，ATT Remote 會使用所選 profile 的 credentials，或安全地提示輸入。使用 `auth.type: basic` 會預先傳送 profile credentials；使用 `auth.type: none` 或 `--no-auth` 則不傳送 credentials。Basic authentication（包括直接 URL 輸入的 credentials）必須使用 HTTPS，並維持 JVM 的 TLS certificate 及 hostname 檢查。
 
 Auto mode 可在之後受保護的 `GET` endpoint 遇到 Basic challenge 時處理並沿用 credentials。遇到 challenge 後不會重試 `POST` 或 `DELETE`；submission 被拒絕後，請先檢查 job list，再決定是否重試。ATT Remote 不會跟隨 redirect，避免將 credentials 傳給 redirect target 或降級至 HTTP。FORM/OIDC challenge 不受支援；請使用 Tomcat BASIC-protected endpoint。Server 必須宣告 API version `1`。
 

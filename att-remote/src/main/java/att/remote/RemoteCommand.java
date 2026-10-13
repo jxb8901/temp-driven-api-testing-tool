@@ -26,28 +26,31 @@ import java.util.Map;
 public final class RemoteCommand {
     private RemoteCommand() { }
     public static int run(String[] args) {
+        return run(args,System.getenv(),ServerProfileLoader.profilePath(),systemConsolePrompt(),
+                (profile,password,username,provider)->new RemoteHttpClient(profile,password,username,provider));
+    }
+    static int run(String[] args,Map<String,String> environment,Path profilePath,CredentialPrompt prompt,RemoteClientFactory clientFactory) {
         String format="human";
         try {
             RemoteOptions options=RemoteOptions.parse(args);format=options.format;
             if(options.command.isEmpty()||"help".equals(options.command.get(0))){help();return 0;}
-            ServerProfile profile=ServerProfileLoader.resolve(options.server,System.getenv("ATT_SERVER"),ServerProfileLoader.profilePath(),options.noAuth);
+            List<String> command=options.command;String op=command.get(0);
+            ServerProfile profile=ServerProfileLoader.resolve(options.server,environment.get("ATT_SERVER"),profilePath,options.noAuth);
             RemoteHttpClient client;
             if(profile.basicAuth) {
-                Credentials credentials=password(profile);
-                client=new RemoteHttpClient(profile,credentials.password,credentials.username);
+                Credentials credentials=password(profile,environment,prompt);
+                client=clientFactory.create(profile,credentials.password,credentials.username,null);
             } else if(profile.autoAuth) {
-                client=new RemoteHttpClient(profile,null,profile.username,()->{
-                    Credentials credentials=password(profile);
+                client=clientFactory.create(profile,null,profile.username,()->{
+                    Credentials credentials=password(profile,environment,prompt);
                     return new RemoteHttpClient.Credentials(credentials.username,credentials.password);
                 });
-                // /version and /health may be public; probe a protected, side-effect-free API before selecting auth.
-                client.get("/packages");
+                if(requiresCredentialPreflight(op)) client.get("/packages");
             } else {
-                client=new RemoteHttpClient(profile,null,null);
+                client=clientFactory.create(profile,null,null,null);
             }
             JsonNode version=client.get("/version");
             if(!version.path("apiVersion").isTextual()||!ServerApi.VERSION.equals(version.path("apiVersion").asText()))throw new RemoteException("ATT Server API is missing or unsupported; client supports API v"+ServerApi.VERSION);
-            List<String> command=options.command;String op=command.get(0);
             if("ping".equals(op)){JsonNode health=client.get("/health");if("json".equals(format))System.out.println(health.toString());else System.out.println("ATT Server "+profile.url+": "+health.path("status").asText("UNKNOWN"));return 0;}
             if("version".equals(op)){if("json".equals(format))System.out.println(version.toString());else System.out.println("ATT Server "+version.path("version").asText("unknown")+" (API v"+version.path("apiVersion").asText()+")");return 0;}
             if("packages".equals(op))return packages(client,command,format);
@@ -195,19 +198,29 @@ public final class RemoteCommand {
         if(!listed)throw new RemoteException("Artifact name is not present in the Server's logical artifact list");
         Path saved=ArtifactDownloader.download(c,id,name,Paths.get(a.get(4)));System.out.println("Downloaded: "+saved);return 0;
     }
-    private static Credentials password(ServerProfile profile)throws RemoteException {
-        if(!profile.basicAuth)return new Credentials(profile.username,null);
+    private static Credentials password(ServerProfile profile,Map<String,String> environment,CredentialPrompt console)throws RemoteException {
         String username=profile.username;
-        String password=profile.passwordEnv==null?null:System.getenv(profile.passwordEnv);
-        Console console=System.console();
+        String password=profile.passwordEnv==null?null:environment.get(profile.passwordEnv);
         if(username==null&&console!=null)username=console.readLine("Username: ");
-        if(password==null){if(console==null)throw new RemoteException("No password secret is configured and no secure terminal is available; set passwordEnv in the Server profile");char[] secret=console.readPassword("Password: ");if(secret==null)throw new RemoteException("Password was not provided");password=new String(secret);java.util.Arrays.fill(secret,'\0');}
+        if(password==null){if(console==null)throw new RemoteException("No password secret is configured and no secure terminal is available; use a named profile with passwordEnv or run ATT Remote in a secure terminal");char[] secret=console.readPassword("Password: ");if(secret==null)throw new RemoteException("Password was not provided");password=new String(secret);java.util.Arrays.fill(secret,'\0');}
         if(username==null||username.trim().isEmpty())throw new RemoteException("Basic authentication username is missing");
         if(username.indexOf(':')>=0||username.indexOf('\n')>=0||username.indexOf('\r')>=0||password.isEmpty())throw new RemoteException("Basic authentication credentials are invalid");
         // Http Basic's user:password tuple is passed only in memory to the transport.
         return new Credentials(username,password);
     }
+    private static CredentialPrompt systemConsolePrompt() {
+        Console console=System.console();if(console==null)return null;
+        return new CredentialPrompt() {
+            @Override public String readLine(String prompt){return console.readLine(prompt);}
+            @Override public char[] readPassword(String prompt){return console.readPassword(prompt);}
+        };
+    }
+    private static boolean requiresCredentialPreflight(String operation) {
+        return "run".equals(operation)||"debug".equals(operation)||"load".equals(operation)||"validate".equals(operation)||"cancel".equals(operation);
+    }
     private static final class Credentials { final String username,password; Credentials(String username,String password){this.username=username;this.password=password;} }
+    interface CredentialPrompt { String readLine(String prompt); char[] readPassword(String prompt); }
+    interface RemoteClientFactory { RemoteHttpClient create(ServerProfile profile,String password,String username,RemoteHttpClient.CredentialProvider provider)throws RemoteException; }
     private static String optionValue(List<String>a,int index,String key){if(index+1>=a.size()||a.get(index+1).startsWith("--"))throw new IllegalArgumentException(key+" requires a value");return a.get(index+1);}
     private static String logicalPath(String value,String label){Path path=Paths.get(value);if(path.isAbsolute()||path.normalize().startsWith("..")||value.indexOf('\0')>=0||value.indexOf('\\')>=0)throw new IllegalArgumentException(label+" must be a package-relative logical path");return path.normalize().toString();}
     private static String age(String value){try{long seconds=Math.max(0,java.time.Duration.between(java.time.Instant.parse(value),java.time.Instant.now()).getSeconds());if(seconds<60)return seconds+"s";if(seconds<3600)return (seconds/60)+"m";if(seconds<86400)return (seconds/3600)+"h";return (seconds/86400)+"d";}catch(Exception ignored){return "unknown";}}
@@ -217,5 +230,5 @@ public final class RemoteCommand {
     private static String segment(String value){try{return java.net.URLEncoder.encode(value,"UTF-8").replace("+","%20");}catch(java.io.UnsupportedEncodingException impossible){throw new IllegalStateException(impossible);}}
     private static int fail(String message,int code,String format){String safe=message==null?"Remote command failed":message.replaceAll("(?i)(password|authorization)\\s*[:=]\\s*[^ ,]+","$1=[REDACTED_SECRET]");if("json".equals(format)){ObjectNode out=RemoteHttpClient.JSON.createObjectNode();out.put("error",safe);out.put("exitCode",code);System.err.println(out.toString());}else System.err.println("ATT Remote: "+safe);return code;}
     private static String safe(Exception e){String m=e.getMessage();return m==null?e.getClass().getSimpleName():m;}
-    private static void help(){System.out.println("Usage: att remote [--server <profile|url>] [--format human|json] [--no-auth] <command>\nCommands: ping, version, packages, package <id>, run|debug|load|validate <packageId> [--principal <name>], jobs [--principal <search>], job|watch|result|cancel <jobId>, artifacts <jobId>, artifact <jobId> <name> --download <directory>\n--server accepts a named profile or an HTTP(S) base URL. ATT_SERVER accepts either value and overrides the YAML default.");}
+    private static void help(){System.out.println("Usage: att remote [--server <profile|url>] [--format human|json] [--no-auth] <command>\nCommands: ping, version, packages, package <id>, run|debug|load|validate <packageId> [--principal <name>], jobs [--principal <search>], job|watch|result|cancel <jobId>, artifacts <jobId>, artifact <jobId> <name> --download <directory>\n--server accepts a named profile or an HTTP(S) base URL. ATT_SERVER accepts either value and overrides the YAML default. Basic authentication, including credentials entered for a direct URL, requires HTTPS.");}
 }
