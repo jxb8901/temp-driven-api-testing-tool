@@ -195,7 +195,7 @@ Schedule routes are hidden with `404` while disabled. With scheduling enabled, a
 }
 ```
 
-Schedules default to paused. Create, edit, and resume compute the next matching instant after the current time. Occurrence states are `scheduled`, `submitted`, `skipped`, and `failed-to-submit`; job execution results remain in the regular job API. Deleting a schedule retains its occurrence history, and does not cancel accepted jobs.
+Schedules default to paused. Create, edit, and resume compute the next matching instant after the current time. Occurrence states are `scheduled`, `submitted`, `skipped`, and `failed-to-submit`; job execution results remain in the regular job API. Deleting a schedule removes its definition but retains its occurrence history and does not cancel accepted jobs. Record the schedule ID before deletion: administrators can continue reading retained rows at `/load-schedules/{scheduleId}/executions` while any remain, even though the deleted definition no longer appears in the UI or schedule list. History is capped by `maxExecutionsPerSchedule`; in-progress occurrences and occurrences linked to active jobs can temporarily exceed that cap, then pruning runs when the linked job becomes terminal, including after its schedule was deleted.
 
 Submit a job with a stable package ID and command-specific ATT Worker fields:
 

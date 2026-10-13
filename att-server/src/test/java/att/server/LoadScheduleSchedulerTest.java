@@ -13,6 +13,11 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -124,13 +129,71 @@ class LoadScheduleSchedulerTest {
         }
     }
 
+    @Test void concurrentStoreInstancesClaimOneScheduledOccurrenceAtMostOnce() throws Exception {
+        Instant fire=Instant.parse("2026-01-01T00:00:00Z");ServerConfig config=config("concurrent-claim",1,"continue",1);
+        try(JobStore first=new JobStore(config);JobStore second=new JobStore(config)) {
+            LoadSchedule schedule=schedule("SCLAIM",fire);first.saveSchedule(schedule);LoadSchedule expected=first.schedule(schedule.id);
+            ExecutorService pool=Executors.newFixedThreadPool(2);CountDownLatch ready=new CountDownLatch(2),start=new CountDownLatch(1);
+            try {
+                Future<Boolean> one=pool.submit(()->{ready.countDown();start.await();return first.advanceAndClaim(expected,"SCLAIM-CLAIM",fire.plusSeconds(60).toString());});
+                Future<Boolean> two=pool.submit(()->{ready.countDown();start.await();return second.advanceAndClaim(expected,"SCLAIM-CLAIM",fire.plusSeconds(60).toString());});
+                assertTrue(ready.await(5,TimeUnit.SECONDS));start.countDown();
+                assertEquals(1,(one.get(10,TimeUnit.SECONDS)?1:0)+(two.get(10,TimeUnit.SECONDS)?1:0));
+            } finally {pool.shutdownNow();}
+            assertEquals(1,first.scheduleExecutions(schedule.id,10).size());
+            assertEquals(fire.plusSeconds(60).toString(),second.schedule(schedule.id).nextRunAt);
+        }
+    }
+
+    @Test void pauseResumeDeleteAndHistoryRetentionPreserveScheduleContract() throws Exception {
+        Instant now=Instant.parse("2026-01-01T00:00:00Z");ServerConfig config=config("lifecycle-retention",1,"continue",1,100);
+        try(JobStore store=new JobStore(config)) {
+            LoadSchedule schedule=schedule("SRETENTION",now);store.createSchedule(schedule,100);
+            LoadSchedule paused=store.setScheduleEnabled(schedule.id,false,"admin",now.plusSeconds(1).toString(),null);
+            assertFalse(paused.enabled);assertEquals(schedule.nextRunAt,paused.nextRunAt);
+            LoadSchedule resumed=store.setScheduleEnabled(schedule.id,true,"admin",now.plusSeconds(2).toString(),now.plusSeconds(60).toString());
+            assertTrue(resumed.enabled);assertEquals(now.plusSeconds(60).toString(),resumed.nextRunAt);
+
+            String url="jdbc:h2:file:"+config.dataDir.resolve("db/att-server").toString().replace('\\','/')+";DB_CLOSE_ON_EXIT=FALSE;AUTO_SERVER=FALSE";
+            try(var connection=java.sql.DriverManager.getConnection(url,"sa","");var insert=connection.prepareStatement(
+                    "INSERT INTO load_schedule_executions(occurrence_id,schedule_id,scheduled_for,status,reason,trigger_type,created_at) VALUES(?,?,?,'skipped','seed','cron',?)")) {
+                for(int i=0;i<101;i++) {
+                    insert.setString(1,"SRETENTION-seed-"+i);insert.setString(2,schedule.id);
+                    insert.setString(3,Instant.parse("2020-01-01T00:00:00Z").plusSeconds(i*60L).toString());insert.setString(4,now.toString());insert.addBatch();
+                }
+                insert.executeBatch();
+            }
+            String newest="SRETENTION-manual-retained";store.insertManualOccurrence(schedule.id,newest,now.plusSeconds(120));
+            store.updateOccurrence(newest,"skipped","retention-check",null);
+            List<Map<String,Object>> retained=store.scheduleExecutions(schedule.id,200);
+            assertEquals(100,retained.size());assertTrue(retained.stream().anyMatch(row->newest.equals(row.get("occurrenceId"))));
+            assertFalse(retained.stream().anyMatch(row->"SRETENTION-seed-0".equals(row.get("occurrenceId"))));
+
+            String activeOccurrence="SRETENTION-active-after-delete";store.insertManualOccurrence(schedule.id,activeOccurrence,now.plusSeconds(180));
+            Job active=job(config,activeOccurrence,"J0000000000000100");store.insert(active,"{}");
+            store.updateOccurrence(activeOccurrence,"submitted",null,active.id);
+            assertEquals(101,store.scheduleExecutions(schedule.id,200).size(),"an active linked job may temporarily exceed the terminal history cap");
+            store.deleteSchedule(schedule.id);assertNull(store.schedule(schedule.id));
+            assertEquals(101,store.scheduleExecutions(schedule.id,200).size(),"administrators can read history by the saved schedule ID after deleting its definition");
+            active.status="PASS";store.update(active);
+            List<Map<String,Object>> afterCompletion=store.scheduleExecutions(schedule.id,200);
+            assertEquals(100,afterCompletion.size(),"finishing a linked job prunes deleted-schedule history back to its configured bound");
+            assertTrue(afterCompletion.stream().anyMatch(row->activeOccurrence.equals(row.get("occurrenceId"))));
+        }
+    }
+
     private ServerConfig config(String name,int minimumInterval,String failurePolicy,int globalRuns) throws Exception {
+        return config(name,minimumInterval,failurePolicy,globalRuns,10000);
+    }
+
+    private ServerConfig config(String name,int minimumInterval,String failurePolicy,int globalRuns,int historyLimit) throws Exception {
         Path allowed=Files.createDirectories(temp.resolve(name+"-packages"));Path pkg=Files.createDirectories(allowed.resolve("p"));
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path file=temp.resolve(name+"-server.yaml");
         Files.writeString(file,"server:\n  dataDir: "+yaml(temp.resolve(name+"-data"))+"\n  javaExecutable: "+yaml(java)
                 +"\n  inspection:\n    enabled: true\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: "+minimumInterval
                 +"\n    maxConcurrentRuns: "+globalRuns+"\n    failurePolicy: "+failurePolicy
+                +"\n    maxExecutionsPerSchedule: "+historyLimit
                 +"\nworkers:\n  maxConcurrentLoad: "+globalRuns+"\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
         return ServerConfig.load(file);
     }

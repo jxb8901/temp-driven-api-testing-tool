@@ -128,7 +128,11 @@ class ServerRuntimeTest {
             assertFalse(invalid.diagnostics.isEmpty());
             assertThrows(IllegalArgumentException.class,()->setupRuntime.createLoadSchedule(ServerRuntime.JSON.readTree(
                     "{\"name\":\"Over cap\",\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\",\"maxConcurrentRuns\":2}"),"operator"));
-            scheduleId=setupRuntime.createLoadSchedule(request,"alice").id;
+            LoadSchedule created=setupRuntime.createLoadSchedule(request,"alice");scheduleId=created.id;
+            LoadSchedule edited=setupRuntime.updateLoadSchedule(scheduleId,ServerRuntime.JSON.readTree("{\"description\":\"edited description\"}"),"bob");
+            assertEquals("edited description",edited.description);assertEquals("alice",edited.createdBy);assertEquals("bob",edited.updatedBy);
+            assertFalse(setupRuntime.setLoadScheduleEnabled(scheduleId,false,"operator").enabled);
+            assertTrue(setupRuntime.setLoadScheduleEnabled(scheduleId,true,"operator").enabled);
         } finally {setupRuntime.close();}
 
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
@@ -157,6 +161,9 @@ class ServerRuntimeTest {
             Map<String,Object> rejected=runtime.triggerLoadSchedule(unavailableId,"operator");
             assertEquals("failed-to-submit",rejected.get("status"));
             assertTrue(String.valueOf(rejected.get("reason")).contains("no longer available"));
+            runtime.deleteLoadSchedule(unavailableId,"operator");
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.loadSchedule(unavailableId));
+            assertEquals("failed-to-submit",runtime.loadScheduleExecutions(unavailableId,10).get(0).get("status"),"delete preserves the occurrence history");
         } finally {runtime.close();}
     }
 

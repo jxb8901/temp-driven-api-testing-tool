@@ -113,5 +113,14 @@ final class LoadScheduleScheduler implements AutoCloseable {
     }
 
     private static String occurrenceId(String scheduleId,Instant fire) { return scheduleId+"-"+fire.toEpochMilli(); }
-    @Override public void close(){executor.shutdownNow();}
+    @Override public void close(){
+        executor.shutdown();
+        try {
+            long waitSeconds=Math.max(1,Math.min(30,config.pollIntervalSeconds));
+            if(!executor.awaitTermination(waitSeconds,TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                if(!executor.awaitTermination(1,TimeUnit.SECONDS))LOG.warning("Scheduled Load polling did not stop before the shutdown wait elapsed");
+            }
+        } catch(InterruptedException interrupted) {executor.shutdownNow();Thread.currentThread().interrupt();}
+    }
 }

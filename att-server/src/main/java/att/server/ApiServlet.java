@@ -161,7 +161,7 @@ public final class ApiServlet extends HttpServlet {
         String[] parts=path.split("/");
         try {
             if(parts.length==2){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;LoadSchedule item=runtime.createLoadSchedule(body,principal);res.setHeader("Location",req.getContextPath()+"/api/v1/load-schedules/"+item.id);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,201,view);return;}
-            if(parts.length==3&&"preview".equals(parts[2])){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;Map<String,Object> preview=runtime.previewLoadSchedule(body);preview.put("requestId",requestId);json(res,200,preview);return;}
+            if(parts.length==3&&"preview".equals(parts[2])){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;Map<String,Object> preview=new LinkedHashMap<>(runtime.previewLoadSchedule(body));preview.put("requestId",requestId);json(res,200,preview);return;}
             if(parts.length==4&&"trigger".equals(parts[3])){Map<String,Object> result=runtime.triggerLoadSchedule(parts[2],principal);result.put("requestId",requestId);json(res,202,result);return;}
             if(parts.length==4&&("pause".equals(parts[3])||"resume".equals(parts[3]))) {
                 LoadSchedule item=runtime.setLoadScheduleEnabled(parts[2],"resume".equals(parts[3]),principal);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,200,view);return;

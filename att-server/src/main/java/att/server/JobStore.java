@@ -211,13 +211,24 @@ final class JobStore implements AutoCloseable {
             else updateOccurrence(occurrence,"submitted",null,job);
         }
     }
-    synchronized void update(Job j) throws Exception {
-        try(Connection c=connect(); PreparedStatement p=c.prepareStatement("UPDATE jobs SET status=?,started_at=?,finished_at=?,worker_pid=?,worker_start_time=?,att_version=?,exit_code=?,result_json=?,diagnostic_json=?,performance_json=? WHERE job_id=?")) {
-            p.setString(1,j.status);p.setString(2,text(j.startedAt));p.setString(3,text(j.finishedAt));
-            if(j.workerPid==null)p.setNull(4,java.sql.Types.BIGINT);else p.setLong(4,j.workerPid);
-            p.setString(5,text(j.workerStartTime));p.setString(6,ServerBuildInfo.PRODUCT);
-            if(j.exitCode==null)p.setNull(7,java.sql.Types.INTEGER);else p.setInt(7,j.exitCode);
-            p.setString(8,j.resultJson);p.setString(9,j.diagnosticJson);p.setString(10,ServerRuntime.JSON.writeValueAsString(j.performance()));p.setString(11,j.id);p.executeUpdate();
+    void update(Job j) throws Exception {
+        // Read Job state before taking the store monitor: callers may hold the Job monitor while writing.
+        String occurrenceId=j.scheduleOccurrenceId;boolean terminal=j.terminal();
+        synchronized(this) {
+            try(Connection c=connect(); PreparedStatement p=c.prepareStatement("UPDATE jobs SET status=?,started_at=?,finished_at=?,worker_pid=?,worker_start_time=?,att_version=?,exit_code=?,result_json=?,diagnostic_json=?,performance_json=? WHERE job_id=?")) {
+                p.setString(1,j.status);p.setString(2,text(j.startedAt));p.setString(3,text(j.finishedAt));
+                if(j.workerPid==null)p.setNull(4,java.sql.Types.BIGINT);else p.setLong(4,j.workerPid);
+                p.setString(5,text(j.workerStartTime));p.setString(6,ServerBuildInfo.PRODUCT);
+                if(j.exitCode==null)p.setNull(7,java.sql.Types.INTEGER);else p.setInt(7,j.exitCode);
+                p.setString(8,j.resultJson);p.setString(9,j.diagnosticJson);p.setString(10,ServerRuntime.JSON.writeValueAsString(j.performance()));p.setString(11,j.id);p.executeUpdate();
+            }
+            if(terminal&&occurrenceId!=null) {
+                String scheduleId=null;
+                try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT schedule_id FROM load_schedule_executions WHERE occurrence_id=?")) {
+                    p.setString(1,occurrenceId);try(ResultSet r=p.executeQuery()){if(r.next())scheduleId=r.getString(1);}
+                }
+                if(scheduleId!=null)pruneScheduleExecutions(scheduleId);
+            }
         }
     }
     synchronized void audit(String principal,String action,String jobId,String packageId,String outcome) throws Exception {
