@@ -12,7 +12,7 @@ public final class RemoteOptions {
     public static RemoteOptions parse(String[] args) {
         String server=null,format="human";boolean noAuth=false;List<String> command=new ArrayList<String>();
         for(int i=0;i<args.length;i++) {
-            if("--server".equals(args[i])) { if(++i>=args.length)throw new IllegalArgumentException("--server requires a profile name");server=args[i]; }
+            if("--server".equals(args[i])) { if(++i>=args.length||args[i].startsWith("--"))throw new IllegalArgumentException("--server requires a profile name or HTTP(S) URL");server=args[i]; }
             else if("--no-auth".equals(args[i])) noAuth=true;
             else if("--format".equals(args[i])) { if(++i>=args.length)throw new IllegalArgumentException("--format requires human or json");format=args[i]; }
             else command.add(args[i]);
