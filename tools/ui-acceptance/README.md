@@ -41,9 +41,9 @@ Run the cross-browser responsive and screenshot check with:
 npm run smoke:cross-browser
 ```
 
-It exercises Chromium, Firefox, and WebKit at 1280, 768, and 390 pixels in light and dark themes, checks horizontal overflow and the tablet/phone schedule cards, runs axe at every viewport, and compares each capture with its committed browser/viewport/theme baseline. CI also uploads the generated screenshots under `tools/ui-acceptance/artifacts/scheduled-load/` for review. The comparison ignores per-channel pixel differences up to 32 and allows up to 12% of pixels to differ for OS font-rasterization variation; larger differences fail with per-capture counts.
+It exercises Chromium, Firefox, and WebKit at 1280, 768, and 390 pixels in light and dark themes, checks horizontal overflow and the tablet/phone schedule cards, runs axe at every viewport, and compares each capture with its committed browser/viewport/theme baseline for the current OS. Separate macOS and Linux baselines avoid treating platform font metrics as UI regressions. CI also uploads the generated screenshots under `tools/ui-acceptance/artifacts/scheduled-load/` for review. The comparison ignores per-channel pixel differences up to 32 and allows up to 4% of pixels to differ; larger differences fail with per-capture counts.
 
-After an intentional Scheduled Load visual change, inspect the generated captures and update the 18 baselines with `ATT_UI_UPDATE_VISUAL_BASELINES=1 npm run smoke:cross-browser`. Review the resulting PNGs and manifest before committing `tools/ui-acceptance/visual-baselines/scheduled-load/`.
+After an intentional Scheduled Load visual change, inspect the generated captures and update the 18 baselines for the current OS with `ATT_UI_UPDATE_VISUAL_BASELINES=1 npm run smoke:cross-browser`. Review the resulting PNGs and manifest before committing the matching platform directory under `tools/ui-acceptance/visual-baselines/scheduled-load/`.
 
 Run the screenshot capture separately:
 

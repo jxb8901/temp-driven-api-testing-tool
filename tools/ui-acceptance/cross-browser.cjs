@@ -5,10 +5,10 @@ const { chromium, firefox, webkit, launchBrowser, selectFixture, startFixture, s
 const { comparePng } = require('./png-compare.cjs');
 
 const outputDirectory = path.join(__dirname, 'artifacts', 'scheduled-load');
-const visualBaselineDirectory = path.join(__dirname, 'visual-baselines', 'scheduled-load');
+const visualBaselineDirectory = path.join(__dirname, 'visual-baselines', 'scheduled-load', process.platform);
 const updateVisualBaselines = process.env.ATT_UI_UPDATE_VISUAL_BASELINES === '1';
-// Allow OS font rasterization differences between the macOS capture host and Linux CI.
-const visualDifferenceLimit = 0.12;
+const visualDifferenceLimit = 0.04;
+const channelTolerance = 32;
 
 async function assertAxe(page, engine, theme, width) {
   await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
@@ -104,7 +104,7 @@ async function main() {
       await fs.writeFile(path.join(visualBaselineDirectory, 'manifest.json'), `${JSON.stringify({
         repositoryVersion: '4.1.3', generatedAt: new Date().toISOString(), platform: process.platform,
         architecture: process.arch,
-        maxChangedPixelRatio: visualDifferenceLimit, channelTolerance: 32, captures: manifest,
+        maxChangedPixelRatio: visualDifferenceLimit, channelTolerance, captures: manifest,
       }, null, 2)}\n`);
     }
     if (visualDifferences.length > 0) {
