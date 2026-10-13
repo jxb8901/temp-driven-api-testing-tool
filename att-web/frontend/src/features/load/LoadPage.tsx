@@ -200,7 +200,7 @@ function initialTiming(policy: JsonObject): TimingDraft {
 
 export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const {
-    api, packages, selectedPackage, selectedEnvironment, environments = [], inlineLoadEnabled,
+    api, packages, selectedPackage, selectedEnvironment, environments = [], environmentState, inlineLoadEnabled,
     principal, onPackageChange, onEnvironmentChange, onJobAccepted, confirmStart,
   } = props;
   const [model, setModel] = useState<LoadModel>('virtualUsers');
@@ -324,8 +324,9 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         : 'Server validation passed. Review the complete normalized scenario before starting.');
     } catch (error) {
       if (sequence !== requestSequence.current) return;
-      const details = error as Error & { diagnostics?: ServerDiagnostic[] };
-      setDiagnostics(details.diagnostics || []);
+      const details = error as Error & { diagnostics?: unknown };
+      const serverDiagnostics = Array.isArray(details.diagnostics) ? details.diagnostics as ServerDiagnostic[] : [];
+      setDiagnostics(serverDiagnostics);
       setDraftState('error');
       setDraftMessage(details.message || 'Server validation failed.');
       setRequestError(details.message || 'Server validation failed.');
@@ -361,8 +362,8 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       setDraft(null);
       onJobAccepted(job.jobId);
     } catch (error) {
-      const failure = error as Error & { status?: number; diagnostics?: ServerDiagnostic[] };
-      setDiagnostics(failure.diagnostics || []);
+      const failure = error as Error & { status?: number; diagnostics?: unknown };
+      setDiagnostics(Array.isArray(failure.diagnostics) ? failure.diagnostics as ServerDiagnostic[] : []);
       setDraftState('error');
       setDraftMessage(failure.message || 'The Server did not accept this Load draft.');
       setRequestError(failure.message || 'The Server did not accept this Load draft.');
@@ -438,6 +439,8 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             </select>
           </label>
         </div>
+        {environmentState === 'loading' && <p className="att-help" role="status" aria-busy="true">Loading declared package environments…</p>}
+        {environmentState === 'error' && <p className="att-inline-error" role="status">Package environments could not be loaded. Only the Server default environment is available in this view.</p>}
         <fieldset className="att-timing-fieldset">
           <legend>Shared timing envelope</legend>
           <DurationField label="Warm-up" value={timing.warmup} onChange={value => setTiming(current => ({ ...current, warmup: value }))} />
@@ -495,7 +498,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
           <p>{draftMessage}</p>
           {requestError && <p>{requestError}</p>}
           {diagnostics.length > 0 && <ul>{diagnostics.map((item, index) => <li key={`${item.code || item.path || 'diagnostic'}-${index}`}>
-            {[item.severity, item.path, item.code].filter(Boolean).join(' · ')}{item.message ? `: ${item.message}` : ''}
+            {[item.severity, item.path, item.code].filter(Boolean).join(' · ')}{item.message || item.summary ? `: ${item.message || item.summary}` : ''}
           </li>)}</ul>}
         </div>
         {draft && <p className="att-draft-expiry">Draft expires {new Date(draft.expiresAt).toLocaleString()}.</p>}

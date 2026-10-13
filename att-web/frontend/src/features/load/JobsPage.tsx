@@ -293,7 +293,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const metrics = resultMetrics(result);
   const buckets = Array.isArray(metrics?.buckets) ? metrics.buckets.slice(0, MAX_BUCKET_ROWS) : [];
 
-  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const index = tabs.findIndex(tab => tab.id === activeTab);
     let next = index;
     if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;

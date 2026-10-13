@@ -13,14 +13,18 @@ async function main() {
   let browser;
   try {
     browser = await launchBrowser();
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, bypassCSP: true });
     const page = await context.newPage();
     const pageErrors = [];
     let cancelRequested = false;
     let delayJobs = false;
     let sentInitialStatus = false;
+    let reconnected = false;
+    let eventConnectionCount = 0;
     let resolveCancellation;
+    let resolveResume;
     const cancellationRequested = new Promise(resolve => { resolveCancellation = resolve; });
+    const resumed = new Promise(resolve => { resolveResume = resolve; });
     page.on('pageerror', error => pageErrors.push(error.message));
     page.on('dialog', async dialog => {
       assert.match(dialog.message(), /Start .* Load|Cancel job/i);
@@ -38,6 +42,9 @@ async function main() {
 
       if (method === 'GET' && resource === 'version') return json({ apiVersion: '1', inlineLoadEnabled: true });
       if (method === 'GET' && resource === 'packages') return json({ items: [{ packageId: 'payments', name: 'Payments' }] });
+      if (method === 'GET' && resource === 'packages/payments/configuration') return json({
+        view: 'declared', environments: [{ name: 'SIT' }, { name: 'UAT' }],
+      });
       if (method === 'GET' && resource === 'jobs') {
         if (delayJobs) await new Promise(resolve => setTimeout(resolve, 700));
         return json({ items: [job] });
@@ -66,6 +73,7 @@ async function main() {
       });
       if (method === 'GET' && resource === `jobs/${jobId}/artifacts`) return json({ items: [{ path: 'load-summary.json', size: 512 }] });
       if (method === 'GET' && resource === `jobs/${jobId}/events`) {
+        eventConnectionCount += 1;
         if (!sentInitialStatus) {
           sentInitialStatus = true;
           return route.fulfill({
@@ -74,11 +82,15 @@ async function main() {
             body: 'id: 1\nevent: status\ndata: {"status":"RUNNING"}\nretry: 50\n\n',
           });
         }
+        if (eventConnectionCount > 1) {
+          reconnected = true;
+          resolveResume();
+        }
         await cancellationRequested;
         return route.fulfill({
           status: 200,
           contentType: 'text/event-stream; charset=utf-8',
-          body: 'id: 2\nevent: status\ndata: {"status":"CANCELLED"}\n\n',
+          body: 'id: 2\nevent: status\ndata: {"status":"CANCELLED"}\n\nid: 3\nevent: result\ndata: {"status":"CANCELLED"}\n\n',
         });
       }
       if (method === 'DELETE' && resource === `jobs/${jobId}`) {
@@ -93,9 +105,11 @@ async function main() {
     await page.goto(`${base}#/advanced-load/payments`);
     await page.getByRole('heading', { name: 'New Load scenario' }).waitFor();
     await page.getByText(/Safe policy defaults loaded|Policy defaults loaded/i).waitFor();
-    await page.locator('.att-target-editor label').filter({ hasText: 'Target logical ID' }).getByRole('textbox').fill('checkout');
+    await page.getByLabel('Target logical ID', { exact: true }).fill('checkout');
     await page.getByRole('button', { name: 'Load sidecar defaults' }).click();
     await page.getByText(/Safe .*defaults loaded/i).waitFor();
+    await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+    await assertAxe(page, 'Advanced Load should pass the configured WCAG accessibility rules');
 
     const sectionNav = page.getByRole('navigation', { name: 'Load scenario sections' });
     for (const [name, sectionId] of [
@@ -110,6 +124,9 @@ async function main() {
     await page.getByRole('button', { name: 'Review and start Load' }).click();
     await page.waitForURL(new RegExp(`#\\/jobs\\/${jobId}$`));
     await page.getByRole('heading', { name: `Job ${jobId}` }).waitFor();
+    await assertAxe(page, 'Loaded Job detail should pass the configured WCAG accessibility rules');
+    await Promise.race([resumed, new Promise((_, reject) => setTimeout(() => reject(new Error('EventSource did not reconnect after the stream closed')), 5000))]);
+    assert.equal(reconnected, true, 'EventSource should retry the stream after a connection ends');
 
     const tabs = [
       ['Overview', 'Status'], ['Live logs', 'Live logs'], ['Events', 'Events'],
@@ -130,12 +147,13 @@ async function main() {
     await page.getByRole('link', { name: /load-summary\.json/ }).waitFor();
 
     await page.getByRole('button', { name: 'Cancel job' }).click();
-    await page.getByText('CANCELLED', { exact: true }).waitFor({ timeout: 10_000 });
+    await page.waitForFunction(() => document.querySelector('.att-job-actions .att-status-badge')?.textContent?.trim() === 'CANCELLED', null, { timeout: 10_000 });
     assert.equal(await page.getByRole('button', { name: 'Cancel job' }).count(), 0, 'terminal status should remove the cancel action');
 
     await page.goto(`${base}#/jobs`);
     await page.getByRole('heading', { name: 'Jobs' }).waitFor();
-    const statusFilter = page.getByLabel('Status', { exact: true });
+    await assertAxe(page, 'Jobs list should pass the configured WCAG accessibility rules');
+    const statusFilter = page.locator('.att-jobs-filter-panel select').first();
     await statusFilter.selectOption('RUNNING');
     delayJobs = true;
     await page.getByRole('button', { name: 'Refresh jobs' }).click();
@@ -152,6 +170,15 @@ async function main() {
     if (browser) await browser.close();
     await stopFixture(fixture);
   }
+}
+
+async function assertAxe(page, message) {
+  const audit = await page.evaluate(async () => window.axe.run(document, {
+    runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+  }));
+  assert.deepEqual(audit.violations.map(({ id, impact, help, nodes }) => ({
+    id, impact, help, selectors: nodes.map(node => node.target),
+  })), [], message);
 }
 
 main().catch(error => {

@@ -20,7 +20,8 @@ export interface ServerDiagnostic {
   code?: string;
   path?: string;
   severity?: string;
-  message: string;
+  message?: string;
+  summary?: string;
 }
 
 export interface LoadPolicyResponse {
@@ -149,6 +150,7 @@ export interface LoadFeatureProps {
   selectedPackage: string;
   selectedEnvironment: string;
   environments?: string[];
+  environmentState?: 'loading' | 'ready' | 'error';
   inlineLoadEnabled: boolean;
   principal?: string;
   onPackageChange: (packageId: string) => void;

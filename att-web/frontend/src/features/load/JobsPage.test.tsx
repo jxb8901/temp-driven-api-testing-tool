@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobsPage } from './JobsPage';
@@ -66,10 +66,12 @@ describe('JobsPage React feature', () => {
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
     await act(async () => { await Promise.resolve(); });
 
-    const labels = ['Overview', 'Live logs', 'Events', 'Results', 'Artifacts', 'Metrics'];
-    expect([...host.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual(labels);
-    for (const tab of labels) {
-      const id = tab.toLowerCase().replaceAll(' ', '-');
+    const tabs = [
+      ['Overview', 'overview'], ['Live logs', 'live'], ['Events', 'events'],
+      ['Results', 'results'], ['Artifacts', 'artifacts'], ['Metrics', 'metrics'],
+    ];
+    expect([...host.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual(tabs.map(([label]) => label));
+    for (const [, id] of tabs) {
       expect(host.querySelector(`#job-tab-${id}`)?.getAttribute('aria-controls')).toBe(`job-panel-${id}`);
       expect(host.querySelector(`#job-panel-${id}`)).not.toBeNull();
     }

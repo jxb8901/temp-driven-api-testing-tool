@@ -23,11 +23,12 @@ async function main() {
 
     for (const [route, title, activeNav] of [
       ['#/packages', 'Packages', 'packages'],
-      ['#/jobs', 'Jobs and results', 'jobs'],
+      ['#/jobs', 'Jobs', 'jobs'],
       ['#/advanced-load', 'Load testing', 'load-testing'],
     ]) {
       await page.goto(`${base}${route}`);
-      await page.locator('#home-title').getByText(title, { exact: true }).waitFor();
+      if (route === '#/jobs') await page.getByRole('heading', { name: title, exact: true }).waitFor();
+      else await page.locator('#home-title').getByText(title, { exact: true }).waitFor();
       assert.equal(await page.locator(`[data-nav="${activeNav}"]`).getAttribute('aria-current'), 'page');
       assert.equal(await page.locator('#breadcrumbs [aria-current="page"]').count(), 1);
     }
@@ -41,8 +42,8 @@ async function main() {
       await page.goto(`${base}#/packages`);
       await page.locator('#packages-state').getByText(/2 configured packages/).waitFor();
       await page.goto(`${base}#/jobs`);
-      await page.locator('#jobs-state').getByText(/recent job row/i).waitFor();
-      assert.equal(await page.locator('#home-title').textContent(), 'Jobs and results');
+      await page.getByRole('heading', { name: 'Jobs', exact: true }).waitFor();
+      await page.locator('.att-jobs-table tbody tr').first().waitFor();
     }
 
     await selectFixture(context, fixture.origin, 'authenticated');

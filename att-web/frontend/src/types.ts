@@ -14,14 +14,16 @@ export class ApiError extends Error {
   readonly code?: string;
   readonly requestId?: string;
   readonly details?: unknown;
+  readonly diagnostics?: unknown;
 
-  constructor(message: string, options: { status: number; code?: string; requestId?: string; details?: unknown }) {
+  constructor(message: string, options: { status: number; code?: string; requestId?: string; details?: unknown; diagnostics?: unknown }) {
     super(message);
     this.name = 'ApiError';
     this.status = options.status;
     this.code = options.code;
     this.requestId = options.requestId;
     this.details = options.details;
+    this.diagnostics = options.diagnostics;
   }
 }
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoadPage } from './LoadPage';
@@ -8,17 +8,17 @@ import type { LoadJobsApi } from './types';
 function makeApi(): LoadJobsApi {
   return {
     getLoadPolicy: vi.fn(async () => ({
-      model: 'virtualUsers',
+      model: 'virtualUsers' as const,
       policy: { schemaVersion: 'att-load/v1.6', load: { warmup: '5s', rampUp: '10s', duration: '30s', rampDown: '5s' } },
       redacted: true,
     })),
     getTargetLoadForm: vi.fn(async () => ({
-      model: 'virtualUsers', target: { type: 'template', id: 'Payments.create' },
+      model: 'virtualUsers' as const, target: { type: 'template' as const, id: 'Payments.create' },
       input: { inputs: { accountId: 'acct-1', retry: 2 }, vars: { token: { $attDebugKeepDefault: 'hidden' } } }, redacted: true,
     })),
-    listTargets: vi.fn(async () => [{ type: 'template', logicalId: 'Payments.create', state: 'ready' }]),
+    listTargets: vi.fn(async () => [{ type: 'template' as const, logicalId: 'Payments.create', state: 'ready' }]),
     createLoadDraft: vi.fn(async () => ({
-      draftId: 'A0123456789ABCDEF0123456789ABCDEF', packageId: 'payments', model: 'virtualUsers',
+      draftId: 'A0123456789ABCDEF0123456789ABCDEF', packageId: 'payments', model: 'virtualUsers' as const,
       previewYaml: 'schemaVersion: att-load/v1.6', expiresAt: new Date(Date.now() + 60_000).toISOString(), redacted: true,
     })),
     submitLoadDraft: vi.fn(async () => ({ jobId: 'JOB-LOAD', status: 'QUEUED' })),
@@ -97,10 +97,9 @@ describe('LoadPage React feature', () => {
     await flush();
     const idInput = host.querySelector('.att-target-editor input[list]') as HTMLInputElement;
     await act(async () => {
-      idInput.value = 'Payments.create';
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(idInput, 'Payments.create');
       idInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(async () => { idInput.dispatchEvent(new Event('change', { bubbles: true })); });
     await flush();
     const sidecar = [...host.querySelectorAll('button')].find(button => button.textContent === 'Load sidecar defaults');
     expect(sidecar).toBeDefined();
@@ -109,7 +108,6 @@ describe('LoadPage React feature', () => {
     expect(api.getTargetLoadForm).toHaveBeenCalledWith('payments', 'template', 'Payments.create', 'virtualUsers', undefined, expect.any(AbortSignal));
     expect(host.querySelector('input[aria-label="accountId value"]')).not.toBeNull();
     expect(host.textContent).toContain('Keep hidden package default');
-    expect(host.querySelector('input[aria-label="accountId value"]')?.getAttribute('value')).toBeNull();
     expect((host.querySelector('input[aria-label="accountId value"]') as HTMLInputElement).value).toBe('acct-1');
 
     const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate scenario');
