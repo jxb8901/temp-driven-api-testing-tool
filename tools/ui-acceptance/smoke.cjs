@@ -1,0 +1,77 @@
+const assert = require('node:assert/strict');
+const { launchBrowser, selectFixture, startFixture, stopFixture } = require('./browser-support.cjs');
+
+async function main() {
+  const fixture = await startFixture();
+  let browser;
+  try {
+    browser = await launchBrowser();
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on('pageerror', error => pageErrors.push(error.message));
+    const base = `${fixture.origin}/att/ui/`;
+
+    await selectFixture(context, fixture.origin, 'loaded');
+    const indexResponse = await page.goto(base);
+    assert.equal(indexResponse.status(), 200, 'the UI must serve below the non-root /att context');
+    await page.locator('#packages-state').getByText(/configured package/i).waitFor();
+    await page.locator('#jobs-state').getByText(/recent job row/i).waitFor();
+    await page.getByText('payments', { exact: true }).first().waitFor();
+    await page.getByText('JOB-4821', { exact: true }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/att/ui/', 'the UI should retain its non-root path');
+
+    for (const [route, title, activeNav] of [
+      ['#/packages', 'Packages', 'packages'],
+      ['#/jobs', 'Jobs and results', 'jobs'],
+      ['#/advanced-load', 'Load testing', 'load-testing'],
+    ]) {
+      await page.goto(`${base}${route}`);
+      await page.locator('#home-title').getByText(title, { exact: true }).waitFor();
+      assert.equal(await page.locator(`[data-nav="${activeNav}"]`).getAttribute('aria-current'), 'page');
+      assert.equal(await page.locator('#breadcrumbs [aria-current="page"]').count(), 1);
+    }
+
+    await selectFixture(context, fixture.origin, 'empty');
+    await page.goto(base);
+    await page.getByText(/No packages are configured yet/i).waitFor();
+    await page.getByText(/No jobs yet/i).waitFor();
+
+    await selectFixture(context, fixture.origin, 'error');
+    await page.goto(base);
+    await page.getByText(/Could not load packages/i).waitFor();
+    await page.getByText(/Could not load recent jobs/i).waitFor();
+    assert.equal(await page.locator('#retry-packages').isVisible(), true);
+
+    await selectFixture(context, fixture.origin, 'loading');
+    await page.goto(base);
+    await page.waitForFunction(() => document.querySelector('#packages-state')?.getAttribute('aria-busy') === 'true');
+    await page.waitForFunction(() => document.querySelector('#jobs-state')?.getAttribute('aria-busy') === 'true');
+
+    await selectFixture(context, fixture.origin, 'loaded');
+    await page.goto(base);
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.classList.contains('skip-link')), true, 'the first Tab should focus the skip link');
+    assert.equal(await page.locator('.skip-link').evaluate(node => node.getBoundingClientRect().top >= 0), true, 'the focused skip link should be visible');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.activeElement?.id === 'main-content');
+
+    await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+    const audit = await page.evaluate(async () => window.axe.run(document, {
+      runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+    }));
+    assert.deepEqual(audit.violations.map(({ id, impact, help, nodes }) => ({
+      id, impact, help, selectors: nodes.map(node => node.target),
+    })), [], 'the dashboard should pass the configured WCAG accessibility rules');
+    assert.deepEqual(pageErrors, [], 'the UI should not report uncaught browser errors');
+    console.log('ATT UI browser smoke and axe-core accessibility checks passed.');
+  } finally {
+    if (browser) await browser.close();
+    await stopFixture(fixture);
+  }
+}
+
+main().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

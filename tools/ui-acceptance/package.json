@@ -1,0 +1,14 @@
+{
+  "name": "att-ui-acceptance",
+  "private": true,
+  "version": "4.1.3",
+  "description": "Development-only browser smoke, accessibility, and screenshot checks for ATT's static UI.",
+  "scripts": {
+    "smoke": "node smoke.cjs",
+    "screenshots": "node screenshots.cjs"
+  },
+  "devDependencies": {
+    "axe-core": "4.11.4",
+    "playwright": "1.62.1"
+  }
+}

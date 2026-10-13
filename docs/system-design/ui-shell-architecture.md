@@ -35,4 +35,15 @@ Phase 1 wraps the existing screens with the persistent navigation, breadcrumb, c
 
 If the shell causes a regression, restore `index.html`, `app.css`, and `app.js` from the previous commit and remove the `app-shell.js` reference. The shell does not migrate server data or alter REST contracts.
 
+## Browser acceptance baseline
+
+The development-only harness and repeatable commands are documented in [`tools/ui-acceptance/README.md`](../../tools/ui-acceptance/README.md). It serves the checked-in static UI under `/att/ui/` with synthetic responses and captures 1440 × 1000 and 768 × 1000 light/dark viewport baselines in [`ui-shell-baseline/`](ui-shell-baseline/). These screenshots record visual layout only; the smoke and axe-core accessibility checks are separate commands and the fixture does not replace stock-Tomcat verification.
+
+| Viewport | Light | Dark |
+|---|---|---|
+| 1440 × 1000 | [Dashboard](ui-shell-baseline/dashboard-1440-light.png) | [Dashboard](ui-shell-baseline/dashboard-1440-dark.png) |
+| 768 × 1000 | [Dashboard](ui-shell-baseline/dashboard-768-light.png) | [Dashboard](ui-shell-baseline/dashboard-768-dark.png) |
+
+To remove only the harness and its captures, revert `tools/ui-acceptance/` and `docs/system-design/ui-shell-baseline/`. Keep the shell rollback above separate from the test-artifact rollback.
+
 Reconsider a compile-time component framework only when the UI needs shared state that cannot be kept clear in the current modules. Any later framework must emit static WAR resources; production must still run only Java and Tomcat.
