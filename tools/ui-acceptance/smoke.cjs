@@ -6,7 +6,7 @@ async function main() {
   let browser;
   try {
     browser = await launchBrowser();
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, bypassCSP: true });
     const page = await context.newPage();
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.message));
@@ -32,10 +32,30 @@ async function main() {
       assert.equal(await page.locator('#breadcrumbs [aria-current="page"]').count(), 1);
     }
 
+    for (const [scenario, headers] of [
+      ['authenticated', { Authorization: 'Basic YXR0LWZpeHR1cmU6cGFzcw==' }],
+      ['anonymous', {}],
+    ]) {
+      await selectFixture(context, fixture.origin, scenario);
+      await page.setExtraHTTPHeaders(headers);
+      await page.goto(`${base}#/packages`);
+      await page.locator('#packages-state').getByText(/2 configured packages/).waitFor();
+      await page.goto(`${base}#/jobs`);
+      await page.locator('#jobs-state').getByText(/recent job row/i).waitFor();
+      assert.equal(await page.locator('#home-title').textContent(), 'Jobs and results');
+    }
+
+    await selectFixture(context, fixture.origin, 'authenticated');
+    await page.setExtraHTTPHeaders({});
+    await page.goto(base);
+    await page.getByText(/Could not load packages/i).waitFor();
+    await page.getByText(/Could not load recent jobs/i).waitFor();
+    assert.equal(await page.locator('#retry-packages').isVisible(), true, 'authentication errors remain retryable');
+
     await selectFixture(context, fixture.origin, 'empty');
     await page.goto(base);
-    await page.getByText(/No packages are configured yet/i).waitFor();
-    await page.getByText(/No jobs yet/i).waitFor();
+    await page.locator('#packages-state').getByText(/No packages are configured yet/i).waitFor();
+    await page.locator('#jobs-state').getByText(/No jobs yet/i).waitFor();
 
     await selectFixture(context, fixture.origin, 'error');
     await page.goto(base);

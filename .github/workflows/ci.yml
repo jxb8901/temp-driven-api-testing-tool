@@ -64,6 +64,24 @@ jobs:
           java-version: '17'
           cache: maven
 
+      - name: Set up pinned Node.js for build-time UI tooling
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+          cache: npm
+          cache-dependency-path: |
+            att-web/frontend/package-lock.json
+            tools/ui-acceptance/package-lock.json
+
+      - name: Verify React, TypeScript, component tests, Vite build, and bundle budget
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+          npm run bundle:budget
+        working-directory: att-web/frontend
+
       - name: Install Pandoc
         run: |
           # Keep generated HTML stable across hosted runner image updates.
@@ -81,6 +99,22 @@ jobs:
 
       - name: Verify
         run: mvn -B -ntp clean verify
+
+      - name: Install browser acceptance dependencies
+        run: npm ci
+        working-directory: tools/ui-acceptance
+
+      - name: Install Chromium for browser acceptance
+        run: npx playwright install --with-deps chromium
+        working-directory: tools/ui-acceptance
+
+      - name: Verify UI browser smoke and axe accessibility
+        run: npm run smoke
+        working-directory: tools/ui-acceptance
+
+      - name: Capture UI screenshot baselines
+        run: npm run screenshots
+        working-directory: tools/ui-acceptance
 
       - name: Verify documentation release gate
         run: python3 tools/verify_documentation.py

@@ -4,35 +4,48 @@
 
 **日期：** 2026-10-13
 
-**範圍：** `att-web` 的靜態 UI，以及它在現有 Server WAR 中的發佈方式。
+**範圍：** React 應用基礎，以及在現有 Server WAR 中以靜態資源發佈。
 
 ## 決策
 
-UI 繼續以 HTML、CSS 和 vanilla JavaScript 實作，並由 ATT Server WAR 作為靜態資源提供。新增獨立而精簡的 `app-shell.js` 模組，負責常駐 Shell。現有 feature routes 和 API workflows 留在 `app.js`；後續 phase 可再加入 feature modules。
+Browser UI 使用 React、TypeScript 和 Vite 建置。唯一的 React mount 位於 `att-web/frontend/src/main.tsx`；`App.tsx` 管理路由與 API-backed app state，`AppShell.tsx` 管理固定 navigation 和 workspace context，feature pages 透過 typed routes 和注入的 callbacks 整合。`api.ts` 提供 `request<T>()`，使用 JSON、標準化 errors、`AbortSignal` 和相對路徑 `../api/v1/`。Hash routes 在 `/ui/` 和 `/att/ui/` 等非 root context 下都可使用。
 
-Production 安裝仍只需要 Java 和 Apache Tomcat，無須 Node.js、npm、前端 server 或下載 dependencies。Browser 只載入 same-origin 靜態資源，並呼叫現有 same-origin `/api/v1/` 和 SSE endpoints。
+Vite 將靜態輸出寫入 `att-web/frontend/dist`。Maven 將這些檔案複製至 `att-web.jar` 的 `META-INF/resources/ui`，再由現有 Server WAR 封裝及提供。Node.js 和 npm 只用於 build 與測試。Production 安裝仍只執行 Java 和 Apache Tomcat，UI 與 API 由 same origin 提供。
 
 ## 考慮過的方案
 
-| 方案 | 優點 | 本 Phase 的成本 | 決定 |
+| 方案 | 優點 | 成本 | 決定 |
 |---|---|---|---|
-| 漸進式 HTML、CSS 和 vanilla JavaScript | 保留現有 UI、嚴格 self-only CSP、hash routes 和 WAR resource packaging | Components 和 state 需要明確慣例 | 採用 |
-| React、TypeScript 和 Vite | 大型 rewrite 有強大的 component 和型別系統 | 在現有 routes 尚未達到 feature parity 前先增加 build toolchain 和 migration 工作 | 暫緩 |
-| Java server-rendered views | Server 控制 markup，毋須 client framework | 需要重寫現有 browser-side resource 和 job workflows | 暫緩 |
+| React、TypeScript 和 Vite | Shared routes 和 API contracts 有型別，feature pages 可組合，支援 component tests | 增加固定的 build-time Node toolchain，並需要分階段遷移 | 採用 |
+| HTML、CSS 和 vanilla JavaScript | 保留舊實作，無 compile step | 共享 shell 和 feature state 缺少大型 feature modules 所需的 component/type 邊界 | 僅保留作遷移 rollback artifact |
+| Java server-rendered views | Server 控制 markup，毋須 browser framework | 要取代現有以 browser 和 REST 為基礎的 workflows | 暫緩 |
 
-## 限制和預算
+## State 和整合邊界
 
-- Scripts 和 styles 必須保持外置，讓現有 Content Security Policy 繼續禁止 inline code。
-- `#/packages/{id}`、`#/advanced-load/{packageId}` 和 `#/jobs/{jobId}` 等 routes，在 `/ui/` 和 `/att/ui/` 等非 root context 下均須可用。
-- 所有 Dashboard 數據均來自現有 package、job 和 version responses。`/jobs` 最多回傳最新 100 筆記錄；UI 必須清楚標示從這些 rows 計算的數量。
-- 保留現有 API payloads、authentication 行為、安全 source projections 和 feature gates。
-- 首次載入的 HTML、CSS 和 JavaScript gzip 大小以 150 KiB 為 review budget。新增 assets 或 dependencies 時重新檢查。
-- 使用共用 `--att-*` tokens，讓後續 phase modules 共用顏色、間距、圓角和 focus ring。
+- `types.ts`、`api.ts`、`state.ts` 和 `router.ts` 是共用 TypeScript 基礎。Feature operations 可集中加入 `api.ts`；pages 不自行建構 API URLs。
+- `ServerVersion.inlineLoadEnabled` 會保存在 server capability state，並傳入 shell 和 feature routes。API 不會提供目前 principal，因此 identity chip 明確顯示「Server managed」和「not exposed by API」。
+- `AppRoute` 包含 dashboard、package list、package/resource、jobs/job 和 load/package variants。`useNavigationGuard()` 提供 `navigate()` 和 `registerUnsavedChanges()`；Shell 使用 keyboard-accessible discard dialog 確認內部或 browser-history navigation。
+- Shell context 會提供 package、environment 和 accepted-job callbacks，讓後續 modules 由 app root 管理狀態。
+- Dashboard summary 和 lists 只使用 `/version`、`/packages` 和 `/jobs` responses。數量只描述回傳 rows；API error 不會顯示為零。
+- 外部 CSS 和 scripts 保留 self-only Content Security Policy。所有 requests 都是 same-origin。
 
-## Migration 和 rollback
+## Build 和 size budget
 
-Phase 1 為既有 screens 加上常駐 navigation、breadcrumb、context 和 action areas。現有 route dispatcher 繼續負責 feature 行為。後續 phases 可新增自己的靜態 UI modules，並連接至此 Shell，無須改變 Java API。
+Frontend dependencies 版本固定於 `package.json` 和 `package-lock.json`。Development 和 CI 會執行 `npm ci`、型別檢查、component tests 和 Vite production build。Java 17 CI job 安裝固定版本 Node.js 22.22.2；Java 8 compatibility job 不需要 Node。初次載入的 JavaScript 和 CSS gzip 預算為 150 KiB，並以 Vite 輸出檢查。
 
-如果 Shell 造成 regression，可從前一個 commit 還原 `index.html`、`app.css` 和 `app.js`，並移除 `app-shell.js` 引用。Shell 不會遷移 Server data 或改動 REST contracts。
+## 分階段遷移和 rollback
 
-只有在 UI 的共用 state 已無法清楚維護於現有 modules 時，才重新考慮 compile-time component framework。日後使用的 framework 必須輸出 WAR 靜態資源；Production 仍只執行 Java 和 Tomcat。
+Vite 產生的 `index.html` 和 bundles 是 active app entry。舊版會直接改 DOM 的 `app.js`、`app-shell.js` 和 stylesheet 僅透過 `legacy.html` 暫時保留作 rollback artifact；React entry 不會載入該頁或舊 scripts。Feature modules 逐階段取代舊 workflows，同時保留既有 Java routes、REST contracts、authentication 和 safe-source behavior。完成 feature parity 驗證後移除 rollback page 和 legacy assets。
+
+如需回復 shell，恢復先前的 `index.html` 和 WAR packaging 路徑中的 static resources，然後重新 build Server WAR。`legacy.html` 只供診斷或 rollback 參考，並不是 deployment switch。Rollback 不會更改 server data 或 API contracts。
+
+## Browser acceptance
+
+Development-only fixture 和 browser commands 記錄於 [`tools/ui-acceptance/README.md`](../../tools/ui-acceptance/README.md)。Harness 會在 `/att/ui/` 測試已 build 的 Vite output、提供 deterministic API responses、執行 browser smoke 和 axe checks，並擷取 1440 × 1000 與 768 × 1000 的 light/dark 截圖，存於 [`ui-shell-baseline/`](ui-shell-baseline/)。截圖反映 layout；不能取代 Java WAR packaging 或 non-root Tomcat tests。
+
+| Viewport | Light | Dark |
+|---|---|---|
+| 1440 × 1000 | [Dashboard](ui-shell-baseline/dashboard-1440-light.png) | [Dashboard](ui-shell-baseline/dashboard-1440-dark.png) |
+| 768 × 1000 | [Dashboard](ui-shell-baseline/dashboard-768-light.png) | [Dashboard](ui-shell-baseline/dashboard-768-dark.png) |
+
+如需移除 acceptance harness，回復 `tools/ui-acceptance/` 和 `docs/system-design/ui-shell-baseline/`。請將測試 artifact rollback 與 app rollback 分開處理。

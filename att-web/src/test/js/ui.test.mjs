@@ -17,10 +17,15 @@ function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo 
   class Element {
     constructor() {
       this.children = []; this.listeners = {}; this.elements = {}; this.dataset = {};
-      this.textContent = ''; this.hidden = false; this.disabled = false; this.value = ''; this.options = [];
+      this.attributes = {}; this.textContent = ''; this.hidden = false; this.disabled = false; this.value = ''; this.options = [];
       this.submitButton = { disabled: false };
     }
     addEventListener(name, listener) { this.listeners[name] = listener; }
+    setAttribute(name, value) { this.attributes[name] = String(value); }
+    getAttribute(name) { return this.attributes[name] ?? null; }
+    removeAttribute(name) { delete this.attributes[name]; }
+    showModal() { this.open = true; this.returnValue = confirmCancel ? 'confirm' : 'cancel'; this.close(); }
+    close() { this.open = false; this.listeners.close?.(); }
     append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
     replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(node => node !== this); }
@@ -58,6 +63,9 @@ function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo 
     return article;
   };
   const elements = new Map();
+  const navLinks = ['dashboard', 'packages', 'explorer', 'load-testing', 'jobs', 'settings'].map(value => {
+    const item = new Element(); item.dataset.nav = value; return item;
+  });
   const node = id => {
     if (!elements.has(id)) {
       const element = new Element();
@@ -70,7 +78,12 @@ function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo 
   const document = {
     baseURI: 'https://example.test/tools/att/ui/',
     getElementById: node,
-    createElement: () => new Element()
+    createElement: () => new Element(),
+    querySelectorAll: selector => selector === '[data-nav]' ? navLinks : [],
+    querySelector: selector => {
+      const match = /^\[data-nav="([^"]+)"\]$/.exec(selector);
+      return match ? navLinks.find(item => item.dataset.nav === match[1]) || null : null;
+    }
   };
   const location = { hash };
   const window = { listeners: {}, confirm: () => confirmCancel,
@@ -211,7 +224,7 @@ test('keeps browser-created Load disabled unless the version capability is exact
   ]) {
     const ui = boot({ versionInfo });
     await waitFor(() => ui.node('packages').children.length === 1, 'home package list');
-    const button = ui.node('packages').children[0].children[2];
+    const button = ui.node('packages').children[0].children[1].children[1];
     assert.equal(button.disabled, versionInfo.inlineLoadEnabled !== true);
   }
   const direct = boot({ hash: '#/advanced-load/payments', versionInfo: { apiVersion: '1' } });
@@ -871,11 +884,11 @@ test('a late Home jobs snapshot cannot overwrite a newer refresh', async () => {
   });
   ui.resolveHomeJobList(1, response('PASS'));
   await refresh;
-  assert.equal(ui.node('jobs').children[0].children[4].textContent, 'PASS');
+  assert.equal(allText(ui.node('jobs').children[0].children[4]).trim(), 'PASS');
 
   ui.resolveHomeJobList(0, response('RUNNING'));
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(ui.node('jobs').children[0].children[4].textContent, 'PASS');
+  assert.equal(allText(ui.node('jobs').children[0].children[4]).trim(), 'PASS');
 });
 
 test('debounces principal search, fetches only jobs, and clears the filter', async () => {

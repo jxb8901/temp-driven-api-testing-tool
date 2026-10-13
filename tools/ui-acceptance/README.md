@@ -1,15 +1,17 @@
 # ATT UI browser acceptance checks
 
-This development-only harness serves the repository's real static UI at `/att/ui/` and provides synthetic responses for the existing `/att/api/v1/` endpoints. It needs Python 3 and a local Chrome/Chromium browser. Node.js and npm are needed only to run these workstation checks; they are not part of ATT's WAR, installation, or production runtime.
+This development-only harness serves the built Vite UI at `/att/ui/` and provides synthetic responses for the existing `/att/api/v1/` endpoints. Build the static assets first with `mvn -B -ntp -pl att-web -am package`. It needs Python 3 and a local Chrome/Chromium browser. Node.js and npm are needed only to build or run these workstation checks; they are not part of ATT's WAR, installation, or production runtime.
 
 ## Install the development dependencies
 
 From this directory, install the pinned test-only packages:
 
 ```sh
-npm install
+npm ci
 npx playwright install chromium
 ```
+
+The acceptance harness pins direct and transitive dependencies in `package.json` and `package-lock.json`. `npm ci` installs the test-only tools reproducibly. This is a workstation/CI dependency only; the WAR and Tomcat startup do not run npm.
 
 If Chrome is already installed, set `ATT_UI_CHROME_PATH` to its executable to use it instead of Playwright's browser download. Set `PYTHON` if Python is not available as `python3`.
 

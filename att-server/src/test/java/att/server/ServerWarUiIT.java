@@ -17,6 +17,8 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarInputStream;
 import java.util.jar.JarOutputStream;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -63,39 +65,25 @@ class ServerWarUiIT {
                     "att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             assertJobDeepLink(port, auth);
 
-            for (String asset : new String[]{"index.html", "app.js", "app-shell.js", "app.css"}) {
+            String index = getText(port, "/tools/att/ui/index.html", auth);
+            assertTrue(index.contains("id=\"root\""), "The active page must mount the React application.");
+            assertFalse(index.contains("app.js"), "The active page must not load the legacy DOM-mutating script.");
+            assertFalse(index.contains("legacy.html"), "The rollback page must not be part of the active entry.");
+            String script = findAsset(index, "src");
+            String stylesheet = findAsset(index, "href");
+            String scriptBody = getText(port, "/tools/att/ui/" + script.replaceFirst("^\\./", ""), auth);
+            String styleBody = getText(port, "/tools/att/ui/" + stylesheet.replaceFirst("^\\./", ""), auth);
+            assertTrue(scriptBody.contains("../api/v1/"), "API URL must work below a non-root context path.");
+            assertTrue(scriptBody.contains("Server managed") && scriptBody.contains("not exposed by API"),
+                    "The shell must not imply a principal that the API does not expose.");
+            assertTrue(styleBody.contains("--att-color-primary") && styleBody.contains("--att-focus-ring"),
+                    "The generated stylesheet must include the shared design tokens.");
+            for (String asset : new String[]{"legacy.html", "app.js", "app-shell.js", "app.css"}) {
                 HttpURLConnection connection = open(port, "/tools/att/ui/" + asset, auth);
                 try {
-                    assertEquals(200, connection.getResponseCode(), asset);
+                    assertEquals(200, connection.getResponseCode(), asset + " rollback asset");
                     assertEquals("nosniff", connection.getHeaderField("X-Content-Type-Options"));
                     assertNotNull(connection.getHeaderField("Content-Security-Policy"));
-                    String body = new String(connection.getInputStream().readAllBytes(),
-                            java.nio.charset.StandardCharsets.UTF_8);
-                    if (asset.equals("app.js")) {
-                        assertTrue(body.contains("new URL('../api/v1/', document.baseURI)"),
-                                "API URL must work below a non-root context path");
-                        assertTrue(body.contains("parts[0] === 'packages' && !parts[1]"),
-                                "The package collection route must resolve without an ID");
-                        assertTrue(body.contains("parts[0] === 'jobs' && !parts[1]"),
-                                "The recent-jobs route must resolve without an ID");
-                        assertTrue(body.contains("parts[0] === 'advanced-load' && !parts[1]"),
-                                "The Load package-selection route must resolve without an ID");
-                    } else if (asset.equals("index.html")) {
-                        assertTrue(body.contains("app-shell.js"), "The shell controller must ship with the WAR");
-                        assertTrue(body.indexOf("app-shell.js") < body.indexOf("app.js"),
-                                "The shell controller must load before the feature controller");
-                        assertTrue(body.contains("id=\"app-sidebar\""), "The persistent navigation shell must be present");
-                        assertTrue(body.contains("Server managed") && body.contains("not exposed by API"),
-                                "The shell must not imply a principal that the API does not expose");
-                        assertTrue(body.contains("id=\"confirmation-dialog\""),
-                                "Destructive and Load confirmations must use the accessible dialog");
-                        assertTrue(body.contains("href=\"#/packages\""), "The package collection must be linked from navigation");
-                        assertTrue(body.contains("href=\"#/jobs\""), "The jobs collection must be linked from navigation");
-                        assertTrue(body.contains("href=\"#/advanced-load\""), "Load testing must have a useful no-package route");
-                    } else if (asset.equals("app.css")) {
-                        assertTrue(body.contains("--att-color-primary") && body.contains("--att-focus-ring"),
-                                "The shared shell tokens must be served with the stylesheet");
-                    }
                 } finally {
                     connection.disconnect();
                 }
@@ -128,6 +116,11 @@ class ServerWarUiIT {
             assertTrue(entries.contains("att/server/ApiServlet.class"));
             assertTrue(entries.contains("att/server/api/ServerApi.class"));
             assertTrue(entries.contains("META-INF/resources/ui/index.html"));
+            assertTrue(entries.stream().anyMatch(name -> name.matches("META-INF/resources/ui/assets/index-[^/]+\\.js")),
+                    "The active Vite bundle must be packaged under Servlet static resources.");
+            assertTrue(entries.stream().anyMatch(name -> name.matches("META-INF/resources/ui/assets/index-[^/]+\\.css")),
+                    "The generated stylesheet must be packaged under Servlet static resources.");
+            assertTrue(entries.contains("META-INF/resources/ui/legacy.html"));
             assertTrue(entries.contains("att-build.properties"));
             assertFalse(entries.contains("att/worker/WorkerMain.class"),
                     "Worker classes belong only in the Local runtime jar");
@@ -173,6 +166,24 @@ class ServerWarUiIT {
         HttpURLConnection connection = open(port, path, authorization);
         try { return connection.getResponseCode(); }
         finally { connection.disconnect(); }
+    }
+
+    private static String getText(int port, String path, String authorization) throws Exception {
+        HttpURLConnection connection = open(port, path, authorization);
+        try {
+            assertEquals(200, connection.getResponseCode(), path);
+            assertEquals("nosniff", connection.getHeaderField("X-Content-Type-Options"));
+            assertNotNull(connection.getHeaderField("Content-Security-Policy"));
+            return new String(connection.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private static String findAsset(String html, String attribute) {
+        Matcher matcher = Pattern.compile("<(?:script|link)[^>]+\\b" + attribute + "=\\\"([^\\\"]+\\.(?:js|css))\\\"").matcher(html);
+        assertTrue(matcher.find(), "The active Vite index must reference a generated " + attribute + " asset.");
+        return matcher.group(1);
     }
 
     private static HttpURLConnection open(int port, String path, String authorization) throws Exception {

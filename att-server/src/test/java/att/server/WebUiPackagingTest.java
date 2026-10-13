@@ -2,35 +2,58 @@ package att.server;
 
 import jakarta.servlet.annotation.WebFilter;
 import org.junit.jupiter.api.Test;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class WebUiPackagingTest {
-    @Test void uiStaticResourcesAreOnTheServerClasspath() throws IOException {
-        var loader=Thread.currentThread().getContextClassLoader();
-        var page=loader.getResourceAsStream("META-INF/resources/ui/index.html");
-        var script=loader.getResourceAsStream("META-INF/resources/ui/app.js");
-        assertNotNull(page,"The att-web JAR must contribute its Servlet static resources to the Server WAR");
-        assertNotNull(script);
-        String html=new String(page.readAllBytes(),StandardCharsets.UTF_8);
-        String js=new String(script.readAllBytes(),StandardCharsets.UTF_8);
-        assertTrue(html.contains("ATT Server"));
-        assertTrue(html.contains("id=\"job-principal-search\""),"Recent jobs can search by the existing principal field");
-        assertTrue(html.contains("id=\"job-principal\""),"Run, Case, Debug and Quick Load forms expose an optional attribution label");
-        assertTrue(html.contains("id=\"advanced-load-principal\""),"Advanced Load exposes an optional attribution label");
-        assertTrue(html.contains("Name(anonym)"),"The UI explains how the Server formats anonymous labels");
-        assertTrue(js.contains("body.principal = value"),"The UI sends the raw optional label for server-side formatting");
-        assertTrue(js.contains("jobs?principal=${encodeURIComponent(principalSearch)}"),"Job search uses the existing principal property");
-        assertTrue(js.contains("new URL('../api/v1/', document.baseURI)"),"API URLs must be relative to the deployment context");
-        assertFalse(js.contains("innerHTML"),"Untrusted API data must not be parsed as HTML");
+    private static final Pattern SCRIPT = Pattern.compile("<script[^>]+src=\\\"([^\\\"]+\\.js)\\\"");
+    private static final Pattern STYLESHEET = Pattern.compile("<link[^>]+href=\\\"([^\\\"]+\\.css)\\\"");
+
+    @Test void activeReactAssetsAreOnTheServerClasspath() throws IOException {
+        var loader = Thread.currentThread().getContextClassLoader();
+        String page = read(loader, "META-INF/resources/ui/index.html");
+        assertTrue(page.contains("id=\"root\""), "The active page must provide the single React mount.");
+        assertFalse(page.contains("app.js"), "The legacy DOM-mutating application must not be loaded by React.");
+        assertFalse(page.contains("legacy.html"), "The rollback page must not be linked from the active entry.");
+
+        String scriptPath = match(SCRIPT, page, "Vite must reference its generated JavaScript bundle.");
+        String stylePath = match(STYLESHEET, page, "Vite must reference its generated stylesheet.");
+        String scriptResource = "META-INF/resources/ui/" + scriptPath.replaceFirst("^\\./", "");
+        String styleResource = "META-INF/resources/ui/" + stylePath.replaceFirst("^\\./", "");
+        String script = read(loader, scriptResource);
+        String style = read(loader, styleResource);
+        assertTrue(script.contains("../api/v1/"), "The bundle must resolve API requests relative to the UI context.");
+        assertTrue(script.contains("Server managed") && script.contains("not exposed by API"),
+                "The shell must not imply a principal that the API does not expose.");
+        assertTrue(style.contains("--att-color-primary") && style.contains("--att-focus-ring"),
+                "The generated stylesheet must include the shared tokens.");
+        assertNotNull(loader.getResource("META-INF/resources/ui/legacy.html"), "Keep the explicit rollback page during migration.");
+        assertNotNull(loader.getResource("META-INF/resources/ui/app.js"), "Legacy workflow assets remain available only to the rollback page.");
     }
 
     @Test void uiSharesTheContainerAuthenticationFilter() {
-        WebFilter mapping=AuthenticationFilter.class.getAnnotation(WebFilter.class);
+        WebFilter mapping = AuthenticationFilter.class.getAnnotation(WebFilter.class);
         assertNotNull(mapping);
         assertTrue(Arrays.asList(mapping.urlPatterns()).contains("/ui/*"));
         assertTrue(Arrays.asList(mapping.urlPatterns()).contains("/api/v1/*"));
+    }
+
+    private static String read(ClassLoader loader, String path) throws IOException {
+        try (var stream = loader.getResourceAsStream(path)) {
+            assertNotNull(stream, "Missing packaged UI resource: " + path);
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private static String match(Pattern pattern, String text, String message) {
+        Matcher matcher = pattern.matcher(text);
+        assertTrue(matcher.find(), message);
+        return matcher.group(1);
     }
 }

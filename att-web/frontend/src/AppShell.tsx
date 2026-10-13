@@ -1,0 +1,238 @@
+import { createContext, useContext, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import type { AsyncState, ServerVersion } from './types';
+import type { AppRoute, RouteState } from './router';
+import { NavigationGuardContext } from './router';
+
+export interface AppShellProps {
+  route: AppRoute;
+  navigation: RouteState;
+  serverVersion: AsyncState<ServerVersion>;
+  selectedPackage: string;
+  selectedEnvironment: string;
+  onPackageChange(packageId: string): void;
+  onEnvironmentChange(environment: string): void;
+  onJobAccepted(job: { jobId: string; packageId?: string }): void;
+  children: ReactNode;
+}
+
+export interface AppShellContextValue {
+  selectedPackage: string;
+  selectedEnvironment: string;
+  onPackageChange(packageId: string): void;
+  onEnvironmentChange(environment: string): void;
+  onJobAccepted(job: { jobId: string; packageId?: string }): void;
+}
+
+export const AppShellContext = createContext<AppShellContextValue | null>(null);
+
+export function useAppShellContext(): AppShellContextValue {
+  const value = useContext(AppShellContext);
+  if (!value) throw new Error('useAppShellContext must be used inside AppShell.');
+  return value;
+}
+
+function routeLink(event: MouseEvent<HTMLAnchorElement>, action: () => void) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  action();
+}
+
+function routeTitle(route: AppRoute): string {
+  if (route.kind === 'dashboard') return 'Dashboard';
+  if (route.kind === 'packages') return 'Packages';
+  if (route.kind === 'package') return route.resource ? route.resource.resourceId : route.packageId;
+  if (route.kind === 'jobs') return route.jobId ? 'Job ' + route.jobId : 'Jobs and results';
+  if (route.kind === 'load') return route.packageId ? 'Advanced Load' : 'Load testing';
+  return 'Dashboard';
+}
+
+function activeNavigation(route: AppRoute): string {
+  if (route.kind === 'packages') return 'packages';
+  if (route.kind === 'package') return 'explorer';
+  if (route.kind === 'jobs') return 'jobs';
+  if (route.kind === 'load') return 'load-testing';
+  return 'dashboard';
+}
+
+function Breadcrumb({ label, href, navigate }: { label: string; href?: string; navigate: (to: string) => void }) {
+  return <li>{href
+    ? <a href={href} onClick={event => routeLink(event, () => navigate(href))}>{label}</a>
+    : <span aria-current="page">{label}</span>}
+  </li>;
+}
+
+function DiscardChangesDialog({ navigation }: { navigation: RouteState }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (navigation.pendingNavigation && !dialog.open) dialog.showModal();
+    if (!navigation.pendingNavigation && dialog.open) dialog.close();
+  }, [navigation.pendingNavigation]);
+
+  useEffect(() => {
+    if (navigation.pendingNavigation) cancelRef.current?.focus();
+  }, [navigation.pendingNavigation]);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="discard-dialog"
+      aria-labelledby="discard-title"
+      aria-describedby="discard-description"
+      onCancel={event => { event.preventDefault(); navigation.cancelNavigation(); }}
+    >
+      <p className="eyebrow">Unsaved work</p>
+      <h2 id="discard-title">Discard your changes?</h2>
+      <p id="discard-description">
+        {navigation.pendingDescription
+          ? 'You have unsaved ' + navigation.pendingDescription + '. If you continue, those changes will be lost.'
+          : 'You have unsaved changes. If you continue, those changes will be lost.'}
+      </p>
+      <div className="dialog-actions">
+        <button ref={cancelRef} className="button button-quiet" type="button" onClick={navigation.cancelNavigation}>Stay on this page</button>
+        <button className="button button-danger" type="button" onClick={navigation.confirmNavigation}>Discard changes and continue</button>
+      </div>
+    </dialog>
+  );
+}
+
+export function AppShell({
+  route, navigation, serverVersion, selectedPackage, selectedEnvironment,
+  onPackageChange, onEnvironmentChange, onJobAccepted, children,
+}: AppShellProps) {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem('att-ui-theme');
+      if (saved === 'dark' || saved === 'light') return saved;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    } catch {
+      return 'light';
+    }
+  });
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+  const currentPage = routeTitle(route);
+  const activeNav = activeNavigation(route);
+  const versionStatus = serverVersion.status === 'ready' ? 'Connected'
+    : serverVersion.status === 'error' ? 'Unavailable' : 'Connecting…';
+  const versionData = serverVersion.status === 'ready' ? serverVersion.data : null;
+  const action = route.kind === 'load' && route.packageId
+    ? { label: 'Open package', target: '#/packages/' + encodeURIComponent(route.packageId), hidden: false }
+    : route.kind === 'package' && versionData?.inlineLoadEnabled === true
+      ? { label: 'Start Load', target: '#/advanced-load/' + encodeURIComponent(route.packageId), hidden: false }
+      : route.kind === 'load' || route.kind === 'jobs'
+        ? { label: 'Browse packages', target: '#/packages', hidden: false }
+        : { label: 'Browse packages', target: '#/packages', hidden: false };
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('att-ui-theme', theme); } catch { /* Storage can be unavailable in private browsing. */ }
+  }, [theme]);
+
+  useEffect(() => {
+    if (!mobileNavigationOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavigationOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mobileNavigationOpen]);
+
+  const navigate = navigation.navigate;
+  const link = (to: string) => (event: MouseEvent<HTMLAnchorElement>) => routeLink(event, () => {
+    navigate(to);
+    setMobileNavigationOpen(false);
+  });
+  const packageHref = selectedPackage ? '#/packages/' + encodeURIComponent(selectedPackage) : '#/packages';
+  const loadHref = selectedPackage ? '#/advanced-load/' + encodeURIComponent(selectedPackage) : '#/advanced-load';
+
+  return (
+    <NavigationGuardContext.Provider value={navigation}>
+      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, onPackageChange, onEnvironmentChange, onJobAccepted }}>
+      <div className={'app-layout' + (collapsed ? ' is-collapsed' : '') + (mobileNavigationOpen ? ' mobile-nav-open' : '')} data-page={currentPage}>
+        <a className="skip-link" href="#main-content">Skip to main content</a>
+        <button className="sidebar-backdrop" type="button" aria-label="Close navigation" onClick={() => setMobileNavigationOpen(false)} tabIndex={mobileNavigationOpen ? 0 : -1} />
+        <aside className="app-sidebar" aria-label="Application sidebar">
+          <div className="sidebar-brand-row">
+            <a href="#/" className="sidebar-brand" aria-label="ATT Studio home" onClick={link('#/')}>
+              <span className="brand-mark" aria-hidden="true">A</span><span className="brand-name">ATT Studio</span>
+            </a>
+            <button className="icon-button sidebar-collapse" type="button" aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'} aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}>
+              <span aria-hidden="true">{collapsed ? '›' : '‹'}</span>
+            </button>
+          </div>
+          <nav id="primary-navigation" className="primary-navigation" aria-label="Primary navigation">
+            <p className="nav-group-label">Workspace</p>
+            <a className="nav-link" href="#/" data-nav="dashboard" aria-current={activeNav === 'dashboard' ? 'page' : undefined} onClick={link('#/')}>
+              <span className="nav-icon" aria-hidden="true">⌂</span><span className="nav-label">Dashboard</span>
+            </a>
+            <a className="nav-link" href="#/packages" data-nav="packages" aria-current={activeNav === 'packages' ? 'page' : undefined} onClick={link('#/packages')}>
+              <span className="nav-icon" aria-hidden="true">▦</span><span className="nav-label">Packages</span>
+            </a>
+            <a className="nav-link" href={packageHref} data-nav="explorer" aria-current={activeNav === 'explorer' ? 'page' : undefined} onClick={link(packageHref)}>
+              <span className="nav-icon" aria-hidden="true">⌕</span><span className="nav-label">Explorer and Run</span>
+            </a>
+            <a className="nav-link" href={loadHref} data-nav="load-testing" aria-current={activeNav === 'load-testing' ? 'page' : undefined} onClick={link(loadHref)}>
+              <span className="nav-icon" aria-hidden="true">⌁</span><span className="nav-label">Load testing</span>
+            </a>
+            <a className="nav-link" href="#/jobs" data-nav="jobs" aria-current={activeNav === 'jobs' ? 'page' : undefined} onClick={link('#/jobs')}>
+              <span className="nav-icon" aria-hidden="true">▤</span><span className="nav-label">Jobs and results</span>
+            </a>
+          </nav>
+          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.1.3'}</span></div>
+        </aside>
+
+        <div className="app-frame">
+          <header className="topbar">
+            <button className="icon-button mobile-menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded={mobileNavigationOpen} onClick={() => setMobileNavigationOpen(true)}>
+              <span aria-hidden="true">☰</span>
+            </button>
+            <a href="#/" className="topbar-brand" onClick={link('#/')}><span className="brand-mark" aria-hidden="true">A</span><span>ATT Studio</span></a>
+            <div className="topbar-spacer" />
+            <div className="topbar-status"><span className="topbar-status-label">Server</span><span className="connection-status" role="status" aria-live="polite" data-state={versionStatus.toLowerCase()}>{versionStatus}</span></div>
+            <button className="theme-toggle" type="button" aria-pressed={theme === 'dark'} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}>
+              <span className="theme-icon" aria-hidden="true">{theme === 'dark' ? '☼' : '◐'}</span><span className="theme-label">{theme === 'dark' ? 'Light' : 'Dark'}</span>
+            </button>
+          </header>
+
+          <div className="page-chrome">
+            <nav id="breadcrumbs" className="breadcrumbs" aria-label="Breadcrumb">
+              <ol>
+                <Breadcrumb label="Dashboard" href={route.kind === 'dashboard' ? undefined : '#/'} navigate={navigate} />
+                {route.kind === 'packages' && <Breadcrumb label="Packages" navigate={navigate} />}
+                {route.kind === 'package' && <>
+                  <Breadcrumb label="Packages" href="#/packages" navigate={navigate} />
+                  <Breadcrumb label={route.packageId} href={route.resource ? packageHref : undefined} navigate={navigate} />
+                  {route.resource && <Breadcrumb label={route.resource.resourceId} navigate={navigate} />}
+                </>}
+                {route.kind === 'load' && <>
+                  <Breadcrumb label="Load testing" href={route.packageId ? '#/advanced-load' : undefined} navigate={navigate} />
+                  {route.packageId && <Breadcrumb label={route.packageId} href={packageHref} navigate={navigate} />}
+                  {route.packageId && <Breadcrumb label="Advanced Load" navigate={navigate} />}
+                </>}
+                {route.kind === 'jobs' && <>
+                  <Breadcrumb label="Jobs and results" href={route.jobId ? '#/jobs' : undefined} navigate={navigate} />
+                  {route.jobId && <Breadcrumb label={'Job ' + route.jobId} navigate={navigate} />}
+                </>}
+              </ol>
+            </nav>
+            <div className="context-toolbar" role="group" aria-label="Workspace context and actions">
+              <div className="context-chip"><span>Package</span><strong>{selectedPackage || 'All packages'}</strong></div>
+              <div className="context-chip"><span>Environment</span><strong>{selectedEnvironment || 'Per run'}</strong></div>
+              <div className="context-chip context-identity"><span>Identity</span><strong>Server managed</strong><small>not exposed by API</small></div>
+              <a className="button button-primary context-action" href={action.target} hidden={action.hidden} onClick={link(action.target)}>{action.label}</a>
+            </div>
+          </div>
+
+          <main id="main-content" tabIndex={-1}>{children}</main>
+          <footer className="page-footer"><span>ATT Server</span><span>API v{versionData?.apiVersion || '1'}</span></footer>
+        </div>
+        <DiscardChangesDialog navigation={navigation} />
+      </div>
+      </AppShellContext.Provider>
+    </NavigationGuardContext.Provider>
+  );
+}
