@@ -1,0 +1,172 @@
+{
+  "repositoryVersion": "4.1.3",
+  "generatedAt": "2026-10-13T18:39:40.562Z",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "maxChangedPixelRatio": 0.04,
+  "channelTolerance": 32,
+  "captures": [
+    {
+      "browser": "chromium",
+      "version": "155.0.8059.40",
+      "width": 1280,
+      "height": 900,
+      "theme": "light",
+      "route": "#/load-schedules",
+      "file": "chromium-scheduled-1280-light.png"
+    },
+    {
+      "browser": "chromium",
+      "version": "155.0.8059.40",
+      "width": 1280,
+      "height": 900,
+      "theme": "dark",
+      "route": "#/load-schedules",
+      "file": "chromium-scheduled-1280-dark.png"
+    },
+    {
+      "browser": "chromium",
+      "version": "155.0.8059.40",
+      "width": 768,
+      "height": 900,
+      "theme": "light",
+      "route": "#/load-schedules",
+      "file": "chromium-scheduled-768-light.png"
+    },
+    {
+      "browser": "chromium",
+      "version": "155.0.8059.40",
+      "width": 768,
+      "height": 900,
+      "theme": "dark",
+      "route": "#/load-schedules",
+      "file": "chromium-scheduled-768-dark.png"
+    },
+    {
+      "browser": "chromium",
+      "version": "155.0.8059.40",
+      "width": 390,
+      "height": 900,
+      "theme": "light",
+      "route": "#/load-schedules",
+      "file": "chromium-scheduled-390-light.png"
+    },
+    {
+      "browser": "chromium",
+      "version": "155.0.8059.40",
+      "width": 390,
+      "height": 900,
+      "theme": "dark",
+      "route": "#/load-schedules",
+      "file": "chromium-scheduled-390-dark.png"
+    },
+    {
+      "browser": "firefox",
+      "version": "153.0",
+      "width": 1280,
+      "height": 900,
+      "theme": "light",
+      "route": "#/load-schedules",
+      "file": "firefox-scheduled-1280-light.png"
+    },
+    {
+      "browser": "firefox",
+      "version": "153.0",
+      "width": 1280,
+      "height": 900,
+      "theme": "dark",
+      "route": "#/load-schedules",
+      "file": "firefox-scheduled-1280-dark.png"
+    },
+    {
+      "browser": "firefox",
+      "version": "153.0",
+      "width": 768,
+      "height": 900,
+      "theme": "light",
+      "route": "#/load-schedules",
+      "file": "firefox-scheduled-768-light.png"
+    },
+    {
+      "browser": "firefox",
+      "version": "153.0",
+      "width": 768,
+      "height": 900,
+      "theme": "dark",
+      "route": "#/load-schedules",
+      "file": "firefox-scheduled-768-dark.png"
+    },
+    {
+      "browser": "firefox",
+      "version": "153.0",
+      "width": 390,
+      "height": 900,
+      "theme": "light",
+      "route": "#/load-schedules",
+      "file": "firefox-scheduled-390-light.png"
+    },
+    {
+      "browser": "firefox",
+      "version": "153.0",
+      "width": 390,
+      "height": 900,
+      "theme": "dark",
+      "route": "#/load-schedules",
+      "file": "firefox-scheduled-390-dark.png"
+    },
+    {
+      "browser": "webkit",
+      "version": "26.5",
+      "width": 1280,
+      "height": 900,
+      "theme": "light",
+      "route": "#/load-schedules",
+      "file": "webkit-scheduled-1280-light.png"
+    },
+    {
+      "browser": "webkit",
+      "version": "26.5",
+      "width": 1280,
+      "height": 900,
+      "theme": "dark",
+      "route": "#/load-schedules",
+      "file": "webkit-scheduled-1280-dark.png"
+    },
+    {
+      "browser": "webkit",
+      "version": "26.5",
+      "width": 768,
+      "height": 900,
+      "theme": "light",
+      "route": "#/load-schedules",
+      "file": "webkit-scheduled-768-light.png"
+    },
+    {
+      "browser": "webkit",
+      "version": "26.5",
+      "width": 768,
+      "height": 900,
+      "theme": "dark",
+      "route": "#/load-schedules",
+      "file": "webkit-scheduled-768-dark.png"
+    },
+    {
+      "browser": "webkit",
+      "version": "26.5",
+      "width": 390,
+      "height": 900,
+      "theme": "light",
+      "route": "#/load-schedules",
+      "file": "webkit-scheduled-390-light.png"
+    },
+    {
+      "browser": "webkit",
+      "version": "26.5",
+      "width": 390,
+      "height": 900,
+      "theme": "dark",
+      "route": "#/load-schedules",
+      "file": "webkit-scheduled-390-dark.png"
+    }
+  ]
+}

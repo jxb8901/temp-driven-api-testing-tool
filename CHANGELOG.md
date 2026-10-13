@@ -1,5 +1,11 @@
 # Changelog
 
+# ATT 4.1.3 - 2026-10-13
+
+- Add the responsive Server UI shell, shared light/dark design tokens, API-backed dashboard, and collection routes (#204).
+- Modernize package, resource, and configuration exploration while preserving existing Run, Validate, Debug, and Quick Load actions (#205).
+- Add the visual Advanced Load builder and tabbed Jobs/results workspace with honest API-backed metrics and latest-100 job coverage (#206).
+
 # ATT 4.1.2 - 2026-10-13
 
 - Resolve ATT Remote servers from a profile or direct HTTP(S) URL, with explicit CLI and environment precedence.

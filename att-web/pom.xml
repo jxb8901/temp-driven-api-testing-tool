@@ -3,9 +3,64 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <parent><groupId>att</groupId><artifactId>template-driven-api-testing-tool</artifactId><version>4.1.2</version><relativePath>../pom.xml</relativePath></parent>
+    <parent><groupId>att</groupId><artifactId>template-driven-api-testing-tool</artifactId><version>4.1.3</version><relativePath>../pom.xml</relativePath></parent>
     <artifactId>att-web</artifactId>
     <packaging>jar</packaging>
     <name>ATT Web UI</name>
     <description>Static browser console served by the ATT Server WAR.</description>
+    <build>
+        <resources>
+            <resource><directory>src/main/resources</directory></resource>
+            <resource>
+                <directory>frontend/dist</directory>
+                <targetPath>META-INF/resources/ui</targetPath>
+            </resource>
+        </resources>
+        <plugins>
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>1.15.1</version>
+                <configuration>
+                    <workingDirectory>${project.basedir}/frontend</workingDirectory>
+                    <installDirectory>${project.build.directory}/node</installDirectory>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>install-node-and-npm-for-build</id>
+                        <phase>generate-resources</phase>
+                        <goals><goal>install-node-and-npm</goal></goals>
+                        <configuration>
+                            <nodeVersion>v22.22.2</nodeVersion>
+                            <npmVersion>10.9.0</npmVersion>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>install-locked-frontend-dependencies</id>
+                        <phase>generate-resources</phase>
+                        <goals><goal>npm</goal></goals>
+                        <configuration><arguments>ci</arguments></configuration>
+                    </execution>
+                    <execution>
+                        <id>build-static-server-ui</id>
+                        <phase>generate-resources</phase>
+                        <goals><goal>npm</goal></goals>
+                        <configuration><arguments>run build</arguments></configuration>
+                    </execution>
+                    <execution>
+                        <id>check-static-ui-bundle-budget</id>
+                        <phase>process-resources</phase>
+                        <goals><goal>npm</goal></goals>
+                        <configuration><arguments>run bundle:budget</arguments></configuration>
+                    </execution>
+                    <execution>
+                        <id>test-typed-ui-components</id>
+                        <phase>test</phase>
+                        <goals><goal>npm</goal></goals>
+                        <configuration><arguments>test</arguments></configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

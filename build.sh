@@ -6,7 +6,7 @@ if [ "${1:-}" = "clean" ]; then
   rm -rf "$ROOT_DIR/target" "$ROOT_DIR/dist" "$ROOT_DIR/att-engine/target" "$ROOT_DIR/att-cli/target" "$ROOT_DIR/att-worker/target" "$ROOT_DIR/att-web/target" "$ROOT_DIR/att-server/target" "$ROOT_DIR/att-dist/target"
   exit 0
 fi
-for required in pom.xml att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-web/pom.xml att-web/src/main/resources/META-INF/resources/ui/index.html att-server/pom.xml att-dist/pom.xml att-dist/src/assembly/local.xml att-dist/src/assembly/server.xml att-server/src/assembly/server-app.xml att-dist/src/release/local/RELEASE_MANIFEST.txt att-dist/src/release/server/RELEASE_MANIFEST.txt config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md docs/server-deployment.md docs/server-deployment.zh.md docs/att-server-web-ui.md docs/att-server-web-ui.zh.md; do
+for required in pom.xml att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-web/pom.xml att-web/frontend/index.html att-server/pom.xml att-dist/pom.xml att-dist/src/assembly/local.xml att-dist/src/assembly/server.xml att-server/src/assembly/server-app.xml att-dist/src/release/local/RELEASE_MANIFEST.txt att-dist/src/release/server/RELEASE_MANIFEST.txt config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md docs/server-deployment.md docs/server-deployment.zh.md docs/att-server-web-ui.md docs/att-server-web-ui.zh.md; do
   if [ ! -e "$ROOT_DIR/$required" ]; then echo "Missing required package path: $ROOT_DIR/$required" >&2; exit 2; fi
 done
 VERSION="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' "$ROOT_DIR/pom.xml" | head -n 1)"
@@ -32,6 +32,17 @@ GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unkn
 for archive in "$LOCAL_ARCHIVE" "$SERVER_ARCHIVE" "$SOURCE_ARCHIVE"; do
   if [ ! -f "$archive" ]; then echo "Maven distribution assembly did not produce: $archive" >&2; exit 2; fi
 done
+for archive in "$LOCAL_ARCHIVE" "$SOURCE_ARCHIVE"; do
+  if tar -tzf "$archive" | grep -E '(^|/)node_modules(/|$)' >/dev/null; then
+    echo "Release archive must not include build-time Node.js dependencies: $archive" >&2; exit 2
+  fi
+  if tar -tzf "$archive" | grep -E '(^|/)ui-acceptance/artifacts(/|$)' >/dev/null; then
+    echo "Release archive must not include generated UI acceptance captures: $archive" >&2; exit 2
+  fi
+done
+if tar -tzf "$LOCAL_ARCHIVE" | grep -E '(^|/)ui-acceptance(/|$)' >/dev/null; then
+  echo "Local binary archive must not include the development-only UI acceptance harness" >&2; exit 2
+fi
 rm -rf "$ROOT_DIR/target/release"; mkdir -p "$LOCAL_WORK" "$SERVER_WORK" "$DIST_DIR"
 tar -xzf "$LOCAL_ARCHIVE" -C "$LOCAL_WORK"
 LOCAL_PACKAGE_DIR="$LOCAL_WORK/$LOCAL_PACKAGE_NAME"

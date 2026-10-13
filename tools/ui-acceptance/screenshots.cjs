@@ -1,0 +1,112 @@
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const { launchBrowser, selectFixture, startFixture, stopFixture } = require('./browser-support.cjs');
+
+const repositoryRoot = path.resolve(__dirname, '../..');
+const outputDirectory = path.join(repositoryRoot, 'docs/system-design/ui-shell-baseline');
+
+async function main() {
+  await fs.mkdir(outputDirectory, { recursive: true });
+  const fixture = await startFixture();
+  let browser;
+  try {
+    browser = await launchBrowser();
+    const captures = [];
+    const screens = [
+      {
+        name: 'dashboard', fixture: 'loaded', route: '',
+        wait: async page => {
+          await page.locator('#packages-state').getByText(/configured package/i).waitFor();
+          await page.locator('#jobs-state').getByText(/recent job row/i).waitFor();
+        },
+      },
+      {
+        name: 'explorer-debug', fixture: 'explorer-workspace',
+        route: '#/packages/payments/resources/template/checkout',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
+          await page.getByRole('heading', { name: 'checkout' }).waitFor();
+        },
+      },
+      {
+        name: 'load-builder', fixture: 'load-workspace', route: '#/advanced-load/payments',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'New Load scenario' }).waitFor();
+          await page.getByText(/Safe policy defaults loaded|Policy defaults loaded/i).waitFor();
+        },
+      },
+      {
+        name: 'job-results', fixture: 'load-workspace', route: '#/jobs/JOB-LOAD-204',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'Job JOB-LOAD-204' }).waitFor();
+          await page.getByRole('tab', { name: 'Results', exact: true }).click();
+          await page.getByText(/Server result returned/i).waitFor();
+        },
+      },
+      {
+        name: 'scheduled-load', fixture: 'scheduled-workspace', route: '#/load-schedules',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'Scheduled Load', exact: true }).waitFor();
+          await page.locator('.att-schedule-table-wrap:visible, .att-schedule-cards:visible')
+            .getByText('Nightly payments', { exact: true }).waitFor();
+        },
+      },
+    ];
+    for (const screenName of [...screens.map(screen => screen.name), 'settings']) {
+      for (const width of [1440, 768]) {
+        for (const theme of ['light', 'dark']) {
+          await fs.rm(path.join(outputDirectory, `${screenName}-${width}-${theme}.png`), { force: true });
+        }
+      }
+    }
+    for (const screen of screens) {
+      for (const width of [1440]) {
+        for (const theme of ['light', 'dark']) {
+          const context = await browser.newContext({
+            viewport: { width, height: 1000 },
+            colorScheme: theme,
+          });
+          await selectFixture(context, fixture.origin, screen.fixture);
+          await context.addInitScript(value => localStorage.setItem('att-ui-theme', value), theme);
+          const page = await context.newPage();
+          const pageErrors = [];
+          page.on('pageerror', error => pageErrors.push(error.message));
+          await page.goto(`${fixture.origin}/att/ui/${screen.route}`);
+          await screen.wait(page);
+          const layout = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth }));
+          if (layout.scrollWidth > width) throw new Error(`${screen.name} overflows at ${width}px: ${JSON.stringify(layout)}`);
+          if (pageErrors.length > 0) throw new Error(`${screen.name} reported browser errors: ${pageErrors.join('; ')}`);
+          const fileName = `${screen.name}-${width}-${theme}.png`;
+          const filePath = path.join(outputDirectory, fileName);
+          await page.screenshot({ path: filePath, fullPage: false, animations: 'disabled' });
+          captures.push({
+            file: fileName,
+            screen: screen.name,
+            viewport: { width, height: 1000 },
+            theme,
+            fixture: `${screen.fixture} synthetic API data`,
+            page: `/att/ui/${screen.route}`,
+          });
+          await context.close();
+        }
+      }
+    }
+    await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      repositoryVersion: '4.1.3',
+      browser: await browser.version(),
+      playwright: require('playwright/package.json').version,
+      fixtureOrigin: fixture.origin,
+      captures,
+    }, null, 2)}\n`);
+    console.log(`Wrote ${captures.length} phase screenshots to ${outputDirectory}`);
+  } finally {
+    if (browser) await browser.close();
+    await stopFixture(fixture);
+  }
+}
+
+main().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

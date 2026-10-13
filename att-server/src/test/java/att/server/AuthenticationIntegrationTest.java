@@ -52,7 +52,7 @@ class AuthenticationIntegrationTest {
         Files.writeString(template.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs:\n  value: safe\n"
                 +"  payload: {account: 'customer account 123456789', secret: 'temporary credential violet-123'}\n");
         Path users=Files.writeString(temp.resolve("tomcat-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"OTHER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"other\" password=\"secret\" roles=\"OTHER\"/></tomcat-users>");
-        Path config=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");
+        Path config=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\nworkers:\n  maxConcurrent: 2\n  queuedLimit: 2\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");
         String old=System.getProperty("att.server.config");System.setProperty("att.server.config",config.toString());
         Tomcat tomcat=start(users,appDirectory("authenticated"),true);
         try {
@@ -108,6 +108,25 @@ class AuthenticationIntegrationTest {
             assertEquals("PASS",loadJob.path("status").asText(),"The authenticated Advanced Load REST route must validate and submit its immutable Worker scenario");
             assertEquals("att",loadJob.path("principal").asText(),"Authenticated requests must ignore caller-supplied attribution labels");
             assertFalse(loadJob.has("attributionPrincipal"),"Attribution reuses the existing principal property");
+            JsonNode longScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6",
+                    "load",Map.of("users",1,"duration","30s"),"workloads",List.of(Map.of("id","cancel-resume",
+                            "load",Map.of("users",1),"execution",Map.of("thinkTime","500ms"),
+                            "target",Map.of("type","template","id","FORM"),"inputs",Map.of("value","cancel-resume")))));
+            JsonNode longDraft=postJson(port,"/att/api/v1/drafts/load",basic,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","scenario",longScenario)));
+            JsonNode cancellable=postJson(port,"/att/api/v1/jobs/load",basic,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","draftId",longDraft.path("draftId").asText())),202);
+            String cancellableJobId=cancellable.path("jobId").asText();
+            assertTrue(cancellableJobId.matches("J[0-9A-F]{16}"));
+            long resumeAfter=assertRetainedSseEvent(port,basic,cancellableJobId);
+            assertEquals(200,cancelJob(port,basic,cancellableJobId),"The real Tomcat API must accept cancellation of an active Load job");
+            long cancelDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+            JsonNode cancelledJob=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);
+            while(!"CANCELLED".equals(cancelledJob.path("status").asText())&&System.nanoTime()<cancelDeadline) {
+                Thread.sleep(20);cancelledJob=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);
+            }
+            assertEquals("CANCELLED",cancelledJob.path("status").asText(),"The running Load job must reach a terminal cancellation state");
+            assertLastEventIdResume(port,basic,cancellableJobId,resumeAfter);
             // Exercise the real public API behind the authenticated browser console.
             String jobId=submitJob(port,basic);
             assertEquals(200,get(port,"/att/api/v1/jobs/"+jobId,basic));
@@ -153,7 +172,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
             assertEquals(200,get(port,"/att/ui/app.js",null));
             assertEquals(200,get(port,"/att/api/v1/health",null));
-            assertEquals("4.1.2",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            assertEquals("4.1.3",getJson(port,"/att/api/v1/version",null).path("version").asText());
             assertEquals("debug",getJson(port,"/att/api/v1/packages/debug",null).path("packageId").asText());
             JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",null);
             String resourceId=resources.path("items").get(0).path("resourceId").asText();
@@ -328,13 +347,34 @@ class AuthenticationIntegrationTest {
         assertTrue(id.matches("J[0-9A-F]{16}"));
         return id;
     }
-    private static void assertRetainedSseEvent(int port,String authorization,String id)throws Exception {
+    private static long assertRetainedSseEvent(int port,String authorization,String id)throws Exception {
         HttpURLConnection c=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();
         c.setReadTimeout(5000);if(authorization!=null)c.setRequestProperty("Authorization",authorization);
         assertEquals(200,c.getResponseCode());assertTrue(c.getHeaderField("Content-Type").startsWith("text/event-stream"));
         try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(c.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
-            assertTrue(reader.readLine().startsWith("id: "),"SSE must replay retained job events");
+            String line=reader.readLine();assertNotNull(line,"SSE must replay retained job events");assertTrue(line.startsWith("id: "),"SSE must replay retained job events");
+            return Long.parseLong(line.substring(4));
         } finally {c.disconnect();}
+    }
+    private static void assertLastEventIdResume(int port,String authorization,String id,long cursor)throws Exception {
+        HttpURLConnection c=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();
+        c.setReadTimeout(10000);if(authorization!=null)c.setRequestProperty("Authorization",authorization);
+        c.setRequestProperty("Last-Event-ID",Long.toString(cursor));
+        assertEquals(200,c.getResponseCode(),"The real Tomcat event endpoint must accept a Last-Event-ID resume request");
+        long previous=cursor;boolean sawEvent=false,sawCancelled=false;
+        try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(c.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            while((line=reader.readLine())!=null) {
+                if(line.startsWith("id: ")) {
+                    long eventId=Long.parseLong(line.substring(4));assertTrue(eventId>previous,"Resumed SSE must not replay events at or before Last-Event-ID");previous=eventId;sawEvent=true;
+                } else if(line.startsWith("data: ")) {
+                    JsonNode data=ServerRuntime.JSON.readTree(line.substring(6));
+                    if("CANCELLED".equals(data.path("status").asText()))sawCancelled=true;
+                }
+            }
+        } finally {c.disconnect();}
+        assertTrue(sawEvent,"A resumed stream must deliver events newer than Last-Event-ID");
+        assertTrue(sawCancelled,"The resumed stream must include the terminal CANCELLED status");
     }
     private static int cancelJob(int port,String authorization,String id)throws Exception {
         HttpURLConnection c=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id).openConnection();

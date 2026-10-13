@@ -1,5 +1,6 @@
 target/
 dist/
+node_modules/
 output/
 build/
 /report/
@@ -7,3 +8,4 @@ logs/
 *.log
 .DS_Store
 tools/__pycache__/
+tools/ui-acceptance/artifacts/

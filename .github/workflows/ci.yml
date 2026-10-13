@@ -64,6 +64,24 @@ jobs:
           java-version: '17'
           cache: maven
 
+      - name: Set up pinned Node.js for build-time UI tooling
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+          cache: npm
+          cache-dependency-path: |
+            att-web/frontend/package-lock.json
+            tools/ui-acceptance/package-lock.json
+
+      - name: Verify React, TypeScript, component tests, Vite build, and bundle budget
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+          npm run bundle:budget
+        working-directory: att-web/frontend
+
       - name: Install Pandoc
         run: |
           # Keep generated HTML stable across hosted runner image updates.
@@ -81,6 +99,39 @@ jobs:
 
       - name: Verify
         run: mvn -B -ntp clean verify
+
+      - name: Install browser acceptance dependencies
+        run: npm ci
+        working-directory: tools/ui-acceptance
+
+      - name: Install Chromium, Firefox, and WebKit for browser acceptance
+        run: npx playwright install --with-deps chromium firefox webkit
+        working-directory: tools/ui-acceptance
+
+      - name: Verify UI browser smoke and axe accessibility
+        run: npm run smoke
+        working-directory: tools/ui-acceptance
+
+      - name: Verify Scheduled Load flows and accessibility
+        run: npm run smoke:scheduled-load
+        working-directory: tools/ui-acceptance
+
+      - name: Verify responsive UI in Chromium, Firefox, and WebKit
+        run: npm run smoke:cross-browser
+        working-directory: tools/ui-acceptance
+
+      - name: Upload Scheduled Load cross-browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-load-browser-screenshots-${{ github.run_id }}
+          path: tools/ui-acceptance/artifacts/scheduled-load/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Capture UI screenshot baselines
+        run: npm run screenshots
+        working-directory: tools/ui-acceptance
 
       - name: Verify documentation release gate
         run: python3 tools/verify_documentation.py

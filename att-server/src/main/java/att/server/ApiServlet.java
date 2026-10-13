@@ -251,7 +251,11 @@ public final class ApiServlet extends HttpServlet {
                 if(runtime.terminal(jobId)&&journal.resultDeliveredThrough(cursor)&&!journal.hasMore(cursor))break;
                 if(System.nanoTime()-lastWrite>TimeUnit.SECONDS.toNanos(15)){out.print(": keepalive\n\n");out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
             }
-        }catch(Exception ignored){}finally{try{subscription.close();}catch(Exception ignored){}async.complete();}
+        }catch(Exception ignored){}finally{
+            try{subscription.close();}catch(Exception ignored){}
+            // A disconnected SSE client can make Tomcat enter COMPLETING before this worker exits.
+            try{async.complete();}catch(IllegalStateException alreadyCompleting){}
+        }
     }
     private List<Map<String,Object>> artifacts(String jobId) throws Exception {
         runtime.jobRecord(jobId);Path root=runtime.config.dataDir.resolve("jobs").resolve(jobId).resolve("output").toRealPath();List<Map<String,Object>> items=new ArrayList<>();
