@@ -17,7 +17,8 @@ record RequestIdentity(String authorizationPrincipal, String persistedPrincipal)
         if (request != null && request.has("principal")) {
             JsonNode value = request.get("principal");
             if (!value.isTextual()) throw new IllegalArgumentException("principal must be a text label");
-            persisted = formatAnonymousPrincipal(value.asText());
+            String label = value.asText();
+            persisted = label.strip().isEmpty() ? ANONYMOUS : formatAnonymousPrincipal(label);
         }
         return new RequestIdentity(ANONYMOUS, persisted);
     }

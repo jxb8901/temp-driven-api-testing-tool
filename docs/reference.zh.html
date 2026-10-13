@@ -5574,9 +5574,10 @@ credentials。匿名模式下，<code>--principal</code> 只提供自我聲稱�
 label，Server 會在既有 <code>principal</code> 欄位儲存
 <code>&lt;name&gt;(anonym)</code>；不影響存取或授權。驗證模式會忽略此
 option。<code>jobs --principal &lt;text&gt;</code>
-會搜尋該既有欄位。<code>--format human|json</code> 及已記錄的 ATT
-selection、environment、Debug、Load option，會在符合 remote job contract
-時使用。Remote command list 見上述指南。</p>
+會以不區分大小寫的子字串搜尋該欄位，因此搜尋 <code>alice</code> 亦會匹配
+<code>alice(anonym)</code>。<code>--format human|json</code> 及已記錄的
+ATT selection、environment、Debug、Load option，會在符合 remote job
+contract 時使用。Remote command list 見上述指南。</p>
 <h3 id="typed-overrides-and-quick-load">Typed overrides and quick
 Load</h3>
 <p><code>--set</code> 可重複使用，並且只接受一個

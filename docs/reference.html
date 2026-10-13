@@ -6099,11 +6099,12 @@ explicitly permits anonymous access. In anonymous mode,
 stores in the existing <code>principal</code> field as
 <code>&lt;name&gt;(anonym)</code>; it does not affect access or
 authorization. Authenticated mode ignores it.
-<code>jobs --principal &lt;text&gt;</code> searches that existing field.
-<code>--format human|json</code> and the documented ATT selection,
-environment, Debug, and Load options are accepted where they map to the
-remote job contract. See the linked guide for the remote command
-list.</p>
+<code>jobs --principal &lt;text&gt;</code> searches that field by
+case-insensitive substring, so searching for <code>alice</code> also
+matches <code>alice(anonym)</code>. <code>--format human|json</code> and
+the documented ATT selection, environment, Debug, and Load options are
+accepted where they map to the remote job contract. See the linked guide
+for the remote command list.</p>
 <p>Options are command-specific. Unknown commands/options and missing
 option values are errors. <code>--package</code> and
 <code>--selected</code> are mutually exclusive. Selected validation and

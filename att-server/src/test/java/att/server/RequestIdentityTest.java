@@ -21,6 +21,15 @@ class RequestIdentityTest {
         assertEquals("anonymous",identity.persistedPrincipal());
     }
 
+    @Test void blankAnonymousNamesUseTheStableSharedIdentity() throws Exception {
+        for (String label : new String[]{"", " \t\n "}) {
+            JsonNode request=ServerRuntime.JSON.readTree("{\"principal\":"+ServerRuntime.JSON.writeValueAsString(label)+"}");
+            RequestIdentity identity=RequestIdentity.resolve(false,null,request);
+            assertEquals("anonymous",identity.authorizationPrincipal());
+            assertEquals("anonymous",identity.persistedPrincipal());
+        }
+    }
+
     @Test void authenticatedIdentityCannotBeOverriddenBySubmittedName() throws Exception {
         JsonNode request=ServerRuntime.JSON.readTree("{\"principal\":\"Alice(anonym)\"}");
         RequestIdentity identity=RequestIdentity.resolve(true,"alice",request);

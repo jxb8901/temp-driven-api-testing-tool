@@ -61,7 +61,7 @@ servers:
 
 `--suite`、`--suite-dir`、`--config`、`--input` 及 Load scenario 等路徑，均指 Server package 內的邏輯相對路徑。Client 會拒絕絕對路徑及 parent-directory traversal。請求只包含 `packageId`，不會包含 `PACKAGE_ROOT`、`SERVER_DATA_DIR`、Worker 路徑或 client 輸出目錄。
 
-命令預設會等待終端結果。Client 只提交一次工作，接收排序後的 status/progress/log/diagnostic event，再取得 result 及退出。它不會在本機調用 `att-engine`。`jobs --principal <text>` 會搜尋既有 principal 欄位，包括 Server 格式化後的匿名 label 及歷史 `anonymous` 紀錄。
+命令預設會等待終端結果。Client 只提交一次工作，接收排序後的 status/progress/log/diagnostic event，再取得 result 及退出。它不會在本機調用 `att-engine`。`jobs --principal <text>` 會以不區分大小寫的子字串搜尋既有 principal 欄位，包括 Server 格式化後的匿名 label；搜尋 `alice` 亦會匹配 `alice(anonym)`，並可搜尋歷史 `anonymous` 紀錄。
 
 使用 `--detach` 回傳 job ID，不會保留背景 process：
 

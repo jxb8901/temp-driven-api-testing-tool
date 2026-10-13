@@ -236,6 +236,10 @@ class AuthenticationIntegrationTest {
                     ServerRuntime.JSON.valueToTree(Map.of("packageId","p","all",true)),202);
             JsonNode unlabelledJob=waitForTerminalJob(port,unlabelledAccepted.path("jobId").asText());
             assertEquals("anonymous",unlabelledJob.path("principal").asText(),"Omitting the label keeps the shared default identity");
+            JsonNode blankLabelAccepted=postJson(port,"/att/api/v1/jobs/run",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("packageId","p","all",true,"principal"," \t ")),202);
+            JsonNode blankLabelJob=waitForTerminalJob(port,blankLabelAccepted.path("jobId").asText());
+            assertEquals("anonymous",blankLabelJob.path("principal").asText(),"A blank label uses the same stable default as an omitted label");
             assertRemoteNoAuthCommands(port);
             assertTrue(auditCount(temp.resolve("open-data"),"anonymous")>0,"Unlabelled anonymous jobs keep the shared default identity in audit records");
             assertTrue(auditCount(temp.resolve("open-data"),"Bob(anonym)")>0,"Named anonymous job submissions use their server-formatted principal in audit records");

@@ -95,7 +95,7 @@ function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo 
     if (deferSubmit && options.method === 'POST') return new Promise((resolve, reject) => pendingSubmissions.push({ resolve, reject }));
     if (deferCancel && options.method === 'DELETE') return new Promise((resolve, reject) => pendingCancellations.push({ resolve, reject }));
     if (deferArtifacts && /^jobs\/[^/]+\/artifacts$/.test(path)) return new Promise(resolve => pendingArtifacts.push(resolve));
-    if (deferJobLists && path === 'jobs' && !options.method) return new Promise((resolve, reject) => pendingHomeJobs.push({ resolve, reject }));
+    if (deferJobLists && /^jobs(?:\?|$)/.test(path) && !options.method) return new Promise((resolve, reject) => pendingHomeJobs.push({ path, resolve, reject }));
     if (deferResult && /^jobs\/[^/]+\/result$/.test(path)) return new Promise(resolve => pendingResults.push(resolve));
     if (deferConfiguration && /^packages\/[^/]+\/configuration(?:\/|\?)/.test(path)) return new Promise(resolve => pendingConfigurations.push(resolve));
     if (deferHome && (path === 'packages' || path === 'jobs')) return delayedHome;
@@ -156,7 +156,7 @@ function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo 
     else if (/^packages\/[^/]+\/configuration\/compare\?/.test(path)) result = configuration.compare || {};
     else if (/^packages\/[^/]+\/configuration\?/.test(path)) result = configuration.declared || {};
     else if (path.startsWith('packages/')) result = { packageId: path.substring(9) };
-    else if (path === 'jobs') result = { items: [] };
+    else if (/^jobs(?:\?|$)/.test(path)) result = { items: [] };
     else if (/^jobs\/(run|debug|load|validate)$/.test(path) && options.method === 'POST') result = { jobId: 'J1' };
     else if (/^jobs\/[^/]+\/artifacts$/.test(path)) result = { items: artifactItems };
     else if (/^jobs\/[^/]+\/result$/.test(path)) result = { result: { passed: 1 }, diagnostic: null };
@@ -168,7 +168,7 @@ function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo 
   class FormData {
     constructor(form) { return new Map(form.formValues || []); }
   }
-  vm.runInNewContext(script, { document, location, window, fetch, EventSource, URL, Headers, FormData, console }, { filename: 'app.js' });
+  vm.runInNewContext(script, { document, location, window, fetch, EventSource, URL, Headers, FormData, console, setTimeout, clearTimeout }, { filename: 'app.js' });
   return { node, location, window, calls, streams, state, pendingSubmissions, pendingCancellations, pendingArtifacts, pendingHomeJobs, pendingResults,
     resolveSubmission: (index, response) => pendingSubmissions[index].resolve(response),
     rejectSubmission: (index, error) => pendingSubmissions[index].reject(error),
@@ -871,11 +871,52 @@ test('a late Home jobs snapshot cannot overwrite a newer refresh', async () => {
   });
   ui.resolveHomeJobList(1, response('PASS'));
   await refresh;
-  assert.equal(ui.node('jobs').children[0].children[3].textContent, 'PASS');
+  assert.equal(ui.node('jobs').children[0].children[4].textContent, 'PASS');
 
   ui.resolveHomeJobList(0, response('RUNNING'));
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(ui.node('jobs').children[0].children[3].textContent, 'PASS');
+  assert.equal(ui.node('jobs').children[0].children[4].textContent, 'PASS');
+});
+
+test('debounces principal search, fetches only jobs, and clears the filter', async () => {
+  const ui = boot();
+  await waitFor(() => ui.node('connection').textContent === 'Connected', 'Home load');
+  const packageRequests = ui.calls.filter(call => call.path === 'packages').length;
+  const search = ui.node('job-principal-search');
+  for (const value of ['a', 'al', 'ali', 'alice']) {
+    search.value = value;
+    search.listeners.input();
+  }
+  await waitFor(() => ui.calls.some(call => call.path === 'jobs?principal=alice'), 'debounced principal search');
+  await new Promise(resolve => setTimeout(resolve, 350));
+  assert.equal(ui.calls.filter(call => call.path.startsWith('jobs?principal=')).length, 1, ui.calls.map(call => call.path).join(', '));
+  assert.equal(ui.calls.filter(call => call.path === 'packages').length, packageRequests);
+
+  search.value = '';
+  search.listeners.input();
+  await waitFor(() => ui.calls.filter(call => call.path === 'jobs').length === 2, 'cleared principal search');
+  assert.equal(ui.calls.filter(call => call.path === 'packages').length, packageRequests);
+});
+
+test('a late principal search cannot replace a newer search result', async () => {
+  const ui = boot({ deferJobLists: true });
+  await waitFor(() => ui.pendingHomeJobs.length === 1, 'initial Home jobs request');
+  ui.resolveHomeJobList(0, { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({ items: [] }) });
+  const search = ui.node('job-principal-search');
+  search.value = 'alice'; search.listeners.input();
+  await waitFor(() => ui.pendingHomeJobs.some(pending => pending.path === 'jobs?principal=alice'), 'Alice search');
+  search.value = 'bob'; search.listeners.input();
+  await waitFor(() => ui.pendingHomeJobs.some(pending => pending.path === 'jobs?principal=bob'), 'Bob search');
+  const response = principal => ({ ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({ items: [
+    { jobId: 'J1', packageId: 'payments', command: 'run', principal, status: 'PASS', createdAt: 'now' }
+  ] }) });
+  const bobIndex = ui.pendingHomeJobs.findIndex(pending => pending.path === 'jobs?principal=bob');
+  const aliceIndex = ui.pendingHomeJobs.findIndex(pending => pending.path === 'jobs?principal=alice');
+  ui.resolveHomeJobList(bobIndex, response('Bob(anonym)'));
+  await waitFor(() => ui.node('jobs').children[0]?.children[3].textContent === 'Bob(anonym)', 'Bob result');
+  ui.resolveHomeJobList(aliceIndex, response('Alice(anonym)'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.node('jobs').children[0].children[3].textContent, 'Bob(anonym)');
 });
 
 test('late home failure cannot overwrite an active job view', async () => {

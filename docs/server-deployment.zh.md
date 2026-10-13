@@ -106,7 +106,7 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 ## 驗證與身份
 
-`server.authenticationRequired: true`（預設值）時，Tomcat 負責驗證請求，ATT Server 會在 Web UI 及受保護的 API 操作使用 Servlet Principal。Health 及 version 維持公開。設為 `false` 時，完整 Web UI、REST 及 Remote API 均可在沒有 Servlet Principal 下使用；Server 會把所有 caller 統一解析為共享授權身份 `anonymous`，即使 container 同時提供 Principal 亦然。所有匿名 caller 共享 drafts、jobs 及 artifacts，沒有個別用戶隔離或責任追蹤。啟用此模式時 ATT 會在啟動日誌發出警告。
+`server.authenticationRequired: true`（預設值）時，Tomcat 負責驗證請求，ATT Server 會在 Web UI 及受保護的 API 操作使用 Servlet Principal。Health 及 version 維持公開。設為 `false` 時，完整 Web UI、REST 及 Remote API 均可在沒有 Servlet Principal 下使用；Server 會把所有 caller 統一解析為共享授權身份 `anonymous`，即使 container 同時提供 Principal 亦然。所有匿名 caller 共享 drafts、jobs 及 artifacts，沒有個別用戶隔離或責任追蹤。啟用此模式時 ATT 會在啟動日誌發出警告。此設定不會略過 `web.xml` 中的 Tomcat security constraint；Tomcat 會在 ATT 處理請求前執行這些限制。
 
 匿名 job submission 可在最外層 JSON 加入選填的 `principal` label，只供顯示及 audit 使用。Server 會 trim 並以 Unicode 正規化 label、驗證長度及字元，然後在既有 job/audit `principal` 欄位加上 `(anonym)` 後綴，例如 `Bob(anonym)`。省略時維持既有值 `anonymous`；caller 不可自行提交保留後綴。此 label 由 caller 自行聲稱，不會改變授權、draft 存取、job 可見範圍、artifact 存取、取消或排程。驗證模式永遠使用 Servlet Principal，並忽略提交的 label。此歸屬資料不會傳給 Worker，也不會放進 ATT expression Context；不會新增持久化欄位或回應欄位。
 
@@ -170,7 +170,7 @@ API 會回傳 `202 Accepted` 及 job ID。工作狀態依序為 `QUEUED`、`PREP
 
 工作記錄在有量度數據時會加入 `performance` 物件。`performance.timings` 使用 monotonic clock 記錄 admission、佇列等待、Worker 準備及啟動、Worker-ready（首個 `STATUS`）、execution-ready（首個 `PROGRESS` 或 `LOG`）、Worker 存活時間及結果至終止時間。`performance.worker` 記錄隔離 Worker 的 Heap、live thread、GC、process CPU 及抽樣 RSS 峰值。抽樣由事件觸發，每 100 ms 最多一次，可能漏掉短暫峰值。RSS 只在 Linux `/proc` 系統提供。Worker 資源數據會保存在標準工作記錄，Server 重啟後仍可讀取。
 
-`GET /jobs` 回傳最近 100 項工作。可加上 `?principal=<text>`，在既有 `principal` property 內作不區分大小寫的文字搜尋；搜尋會在 100 項上限前執行。Web UI 及 `att remote jobs --principal <text>` 均使用此篩選。舊紀錄保留原有值，包括先前的 `anonymous` 紀錄。系統不會保存提交 payload，只保存 command 及 package ID 摘要。Engine result 及診斷會作為控制平面 metadata 保存。較大的報告、log 及其他證據會留在工作輸出目錄。
+`GET /jobs` 回傳最近 100 項工作。可加上 `?principal=<text>`，在既有 `principal` property 內作不區分大小寫的文字搜尋；搜尋會在 100 項上限前執行，並採用子字串比對，因此搜尋 `alice` 亦會匹配 `alice(anonym)`。Web UI 及 `att remote jobs --principal <text>` 均使用此篩選。舊紀錄保留原有值，包括先前的 `anonymous` 紀錄。系統不會保存提交 payload，只保存 command 及 package ID 摘要。Engine result 及診斷會作為控制平面 metadata 保存。較大的報告、log 及其他證據會留在工作輸出目錄。
 
 資源探索可用 `case`、`template`、`flow` 或 `tool` 篩選。每頁預設 50 項，最多 100 項；續頁 cursor 會加密並綁定 Server 解析出的身份及查詢。匿名模式下所有 caller 共用同一 cursor 身份。若 package 內容改變，舊 cursor 會以 `409` 拒絕。Explorer 回傳邏輯資源 ID、安全投影、來源資訊、關聯及穩定診斷碼。YAML source 是解析及遮蔽後的投影，並非原始檔案內容。只有 Server 設定明確允許的 package 相對路徑才會提供 Tool script source。探索程序不會執行 Tool，也不提供檔案系統瀏覽器；檢查佇列、Worker heap、逾時及 response 大小均與一般工作執行分開限制。
 

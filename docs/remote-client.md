@@ -61,7 +61,7 @@ Pass the logical Server package ID first. Familiar ATT selection and environment
 
 Paths such as `--suite`, `--suite-dir`, `--config`, `--input`, and a Load scenario are logical paths inside the Server package. The client rejects absolute paths and parent-directory traversal. The request contains `packageId`, never `PACKAGE_ROOT`, `SERVER_DATA_DIR`, Worker paths, or a client output directory.
 
-Commands wait for a terminal result by default. The client submits once, consumes ordered status/progress/log/diagnostic events, retrieves the result, and exits. It does not invoke `att-engine` locally. `jobs --principal <text>` searches the existing principal field, including server-formatted anonymous labels and historical `anonymous` records.
+Commands wait for a terminal result by default. The client submits once, consumes ordered status/progress/log/diagnostic events, retrieves the result, and exits. It does not invoke `att-engine` locally. `jobs --principal <text>` searches the existing principal field by case-insensitive substring, including server-formatted anonymous labels: searching for `alice` also matches `alice(anonym)`. Historical `anonymous` records are searchable too.
 
 Use `--detach` to return the job ID without keeping a background process:
 
