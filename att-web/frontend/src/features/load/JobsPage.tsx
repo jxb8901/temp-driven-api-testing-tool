@@ -23,6 +23,10 @@ function toError(value: unknown, fallback: string): Error {
   return value instanceof Error ? value : new Error(fallback);
 }
 
+function isTerminalStatus(status: JobStatus): boolean {
+  return !['QUEUED', 'PREPARING', 'RUNNING', 'CANCEL_REQUESTED'].includes(status);
+}
+
 function displayValue(value: unknown): string {
   if (typeof value === 'string') return value;
   try { return JSON.stringify(value, null, 2); }
@@ -61,6 +65,78 @@ function numericRows(value: unknown, prefix = '', depth = 0, rows: Array<[string
 function resultMetrics(payload: JobResultResponse | null): Record<string, unknown> | null {
   const value = payload?.result?.metrics;
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+type MetricBucket = { key: string; values: Record<string, unknown>; epochMs: number | null };
+type MetricSeries = {
+  field: string;
+  label: string;
+  unit: string;
+  points: Array<{ epochMs: number; value: number }>;
+};
+
+function metricBuckets(value: unknown): MetricBucket[] {
+  const entries: Array<[string, unknown]> = Array.isArray(value)
+    ? value.map((bucket, index) => [String(index), bucket])
+    : value && typeof value === 'object'
+      ? Object.entries(value as Record<string, unknown>)
+      : [];
+
+  return entries.flatMap(([key, item]) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const values = item as Record<string, unknown>;
+    const explicitTime = values.bucketStartEpochMs;
+    let epochMs: number | null = null;
+
+    if (typeof explicitTime === 'number' && Number.isFinite(explicitTime)) epochMs = explicitTime;
+    else if (typeof explicitTime === 'string' && explicitTime.trim() && Number.isFinite(Number(explicitTime))) epochMs = Number(explicitTime);
+    else if (typeof values.bucketStart === 'string' && Number.isFinite(Date.parse(values.bucketStart))) epochMs = Date.parse(values.bucketStart);
+    else if (/^\d{12,}$/.test(key) && Number.isFinite(Number(key))) epochMs = Number(key);
+    else if (Number.isFinite(Date.parse(key))) epochMs = Date.parse(key);
+
+    return [{ key, values, epochMs }];
+  }).sort((left, right) => {
+    if (left.epochMs === null) return right.epochMs === null ? left.key.localeCompare(right.key) : 1;
+    if (right.epochMs === null) return -1;
+    return left.epochMs - right.epochMs;
+  });
+}
+
+function metricSeries(buckets: MetricBucket[]): MetricSeries[] {
+  if (!buckets.length) return [];
+  const definitions = [
+    { field: 'completedTps', label: 'Completed throughput', unit: 'completed requests per 1-second bucket' },
+    { field: 'p95Ms', label: 'p95 latency', unit: 'milliseconds' },
+    { field: 'p99Ms', label: 'p99 latency', unit: 'milliseconds' },
+  ];
+
+  return definitions.flatMap(definition => {
+    const points: MetricSeries['points'] = [];
+    for (const bucket of buckets) {
+      const value = bucket.values[definition.field];
+      if (bucket.epochMs === null || typeof value !== 'number' || !Number.isFinite(value)) return [];
+      points.push({ epochMs: bucket.epochMs, value });
+    }
+    return [{ ...definition, points }];
+  });
+}
+
+function browserTimeZone(): string {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
+  catch { return 'UTC'; }
+}
+
+function formatBucketTime(epochMs: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    timeZone: browserTimeZone(), timeZoneName: 'short',
+  }).format(epochMs);
+}
+
+function formatChartTime(epochMs: number, timezone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: timezone,
+  }).format(epochMs);
 }
 
 function loadMetricRows(metrics: Record<string, unknown> | null): Array<[string, number]> {
@@ -277,7 +353,11 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     setCancelState('pending'); setCancelError('');
     try {
       const response = await api.cancelJob(jobId);
-      setJob(current => current ? { ...current, status: response.status } : current);
+      setJob(current => {
+        if (!current) return current;
+        if (isTerminalStatus(current.status) && !isTerminalStatus(response.status)) return current;
+        return { ...current, status: response.status };
+      });
       setCancelState('idle');
     } catch (error) {
       setCancelError(toError(error, 'The Server could not cancel this job.').message);
@@ -291,7 +371,8 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const jobStatus = job?.status || 'UNKNOWN';
   const canCancel = Boolean(job && ['QUEUED', 'PREPARING', 'RUNNING'].includes(job.status));
   const metrics = resultMetrics(result);
-  const buckets = Array.isArray(metrics?.buckets) ? metrics.buckets.slice(0, MAX_BUCKET_ROWS) : [];
+  const buckets = metricBuckets(metrics?.buckets).slice(0, MAX_BUCKET_ROWS);
+  const charts = metricSeries(buckets);
 
   function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const index = tabs.findIndex(tab => tab.id === activeTab);
@@ -371,6 +452,8 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
       {job && <MetricTable title="Worker metrics" rows={numericRows(job.performance?.worker)} />}
       {metrics && <MetricTable title="Load result metrics" rows={loadMetricRows(metrics)} />}
       {!metrics && <p role="status">{resultState === 'loading' || resultState === 'refreshing' ? 'Load result metrics are loading.' : job?.command === 'load' ? 'No Load metrics summary was returned. No chart or derived metric is shown.' : 'This command has no Load metric summary.'}</p>}
+      {buckets.length > 0 && charts.map(series => <TimeSeriesChart key={series.field} series={series} />)}
+      {buckets.length > 0 && !charts.length && <p role="status">The Server returned buckets, but this view cannot chart them without timestamps and complete numeric samples. Raw returned values remain available in the table.</p>}
       {buckets.length > 0 && <BucketTable buckets={buckets} />}
       {metrics && !buckets.length && <p role="status">No time-series buckets were returned. Summary metrics are shown in the table above.</p>}
       {!job?.performance?.timings && !job?.performance?.worker && !metrics && resultState !== 'loading' && <p role="status">The API did not return metrics for this job.</p>}
@@ -390,12 +473,64 @@ function MetricTable({ title, rows, unit = '' }: { title: string; rows: Array<[s
   </section>;
 }
 
-function BucketTable({ buckets }: { buckets: unknown[] }) {
-  const columns = unique(buckets.flatMap(bucket => bucket && typeof bucket === 'object' && !Array.isArray(bucket) ? Object.keys(bucket as Record<string, unknown>) : []));
+function TimeSeriesChart({ series }: { series: MetricSeries }) {
+  const width = 820;
+  const height = 250;
+  const left = 62;
+  const right = 16;
+  const top = 16;
+  const bottom = 42;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const firstTime = series.points[0].epochMs;
+  const lastTime = series.points[series.points.length - 1].epochMs;
+  const maxValue = Math.max(1, ...series.points.map(point => point.value));
+  const timeSpan = Math.max(1, lastTime - firstTime);
+  const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+  const titleId = 'att-chart-' + series.field + '-title';
+  const descId = 'att-chart-' + series.field + '-description';
+  const coordinates = series.points.map(point => ({
+    x: left + ((point.epochMs - firstTime) / timeSpan) * plotWidth,
+    y: top + (1 - point.value / maxValue) * plotHeight,
+  }));
+  const path = coordinates.map((point, index) => (index ? 'L ' : 'M ') + point.x.toFixed(2) + ' ' + point.y.toFixed(2)).join(' ');
+  const timezone = browserTimeZone();
+
+  return <figure className="att-metric-chart" aria-labelledby={titleId}>
+    <figcaption>
+      <h3 id={titleId}>{series.label}</h3>
+      <p>Y axis: {series.unit}. X axis: bucket start time in {timezone}. Each point is a value returned by the Server; no points are interpolated.</p>
+    </figcaption>
+    <svg className="att-metric-chart-svg" viewBox={'0 0 ' + width + ' ' + height} role="img" aria-label={series.label + ' by bucket start time'} aria-describedby={descId}>
+      <title>{series.label} by bucket start time</title>
+      <desc id={descId}>{series.points.length} ordered server samples from {formatBucketTime(firstTime)} to {formatBucketTime(lastTime)}.</desc>
+      {[0, 0.25, 0.5, 0.75, 1].map(fraction => {
+        const y = top + (1 - fraction) * plotHeight;
+        return <g className="att-metric-chart-grid" key={fraction}>
+          <line x1={left} x2={width - right} y1={y} y2={y} />
+          <text x={left - 8} y={y + 4} textAnchor="end">{numberFormat.format(maxValue * fraction)}</text>
+        </g>;
+      })}
+      <line className="att-metric-chart-axis" x1={left} x2={left} y1={top} y2={height - bottom} />
+      <line className="att-metric-chart-axis" x1={left} x2={width - right} y1={height - bottom} y2={height - bottom} />
+      {coordinates.length > 1
+        ? <path className="att-metric-chart-line" d={path} />
+        : <circle className="att-metric-chart-line" cx={coordinates[0].x} cy={coordinates[0].y} r="4" />}
+      <text className="att-metric-chart-time" x={left} y={height - 10} textAnchor="start">{formatChartTime(firstTime, timezone)}</text>
+      <text className="att-metric-chart-time" x={width - right} y={height - 10} textAnchor="end">{formatChartTime(lastTime, timezone)}</text>
+    </svg>
+  </figure>;
+}
+
+function BucketTable({ buckets }: { buckets: MetricBucket[] }) {
+  const columns = unique(buckets.flatMap(bucket => Object.keys(bucket.values)));
   return <section className="att-metric-section" aria-label="Returned Load time-series buckets">
-    <h3>Load time-series buckets</h3><p>Table alternative using the exact bucket fields returned by the Server; no points are interpolated.</p>
-    <div className="att-table-scroll"><table><caption>{buckets.length} returned buckets, capped at {MAX_BUCKET_ROWS} rows by this view</caption><thead><tr>{columns.map(key => <th scope="col" key={key}>{key}</th>)}</tr></thead>
-      <tbody>{buckets.map((bucket, index) => <tr key={index}>{columns.map(key => <td key={key}>{bucket && typeof bucket === 'object' ? displayValue((bucket as Record<string, unknown>)[key] ?? '') : ''}</td>)}</tr>)}</tbody>
+    <h3>Load time-series buckets</h3><p>Table alternative using the exact bucket fields returned by the Server; timestamps are shown in the local timezone, and no points are interpolated.</p>
+    <div className="att-table-scroll"><table><caption>{buckets.length} returned buckets, capped at {MAX_BUCKET_ROWS} rows by this view</caption><thead><tr><th scope="col">Bucket start ({browserTimeZone()})</th>{columns.map(key => <th scope="col" key={key}>{key}</th>)}</tr></thead>
+      <tbody>{buckets.map(bucket => <tr key={bucket.key}>
+        <td>{bucket.epochMs === null ? bucket.key : <time dateTime={new Date(bucket.epochMs).toISOString()}>{formatBucketTime(bucket.epochMs)}</time>}</td>
+        {columns.map(key => <td key={key}>{displayValue(bucket.values[key] ?? '')}</td>)}
+      </tr>)}</tbody>
     </table></div>
   </section>;
 }

@@ -7,6 +7,8 @@ const job = {
   createdAt: '2026-10-13T09:50:00Z', startedAt: '2026-10-13T09:50:01Z',
   performance: { timings: { queueMs: 4, executionMs: 950 }, worker: { heapUsedBytes: 2048 } },
 };
+const earlyBucket = Date.parse('2026-10-13T09:50:01.000Z');
+const lateBucket = Date.parse('2026-10-13T09:50:02.000Z');
 
 async function main() {
   const fixture = await startFixture();
@@ -69,7 +71,10 @@ async function main() {
       if (method === 'POST' && resource === 'jobs/load') return json({ jobId, status: 'RUNNING', command: 'load', packageId: 'payments' }, 202);
       if (method === 'GET' && resource === `jobs/${jobId}`) return json({ ...job, status: cancelRequested ? 'CANCELLED' : 'RUNNING' });
       if (method === 'GET' && resource === `jobs/${jobId}/result`) return json({
-        job, result: { status: 'PASS', metrics: { completedThroughput: 120, p95Ms: 85, buckets: [{ second: 1, requests: 120 }] } },
+        job, result: { status: 'PASS', metrics: { completedThroughput: 120, p95Ms: 85, buckets: {
+          [String(lateBucket)]: { bucketStartEpochMs: lateBucket, bucketStart: new Date(lateBucket).toISOString(), completedTps: 120, p95Ms: 85, p99Ms: 110 },
+          [String(earlyBucket)]: { bucketStartEpochMs: earlyBucket, bucketStart: new Date(earlyBucket).toISOString(), completedTps: 96, p95Ms: 74, p99Ms: 99 },
+        } } },
       });
       if (method === 'GET' && resource === `jobs/${jobId}/artifacts`) return json({ items: [{ path: 'load-summary.json', size: 512 }] });
       if (method === 'GET' && resource === `jobs/${jobId}/events`) {
@@ -141,6 +146,14 @@ async function main() {
       assert.equal(await panel.isVisible(), true, `${name} panel should be visible`);
       assert.equal(await panel.getByText(content, { exact: true }).count() > 0, true, `${name} panel should show ${content}`);
     }
+    await page.getByRole('tab', { name: 'Metrics' }).click();
+    const metricsPanel = page.locator('#job-panel-metrics');
+    await metricsPanel.getByRole('img', { name: /Completed throughput by bucket start time/i }).waitFor();
+    assert.equal(await metricsPanel.locator('svg[role="img"]').count(), 3, 'the returned throughput and latency bucket series should be charted');
+    await assertAxe(page, 'Load metric charts and their data table should pass the configured WCAG accessibility rules');
+    const bucketTimes = await metricsPanel.locator('[aria-label="Returned Load time-series buckets"] tbody time').evaluateAll(nodes => nodes.map(node => node.getAttribute('datetime')));
+    assert.deepEqual(bucketTimes, [new Date(earlyBucket).toISOString(), new Date(lateBucket).toISOString()], 'map-shaped server buckets should be ordered by actual start time');
+
     await page.getByRole('tab', { name: 'Results' }).click();
     await page.getByText(/Server result returned/i).waitFor();
     await page.getByRole('tab', { name: 'Artifacts' }).click();
