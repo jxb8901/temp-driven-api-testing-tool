@@ -6,6 +6,9 @@
   "scripts": {
     "smoke": "node smoke.cjs",
     "smoke:explorer": "node explorer-smoke.cjs",
+    "smoke:load-jobs": "node load-jobs.cjs",
+    "smoke:scheduled-load": "node scheduled-load.cjs",
+    "smoke:cross-browser": "node cross-browser.cjs",
     "screenshots": "node screenshots.cjs"
   },
   "devDependencies": {

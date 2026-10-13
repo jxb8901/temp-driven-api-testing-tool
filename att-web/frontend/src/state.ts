@@ -42,5 +42,6 @@ export function serverCapabilities(state: AppState) {
   return {
     apiVersion: version?.apiVersion ?? null,
     inlineLoadEnabled: version?.inlineLoadEnabled === true,
+    loadSchedulingEnabled: version?.loadSchedulingEnabled === true,
   };
 }

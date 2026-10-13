@@ -14,7 +14,9 @@ Quick Load 同樣可從這些目標詳細資料開啟。選擇 Virtual Users 或
 
 首頁每個 package 都可開啟 Advanced Load。先選擇 `virtualUsers` 或 `arrivalRate`，再新增 workloads；所有 workload 都使用同一 model。設定共用時間窗口、選填 seed、package-relative Testdata imports、execution defaults、aggregate thresholds 及 evidence policy。你可以新增、複製、排序或移除 workload。每個 workload 有自己的 intensity、target、Testdata policy 及 thresholds。Workload 可使用單一 Template、Flow 或 Tool target；Virtual Users 亦可使用 weighted target mix。每個 Arrival Rate workload 使用一個 target。Target sidecar 預設值只包含安全的 business 欄位；不會複製 Debug `case`、`stage` 或 local Testdata。驗證完整 scenario 並檢視安全 YAML 後，確認即可由 Server 以不可變 draft 交給一般 Load scheduler。只有預覽未遮蔽時才可複製或匯出。
 
-當 `server.scheduling.enabled` 為 true 且 caller 具備設定的排程管理 role（預設 `ATT_ADMIN`）時，可使用 Scheduled Load。頁面可建立及編輯 package-relative scenario 排程、按選定的 IANA timezone 顯示 next run，並提供暫停/恢復、需確認的手動觸發及刪除。Cron 使用五個數字欄位並支援清單、範圍及 step；Server 會執行設定的最短間隔限制。Occurrence history 會區分 `skipped`、`failed-to-submit` 及已接納工作，submitted run 連結至一般 job 頁面、結果、事件與 artifacts。排程和歷史在 Server 重啟後仍保留。重啟不會補跑錯過的 occurrence；編輯或刪除排程不會取消已接納工作。
+當 `/api/v1/version` 回傳 `loadSchedulingEnabled: true` 且 caller 具備設定的排程管理 role（預設 `ATT_ADMIN`）時，可在 React 主控台的 `#/load-schedules` 使用 Scheduled Load。頁面可建立及編輯 package-relative scenario 排程、按選定的 IANA timezone 顯示 next run，並支援 daily、weekly 及五欄位 cron。Daily 和 weekly 使用當地時間；weekly 可選工作日、週末或個別日子。新排程預設暫停，只有選取 **Enable after saving** 才會啟用。Server 計算 preview，並執行設定的最短間隔及每排程並行上限。春季 DST 跳時中不存在的當地時間會略過；秋季回撥時同一當地時間可能對應兩個有效時間點。錯過時間、並行上限及 Server 全域容量造成的 occurrence 會記錄為 skipped，不會補跑或排隊。Run Now 和刪除都需要確認。Occurrence history 會說明略過及提交失敗，並將已提交工作連結至一般 job 頁面、結果、事件與 artifacts。排程和歷史在 Server 重啟後仍保留；編輯或刪除排程不會取消已接納工作。
+
+共用 React shell 會跟隨作業系統的淺色或深色偏好，直到你自行選擇主題；選擇會保存在瀏覽器儲存空間。按 `/` 或 `Ctrl K`/`⌘ K` 搜尋頁面，按 `?` 開啟快捷鍵清單，按 `Esc` 關閉對話框或手機導覽。在 Advanced Load 頁面，按 `Ctrl Enter`/`⌘ Enter` 只會啟動仍有效且已驗證的 draft，並保留既有確認步驟。主控台和 Scheduled Load 編輯器會適應平板及手機寬度，保留清晰的鍵盤焦點，尊重減少動態效果設定，並以文字標籤配合狀態顏色。
 
 Configuration Explorer 會顯示已宣告設定、按 section 分組的 Engine effective 設定，以及兩個 profile 的分頁欄位比較。它使用 package 正常的 `FrameworkConfigLoader` 選擇規則，不會連接 DB、MQ、HTTP 或 SSH。Root-only package 可直接檢視已設定的預設值，無需選擇 profile。可能洩露憑證或網絡拓撲的值會標示為 hidden；Server 不會比較 hidden 值。比較結果會分別顯示左右兩邊的狀態，因此 `hidden` 和 `missing` 會保持區分。Explorer 顯示欄位狀態與來源、篩選所選 section，並可把 effective environment 填入現有 Run/Debug/Load 表單而不提交工作。Tool 詳細資料會連結至其設定 section。Explorer 顯示安全的 helper 與 Tool metadata、profile 繼承或替換狀態，以及 Testdata descriptor metadata，但不會顯示 records 或未限制的 YAML。公開 endpoint 及分頁參數見 [ATT Server 部署與 API](server-deployment.zh.md#package-configuration-inspection)。
 
@@ -27,6 +29,12 @@ Source 分頁只載入 Server 提供的安全 source projection。畫面最多�
 可從資源 Inspector 執行 Debug 或 Case。Sidecar 提供的 scalar 欄位會使用文字、數字、布林值及 null 等型別控制項。巢狀值及完整 business input 可在 **Advanced JSON** 編輯。提交驗證前，請修正無效 JSON 或 scalar 值。**Reset defaults** 會還原從 sidecar 載入的值。若 Server 將 sidecar 值標示為 redacted，表單會顯示 keep-default 標記，不會揭露隱藏值。保留標記即可沿用 package 值；如需覆寫，請選擇型別並輸入明確值。開始 Debug 前請先驗證並檢視安全預覽。Server 仍是驗證及存取檢查的權威來源。
 
 當 Debug 編輯尚未儲存時，切換 package、resource 或 environment 會先詢問是否捨棄變更。同一保護也涵蓋 hash route 及瀏覽器上一頁／下一頁。選填 job label 會隨執行請求作為 Principal label 傳送；它不能取代 Tomcat 驗證。若 session 過期，請重新登入後重試。在 Server 允許請求時，匿名部署亦可使用此 label。
+
+## React Load Builder 與 Jobs/Results
+
+Advanced Load route 使用有型別的控制項設定 duration 單位、Virtual Users、Arrival Rate、最大並行數及 think time。Target sidecar 預設值會為 `inputs`、`vars` 及 Tool `arguments` 提供有型別 scalar 控制項；巢狀值保留在 Advanced JSON。表單會按 model 顯示適用限制，但驗證、policy 上限、draft 過期、package revision 及執行仍以 Server 為準。確認後，UI 會提交同一份由 Server 簽發的 draft；回應已遮蔽時不會提供預覽複製或匯出。
+
+Jobs route 載入 Server 回傳的最新工作列（最多 100 筆）。狀態、套件、類型、建立日期篩選、排序及用戶端分頁只作用於已載入列；Principal 搜尋會送到 Server。此 API 不會回傳工作所屬 environment，因此 UI 不提供 environment 篩選。重新整理等待回應時會保留所選篩選及排序。工作詳細資料提供穩定的 Overview、Live logs、Events、Results、Artifacts 及 Metrics 分頁。原生同源 `EventSource` 會使用瀏覽器的 `Last-Event-ID` 重新連線；取消前需要確認，UI 會等候 Server 狀態事件。Metrics 只顯示工作及結果 endpoint 實際回傳的值；Server timing 與 Worker JVM 資料會和 Load 結果指標分開呈現，結果沒有 time-series buckets 時不會推算 throughput 圖表。
 
 Explorer 是 React 與 TypeScript 單頁 UI，於 `att-web` Maven resource 階段使用 Vite 建置。Maven 會把產生的靜態資源複製至 `META-INF/resources/ui/`；Server WAR 再將它們封裝供 Tomcat 提供。Node.js 只用於建置階段。部署後的 UI 呼叫同源公開 REST API，無需額外 Node 程序或前端服務。
 

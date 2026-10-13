@@ -36,7 +36,13 @@ for archive in "$LOCAL_ARCHIVE" "$SOURCE_ARCHIVE"; do
   if tar -tzf "$archive" | grep -E '(^|/)node_modules(/|$)' >/dev/null; then
     echo "Release archive must not include build-time Node.js dependencies: $archive" >&2; exit 2
   fi
+  if tar -tzf "$archive" | grep -E '(^|/)ui-acceptance/artifacts(/|$)' >/dev/null; then
+    echo "Release archive must not include generated UI acceptance captures: $archive" >&2; exit 2
+  fi
 done
+if tar -tzf "$LOCAL_ARCHIVE" | grep -E '(^|/)ui-acceptance(/|$)' >/dev/null; then
+  echo "Local binary archive must not include the development-only UI acceptance harness" >&2; exit 2
+fi
 rm -rf "$ROOT_DIR/target/release"; mkdir -p "$LOCAL_WORK" "$SERVER_WORK" "$DIST_DIR"
 tar -xzf "$LOCAL_ARCHIVE" -C "$LOCAL_WORK"
 LOCAL_PACKAGE_DIR="$LOCAL_WORK/$LOCAL_PACKAGE_NAME"

@@ -180,7 +180,7 @@ async function main() {
     const discardDialog = page.getByRole('dialog', { name: 'Discard your changes?' });
     await discardDialog.waitFor({ state: 'visible' });
     await discardDialog.getByRole('button', { name: 'Discard changes and continue' }).click();
-    await page.getByRole('heading', { name: 'Jobs and results' }).waitFor();
+    await page.getByRole('heading', { name: 'Jobs' }).waitFor();
     assert.match(page.url(), /#\/jobs$/);
 
     authFailure = true;

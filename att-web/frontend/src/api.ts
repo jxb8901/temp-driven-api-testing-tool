@@ -4,6 +4,15 @@ import type {
   DebugFormResponse, EffectiveConfigurationQuery, ResourceDetail, ResourceIdentity,
   ResourcePage, ResourceQuery, SourceProjection,
 } from './features/explorer/types';
+import type {
+  JobAccepted as LoadJobAccepted, JobArtifact, JobEventHandlers, JobResultResponse,
+  JobSummary as LoadJobSummary, JobView, LoadDraftInput, LoadDraftResponse, LoadModel,
+  LoadPolicyResponse, LoadTargetType, QuickLoadFormResponse, SubmitLoadDraftInput, TargetResource,
+} from './features/load/types';
+import type {
+  DeleteScheduleResponse, LoadSchedule, LoadScheduleInput, ScheduleOccurrence, SchedulePreview,
+  SchedulePreviewInput,
+} from './features/schedules/types';
 
 /** Resolve the API below the current UI context (for example /att/ui/ -> /att/api/v1/). */
 export function apiBaseUrl(): URL {
@@ -37,13 +46,14 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   const response = await fetch(url, { ...init, headers, credentials: 'same-origin' });
   const body = parseBody(await response.text());
   if (!response.ok) {
-    const payload = body && typeof body === 'object' ? body as { error?: ApiErrorBody; requestId?: string } : {};
+    const payload = body && typeof body === 'object' ? body as { error?: ApiErrorBody; requestId?: string; diagnostics?: unknown } : {};
     const detail = payload.error;
     throw new ApiError(detail?.summary || ('ATT API request failed (' + response.status + ').'), {
       status: response.status,
       code: detail?.code,
       requestId: payload.requestId || response.headers.get('X-Request-Id') || undefined,
       details: detail?.detail,
+      diagnostics: payload.diagnostics,
     });
   }
   if (body === undefined && response.status !== 204) {
@@ -74,6 +84,41 @@ function postJson<T>(path: string, value: unknown, signal?: AbortSignal): Promis
   return request<T>(path, { method: 'POST', body: JSON.stringify(value), signal });
 }
 
+function parseEventData(raw: string): unknown {
+  try { return JSON.parse(raw) as unknown; }
+  catch { return raw; }
+}
+
+function artifactUrl(jobId: string, path: string): string {
+  const segments = path.replaceAll('\\', '/').split('/');
+  if (!segments.length || segments.some(segment => !segment || segment === '.' || segment === '..')) return '#invalid-artifact';
+  const base = apiBaseUrl();
+  const encodedPath = segments.map(encodeURIComponent).join('/');
+  const url = new URL('jobs/' + encodeURIComponent(jobId) + '/artifacts/' + encodedPath, base);
+  if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname)) return '#invalid-artifact';
+  return url.toString();
+}
+
+function subscribeJob(jobId: string, handlers: JobEventHandlers): () => void {
+  const url = new URL('jobs/' + encodeURIComponent(jobId) + '/events', apiBaseUrl());
+  const source = new EventSource(url.toString(), { withCredentials: true });
+  source.onopen = () => handlers.onOpen();
+  source.onerror = () => handlers.onError();
+  for (const type of ['status', 'progress', 'log', 'diagnostic', 'result']) {
+    source.addEventListener(type, event => {
+      const message = event as MessageEvent<string>;
+      handlers.onEvent({ id: message.lastEventId || undefined, type, data: parseEventData(message.data) });
+      if (type === 'result') source.close();
+    });
+  }
+  source.onmessage = event => handlers.onEvent({
+    id: event.lastEventId || undefined,
+    type: 'message',
+    data: parseEventData(event.data),
+  });
+  return () => source.close();
+}
+
 export const api = {
   getVersion(signal?: AbortSignal): Promise<ServerVersion> {
     return request<ServerVersion>('version', { signal });
@@ -84,6 +129,52 @@ export const api = {
   getJobs(signal?: AbortSignal): Promise<ApiEnvelope<JobSummary>> {
     return request<ApiEnvelope<JobSummary>>('jobs', { signal });
   },
+  getLoadPolicy(packageId: string, model: LoadModel, environment?: string, signal?: AbortSignal): Promise<LoadPolicyResponse> {
+    return request<LoadPolicyResponse>('packages/' + encodeURIComponent(packageId) + '/load-policy' + queryString({ model, environment }), { signal });
+  },
+  getTargetLoadForm(
+    packageId: string,
+    type: LoadTargetType,
+    resourceId: string,
+    model: LoadModel,
+    environment?: string,
+    signal?: AbortSignal,
+  ): Promise<QuickLoadFormResponse> {
+    const path = 'packages/' + encodeURIComponent(packageId) + '/resources/' + encodeURIComponent(type) + '/' + encodeURIComponent(resourceId) + '/quick-load-form';
+    return request<QuickLoadFormResponse>(path + queryString({ model, environment }), { signal });
+  },
+  async listTargets(packageId: string, type: LoadTargetType, signal?: AbortSignal): Promise<TargetResource[]> {
+    const page = await request<ResourcePage>(
+      'packages/' + encodeURIComponent(packageId) + '/resources' + queryString({ type, limit: 100 }),
+      { signal },
+    );
+    return (page.items || []).map(item => ({ type, logicalId: item.logicalId || '', state: item.state || '' }));
+  },
+  createLoadDraft(input: LoadDraftInput, signal?: AbortSignal): Promise<LoadDraftResponse> {
+    return postJson<LoadDraftResponse>('drafts/load', input, signal);
+  },
+  submitLoadDraft(input: SubmitLoadDraftInput): Promise<LoadJobAccepted> {
+    return postJson<LoadJobAccepted>('jobs/load', input);
+  },
+  async listJobs(input: { principal?: string; signal?: AbortSignal } = {}): Promise<LoadJobSummary[]> {
+    const envelope = await request<ApiEnvelope<LoadJobSummary>>('jobs' + queryString({ principal: input.principal }), { signal: input.signal });
+    return Array.isArray(envelope.items) ? envelope.items.slice(0, 100) : [];
+  },
+  getJob(jobId: string, signal?: AbortSignal): Promise<JobView> {
+    return request<JobView>('jobs/' + encodeURIComponent(jobId), { signal });
+  },
+  getJobResult(jobId: string, signal?: AbortSignal): Promise<JobResultResponse> {
+    return request<JobResultResponse>('jobs/' + encodeURIComponent(jobId) + '/result', { signal });
+  },
+  async getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]> {
+    const envelope = await request<ApiEnvelope<JobArtifact>>('jobs/' + encodeURIComponent(jobId) + '/artifacts', { signal });
+    return Array.isArray(envelope.items) ? envelope.items : [];
+  },
+  cancelJob(jobId: string): Promise<{ jobId: string; status: LoadJobSummary['status'] }> {
+    return request<{ jobId: string; status: LoadJobSummary['status'] }>('jobs/' + encodeURIComponent(jobId), { method: 'DELETE' });
+  },
+  subscribeJob,
+  artifactHref: artifactUrl,
   listResources(packageId: string, query: ResourceQuery, signal?: AbortSignal): Promise<ResourcePage> {
     return request<ResourcePage>('packages/' + encodeURIComponent(packageId) + '/resources' + queryString({
       query: query.query,
@@ -134,5 +225,36 @@ export const api = {
     };
     if (input.principal) body.principal = input.principal;
     return postJson<AcceptedJob>('jobs/run', body, signal);
+  },
+  listLoadSchedules(signal?: AbortSignal): Promise<ApiEnvelope<LoadSchedule>> {
+    return request<ApiEnvelope<LoadSchedule>>('load-schedules', { signal });
+  },
+  previewLoadSchedule(input: SchedulePreviewInput, signal?: AbortSignal): Promise<SchedulePreview> {
+    return postJson<SchedulePreview>('load-schedules/preview', input, signal);
+  },
+  createLoadSchedule(input: LoadScheduleInput, signal?: AbortSignal): Promise<LoadSchedule> {
+    return postJson<LoadSchedule>('load-schedules', input, signal);
+  },
+  updateLoadSchedule(id: string, input: LoadScheduleInput, signal?: AbortSignal): Promise<LoadSchedule> {
+    return request<LoadSchedule>('load-schedules/' + encodeURIComponent(id), {
+      method: 'PATCH', body: JSON.stringify(input), signal,
+    });
+  },
+  setLoadScheduleEnabled(id: string, enabled: boolean, signal?: AbortSignal): Promise<LoadSchedule> {
+    return postJson<LoadSchedule>(
+      'load-schedules/' + encodeURIComponent(id) + (enabled ? '/resume' : '/pause'), {}, signal,
+    );
+  },
+  triggerLoadSchedule(id: string, signal?: AbortSignal): Promise<ScheduleOccurrence> {
+    return postJson<ScheduleOccurrence>('load-schedules/' + encodeURIComponent(id) + '/trigger', {}, signal);
+  },
+  deleteLoadSchedule(id: string, signal?: AbortSignal): Promise<DeleteScheduleResponse> {
+    return request<DeleteScheduleResponse>('load-schedules/' + encodeURIComponent(id), { method: 'DELETE', signal });
+  },
+  getLoadScheduleExecutions(id: string, limit = 100, signal?: AbortSignal): Promise<ApiEnvelope<ScheduleOccurrence>> {
+    return request<ApiEnvelope<ScheduleOccurrence>>(
+      'load-schedules/' + encodeURIComponent(id) + '/executions' + queryString({ limit }),
+      { signal },
+    );
   },
 };
