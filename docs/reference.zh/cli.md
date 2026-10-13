@@ -123,6 +123,8 @@ Remote command 使用 ATT Server 公開的 `/api/v1` contract。現有 `run`、`
 ```sh
 ./att.sh remote --server sit packages
 ./att.sh remote --server sit --no-auth packages
+./att.sh remote --server https://att-sit.example.com/att packages
+ATT_SERVER=sit ./att.sh remote packages
 ./att.sh remote --server sit run payments --suite testcase/smoke.xlsx --env SIT --tag smoke
 ./att.sh remote --server sit --no-auth run payments --all --principal Bob
 ./att.sh remote --server sit jobs --principal 'Bob(anonym)'
@@ -140,7 +142,7 @@ Attached Run、Debug、Load 及 Validate 只提交一次工作，透過 SSE 追�
 
 Remote exit code：PASS/成功為 `0`、ATT FAIL 為 `1`、INVALID 為 `2`、ATT ERROR/CANCELLED 為 `3`；若連線、驗證或 protocol 問題令 client 無法取得可信結果，則為 `4`。Profile、options、reconnect 及 troubleshooting 見 [ATT Remote client](../remote-client.zh.md)。
 
-Remote-only option 包括 `--server <profile>`、`--no-auth`、`--principal <name>`、`--detach`、`--download <directory>` 及 `--scenario <package-relative-path>`。只有 Server 明確允許匿名存取時，`--no-auth` 才會略過 profile credentials。匿名模式下，`--principal` 只提供自我聲稱的 label，Server 會在既有 `principal` 欄位儲存 `<name>(anonym)`；不影響存取或授權。驗證模式會忽略此 option。`jobs --principal <text>` 會以不區分大小寫的子字串搜尋該欄位，因此搜尋 `alice` 亦會匹配 `alice(anonym)`。`--format human|json` 及已記錄的 ATT selection、environment、Debug、Load option，會在符合 remote job contract 時使用。Remote command list 見上述指南。
+Remote-only option 包括 `--server <profile|url>`、`--no-auth`、`--principal <name>`、`--detach`、`--download <directory>` 及 `--scenario <package-relative-path>`。只有 Server 明確允許匿名存取時，`--no-auth` 才會略過 profile credentials。匿名模式下，`--principal` 只提供自我聲稱的 label，Server 會在既有 `principal` 欄位儲存 `<name>(anonym)`；不影響存取或授權。驗證模式會忽略此 option。`jobs --principal <text>` 會以不區分大小寫的子字串搜尋該欄位，因此搜尋 `alice` 亦會匹配 `alice(anonym)`。`--format human|json` 及已記錄的 ATT selection、environment、Debug、Load option，會在符合 remote job contract 時使用。Remote command list 見上述指南。
 
 
 ## Typed overrides and quick Load

@@ -6056,13 +6056,15 @@ local unless you explicitly add <code>remote</code>.</p>
 <div class="sourceCode" id="cb91"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb91-1"><a href="#cb91-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit packages</span>
 <span id="cb91-2"><a href="#cb91-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit <span class="at">--no-auth</span> packages</span>
-<span id="cb91-3"><a href="#cb91-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit run payments <span class="at">--suite</span> testcase/smoke.xlsx <span class="at">--env</span> SIT <span class="at">--tag</span> smoke</span>
-<span id="cb91-4"><a href="#cb91-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit <span class="at">--no-auth</span> run payments <span class="at">--all</span> <span class="at">--principal</span> Bob</span>
-<span id="cb91-5"><a href="#cb91-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit jobs <span class="at">--principal</span> <span class="st">&#39;Bob(anonym)&#39;</span></span>
-<span id="cb91-6"><a href="#cb91-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> ci run payments <span class="at">--all</span> <span class="at">--detach</span></span>
-<span id="cb91-7"><a href="#cb91-7" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit watch J0123456789ABCDEF</span>
-<span id="cb91-8"><a href="#cb91-8" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit load payments <span class="at">--scenario</span> load/payment.yaml <span class="at">--users</span> 2 <span class="at">--duration</span> 30s</span>
-<span id="cb91-9"><a href="#cb91-9" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit artifacts J0123456789ABCDEF <span class="at">--download</span> ./results</span></code></pre></div>
+<span id="cb91-3"><a href="#cb91-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> https://att-sit.example.com/att packages</span>
+<span id="cb91-4"><a href="#cb91-4" aria-hidden="true" tabindex="-1"></a><span class="va">ATT_SERVER</span><span class="op">=</span>sit <span class="ex">./att.sh</span> remote packages</span>
+<span id="cb91-5"><a href="#cb91-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit run payments <span class="at">--suite</span> testcase/smoke.xlsx <span class="at">--env</span> SIT <span class="at">--tag</span> smoke</span>
+<span id="cb91-6"><a href="#cb91-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit <span class="at">--no-auth</span> run payments <span class="at">--all</span> <span class="at">--principal</span> Bob</span>
+<span id="cb91-7"><a href="#cb91-7" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit jobs <span class="at">--principal</span> <span class="st">&#39;Bob(anonym)&#39;</span></span>
+<span id="cb91-8"><a href="#cb91-8" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> ci run payments <span class="at">--all</span> <span class="at">--detach</span></span>
+<span id="cb91-9"><a href="#cb91-9" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit watch J0123456789ABCDEF</span>
+<span id="cb91-10"><a href="#cb91-10" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit load payments <span class="at">--scenario</span> load/payment.yaml <span class="at">--users</span> 2 <span class="at">--duration</span> 30s</span>
+<span id="cb91-11"><a href="#cb91-11" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit artifacts J0123456789ABCDEF <span class="at">--download</span> ./results</span></code></pre></div>
 <p>The <code>--server</code> value selects an entry from
 <code>~/.att/servers.yaml</code>; set <code>ATT_REMOTE_CONFIG</code> to
 select another profile file. <code>ATT_SERVER_CONFIG</code> is reserved
@@ -6089,9 +6091,10 @@ ERROR/CANCELLED, and <code>4</code> when the client cannot establish a
 trustworthy result because of connection, authentication, or protocol
 failure. See <a href="remote-client.md">ATT Remote client</a> for
 profiles, command options, reconnect behavior, and troubleshooting.</p>
-<p>Remote-only options include <code>--server &lt;profile&gt;</code>,
-<code>--no-auth</code>, <code>--principal &lt;name&gt;</code>,
-<code>--detach</code>, <code>--download &lt;directory&gt;</code>, and
+<p>Remote-only options include
+<code>--server &lt;profile|url&gt;</code>, <code>--no-auth</code>,
+<code>--principal &lt;name&gt;</code>, <code>--detach</code>,
+<code>--download &lt;directory&gt;</code>, and
 <code>--scenario &lt;package-relative-path&gt;</code>.
 <code>--no-auth</code> bypasses profile credentials only when the Server
 explicitly permits anonymous access. In anonymous mode,

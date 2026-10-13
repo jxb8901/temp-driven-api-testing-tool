@@ -25,11 +25,13 @@ servers:
       passwordEnv: ATT_CI_PASSWORD
 ```
 
-Inject the named environment variable from your CI secret store. For interactive use, omit `passwordEnv`; the CLI prompts for a password without echoing it. Set `ATT_REMOTE_CONFIG` to use another profile file. `ATT_SERVER_CONFIG` is reserved for the Server deployment YAML.
+Inject the named environment variable from your CI secret store. For interactive use, omit `passwordEnv`; the CLI prompts without echoing credentials after the Server requests Basic authentication. Set `ATT_REMOTE_CONFIG` to use another profile file. `ATT_SERVER_CONFIG` is reserved for the Server deployment YAML.
 
-Select a profile with `--server`. `ATT_SERVER` can override the default profile URL. An explicit `--server` profile takes precedence over `ATT_SERVER`; otherwise the precedence is `ATT_SERVER` URL, then the configured default profile. The profile still supplies authentication settings when `ATT_SERVER` overrides its URL.
+Select a profile or pass an HTTP(S) base URL with `--server`. `ATT_SERVER` accepts either a profile name or a URL. Resolution follows this order: explicit `--server`, `ATT_SERVER`, then the YAML `default` profile. A selected URL never inherits credentials from another profile. The context path is preserved, and URL validation rejects embedded credentials, query strings, fragments, and unsupported schemes.
 
-Use `--no-auth` to bypass the profile credentials and password prompt when the Server explicitly allows anonymous access. Basic authentication works only over HTTPS. The client uses the JVM's default TLS trust and hostname verification. It has no insecure TLS switch. Health and version checks happen before each operation; the Server must declare API version `1`.
+Profiles default to `auth.type: auto`. Before Run, Debug, Load, Validate, or cancel, ATT Remote probes the protected, read-only `GET /packages` endpoint to acquire credentials before the state-changing request. Read-only commands handle a Basic challenge on their own `GET`; `ping` and `version` do not depend on package-list access. This probe assumes package listing and state-changing API operations share the same authentication boundary. If `/packages` is public while a state-changing operation requires authentication, set `auth.type: basic` for that profile. If anonymous access succeeds, ATT Remote sends no credentials. If a protected `GET` returns an HTTP Basic challenge, ATT Remote uses credentials from the selected profile or prompts securely. Use `auth.type: basic` to send a profile's credentials preemptively, or `auth.type: none` / `--no-auth` to send no credentials. Basic authentication, including credentials entered for a direct URL, requires HTTPS; JVM TLS certificate and hostname checks stay enabled.
+
+Auto mode can handle a later Basic challenge on a protected `GET` endpoint and reuse those credentials. It never retries a `POST` or `DELETE` after a challenge; check the job list before intentionally retrying a rejected submission. ATT Remote does not follow redirects, so it cannot leak credentials to a redirect target or downgrade to HTTP. FORM/OIDC challenges are unsupported; use a Tomcat BASIC-protected endpoint. The Server must declare API version `1`.
 
 Anonymous mode is intended only for isolated SIT/development deployments. All callers share the same authorization identity and can access the same jobs and drafts; use `--no-auth` only when the deployment owner has explicitly enabled it and protected the network boundary. `--principal <name>` on Run, Debug, Load, or Validate submits a self-declared display/audit label. The Server stores it in the existing `principal` field as `<name>(anonym)`; it does not create user-specific access or authorization. Authenticated mode ignores this option.
 
@@ -44,6 +46,8 @@ Use the package ID configured by the Server. The client does not request or disp
 ./att.sh remote --server sit package payments
 ./att.sh remote --server sit --no-auth ping
 ./att.sh remote --server sit --no-auth packages
+./att.sh remote --server https://att-sit.example.com/att packages
+ATT_SERVER=sit ./att.sh remote packages
 ```
 
 ## Submit Run, Debug, Load, and Validate jobs
