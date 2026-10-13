@@ -180,7 +180,8 @@ export interface ExplorerPageProps {
   registerUnsavedChanges: (isDirty: boolean, description?: string) => () => void;
   api: ExplorerApi;
   packageId: string;
-  resourceRoute: Omit<ResourceIdentity, 'packageId'> | null;
+  /** Route values are untrusted URL segments; Explorer validates the type before API use. */
+  resourceRoute: { type: string; resourceId: string } | null;
   environment: string;
   principalLabel?: string;
   onResourceRouteChange: (route: Omit<ResourceIdentity, 'packageId'> | null) => void;

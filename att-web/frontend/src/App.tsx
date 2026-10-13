@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 import { api, request } from './api';
-import { AppShell } from './AppShell';
-import { DashboardPage, LoadLanding, PackageLanding } from './DashboardPage';
-import { useRouteState } from './router';
+import { AppShell, useAppShellContext } from './AppShell';
+import { DashboardPage, LoadLanding } from './DashboardPage';
+import { useNavigationGuard, useRouteState } from './router';
 import { appReducer, initialAppState, serverCapabilities } from './state';
 import type { AsyncState, JobSummary } from './types';
+import { ExplorerPage } from './features/explorer/ExplorerPage';
+import './features/explorer/explorer.css';
+import type { ExplorerPageProps } from './features/explorer/types';
 
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error('The ATT Server request could not be completed.');
@@ -44,6 +47,38 @@ function JobDetailPage({ jobId }: { jobId: string }) {
       </section>
     </div>
   );
+}
+
+function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled }: {
+  packageId: string;
+  resourceRoute: ExplorerPageProps['resourceRoute'];
+  inlineLoadEnabled: boolean;
+}) {
+  const workspace = useAppShellContext();
+  const navigation = useNavigationGuard();
+  const onResourceRouteChange = useCallback((resource: ExplorerPageProps['resourceRoute']) => {
+    navigation.navigate(resource
+      ? { kind: 'package', packageId, resource }
+      : { kind: 'package', packageId });
+  }, [navigation.navigate, packageId]);
+  const onJobAccepted = useCallback((jobId: string) => {
+    workspace.onJobAccepted({ jobId, packageId });
+  }, [packageId, workspace.onJobAccepted]);
+  const onOpenQuickLoad = useCallback((identity: { packageId: string }) => {
+    navigation.navigate({ kind: 'load', packageId: identity.packageId });
+  }, [navigation.navigate]);
+
+  return <ExplorerPage
+    api={api}
+    packageId={packageId}
+    resourceRoute={resourceRoute}
+    environment={workspace.selectedEnvironment}
+    registerUnsavedChanges={navigation.registerUnsavedChanges}
+    onResourceRouteChange={onResourceRouteChange}
+    onEnvironmentChange={workspace.onEnvironmentChange}
+    onJobAccepted={onJobAccepted}
+    onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
+  />;
 }
 
 export default function App() {
@@ -120,7 +155,11 @@ export default function App() {
   } else if (navigation.route.kind === 'jobs') {
     content = <DashboardPage view="jobs" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} />;
   } else if (navigation.route.kind === 'package') {
-    content = <PackageLanding packageId={navigation.route.packageId} resourceId={navigation.route.resource?.resourceId} enabled={capabilities.inlineLoadEnabled} />;
+    content = <ExplorerRouteView
+      packageId={navigation.route.packageId}
+      resourceRoute={navigation.route.resource || null}
+      inlineLoadEnabled={capabilities.inlineLoadEnabled}
+    />;
   } else {
     content = <LoadLanding state={state.packages} enabled={capabilities.inlineLoadEnabled} packageId={navigation.route.packageId} onSelectPackage={onLoadPackageChange} />;
   }

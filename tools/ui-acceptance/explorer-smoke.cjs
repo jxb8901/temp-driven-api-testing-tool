@@ -74,6 +74,12 @@ async function main() {
           environments: [{ name: 'staging', state: 'active', default: true }, { name: 'production', state: 'active' }],
         });
       }
+      if (method === 'GET' && path === 'packages/payments/configuration/compare') {
+        return jsonResponse(route, 200, {
+          state: 'ready', leftEnvironment: 'staging', rightEnvironment: 'production',
+          fields: [{ path: 'database.password', left: { state: 'hidden' }, right: { state: 'missing' }, change: 'changed' }],
+        });
+      }
       if (method === 'GET' && path === 'packages/payments/resources/template/checkout/debug-form') {
         return jsonResponse(route, 200, {
           target: { type: 'template', id: 'checkout' },
@@ -128,6 +134,9 @@ async function main() {
 
     await page.goto(`${base}#/packages/payments/resources/template/checkout`);
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
+    await page.getByRole('button', { name: 'Compare', exact: true }).click();
+    await page.getByRole('table', { name: 'Configuration profile comparison' }).waitFor();
+    assert.equal(await page.getByRole('table', { name: 'Configuration profile comparison' }).innerText().then(text => text.includes('hidden') && text.includes('missing')), true, 'configuration comparison distinguishes hidden from missing');
     await page.getByRole('button', { name: 'Debug this target' }).click();
     await page.getByText(/Hidden package-authored values are preserved/).waitFor();
     const keepDefault = page.getByRole('checkbox', { name: /Keep hidden package default/ });

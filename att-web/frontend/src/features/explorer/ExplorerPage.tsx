@@ -27,6 +27,9 @@ function userError(error: unknown, action: string): string {
 function isRunnable(resource?: ResourceSummary | null): boolean {
   return Boolean(resource && resource.state !== 'invalid' && ['template', 'flow', 'tool'].includes(resource.type));
 }
+function isResourceType(type: string): type is ResourceSummary['type'] {
+  return ['case', 'template', 'flow', 'tool'].includes(type);
+}
 function debugGroups(type?: string) {
   return type === 'tool'
     ? [{ key: 'inputs', label: 'Inputs' }, { key: 'arguments', label: 'Tool arguments' }]
@@ -72,18 +75,30 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   const [principal, setPrincipal] = useState(principalLabel);
   const [resourceRefresh, setResourceRefresh] = useState(0);
   const dirtyRef = useRef(false);
+  const unregisterDirtyRef = useRef<(() => void) | null>(null);
   const selectedRouteKey = resourceRouteKey(resourceRoute);
-  const identity = useMemo<ResourceIdentity | null>(() => resourceRoute
+  const identity = useMemo<ResourceIdentity | null>(() => resourceRoute && isResourceType(resourceRoute.type)
     ? { packageId, type: resourceRoute.type, resourceId: resourceRoute.resourceId } : null,
   [packageId, resourceRoute?.type, resourceRoute?.resourceId]);
   const selectedKey = resourceRoute ? `${resourceRoute.type}:${resourceRoute.resourceId}` : '';
 
   const updateDirty = useCallback((next: boolean) => {
     dirtyRef.current = next;
+    if (!next) {
+      unregisterDirtyRef.current?.();
+      unregisterDirtyRef.current = null;
+    }
     setDirty(next);
   }, []);
 
-  useEffect(() => registerUnsavedChanges(dirty, 'Explorer Debug and Test Runner edits'), [dirty, registerUnsavedChanges]);
+  useEffect(() => {
+    const unregister = registerUnsavedChanges(dirty, 'Explorer Debug and Test Runner edits');
+    unregisterDirtyRef.current = unregister;
+    return () => {
+      unregister();
+      if (unregisterDirtyRef.current === unregister) unregisterDirtyRef.current = null;
+    };
+  }, [dirty, registerUnsavedChanges]);
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (!dirtyRef.current) return;
@@ -282,7 +297,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
           {detailLoading && <p role="status">Loading resource detail…</p>}
           {detailError && <p className="att-error" role="alert">{detailError}</p>}
           <div className="att-explorer-tabs" role="tablist" aria-label="Resource content" onKeyDown={onTabsKeyDown}>
-            {(['definition', 'source', 'relations'] as const).map((name, index) => <button key={name} type="button" role="tab" data-tab={name}
+            {(['definition', 'source', 'relations'] as const).map(name => <button key={name} type="button" role="tab" data-tab={name}
               id={`att-explorer-tab-${name}`} aria-selected={tab === name} aria-controls={`att-explorer-panel-${name}`}
               tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)}>{name === 'definition' ? 'Definition' : name === 'source' ? 'Source' : 'Dependencies'}</button>)}
           </div>

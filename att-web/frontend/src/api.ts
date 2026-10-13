@@ -1,4 +1,9 @@
 import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type PackageSummary, type ServerVersion } from './types';
+import type {
+  AcceptedJob, ConfigurationComparisonQuery, ConfigurationResponse, DebugDraftRequest, DraftResponse,
+  DebugFormResponse, EffectiveConfigurationQuery, ResourceDetail, ResourceIdentity,
+  ResourcePage, ResourceQuery, SourceProjection,
+} from './features/explorer/types';
 
 /** Resolve the API below the current UI context (for example /att/ui/ -> /att/api/v1/). */
 export function apiBaseUrl(): URL {
@@ -50,6 +55,25 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   return body as T;
 }
 
+function queryString(values: Record<string, string | number | undefined>): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined && String(value).length > 0) params.set(key, String(value));
+  }
+  const query = params.toString();
+  return query ? '?' + query : '';
+}
+
+function resourcePath(identity: ResourceIdentity): string {
+  return 'packages/' + encodeURIComponent(identity.packageId)
+    + '/resources/' + encodeURIComponent(identity.type)
+    + '/' + encodeURIComponent(identity.resourceId);
+}
+
+function postJson<T>(path: string, value: unknown, signal?: AbortSignal): Promise<T> {
+  return request<T>(path, { method: 'POST', body: JSON.stringify(value), signal });
+}
+
 export const api = {
   getVersion(signal?: AbortSignal): Promise<ServerVersion> {
     return request<ServerVersion>('version', { signal });
@@ -59,5 +83,56 @@ export const api = {
   },
   getJobs(signal?: AbortSignal): Promise<ApiEnvelope<JobSummary>> {
     return request<ApiEnvelope<JobSummary>>('jobs', { signal });
+  },
+  listResources(packageId: string, query: ResourceQuery, signal?: AbortSignal): Promise<ResourcePage> {
+    return request<ResourcePage>('packages/' + encodeURIComponent(packageId) + '/resources' + queryString({
+      query: query.query,
+      type: query.type === 'all' ? undefined : query.type,
+      cursor: query.cursor,
+      limit: query.limit,
+    }), { signal });
+  },
+  getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail> {
+    return request<ResourceDetail>(resourcePath(identity), { signal });
+  },
+  getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection> {
+    return request<SourceProjection>(resourcePath(identity) + '/source', { signal });
+  },
+  getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse> {
+    return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration?view=declared', { signal });
+  },
+  getEffectiveConfiguration(packageId: string, query: EffectiveConfigurationQuery, signal?: AbortSignal): Promise<ConfigurationResponse> {
+    return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/effective' + queryString({
+      environment: query.environment,
+      section: query.section,
+      offset: query.offset,
+      limit: query.limit,
+    }), { signal });
+  },
+  compareConfiguration(packageId: string, query: ConfigurationComparisonQuery, signal?: AbortSignal): Promise<ConfigurationResponse> {
+    return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/compare' + queryString({
+      left: query.left,
+      right: query.right,
+      offset: query.offset,
+      limit: query.limit,
+    }), { signal });
+  },
+  getDebugForm(identity: ResourceIdentity, environment?: string, signal?: AbortSignal): Promise<DebugFormResponse> {
+    return request<DebugFormResponse>(resourcePath(identity) + '/debug-form' + queryString({ environment }), { signal });
+  },
+  previewDebug(input: DebugDraftRequest, signal?: AbortSignal): Promise<DraftResponse> {
+    return postJson<DraftResponse>('drafts/debug', input, signal);
+  },
+  submitDebug(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob> {
+    return postJson<AcceptedJob>('jobs/debug', input, signal);
+  },
+  runCase(input: { packageId: string; suite: string; caseId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob> {
+    const body: { packageId: string; suites: string[]; caseIds: string[]; principal?: string } = {
+      packageId: input.packageId,
+      suites: [input.suite],
+      caseIds: [input.caseId],
+    };
+    if (input.principal) body.principal = input.principal;
+    return postJson<AcceptedJob>('jobs/run', body, signal);
   },
 };

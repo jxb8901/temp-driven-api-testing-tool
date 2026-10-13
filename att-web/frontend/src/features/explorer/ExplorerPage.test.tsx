@@ -65,7 +65,7 @@ function apiWith(overrides: Partial<ExplorerApi>): ExplorerApi {
     getDeclaredConfiguration: vi.fn(async () => ({ state: 'ready', environments: [], globals: {}, sections: [] })),
     getEffectiveConfiguration: vi.fn(async () => ({ state: 'ready', globals: {}, sections: [] })),
     compareConfiguration: vi.fn(async () => ({ state: 'ready', fields: [] })),
-    getDebugForm: vi.fn(async () => ({ target: { type: 'template', id: 'template-1' }, input: {} })),
+    getDebugForm: vi.fn(async () => ({ target: { type: 'template' as const, id: 'template-1' }, input: {} })),
     previewDebug: vi.fn(async () => ({ draftId: 'draft-1', previewYaml: 'accepted: true' })),
     submitDebug: vi.fn(async () => ({ jobId: 'job-debug-1' })),
     runCase: vi.fn(async () => ({ jobId: 'job-case-1' })),
