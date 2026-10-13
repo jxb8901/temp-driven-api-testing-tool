@@ -2,6 +2,8 @@
 
 # ATT 4.1.2 - 2026-10-13
 
+- Resolve ATT Remote servers from a profile or direct HTTP(S) URL, with explicit CLI and environment precedence.
+- Add safe automatic Basic authentication detection, explicit `auto`/`basic`/`none` modes, and redirect and TLS protections.
 - Support fully anonymous Web UI, REST, and Remote operations when `server.authenticationRequired: false`, keeping one shared authorization identity across inspection, drafts, jobs, and audit (#199).
 - Add optional self-declared anonymous job labels stored as `Name(anonym)` in the existing `principal` field; support UI/Remote entry and principal search without changing authorization.
 - Warn at Server startup and document the shared-access limitations and network restrictions for anonymous mode.

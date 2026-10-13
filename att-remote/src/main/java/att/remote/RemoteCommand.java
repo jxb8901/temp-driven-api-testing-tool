@@ -31,8 +31,20 @@ public final class RemoteCommand {
             RemoteOptions options=RemoteOptions.parse(args);format=options.format;
             if(options.command.isEmpty()||"help".equals(options.command.get(0))){help();return 0;}
             ServerProfile profile=ServerProfileLoader.resolve(options.server,System.getenv("ATT_SERVER"),ServerProfileLoader.profilePath(),options.noAuth);
-            Credentials credentials=options.noAuth?new Credentials(null,null):password(profile);
-            RemoteHttpClient client=new RemoteHttpClient(profile,credentials.password,credentials.username);
+            RemoteHttpClient client;
+            if(profile.basicAuth) {
+                Credentials credentials=password(profile);
+                client=new RemoteHttpClient(profile,credentials.password,credentials.username);
+            } else if(profile.autoAuth) {
+                client=new RemoteHttpClient(profile,null,profile.username,()->{
+                    Credentials credentials=password(profile);
+                    return new RemoteHttpClient.Credentials(credentials.username,credentials.password);
+                });
+                // /version and /health may be public; probe a protected, side-effect-free API before selecting auth.
+                client.get("/packages");
+            } else {
+                client=new RemoteHttpClient(profile,null,null);
+            }
             JsonNode version=client.get("/version");
             if(!version.path("apiVersion").isTextual()||!ServerApi.VERSION.equals(version.path("apiVersion").asText()))throw new RemoteException("ATT Server API is missing or unsupported; client supports API v"+ServerApi.VERSION);
             List<String> command=options.command;String op=command.get(0);
@@ -205,5 +217,5 @@ public final class RemoteCommand {
     private static String segment(String value){try{return java.net.URLEncoder.encode(value,"UTF-8").replace("+","%20");}catch(java.io.UnsupportedEncodingException impossible){throw new IllegalStateException(impossible);}}
     private static int fail(String message,int code,String format){String safe=message==null?"Remote command failed":message.replaceAll("(?i)(password|authorization)\\s*[:=]\\s*[^ ,]+","$1=[REDACTED_SECRET]");if("json".equals(format)){ObjectNode out=RemoteHttpClient.JSON.createObjectNode();out.put("error",safe);out.put("exitCode",code);System.err.println(out.toString());}else System.err.println("ATT Remote: "+safe);return code;}
     private static String safe(Exception e){String m=e.getMessage();return m==null?e.getClass().getSimpleName():m;}
-    private static void help(){System.out.println("Usage: att remote [--server <profile>] [--format human|json] [--no-auth] <command>\nCommands: ping, version, packages, package <id>, run|debug|load|validate <packageId> [--principal <name>], jobs [--principal <search>], job|watch|result|cancel <jobId>, artifacts <jobId>, artifact <jobId> <name> --download <directory>\nSet ATT_SERVER to override the configured default profile URL.");}
+    private static void help(){System.out.println("Usage: att remote [--server <profile|url>] [--format human|json] [--no-auth] <command>\nCommands: ping, version, packages, package <id>, run|debug|load|validate <packageId> [--principal <name>], jobs [--principal <search>], job|watch|result|cancel <jobId>, artifacts <jobId>, artifact <jobId> <name> --download <directory>\n--server accepts a named profile or an HTTP(S) base URL. ATT_SERVER accepts either value and overrides the YAML default.");}
 }

@@ -5534,13 +5534,15 @@ contract。現有 <code>run</code>、<code>debug</code>、<code>load</code>
 <div class="sourceCode" id="cb86"><pre
 class="sourceCode sh"><code class="sourceCode bash"><span id="cb86-1"><a href="#cb86-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit packages</span>
 <span id="cb86-2"><a href="#cb86-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit <span class="at">--no-auth</span> packages</span>
-<span id="cb86-3"><a href="#cb86-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit run payments <span class="at">--suite</span> testcase/smoke.xlsx <span class="at">--env</span> SIT <span class="at">--tag</span> smoke</span>
-<span id="cb86-4"><a href="#cb86-4" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit <span class="at">--no-auth</span> run payments <span class="at">--all</span> <span class="at">--principal</span> Bob</span>
-<span id="cb86-5"><a href="#cb86-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit jobs <span class="at">--principal</span> <span class="st">&#39;Bob(anonym)&#39;</span></span>
-<span id="cb86-6"><a href="#cb86-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> ci run payments <span class="at">--all</span> <span class="at">--detach</span></span>
-<span id="cb86-7"><a href="#cb86-7" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit watch J0123456789ABCDEF</span>
-<span id="cb86-8"><a href="#cb86-8" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit load payments <span class="at">--scenario</span> load/payment.yaml <span class="at">--users</span> 2 <span class="at">--duration</span> 30s</span>
-<span id="cb86-9"><a href="#cb86-9" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit artifacts J0123456789ABCDEF <span class="at">--download</span> ./results</span></code></pre></div>
+<span id="cb86-3"><a href="#cb86-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> https://att-sit.example.com/att packages</span>
+<span id="cb86-4"><a href="#cb86-4" aria-hidden="true" tabindex="-1"></a><span class="va">ATT_SERVER</span><span class="op">=</span>sit <span class="ex">./att.sh</span> remote packages</span>
+<span id="cb86-5"><a href="#cb86-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit run payments <span class="at">--suite</span> testcase/smoke.xlsx <span class="at">--env</span> SIT <span class="at">--tag</span> smoke</span>
+<span id="cb86-6"><a href="#cb86-6" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit <span class="at">--no-auth</span> run payments <span class="at">--all</span> <span class="at">--principal</span> Bob</span>
+<span id="cb86-7"><a href="#cb86-7" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit jobs <span class="at">--principal</span> <span class="st">&#39;Bob(anonym)&#39;</span></span>
+<span id="cb86-8"><a href="#cb86-8" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> ci run payments <span class="at">--all</span> <span class="at">--detach</span></span>
+<span id="cb86-9"><a href="#cb86-9" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit watch J0123456789ABCDEF</span>
+<span id="cb86-10"><a href="#cb86-10" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit load payments <span class="at">--scenario</span> load/payment.yaml <span class="at">--users</span> 2 <span class="at">--duration</span> 30s</span>
+<span id="cb86-11"><a href="#cb86-11" aria-hidden="true" tabindex="-1"></a><span class="ex">./att.sh</span> remote <span class="at">--server</span> sit artifacts J0123456789ABCDEF <span class="at">--download</span> ./results</span></code></pre></div>
 <p><code>--server</code> 選擇 <code>~/.att/servers.yaml</code> 中的
 profile；設定 <code>ATT_REMOTE_CONFIG</code> 可使用其他 profile
 檔案。<code>ATT_SERVER_CONFIG</code> 保留給 Server deployment
@@ -5567,7 +5569,7 @@ result。<code>--detach</code> 會輸出已接受工作 ID 並結束。使用
 troubleshooting 見 <a href="remote-client.zh.md">ATT Remote
 client</a>。</p>
 <p>Remote-only option 包括
-<code>--server &lt;profile&gt;</code>、<code>--no-auth</code>、<code>--principal &lt;name&gt;</code>、<code>--detach</code>、<code>--download &lt;directory&gt;</code>
+<code>--server &lt;profile|url&gt;</code>、<code>--no-auth</code>、<code>--principal &lt;name&gt;</code>、<code>--detach</code>、<code>--download &lt;directory&gt;</code>
 及 <code>--scenario &lt;package-relative-path&gt;</code>。只有 Server
 明確允許匿名存取時，<code>--no-auth</code> 才會略過 profile
 credentials。匿名模式下，<code>--principal</code> 只提供自我聲稱的

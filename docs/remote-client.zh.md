@@ -25,11 +25,13 @@ servers:
       passwordEnv: ATT_CI_PASSWORD
 ```
 
-請由 CI secret store 注入指定的環境變數。互動使用時，可省略 `passwordEnv`；CLI 會隱藏 password 輸入。設定 `ATT_REMOTE_CONFIG` 可使用其他 profile 檔案。`ATT_SERVER_CONFIG` 保留給 Server deployment YAML 使用。
+請由 CI secret store 注入指定的環境變數。互動使用時，可省略 `passwordEnv`；Server 要求 Basic authentication 後，CLI 會隱藏輸入 credentials。設定 `ATT_REMOTE_CONFIG` 可使用其他 profile 檔案。`ATT_SERVER_CONFIG` 保留給 Server deployment YAML 使用。
 
-使用 `--server` 選擇 profile。`ATT_SERVER` 可覆蓋 default profile URL。明確的 `--server` profile 優先；否則依序採用 `ATT_SERVER` URL，再採用設定檔的 default profile。若 `ATT_SERVER` 覆蓋 URL，authentication settings 仍取自 profile。
+`--server` 可選擇 profile 或直接接受 HTTP(S) base URL。`ATT_SERVER` 同樣接受 profile 名稱或 URL。選擇優先次序為明確指定的 `--server`、`ATT_SERVER`、YAML `default` profile。直接選擇 URL 時不會沿用其他 profile 的 credentials，並會保留 context path。URL validation 會拒絕 embedded credentials、query、fragment 及不支援的 scheme。
 
-若 Server 明確允許匿名存取，可使用 `--no-auth` 略過 profile credentials 及 password prompt。Basic authentication 只可透過 HTTPS 使用。Client 採用 JVM 預設 TLS trust 及 hostname verification，沒有 insecure TLS 選項。每項操作開始前均會檢查 health/version；Server 必須宣告 API version `1`。
+Profile 預設使用 `auth.type: auto`。每項命令開始前，ATT Remote 會呼叫受保護且唯讀的 `GET /packages`；公開的 `/version` 或 `/health` 不會用來判斷 authentication mode。若匿名存取成功，便不會傳送 credentials。若 Server 回覆 HTTP Basic challenge，ATT Remote 會使用所選 profile 的 credentials，或安全地提示輸入。使用 `auth.type: basic` 會預先傳送 profile credentials；使用 `auth.type: none` 或 `--no-auth` 則不傳送 credentials。Basic authentication 必須使用 HTTPS，並維持 JVM 的 TLS certificate 及 hostname 檢查。
+
+Auto mode 可在之後受保護的 `GET` endpoint 遇到 Basic challenge 時處理並沿用 credentials。遇到 challenge 後不會重試 `POST` 或 `DELETE`；submission 被拒絕後，請先檢查 job list，再決定是否重試。ATT Remote 不會跟隨 redirect，避免將 credentials 傳給 redirect target 或降級至 HTTP。FORM/OIDC challenge 不受支援；請使用 Tomcat BASIC-protected endpoint。Server 必須宣告 API version `1`。
 
 匿名模式只適用於隔離的 SIT/development 部署。所有 caller 共用相同授權身份，亦可存取相同 jobs 及 drafts；只有部署方明確啟用並保護網絡邊界時才使用 `--no-auth`。Run、Debug、Load 或 Validate 可加上 `--principal <name>` 提交自我聲稱的顯示/audit label。Server 會將其存入既有 `principal` 欄位並格式化為 `<name>(anonym)`；不會產生個別用戶存取或授權。驗證模式會忽略此 option。
 
@@ -44,6 +46,8 @@ servers:
 ./att.sh remote --server sit package payments
 ./att.sh remote --server sit --no-auth ping
 ./att.sh remote --server sit --no-auth packages
+./att.sh remote --server https://att-sit.example.com/att packages
+ATT_SERVER=sit ./att.sh remote packages
 ```
 
 ## 提交 Run、Debug、Load 及 Validate 工作
