@@ -16,9 +16,6 @@
   let selectedPackage = '';
   let formPackage = '';
   let activeJob = '';
-  let activeJobPackage = '';
-  let dashboardPackages = null;
-  let dashboardJobs = null;
   let source = null;
   let lastEventId = 0;
   let artifactRequestSequence = 0;
@@ -66,102 +63,15 @@
   let advancedTargetSuggestionSequence = 0;
   const advancedTargetCatalogs = new Map();
   let advancedSubmitting = false;
+  let scheduleRequestSequence = 0;
+  let schedulePreviewSequence = 0;
+  let schedulePreviewTimer = null;
   let resourceConfigurationTarget = null;
   let cancelRequested = false;
   let versionPromise = null;
   let inlineLoadEnabled = false;
   let navigation = 0;
   const submitting = new Set();
-
-  function setConnectionStatus(value) {
-    text(byId('connection'), value);
-    text(byId('summary-server-status'), value);
-    byId('connection').dataset.state = String(value || '').toLowerCase();
-  }
-
-  function updateDashboardSummary() {
-    text(byId('summary-package-count'), dashboardPackages === null ? '—' : String(dashboardPackages.length));
-    text(byId('summary-active-jobs'), dashboardJobs === null ? '—' : String(dashboardJobs.filter(job => ['QUEUED','PREPARING','RUNNING','CANCEL_REQUESTED'].includes(String(job.status || '').toUpperCase())).length));
-    text(byId('summary-active-detail'), dashboardJobs === null ? 'Waiting for recent jobs' : `In ${dashboardJobs.length} returned job row${dashboardJobs.length === 1 ? '' : 's'}`);
-    const latest = dashboardJobs && dashboardJobs[0];
-    text(byId('summary-latest-job'), latest ? String(latest.status || 'Unknown') : dashboardJobs === null ? '—' : 'No jobs yet');
-    text(byId('summary-latest-detail'), latest ? `Job ${latest.jobId || ''}` : dashboardJobs === null ? 'Waiting for recent jobs' : 'Submit a Run, Debug, or Load job from a package.');
-  }
-
-  function statusBadge(value) {
-    const status = String(value || 'UNKNOWN').toUpperCase();
-    const badge = el('span', status);
-    badge.className = `status-badge status-${status.toLowerCase().replace(/_/g, '-')}`;
-    return badge;
-  }
-
-  function updateShellContext(parts) {
-    const mode = parts[0] || 'dashboard';
-    const routePackage = (mode === 'packages' || mode === 'advanced-load') ? (parts[1] || '') : '';
-    const contextPackage = routePackage || activeJobPackage;
-    const packageLabel = contextPackage || 'All packages';
-    text(byId('context-package'), packageLabel);
-    const environment = mode === 'advanced-load' && routePackage
-      ? String(byId('advanced-load-environment').value || '').trim()
-      : mode === 'packages' && routePackage
-        ? String(byId('submit-form').elements.environment.value || '').trim()
-        : '';
-    text(byId('context-environment'), environment || 'Per run');
-
-    const crumbs = byId('breadcrumbs');
-    crumbs.replaceChildren();
-    const addCrumb = (label, href = '') => {
-      const item = document.createElement('li');
-      const node = href ? link(href, label) : el('span', label);
-      if (!href) node.setAttribute('aria-current', 'page');
-      item.append(node); crumbs.append(item);
-    };
-    addCrumb('Dashboard', mode === 'dashboard' ? '' : '#/');
-    if (mode === 'packages') {
-      addCrumb('Packages', routePackage ? '#/packages' : '');
-      if (routePackage) addCrumb(routePackage);
-    } else if (mode === 'advanced-load') {
-      addCrumb('Load testing', routePackage ? '#/advanced-load' : '');
-      if (routePackage) { addCrumb(routePackage, `#/packages/${encodeURIComponent(routePackage)}`); addCrumb('Advanced Load'); }
-    } else if (mode === 'jobs') {
-      addCrumb('Jobs and results', activeJob ? '#/jobs' : '');
-      if (activeJob) addCrumb(`Job ${activeJob}`);
-    }
-
-    const navMode = mode === 'packages' ? (routePackage ? 'explorer' : 'packages')
-      : mode === 'advanced-load' ? 'load-testing'
-        : mode === 'jobs' ? 'jobs' : 'dashboard';
-    document.querySelectorAll('[data-nav]').forEach(node => {
-      if (node.dataset.nav === navMode) node.setAttribute('aria-current', 'page');
-      else node.removeAttribute('aria-current');
-    });
-    const packageRoute = routePackage ? `#/packages/${encodeURIComponent(routePackage)}` : '#/packages';
-    const loadRoute = routePackage ? `#/advanced-load/${encodeURIComponent(routePackage)}` : '#/advanced-load';
-    const explorerLink = document.querySelector('[data-nav="explorer"]');
-    const loadLink = document.querySelector('[data-nav="load-testing"]');
-    explorerLink.href = packageRoute;
-    loadLink.href = loadRoute;
-
-    const action = byId('context-action');
-    if (mode === 'advanced-load' && routePackage) {
-      action.href = packageRoute; text(action, 'Open package'); action.hidden = false;
-    } else if (mode === 'advanced-load') {
-      action.href = '#/packages'; text(action, 'Choose a package'); action.hidden = false;
-    } else if (mode === 'packages' && routePackage) {
-      action.href = loadRoute; text(action, 'Start Load'); action.hidden = false;
-    } else if (mode === 'jobs' && activeJob) {
-      action.href = '#/jobs'; text(action, 'All jobs'); action.hidden = false;
-    } else if (mode === 'jobs') {
-      action.href = '#/packages'; text(action, 'Browse packages'); action.hidden = false;
-    } else if (mode === 'packages' && dashboardPackages && dashboardPackages.length) {
-      action.href = `#/packages/${encodeURIComponent(dashboardPackages[0].packageId)}`;
-      text(action, 'Open first package'); action.hidden = false;
-    } else if (mode === 'packages') {
-      action.hidden = true;
-    } else {
-      action.href = '#/packages'; text(action, 'View packages'); action.hidden = false;
-    }
-  }
 
   async function request(path, options = {}) {
     const headers = new Headers(options.headers || {});
@@ -187,7 +97,8 @@
       versionPromise = request('version').then(info => {
         if (String(info.apiVersion) !== '1') throw new Error('Incompatible ATT Server API version; this Web UI requires /api/v1.');
         inlineLoadEnabled = info.inlineLoadEnabled === true;
-        setConnectionStatus('Connected');
+        byId('scheduled-load-nav').hidden = info.loadSchedulingEnabled !== true;
+        text(byId('connection'), 'Connected');
       }).catch(error => { versionPromise = null; throw error; });
     }
     return versionPromise;
@@ -211,138 +122,208 @@
     }
     const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
     closeStream();
-    const homeRoute = parts.length === 0 || (parts[0] === 'packages' && !parts[1]) || (parts[0] === 'jobs' && !parts[1]) || (parts[0] === 'advanced-load' && !parts[1]);
-    byId('home').hidden = !homeRoute;
+    byId('home').hidden = parts.length > 0;
+    byId('load-schedules-view').hidden = parts[0] !== 'load-schedules';
     byId('package-view').hidden = parts[0] !== 'packages' || !parts[1];
     byId('advanced-load').hidden = parts[0] !== 'advanced-load' || !parts[1];
     byId('job-view').hidden = parts[0] !== 'jobs' || !parts[1];
     message('');
-    activeJobPackage = '';
     selectedPackage = (parts[0] === 'packages' || parts[0] === 'advanced-load') ? (parts[1] || '') : '';
-    if (homeRoute) {
-      const mode = parts[0] || 'dashboard';
-      byId('home-title').textContent = mode === 'packages' ? 'Packages' : mode === 'jobs' ? 'Jobs and results' : mode === 'advanced-load' ? 'Load testing' : 'Dashboard';
-      byId('home-description').textContent = mode === 'packages' ? 'Choose a configured package to inspect and run its resources.'
-        : mode === 'jobs' ? 'Review recent job status and open detailed results.'
-          : mode === 'advanced-load' ? 'Choose a configured package to build and start an Advanced Load scenario.'
-            : 'Monitor recent ATT activity and open a package workspace.';
-      byId('dashboard-overview').hidden = mode !== 'dashboard';
-      byId('home-packages-section').hidden = mode === 'jobs';
-      byId('home-jobs-section').hidden = mode === 'packages' || mode === 'advanced-load';
-    }
     if (selectedPackage && selectedPackage !== formPackage) {
       byId('submit-form').reset();
       formPackage = selectedPackage;
     }
     activeJob = parts[0] === 'jobs' ? (parts[1] || '') : '';
-    updateShellContext(parts);
     const submitButton = byId('submit-form').querySelector('button[type="submit"]');
     if (submitButton) submitButton.disabled = selectedPackage !== '' && submitting.has(selectedPackage);
     ensureCompatible().then(() => {
       if (generation !== navigation) return;
       if (parts[0] === 'packages' && selectedPackage) showPackage(selectedPackage, generation);
       else if (parts[0] === 'advanced-load' && selectedPackage) showAdvancedLoadPackage(selectedPackage, generation);
+      else if (parts[0] === 'load-schedules') loadSchedules(generation);
       else if (activeJob) showJob(activeJob, generation);
-      else loadHome(generation, parts[0] || 'dashboard');
-    }).catch(error => { if (generation === navigation) { setConnectionStatus('Unavailable'); message(error.message); } });
+      else loadHome(generation);
+    }).catch(error => { if (generation === navigation) { text(byId('connection'), 'Unavailable'); message(error.message); } });
   }
-  async function loadHomePackages(generation = navigation) {
-    dashboardPackages = null;
-    updateDashboardSummary();
-    byId('packages-state').setAttribute('aria-busy', 'true');
-    text(byId('packages-state'), 'Loading configured packages…');
-    byId('retry-packages').hidden = true;
+  async function loadHomePackages(generation) {
     try {
       const packages = await request('packages');
       if (generation !== navigation) return false;
-      dashboardPackages = listItems(packages);
-      updateDashboardSummary();
       const packageList = byId('packages'); packageList.replaceChildren();
-      dashboardPackages.forEach(item => {
+      listItems(packages).forEach(item => {
         const li = document.createElement('li');
         li.append(link(`#/packages/${encodeURIComponent(item.packageId)}`, item.packageId));
-        const actions = document.createElement('span'); actions.className = 'package-actions';
-        const explorer = link(`#/packages/${encodeURIComponent(item.packageId)}`, 'Open explorer'); explorer.className = 'button button-quiet';
-        actions.append(explorer);
-        const advanced = el('button', inlineLoadEnabled ? 'Advanced Load' : 'Advanced Load (disabled)'); advanced.type = 'button'; advanced.className = 'button button-quiet';
+        const advanced = el('button', inlineLoadEnabled ? 'Advanced Load' : 'Advanced Load (disabled)'); advanced.type = 'button';
         advanced.disabled = !inlineLoadEnabled;
         if (inlineLoadEnabled) advanced.addEventListener('click', () => { location.hash = `#/advanced-load/${encodeURIComponent(item.packageId)}`; });
         else advanced.title = 'The Server administrator has disabled browser-created Load drafts.';
-        actions.append(advanced); li.append(actions); packageList.append(li);
+        li.append(el('span', ' '), advanced); packageList.append(li);
       });
-      byId('packages-state').setAttribute('aria-busy', 'false');
-      text(byId('packages-state'), dashboardPackages.length ? `${dashboardPackages.length} configured package${dashboardPackages.length === 1 ? '' : 's'} available.` : 'No packages are configured yet. Ask a Server administrator to register a package.');
-      updateShellContext(location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent));
-      setConnectionStatus('Connected');
       return true;
     } catch (error) {
       if (generation === navigation) {
-        dashboardPackages = null;
-        updateDashboardSummary();
-        byId('packages-state').setAttribute('aria-busy', 'false');
-        text(byId('packages-state'), 'Could not load packages. Retry to try again.');
-        byId('retry-packages').hidden = false;
-        setConnectionStatus('Unavailable'); message(error.message);
+        byId('connection').textContent = 'Unavailable'; message(error.message);
       }
       return false;
     }
   }
   async function loadHomeJobs(generation = navigation) {
     const requestSequence = ++homeRequestSequence;
-    dashboardJobs = null;
-    updateDashboardSummary();
-    byId('jobs-state').setAttribute('aria-busy', 'true');
-    text(byId('jobs-state'), 'Loading recent jobs…');
     try {
       const principalSearch = String(byId('job-principal-search').value || '').trim();
       const jobsPath = principalSearch ? `jobs?principal=${encodeURIComponent(principalSearch)}` : 'jobs';
       const jobs = await request(jobsPath);
       if (requestSequence !== homeRequestSequence || generation !== navigation) return false;
       const tbody = byId('jobs'); tbody.replaceChildren();
-      dashboardJobs = listItems(jobs);
-      updateDashboardSummary();
-      dashboardJobs.forEach(job => {
+      listItems(jobs).forEach(job => {
         const row = document.createElement('tr');
-        [job.jobId, job.packageId, job.command, job.principal, job.status, job.createdAt].forEach((value, i) => {
-          const cell = document.createElement('td');
-          if (i === 0) cell.append(link(`#/jobs/${encodeURIComponent(job.jobId)}`, value));
-          else if (i === 4) cell.append(statusBadge(value));
-          else text(cell, value);
-          row.append(cell);
-        });
+        [job.jobId, job.packageId, job.command, job.principal, job.status, job.createdAt].forEach((value, i) => { const cell = document.createElement('td'); if (i === 0) cell.append(link(`#/jobs/${encodeURIComponent(job.jobId)}`, value)); else text(cell, value); row.append(cell); });
         tbody.append(row);
       });
-      byId('jobs-state').setAttribute('aria-busy', 'false');
-      text(byId('jobs-state'), dashboardJobs.length ? `Showing ${dashboardJobs.length} recent job row${dashboardJobs.length === 1 ? '' : 's'}.` : 'No jobs yet. Submit a Run, Debug, or Load job from a package.');
-      setConnectionStatus('Connected');
+      byId('connection').textContent = 'Connected';
       return true;
     } catch (error) {
       if (requestSequence === homeRequestSequence && generation === navigation) {
-        dashboardJobs = null;
-        updateDashboardSummary();
-        byId('jobs-state').setAttribute('aria-busy', 'false');
-        text(byId('jobs-state'), 'Could not load recent jobs. Use Refresh to try again.');
-        setConnectionStatus('Unavailable'); message(error.message);
+        byId('connection').textContent = 'Unavailable'; message(error.message);
       }
       return false;
     }
   }
-  async function loadHome(generation = navigation, mode = 'dashboard') {
-    if (mode === 'packages' || mode === 'advanced-load') return loadHomePackages(generation);
-    if (mode === 'jobs') return loadHomeJobs(generation);
+  async function loadHome(generation = navigation) {
     const results = await Promise.all([loadHomePackages(generation), loadHomeJobs(generation)]);
     return results.every(Boolean);
   }
-  function confirmAction(prompt, title, acceptLabel = 'Confirm') {
-    const dialog = byId('confirmation-dialog');
-    text(byId('confirmation-title'), title || 'Confirm action');
-    text(byId('confirmation-message'), prompt);
-    text(byId('confirmation-accept'), acceptLabel);
-    dialog.returnValue = 'cancel';
-    return new Promise(resolve => {
-      dialog.addEventListener('close', () => resolve(dialog.returnValue === 'confirm'), { once: true });
-      dialog.showModal();
-    });
+  function scheduleLocalTime(schedule) {
+    if (!schedule.nextRunAt) return '—';
+    try { return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: schedule.timezone }).format(new Date(schedule.nextRunAt)); }
+    catch (_) { return schedule.nextRunAt; }
+  }
+  function scheduleCron(form) {
+    const recurrence = form.elements.recurrence.value;
+    if (recurrence === 'cron') return String(form.elements.cron.value || '').trim();
+    const time = String(form.elements.timeOfDay.value || '');
+    const match = /^(\d{2}):(\d{2})$/.exec(time);
+    if (!match) return '';
+    const minute = String(Number(match[2])), hour = String(Number(match[1]));
+    return `${minute} ${hour} * * ${recurrence === 'weekly' ? form.elements.dayOfWeek.value : '*'}`;
+  }
+  function syncScheduleRecurrence(form) {
+    const simple = form.elements.recurrence.value !== 'cron';
+    byId('simple-recurrence').hidden = !simple;
+    byId('weekly-day-field').hidden = form.elements.recurrence.value !== 'weekly';
+    byId('cron-field').hidden = simple;
+    form.elements.timeOfDay.required = simple;
+    form.elements.cron.required = !simple;
+    schedulePreview();
+  }
+  function schedulePreview() {
+    if (schedulePreviewTimer !== null) clearTimeout(schedulePreviewTimer);
+    const sequence = ++schedulePreviewSequence;
+    schedulePreviewTimer = setTimeout(async () => {
+      const form = byId('load-schedule-form'), timezone = String(form.elements.timezone.value || '').trim(), cron = scheduleCron(form);
+      if (!timezone || !cron) { text(byId('schedule-next-run-preview'), 'Choose a valid timezone and recurrence to preview the next run.'); return; }
+      try {
+        const preview = await request('load-schedules/preview', { method: 'POST', body: JSON.stringify({ timezone, cron }) });
+        if (sequence !== schedulePreviewSequence) return;
+        text(byId('schedule-next-run-preview'), `Next run: ${scheduleLocalTime(preview)} (${preview.timezone})`);
+      } catch (error) {
+        if (sequence === schedulePreviewSequence) text(byId('schedule-next-run-preview'), `Preview unavailable: ${error.message}`);
+      }
+    }, 250);
+  }
+  function recurrenceForCron(cron) {
+    let match = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(cron || '');
+    if (match) return { recurrence: 'daily', timeOfDay: `${String(Number(match[2])).padStart(2, '0')}:${String(Number(match[1])).padStart(2, '0')}` };
+    match = /^(\d{1,2}) (\d{1,2}) \* \* (1-5|0,6|[0-6])$/.exec(cron || '');
+    if (match) return { recurrence: 'weekly', timeOfDay: `${String(Number(match[2])).padStart(2, '0')}:${String(Number(match[1])).padStart(2, '0')}`, dayOfWeek: match[3] };
+    return { recurrence: 'cron' };
+  }
+  function scheduleAction(label, action, schedule) {
+    const button = el('button', label); button.type = 'button';
+    button.addEventListener('click', action); return button;
+  }
+  async function loadSchedules(generation = navigation) {
+    const sequence = ++scheduleRequestSequence;
+    try {
+      const [data, packages] = await Promise.all([request('load-schedules'), request('packages')]);
+      if (sequence !== scheduleRequestSequence || generation !== navigation) return;
+      const select = byId('load-schedule-form').elements.packageId;
+      const selected = select.value; select.replaceChildren();
+      listItems(packages).forEach(item => { const option = el('option', item.packageId); option.value = item.packageId; select.append(option); });
+      if (selected) select.value = selected;
+      if (!byId('load-schedule-form').elements.timezone.value) {
+        byId('load-schedule-form').elements.timezone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      }
+      const tbody = byId('load-schedules'); tbody.replaceChildren();
+      listItems(data).forEach(schedule => {
+        const row = document.createElement('tr');
+        const name = el('td', schedule.name); name.append(document.createElement('br'), el('small', schedule.description || ''));
+        const scenario = el('td', `${schedule.packageId} · ${schedule.scenario} · ${schedule.loadModel || 'model unavailable'}${schedule.config ? ` · ${schedule.config}` : ''}`);
+        const recurrence = el('td', `${schedule.timezone} · ${schedule.cron}`);
+        const next = el('td', scheduleLocalTime(schedule));
+        const state = el('td', schedule.enabled ? 'Enabled' : 'Paused');
+        const actions = document.createElement('td');
+        actions.append(scheduleAction('History', () => showScheduleHistory(schedule, generation), schedule));
+        actions.append(document.createTextNode(' '), scheduleAction('Edit', () => editSchedule(schedule), schedule));
+        actions.append(document.createTextNode(' '), scheduleAction(schedule.enabled ? 'Pause' : 'Resume', async () => {
+          try { await request(`load-schedules/${encodeURIComponent(schedule.id)}/${schedule.enabled ? 'pause' : 'resume'}`, { method: 'POST' }); await loadSchedules(generation); }
+          catch (error) { text(byId('schedule-status'), error.message); }
+        }, schedule));
+        actions.append(document.createTextNode(' '), scheduleAction('Run now', async () => {
+          if (!window.confirm(`Submit ${schedule.name} as a Load job now?`)) return;
+          try { const occurrence = await request(`load-schedules/${encodeURIComponent(schedule.id)}/trigger`, { method: 'POST', body: '{}' });
+            text(byId('schedule-status'), `Occurrence ${occurrence.status}${occurrence.jobId ? ` · job ${occurrence.jobId}` : ''}.`); await loadSchedules(generation); await showScheduleHistory(schedule, generation); }
+          catch (error) { text(byId('schedule-status'), error.message); }
+        }, schedule));
+        actions.append(document.createTextNode(' '), scheduleAction('Delete', async () => {
+          if (!window.confirm(`Delete schedule ${schedule.name}? Running jobs will continue.`)) return;
+          try { await request(`load-schedules/${encodeURIComponent(schedule.id)}`, { method: 'DELETE' });
+            if (byId('schedule-history').dataset.scheduleId === schedule.id) byId('schedule-history').hidden = true;
+            text(byId('schedule-status'), `Deleted ${schedule.name}.`); await loadSchedules(generation); }
+          catch (error) { text(byId('schedule-status'), error.message); }
+        }, schedule));
+        row.append(name, scenario, recurrence, next, state, actions); tbody.append(row);
+      });
+      text(byId('schedule-status'), `${listItems(data).length} schedule(s). Times are shown in each schedule's timezone.`);
+    } catch (error) {
+      if (sequence === scheduleRequestSequence && generation === navigation) text(byId('schedule-status'), error.message);
+    }
+  }
+  function editSchedule(schedule) {
+    const form = byId('load-schedule-form'); form.dataset.scheduleId = schedule.id;
+    form.elements.name.value = schedule.name || ''; form.elements.description.value = schedule.description || '';
+    form.elements.tags.value = (schedule.tags || []).join(', ');
+    form.elements.packageId.value = schedule.packageId || ''; form.elements.scenario.value = schedule.scenario || '';
+    form.elements.config.value = schedule.config || ''; form.elements.environment.value = schedule.environment || '';
+    form.elements.timezone.value = schedule.timezone || 'UTC'; form.elements.cron.value = schedule.cron || '';
+    const recurrence = recurrenceForCron(schedule.cron || '');form.elements.recurrence.value=recurrence.recurrence;
+    if (recurrence.timeOfDay) form.elements.timeOfDay.value=recurrence.timeOfDay;
+    if (recurrence.dayOfWeek) form.elements.dayOfWeek.value=recurrence.dayOfWeek;
+    form.elements.load.value = JSON.stringify(schedule.load || {}, null, 2); form.elements.enabled.checked = schedule.enabled === true;
+    form.elements.maxConcurrentRuns.value=String(schedule.maxConcurrentRuns || 1);syncScheduleRecurrence(form);
+    text(byId('schedule-form-heading'), `Edit schedule: ${schedule.name}`); byId('cancel-schedule-edit').hidden = false;
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function resetScheduleForm() {
+    const form = byId('load-schedule-form'); form.reset(); delete form.dataset.scheduleId;
+    form.elements.timezone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    form.elements.recurrence.value='daily';form.elements.timeOfDay.value='02:00';form.elements.dayOfWeek.value='1-5';form.elements.maxConcurrentRuns.value='1';syncScheduleRecurrence(form);
+    text(byId('schedule-form-heading'), 'Create schedule'); byId('cancel-schedule-edit').hidden = true;
+  }
+  async function showScheduleHistory(schedule, generation = navigation) {
+    try {
+      const data = await request(`load-schedules/${encodeURIComponent(schedule.id)}/executions?limit=100`);
+      if (generation !== navigation) return;
+      const section = byId('schedule-history'); section.hidden = false; section.dataset.scheduleId = schedule.id;
+      text(byId('schedule-history-title'), `Execution history · ${schedule.name}`);
+      const tbody = byId('schedule-executions'); tbody.replaceChildren();
+      listItems(data).forEach(item => {
+        const row = document.createElement('tr');
+        [item.scheduledFor, item.triggerType, item.occurrenceId, item.status, item.reason || ''].forEach(value => row.append(el('td', value)));
+        const jobCell = document.createElement('td'); if (item.jobId) jobCell.append(link(`#/jobs/${encodeURIComponent(item.jobId)}`, item.jobId));
+        row.append(jobCell); tbody.append(row);
+      });
+    } catch (error) { text(byId('schedule-status'), error.message); }
   }
   function schedulePrincipalSearch() {
     if (principalSearchTimer !== null) clearTimeout(principalSearchTimer);
@@ -360,7 +341,6 @@
       byId('advanced-load-editor').hidden = true; byId('advanced-load-workloads').replaceChildren();
       text(byId('advanced-load-policy-status'), 'Choose the scenario model before configuring workloads.');
       text(byId('advanced-load-status'), ''); text(byId('advanced-load-preview'), ''); clearAdvancedLoadDraft();
-      updateShellContext(location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent));
     }
     if (!inlineLoadEnabled) {
       advancedLoadModel = ''; advancedLoadPolicy = null;
@@ -730,7 +710,7 @@
       if (JSON.stringify(currentAdvancedLoadBody()) !== advancedLoadDraftFingerprint) return;
       const model = draft.model === 'arrivalRate' ? 'Arrival Rate' : 'Virtual Users';
       const count = Array.from(byId('advanced-load-workloads').querySelectorAll('.advanced-workload')).length;
-      if (!await confirmAction(`Start ${model} Load with ${count} workload${count === 1 ? '' : 's'}? Review the validated full scenario above before confirming.`, 'Start Advanced Load', 'Start Load')) return;
+      if (!window.confirm(`Start ${model} Load with ${count} workload${count === 1 ? '' : 's'}? Review the validated full scenario above before confirming.`)) return;
       const accepted = await request('jobs/load', { method: 'POST', body: JSON.stringify(addPrincipalLabel({ packageId, draftId: draft.draftId }, 'advanced-load-principal')) });
       clearAdvancedLoadDraft();
       if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
@@ -1378,7 +1358,7 @@
       if (!draft || generation !== navigation || selectedPackage !== packageId) return;
       const modelLabel = draft.model === 'arrivalRate' ? 'Arrival Rate' : 'Virtual Users';
       if (JSON.stringify(currentQuickLoadBody()) !== quickLoadDraftFingerprint) return;
-      if (!await confirmAction(`Start ${modelLabel} Load for ${draft.target.type} ${draft.target.id}? Review the validated YAML preview before confirming.`, 'Start Quick Load', 'Start Load')) return;
+      if (!window.confirm(`Start ${modelLabel} Load for ${draft.target.type} ${draft.target.id}? Review the validated YAML preview before confirming.`)) return;
       const accepted = await request('jobs/load', { method: 'POST', body: JSON.stringify(addPrincipalLabel({ packageId, draftId: draft.draftId })) });
       quickLoadDraft = null; quickLoadDraftFingerprint = '';
       if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
@@ -1502,8 +1482,6 @@
       const job = await request(`jobs/${encodeURIComponent(id)}`);
       if (generation !== navigation || activeJob !== id) return false;
       loaded = true;
-      activeJobPackage = String(job.packageId || '');
-      updateShellContext(location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent));
       const summary = byId('job-summary'); summary.replaceChildren();
       [['Package',job.packageId],['Command',job.command],['Principal',job.principal],['Status',job.status],['Created',job.createdAt],['Started',job.startedAt],['Finished',job.finishedAt]].forEach(([label,value]) => {
         if (value) summary.append(el('dt',label),el('dd',value));
@@ -1543,7 +1521,7 @@
   byId('cancel-job').addEventListener('click', async () => {
     const jobId = activeJob;
     const generation = navigation;
-    if (!jobId || !await confirmAction(`Cancel job ${jobId}?`, 'Cancel job', 'Cancel job')) return;
+    if (!jobId || !window.confirm(`Cancel job ${jobId}?`)) return;
     cancelRequested = true; byId('cancel-job').disabled = true; text(byId('cancel-state'), 'Cancellation requested; waiting for Server confirmation.');
     try {
       await request(`jobs/${encodeURIComponent(jobId)}`, { method:'DELETE' });
@@ -1573,10 +1551,7 @@
   byId('debug-resource').addEventListener('click', loadDebugForm);
   byId('quick-load-resource').addEventListener('click', loadQuickLoadForm);
   byId('advanced-load-model').addEventListener('change', loadAdvancedLoadPolicy);
-  byId('advanced-load-environment').addEventListener('input', () => {
-    markAdvancedLoadDirty();
-    updateShellContext(location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent));
-  });
+  byId('advanced-load-environment').addEventListener('input', markAdvancedLoadDirty);
   byId('advanced-load-environment').addEventListener('change', () => { if (advancedLoadModel) loadAdvancedLoadPolicy({ preserveScenario: true }); });
   ['advanced-load-warmup','advanced-load-ramp-up','advanced-load-duration','advanced-load-ramp-down',
     'advanced-load-seed','advanced-load-execution','advanced-load-testdata','advanced-load-thresholds','advanced-load-evidence']
@@ -1626,7 +1601,6 @@
   if (debugEnvironment) debugEnvironment.addEventListener('input', () => {
     debugDraft = null; debugDraftFingerprint = ''; text(byId('debug-preview'), '');
     quickLoadDraft = null; quickLoadDraftFingerprint = ''; text(byId('quick-load-preview'), '');
-    updateShellContext(location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent));
   });
   byId('preview-debug-form').addEventListener('click', async () => {
     try { await previewDebugDraft(); }
@@ -1677,8 +1651,36 @@
   byId('load-more-configuration').addEventListener('click', loadMoreConfiguration);
   byId('refresh-configuration').addEventListener('click', () => { if (selectedPackage) loadDeclaredConfiguration(selectedPackage); });
   byId('refresh-jobs').addEventListener('click', () => loadHomeJobs());
-  byId('retry-packages').addEventListener('click', () => loadHomePackages());
   byId('job-principal-search').addEventListener('input', schedulePrincipalSearch);
+  byId('load-schedule-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      const load = JSON.parse(String(form.elements.load.value || '{}'));
+      if (!load || Array.isArray(load) || typeof load !== 'object') throw new Error('Load options must be a JSON object.');
+      const payload = {
+        name: String(form.elements.name.value || '').trim(), description: String(form.elements.description.value || '').trim(),
+        tags: String(form.elements.tags.value || '').split(',').map(tag => tag.trim()).filter(Boolean),
+        packageId: String(form.elements.packageId.value || ''), scenario: String(form.elements.scenario.value || '').trim(),
+        config: String(form.elements.config.value || '').trim(), environment: String(form.elements.environment.value || '').trim(),
+        timezone: String(form.elements.timezone.value || '').trim(), cron: scheduleCron(form),
+        maxConcurrentRuns: Number(form.elements.maxConcurrentRuns.value || 1),
+        load, enabled: form.elements.enabled.checked
+      };
+      const id = form.dataset.scheduleId;
+      const saved = await request(id ? `load-schedules/${encodeURIComponent(id)}` : 'load-schedules', {
+        method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload)
+      });
+      resetScheduleForm(); text(byId('schedule-status'), `Saved ${saved.name}. Next run: ${scheduleLocalTime(saved)}.`);
+      await loadSchedules();
+    } catch (error) { text(byId('schedule-status'), error.message); }
+  });
+  byId('load-schedule-form').elements.recurrence.addEventListener('change', () => syncScheduleRecurrence(byId('load-schedule-form')));
+  for (const field of ['timezone', 'timeOfDay', 'dayOfWeek', 'cron']) {
+    byId('load-schedule-form').elements[field].addEventListener('input', schedulePreview);
+    byId('load-schedule-form').elements[field].addEventListener('change', schedulePreview);
+  }
+  byId('cancel-schedule-edit').addEventListener('click', resetScheduleForm);
   window.addEventListener('hashchange', route);
   route();
 })();

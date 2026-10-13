@@ -149,6 +149,36 @@ class ServerConfigTest {
         assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file));
     }
 
+    @Test void schedulingIsDisabledByDefaultAndAnonymousAdministrationRequiresAnExplicitGate() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("schedule-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path defaults=temp.resolve("schedule-defaults.yaml");Files.writeString(defaults,"server:\n  dataDir: "+yaml(temp.resolve("schedule-default-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\nworkers:\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        assertFalse(ServerConfig.load(defaults).scheduling.enabled);
+
+        Path rejected=temp.resolve("schedule-anonymous-rejected.yaml");Files.writeString(rejected,"server:\n  dataDir: "+yaml(temp.resolve("schedule-anonymous-rejected-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  authenticationRequired: false\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        IllegalArgumentException noGate=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(rejected));
+        assertTrue(noGate.getMessage().contains("allowAnonymousManagement"));
+
+        Path allowedAnonymous=temp.resolve("schedule-anonymous-allowed.yaml");Files.writeString(allowedAnonymous,"server:\n  dataDir: "+yaml(temp.resolve("schedule-anonymous-allowed-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  authenticationRequired: false\n  scheduling:\n    enabled: true\n    allowAnonymousManagement: true\n    adminRole: SIT_OPERATORS\nworkers:\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        ServerConfig anonymous=ServerConfig.load(allowedAnonymous);assertTrue(anonymous.scheduling.enabled);assertTrue(anonymous.scheduling.allowAnonymousManagement);assertEquals("SIT_OPERATORS",anonymous.scheduling.adminRole);
+
+        Path disabledInspection=temp.resolve("schedule-inspection-disabled.yaml");Files.writeString(disabledInspection,"server:\n  dataDir: "+yaml(temp.resolve("schedule-inspection-disabled-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  inspection:\n    enabled: false\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        assertThrows(IllegalArgumentException.class,()->ServerConfig.load(disabledInspection));
+    }
+
+    @Test void schedulerConcurrencyCapCannotExceedLoadAdmissionCapacity() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("schedule-cap-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path file=temp.resolve("schedule-cap.yaml");Files.writeString(file,"server:\n  dataDir: "+yaml(temp.resolve("schedule-cap-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  scheduling:\n    enabled: true\n    maxConcurrentRuns: 2\nworkers:\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file));
+        assertTrue(error.getMessage().contains("must not exceed workers.maxConcurrentLoad"));
+    }
+
     private static String yaml(Path path){return "'"+path.toAbsolutePath().toString().replace("'","''")+"'";}
 
     @Test void validatesAndLoadsBoundedWorkerHeapSettings() throws Exception {

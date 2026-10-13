@@ -27,11 +27,12 @@ public final class ServerConfig {
     public final List<Path> workerLibraryDirs;
     public final Inspection inspection;
     public final InlineLoad inlineLoad;
+    public final Scheduling scheduling;
 
     private ServerConfig(Path dataDir, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling) {
         this.dataDir=dataDir; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
@@ -41,6 +42,7 @@ public final class ServerConfig {
         this.workerLibraryDirs=List.copyOf(workerLibraryDirs);
         this.inspection=inspection;
         this.inlineLoad=inlineLoad;
+        this.scheduling=scheduling;
     }
 
     public static ServerConfig load(Path file) throws Exception {
@@ -100,6 +102,7 @@ public final class ServerConfig {
             artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
         Inspection inspection=inspection(server.get("inspection"),resolved);
         InlineLoad inlineLoad=inlineLoad(server.get("inlineLoad"));
+        Scheduling scheduling=scheduling(server.get("scheduling"),authenticationRequired,load,inspection.enabled);
         Path candidateData=canonicalFuturePath(data);
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(candidateData)||candidateData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
@@ -108,7 +111,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,resolved,allowed,workerLibraries,inspection,inlineLoad);
+        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling);
     }
 
     public static Path configPath() {
@@ -217,6 +220,31 @@ public final class ServerConfig {
             throw new IllegalArgumentException("server.inlineLoad.maxAggregateArrivalRatePerSecond must be a finite number greater than 0 and at most 1000000");
         return new InlineLoad(enabled,workloads,targets,users,rate,concurrent,totalConcurrent,duration);
     }
+
+    private static Scheduling scheduling(Object raw,boolean authenticationRequired,int maxConcurrentLoad,boolean inspectionEnabled) {
+        Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.scheduling");
+        Set<String> allowed=Set.of("enabled","allowAnonymousManagement","adminRole","maxSchedules",
+                "minimumIntervalMinutes","pollIntervalSeconds","maxConcurrentRuns","failurePolicy","maxExecutionsPerSchedule");
+        for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))
+            throw new IllegalArgumentException("server.scheduling contains an unknown setting");
+        boolean enabled=boolValue(values,"enabled",false);
+        boolean allowAnonymous=boolValue(values,"allowAnonymousManagement",false);
+        if(enabled&&!inspectionEnabled)throw new IllegalArgumentException("server.inspection.enabled must be true when server.scheduling.enabled is true");
+        if(enabled&&!authenticationRequired&&!allowAnonymous)
+            throw new IllegalArgumentException("server.scheduling.allowAnonymousManagement must be true before schedules can run without authentication");
+        Object rawRole=values.get("adminRole");
+        String role=rawRole==null?"ATT_ADMIN":string(rawRole,"server.scheduling.adminRole");
+        if(!role.matches("[A-Za-z][A-Za-z0-9._-]{0,63}"))throw new IllegalArgumentException("server.scheduling.adminRole is invalid");
+        int schedules=intValue(values,"maxSchedules",100,1,10000);
+        int minimum=intValue(values,"minimumIntervalMinutes",15,1,10080);
+        int poll=intValue(values,"pollIntervalSeconds",10,1,300);
+        int concurrent=intValue(values,"maxConcurrentRuns",1,1,32);
+        int history=intValue(values,"maxExecutionsPerSchedule",10000,100,100000);
+        if(concurrent>maxConcurrentLoad)throw new IllegalArgumentException("server.scheduling.maxConcurrentRuns must not exceed workers.maxConcurrentLoad");
+        Object rawFailurePolicy=values.get("failurePolicy");String failurePolicy=rawFailurePolicy==null?"continue":string(rawFailurePolicy,"server.scheduling.failurePolicy");
+        if(!Set.of("continue","pauseAfterSubmitFailure").contains(failurePolicy))throw new IllegalArgumentException("server.scheduling.failurePolicy must be continue or pauseAfterSubmitFailure");
+        return new Scheduling(enabled,allowAnonymous,role,schedules,minimum,poll,concurrent,failurePolicy,history);
+    }
     private static int inlineIntValue(Map<?,?> values,String key,int fallback,int min,int max) {
         Object raw=values.get(key);
         if(raw==null)return fallback;
@@ -240,6 +268,21 @@ public final class ServerConfig {
             this.enabled=enabled;this.maxWorkloads=maxWorkloads;this.maxTargets=maxTargets;this.maxTotalUsers=maxTotalUsers;
             this.maxAggregateArrivalRatePerSecond=maxAggregateArrivalRatePerSecond;
             this.maxConcurrentPerWorkload=maxConcurrentPerWorkload;this.maxTotalConcurrent=maxTotalConcurrent;this.maxDurationSeconds=maxDurationSeconds;
+        }
+    }
+
+    /** Explicit opt-in and bounded limits for persisted recurring Load schedules. */
+    public static final class Scheduling {
+        public final boolean enabled,allowAnonymousManagement;
+        public final String adminRole;
+        public final String failurePolicy;
+        public final int maxSchedules,minimumIntervalMinutes,pollIntervalSeconds,maxConcurrentRuns,maxExecutionsPerSchedule;
+        private Scheduling(boolean enabled,boolean allowAnonymousManagement,String adminRole,int maxSchedules,
+                           int minimumIntervalMinutes,int pollIntervalSeconds,int maxConcurrentRuns,String failurePolicy,int maxExecutionsPerSchedule) {
+            this.enabled=enabled;this.allowAnonymousManagement=allowAnonymousManagement;this.adminRole=adminRole;
+            this.maxSchedules=maxSchedules;this.minimumIntervalMinutes=minimumIntervalMinutes;
+            this.pollIntervalSeconds=pollIntervalSeconds;this.maxConcurrentRuns=maxConcurrentRuns;this.failurePolicy=failurePolicy;
+            this.maxExecutionsPerSchedule=maxExecutionsPerSchedule;
         }
     }
 
