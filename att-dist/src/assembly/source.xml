@@ -15,7 +15,7 @@
             </includes>
             <excludes><exclude>**/target/**</exclude><exclude>dist/**</exclude><exclude>output/**</exclude><exclude>report/**</exclude><exclude>logs/**</exclude></excludes>
         </fileSet>
-        <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>tools</outputDirectory><excludes><exclude>**/*.sh</exclude></excludes></fileSet>
-        <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>tools</outputDirectory><includes><include>**/*.sh</include></includes><fileMode>0755</fileMode></fileSet>
+        <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>tools</outputDirectory><excludes><exclude>**/*.sh</exclude><exclude>**/node_modules/**</exclude></excludes></fileSet>
+        <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>tools</outputDirectory><includes><include>**/*.sh</include></includes><excludes><exclude>**/node_modules/**</exclude></excludes><fileMode>0755</fileMode></fileSet>
     </fileSets>
 </assembly>

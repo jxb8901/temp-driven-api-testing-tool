@@ -32,6 +32,11 @@ GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unkn
 for archive in "$LOCAL_ARCHIVE" "$SERVER_ARCHIVE" "$SOURCE_ARCHIVE"; do
   if [ ! -f "$archive" ]; then echo "Maven distribution assembly did not produce: $archive" >&2; exit 2; fi
 done
+for archive in "$LOCAL_ARCHIVE" "$SOURCE_ARCHIVE"; do
+  if tar -tzf "$archive" | grep -E '(^|/)node_modules(/|$)' >/dev/null; then
+    echo "Release archive must not include build-time Node.js dependencies: $archive" >&2; exit 2
+  fi
+done
 rm -rf "$ROOT_DIR/target/release"; mkdir -p "$LOCAL_WORK" "$SERVER_WORK" "$DIST_DIR"
 tar -xzf "$LOCAL_ARCHIVE" -C "$LOCAL_WORK"
 LOCAL_PACKAGE_DIR="$LOCAL_WORK/$LOCAL_PACKAGE_NAME"
