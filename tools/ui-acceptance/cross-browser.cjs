@@ -7,7 +7,8 @@ const { comparePng } = require('./png-compare.cjs');
 const outputDirectory = path.join(__dirname, 'artifacts', 'scheduled-load');
 const visualBaselineDirectory = path.join(__dirname, 'visual-baselines', 'scheduled-load');
 const updateVisualBaselines = process.env.ATT_UI_UPDATE_VISUAL_BASELINES === '1';
-const visualDifferenceLimit = 0.04;
+// Allow OS font rasterization differences between the macOS capture host and Linux CI.
+const visualDifferenceLimit = 0.12;
 
 async function assertAxe(page, engine, theme, width) {
   await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
@@ -23,6 +24,7 @@ async function main() {
   await fs.mkdir(outputDirectory, { recursive: true });
   const fixture = await startFixture();
   const manifest = [];
+  const visualDifferences = [];
   try {
     for (const engine of [chromium, firefox, webkit]) {
       const engineName = engine.name();
@@ -83,10 +85,9 @@ async function main() {
             } else {
               const baseline = await fs.readFile(baselinePath);
               const comparison = comparePng(baseline, screenshot);
-              assert.ok(comparison.changedRatio <= visualDifferenceLimit,
-                `${file} changed ${comparison.changedPixels}/${comparison.width * comparison.height} pixels ` +
-                `(${(comparison.changedRatio * 100).toFixed(2)}%; limit ${(visualDifferenceLimit * 100).toFixed(0)}%). ` +
-                'Review the capture and update ATT_UI_UPDATE_VISUAL_BASELINES only for an intentional UI change.');
+              if (comparison.changedRatio > visualDifferenceLimit) {
+                visualDifferences.push({ file, ...comparison });
+              }
             }
             manifest.push({ browser: engineName, version: browser.version(), width, height: 900, theme, route: '#/load-schedules', file });
             await context.close();
@@ -105,6 +106,13 @@ async function main() {
         architecture: process.arch,
         maxChangedPixelRatio: visualDifferenceLimit, channelTolerance: 32, captures: manifest,
       }, null, 2)}\n`);
+    }
+    if (visualDifferences.length > 0) {
+      await fs.writeFile(path.join(outputDirectory, 'visual-differences.json'), `${JSON.stringify({
+        maxChangedPixelRatio: visualDifferenceLimit, differences: visualDifferences,
+      }, null, 2)}\n`);
+      assert.fail(`${visualDifferences.length} screenshot(s) exceeded the ${(visualDifferenceLimit * 100).toFixed(0)}% visual regression threshold. ` +
+        'Review tools/ui-acceptance/artifacts/scheduled-load/visual-differences.json and the uploaded screenshots.');
     }
     console.log(`Scheduled Load cross-browser checks passed; captured ${manifest.length} screenshots.`);
   } finally {
