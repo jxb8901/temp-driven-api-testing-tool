@@ -1,7 +1,7 @@
-# ATT v4.1.1 使用手冊與參考
+# ATT v4.1.2 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.1.1
+Version: 4.1.2
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -2557,7 +2557,10 @@ Remote command 使用 ATT Server 公開的 `/api/v1` contract。現有 `run`、`
 
 ```sh
 ./att.sh remote --server sit packages
+./att.sh remote --server sit --no-auth packages
 ./att.sh remote --server sit run payments --suite testcase/smoke.xlsx --env SIT --tag smoke
+./att.sh remote --server sit --no-auth run payments --all --principal Bob
+./att.sh remote --server sit jobs --principal 'Bob(anonym)'
 ./att.sh remote --server ci run payments --all --detach
 ./att.sh remote --server sit watch J0123456789ABCDEF
 ./att.sh remote --server sit load payments --scenario load/payment.yaml --users 2 --duration 30s
@@ -2572,7 +2575,7 @@ Attached Run、Debug、Load 及 Validate 只提交一次工作，透過 SSE 追�
 
 Remote exit code：PASS/成功為 `0`、ATT FAIL 為 `1`、INVALID 為 `2`、ATT ERROR/CANCELLED 為 `3`；若連線、驗證或 protocol 問題令 client 無法取得可信結果，則為 `4`。Profile、options、reconnect 及 troubleshooting 見 [ATT Remote client](remote-client.zh.md)。
 
-Remote-only option 為 `--server <profile>`、`--detach`、`--download <directory>` 及 `--scenario <package-relative-path>`。`--format human|json` 及已記錄的 ATT selection、environment、Debug、Load option，會在符合 remote job contract 時使用。Remote command list 見上述指南。
+Remote-only option 包括 `--server <profile>`、`--no-auth`、`--principal <name>`、`--detach`、`--download <directory>` 及 `--scenario <package-relative-path>`。只有 Server 明確允許匿名存取時，`--no-auth` 才會略過 profile credentials。匿名模式下，`--principal` 只提供自我聲稱的 label，Server 會在既有 `principal` 欄位儲存 `<name>(anonym)`；不影響存取或授權。驗證模式會忽略此 option。`jobs --principal <text>` 會搜尋該既有欄位。`--format human|json` 及已記錄的 ATT selection、environment、Debug、Load option，會在符合 remote job contract 時使用。Remote command list 見上述指南。
 
 
 ### Typed overrides and quick Load
@@ -2840,7 +2843,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.1.1",
+  "attVersion": "4.1.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2879,7 +2882,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.1.1-local.tar.gz`、包含 WAR 和部署指南的 `att-4.1.1-server.tar.gz`，以及 source archive `att-4.1.1-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
+`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.1.2-local.tar.gz`、包含 WAR 和部署指南的 `att-4.1.2-server.tar.gz`，以及 source archive `att-4.1.2-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
 
 ### Runtime dependencies
 
@@ -3055,7 +3058,7 @@ Timeout range、evidence sample bound、result limit、pool size 等 operational
 
 #### 為什麼 `Att.bat` 會要求 Maven，或者為什麼 `.sh` Tool 在 windows 上失敗？
 
-在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.1.1.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
+在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.1.2.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
 
 啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名稱可解析為 `pwsh.exe`。維護多平臺版本時，請保持參數契約和 stdout 輸出格式一致。
 

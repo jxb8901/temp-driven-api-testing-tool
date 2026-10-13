@@ -17,6 +17,12 @@ class WebUiPackagingTest {
         String html=new String(page.readAllBytes(),StandardCharsets.UTF_8);
         String js=new String(script.readAllBytes(),StandardCharsets.UTF_8);
         assertTrue(html.contains("ATT Server"));
+        assertTrue(html.contains("id=\"job-principal-search\""),"Recent jobs can search by the existing principal field");
+        assertTrue(html.contains("id=\"job-principal\""),"Run, Case, Debug and Quick Load forms expose an optional attribution label");
+        assertTrue(html.contains("id=\"advanced-load-principal\""),"Advanced Load exposes an optional attribution label");
+        assertTrue(html.contains("Name(anonym)"),"The UI explains how the Server formats anonymous labels");
+        assertTrue(js.contains("body.principal = value"),"The UI sends the raw optional label for server-side formatting");
+        assertTrue(js.contains("jobs?principal=${encodeURIComponent(principalSearch)}"),"Job search uses the existing principal property");
         assertTrue(js.contains("new URL('../api/v1/', document.baseURI)"),"API URLs must be relative to the deployment context");
         assertFalse(js.contains("innerHTML"),"Untrusted API data must not be parsed as HTML");
     }

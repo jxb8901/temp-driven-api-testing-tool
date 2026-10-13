@@ -16,6 +16,7 @@ public final class ServerBootstrap implements ServletContextListener {
             ServerRuntime runtime=new ServerRuntime(config,libs.toString());
             event.getServletContext().setAttribute(RUNTIME,runtime);
             event.getServletContext().log("ATT Server "+ServerBuildInfo.PRODUCT+" started; packageIds="+config.packages.keySet().size()+" maxConcurrent="+config.maxConcurrent);
+            if(!config.authenticationRequired)event.getServletContext().log("WARNING: ATT Server anonymous mode is enabled. Every caller shares the 'anonymous' identity and can access shared drafts, jobs, and artifacts; there is no per-user isolation or accountability. Restrict access to loopback or a private interface and protect any proxy with a VPN, firewall or IP allowlist. Use TLS for traffic leaving localhost.");
         } catch(Exception e) {
             throw new IllegalStateException("ATT Server startup failed: "+e.getMessage(),e);
         }

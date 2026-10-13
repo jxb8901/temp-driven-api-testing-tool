@@ -40,7 +40,7 @@ public final class RemoteCommand {
             if("version".equals(op)){if("json".equals(format))System.out.println(version.toString());else System.out.println("ATT Server "+version.path("version").asText("unknown")+" (API v"+version.path("apiVersion").asText()+")");return 0;}
             if("packages".equals(op))return packages(client,command,format);
             if("package".equals(op))return packageView(client,command,format);
-            if("jobs".equals(op))return jobs(client,format);
+            if("jobs".equals(op))return jobs(client,command,format);
             if("job".equals(op))return job(client,command,format);
             if("result".equals(op))return result(client,command,format);
             if("cancel".equals(op))return cancel(client,command,format);
@@ -62,9 +62,11 @@ public final class RemoteCommand {
         if(a.size()!=2)throw new IllegalArgumentException("Usage: att remote package <packageId>");JsonNode result=c.get("/packages/"+segment(a.get(1)));
         if("json".equals(f))System.out.println(result.toString());else System.out.println(result.path("packageId").asText()+"\t"+result.path("name").asText());return 0;
     }
-    private static int jobs(RemoteHttpClient c,String f)throws Exception {
-        // The Server itself applies the v1 visibility policy; the client does not filter jobs.
-        JsonNode items=c.get("/jobs").path("items");if("json".equals(f)){System.out.println(items.toString());return 0;}
+    private static int jobs(RemoteHttpClient c,List<String>a,String f)throws Exception {
+        String path="/jobs";
+        if(a.size()==3&&"--principal".equals(a.get(1))){if(a.get(2).trim().isEmpty())throw new IllegalArgumentException("--principal requires a non-empty search value");path+="?principal="+segment(a.get(2));}
+        else if(a.size()!=1)throw new IllegalArgumentException("Usage: att remote jobs [--principal <search>]");
+        JsonNode items=c.get(path).path("items");if("json".equals(f)){System.out.println(items.toString());return 0;}
         System.out.println("JOB\tPACKAGE\tCOMMAND\tPRINCIPAL\tSTATUS\tAGE");for(JsonNode i:items)System.out.println(i.path("jobId").asText()+"\t"+i.path("packageId").asText()+"\t"+i.path("command").asText()+"\t"+i.path("principal").asText()+"\t"+i.path("status").asText()+"\t"+age(i.path("createdAt").asText()));return 0;
     }
     private static int job(RemoteHttpClient c,List<String>a,String f)throws Exception {
@@ -95,7 +97,8 @@ public final class RemoteCommand {
             if("--selected".equals(key)){body.put("validationScope","selected");continue;}
             if("--debug".equals(key)&&"load".equals(operation)) { if(i+2>=a.size())throw new IllegalArgumentException("--debug requires target type and id");debugType=a.get(++i);debugId=a.get(++i);continue; }
             String value=optionValue(a,i,key);i++;
-            if("--suite".equals(key))suites.add(logicalPath(value,key));
+            if("--principal".equals(key))body.put("principal",value);
+            else if("--suite".equals(key))suites.add(logicalPath(value,key));
             else if("--case".equals(key)||"--case-id".equals(key))caseIds.add(value);
             else if("--tag".equals(key))tags.add(value);
             else if("--exclude-tag".equals(key))exclude.add(value);
@@ -202,5 +205,5 @@ public final class RemoteCommand {
     private static String segment(String value){try{return java.net.URLEncoder.encode(value,"UTF-8").replace("+","%20");}catch(java.io.UnsupportedEncodingException impossible){throw new IllegalStateException(impossible);}}
     private static int fail(String message,int code,String format){String safe=message==null?"Remote command failed":message.replaceAll("(?i)(password|authorization)\\s*[:=]\\s*[^ ,]+","$1=[REDACTED_SECRET]");if("json".equals(format)){ObjectNode out=RemoteHttpClient.JSON.createObjectNode();out.put("error",safe);out.put("exitCode",code);System.err.println(out.toString());}else System.err.println("ATT Remote: "+safe);return code;}
     private static String safe(Exception e){String m=e.getMessage();return m==null?e.getClass().getSimpleName():m;}
-    private static void help(){System.out.println("Usage: att remote [--server <profile>] [--format human|json] [--no-auth] <command>\nCommands: ping, version, packages, package <id>, run|debug|load|validate <packageId>, jobs, job|watch|result|cancel <jobId>, artifacts <jobId>, artifact <jobId> <name> --download <directory>\nSet ATT_SERVER to override the configured default profile URL.");}
+    private static void help(){System.out.println("Usage: att remote [--server <profile>] [--format human|json] [--no-auth] <command>\nCommands: ping, version, packages, package <id>, run|debug|load|validate <packageId> [--principal <name>], jobs [--principal <search>], job|watch|result|cancel <jobId>, artifacts <jobId>, artifact <jobId> <name> --download <directory>\nSet ATT_SERVER to override the configured default profile URL.");}
 }

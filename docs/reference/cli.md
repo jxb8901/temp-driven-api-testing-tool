@@ -125,7 +125,10 @@ Remote commands use the public ATT Server `/api/v1` contract. Existing commands 
 
 ```sh
 ./att.sh remote --server sit packages
+./att.sh remote --server sit --no-auth packages
 ./att.sh remote --server sit run payments --suite testcase/smoke.xlsx --env SIT --tag smoke
+./att.sh remote --server sit --no-auth run payments --all --principal Bob
+./att.sh remote --server sit jobs --principal 'Bob(anonym)'
 ./att.sh remote --server ci run payments --all --detach
 ./att.sh remote --server sit watch J0123456789ABCDEF
 ./att.sh remote --server sit load payments --scenario load/payment.yaml --users 2 --duration 30s
@@ -140,7 +143,7 @@ Attached Run, Debug, Load, and Validate commands submit once, follow SSE, reconn
 
 Remote exit codes are `0` for PASS/success, `1` for ATT FAIL, `2` for INVALID, `3` for ATT ERROR/CANCELLED, and `4` when the client cannot establish a trustworthy result because of connection, authentication, or protocol failure. See [ATT Remote client](../remote-client.md) for profiles, command options, reconnect behavior, and troubleshooting.
 
-Remote-only options are `--server <profile>`, `--detach`, `--download <directory>`, and `--scenario <package-relative-path>`. `--format human|json` and the documented ATT selection, environment, Debug, and Load options are accepted where they map to the remote job contract. See the linked guide for the remote command list.
+Remote-only options include `--server <profile>`, `--no-auth`, `--principal <name>`, `--detach`, `--download <directory>`, and `--scenario <package-relative-path>`. `--no-auth` bypasses profile credentials only when the Server explicitly permits anonymous access. In anonymous mode, `--principal` supplies a self-declared label that the Server stores in the existing `principal` field as `<name>(anonym)`; it does not affect access or authorization. Authenticated mode ignores it. `jobs --principal <text>` searches that existing field. `--format human|json` and the documented ATT selection, environment, Debug, and Load options are accepted where they map to the remote job contract. See the linked guide for the remote command list.
 
 
 Options are command-specific. Unknown commands/options and missing option values are errors. `--package` and `--selected` are mutually exclusive. Selected validation and run require an explicit selection.

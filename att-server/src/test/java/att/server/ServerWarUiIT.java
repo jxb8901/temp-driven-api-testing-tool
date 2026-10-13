@@ -123,7 +123,7 @@ class ServerWarUiIT {
             }) {
                 jar.putNextEntry(new JarEntry(name));
                 if (name.equals("att-build.properties"))
-                    jar.write("att.version=4.1.1\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    jar.write("att.version=4.1.2\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 else
                     jar.write(0);
                 jar.closeEntry();

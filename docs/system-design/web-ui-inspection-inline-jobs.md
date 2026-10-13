@@ -14,7 +14,7 @@ This design preserves the existing package-relative job API and CLI behavior. It
 2. **Address resources by logical identity.** A resource ID is package-scoped and identifies a Case, Template, Flow, or Tool. It never contains a host path. Case identity includes its logical suite, group, Case ID, and row provenance; other resource identities use their ATT IDs.
 3. **Reuse Engine semantics.** Engine code owns Excel, Template, Flow, Tool, config, Debug sidecar, and Load parsing. Browser code renders typed projections; it does not parse ATT YAML or reproduce Load semantics.
 4. **Return safe projections only.** Inspection APIs do not return unrestricted files or resolved secrets. Source and configuration output is allowlisted and redacted on the Server.
-5. **Validate immutable drafts before submission.** The Server issues an opaque draft ID bound to the authenticated principal, package, environment, target closure, and normalized input. Submission references that draft instead of resending editable input.
+5. **Validate immutable drafts before submission.** The Server issues an opaque draft ID bound to the resolved request identity, package, environment, target closure, and normalized input. In anonymous mode all callers share that identity and its drafts. Submission references the draft instead of resending editable input.
 6. **Keep new Debug and Load inputs in memory.** The Server sends typed values through the existing Worker JSON-lines request. It does not write generated inputs under the package root or accept client-supplied physical paths.
 7. **Require explicit Server-side Load limits.** Inline Load is disabled until deployment configuration enables it and defines workload, rate, concurrency, and duration caps. Existing Server queue and concurrent-Load admission limits continue to apply.
 
@@ -33,7 +33,7 @@ GET /api/v1/packages/{packageId}/resources/{kind}/{resourceId}/quick-load-form?m
 GET /api/v1/packages/{packageId}/load-policy?model=virtualUsers&environment=SIT
 ```
 
-List responses carry typed resource summaries, safe relationship references, and an optional encrypted continuation cursor. A cursor is bound to the authenticated principal, package, filters, offset, and private package revision digest. The digest is encrypted inside the cursor and never returned as a response field. The default page size is 50; the maximum is 100. If package content changes between pages, the Server rejects the stale cursor and the Explorer can refresh the list.
+List responses carry typed resource summaries, safe relationship references, and an optional encrypted continuation cursor. A cursor is bound to the resolved request identity, package, filters, offset, and private package revision digest. The digest is encrypted inside the cursor and never returned as a response field. The default page size is 50; the maximum is 100. If package content changes between pages, the Server rejects the stale cursor and the Explorer can refresh the list.
 
 Details expose only fields supported by the resource type. Case details retain logical suite, group, Case ID, row or sheet provenance, tags, and mapped input/expected-value metadata. Template, Flow, and Tool details expose their parsed definitions and resolvable references. Unresolved references are diagnostics. Only Case details provide Run. Only Template, Flow, and Tool details provide Debug and Quick Load.
 
@@ -62,7 +62,7 @@ POST /api/v1/jobs/debug
 POST /api/v1/jobs/load
 ```
 
-Debug draft creation validates the typed request and selected target closure. It returns a safe YAML preview, validation diagnostics, and an opaque draft ID. Drafts are bound to the authenticated Servlet Principal, package, environment, target, and private package revision. The in-memory store is bounded to 128 active drafts across the Server and 16 per authenticated principal; each expires after 10 minutes. Server restart invalidates drafts, so clients must rebuild and revalidate them.
+Debug draft creation validates the typed request and selected target closure. It returns a safe YAML preview, validation diagnostics, and an opaque draft ID. Drafts are bound to the resolved request identity, package, environment, target, and private package revision. The in-memory store is bounded to 128 active drafts across the Server and 16 per identity; each expires after 10 minutes. In anonymous mode all callers share the `anonymous` identity and its draft quota. Server restart invalidates drafts, so clients must rebuild and revalidate them.
 
 A draft captures normalized values and an internal content digest for the target, sidecars, config, referenced resource closure, and, for Quick Load, the selected model policy. The digest never leaves the Server. The Server checks the package revision when the draft is submitted and immediately before Worker start; the Worker verifies it again before Engine execution. A change detected during submission returns HTTP 409 and `ATT-SERVER-DRAFT-STALE`; a change detected after job acceptance marks the job `INVALID` with that diagnostic. The submitted Worker input is the same immutable typed value validated for preview.
 
@@ -128,14 +128,14 @@ Job metadata continues to store the command and package ID summary, not the subm
 
 | Data | Default response | Additional rule |
 | --- | --- | --- |
-| Logical resource IDs, types, safe names, tags, and relationships | Visible to an authenticated principal | Package-scoped; no absolute paths |
+| Logical resource IDs, types, safe names, tags, and relationships | Visible to callers allowed by the configured identity mode | Package-scoped; no absolute paths |
 | Case row and sheet provenance | Visible as logical identifiers | Never include the workbook's physical path |
 | Template, Flow, and Tool definitions | Allowlisted structured projection | Sensitive fields are replaced before serialization |
 | Tool script text | Unavailable | Available only under explicit server-side package/resource allowlisting and source-size cap |
 | Declared or effective configuration | Allowlisted projection | No unrestricted YAML; use the real Engine resolution |
 | Passwords, tokens, private keys, credentials, resolved environment values, auth headers | Always hidden | No preview, diagnostic, event, cache, or export may contain bytes |
 | Testdata records and resolved values | Never returned | Descriptor IDs, schema, and permitted selection metadata may be shown |
-| Hostnames, ports, JDBC URLs, endpoints, queues, network topology | Hidden by default | A Server-side visibility policy may allow selected fields for all authenticated principals; the browser cannot grant visibility |
+| Hostnames, ports, JDBC URLs, endpoints, queues, network topology | Hidden by default | A Server-side visibility policy may allow selected fields for all authenticated callers; the browser cannot grant visibility |
 | Cross-profile comparison of hidden values | Hidden state only | Do not reveal equality, hashes, lengths, or change counts |
 | User-entered Debug/Load values | Safe typed preview | Apply the same sensitive-field rules; mark the preview redacted when any field is hidden |
 
@@ -175,7 +175,7 @@ The report preserves raw samples and package size. With five measured runs, p95 
 
 The persistent inspector index also serves Debug form and draft validation requests. The execution Worker performs one fresh package revision check at the side-effect boundary. The opt-in `DebugDraftPipelinePerformanceBenchmark` measures form, draft creation, preview, submission, first-event, and completion latency against multiple Excel workbooks. Run it with `mvn -pl att-server -am -Dtest=DebugDraftPipelinePerformanceBenchmark -Datt.server.benchmark.debugDraft=true -Dsurefire.failIfNoSpecifiedTests=false test`; it writes JSON under `att-server/target/` by default. The recorded 4.1.0 baseline is [issue-176-debug-draft-pipeline-4.1.0.json](baselines/issue-176-debug-draft-pipeline-4.1.0.json). On its five-workbook, 1,500-Case fixture, three samples measured a p50 of 23.1 ms for draft creation, 0.31 ms for preview, 886 ms for submission, and 892 ms from draft creation through the first event (936 ms including form loading). The benchmark exercises ServerRuntime APIs without browser rendering; timings are descriptive for the recorded Mac OS X aarch64 / Java 26 host.
 
-New inspection and draft endpoints always require a Servlet Principal, even when a deployment enables anonymous access for the legacy API. Unknown packages and resources return the same not-found shape. New DTOs reject unknown fields and ambiguous combinations. Existing requests remain backward compatible.
+Inspection and draft endpoints use the same Server-resolved identity as job submission: the Servlet Principal when authentication is required, or the shared `anonymous` identity when explicit anonymous mode is enabled. Unknown packages and resources return the same not-found shape. New DTOs reject unknown fields and ambiguous combinations. Existing requests remain backward compatible.
 
 Inline Load is disabled by default. Enabling `server.inlineLoad.enabled` applies server-owned maxima for `maxWorkloads` (default 10), `maxTargets` (20), `maxTotalUsers` (100), `maxAggregateArrivalRatePerSecond` (100), `maxConcurrentPerWorkload` (100), `maxTotalConcurrent` (1,000), and `maxDurationSeconds` (3600). Deployments can lower or raise these bounded values in Server configuration. The Server enforces them after Engine validation, before storing a draft, and again before queue admission. Total targets count fixed targets and VU mix entries; total duration is the sum of warmup, ramp-up, measured duration, and ramp-down. A disabled feature returns `403 ATT-SERVER-INLINE-LOAD-DISABLED`; exceeding a configured cap returns a safe `400 ATT-SERVER-INVALID-REQUEST`. VU and Arrival Rate cannot mix; Arrival Rate cannot contain a weighted mix; workload timing envelopes must match; Engine validation remains authoritative. The existing `maxConcurrentLoad` and general Worker queue limits still apply. Path-based Load requests retain their existing contract and are not subject to the browser-draft caps.
 
@@ -186,7 +186,7 @@ New endpoints use the existing `error` envelope and stable codes:
 | HTTP status | Code | Meaning |
 | --- | --- | --- |
 | 400 | `ATT-SERVER-INVALID-REQUEST` | Invalid JSON, unknown field, invalid logical ID, schema error, or semantic error |
-| 401 | `ATT-SERVER-AUTHENTICATION-REQUIRED` | No authenticated Servlet Principal |
+| 401 | `ATT-SERVER-AUTHENTICATION-REQUIRED` | No request identity is available because authentication is required |
 | 404 | `ATT-SERVER-NOT-FOUND` | Package, resource, or draft is unavailable |
 | 409 | `ATT-RESOURCE-CURSOR-STALE` | Package content changed while listing resources |
 | 409 | `ATT-SERVER-DRAFT-STALE` | Package content changed after Debug or Load preview |

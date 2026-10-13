@@ -3,6 +3,12 @@
   const api = new URL('../api/v1/', document.baseURI).pathname;
   const byId = id => document.getElementById(id);
   const text = (node, value) => { node.textContent = value == null ? '' : String(value); };
+  function addPrincipalLabel(body, inputId = 'job-principal') {
+    const input = byId(inputId);
+    const value = input ? String(input.value || '').trim() : '';
+    if (value) body.principal = value;
+    return body;
+  }
   const message = value => text(byId('message'), value || '');
   const terminal = new Set(['PASS', 'FAIL', 'ERROR', 'INVALID', 'CANCELLED']);
   const boundedEvents = 500;
@@ -131,7 +137,9 @@
   async function loadHome(generation = navigation) {
     const requestSequence = ++homeRequestSequence;
     try {
-      const [packages, jobs] = await Promise.all([request('packages'), request('jobs')]);
+      const principalSearch = String(byId('job-principal-search').value || '').trim();
+      const jobsPath = principalSearch ? `jobs?principal=${encodeURIComponent(principalSearch)}` : 'jobs';
+      const [packages, jobs] = await Promise.all([request('packages'), request(jobsPath)]);
       if (requestSequence !== homeRequestSequence || generation !== navigation) return;
       byId('connection').textContent = 'Connected';
       const packageList = byId('packages'); packageList.replaceChildren();
@@ -147,7 +155,7 @@
       const tbody = byId('jobs'); tbody.replaceChildren();
       listItems(jobs).forEach(job => {
         const row = document.createElement('tr');
-        [job.jobId, job.packageId, job.command, job.status, job.createdAt].forEach((value, i) => { const cell = document.createElement('td'); if (i === 0) cell.append(link(`#/jobs/${encodeURIComponent(job.jobId)}`, value)); else text(cell, value); row.append(cell); });
+        [job.jobId, job.packageId, job.command, job.principal, job.status, job.createdAt].forEach((value, i) => { const cell = document.createElement('td'); if (i === 0) cell.append(link(`#/jobs/${encodeURIComponent(job.jobId)}`, value)); else text(cell, value); row.append(cell); });
         tbody.append(row);
       });
     } catch (error) {
@@ -534,7 +542,7 @@
       const model = draft.model === 'arrivalRate' ? 'Arrival Rate' : 'Virtual Users';
       const count = Array.from(byId('advanced-load-workloads').querySelectorAll('.advanced-workload')).length;
       if (!window.confirm(`Start ${model} Load with ${count} workload${count === 1 ? '' : 's'}? Review the validated full scenario above before confirming.`)) return;
-      const accepted = await request('jobs/load', { method: 'POST', body: JSON.stringify({ packageId, draftId: draft.draftId }) });
+      const accepted = await request('jobs/load', { method: 'POST', body: JSON.stringify(addPrincipalLabel({ packageId, draftId: draft.draftId }, 'advanced-load-principal')) });
       clearAdvancedLoadDraft();
       if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
     } catch (error) {
@@ -1022,7 +1030,7 @@
     try {
       const draft = await previewDebugDraft();
       if (!draft || generation !== navigation || selectedPackage !== packageId) return;
-      const accepted = await request('jobs/debug', { method: 'POST', body: JSON.stringify({ packageId, draftId: draft.draftId }) });
+      const accepted = await request('jobs/debug', { method: 'POST', body: JSON.stringify(addPrincipalLabel({ packageId, draftId: draft.draftId })) });
       debugDraft = null; debugDraftFingerprint = '';
       if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
     } catch (error) {
@@ -1182,7 +1190,7 @@
       const modelLabel = draft.model === 'arrivalRate' ? 'Arrival Rate' : 'Virtual Users';
       if (JSON.stringify(currentQuickLoadBody()) !== quickLoadDraftFingerprint) return;
       if (!window.confirm(`Start ${modelLabel} Load for ${draft.target.type} ${draft.target.id}? Review the validated YAML preview before confirming.`)) return;
-      const accepted = await request('jobs/load', { method: 'POST', body: JSON.stringify({ packageId, draftId: draft.draftId }) });
+      const accepted = await request('jobs/load', { method: 'POST', body: JSON.stringify(addPrincipalLabel({ packageId, draftId: draft.draftId })) });
       quickLoadDraft = null; quickLoadDraftFingerprint = '';
       if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
     } catch (error) {
@@ -1213,6 +1221,7 @@
     submitting.add(packageId); byId('run-resource-case').disabled = true;
     try {
       const body = { packageId, suites: [item.provenance.suite], caseIds: [item.logicalId] };
+      addPrincipalLabel(body);
       const accepted = await request('jobs/run', { method: 'POST', body: JSON.stringify(body) });
       if (generation === navigation && selectedPackage === packageId) location.hash = `#/jobs/${encodeURIComponent(accepted.jobId)}`;
     } catch (error) { if (generation === navigation && selectedPackage === packageId) message(error.message); }
@@ -1233,6 +1242,8 @@
     const submitButton = form.querySelector('button[type="submit"]');
     if (submitButton) submitButton.disabled = true;
     const body = { packageId: selectedPackage };
+    const principalLabel = String(values.get('principal') || '').trim();
+    if (principalLabel) body.principal = principalLabel;
     ['environment','config','runId','debugId','suiteDirectory','validationScope','scenario'].forEach(key => { const value = String(values.get(key) || '').trim(); if (value) body[key] = value; });
     ['suites','tags','excludeTags','caseIds'].forEach(key => { const value = commaList(String(values.get(key) || '')); if (value) body[key] = value; });
     if (values.has('all')) body.all = true;
@@ -1471,6 +1482,7 @@
   byId('load-more-configuration').addEventListener('click', loadMoreConfiguration);
   byId('refresh-configuration').addEventListener('click', () => { if (selectedPackage) loadDeclaredConfiguration(selectedPackage); });
   byId('refresh-jobs').addEventListener('click', () => loadHome());
+  byId('job-principal-search').addEventListener('input', () => loadHome());
   window.addEventListener('hashchange', route);
   route();
 })();

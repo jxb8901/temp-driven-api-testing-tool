@@ -31,6 +31,8 @@ Select a profile with `--server`. `ATT_SERVER` can override the default profile 
 
 Use `--no-auth` to bypass the profile credentials and password prompt when the Server explicitly allows anonymous access. Basic authentication works only over HTTPS. The client uses the JVM's default TLS trust and hostname verification. It has no insecure TLS switch. Health and version checks happen before each operation; the Server must declare API version `1`.
 
+Anonymous mode is intended only for isolated SIT/development deployments. All callers share the same authorization identity and can access the same jobs and drafts; use `--no-auth` only when the deployment owner has explicitly enabled it and protected the network boundary. `--principal <name>` on Run, Debug, Load, or Validate submits a self-declared display/audit label. The Server stores it in the existing `principal` field as `<name>(anonym)`; it does not create user-specific access or authorization. Authenticated mode ignores this option.
+
 ## Discover packages
 
 Use the package ID configured by the Server. The client does not request or display package root paths.
@@ -40,6 +42,8 @@ Use the package ID configured by the Server. The client does not request or disp
 ./att.sh remote --server sit version
 ./att.sh remote --server sit packages
 ./att.sh remote --server sit package payments
+./att.sh remote --server sit --no-auth ping
+./att.sh remote --server sit --no-auth packages
 ```
 
 ## Submit Run, Debug, Load, and Validate jobs
@@ -49,13 +53,15 @@ Pass the logical Server package ID first. Familiar ATT selection and environment
 ```sh
 ./att.sh remote --server sit run payments --suite testcase/payment.xlsx --tag smoke --env SIT
 ./att.sh remote --server sit debug payments flow PAYMENT.submit --set vars.Channel=WEB
+./att.sh remote --server sit --no-auth run payments --all --principal Bob
 ./att.sh remote --server sit load payments load/payment.yaml --users 2 --duration 30s
 ./att.sh remote --server sit validate payments --package
+./att.sh remote --server sit jobs --principal 'Bob(anonym)'
 ```
 
 Paths such as `--suite`, `--suite-dir`, `--config`, `--input`, and a Load scenario are logical paths inside the Server package. The client rejects absolute paths and parent-directory traversal. The request contains `packageId`, never `PACKAGE_ROOT`, `SERVER_DATA_DIR`, Worker paths, or a client output directory.
 
-Commands wait for a terminal result by default. The client submits once, consumes ordered status/progress/log/diagnostic events, retrieves the result, and exits. It does not invoke `att-engine` locally.
+Commands wait for a terminal result by default. The client submits once, consumes ordered status/progress/log/diagnostic events, retrieves the result, and exits. It does not invoke `att-engine` locally. `jobs --principal <text>` searches the existing principal field, including server-formatted anonymous labels and historical `anonymous` records.
 
 Use `--detach` to return the job ID without keeping a background process:
 
