@@ -23,8 +23,8 @@ Vite emits static files to `att-web/frontend/dist`. Maven copies those files int
 ## State and integration boundaries
 
 - `types.ts`, `api.ts`, `state.ts`, and `router.ts` are the shared TypeScript foundation. Feature operations can be added centrally to `api.ts`; pages do not construct API URLs.
-- `ServerVersion.inlineLoadEnabled` is retained as a server capability and passed into the shell and feature routes. The API does not expose the current principal, so the identity chip says “Server managed” and “not exposed by API.”
-- `AppRoute` has dashboard, package collection, package/resource, jobs/job, and load/package variants. `useNavigationGuard()` provides `navigate()` and `registerUnsavedChanges()`; the shell presents a keyboard-accessible discard dialog for internal and browser-history navigation.
+- `ServerVersion.inlineLoadEnabled` and `loadSchedulingEnabled` are retained as server capabilities and passed into the shell and feature routes. The API does not expose the current principal, so the identity chip says “Server managed” and “not exposed by API.”
+- `AppRoute` has dashboard, package collection, package/resource, jobs/job, load/package, and Scheduled Load variants. `useNavigationGuard()` provides `navigate()` and `registerUnsavedChanges()`; the shell presents a keyboard-accessible discard dialog for internal and browser-history navigation.
 - Package, environment, and accepted-job callbacks are exposed through shell context so later modules can stay controlled by the application root.
 - Dashboard summaries and lists use only `/version`, `/packages`, and `/jobs` responses. Counts describe returned rows; an API error is not displayed as zero.
 - External CSS and scripts preserve the existing self-only Content Security Policy. All requests remain same-origin.
@@ -41,7 +41,11 @@ To roll back the shell, restore the prior `index.html` and static resources in t
 
 ## Browser acceptance
 
-The development-only fixture and browser commands are documented in [`tools/ui-acceptance/README.md`](../../tools/ui-acceptance/README.md). The harness targets the built Vite output under `/att/ui/`, supplies deterministic API responses, runs browser smoke and axe checks, and captures 1440 × 1000 and 768 × 1000 light and dark references in [`ui-shell-baseline/`](ui-shell-baseline/). These images record layout; they do not replace Java WAR packaging or non-root Tomcat tests.
+The development-only fixture and browser commands are documented in [`tools/ui-acceptance/README.md`](../../tools/ui-acceptance/README.md). The harness targets the built Vite output under `/att/ui/`, supplies deterministic API responses, and runs dashboard, Explorer, Load/Jobs, and Scheduled Load flows with axe checks. The cross-browser suite covers Chromium, Firefox, and WebKit at desktop, tablet, and phone widths in light and dark themes; it checks responsive layout and overflow, runs axe at every viewport, and stores screenshots as CI artifacts. Dashboard reference captures remain in [`ui-shell-baseline/`](ui-shell-baseline/). Browser screenshots and axe checks do not replace Java WAR packaging or non-root Tomcat tests.
+
+Scheduled Load is a lazily loaded React route. The shell advertises it only when `/api/v1/version` reports `loadSchedulingEnabled`; direct navigation still shows the server-disabled state. The page calls the typed `load-schedules` API methods, requires a current server preview before saving, starts new schedules paused, and asks before Run Now or deletion. Occurrence history includes skipped and failed submissions as well as linked jobs. The server remains authoritative for cron validation, timezone and DST behavior, minimum intervals, overlap limits, and authorization.
+
+The shell follows `prefers-color-scheme` until a user selects a theme, then stores that explicit choice locally. `/` and `Ctrl K`/`⌘ K` open the page palette, `?` opens shortcut help, and Escape closes dialogs and mobile navigation. On Advanced Load, `Ctrl Enter`/`⌘ Enter` invokes the existing confirmation for a live validated draft.
 
 | Viewport | Light | Dark |
 |---|---|---|

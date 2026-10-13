@@ -1,6 +1,6 @@
 # ATT UI browser acceptance checks
 
-This development-only harness serves the built Vite UI at `/att/ui/` and provides synthetic responses for the existing `/att/api/v1/` endpoints. Build the static assets first with `mvn -B -ntp -pl att-web -am package`. It needs Python 3 and a local Chrome/Chromium browser. Node.js and npm are needed only to build or run these workstation checks; they are not part of ATT's WAR, installation, or production runtime.
+This development-only harness serves the built Vite UI at `/att/ui/` and provides synthetic responses for the existing `/att/api/v1/` endpoints. Build the static assets first with `mvn -B -ntp -pl att-web -am package`. It needs Python 3 and local Chromium, Firefox, and WebKit browsers. Node.js and npm are needed only to build or run these workstation checks; they are not part of ATT's WAR, installation, or production runtime.
 
 ## Install the development dependencies
 
@@ -8,7 +8,7 @@ From this directory, install the pinned test-only packages:
 
 ```sh
 npm ci
-npx playwright install chromium
+npx playwright install chromium firefox webkit
 ```
 
 The acceptance harness pins direct and transitive dependencies in `package.json` and `package-lock.json`. `npm ci` installs the test-only tools reproducibly. This is a workstation/CI dependency only; the WAR and Tomcat startup do not run npm.
@@ -24,6 +24,22 @@ npm run smoke
 ```
 
 The script covers static resources below the non-root `/att/` context, loaded/empty/error/loading dashboard states, the package/jobs/load route aliases, selected navigation and breadcrumb state, skip-link keyboard behavior, uncaught browser errors, and axe-core WCAG 2.0/2.1/2.2 A/AA rules. It reports selectors for any axe violations.
+
+Run the Scheduled Load workflow and accessibility check with:
+
+```sh
+npm run smoke:scheduled-load
+```
+
+This flow covers server-computed previews, create/edit/pause/resume, explicit Run Now and delete confirmation, occurrence history and job links, disabled/authentication/role-error states, keyboard palette and shortcuts, light/dark preference, and 1280/768/390-pixel layouts.
+
+Run the cross-browser responsive and screenshot check with:
+
+```sh
+npm run smoke:cross-browser
+```
+
+It exercises Chromium, Firefox, and WebKit at 1280, 768, and 390 pixels in light and dark themes, checks horizontal overflow and the tablet/phone schedule cards, runs axe at desktop width, and captures per-browser screenshots under `tools/ui-acceptance/artifacts/scheduled-load/`. CI uploads those generated screenshots for review; they are not committed baselines.
 
 Run the screenshot capture separately:
 

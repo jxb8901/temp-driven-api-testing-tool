@@ -9,6 +9,10 @@ import type {
   JobSummary as LoadJobSummary, JobView, LoadDraftInput, LoadDraftResponse, LoadModel,
   LoadPolicyResponse, LoadTargetType, QuickLoadFormResponse, SubmitLoadDraftInput, TargetResource,
 } from './features/load/types';
+import type {
+  DeleteScheduleResponse, LoadSchedule, LoadScheduleInput, ScheduleOccurrence, SchedulePreview,
+  SchedulePreviewInput,
+} from './features/schedules/types';
 
 /** Resolve the API below the current UI context (for example /att/ui/ -> /att/api/v1/). */
 export function apiBaseUrl(): URL {
@@ -221,5 +225,36 @@ export const api = {
     };
     if (input.principal) body.principal = input.principal;
     return postJson<AcceptedJob>('jobs/run', body, signal);
+  },
+  listLoadSchedules(signal?: AbortSignal): Promise<ApiEnvelope<LoadSchedule>> {
+    return request<ApiEnvelope<LoadSchedule>>('load-schedules', { signal });
+  },
+  previewLoadSchedule(input: SchedulePreviewInput, signal?: AbortSignal): Promise<SchedulePreview> {
+    return postJson<SchedulePreview>('load-schedules/preview', input, signal);
+  },
+  createLoadSchedule(input: LoadScheduleInput, signal?: AbortSignal): Promise<LoadSchedule> {
+    return postJson<LoadSchedule>('load-schedules', input, signal);
+  },
+  updateLoadSchedule(id: string, input: LoadScheduleInput, signal?: AbortSignal): Promise<LoadSchedule> {
+    return request<LoadSchedule>('load-schedules/' + encodeURIComponent(id), {
+      method: 'PATCH', body: JSON.stringify(input), signal,
+    });
+  },
+  setLoadScheduleEnabled(id: string, enabled: boolean, signal?: AbortSignal): Promise<LoadSchedule> {
+    return postJson<LoadSchedule>(
+      'load-schedules/' + encodeURIComponent(id) + (enabled ? '/resume' : '/pause'), {}, signal,
+    );
+  },
+  triggerLoadSchedule(id: string, signal?: AbortSignal): Promise<ScheduleOccurrence> {
+    return postJson<ScheduleOccurrence>('load-schedules/' + encodeURIComponent(id) + '/trigger', {}, signal);
+  },
+  deleteLoadSchedule(id: string, signal?: AbortSignal): Promise<DeleteScheduleResponse> {
+    return request<DeleteScheduleResponse>('load-schedules/' + encodeURIComponent(id), { method: 'DELETE', signal });
+  },
+  getLoadScheduleExecutions(id: string, limit = 100, signal?: AbortSignal): Promise<ApiEnvelope<ScheduleOccurrence>> {
+    return request<ApiEnvelope<ScheduleOccurrence>>(
+      'load-schedules/' + encodeURIComponent(id) + '/executions' + queryString({ limit }),
+      { signal },
+    );
   },
 };

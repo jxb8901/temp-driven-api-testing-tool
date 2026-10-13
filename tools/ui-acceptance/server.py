@@ -15,7 +15,11 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 BUILT_UI_ROOT = REPOSITORY / "att-web/target/classes/META-INF/resources/ui"
-UI_ROOT = BUILT_UI_ROOT if (BUILT_UI_ROOT / "index.html").is_file() else REPOSITORY / "att-web/src/main/resources/META-INF/resources/ui"
+BUILT_FRONTEND_ROOT = REPOSITORY / "att-web/frontend/dist"
+UI_ROOT = BUILT_UI_ROOT if (BUILT_UI_ROOT / "index.html").is_file() else (
+    BUILT_FRONTEND_ROOT if (BUILT_FRONTEND_ROOT / "index.html").is_file()
+    else REPOSITORY / "att-web/src/main/resources/META-INF/resources/ui"
+)
 PACKAGES = [
     {"packageId": "payments"},
     {"packageId": "ledger"},
@@ -54,6 +58,16 @@ RESOURCE_ITEMS = [
     {"type": "flow", "logicalId": "purchase-flow", "state": "ready", "name": "Purchase flow"},
     {"type": "tool", "logicalId": "seed-data", "state": "ready", "name": "Seed data"},
 ]
+SCHEDULE = {
+    "id": "SCHED-204", "name": "Nightly payments", "description": "Checkout soak", "tags": ["nightly"],
+    "packageId": "payments", "scenario": "load/nightly.yaml", "config": "config/config.yaml",
+    "environment": "SIT", "timezone": "Asia/Hong_Kong", "cron": "0 2 * * *", "load": {},
+    "maxConcurrentRuns": 1, "enabled": True, "nextRunAt": "2026-10-15T18:00:00Z",
+}
+SCHEDULE_OCCURRENCES = [
+    {"occurrenceId": "O-SKIPPED", "scheduleId": "SCHED-204", "scheduledFor": "2026-10-14T18:00:00Z", "triggerType": "scheduled", "status": "skipped", "reason": "schedule-overlap-limit"},
+    {"occurrenceId": "O-SUBMITTED", "scheduleId": "SCHED-204", "scheduledFor": "2026-10-13T18:00:00Z", "triggerType": "scheduled", "status": "submitted", "jobId": "JOB-4821"},
+]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -85,6 +99,36 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": {"code": "INVALID_JSON", "summary": "Request body must be JSON."}})
             return
         scenario = self._fixture()
+        if resource.startswith("load-schedules"):
+            if scenario == "schedule-unauthenticated":
+                self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Sign in to manage Scheduled Load."}})
+                return
+            if scenario == "schedule-forbidden":
+                self._json(403, {"error": {"code": "SCHEDULE_ADMIN_REQUIRED", "summary": "Scheduled Load administrator role required."}})
+                return
+            if resource == "load-schedules/preview":
+                self._json(200, {"timezone": body.get("timezone", "UTC"), "cron": body.get("cron", "0 2 * * *"), "nextRunAt": "2026-10-15T18:00:00Z"})
+                return
+            if resource == "load-schedules":
+                created = {**body, "id": "SCHED-CREATED", "nextRunAt": "2026-10-15T18:00:00Z"}
+                self.server.schedules.insert(0, created)
+                self._json(201, created)
+                return
+            if resource.endswith("/trigger"):
+                occurrence = {"occurrenceId": "O-NOW", "scheduleId": resource.split("/")[1], "scheduledFor": "2026-10-14T10:00:00Z", "triggerType": "manual", "status": "submitted", "jobId": "JOB-4821"}
+                self.server.schedule_occurrences.insert(0, occurrence)
+                self._json(202, occurrence)
+                return
+            if resource.endswith("/pause") or resource.endswith("/resume"):
+                schedule_id = resource.split("/")[1]
+                enabled = resource.endswith("/resume")
+                updated = next((item for item in self.server.schedules if item["id"] == schedule_id), None)
+                if updated is None:
+                    self._json(404, {"error": {"code": "NOT_FOUND", "summary": "Schedule not found."}})
+                else:
+                    updated["enabled"] = enabled
+                    self._json(200, updated)
+                return
         if scenario == "explorer-workspace" and resource in {"drafts/debug", "debug/drafts", "debug/preview"}:
             draft_id = "DEBUG-DRAFT-204"
             self.server.valid_drafts.add(draft_id)
@@ -110,6 +154,33 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(404, {"error": {"code": "FIXTURE_NOT_FOUND", "summary": "No fixture route is defined."}})
 
+    def do_PATCH(self) -> None:
+        request = urlsplit(self.path)
+        if not request.path.startswith("/att/api/v1/"):
+            self.send_error(404)
+            return
+        resource = request.path.removeprefix("/att/api/v1/")
+        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._json(400, {"error": {"code": "INVALID_JSON", "summary": "Request body must be JSON."}})
+            return
+        scenario = self._fixture()
+        if resource.startswith("load-schedules"):
+            status = self._schedule_access_error(scenario)
+            if status:
+                return
+            schedule_id = resource.split("/")[1]
+            updated = next((item for item in self.server.schedules if item["id"] == schedule_id), None)
+            if updated is None:
+                self._json(404, {"error": {"code": "NOT_FOUND", "summary": "Schedule not found."}})
+            else:
+                updated.update(body)
+                self._json(200, updated)
+            return
+        self._json(404, {"error": {"code": "FIXTURE_NOT_FOUND", "summary": "No fixture route is defined."}})
+
     def do_DELETE(self) -> None:
         request = urlsplit(self.path)
         if not request.path.startswith("/att/api/v1/"):
@@ -119,6 +190,14 @@ class Handler(BaseHTTPRequestHandler):
         if self._fixture() == "load-workspace" and resource == "jobs/" + LOAD_JOB["jobId"]:
             self.server.cancel_requested = True
             self._json(202, {"jobId": LOAD_JOB["jobId"], "status": "CANCEL_REQUESTED"})
+            return
+        if resource.startswith("load-schedules/"):
+            scenario = self._fixture()
+            if self._schedule_access_error(scenario):
+                return
+            schedule_id = resource.split("/")[1]
+            self.server.schedules = [item for item in self.server.schedules if item["id"] != schedule_id]
+            self._json(200, {"scheduleId": schedule_id, "status": "DELETED"})
             return
         self._json(404, {"error": {"code": "FIXTURE_NOT_FOUND", "summary": "No fixture route is defined."}})
 
@@ -137,15 +216,42 @@ class Handler(BaseHTTPRequestHandler):
         morsel = cookies.get("att-ui-fixture")
         return morsel.value if morsel else "loaded"
 
+    def _schedule_access_error(self, scenario: str) -> bool:
+        if scenario == "schedule-unauthenticated":
+            self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Sign in to manage Scheduled Load."}})
+            return True
+        if scenario == "schedule-forbidden":
+            self._json(403, {"error": {"code": "SCHEDULE_ADMIN_REQUIRED", "summary": "Scheduled Load administrator role required."}})
+            return True
+        if scenario == "schedule-disabled":
+            self._json(404, {"error": {"code": "SCHEDULING_DISABLED", "summary": "Scheduled Load is disabled."}})
+            return True
+        return False
+
     def _api(self, resource: str, query: dict[str, list[str]]) -> None:
         scenario = self._fixture()
         if resource == "version":
-            self._json(200, {"apiVersion": "1", "inlineLoadEnabled": True})
+            schedules_enabled = scenario in {"scheduled-workspace", "schedule-forbidden", "schedule-unauthenticated"}
+            self._json(200, {"apiVersion": "1", "inlineLoadEnabled": True, "loadSchedulingEnabled": schedules_enabled})
             return
         if scenario == "authenticated" and self.headers.get("Authorization") != "Basic YXR0LWZpeHR1cmU6cGFzcw==":
             self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Fixture authentication is required."}})
             return
         parts = [unquote(part) for part in resource.strip("/").split("/") if part]
+        if parts and parts[0] == "load-schedules":
+            if self._schedule_access_error(scenario):
+                return
+            if parts == ["load-schedules"]:
+                self._json(200, {"items": self.server.schedules})
+                return
+            if len(parts) == 3 and parts[2] == "executions":
+                occurrences = [item for item in self.server.schedule_occurrences if item.get("scheduleId") == parts[1]]
+                self._json(200, {"items": occurrences[: int(query.get("limit", ["100"])[0])]})
+                return
+            if len(parts) == 2:
+                schedule = next((item for item in self.server.schedules if item["id"] == parts[1]), None)
+                self._json(200 if schedule else 404, schedule or {"error": {"code": "NOT_FOUND", "summary": "Schedule not found."}})
+                return
         if parts == ["packages"]:
             data = PACKAGES
         elif parts == ["jobs"]:
@@ -197,9 +303,24 @@ class Handler(BaseHTTPRequestHandler):
                 if parts[2] == "events":
                     self._events()
                     return
+            if scenario == "scheduled-workspace" and job_id == "JOB-4821":
+                if len(parts) == 2:
+                    self._json(200, JOBS[0])
+                    return
+                if parts[2] == "result":
+                    self._json(200, {"job": JOBS[0], "result": {"status": "PASS", "metrics": {"completedThroughput": 120, "p95Ms": 85}}, "diagnostic": None})
+                    return
+                if parts[2] == "artifacts" and len(parts) == 3:
+                    self._json(200, {"items": []})
+                    return
+                if parts[2] == "events":
+                    self._events()
+                    return
             if scenario == "explorer-workspace" and job_id == "JOB-DEBUG-204":
                 self._json(200, {"jobId": job_id, "packageId": "payments", "command": "debug", "status": "PASS", "createdAt": "2026-10-13T09:50:00Z"})
                 return
+            self._json(404, {"error": {"code": "JOB_NOT_FOUND", "summary": "Job not found."}})
+            return
         elif scenario == "explorer-workspace" and len(parts) == 3 and parts[:2] == ["packages", "payments"] and parts[2] in {"configuration", "config", "declared-configuration", "effective-configuration", "compare-configuration"}:
             self._json(200, {"state": "ready", "environments": ["dev", "staging", "prod"], "globals": {}, "sections": [], "items": [], "total": 0})
             return
@@ -273,7 +394,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         if "fixture=" in query:
             scenario = parse_qs(query).get("fixture", [""])[0]
-            if scenario in {"loaded", "empty", "error", "loading", "authenticated", "anonymous", "explorer-workspace", "load-workspace"}:
+            if scenario in {"loaded", "empty", "error", "loading", "authenticated", "anonymous", "explorer-workspace", "load-workspace", "scheduled-workspace", "schedule-forbidden", "schedule-unauthenticated", "schedule-disabled"}:
                 self.send_header("Set-Cookie", f"att-ui-fixture={scenario}; Path=/att/; SameSite=Lax")
         self.end_headers()
         self.wfile.write(body)
@@ -287,6 +408,8 @@ def main() -> None:
     server.valid_drafts = set()
     server.cancel_requested = False
     server.job_list_requests = 0
+    server.schedules = [dict(SCHEDULE)]
+    server.schedule_occurrences = list(SCHEDULE_OCCURRENCES)
     actual_port = server.server_address[1]
     print(f"READY http://127.0.0.1:{actual_port}", flush=True)
     try:

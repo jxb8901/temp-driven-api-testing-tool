@@ -7,6 +7,7 @@ export interface AppShellProps {
   route: AppRoute;
   navigation: RouteState;
   serverVersion: AsyncState<ServerVersion>;
+  showScheduledLoad?: boolean;
   selectedPackage: string;
   selectedEnvironment: string;
   onPackageChange(packageId: string): void;
@@ -43,6 +44,7 @@ function routeTitle(route: AppRoute): string {
   if (route.kind === 'package') return route.resource ? route.resource.resourceId : route.packageId;
   if (route.kind === 'jobs') return route.jobId ? 'Job ' + route.jobId : 'Jobs and results';
   if (route.kind === 'load') return route.packageId ? 'Advanced Load' : 'Load testing';
+  if (route.kind === 'schedules') return 'Scheduled Load';
   return 'Dashboard';
 }
 
@@ -51,7 +53,71 @@ function activeNavigation(route: AppRoute): string {
   if (route.kind === 'package') return 'explorer';
   if (route.kind === 'jobs') return 'jobs';
   if (route.kind === 'load') return 'load-testing';
+  if (route.kind === 'schedules') return 'scheduled-load';
   return 'dashboard';
+}
+
+function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, onClose, onNavigate }: {
+  open: boolean;
+  mode: 'palette' | 'shortcuts';
+  showScheduledLoad: boolean;
+  selectedPackage: string;
+  onClose(): void;
+  onNavigate(route: AppRoute): void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const [query, setQuery] = useState('');
+  const commands: Array<{ label: string; description: string; route: AppRoute }> = [
+    { label: 'Dashboard', description: 'Workspace overview', route: { kind: 'dashboard' } },
+    { label: 'Packages', description: 'Configured packages', route: { kind: 'packages' } },
+    { label: 'Explorer and Run', description: 'Browse package resources', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
+    { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
+    { label: 'Jobs and results', description: 'Inspect recent jobs', route: { kind: 'jobs' } },
+    ...(showScheduledLoad ? [{ label: 'Scheduled Load', description: 'Manage recurring Load schedules', route: { kind: 'schedules' } as AppRoute }] : []),
+  ];
+  const matches = commands.filter(command => `${command.label} ${command.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) {
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
+      window.setTimeout(() => (mode === 'palette' ? searchRef.current : closeRef.current)?.focus(), 0);
+    } else if (!open && dialog.open) {
+      if (typeof dialog.close === 'function') dialog.close();
+      else dialog.removeAttribute('open');
+    }
+    if (open) setQuery('');
+  }, [mode, open]);
+
+  return <dialog ref={dialogRef} className="keyboard-dialog" aria-labelledby="keyboard-dialog-title"
+    onCancel={event => { event.preventDefault(); onClose(); }}>
+    <div className="keyboard-dialog-heading">
+      <div><p className="eyebrow">ATT Studio</p><h2 id="keyboard-dialog-title">{mode === 'palette' ? 'Go to' : 'Keyboard shortcuts'}</h2></div>
+      <button ref={closeRef} className="icon-button" type="button" aria-label="Close dialog" onClick={onClose}>×</button>
+    </div>
+    {mode === 'palette' ? <>
+      <label className="sr-only" htmlFor="command-search">Search pages</label>
+      <input ref={searchRef} id="command-search" type="search" value={query} onChange={event => setQuery(event.currentTarget.value)} placeholder="Search pages…" />
+      <div className="command-list" role="list" aria-label="Pages">
+        {matches.map(command => <div key={command.label} role="listitem"><button type="button" onClick={() => onNavigate(command.route)}>
+          <span>{command.label}</span><small>{command.description}</small>
+        </button></div>)}
+        {matches.length === 0 && <p role="status">No matching pages.</p>}
+      </div>
+    </> : <>
+      <dl className="shortcut-list">
+        <div><dt>Open page search</dt><dd><kbd>⌘ K</kbd> / <kbd>Ctrl K</kbd> or <kbd>/</kbd></dd></div>
+        <div><dt>Open this help</dt><dd><kbd>?</kbd></dd></div>
+        <div><dt>Close a dialog or menu</dt><dd><kbd>Esc</kbd></dd></div>
+        <div><dt>Start a validated Load draft</dt><dd><kbd>⌘ Enter</kbd> / <kbd>Ctrl Enter</kbd> · asks for confirmation</dd></div>
+      </dl>
+      <p className="keyboard-dialog-note">The slash and help shortcuts do not intercept text fields. The page-search key combination works from any field; the Load submit shortcut is available only on Advanced Load and always asks for confirmation.</p>
+    </>}
+  </dialog>;
 }
 
 function Breadcrumb({ label, href, navigate }: { label: string; href?: string; navigate: (to: string) => void }) {
@@ -100,7 +166,7 @@ function DiscardChangesDialog({ navigation }: { navigation: RouteState }) {
 }
 
 export function AppShell({
-  route, navigation, serverVersion, selectedPackage, selectedEnvironment,
+  route, navigation, serverVersion, showScheduledLoad = false, selectedPackage, selectedEnvironment,
   onPackageChange, onEnvironmentChange, onJobAccepted, children,
 }: AppShellProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -112,8 +178,17 @@ export function AppShell({
       return 'light';
     }
   });
+  const [themeOverridden, setThemeOverridden] = useState(() => {
+    try { return localStorage.getItem('att-ui-theme') === 'dark' || localStorage.getItem('att-ui-theme') === 'light'; }
+    catch { return false; }
+  });
   const [collapsed, setCollapsed] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+  const [mobileViewport, setMobileViewport] = useState(() => window.matchMedia?.('(max-width: 820px)').matches || false);
+  const [keyboardMode, setKeyboardMode] = useState<'palette' | 'shortcuts' | null>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const wasMobileNavigationOpen = useRef(false);
   const currentPage = routeTitle(route);
   const activeNav = activeNavigation(route);
   const versionStatus = serverVersion.status === 'ready' ? 'Connected'
@@ -129,8 +204,63 @@ export function AppShell({
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    try { localStorage.setItem('att-ui-theme', theme); } catch { /* Storage can be unavailable in private browsing. */ }
   }, [theme]);
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!media || themeOverridden) return;
+    const update = () => setTheme(media.matches ? 'dark' : 'light');
+    update();
+    media.addEventListener?.('change', update);
+    if (!media.addEventListener) media.addListener?.(update);
+    return () => {
+      media.removeEventListener?.('change', update);
+      if (!media.removeEventListener) media.removeListener?.(update);
+    };
+  }, [themeOverridden]);
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(max-width: 820px)');
+    if (!media) return;
+    const update = () => {
+      setMobileViewport(media.matches);
+      if (!media.matches) setMobileNavigationOpen(false);
+    };
+    update();
+    media.addEventListener?.('change', update);
+    if (!media.addEventListener) media.addListener?.(update);
+    return () => {
+      media.removeEventListener?.('change', update);
+      if (!media.removeEventListener) media.removeListener?.(update);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (mobileNavigationOpen) sidebarRef.current?.querySelector<HTMLElement>('.nav-link')?.focus();
+    else if (wasMobileNavigationOpen.current && mobileViewport) mobileMenuButtonRef.current?.focus();
+    wasMobileNavigationOpen.current = mobileNavigationOpen;
+  }, [mobileNavigationOpen, mobileViewport]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const editable = Boolean(target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)));
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setKeyboardMode('palette');
+      } else if (!editable && !event.metaKey && !event.ctrlKey && !event.altKey && event.key === '/') {
+        event.preventDefault();
+        setKeyboardMode('palette');
+      } else if (!editable && !event.metaKey && !event.ctrlKey && !event.altKey && event.key === '?') {
+        event.preventDefault();
+        setKeyboardMode('shortcuts');
+      } else if (event.key === 'Escape' && !keyboardMode && mobileNavigationOpen) {
+        setMobileNavigationOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [keyboardMode, mobileNavigationOpen]);
 
   useEffect(() => {
     if (!mobileNavigationOpen) return;
@@ -148,14 +278,21 @@ export function AppShell({
   });
   const packageHref = selectedPackage ? '#/packages/' + encodeURIComponent(selectedPackage) : '#/packages';
   const loadHref = selectedPackage ? '#/advanced-load/' + encodeURIComponent(selectedPackage) : '#/advanced-load';
+  const changeTheme = () => {
+    setTheme(value => value === 'dark' ? 'light' : 'dark');
+    setThemeOverridden(true);
+    try { localStorage.setItem('att-ui-theme', theme === 'dark' ? 'light' : 'dark'); } catch { /* Storage can be unavailable in private browsing. */ }
+  };
 
   return (
     <NavigationGuardContext.Provider value={navigation}>
       <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, onPackageChange, onEnvironmentChange, onJobAccepted }}>
       <div className={'app-layout' + (collapsed ? ' is-collapsed' : '') + (mobileNavigationOpen ? ' mobile-nav-open' : '')} data-page={currentPage}>
         <a className="skip-link" href="#main-content">Skip to main content</a>
-        <button className="sidebar-backdrop" type="button" aria-label="Close navigation" onClick={() => setMobileNavigationOpen(false)} tabIndex={mobileNavigationOpen ? 0 : -1} />
-        <aside className="app-sidebar" aria-label="Application sidebar">
+        <button className="sidebar-backdrop" type="button" aria-label="Close navigation" aria-hidden={!mobileNavigationOpen} onClick={() => setMobileNavigationOpen(false)} tabIndex={-1} />
+        <aside ref={sidebarRef} className="app-sidebar" aria-label="Application sidebar"
+          aria-hidden={mobileViewport && !mobileNavigationOpen ? true : undefined}
+          inert={mobileViewport && !mobileNavigationOpen}>
           <div className="sidebar-brand-row">
             <a href="#/" className="sidebar-brand" aria-label="ATT Studio home" onClick={link('#/')}>
               <span className="brand-mark" aria-hidden="true">A</span><span className="brand-name">ATT Studio</span>
@@ -181,19 +318,26 @@ export function AppShell({
             <a className="nav-link" href="#/jobs" data-nav="jobs" aria-current={activeNav === 'jobs' ? 'page' : undefined} onClick={link('#/jobs')}>
               <span className="nav-icon" aria-hidden="true">▤</span><span className="nav-label">Jobs and results</span>
             </a>
+            {showScheduledLoad && <a className="nav-link" href="#/load-schedules" data-nav="scheduled-load" aria-current={activeNav === 'scheduled-load' ? 'page' : undefined} onClick={link('#/load-schedules')}>
+              <span className="nav-icon" aria-hidden="true">◷</span><span className="nav-label">Scheduled Load</span>
+            </a>}
           </nav>
           <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.1.3'}</span></div>
         </aside>
 
         <div className="app-frame">
           <header className="topbar">
-            <button className="icon-button mobile-menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded={mobileNavigationOpen} onClick={() => setMobileNavigationOpen(true)}>
+            <button ref={mobileMenuButtonRef} className="icon-button mobile-menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded={mobileNavigationOpen} onClick={() => setMobileNavigationOpen(true)}>
               <span aria-hidden="true">☰</span>
             </button>
             <a href="#/" className="topbar-brand" onClick={link('#/')}><span className="brand-mark" aria-hidden="true">A</span><span>ATT Studio</span></a>
             <div className="topbar-spacer" />
+            <button className="topbar-command" type="button" onClick={() => setKeyboardMode('palette')} aria-label="Search pages, shortcut Control or Command K or slash">
+              <span className="topbar-command-label">Search pages</span><kbd>Ctrl / ⌘ K</kbd>
+            </button>
+            <button className="icon-button shortcut-help" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={() => setKeyboardMode('shortcuts')}>?</button>
             <div className="topbar-status"><span className="topbar-status-label">Server</span><span className="connection-status" role="status" aria-live="polite" data-state={versionStatus.toLowerCase()}>{versionStatus}</span></div>
-            <button className="theme-toggle" type="button" aria-pressed={theme === 'dark'} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}>
+            <button className="theme-toggle" type="button" aria-pressed={theme === 'dark'} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={changeTheme}>
               <span className="theme-icon" aria-hidden="true">{theme === 'dark' ? '☼' : '◐'}</span><span className="theme-label">{theme === 'dark' ? 'Light' : 'Dark'}</span>
             </button>
           </header>
@@ -217,6 +361,7 @@ export function AppShell({
                   <Breadcrumb label="Jobs and results" href={route.jobId ? '#/jobs' : undefined} navigate={navigate} />
                   {route.jobId && <Breadcrumb label={'Job ' + route.jobId} navigate={navigate} />}
                 </>}
+                {route.kind === 'schedules' && <Breadcrumb label="Scheduled Load" navigate={navigate} />}
               </ol>
             </nav>
             <div className="context-toolbar" role="group" aria-label="Workspace context and actions">
@@ -231,6 +376,8 @@ export function AppShell({
           <footer className="page-footer"><span>ATT Server</span><span>API v{versionData?.apiVersion || '1'}</span></footer>
         </div>
         <DiscardChangesDialog navigation={navigation} />
+        <KeyboardDialog open={keyboardMode !== null} mode={keyboardMode || 'palette'} showScheduledLoad={showScheduledLoad} selectedPackage={selectedPackage}
+          onClose={() => setKeyboardMode(null)} onNavigate={target => { navigate(target); setKeyboardMode(null); setMobileNavigationOpen(false); }} />
       </div>
       </AppShellContext.Provider>
     </NavigationGuardContext.Provider>

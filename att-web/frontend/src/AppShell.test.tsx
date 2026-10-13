@@ -55,4 +55,54 @@ describe('AppShell', () => {
     expect(host.textContent).toContain('payments');
     expect(host.querySelector('#main-content #feature-mount')?.textContent).toBe('Feature content');
   });
+
+  it('gates Scheduled Load navigation on the advertised server capability', () => {
+    localStorage.setItem('att-ui-theme', 'light');
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    const navigation: RouteState = {
+      route: { kind: 'schedules' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
+      navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn(),
+    };
+    act(() => root?.render(<AppShell
+      route={navigation.route} navigation={navigation}
+      serverVersion={{ status: 'ready', data: { apiVersion: '1', inlineLoadEnabled: false, loadSchedulingEnabled: true } }}
+      showScheduledLoad selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()}
+      onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}><p>Schedules</p></AppShell>));
+    expect(host.querySelector('[data-nav="scheduled-load"]')?.getAttribute('aria-current')).toBe('page');
+    expect(host.querySelector('#breadcrumbs')?.textContent).toContain('Scheduled Load');
+  });
+
+  it('opens a searchable page palette and shortcut help from the keyboard', () => {
+    localStorage.setItem('att-ui-theme', 'light');
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    const navigation: RouteState = {
+      route: { kind: 'dashboard' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
+      navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn(),
+    };
+    act(() => root?.render(<AppShell
+      route={navigation.route} navigation={navigation} serverVersion={{ status: 'ready', data: { apiVersion: '1', inlineLoadEnabled: false } }}
+      showScheduledLoad selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()}
+      onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}><p>Dashboard</p></AppShell>));
+
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })));
+    expect(host.querySelector('.keyboard-dialog[open]')).not.toBeNull();
+    const search = host.querySelector('#command-search') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(search, 'Scheduled');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const command = [...host.querySelectorAll('.command-list button')].find(button => button.textContent?.includes('Scheduled Load'));
+    expect(command).not.toBeUndefined();
+    act(() => command?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(navigation.navigate).toHaveBeenCalledWith({ kind: 'schedules' });
+    expect(host.querySelector('.keyboard-dialog[open]')).toBeNull();
+
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true })));
+    expect(host.textContent).toContain('Start a validated Load draft');
+  });
 });
