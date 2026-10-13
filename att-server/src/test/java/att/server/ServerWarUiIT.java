@@ -34,11 +34,12 @@ class ServerWarUiIT {
         assertServerApplicationJar(war);
 
         Path users = Files.writeString(temp.resolve("tomcat-users.xml"),
-                "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
+                "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/>"
+                        +"<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER,ATT_ADMIN\"/></tomcat-users>");
         Path packages = Files.createDirectories(temp.resolve("packages"));
         Path dummyPackage = Files.createDirectories(packages.resolve("dummy"));
         Path config = Files.writeString(temp.resolve("server.yaml"),
-                "server:\n  dataDir: " + temp.resolve("data") + "\n  authenticationRequired: true\n"
+                "server:\n  dataDir: " + temp.resolve("data") + "\n  authenticationRequired: true\n  scheduling:\n    enabled: true\n    adminRole: ATT_ADMIN\n"
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"
                         + "packages:\n  allowedRoots:\n    - " + packages + "\n  entries:\n    dummy: " + dummyPackage + "\n");
         String oldConfig = System.getProperty("att.server.config");
@@ -61,6 +62,16 @@ class ServerWarUiIT {
             assertEquals(401, get(port, "/tools/att/ui/index.html", null));
             String auth = "Basic " + Base64.getEncoder().encodeToString(
                     "att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String scheduleAdminAuth="Basic "+Base64.getEncoder().encodeToString("schedule-admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(401,get(port,"/tools/att/api/v1/load-schedules",null));
+            assertEquals(403,get(port,"/tools/att/api/v1/load-schedules",auth),"ordinary ATT_USER role must not manage schedules");
+            assertEquals(200,get(port,"/tools/att/api/v1/load-schedules",scheduleAdminAuth),"configured schedule admin role may list schedules");
+            String previewPath="/tools/att/api/v1/load-schedules/preview";
+            String previewBody="{\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}";
+            assertEquals(403,postJson(port,previewPath,scheduleAdminAuth,"https://attacker.example",previewBody),"cross-origin schedule mutations must be rejected");
+            assertEquals(403,postJson(port,previewPath,scheduleAdminAuth,"null",previewBody),"opaque Origins must be rejected");
+            assertEquals(200,postJson(port,previewPath,scheduleAdminAuth,"http://127.0.0.1:"+port,previewBody),"same-origin schedule preview may proceed");
+            assertEquals(403,delete(port,"/tools/att/api/v1/load-schedules/unknown",scheduleAdminAuth,"https://attacker.example"),"cross-origin deletes must be rejected before schedule lookup");
             assertJobDeepLink(port, auth);
 
             for (String asset : new String[]{"index.html", "app.js", "app.css"}) {
@@ -152,6 +163,28 @@ class ServerWarUiIT {
         HttpURLConnection connection = open(port, path, authorization);
         try { return connection.getResponseCode(); }
         finally { connection.disconnect(); }
+    }
+
+    private static int postJson(int port,String path,String authorization,String origin,String body)throws Exception {
+        return stateChange(port,path,authorization,origin,"POST",body);
+    }
+
+    private static int delete(int port,String path,String authorization,String origin)throws Exception {
+        return stateChange(port,path,authorization,origin,"DELETE",null);
+    }
+
+    private static int stateChange(int port,String path,String authorization,String origin,String method,String body)throws Exception {
+        byte[] payload=body==null?new byte[0]:body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        try(java.net.Socket socket=new java.net.Socket("127.0.0.1",port)) {
+            socket.setSoTimeout(5000);StringBuilder request=new StringBuilder(method).append(' ').append(path).append(" HTTP/1.1\r\nHost: 127.0.0.1:").append(port).append("\r\nConnection: close\r\n");
+            if(authorization!=null)request.append("Authorization: ").append(authorization).append("\r\n");
+            if(origin!=null)request.append("Origin: ").append(origin).append("\r\n");
+            if(body!=null)request.append("Content-Type: application/json\r\nContent-Length: ").append(payload.length).append("\r\n");
+            request.append("\r\n");var output=socket.getOutputStream();output.write(request.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));output.write(payload);output.flush();
+            String status=new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(),java.nio.charset.StandardCharsets.UTF_8)).readLine();
+            if(status==null)throw new java.io.IOException("Tomcat closed the state-change response without a status line");
+            return Integer.parseInt(status.split(" ")[1]);
+        }
     }
 
     private static HttpURLConnection open(int port, String path, String authorization) throws Exception {

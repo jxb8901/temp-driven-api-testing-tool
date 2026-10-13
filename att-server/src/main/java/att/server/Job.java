@@ -7,6 +7,7 @@ import java.util.Map;
 
 final class Job {
     final String id,command,packageId,principal;
+    String scheduleOccurrenceId;
     final Instant createdAt=Instant.now();
     volatile long requestReceivedNanos=System.nanoTime();
     volatile long admittedNanos,workerStartedNanos,workerSpawnStartedNanos,workerSpawnedNanos;

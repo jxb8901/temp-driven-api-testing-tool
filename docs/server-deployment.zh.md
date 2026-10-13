@@ -14,7 +14,7 @@ Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`�
 
 Server 依次尋找 JVM property `-Datt.server.config`、環境變數 `ATT_SERVER_CONFIG`，再尋找 `$ATT_HOME/config/att-server.yaml`。最後一個路徑的 `ATT_HOME` 先取自 `-Datt.home`，再取自 `ATT_HOME` 環境變數。若選定的 config 不存在、不可讀或無效，Server 會在診斷中指出其路徑並停止啟動，不會改用其他來源。沒有明確來源或可用的預設 config 時，啟動錯誤會提供設定指引。
 
-Tomcat 負責 listener、TLS、access log 及驗證。請讓服務帳戶可讀取 ATT_HOME 和 package root，並擁有或可寫入 `server.dataDir`。請設定 Realm、SSO 整合、用戶端憑證或其他容器支援的機制；驗證失敗時，Server 會保留容器回傳的 challenge 或 redirect。若設定、Java 基線或 package mapping 無效，Server 會在啟動時失敗。
+Tomcat 負責 listener、TLS、access log 及驗證。請讓服務帳戶可讀取 ATT_HOME 和 package root，並擁有或可寫入 `server.dataDir`。請設定 Realm、SSO 整合、用戶端憑證或其他容器支援的機制；驗證失敗時，Server 會保留容器回傳的 challenge 或 redirect。啟用 Scheduled Load 後，只有 `server.scheduling.adminRole`（預設 `ATT_ADMIN`）中的 Servlet 使用者可管理排程。若設定、Java 基線或 package mapping 無效，Server 會在啟動時失敗。
 
 ## ATT_HOME 佈局與遷移
 
@@ -44,6 +44,16 @@ att/                              # ATT_HOME
 
 瀏覽器建立的 Quick Load 及 Advanced Load draft 另有獨立 opt-in：`server.inlineLoad.enabled` 預設為 `false`。啟用後，Server 會在 Engine 驗證後及進入佇列前，再次檢查 workload 數、target 數、Virtual User 總數、Arrival Rate 總和、每個 workload 及整體並行數上限，以及完整時間窗口上限。以下範例設定保守預設值。時間窗口上限為 warmup、ramp-up、duration、ramp-down 的總和；target 數包含固定 target 及每個 VU mix entry。功能停用時回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出設定上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。這些限制適用於瀏覽器建立的 draft；既有 path-based Load request 維持相容行為，並繼續受 `workers.maxConcurrentLoad` 限制。
 
+週期性 package-backed Load 排程另有獨立 opt-in：`server.scheduling.enabled` 預設為 `false`。啟用前請先選定管理員角色並檢視排程上限。已驗證部署需要 Servlet container role `server.scheduling.adminRole`（預設 `ATT_ADMIN`）；請在 Tomcat 將此 role 對應至可信操作人員。若關閉驗證，必須同時設定 `server.scheduling.allowAnonymousManagement: true` 才能啟動排程；所有匿名 caller 會共享排程管理權限，Server 亦會記錄啟動警告。此功能需要有界 package inspection。排程定義及執行歷史保存在 `server.dataDir` 的 H2 資料庫；請在同一 dataDir 只執行一個 Server 程序。每個排程預設保留最新 10,000 筆 terminal occurrence（`maxExecutionsPerSchedule` 可設為 100–100,000）；執行中及處理中的 occurrence 會保留。本 scheduler 不提供多節點 leader election。
+
+排程以 package ID 及 package-relative Load scenario 檔案為輸入。建立/編輯及每次 occurrence 前，有界 Inspector 會驗證和正規化完整 scenario 及 target closure；即使瀏覽器建立的 Load draft 停用，Server 的 Load users、rate、duration、workload 及 target 上限仍然適用。每個工作都使用檢查所得的 immutable scenario 及 package revision，再經標準 Worker 和 Server Load admission 路徑提交；既有 Load concurrency 及 queue 上限仍然適用。排程 API 只接受 scenario、選填 config/environment 及現有的字串型 Load options；options 會在儲存和提交前以 Server 上限及 Engine 驗證。不接受輸出路徑、package root、Worker 設定、憑證或 caller 提供的 principal。工作使用 Server 建立的 `load-schedule:<id>` principal。提交失敗會記錄且不重試。已接納工作的狀態與 evidence 維持標準 job 生命週期，與 schedule occurrence 分開。
+
+UI 提供每日及每週本地時間選項，亦支援五欄位 cron（`minute hour day-of-month month day-of-week`），包括 `*`、清單、範圍及 `/step`；不接受月份/星期名稱或擴充 cron 語法。日及星期欄位同時受限時，任一欄位匹配即算符合。Timezone 必須是 IANA zone ID。春季 DST 跳時中不存在的本地分鐘會略過；秋季重複時段中，每個實際 instant 都會執行一次。Occurrence 間隔至少為 `minimumIntervalMinutes`（預設 15，範圍 1–10080）。重啟或延遲 poll 錯過的 firing 會直接推進至下一個未來 instant，並按每個排程及每次 poll 合併為一筆 `skipped` history/audit 記錄，原因為 `misfire-no-backfill`；不會補跑 Load。每次 poll 對每個排程最多提交一個 occurrence。每個排程的 `maxConcurrentRuns` 預設為 1，並且不可高於全域 `server.scheduling.maxConcurrentRuns`；達到排程自己的執行中上限時會略過新 occurrence。全域 `maxConcurrentRuns`（預設 1，且不可高於 `workers.maxConcurrentLoad`）限制由 scheduler 提交的工作。容量或 package 驗證拒絕會記錄為 `failed-to-submit`，不會重試。`failurePolicy: continue`（預設值）會讓排程繼續啟用；`pauseAfterSubmitFailure` 會在首次提交失敗後暫停排程。此設定只處理提交錯誤；已提交工作的後續結果仍是標準 job outcome。暫停、編輯或刪除排程不會取消已接納的工作。
+
+內建 Scheduled Load 頁面支援建立、編輯、暫停/恢復、手動觸發、刪除、每日/每週/cron recurrence、時區感知的 next-run 預覽，以及連結標準工作記錄的 occurrence history。手動觸發需要瀏覽器確認，並遵守每排程及全域 active-run、容量上限和最短間隔 rate limit。
+
+啟用後的 `/metrics` 會包含下一次到期時間、執行中的排程 Load 數量，以及依狀態統計的保留 occurrence 數。Occurrence history 和 audit table 會記錄提交、略過、容量及 misfire 結果；變更及手動觸發動作會記錄已解析的 caller。Scheduler 使用 Server 主機的 wall clock 及排程的 IANA timezone；請以 NTP 保持主機時間同步。時鐘向前調整會按 misfire 處理並記錄，不會補跑；時鐘向後調整會等候 wall clock 追上已儲存的 next instant。更新 WAR 或重啟 Tomcat 時，請採用單一 instance 的標準部署流程：runtime 停止時 scheduler 一併停止，已接納工作依標準 shutdown recovery 處理，重啟後略過錯過的 occurrence。不要讓新舊 Server 程序同時使用相同 `server.dataDir`，也不要為此單節點 scheduler 使用 rolling multi-instance deployment。
+
 ```yaml
 server:
   dataDir: /var/lib/att-server
@@ -69,6 +79,16 @@ server:
     maxAggregateArrivalRatePerSecond: 100
     maxConcurrentPerWorkload: 100
     maxDurationSeconds: 3600
+  scheduling:
+    enabled: false
+    allowAnonymousManagement: false
+    adminRole: ATT_ADMIN
+    maxSchedules: 100
+    minimumIntervalMinutes: 15
+    pollIntervalSeconds: 10
+    maxConcurrentRuns: 1
+    failurePolicy: continue
+    maxExecutionsPerSchedule: 10000
 workers:
   maxConcurrent: 8
   queuedLimit: 100
@@ -132,7 +152,7 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 | 方法 | 路徑 | 用途 |
 | --- | --- | --- |
 | `GET` | `/health`、`/version` | 健康狀態、build 及瀏覽器 Load capability 資訊 |
-| `GET` | `/metrics` | 有界的工作及 Worker 數量 |
+| `GET` | `/metrics` | 有界的工作、Worker 及已啟用排程數量 |
 | `GET` | `/packages`、`/packages/{packageId}` | 讀取設定中的 registry |
 | `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | 列出安全的 Case、Template、Flow 及 Tool 投影 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | 讀取單一資源定義及關聯 |
@@ -152,6 +172,30 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 | `GET` | `/jobs/{jobId}/artifacts` | 列出輸出檔案 |
 | `GET` | `/jobs/{jobId}/artifacts/{path}` | 下載輸出檔案 |
 | `DELETE` | `/jobs/{jobId}` | 取消執行中工作並保留歷史 |
+| `GET`、`POST` | `/load-schedules` | 列出或建立排程（僅管理員） |
+| `POST` | `/load-schedules/preview` | 驗證 recurrence 並預覽下一次執行時間（僅管理員） |
+| `GET`、`PATCH`、`DELETE` | `/load-schedules/{scheduleId}` | 讀取、編輯或刪除排程（僅管理員） |
+| `POST` | `/load-schedules/{scheduleId}/pause`、`resume`、`trigger` | 暫停、恢復或手動觸發（僅管理員） |
+| `GET` | `/load-schedules/{scheduleId}/executions?limit=100` | 讀取 occurrence history 及已接納工作連結 |
+
+排程停用時，相關 endpoint 會回傳 `404`。啟用後，已驗證 caller 預設需要 `ATT_ADMIN` role。Browser/API 狀態變更請求亦會套用同源檢查。建立排程的 JSON 範例如下：
+
+```json
+{
+  "name": "Nightly checkout load",
+  "packageId": "payments",
+  "scenario": "load/checkout.yaml",
+  "config": "config/config.yaml",
+  "environment": "SIT",
+  "timezone": "Asia/Hong_Kong",
+  "cron": "0 2 * * *",
+  "load": { "duration": "10m" },
+  "maxConcurrentRuns": 1,
+  "enabled": false
+}
+```
+
+排程預設為 paused。建立、編輯及恢復時會按目前時間計算下一個符合的 instant。Occurrence 狀態為 `scheduled`、`submitted`、`skipped` 及 `failed-to-submit`；job 執行結果仍使用一般 job API。刪除排程會移除定義，但保留歷史，也不會取消已接納的工作。刪除前請記下 UI/API 顯示的 schedule ID；只要仍有保留記錄，管理員在定義刪除後仍可使用 `/load-schedules/{scheduleId}/executions` 讀取歷史，即使該排程不再出現在 UI 或 schedule list。History 受 `maxExecutionsPerSchedule` 限制；處理中 occurrence 及連結至執行中工作的 occurrence 可暫時超出上限，相關工作進入 terminal 狀態時會執行 pruning，schedule 定義刪除後亦會如此。
 
 使用穩定 package ID 及該 ATT Worker command 的欄位提交工作：
 
