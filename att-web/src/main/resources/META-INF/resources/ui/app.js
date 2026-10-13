@@ -63,6 +63,7 @@
   let advancedTargetSuggestionSequence = 0;
   const advancedTargetCatalogs = new Map();
   let advancedSubmitting = false;
+  let scheduleRequestSequence = 0;
   let resourceConfigurationTarget = null;
   let cancelRequested = false;
   let versionPromise = null;
@@ -94,6 +95,7 @@
       versionPromise = request('version').then(info => {
         if (String(info.apiVersion) !== '1') throw new Error('Incompatible ATT Server API version; this Web UI requires /api/v1.');
         inlineLoadEnabled = info.inlineLoadEnabled === true;
+        byId('scheduled-load-nav').hidden = info.loadSchedulingEnabled !== true;
         text(byId('connection'), 'Connected');
       }).catch(error => { versionPromise = null; throw error; });
     }
@@ -119,6 +121,7 @@
     const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
     closeStream();
     byId('home').hidden = parts.length > 0;
+    byId('load-schedules-view').hidden = parts[0] !== 'load-schedules';
     byId('package-view').hidden = parts[0] !== 'packages' || !parts[1];
     byId('advanced-load').hidden = parts[0] !== 'advanced-load' || !parts[1];
     byId('job-view').hidden = parts[0] !== 'jobs' || !parts[1];
@@ -135,6 +138,7 @@
       if (generation !== navigation) return;
       if (parts[0] === 'packages' && selectedPackage) showPackage(selectedPackage, generation);
       else if (parts[0] === 'advanced-load' && selectedPackage) showAdvancedLoadPackage(selectedPackage, generation);
+      else if (parts[0] === 'load-schedules') loadSchedules(generation);
       else if (activeJob) showJob(activeJob, generation);
       else loadHome(generation);
     }).catch(error => { if (generation === navigation) { text(byId('connection'), 'Unavailable'); message(error.message); } });
@@ -186,6 +190,93 @@
   async function loadHome(generation = navigation) {
     const results = await Promise.all([loadHomePackages(generation), loadHomeJobs(generation)]);
     return results.every(Boolean);
+  }
+  function scheduleLocalTime(schedule) {
+    if (!schedule.nextRunAt) return '—';
+    try { return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: schedule.timezone }).format(new Date(schedule.nextRunAt)); }
+    catch (_) { return schedule.nextRunAt; }
+  }
+  function scheduleAction(label, action, schedule) {
+    const button = el('button', label); button.type = 'button';
+    button.addEventListener('click', action); return button;
+  }
+  async function loadSchedules(generation = navigation) {
+    const sequence = ++scheduleRequestSequence;
+    try {
+      const [data, packages] = await Promise.all([request('load-schedules'), request('packages')]);
+      if (sequence !== scheduleRequestSequence || generation !== navigation) return;
+      const select = byId('load-schedule-form').elements.packageId;
+      const selected = select.value; select.replaceChildren();
+      listItems(packages).forEach(item => { const option = el('option', item.packageId); option.value = item.packageId; select.append(option); });
+      if (selected) select.value = selected;
+      if (!byId('load-schedule-form').elements.timezone.value) {
+        byId('load-schedule-form').elements.timezone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      }
+      const tbody = byId('load-schedules'); tbody.replaceChildren();
+      listItems(data).forEach(schedule => {
+        const row = document.createElement('tr');
+        const name = el('td', schedule.name); name.append(document.createElement('br'), el('small', schedule.description || ''));
+        const scenario = el('td', `${schedule.packageId} · ${schedule.scenario} · ${schedule.loadModel || 'model unavailable'}${schedule.config ? ` · ${schedule.config}` : ''}`);
+        const recurrence = el('td', `${schedule.timezone} · ${schedule.cron}`);
+        const next = el('td', scheduleLocalTime(schedule));
+        const state = el('td', schedule.enabled ? 'Enabled' : 'Paused');
+        const actions = document.createElement('td');
+        actions.append(scheduleAction('History', () => showScheduleHistory(schedule, generation), schedule));
+        actions.append(document.createTextNode(' '), scheduleAction('Edit', () => editSchedule(schedule), schedule));
+        actions.append(document.createTextNode(' '), scheduleAction(schedule.enabled ? 'Pause' : 'Resume', async () => {
+          try { await request(`load-schedules/${encodeURIComponent(schedule.id)}/${schedule.enabled ? 'pause' : 'resume'}`, { method: 'POST' }); await loadSchedules(generation); }
+          catch (error) { text(byId('schedule-status'), error.message); }
+        }, schedule));
+        actions.append(document.createTextNode(' '), scheduleAction('Run now', async () => {
+          if (!window.confirm(`Submit ${schedule.name} as a Load job now?`)) return;
+          try { const occurrence = await request(`load-schedules/${encodeURIComponent(schedule.id)}/trigger`, { method: 'POST', body: '{}' });
+            text(byId('schedule-status'), `Occurrence ${occurrence.status}${occurrence.jobId ? ` · job ${occurrence.jobId}` : ''}.`); await loadSchedules(generation); await showScheduleHistory(schedule, generation); }
+          catch (error) { text(byId('schedule-status'), error.message); }
+        }, schedule));
+        actions.append(document.createTextNode(' '), scheduleAction('Delete', async () => {
+          if (!window.confirm(`Delete schedule ${schedule.name}? Running jobs will continue.`)) return;
+          try { await request(`load-schedules/${encodeURIComponent(schedule.id)}`, { method: 'DELETE' });
+            if (byId('schedule-history').dataset.scheduleId === schedule.id) byId('schedule-history').hidden = true;
+            text(byId('schedule-status'), `Deleted ${schedule.name}.`); await loadSchedules(generation); }
+          catch (error) { text(byId('schedule-status'), error.message); }
+        }, schedule));
+        row.append(name, scenario, recurrence, next, state, actions); tbody.append(row);
+      });
+      text(byId('schedule-status'), `${listItems(data).length} schedule(s). Times are shown in each schedule's timezone.`);
+    } catch (error) {
+      if (sequence === scheduleRequestSequence && generation === navigation) text(byId('schedule-status'), error.message);
+    }
+  }
+  function editSchedule(schedule) {
+    const form = byId('load-schedule-form'); form.dataset.scheduleId = schedule.id;
+    form.elements.name.value = schedule.name || ''; form.elements.description.value = schedule.description || '';
+    form.elements.tags.value = (schedule.tags || []).join(', ');
+    form.elements.packageId.value = schedule.packageId || ''; form.elements.scenario.value = schedule.scenario || '';
+    form.elements.config.value = schedule.config || ''; form.elements.environment.value = schedule.environment || '';
+    form.elements.timezone.value = schedule.timezone || 'UTC'; form.elements.cron.value = schedule.cron || '';
+    form.elements.load.value = JSON.stringify(schedule.load || {}, null, 2); form.elements.enabled.checked = schedule.enabled === true;
+    text(byId('schedule-form-heading'), `Edit schedule: ${schedule.name}`); byId('cancel-schedule-edit').hidden = false;
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function resetScheduleForm() {
+    const form = byId('load-schedule-form'); form.reset(); delete form.dataset.scheduleId;
+    form.elements.timezone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    text(byId('schedule-form-heading'), 'Create schedule'); byId('cancel-schedule-edit').hidden = true;
+  }
+  async function showScheduleHistory(schedule, generation = navigation) {
+    try {
+      const data = await request(`load-schedules/${encodeURIComponent(schedule.id)}/executions?limit=100`);
+      if (generation !== navigation) return;
+      const section = byId('schedule-history'); section.hidden = false; section.dataset.scheduleId = schedule.id;
+      text(byId('schedule-history-title'), `Execution history · ${schedule.name}`);
+      const tbody = byId('schedule-executions'); tbody.replaceChildren();
+      listItems(data).forEach(item => {
+        const row = document.createElement('tr');
+        [item.scheduledFor, item.triggerType, item.occurrenceId, item.status, item.reason || ''].forEach(value => row.append(el('td', value)));
+        const jobCell = document.createElement('td'); if (item.jobId) jobCell.append(link(`#/jobs/${encodeURIComponent(item.jobId)}`, item.jobId));
+        row.append(jobCell); tbody.append(row);
+      });
+    } catch (error) { text(byId('schedule-status'), error.message); }
   }
   function schedulePrincipalSearch() {
     if (principalSearchTimer !== null) clearTimeout(principalSearchTimer);
@@ -1514,6 +1605,29 @@
   byId('refresh-configuration').addEventListener('click', () => { if (selectedPackage) loadDeclaredConfiguration(selectedPackage); });
   byId('refresh-jobs').addEventListener('click', () => loadHomeJobs());
   byId('job-principal-search').addEventListener('input', schedulePrincipalSearch);
+  byId('load-schedule-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      const load = JSON.parse(String(form.elements.load.value || '{}'));
+      if (!load || Array.isArray(load) || typeof load !== 'object') throw new Error('Load options must be a JSON object.');
+      const payload = {
+        name: String(form.elements.name.value || '').trim(), description: String(form.elements.description.value || '').trim(),
+        tags: String(form.elements.tags.value || '').split(',').map(tag => tag.trim()).filter(Boolean),
+        packageId: String(form.elements.packageId.value || ''), scenario: String(form.elements.scenario.value || '').trim(),
+        config: String(form.elements.config.value || '').trim(), environment: String(form.elements.environment.value || '').trim(),
+        timezone: String(form.elements.timezone.value || '').trim(), cron: String(form.elements.cron.value || '').trim(),
+        load, enabled: form.elements.enabled.checked
+      };
+      const id = form.dataset.scheduleId;
+      const saved = await request(id ? `load-schedules/${encodeURIComponent(id)}` : 'load-schedules', {
+        method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload)
+      });
+      resetScheduleForm(); text(byId('schedule-status'), `Saved ${saved.name}. Next run: ${scheduleLocalTime(saved)}.`);
+      await loadSchedules();
+    } catch (error) { text(byId('schedule-status'), error.message); }
+  });
+  byId('cancel-schedule-edit').addEventListener('click', resetScheduleForm);
   window.addEventListener('hashchange', route);
   route();
 })();

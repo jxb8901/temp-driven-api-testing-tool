@@ -37,6 +37,17 @@ server:
     maxConcurrentPerWorkload: 100
     maxTotalConcurrent: 1000
     maxDurationSeconds: 3600
+  # Recurring package-backed Load schedules are disabled unless enabled here.
+  scheduling:
+    enabled: false
+    allowAnonymousManagement: false
+    adminRole: ATT_ADMIN
+    maxSchedules: 100
+    minimumIntervalMinutes: 15
+    pollIntervalSeconds: 10
+    maxConcurrentRuns: 1
+    failurePolicy: continue
+    maxExecutionsPerSchedule: 10000
 
 workers:
   maxConcurrent: 8

@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -56,6 +57,10 @@ final class ServerRuntime implements AutoCloseable {
     private static final int RESOURCE_DEFAULT_PAGE_SIZE=50, RESOURCE_MAX_PAGE_SIZE=100;
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
+    private static final class ValidatedScheduledScenario {
+        final Map<String,Object> scenario;final String revisionDigest,model;
+        ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;}
+    }
     final ServerConfig config;
     final JobStore store;
     final ThreadPoolExecutor workers,streams,inspectors;
@@ -67,6 +72,7 @@ final class ServerRuntime implements AutoCloseable {
     final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
     private final ScheduledExecutorService retention;
     private final ScheduledExecutorService inspectionWatchdogs;
+    private final LoadScheduleScheduler loadScheduleScheduler;
     private final WorkerProcessLauncher processLauncher;
     private final Clock clock;
     private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
@@ -99,6 +105,12 @@ final class ServerRuntime implements AutoCloseable {
         inspectionWatchdogs=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-watchdog");t.setDaemon(true);return t;});
         recover();cleanupExpiredJobsSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
+        if(config.scheduling.enabled) {
+            store.recoverScheduleExecutions();
+            if(!config.authenticationRequired)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Scheduled Load management is enabled without authentication; anonymous schedule administration was explicitly allowed");
+            loadScheduleScheduler=new LoadScheduleScheduler(config.scheduling,store,this::submitScheduledLoad,clock);
+            loadScheduleScheduler.start();
+        } else loadScheduleScheduler=null;
     }
     private void recover() throws Exception {
         for(Map<String,Object> stale:store.staleWorkers()) {
@@ -122,17 +134,23 @@ final class ServerRuntime implements AutoCloseable {
         return submit(command,input,principal,false);
     }
     private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft) throws Exception {
+        return submit(command,input,principal,serverIssuedDraft,null,false);
+    }
+    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId) throws Exception {
+        return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,false);
+    }
+    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued) throws Exception {
         long requestReceivedNanos=System.nanoTime();
         if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
         if(!serverIssuedDraft&&(input.has("draftId")||input.has("inlineDebugInput")||input.has("inlineLoadScenario")
                 ||input.has("expectedRevisionDigest")||input.has("draftResourceId")))
             throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
         if(serverIssuedDraft&&"load".equals(command)) {
-            requireInlineLoadEnabled();
+            if(!scheduleIssued)requireInlineLoadEnabled();
             JsonNode scenarioNode=input.get("inlineLoadScenario");
             if(scenarioNode==null||!scenarioNode.isObject())throw new IllegalArgumentException("A validated inline Load scenario is required");
             @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(scenarioNode,Map.class);
-            enforceInlineLoadLimits(scenario);
+            if(scheduleIssued)validateScheduledLoadLimits(config.inlineLoad,scenario);else enforceInlineLoadLimits(scenario);
         }
         String packageId=required(input,"packageId");Path root=config.packages.get(packageId);
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
@@ -158,7 +176,7 @@ final class ServerRuntime implements AutoCloseable {
             id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
             jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
             JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob);
-            Job job=new Job(id,command,packageId,principal,request,events);job.requestReceivedNanos=requestReceivedNanos;String summary=JSON.writeValueAsString(Map.of("command",command,"packageId",packageId));
+            Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;String summary=JSON.writeValueAsString(Map.of("command",command,"packageId",packageId));
             store.insert(job,summary);persisted=true;jobs.put(id,job);append(job,"status",Map.of("jobId",id,"status","QUEUED"));
             FutureTask<Void> task=new FutureTask<>(()->{execute(job,activeJobPath,lease);return null;});tasks.put(id,task);leases.put(id,lease);
             job.admittedNanos=System.nanoTime();
@@ -631,6 +649,9 @@ final class ServerRuntime implements AutoCloseable {
     }
     static void validateInlineLoadLimits(ServerConfig.InlineLoad limits,Map<String,Object> scenario) {
         if(!limits.enabled)throw new InlineLoadDisabledException();
+        validateScheduledLoadLimits(limits,scenario);
+    }
+    static void validateScheduledLoadLimits(ServerConfig.InlineLoad limits,Map<String,Object> scenario) {
         Object rawWorkloads=scenario.get("workloads");
         if(!(rawWorkloads instanceof List)||((List<?>)rawWorkloads).isEmpty())
             throw new IllegalArgumentException("Validated Load scenario must contain workloads");
@@ -945,7 +966,150 @@ final class ServerRuntime implements AutoCloseable {
         int offset=value.path("offset").asInt(-1);String revision=value.path("revision").asText("");if(offset<1||offset>20000||!revision.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("cursor is invalid");return new Cursor(offset,revision);
     }
     private static boolean containsControl(String value){for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))return true;return false;}
-    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());return m;}
+    List<LoadSchedule> loadSchedules() throws Exception {requireSchedulingEnabled();return store.schedules();}
+    LoadSchedule loadSchedule(String id) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();return schedule;}
+    List<Map<String,Object>> loadScheduleExecutions(String id,int limit) throws Exception {requireSchedulingEnabled();if(store.schedule(id)==null&&store.scheduleExecutions(id,1).isEmpty())throw new NotFoundException();return store.scheduleExecutions(id,limit);}
+    LoadSchedule createLoadSchedule(JsonNode input,String principal) throws Exception {
+        requireSchedulingEnabled();
+        LoadSchedule schedule=buildLoadSchedule(input,null,principal);schedule.id="S"+UUID.randomUUID().toString().replace("-","").toUpperCase();schedule.createdBy=principal;schedule.createdAt=clock.instant().toString();
+        store.createSchedule(schedule,config.scheduling.maxSchedules);store.audit(principal,"SCHEDULE_CREATE",null,schedule.packageId,"CREATED");return schedule;
+    }
+    LoadSchedule updateLoadSchedule(String id,JsonNode input,String principal) throws Exception {
+        requireSchedulingEnabled();LoadSchedule prior=store.schedule(id);if(prior==null)throw new NotFoundException();
+        LoadSchedule schedule=buildLoadSchedule(input,prior,principal);schedule.id=id;schedule.createdBy=prior.createdBy;schedule.createdAt=prior.createdAt;
+        schedule.updatedBy=principal;schedule.updatedAt=clock.instant().toString();
+        if(!prior.enabled&&schedule.enabled||!prior.cron.equals(schedule.cron)||!prior.timezone.equals(schedule.timezone))
+            schedule.nextRunAt=nextRun(schedule.cron,schedule.timezone,clock.instant()).toString();
+        else if(!schedule.enabled)schedule.nextRunAt=prior.nextRunAt;
+        LoadSchedule updated=store.updateSchedule(schedule,prior.updatedAt);if(updated==null)throw new NotFoundException();
+        store.audit(principal,"SCHEDULE_UPDATE",null,schedule.packageId,"UPDATED");return updated;
+    }
+    LoadSchedule setLoadScheduleEnabled(String id,boolean enabled,String principal) throws Exception {
+        requireSchedulingEnabled();Instant now=clock.instant();LoadSchedule schedule;
+        synchronized(store) {
+            LoadSchedule current=store.schedule(id);if(current==null)throw new NotFoundException();
+            String next=enabled?nextRun(current.cron,current.timezone,now).toString():null;
+            schedule=store.setScheduleEnabled(id,enabled,principal,now.toString(),next);
+        }
+        if(schedule==null)throw new NotFoundException();
+        store.audit(principal,enabled?"SCHEDULE_RESUME":"SCHEDULE_PAUSE",null,schedule.packageId,enabled?"ENABLED":"PAUSED");
+        return schedule;
+    }
+    void deleteLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();store.deleteSchedule(id);store.audit(principal,"SCHEDULE_DELETE",null,schedule.packageId,"DELETED");}
+    Map<String,Object> triggerLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule);store.audit(principal,"SCHEDULE_TRIGGER",String.valueOf(occurrence.get("jobId")),schedule.packageId,String.valueOf(occurrence.get("status")));return occurrence;}
+
+    private Map<String,Object> submitScheduledLoad(LoadSchedule schedule,String occurrenceId) throws Exception {
+        Path root=config.packages.get(schedule.packageId);if(root==null)throw new IllegalArgumentException("Configured schedule package is no longer available");validatePackageRoot(root);
+        ValidatedScheduledScenario validated=validateScheduleScenario(root,schedule);Map<String,Object> scenario=validated.scenario;
+        com.fasterxml.jackson.databind.node.ObjectNode input=JSON.createObjectNode();input.put("packageId",schedule.packageId);
+        if(schedule.config!=null)input.put("config",schedule.config);if(schedule.environment!=null)input.put("environment",schedule.environment);
+        input.set("inlineLoadScenario",JSON.valueToTree(scenario));input.put("expectedRevisionDigest",validated.revisionDigest);
+        input.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(schedule.packageId)));
+        input.put("maxSourceBytes",config.inspection.maxSourceBytes);input.put("maxResponseBytes",config.inspection.maxResponseBytes);
+        return submit("load",input,"load-schedule:"+schedule.id,true,occurrenceId,true);
+    }
+
+    private ValidatedScheduledScenario validateScheduleScenario(Path root,LoadSchedule schedule) throws Exception {
+        Map<String,Object> requested=readScheduledScenario(root,schedule.scenario);
+        ValidatedScheduledScenario validated=validateScheduledScenario(root,schedule,requested);
+        if(schedule.load!=null&&!schedule.load.isEmpty()) {
+            Map<String,Object> overridden=withScheduledLoadOptions(validated.scenario,schedule.load);
+            validated=validateScheduledScenario(root,schedule,overridden);
+        }
+        validateScheduledLoadLimits(config.inlineLoad,validated.scenario);schedule.loadModel=validated.model;return validated;
+    }
+
+    private Map<String,Object> readScheduledScenario(Path root,String relative) throws Exception {
+        Path scenario=root.resolve(relative).normalize();validatePackagePath(root,relative,"scenario");
+        if(!Files.isRegularFile(scenario)||!scenario.toRealPath().startsWith(root.toRealPath()))throw new IllegalArgumentException("Scheduled Load scenario must be a regular package file");
+        if(Files.size(scenario)>config.maxRequestBytes)throw new IllegalArgumentException("Scheduled Load scenario exceeds server.maxRequestBytes");
+        org.yaml.snakeyaml.LoaderOptions options=new org.yaml.snakeyaml.LoaderOptions();options.setAllowDuplicateKeys(false);
+        options.setMaxAliasesForCollections(20);options.setCodePointLimit(config.maxRequestBytes);
+        Object raw;try(var stream=Files.newInputStream(scenario)){raw=new Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor(options)).load(stream);}
+        if(!(raw instanceof Map<?,?>))throw new IllegalArgumentException("Scheduled Load scenario must be a YAML mapping");
+        @SuppressWarnings("unchecked") Map<String,Object> result=(Map<String,Object>)JSON.convertValue(raw,Map.class);
+        return result;
+    }
+
+    private ValidatedScheduledScenario validateScheduledScenario(Path root,LoadSchedule schedule,Map<String,Object> scenario) throws Exception {
+        WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
+        if(schedule.config!=null){request.config=safeRelative(schedule.config,"config");validatePackagePath(root,request.config,"config");}
+        request.inspectionAction="load-scenario";request.inlineLoadScenario=scenario;
+        Map<String,Object> inspected=executeInspection(root,request);
+        Object rawScenario=inspected.get("normalizedScenario"),rawDigest=inspected.get("revisionDigest"),rawModel=inspected.get("model");
+        if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
+                ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel))
+            throw new IllegalStateException("Load validation Worker returned an invalid response");
+        @SuppressWarnings("unchecked") Map<String,Object> normalized=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
+        return new ValidatedScheduledScenario(normalized,(String)rawDigest,(String)rawModel);
+    }
+
+    private static Map<String,Object> withScheduledLoadOptions(Map<String,Object> source,Map<String,String> options) {
+        @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(source,Map.class);
+        Object raw=scenario.get("workloads");if(!(raw instanceof List<?> workloads)||workloads.isEmpty())throw new IllegalArgumentException("Scheduled Load scenario must contain workloads");
+        List<Object> normalized=new ArrayList<>();
+        for(Object value:workloads) {
+            if(!(value instanceof Map<?,?>))throw new IllegalArgumentException("Scheduled Load workload is invalid");
+            @SuppressWarnings("unchecked") Map<String,Object> workload=(Map<String,Object>)JSON.convertValue(value,Map.class);
+            Object prior=workload.get("load");if(!(prior instanceof Map<?,?>))throw new IllegalArgumentException("Scheduled Load pacing is invalid");
+            @SuppressWarnings("unchecked") Map<String,Object> load=(Map<String,Object>)JSON.convertValue(prior,Map.class);load.putAll(options);workload.put("load",load);normalized.add(workload);
+        }
+        scenario.put("workloads",normalized);return scenario;
+    }
+
+    private LoadSchedule buildLoadSchedule(JsonNode input,LoadSchedule prior,String principal) throws Exception {
+        if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
+        Set<String> allowed=Set.of("name","description","tags","packageId","scenario","config","environment","timezone","cron","load","enabled");
+        input.fieldNames().forEachRemaining(key->{if(!allowed.contains(key))throw new IllegalArgumentException("Unknown schedule field: "+key);});
+        LoadSchedule s=prior==null?new LoadSchedule():prior.copy();
+        s.name=fieldText(input,"name",s.name,true);s.description=fieldText(input,"description",s.description,false);
+        if(input.has("tags"))s.tags=scheduleTags(input.get("tags"));else if(s.tags==null)s.tags=List.of();
+        s.packageId=fieldText(input,"packageId",s.packageId,true);s.scenario=fieldText(input,"scenario",s.scenario,true);
+        s.config=fieldText(input,"config",s.config,false);s.environment=fieldText(input,"environment",s.environment,false);
+        s.timezone=fieldText(input,"timezone",s.timezone,true);s.cron=fieldText(input,"cron",s.cron,true);
+        if(input.has("enabled")){if(!input.get("enabled").isBoolean())throw new IllegalArgumentException("enabled must be true or false");s.enabled=input.get("enabled").booleanValue();}
+        if(input.has("load"))s.load=loadOptions(input.get("load"));else if(s.load==null)s.load=new LinkedHashMap<>();
+        if(s.name.isBlank()||s.name.length()>120||containsControl(s.name))throw new IllegalArgumentException("name must be 1 to 120 characters without control characters");
+        if(s.description!=null&&(s.description.length()>500||containsControl(s.description)))throw new IllegalArgumentException("description must be at most 500 characters without control characters");
+        if(!config.packages.containsKey(s.packageId))throw new IllegalArgumentException("Unknown packageId");
+        Path root=config.packages.get(s.packageId);validatePackageRoot(root);
+        s.scenario=safeRelative(s.scenario,"scenario");if(s.scenario==null)throw new IllegalArgumentException("scenario is required");
+        validatePackagePath(root,s.scenario,"scenario");Path scenarioPath=root.resolve(s.scenario).normalize();
+        if(!Files.isRegularFile(scenarioPath)||!scenarioPath.toRealPath().startsWith(root.toRealPath()))throw new IllegalArgumentException("scenario must be a regular file inside the configured package");
+        s.config=safeRelative(s.config,"config");validatePackagePath(root,s.config,"config");
+        s.environment=s.environment==null||s.environment.isBlank()?null:safeText(s.environment,128,"environment");
+        java.time.ZoneId zone;try{zone=java.time.ZoneId.of(s.timezone);if(!java.time.ZoneId.getAvailableZoneIds().contains(s.timezone))throw new IllegalArgumentException();}catch(Exception invalid){throw new IllegalArgumentException("timezone must be a valid IANA timezone");}
+        CronExpression cron=CronExpression.parse(s.cron,config.scheduling.minimumIntervalMinutes);
+        cron.validateTimezoneMinimumInterval(zone,config.scheduling.minimumIntervalMinutes,clock.instant());
+        validateScheduleScenario(root,s);
+        s.nextRunAt=nextRun(s.cron,s.timezone,clock.instant()).toString();
+        s.updatedBy=principal;s.updatedAt=clock.instant().toString();return s;
+    }
+    private static String fieldText(JsonNode input,String name,String prior,boolean required) {
+        if(!input.has(name)) {if(required&&(prior==null||prior.isBlank()))throw new IllegalArgumentException(name+" is required");return prior;}
+        JsonNode node=input.get(name);if(node==null||node.isNull()){if(required)throw new IllegalArgumentException(name+" is required");return null;}
+        if(!node.isTextual())throw new IllegalArgumentException(name+" must be a string");String value=node.asText().trim();
+        if(value.length()>512||containsControl(value))throw new IllegalArgumentException(name+" is invalid");return value;
+    }
+    private static Map<String,String> loadOptions(JsonNode value) {
+        if(!value.isObject())throw new IllegalArgumentException("load must be an object of Load option strings");
+        Set<String> allowed=Set.of("users","arrivalRate","warmup","rampUp","duration","rampDown","thinkTime","maxConcurrent","overloadPolicy");
+        Map<String,String> result=new LinkedHashMap<>();value.fields().forEachRemaining(entry->{
+            if(!allowed.contains(entry.getKey()))throw new IllegalArgumentException("Unsupported Load option: "+entry.getKey());
+            if(!entry.getValue().isTextual())throw new IllegalArgumentException("Load option values must be strings");
+            String option=entry.getValue().asText();if(option.length()>128||containsControl(option))throw new IllegalArgumentException("Load option is invalid");result.put(entry.getKey(),option);
+        });return result;
+    }
+    private static List<String> scheduleTags(JsonNode value) {
+        if(!value.isArray()||value.size()>20)throw new IllegalArgumentException("tags must be an array of at most 20 labels");
+        java.util.LinkedHashSet<String> tags=new java.util.LinkedHashSet<>();
+        for(JsonNode tag:value){if(!tag.isTextual())throw new IllegalArgumentException("schedule tags must be strings");String label=tag.asText().trim();
+            if(!label.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,47}"))throw new IllegalArgumentException("each tag must be 1 to 48 letters, numbers, or . _ : - characters");tags.add(label);}
+        return List.copyOf(tags);
+    }
+    private static Instant nextRun(String cron,String timezone,Instant after) {return CronExpression.parse(cron,1).nextAfter(after,java.time.ZoneId.of(timezone));}
+    private void requireSchedulingEnabled(){if(!config.scheduling.enabled||loadScheduleScheduler==null)throw new NotFoundException();}
+    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}return m;}
     Path artifact(Job job,String requested) throws Exception {
         if(requested==null||requested.isBlank())throw new IllegalArgumentException("artifact path is required");
         Path base=config.dataDir.resolve("jobs").resolve(job.id).resolve("output").toRealPath();Path relative=Paths.get(requested);
@@ -996,7 +1160,7 @@ final class ServerRuntime implements AutoCloseable {
         return node.deepCopy();
     }
     private static String replacePathPrefix(String value,String prefix,String logical){if(value.equals(prefix))return logical+":";String separator=java.io.File.separator;value=value.replace(prefix+separator,logical+":");if("\\".equals(separator))value=value.replace(prefix+"/",logical+":");else value=value.replace(prefix+"\\",logical+":");return value;}
-    private static String safeMessage(Exception e){String m=att.server.api.internal.DiagnosticSanitizer.redactText(e.getMessage());return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
+    static String safeMessage(Exception e){String m=att.server.api.internal.DiagnosticSanitizer.redactText(e.getMessage());return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
     private static String readBoundedLine(BufferedReader reader,int limit) throws java.io.IOException {StringBuilder line=new StringBuilder();boolean oversized=false;int c;while((c=reader.read())!=-1){if(c=='\n')break;if(c=='\r')continue;if(line.length()<limit)line.append((char)c);else oversized=true;}if(c==-1&&line.isEmpty()&&!oversized)return null;return oversized?"\u0000OVERSIZED":line.toString();}
     JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob):active.events;}
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
@@ -1014,7 +1178,7 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
@@ -1025,6 +1189,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     static final class QueueFullException extends RuntimeException {QueueFullException(String m){super(m);}}
     static final class NotFoundException extends RuntimeException {}
+    static final class ScheduleConflictException extends RuntimeException {}
     static final class InspectionCapacityException extends RuntimeException {}
     static final class InspectionTimeoutException extends RuntimeException {}
     static final class InspectionResponseTooLargeException extends RuntimeException {}

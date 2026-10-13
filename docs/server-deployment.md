@@ -14,7 +14,7 @@ The Local archive's extracted directory is `ATT_HOME`, the shared installation a
 
 Server config discovery checks, in order, JVM property `-Datt.server.config`, environment variable `ATT_SERVER_CONFIG`, then `$ATT_HOME/config/att-server.yaml`. For the last candidate, the Server resolves `ATT_HOME` from `-Datt.home` first and then the `ATT_HOME` environment variable. A selected config that is missing, unreadable, or invalid stops startup with its path in the diagnostic; the Server does not fall back to another source. With no explicit source or usable default candidate, startup fails with setup guidance.
 
-Tomcat owns listeners, TLS, access logs, and authentication. Give its service account read access to ATT_HOME and package roots, and ownership or write access to `server.dataDir`. The WAR uses the Servlet container's configured authentication mechanism on package and job APIs and metrics, and preserves the container's challenge or redirect when authentication fails. Any authenticated Servlet Principal has the same API permissions in v1; no `ATT_USER` role assignment or ATT-specific RBAC is required. Health and version remain public. Terminate TLS before exposing BASIC credentials. The Server fails startup when its configuration, Java baseline, or package mappings are invalid.
+Tomcat owns listeners, TLS, access logs, and authentication. Give its service account read access to ATT_HOME and package roots, and ownership or write access to `server.dataDir`. The WAR uses the Servlet container's configured authentication mechanism on package and job APIs and metrics, and preserves the container's challenge or redirect when authentication fails. Authenticated Principals retain the v1 package and job permissions; Scheduled Load administration is limited to the configured `server.scheduling.adminRole`. Health and version remain public. Terminate TLS before exposing BASIC credentials. The Server fails startup when its configuration, Java baseline, or package mappings are invalid.
 
 ## ATT_HOME layout and migration
 
@@ -44,6 +44,16 @@ To migrate a flat Local installation, back it up first and extract the new archi
 
 Browser-created Quick and Advanced Load drafts have a separate opt-in: `server.inlineLoad.enabled` defaults to `false`. When enabled, the Server enforces the configured workload, target, total Virtual User, aggregate Arrival Rate, per-workload and aggregate concurrency, and total timing-envelope caps after Engine validation and again before queue admission. The [Server configuration example](#configuration) sets conservative defaults. The duration cap is the sum of warmup, ramp-up, measured duration, and ramp-down; target count includes each fixed target and each VU mix entry. A disabled feature returns `403 ATT-SERVER-INLINE-LOAD-DISABLED`. An over-limit draft returns `400 ATT-SERVER-INLINE-LOAD-LIMIT` with a summary naming the exceeded setting. These limits apply to browser-created drafts; existing path-based Load submissions retain their compatibility behavior and continue to use `workers.maxConcurrentLoad` admission.
 
+Recurring package-backed Load schedules use a separate opt-in: `server.scheduling.enabled` defaults to `false`. Enable it only after choosing an administrator role and reviewing the schedule caps. Authenticated management requires the Servlet container role named by `server.scheduling.adminRole` (default `ATT_ADMIN`); map that role to trusted operators in Tomcat. With authentication disabled, startup refuses to enable scheduling unless `server.scheduling.allowAnonymousManagement: true` is also set. That choice grants every anonymous caller shared schedule administration and logs a startup warning. The feature requires bounded package inspection and stores schedule definitions and execution history in H2 under `server.dataDir`; keep one Server process on that data directory. The latest 10,000 terminal occurrences per schedule are retained by default (`maxExecutionsPerSchedule` can be set from 100 to 100,000); active and in-progress occurrences are preserved. This scheduler does not claim multi-instance leader election.
+
+Schedules refer to an existing package ID and a package-relative Load scenario file. Each definition may also include a description and up to 20 informational tags. At create/update and every occurrence, the bounded Inspector validates and normalizes the full scenario and target closure; Server Load user, rate, duration, workload, and target caps apply even when browser-created Load drafts are disabled. Each submitted job uses the inspected immutable scenario and package revision, then follows the regular Worker and Load admission path, so Load concurrency and queue limits still apply. The schedule API accepts only the scenario, optional config and environment, and the existing string-valued Load options; options are validated against those Server caps and the Engine before they can be saved or submitted. Clients cannot provide output paths, package roots, Worker settings, credentials, or a principal identity. Schedule-owned jobs use a Server-generated `load-schedule:<id>` principal. A failed submission is recorded and is not retried. A Load job accepted by the Server has its own standard job status and evidence, separate from its schedule occurrence.
+
+Cron uses five numeric fields (`minute hour day-of-month month day-of-week`) with `*`, lists, ranges, and `/step`. Names and extended cron syntax are rejected. When both day-of-month and day-of-week are restricted, either may match. The timezone must be an IANA zone ID. A nonexistent local minute during a spring-forward gap is skipped; during a fall-back overlap, a matching local minute runs once for each real instant. Occurrences must be at least `minimumIntervalMinutes` apart (default 15; allowed 1–10080). A late occurrence after restart or a missed poll is recorded as `skipped` with `misfire-no-backfill`; missed occurrences are not replayed as Load jobs. The default overlap policy skips a run while an earlier occurrence of that schedule is active. The global `maxConcurrentRuns` cap (default 1, and never above `workers.maxConcurrentLoad`) limits scheduler-submitted jobs. Capacity and package validation rejections become `failed-to-submit` and are never retried. `failurePolicy: continue` (default) leaves the schedule enabled; `pauseAfterSubmitFailure` pauses it after the first failed submission. This policy concerns submission errors; a submitted job's later result remains an ordinary job outcome. Pausing, editing, or deleting a schedule does not cancel a job already accepted.
+
+The built-in Scheduled Load page supports create, edit, pause/resume, manual trigger, delete, timezone-aware next-run display, and occurrence history linked to standard jobs. Manual triggers require browser confirmation and obey the same active-run and capacity limits.
+
+The enabled `/metrics` response includes the next due time, active scheduled Loads, and retained occurrence counts by status. Occurrence history and the audit table record submission, skip, capacity, and misfire outcomes; mutation and manual-trigger actions include the resolved caller. The scheduler uses the Server host's wall clock and the configured IANA timezone; keep the host clock synchronized with NTP. A forward clock adjustment is handled like a misfire and is recorded without backfill; a backward adjustment delays due work until wall time reaches its stored next instant. For a WAR upgrade or Tomcat restart, use the normal single-instance deployment process: the scheduler stops with the runtime, accepted jobs follow standard shutdown recovery, and missed occurrences are skipped after restart. Do not overlap old and new Server processes against the same `server.dataDir` or use rolling multi-instance deployment for this single-node scheduler.
+
 ```yaml
 server:
   dataDir: /var/lib/att-server
@@ -69,6 +79,16 @@ server:
     maxAggregateArrivalRatePerSecond: 100
     maxConcurrentPerWorkload: 100
     maxDurationSeconds: 3600
+  scheduling:
+    enabled: false
+    allowAnonymousManagement: false
+    adminRole: ATT_ADMIN
+    maxSchedules: 100
+    minimumIntervalMinutes: 15
+    pollIntervalSeconds: 10
+    maxConcurrentRuns: 1
+    failurePolicy: continue
+    maxExecutionsPerSchedule: 10000
 workers:
   maxConcurrent: 8
   queuedLimit: 100
@@ -132,7 +152,7 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health`, `/version` | Health, build, and browser Load capability information |
-| `GET` | `/metrics` | Bounded job and Worker counts |
+| `GET` | `/metrics` | Bounded job, Worker, and enabled schedule counts |
 | `GET` | `/packages`, `/packages/{packageId}` | Read the configured registry |
 | `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | List safe Case, Template, Flow, and Tool projections |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | Read one safe resource definition and references |
@@ -152,6 +172,28 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 | `GET` | `/jobs/{jobId}/artifacts` | List output files |
 | `GET` | `/jobs/{jobId}/artifacts/{path}` | Download one output file |
 | `DELETE` | `/jobs/{jobId}` | Cancel an active job; retain its history |
+| `GET`, `POST` | `/load-schedules` | List schedules or create one (administrator only) |
+| `GET`, `PATCH`, `DELETE` | `/load-schedules/{scheduleId}` | Read, edit, or delete a schedule (administrator only) |
+| `POST` | `/load-schedules/{scheduleId}/pause`, `/resume`, `/trigger` | Pause, resume, or manually trigger (administrator only) |
+| `GET` | `/load-schedules/{scheduleId}/executions?limit=100` | Read retained occurrence history with links to accepted jobs |
+
+Schedule routes are hidden with `404` while disabled. With scheduling enabled, authenticated callers need the configured `ATT_ADMIN` role by default. The browser/API state-changing origin checks also apply. A schedule creation request is a JSON object such as:
+
+```json
+{
+  "name": "Nightly checkout load",
+  "packageId": "payments",
+  "scenario": "load/checkout.yaml",
+  "config": "config/config.yaml",
+  "environment": "SIT",
+  "timezone": "Asia/Hong_Kong",
+  "cron": "0 2 * * *",
+  "load": { "duration": "10m" },
+  "enabled": false
+}
+```
+
+Schedules default to paused. Create, edit, and resume compute the next matching instant after the current time. Occurrence states are `scheduled`, `submitted`, `skipped`, and `failed-to-submit`; job execution results remain in the regular job API. Deleting a schedule retains its occurrence history, and does not cancel accepted jobs.
 
 Submit a job with a stable package ID and command-specific ATT Worker fields:
 

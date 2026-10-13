@@ -36,14 +36,19 @@ import java.util.concurrent.TimeUnit;
 public final class ApiServlet extends HttpServlet {
     private ServerRuntime runtime;
     @Override public void init() throws ServletException {Object r=getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(!(r instanceof ServerRuntime))throw new ServletException("ATT Server runtime did not initialize");runtime=(ServerRuntime)r;}
+    @Override protected void service(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
+        if("PATCH".equalsIgnoreCase(req.getMethod())){schedulePatch(req,res);return;}
+        super.service(req,res);
+    }
     @Override protected void doGet(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String path=path(req);String requestId=requestId(req,res);
         try {
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
-            if("/version".equals(path)){json(res,200,Map.of("version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"buildTime",ServerBuildInfo.BUILD_TIME,"gitCommit",ServerBuildInfo.GIT_COMMIT,"javaMinimum",17,"inlineLoadEnabled",runtime.config.inlineLoad.enabled,"requestId",requestId));return;}
+            if("/version".equals(path)){json(res,200,Map.of("version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"buildTime",ServerBuildInfo.BUILD_TIME,"gitCommit",ServerBuildInfo.GIT_COMMIT,"javaMinimum",17,"inlineLoadEnabled",runtime.config.inlineLoad.enabled,"loadSchedulingEnabled",runtime.config.scheduling.enabled,"requestId",requestId));return;}
             boolean resourceRequest=resourcePath(path);
             boolean configurationRequest=configurationPath(path);
             boolean loadPolicyRequest=loadPolicyPath(path);
+            if(loadSchedulePath(path)){scheduleGet(req,res,path,requestId);return;}
             boolean draftRequest=path.matches("/drafts/[DLA][0-9A-F]{32}");
             String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
             if("/metrics".equals(path)){Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
@@ -82,6 +87,7 @@ public final class ApiServlet extends HttpServlet {
     @Override protected void doPost(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req);String authorizationPrincipal=principal(req);
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+        if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
         boolean createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path);
         String command=path.startsWith("/jobs/")?path.substring("/jobs/".length()):"";
         if(!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
@@ -121,6 +127,7 @@ public final class ApiServlet extends HttpServlet {
     @Override protected void doDelete(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req),principal=principal(req);
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+        if(loadSchedulePath(path)){scheduleDelete(req,res,path,requestId,principal);return;}
         if(!path.matches("/jobs/[^/]+")){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
         try{String id=segment(path,2);String status=runtime.cancel(id,principal);json(res,200,Map.of("jobId",id,"status",status,"requestId",requestId));}
@@ -128,6 +135,91 @@ public final class ApiServlet extends HttpServlet {
         catch(Exception e){error(res,500,"ATT-SERVER-CANCEL-FAILED","The job could not be cancelled",requestId);}
     }
     @Override protected void doPut(HttpServletRequest req,HttpServletResponse res) throws IOException {error(res,405,"ATT-SERVER-METHOD-NOT-ALLOWED","Package administration is read-only in v1",requestId(req,res));}
+
+    private void scheduleGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
+        String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+        if(!scheduleAdmin(req,res,requestId))return;
+        try {
+            String[] parts=path.split("/");
+            if(parts.length==2){json(res,200,Map.of("items",runtime.loadSchedules(),"requestId",requestId));return;}
+            String id=parts[2];
+            if(parts.length==3){LoadSchedule item=runtime.loadSchedule(id);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,200,view);return;}
+            if(parts.length==4&&"executions".equals(parts[3])){int limit=parseScheduleLimit(req.getParameter("limit"));json(res,200,Map.of("items",runtime.loadScheduleExecutions(id,limit),"scheduleId",id,"requestId",requestId));return;}
+            error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
+        } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
+          catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
+          catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
+          catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule request could not be completed",requestId);}
+    }
+
+    private void schedulePost(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
+        if(!scheduleAdmin(req,res,requestId))return;
+        if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+        String[] parts=path.split("/");
+        try {
+            if(parts.length==2){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;LoadSchedule item=runtime.createLoadSchedule(body,principal);res.setHeader("Location",req.getContextPath()+"/api/v1/load-schedules/"+item.id);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,201,view);return;}
+            if(parts.length==4&&"trigger".equals(parts[3])){Map<String,Object> result=runtime.triggerLoadSchedule(parts[2],principal);result.put("requestId",requestId);json(res,202,result);return;}
+            if(parts.length==4&&("pause".equals(parts[3])||"resume".equals(parts[3]))) {
+                LoadSchedule item=runtime.setLoadScheduleEnabled(parts[2],"resume".equals(parts[3]),principal);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,200,view);return;
+            }
+            error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
+        } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
+          catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
+          catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
+          catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule request could not be completed",requestId);}
+    }
+
+    private void schedulePatch(HttpServletRequest req,HttpServletResponse res)throws IOException {
+        String requestId=requestId(req,res),path=path(req),principal=principal(req);
+        if(!loadSchedulePath(path)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+        if(!scheduleAdmin(req,res,requestId))return;
+        if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+        String[] parts=path.split("/");if(parts.length!=3){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;
+        try{LoadSchedule item=runtime.updateLoadSchedule(parts[2],body,principal);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,200,view);}
+        catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+        catch(ServerRuntime.ScheduleConflictException e){error(res,409,"ATT-SERVER-SCHEDULE-CHANGED","The schedule changed while it was being edited; reload it and retry",requestId);}
+        catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
+        catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
+        catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
+        catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
+        catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
+        catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule could not be updated",requestId);}
+    }
+
+    private void scheduleDelete(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
+        if(!scheduleAdmin(req,res,requestId))return;
+        if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+        String[] parts=path.split("/");if(parts.length!=3){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        try{runtime.deleteLoadSchedule(parts[2],principal);json(res,200,Map.of("scheduleId",parts[2],"status","DELETED","requestId",requestId));}
+        catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+        catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule could not be deleted",requestId);}
+    }
+
+    private boolean scheduleAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
+        if(!runtime.config.scheduling.enabled){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return false;}
+        if(!runtime.config.authenticationRequired&&runtime.config.scheduling.allowAnonymousManagement)return true;
+        if(req.isUserInRole(runtime.config.scheduling.adminRole))return true;
+        error(res,403,"ATT-SERVER-SCHEDULE-ADMIN-REQUIRED","The configured schedule administrator role is required",requestId);return false;
+    }
+
+    private JsonNode scheduleBody(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
+        if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return null;}
+        byte[] body=req.getInputStream().readNBytes(runtime.config.maxRequestBytes+1);
+        if(body.length>runtime.config.maxRequestBytes){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Request body exceeds the configured size limit",requestId);return null;}
+        JsonNode parsed;try{parsed=ServerRuntime.JSON.readTree(body);}catch(JsonProcessingException malformed){error(res,400,"ATT-SERVER-INVALID-REQUEST","Request body is not valid JSON",requestId);return null;}
+        if(parsed==null||!parsed.isObject()){error(res,400,"ATT-SERVER-INVALID-REQUEST","A JSON object is required",requestId);return null;}return parsed;
+    }
+
+    private static int parseScheduleLimit(String raw){if(raw==null||raw.isBlank())return 100;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be between 1 and 500");int limit=Integer.parseInt(raw);if(limit<1||limit>500)throw new IllegalArgumentException("limit must be between 1 and 500");return limit;}
+    private static boolean loadSchedulePath(String path){return path.matches("/load-schedules(?:/[^/]+(?:/(?:executions|trigger|pause|resume))?)?");}
 
     private void sse(HttpServletRequest req,HttpServletResponse res,String jobId) throws IOException {
         String last=req.getHeader("Last-Event-ID");long cursor=0;

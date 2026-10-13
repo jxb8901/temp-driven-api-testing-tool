@@ -15,10 +15,34 @@
     <section id="home">
       <h1>Packages</h1>
       <p>Open a package explorer or start an Advanced Load scenario from a configured package.</p>
+      <p><a id="scheduled-load-nav" href="#/load-schedules" hidden>Scheduled Load</a></p>
       <div class="columns">
         <section><h2>Configured packages</h2><ul id="packages" class="package-list"></ul></section>
         <section><h2>Recent jobs</h2><label for="job-principal-search">Search jobs by principal</label><input id="job-principal-search" type="search" maxlength="120"><button id="refresh-jobs" type="button">Refresh jobs</button><div class="table-wrap"><table><thead><tr><th>Job</th><th>Package</th><th>Command</th><th>Principal</th><th>Status</th><th>Created</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
       </div>
+    </section>
+    <section id="load-schedules-view" hidden>
+      <p><a href="#/">← Packages and jobs</a></p>
+      <h1>Scheduled Load</h1>
+      <p>Schedules submit package scenarios as standard Load jobs. The Server records skipped and failed submissions and links accepted occurrences to their job history.</p>
+      <p id="schedule-status" role="status" aria-live="polite"></p>
+      <div class="table-wrap"><table><thead><tr><th>Name</th><th>Package and scenario</th><th>Timezone and cron</th><th>Next run</th><th>State</th><th>Actions</th></tr></thead><tbody id="load-schedules"></tbody></table></div>
+      <section id="schedule-history" hidden><h2 id="schedule-history-title">Execution history</h2><div class="table-wrap"><table><thead><tr><th>Scheduled for</th><th>Trigger</th><th>Occurrence</th><th>Status</th><th>Reason</th><th>Job</th></tr></thead><tbody id="schedule-executions"></tbody></table></div></section>
+      <h2 id="schedule-form-heading">Create schedule</h2>
+      <form id="load-schedule-form">
+        <label>Name <input name="name" maxlength="120" required></label>
+        <label>Description <input name="description" maxlength="500"></label>
+        <label>Tags (comma separated, up to 20) <input name="tags" maxlength="1000"></label>
+        <label>Package <select name="packageId" required></select></label>
+        <label>Scenario path (package relative) <input name="scenario" maxlength="512" required></label>
+        <label>Config path (optional, package relative) <input name="config" maxlength="512"></label>
+        <label>Environment <input name="environment" maxlength="128"></label>
+        <label>Timezone (IANA) <input name="timezone" maxlength="80" required></label>
+        <label>Cron (minute hour day-of-month month day-of-week) <input name="cron" maxlength="120" placeholder="0 2 * * *" required></label>
+        <label>Load options (JSON object, optional)<textarea name="load" rows="4" spellcheck="false">{}</textarea></label>
+        <label><input name="enabled" type="checkbox"> Enable after saving</label>
+        <div><button type="submit">Save schedule</button> <button id="cancel-schedule-edit" type="button" hidden>Cancel edit</button></div>
+      </form>
     </section>
     <section id="advanced-load" hidden>
       <p><a href="#/">← Packages and jobs</a></p>
