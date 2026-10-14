@@ -136,6 +136,32 @@ Local session 使用不透明的 server-side identifier，登入時會輪替，�
 
 `GET /api/v1/auth/me` 回傳安全的目前用戶資料及瀏覽器所需的 CSRF token。`POST /api/v1/auth/login` 及 `/api/v1/auth/logout` 管理 session。使用 local account 的 CLI 及 REST client 亦可透過 HTTPS Basic authentication 存取。管理員可使用 `GET`、`POST /api/v1/auth/users`、`POST /api/v1/auth/users/{loginId}/password`、`POST /api/v1/auth/users/{loginId}/enable` 及 `DELETE /api/v1/auth/users/{loginId}` 管理帳戶。`POST /api/v1/auth/password` 會先核對目前密碼，再變更自己的密碼。API 回應不會包含密碼雜湊、session identifier 或密碼。
 
+在 Studio 中，local `ADMIN` 可於 **Settings → User Management** 管理帳戶。列表只顯示登入 ID、顯示名稱、角色及啟用狀態。建立、啟用／停用及重設密碼都需要明確確認；停用或重設密碼會撤銷該用戶的 session。即使來自不同 Server runtime 的請求同時執行，Server 仍會拒絕停用最後一個啟用中的 `ADMIN`。所有 local 用戶均可在目前用戶選單使用 **Change password**。密碼變更成功後會撤銷目前 session，並返回登入頁面。密碼只會在表單開啟時暫存，不會寫入瀏覽器儲存空間或應用程式日誌。Container mode 的 Settings 會說明帳戶由 Tomcat 或設定的 SSO provider 管理。
+
+### 復原失去存取權的本地管理員
+
+一次性 bootstrap 不會重新開啟，也不是帳戶復原方式。若現有 `ADMIN` 忘記密碼或已被停用，請使用離線復原工具。此操作不能建立帳戶；若帳戶不存在或不是 `ADMIN`，工具會拒絕執行。
+
+1. 停止所有使用此 `server.dataDir` 的 Tomcat process，並等待完全結束。以下命令須以 Server 作業系統帳戶執行，並可寫入現有的 `dataDir`。
+2. 設定 `ATT_SERVER_WAR` 為部署中的 `att-server-4.1.4.war`、`CATALINA_HOME` 為 Tomcat 安裝目錄，以及 `JAVA_HOME` 為 Java 17 或更新版本。將 WAR 解壓至權限受限的暫存目錄，再以套件內 library 及 Tomcat Servlet API 啟動工具：
+
+   ```sh
+   umask 077
+   recovery_dir="$(mktemp -d)"
+   trap 'rm -rf "$recovery_dir"' EXIT
+   (
+     cd "$recovery_dir"
+     "$JAVA_HOME/bin/jar" xf "$ATT_SERVER_WAR"
+     "$JAVA_HOME/bin/java" -Datt.server.config=/absolute/path/to/att-server.yaml \
+       -cp "WEB-INF/lib/*:$CATALINA_HOME/lib/*" att.server.AuthRecoveryTool
+   )
+   ```
+
+3. 按互動提示輸入現有 ADMIN 登入 ID、輸入 `RECOVER ADMIN` 確認，然後輸入新密碼兩次。密碼輸入時不會顯示，也不接受作為命令列參數。
+4. 重新啟動 Tomcat，並使用新密碼登入。
+
+工具只會更新所選的現有 `ADMIN` row；若帳戶已停用，會重新啟用，並更新密碼雜湊及 CSRF token、撤銷該帳戶所有 session，以及記錄 `ADMIN_RECOVERY` audit event。工具不會修改 bootstrap claim 或建立 bootstrap token。若找不到現有資料庫、資料庫無法開啟，或指定帳戶不是 `ADMIN`，復原會失敗且不會建立帳戶。請保護備份、暫存解壓目錄及 `server.dataDir`，並視為 Server 憑證處理。
+
 Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的工作歸屬於已驗證的 login ID；其他用戶即使猜中 ID，也無法存取該 draft 或 job。同一歸屬檢查亦保護 job 狀態、結果、SSE、artifacts 及取消操作。Container mode 保留現有授權行為。
 
 匿名 job submission 可在最外層 JSON 加入選填的 `principal` label，只供顯示及 audit 使用。Server 會 trim 並以 Unicode 正規化 label、驗證長度及字元，然後在既有 job/audit `principal` 欄位加上 `(anonym)` 後綴，例如 `Bob(anonym)`。省略時維持既有值 `anonymous`；caller 不可自行提交保留後綴。此 label 由 caller 自行聲稱，不會改變授權、draft 存取、job 可見範圍、artifact 存取、取消或排程。驗證模式永遠使用 Servlet Principal，並忽略提交的 label。此歸屬資料不會傳給 Worker，也不會放進 ATT expression Context；不會新增持久化欄位或回應欄位。
@@ -153,7 +179,7 @@ Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的
 
 `RemoteIpValve` 只應信任實際 proxy 位址。Proxy 加入 forwarded headers 前，必須先移除 client 自行提交的值。請將 Tomcat 綁定 loopback 或 private interface，並用 VPN、防火牆或 IP allowlist 保護 proxy。localhost 以外的流量必須使用 HTTPS。Draft 存於記憶體，Server 重啟後會清除。切換驗證 mode 需要重啟；現有 draft 不會轉移到其他身份。Local mode 不會讀取或修改 JSPWiki 帳戶檔案，也不提供外部 LDAP、OIDC、SAML 或共用 SSO。
 
-內建瀏覽器主控台位於 `<context path>/ui/`，使用所選的 container 或 local 驗證 mode。Local mode 會在主控台顯示目前用戶並提供登出控制。詳見 [ATT Server Web UI](reference.zh/att-server-web-ui.md)。
+內建瀏覽器主控台位於 `<context path>/ui/`，使用所選的 container 或 local 驗證 mode。Local mode 會在主控台提供帳戶管理及密碼變更功能。詳見 [ATT Server Web UI](att-server-web-ui.zh.md)。
 
 ## REST API
 

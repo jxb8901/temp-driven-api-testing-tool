@@ -273,8 +273,67 @@ final class JobStore implements AutoCloseable {
             }
         }
     }
-    synchronized void updateAuthPassword(String login,String hash,String csrf) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE auth_users SET password_hash=?,csrf_token=?,updated_at=? WHERE login_id=? AND active=TRUE")){p.setString(1,hash);p.setString(2,csrf);p.setString(3,Instant.now().toString());p.setString(4,login);if(p.executeUpdate()==0)throw new AuthService.AuthFailure(404,"ATT-AUTH-USER-NOT-FOUND");}revokeAuthSessions(login);}
-    synchronized void setAuthActive(String login,boolean active) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE auth_users SET active=?,updated_at=? WHERE login_id=?")){p.setBoolean(1,active);p.setString(2,Instant.now().toString());p.setString(3,login);if(p.executeUpdate()==0)throw new IllegalArgumentException("Unknown user");}if(!active)revokeAuthSessions(login);}
+    synchronized void updateAuthPassword(String login,String hash,String csrf) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try(PreparedStatement update=c.prepareStatement("UPDATE auth_users SET password_hash=?,csrf_token=?,updated_at=? WHERE login_id=?")) {
+                update.setString(1,hash);update.setString(2,csrf);update.setString(3,Instant.now().toString());update.setString(4,login);
+                if(update.executeUpdate()==0)throw new AuthService.AuthFailure(404,"ATT-AUTH-USER-NOT-FOUND");
+                try(PreparedStatement revoke=c.prepareStatement("DELETE FROM auth_sessions WHERE login_id=?")){revoke.setString(1,login);revoke.executeUpdate();}
+                c.commit();
+            } catch(Exception failure) {c.rollback();throw failure;}
+        }
+    }
+    synchronized void recoverExistingAdmin(String login,String hash,String csrf) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                String role;
+                try(PreparedStatement lookup=c.prepareStatement("SELECT role FROM auth_users WHERE login_id=? FOR UPDATE")) {
+                    lookup.setString(1,login);try(ResultSet result=lookup.executeQuery()) {
+                        if(!result.next())throw new IllegalArgumentException("The requested existing account was not found");
+                        role=result.getString(1);
+                    }
+                }
+                if(!"ADMIN".equals(role))throw new IllegalArgumentException("Recovery can update an existing ADMIN account only");
+                try(PreparedStatement update=c.prepareStatement("UPDATE auth_users SET password_hash=?,csrf_token=?,active=TRUE,updated_at=? WHERE login_id=? AND role='ADMIN'")) {
+                    update.setString(1,hash);update.setString(2,csrf);update.setString(3,Instant.now().toString());update.setString(4,login);update.executeUpdate();
+                }
+                try(PreparedStatement revoke=c.prepareStatement("DELETE FROM auth_sessions WHERE login_id=?")){revoke.setString(1,login);revoke.executeUpdate();}
+                try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,created_at,outcome) VALUES(?,?,?,?)")) {
+                    audit.setString(1,"offline-admin-recovery:"+login);audit.setString(2,"ADMIN_RECOVERY");audit.setString(3,Instant.now().toString());audit.setString(4,"SUCCESS");audit.executeUpdate();
+                }
+                c.commit();
+            } catch(Exception failure) {c.rollback();throw failure;}
+        }
+    }
+    synchronized void setAuthActive(String login,boolean active) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                String role;boolean wasActive;
+                try(PreparedStatement lookup=c.prepareStatement("SELECT role,active FROM auth_users WHERE login_id=?")) {
+                    lookup.setString(1,login);try(ResultSet result=lookup.executeQuery()) {
+                        if(!result.next())throw new IllegalArgumentException("Unknown user");
+                        role=result.getString(1);wasActive=result.getBoolean(2);
+                    }
+                }
+                if(!active&&wasActive&&"ADMIN".equals(role)) {
+                    try(Statement lock=c.createStatement();ResultSet guard=lock.executeQuery("SELECT claim_id FROM auth_bootstrap_claim WHERE claim_id=1 FOR UPDATE")) {
+                        if(!guard.next())throw new IllegalStateException("The local administrator guard is missing");
+                    }
+                    try(Statement count=c.createStatement();ResultSet admins=count.executeQuery("SELECT COUNT(*) FROM auth_users WHERE role='ADMIN' AND active=TRUE")) {
+                        admins.next();if(admins.getLong(1)<=1)throw new AuthService.AuthFailure(409,"ATT-AUTH-LAST-ADMIN");
+                    }
+                }
+                try(PreparedStatement update=c.prepareStatement("UPDATE auth_users SET active=?,updated_at=? WHERE login_id=?")) {
+                    update.setBoolean(1,active);update.setString(2,Instant.now().toString());update.setString(3,login);update.executeUpdate();
+                }
+                if(!active)try(PreparedStatement revoke=c.prepareStatement("DELETE FROM auth_sessions WHERE login_id=?")){revoke.setString(1,login);revoke.executeUpdate();}
+                c.commit();
+            } catch(Exception failure) {c.rollback();throw failure;}
+        }
+    }
     synchronized void saveAuthSession(String tokenHash,String login,String csrf,long now,long expiry) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO auth_sessions(token_hash,login_id,csrf_token,created_at,last_seen,absolute_expiry) VALUES(?,?,?,?,?,?)")){p.setString(1,tokenHash);p.setString(2,login);p.setString(3,csrf);p.setLong(4,now);p.setLong(5,now);p.setLong(6,expiry);p.executeUpdate();}}
     synchronized Map<String,String> authSession(String hash,long now,long idleMillis) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT s.login_id,s.csrf_token,s.last_seen,s.absolute_expiry,u.display_name,u.role,u.active FROM auth_sessions s JOIN auth_users u ON u.login_id=s.login_id WHERE s.token_hash=?")){p.setString(1,hash);try(ResultSet r=p.executeQuery()){if(!r.next())return null;long seen=r.getLong(3),expiry=r.getLong(4);if(!r.getBoolean(7)||now>expiry||now-seen>idleMillis){deleteAuthSession(hash);return null;}try(Connection touchConnection=connect();PreparedStatement touch=touchConnection.prepareStatement("UPDATE auth_sessions SET last_seen=? WHERE token_hash=?")){touch.setLong(1,now);touch.setString(2,hash);touch.executeUpdate();}Map<String,String> m=new LinkedHashMap<>();m.put("loginId",r.getString(1));m.put("csrfToken",r.getString(2));m.put("displayName",r.getString(5));m.put("role",r.getString(6));return m;}}

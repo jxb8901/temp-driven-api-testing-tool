@@ -8,6 +8,7 @@
     "smoke:explorer": "node explorer-smoke.cjs",
     "smoke:load-jobs": "node load-jobs.cjs",
     "smoke:scheduled-load": "node scheduled-load.cjs",
+    "smoke:auth": "node auth-smoke.cjs",
     "smoke:cross-browser": "node cross-browser.cjs",
     "screenshots": "node screenshots.cjs"
   },

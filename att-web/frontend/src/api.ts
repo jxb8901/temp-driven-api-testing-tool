@@ -1,4 +1,4 @@
-import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type PackageSummary, type ServerVersion } from './types';
+import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type PackageSummary, type ServerVersion } from './types';
 import type {
   AcceptedJob, ConfigurationComparisonQuery, ConfigurationResponse, DebugDraftRequest, DraftResponse,
   DebugFormResponse, EffectiveConfigurationQuery, ResourceDetail, ResourceIdentity,
@@ -15,6 +15,7 @@ import type {
 } from './features/schedules/types';
 
 let csrfToken = '';
+let localAuthMode = false;
 
 /** Resolve the API below the current UI context (for example /att/ui/ -> /att/api/v1/). */
 export function apiBaseUrl(): URL {
@@ -54,6 +55,10 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   if (!response.ok) {
     const payload = body && typeof body === 'object' ? body as { error?: ApiErrorBody; requestId?: string; diagnostics?: unknown } : {};
     const detail = payload.error;
+    if (localAuthMode && detail?.code === 'ATT-SERVER-AUTHENTICATION-REQUIRED' && path !== 'auth/me') {
+      const returnTo = location.pathname + location.search + location.hash;
+      location.assign(new URL('login.html?returnTo=' + encodeURIComponent(returnTo), document.baseURI).toString());
+    }
     throw new ApiError(detail?.summary || ('ATT API request failed (' + response.status + ').'), {
       status: response.status,
       code: detail?.code,
@@ -126,14 +131,32 @@ function subscribeJob(jobId: string, handlers: JobEventHandlers): () => void {
 }
 
 export const api = {
-  getVersion(signal?: AbortSignal): Promise<ServerVersion> {
-    return request<ServerVersion>('version', { signal });
+  async getVersion(signal?: AbortSignal): Promise<ServerVersion> {
+    const version = await request<ServerVersion>('version', { signal });
+    localAuthMode = version.authMode === 'local';
+    return version;
   },
-  getCurrentUser(signal?: AbortSignal): Promise<{ loginId: string; displayName: string; role: string; csrfToken?: string }> {
+  getCurrentUser(signal?: AbortSignal): Promise<{ loginId: string; displayName: string; role: 'ADMIN' | 'USER'; csrfToken?: string }> {
     return request('auth/me', { signal });
   },
   logout(): Promise<{ loggedOut: boolean }> {
     return request('auth/logout', { method: 'POST', body: '{}' });
+  },
+  listLocalUsers(signal?: AbortSignal): Promise<{ items: LocalAuthUser[] }> {
+    return request('auth/users', { signal });
+  },
+  createLocalUser(input: { loginId: string; displayName: string; role: 'ADMIN' | 'USER'; password: string }): Promise<{ user: LocalAuthUser }> {
+    return postJson('auth/users', input);
+  },
+  setLocalUserEnabled(loginId: string, enabled: boolean): Promise<{ enabled: boolean } | { disabled: boolean }> {
+    const path = 'auth/users/' + encodeURIComponent(loginId);
+    return enabled ? postJson(path + '/enable', {}) : request(path, { method: 'DELETE' });
+  },
+  resetLocalUserPassword(loginId: string, password: string): Promise<{ updated: boolean }> {
+    return postJson('auth/users/' + encodeURIComponent(loginId) + '/password', { password });
+  },
+  changeLocalPassword(currentPassword: string, newPassword: string): Promise<{ updated: boolean }> {
+    return postJson('auth/password', { currentPassword, newPassword });
   },
   getPackages(signal?: AbortSignal): Promise<ApiEnvelope<PackageSummary>> {
     return request<ApiEnvelope<PackageSummary>>('packages', { signal });

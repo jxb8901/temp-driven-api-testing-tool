@@ -47,6 +47,20 @@ class AuthServiceTest {
         assertEquals(missing.status,disabledOrWrong.status);assertEquals(missing.code,disabledOrWrong.code);store.close();
     }
 
+    @Test void resettingDisabledUserPasswordDoesNotReenableAccount() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("disabled-reset-packages"));Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path javaExecutable=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path configFile=Files.writeString(temp.resolve("disabled-reset-server.yaml"),"server:\n  dataDir: "+temp.resolve("disabled-reset-data")+"\n  javaExecutable: "+javaExecutable+"\n  auth:\n    mode: local\nworkers: {}\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    default: "+pkg+"\n");
+        ServerConfig config=ServerConfig.load(configFile);JobStore store=new JobStore(config);AuthService auth=new AuthService(config,store);
+        auth.bootstrap(Files.readString(config.dataDir.resolve("bootstrap-admin.token")).strip(),"admin","Admin","administrator password","127.0.0.1");
+        auth.createUser("disabled-user","Disabled User","initial user password","USER");auth.disable("disabled-user");
+        auth.password("disabled-user","reset user password");
+        assertFalse(Boolean.TRUE.equals(store.authUser("disabled-user").get("active")),"Password reset must preserve disabled state");
+        assertThrows(AuthService.AuthFailure.class,()->auth.login("disabled-user","reset user password","127.0.0.1"));
+        auth.enable("disabled-user");assertNotNull(auth.login("disabled-user","reset user password","127.0.0.1"));
+        store.close();
+    }
+
     @Test void concurrentBootstrapRequestsCanCreateOnlyOneAdministrator() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("parallel-packages"));Path pkg=Files.createDirectory(allowed.resolve("default"));
         Path javaExecutable=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name"," ").toLowerCase().contains("win")?"java.exe":"java");
@@ -59,6 +73,67 @@ class AuthServiceTest {
             assertNotEquals(first.get(),second.get(),"Exactly one concurrent request may claim the bootstrap token");
             assertEquals(1,store.authUserCount());assertEquals(1,store.activeAdminCount());assertTrue(store.bootstrapClaimed());
         } finally {pool.shutdownNow();store.close();}
+    }
+
+    @Test void offlineRecoveryRestoresOnlyAnExistingAdminAndDoesNotReopenBootstrap() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("recovery-packages"));Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path javaExecutable=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path configFile=Files.writeString(temp.resolve("recovery-server.yaml"),"server:\n  dataDir: "+temp.resolve("recovery-data")+"\n  javaExecutable: "+javaExecutable+"\n  auth:\n    mode: local\nworkers: {}\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    default: "+pkg+"\n");
+        ServerConfig config=ServerConfig.load(configFile);JobStore store=new JobStore(config);AuthService auth=new AuthService(config,store);
+        String bootstrapToken=Files.readString(config.dataDir.resolve("bootstrap-admin.token")).strip();
+        auth.bootstrap(bootstrapToken,"admin","ATT Administrator","initial secure password","127.0.0.1");
+        auth.createUser("backup-admin","Backup Administrator","another secure password","ADMIN");
+        auth.createUser("regular-user","Regular User","regular secure password","USER");
+        Map<String,Object> session=auth.login("admin","initial secure password","127.0.0.1");
+        String sessionToken=(String)session.get("token");
+        String sessionHash=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(sessionToken.getBytes(java.nio.charset.StandardCharsets.US_ASCII)));
+        auth.disable("admin");
+        assertNull(store.authSession(sessionHash,System.currentTimeMillis(),AuthService.IDLE_MILLIS));
+        store.close();
+
+        char[] recoveredPassword="recovered admin password".toCharArray();
+        AuthRecoveryTool.recover(config,"ADMIN",recoveredPassword);
+        java.util.Arrays.fill(recoveredPassword,'\0');
+
+        JobStore recoveredStore=new JobStore(config);
+        try {
+            Map<String,Object> recovered=recoveredStore.authUser("admin");
+            assertTrue(Boolean.TRUE.equals(recovered.get("active")));
+            assertNotEquals("initial secure password",recovered.get("passwordHash"));
+            assertEquals(3,recoveredStore.authUserCount(),"Recovery must not create a user");
+            assertTrue(recoveredStore.bootstrapClaimed(),"Recovery must preserve the one-time bootstrap claim");
+            assertFalse(Files.exists(config.dataDir.resolve("bootstrap-admin.token")));
+            assertFalse(new AuthService(config,recoveredStore).bootstrapRequired(),"Recovery must not reopen bootstrap");
+            Object loginUser=new AuthService(config,recoveredStore).login("admin","recovered admin password","127.0.0.1").get("user");
+            assertInstanceOf(Map.class,loginUser);
+            assertEquals("admin",((Map<?,?>)loginUser).get("loginId"));
+            assertThrows(IllegalArgumentException.class,()->AuthRecoveryTool.recover(config,"regular-user","attempted regular recovery".toCharArray()));
+            assertThrows(IllegalArgumentException.class,()->AuthRecoveryTool.recover(config,"missing-admin","attempted missing recovery".toCharArray()));
+            assertEquals(3,recoveredStore.authUserCount());
+        } finally {recoveredStore.close();}
+    }
+
+    @Test void concurrentAdminDisablesCannotLockOutEveryAdministrator() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("admin-guard-packages"));Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path javaExecutable=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path configFile=Files.writeString(temp.resolve("admin-guard-server.yaml"),"server:\n  dataDir: "+temp.resolve("admin-guard-data")+"\n  javaExecutable: "+javaExecutable+"\n  auth:\n    mode: local\nworkers: {}\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    default: "+pkg+"\n");
+        ServerConfig config=ServerConfig.load(configFile);JobStore firstStore=new JobStore(config);AuthService firstAuth=new AuthService(config,firstStore);
+        firstAuth.bootstrap(Files.readString(config.dataDir.resolve("bootstrap-admin.token")).strip(),"admin-one","Admin One","first admin password","127.0.0.1");
+        firstAuth.createUser("admin-two","Admin Two","second admin password","ADMIN");
+        JobStore secondStore=new JobStore(config);AuthService secondAuth=new AuthService(config,secondStore);
+        var pool=Executors.newFixedThreadPool(2);CountDownLatch start=new CountDownLatch(1);
+        try {
+            Future<Boolean> first=pool.submit(()->disableAfter(start,firstAuth,"admin-one"));
+            Future<Boolean> second=pool.submit(()->disableAfter(start,secondAuth,"admin-two"));
+            start.countDown();
+            assertNotEquals(first.get(),second.get(),"At most one concurrent disable can leave an ADMIN active");
+            assertEquals(1,firstStore.activeAdminCount());
+        } finally {pool.shutdownNow();secondStore.close();firstStore.close();}
+    }
+
+    private static boolean disableAfter(CountDownLatch start,AuthService auth,String login)throws Exception {
+        start.await();try{auth.disable(login);return true;}
+        catch(AuthService.AuthFailure failure){assertEquals("ATT-AUTH-LAST-ADMIN",failure.code);return false;}
     }
 
     private static boolean bootstrapAfter(CountDownLatch start,AuthService auth,String token,String login)throws Exception {

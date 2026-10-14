@@ -136,6 +136,32 @@ Local sessions use opaque server-side identifiers, rotate at login, expire after
 
 `GET /api/v1/auth/me` returns the safe current-user profile and the CSRF token needed by browser clients. `POST /api/v1/auth/login` and `/api/v1/auth/logout` manage sessions. HTTPS Basic authentication is also supported for CLI and REST clients using local accounts. `GET` and `POST /api/v1/auth/users`, `POST /api/v1/auth/users/{loginId}/password`, `POST /api/v1/auth/users/{loginId}/enable`, and `DELETE /api/v1/auth/users/{loginId}` provide administrator account management. `POST /api/v1/auth/password` changes the current user's password after validating the current password. Password hashes, session identifiers, and passwords are never returned in API responses.
 
+In Studio, local `ADMIN` users can manage accounts under **Settings → User Management**. The table exposes only login ID, display name, role, and active state. Create, enable/disable, and password-reset actions use explicit confirmation; disabling or resetting a user revokes that user's sessions. The Server rejects an attempt to disable the last active `ADMIN`, including concurrent requests from separate Server runtimes. Every local user can use **Change password** in the current-user menu. A successful change revokes the current session and returns to the login page. Account passwords are held only in the form while it is open and are not saved to browser storage or application logs. In container mode the Settings page explains that Tomcat or the configured SSO provider owns account management.
+
+### Recover a locked-out local administrator
+
+The one-time bootstrap is not a recovery mechanism and is never reopened. To recover an existing `ADMIN` who has lost the password or was disabled, use the offline recovery tool. This operation cannot create an account and will reject a missing account or a non-`ADMIN` account.
+
+1. Stop every Tomcat process that uses this `server.dataDir` and wait for it to exit. Run the command below as the Server operating-system account, with write access to the existing `dataDir`.
+2. Set `ATT_SERVER_WAR` to the deployed `att-server-4.1.4.war`, `CATALINA_HOME` to the Tomcat installation, and `JAVA_HOME` to Java 17 or later. Extract the WAR to a private temporary directory and launch the tool with its packaged libraries and Tomcat's Servlet API:
+
+   ```sh
+   umask 077
+   recovery_dir="$(mktemp -d)"
+   trap 'rm -rf "$recovery_dir"' EXIT
+   (
+     cd "$recovery_dir"
+     "$JAVA_HOME/bin/jar" xf "$ATT_SERVER_WAR"
+     "$JAVA_HOME/bin/java" -Datt.server.config=/absolute/path/to/att-server.yaml \
+       -cp "WEB-INF/lib/*:$CATALINA_HOME/lib/*" att.server.AuthRecoveryTool
+   )
+   ```
+
+3. At the interactive prompts, enter the existing ADMIN login ID, type `RECOVER ADMIN`, and enter the new password twice. Password input is not echoed and is not accepted as a command-line argument.
+4. Start Tomcat and sign in with the new password.
+
+The tool updates only the selected, existing `ADMIN` row, reactivates it if disabled, replaces its password hash and CSRF token, revokes all its sessions, and records an `ADMIN_RECOVERY` audit event. It does not modify the bootstrap claim or create a bootstrap token. If no existing database is found, the database cannot be opened, or the selected account is not an `ADMIN`, recovery fails without creating an account. Keep the backup, temporary extraction directory, and `server.dataDir` protected as server credentials.
+
 Local users share package access in v1. Drafts and submitted jobs belong to the authenticated login ID; another user cannot access a draft or job by guessing its ID. The same ownership check protects job status, results, SSE, artifacts, and cancellation. Container-mode authorization behavior remains compatible with existing deployments.
 
 Anonymous job submissions may include an optional top-level `principal` label, for display and audit only. The Server trims and Unicode-normalizes the label, validates its length and characters, and stores it in the existing job/audit `principal` field with the suffix `(anonym)`, such as `Bob(anonym)`. Omitting it keeps the existing value `anonymous`; callers cannot supply the reserved suffix themselves. This label is self-declared and never changes authorization, draft access, job visibility, artifact access, cancellation, or scheduling. Authenticated mode always stores the Servlet Principal and ignores a submitted label. Attribution is not sent to the Worker or exposed in ATT expression Context; no additional persisted or response field is introduced.
@@ -153,7 +179,7 @@ State-changing requests require `application/json`; requests carrying an `Origin
 
 Tomcat's `RemoteIpValve` must trust only the actual proxy addresses. Ensure the proxy removes client-supplied forwarded headers before adding its own. Bind Tomcat to loopback or a private interface and protect the proxy with a VPN, firewall, or IP allowlist. Use HTTPS for traffic outside localhost. Drafts are in memory and are cleared on Server restart. Changing authentication mode requires a restart; existing drafts are not transferred between identities. Local mode does not read or modify JSPWiki account files and does not implement external LDAP, OIDC, SAML, or shared SSO.
 
-The bundled browser console is served at `<context path>/ui/`. It uses the selected container or local authentication mode and provides the current user and logout controls in local mode. See [ATT Server Web UI](att-server-web-ui.md).
+The bundled browser console is served at `<context path>/ui/`. It uses the selected container or local authentication mode and provides account management and password-change controls in local mode. See [ATT Server Web UI](att-server-web-ui.md).
 
 ## REST API
 

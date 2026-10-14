@@ -90,7 +90,7 @@ final class AuthService {
     void logout(HttpServletRequest req) throws Exception {for(var c:req.getCookies()==null?new jakarta.servlet.http.Cookie[0]:req.getCookies())if(COOKIE.equals(c.getName()))store.deleteAuthSession(sha256(c.getValue()));}
     void password(String login,String password) throws Exception {store.updateAuthPassword(normalize(login),hash(password),randomToken());}
     void changePassword(String login,String currentPassword,String nextPassword) throws Exception {Map<String,Object> user=store.authUser(normalize(login));if(user==null||!Boolean.TRUE.equals(user.get("active"))||!verify(currentPassword,(String)user.get("passwordHash")))throw new AuthFailure(401,"ATT-AUTH-INVALID-CREDENTIALS");store.updateAuthPassword((String)user.get("loginId"),hash(nextPassword),randomToken());}
-    void disable(String login) throws Exception {Map<String,Object> user=store.authUser(normalize(login));if(user==null)throw new IllegalArgumentException("Unknown user");if(Boolean.TRUE.equals(user.get("active"))&&"ADMIN".equals(user.get("role"))&&store.activeAdminCount()<=1)throw new AuthFailure(409,"ATT-AUTH-LAST-ADMIN");store.setAuthActive((String)user.get("loginId"),false);}
+    void disable(String login) throws Exception {store.setAuthActive(normalize(login),false);}
     void enable(String login) throws Exception {store.setAuthActive(normalize(login),true);}
     void createUser(String login,String display,String password,String role) throws Exception {
         String normalized=normalize(login),safeDisplay=displayName(normalized,display);
@@ -108,7 +108,10 @@ final class AuthService {
     private static void increment(ConcurrentHashMap<String,Attempt> map,String key,long now){map.compute(key,(k,v)->v==null||now-v.window>600_000?new Attempt(now,1):new Attempt(v.window,v.failures+1));}
     static Map<String,Object> safeUser(Map<String,Object> user) {if(user==null)return Map.of();return Map.of("loginId",user.get("loginId"),"displayName",user.get("displayName"),"role",user.get("role"));}
     private static String hash(String password) throws Exception {
-        validatePassword(password);byte[] salt=new byte[16];RANDOM.nextBytes(salt);PBEKeySpec spec=new PBEKeySpec(password.toCharArray(),salt,ITERATIONS,256);
+        validatePassword(password);return hash(password.toCharArray());
+    }
+    static String hash(char[] password) throws Exception {
+        validatePassword(password);byte[] salt=new byte[16];RANDOM.nextBytes(salt);PBEKeySpec spec=new PBEKeySpec(password,salt,ITERATIONS,256);
         try {byte[] derived=SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).getEncoded();return "pbkdf2-sha256$"+ITERATIONS+"$"+Base64.getEncoder().encodeToString(salt)+"$"+Base64.getEncoder().encodeToString(derived);}finally{spec.clearPassword();}
     }
     private static boolean verify(String password,String encoded) throws Exception {
@@ -119,6 +122,8 @@ final class AuthService {
     private static boolean needsUpgrade(String encoded){String[] parts=encoded.split("\\$",-1);return parts.length==4&&"pbkdf2-sha256".equals(parts[0])&&Integer.parseInt(parts[1])<ITERATIONS;}
     private static boolean validPasswordInput(String password){return password!=null&&password.length()>=12&&password.length()<=1024&&password.codePoints().noneMatch(Character::isISOControl);}
     private static void validatePassword(String password) {if(!validPasswordInput(password))throw new IllegalArgumentException("password must be 12-1024 characters without control characters");}
+    private static void validatePassword(char[] password) {if(password==null||password.length<12||password.length>1024)throw new IllegalArgumentException("password must be 12-1024 characters without control characters");for(char value:password)if(Character.isISOControl(value))throw new IllegalArgumentException("password must be 12-1024 characters without control characters");}
+    static String recoveryCsrfToken(){return randomToken();}
     private static String randomToken(){byte[] bytes=new byte[32];RANDOM.nextBytes(bytes);return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);}
     private static String sha256(String token) throws Exception{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.US_ASCII)));}
     private static void secureFile(Path file){try{Files.setPosixFilePermissions(file,PosixFilePermissions.fromString("rw-------"));}catch(UnsupportedOperationException unsupported){try{var view=Files.getFileAttributeView(file,java.nio.file.attribute.AclFileAttributeView.class);if(view==null)throw new IllegalStateException("Filesystem does not support private bootstrap-token permissions");var owner=Files.getOwner(file);var entry=java.nio.file.attribute.AclEntry.newBuilder().setType(java.nio.file.attribute.AclEntryType.ALLOW).setPrincipal(owner).setPermissions(java.util.EnumSet.allOf(java.nio.file.attribute.AclEntryPermission.class)).build();view.setAcl(java.util.List.of(entry));}catch(Exception e){throw new IllegalStateException("Unable to secure local authentication bootstrap token",e);}}catch(Exception e){throw new IllegalStateException("Unable to secure local authentication bootstrap token",e);}}

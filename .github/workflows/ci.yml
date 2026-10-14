@@ -112,6 +112,10 @@ jobs:
         run: npm run smoke
         working-directory: tools/ui-acceptance
 
+      - name: Verify native authentication UI flows and accessibility
+        run: npm run smoke:auth
+        working-directory: tools/ui-acceptance
+
       - name: Verify Scheduled Load flows and accessibility
         run: npm run smoke:scheduled-load
         working-directory: tools/ui-acceptance

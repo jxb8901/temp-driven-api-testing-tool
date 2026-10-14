@@ -38,6 +38,14 @@ export interface ServerVersion {
   authMode?: 'container' | 'local';
 }
 
+export interface LocalAuthUser {
+  loginId: string;
+  displayName: string;
+  role: 'ADMIN' | 'USER';
+  active: boolean;
+  updatedAt?: string;
+}
+
 export interface PackageSummary {
   packageId: string;
   name?: string;

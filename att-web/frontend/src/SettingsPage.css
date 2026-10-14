@@ -22,3 +22,45 @@
   .att-settings-shortcuts > div { align-items: flex-start; flex-direction: column; gap: var(--att-space-2); }
   .att-settings-shortcuts dd { text-align: left; }
 }
+
+.att-user-management { min-width: 0; }
+.att-user-search { display: grid; max-width: 560px; gap: var(--att-space-2); margin-top: var(--att-space-4); }
+.att-user-search label, .att-auth-dialog label, .att-auth-password-field > label { color: var(--att-color-text); font-size: .82rem; font-weight: 650; }
+.att-user-search input, .att-auth-dialog input, .att-auth-dialog select { width: 100%; min-height: 40px; padding: .55rem .7rem; border: 1px solid var(--att-color-border); border-radius: var(--att-radius-control); background: var(--att-color-surface); color: var(--att-color-text); font: inherit; }
+.att-user-search input:focus-visible, .att-auth-dialog input:focus-visible, .att-auth-dialog select:focus-visible { outline: 0; box-shadow: var(--att-focus-ring); }
+.att-user-table-wrap { width: 100%; margin-top: var(--att-space-4); overflow-x: auto; }
+.att-user-table { width: 100%; border-collapse: collapse; text-align: left; }
+.att-user-table th, .att-user-table td { padding: .7rem .65rem; border-top: 1px solid var(--att-color-border); color: var(--att-color-text); font-size: .82rem; vertical-align: middle; }
+.att-user-table thead th { color: var(--att-color-muted); font-size: .76rem; font-weight: 650; white-space: nowrap; }
+.att-user-table thead button { padding: .2rem 0; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; }
+.att-user-table thead button:focus-visible, .att-user-actions button:focus-visible { outline: 0; box-shadow: var(--att-focus-ring); }
+.att-user-table tbody th { font-weight: 650; white-space: nowrap; }
+.att-user-actions { display: flex; flex-wrap: wrap; gap: var(--att-space-1); }
+.att-user-actions .button { min-height: 34px; padding: 0 .55rem; font-size: .74rem; }
+.att-user-status { display: inline-flex; align-items: center; gap: .35rem; white-space: nowrap; }
+.att-user-status::before { width: .48rem; height: .48rem; border-radius: 50%; background: var(--att-color-muted); content: ''; }
+.att-user-status.is-active::before { background: #27845a; }
+.att-user-status.is-disabled::before { background: #a36136; }
+.att-auth-empty, .att-auth-help { color: var(--att-color-muted); font-size: .82rem; line-height: 1.5; }
+.att-auth-feedback { margin: var(--att-space-3) 0 0; color: var(--att-color-success, #27845a); font-size: .84rem; }
+.att-auth-error { margin: var(--att-space-3) 0; color: var(--att-color-danger, #a43d35); font-size: .84rem; line-height: 1.45; }
+.att-auth-error p { margin: 0 0 var(--att-space-2); }
+.att-auth-dialog { width: min(520px, calc(100vw - 2rem)); max-width: 100%; max-height: calc(100dvh - 2rem); overflow-y: auto; padding: var(--att-space-5); border: 1px solid var(--att-color-border); border-radius: var(--att-radius-panel); background: var(--att-color-surface); color: var(--att-color-text); }
+.att-auth-dialog::backdrop { background: rgb(15 23 42 / .52); }
+.att-auth-dialog form { display: grid; gap: var(--att-space-3); }
+.att-auth-dialog form > label { display: grid; gap: var(--att-space-2); }
+.att-auth-dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--att-space-3); }
+.att-auth-dialog-heading h2 { margin-bottom: 0; }
+.att-auth-dialog-heading .eyebrow { margin-bottom: var(--att-space-1); }
+.att-auth-password-field { display: grid; gap: var(--att-space-2); }
+.att-auth-password-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--att-space-2); }
+.att-auth-password-control .button { min-height: 40px; }
+.att-auth-dialog .dialog-actions { margin-top: var(--att-space-2); }
+@media (max-width: 640px) {
+  .att-user-management { padding: var(--att-space-3); }
+  .att-user-management > .att-settings-section-heading { align-items: stretch; }
+  .att-user-management > .att-settings-section-heading > .button { align-self: flex-start; }
+  .att-user-table { min-width: 680px; }
+  .att-auth-dialog { padding: var(--att-space-4); }
+  .att-auth-password-control { grid-template-columns: minmax(0, 1fr); }
+}
