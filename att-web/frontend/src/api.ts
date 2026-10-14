@@ -164,8 +164,8 @@ export const api = {
   getJobs(signal?: AbortSignal): Promise<ApiEnvelope<JobSummary>> {
     return request<ApiEnvelope<JobSummary>>('jobs', { signal });
   },
-  getLoadPolicy(packageId: string, model: LoadModel, environment?: string, signal?: AbortSignal): Promise<LoadPolicyResponse> {
-    return request<LoadPolicyResponse>('packages/' + encodeURIComponent(packageId) + '/load-policy' + queryString({ model, environment }), { signal });
+  getLoadPolicy(packageId: string, model: LoadModel, environment?: string, signal?: AbortSignal, templateId?: string): Promise<LoadPolicyResponse> {
+    return request<LoadPolicyResponse>('packages/' + encodeURIComponent(packageId) + '/load-policy' + queryString({ model, environment, templateId }), { signal });
   },
   getTargetLoadForm(
     packageId: string,
@@ -216,6 +216,8 @@ export const api = {
       type: query.type === 'all' ? undefined : query.type,
       cursor: query.cursor,
       limit: query.limit,
+      sort: query.sort,
+      direction: query.direction,
     }), { signal });
   },
   getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail> {
@@ -224,8 +226,8 @@ export const api = {
   getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection> {
     return request<SourceProjection>(resourcePath(identity) + '/source', { signal });
   },
-  getResourceSourceFile(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal): Promise<SourceProjection> {
-    return request<SourceProjection>(resourcePath(identity) + '/source-file' + queryString({ referenceId }), { signal });
+  getResourceSourceFile(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection> {
+    return request<SourceProjection>(resourcePath(identity) + '/source-file' + queryString({ referenceId, origin }), { signal });
   },
   getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse> {
     return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration?view=declared', { signal });

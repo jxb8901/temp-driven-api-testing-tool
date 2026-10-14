@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 export interface ResourceRoute {
   type: string;
   resourceId: string;
+  tab?: 'definition' | 'source' | 'relations';
 }
 
 export type ConfigurationTab = 'source' | 'declared' | 'effective' | 'compare' | 'testdata';
@@ -35,7 +36,12 @@ export function parseRoute(hash: string): AppRoute {
   if (parts[0] === 'packages' && parts.length === 1) return { kind: 'packages' };
   if (parts[0] === 'packages' && parts[1]) {
     if (parts.length === 5 && parts[2] === 'resources') {
-      return { kind: 'package', packageId: parts[1], resource: { type: parts[3], resourceId: parts[4] } };
+      const rawDetailTab = query.get('detail');
+      const detailTab = rawDetailTab === 'definition' || rawDetailTab === 'source' || rawDetailTab === 'relations'
+        ? rawDetailTab : undefined;
+      return { kind: 'package', packageId: parts[1], resource: {
+        type: parts[3], resourceId: parts[4], ...(detailTab && detailTab !== 'definition' ? { tab: detailTab } : {}),
+      } };
     }
     return { kind: 'package', packageId: parts[1] };
   }
@@ -78,9 +84,11 @@ export function formatRoute(route: AppRoute): string {
     case 'packages': return '#/packages';
     case 'package': {
       const root = '#/packages/' + encodeURIComponent(route.packageId);
-      return route.resource
-        ? root + '/resources/' + encodeURIComponent(route.resource.type) + '/' + encodeURIComponent(route.resource.resourceId)
-        : root;
+      if (!route.resource) return root;
+      const resource = root + '/resources/' + encodeURIComponent(route.resource.type) + '/' + encodeURIComponent(route.resource.resourceId);
+      if (!route.resource.tab || route.resource.tab === 'definition') return resource;
+      const query = new URLSearchParams({ detail: route.resource.tab });
+      return resource + '?' + query.toString();
     }
     case 'configuration': {
       const query = new URLSearchParams();

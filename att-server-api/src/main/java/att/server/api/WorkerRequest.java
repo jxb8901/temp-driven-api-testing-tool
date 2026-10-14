@@ -49,6 +49,8 @@ public class WorkerRequest {
     public String inspectionTargetId;
     public String draftResourceId;
     public String inspectionQuery;
+    public String inspectionSort;
+    public String inspectionDirection;
     public Integer inspectionOffset;
     public Integer inspectionLimit;
     public String expectedRevisionDigest;

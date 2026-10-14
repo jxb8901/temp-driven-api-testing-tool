@@ -206,10 +206,10 @@ class ServerRuntimeTest {
             return builder.start();
         });
         try {
-            Map<String,Object> first=runtime.inspectResource("p","list","template",null,null,1,null,"alice");
+            Map<String,Object> first=runtime.inspectResource("p","list","template",null,null,1,null,"name","asc",null,"alice");
             @SuppressWarnings("unchecked") List<Map<String,Object>> firstItems=(List<Map<String,Object>>)first.get("items");
             assertEquals(1,firstItems.size());assertNotNull(first.get("nextCursor"));
-            Map<String,Object> second=runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor")),"alice");
+            Map<String,Object> second=runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor")),"name","asc",null,"alice");
             @SuppressWarnings("unchecked") List<Map<String,Object>> secondItems=(List<Map<String,Object>>)second.get("items");
             assertEquals(1,secondItems.size());assertNotEquals(firstItems.get(0).get("resourceId"),secondItems.get(0).get("resourceId"));
             String resourceId=String.valueOf(firstItems.get(0).get("resourceId"));
@@ -217,6 +217,7 @@ class ServerRuntimeTest {
             runtime.inspectResource("p","source","template",resourceId,null,1,null,"alice");
             assertThrows(IllegalArgumentException.class,()->runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor"))+"x","alice"));
             assertThrows(IllegalArgumentException.class,()->runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor")),"bob"));
+            assertThrows(IllegalArgumentException.class,()->runtime.inspectResource("p","list","template",null,null,1,String.valueOf(first.get("nextCursor")),"name","desc",null,"alice"));
             assertEquals(1,inspectorStarts.get(),"pagination, detail, and source requests should reuse the bounded inspection Worker process");
         } finally {runtime.close();}
     }
@@ -354,6 +355,14 @@ class ServerRuntimeTest {
         MutableClock clock=new MutableClock();
         ServerRuntime runtime=new ServerRuntime(ServerConfig.load(configFile),libs.toString(),ProcessBuilder::start,clock);
         try {
+            Path arrivalPolicy=Files.createFile(packageRoot.resolve("load/load.arrivalrate.yaml"));
+            Files.writeString(arrivalPolicy,"schemaVersion: att-load/v1.6\nload: {arrivalRate: '2/s', maxConcurrent: 3, overloadPolicy: drop, duration: 2m}\n");
+            Map<String,Object> selectedPolicy=runtime.inspectQuickLoadPolicy("p","arrivalRate",null,"load/load.arrivalrate.yaml","alice");
+            @SuppressWarnings("unchecked") Map<String,Object> selectedPolicyBody=(Map<String,Object>)selectedPolicy.get("policy");
+            @SuppressWarnings("unchecked") Map<String,Object> selectedLoad=(Map<String,Object>)selectedPolicyBody.get("load");
+            assertEquals("2/s",selectedLoad.get("arrivalRate"));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> policyTemplates=(List<Map<String,Object>>)selectedPolicy.get("templates");
+            assertTrue(policyTemplates.stream().anyMatch(item->"load/load.arrivalrate.yaml".equals(item.get("id"))));
             Map<String,Object> page=runtime.inspectResource("p","list","template",null,null,10,null,"alice");
             @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
             String resourceId=String.valueOf(items.get(0).get("resourceId"));

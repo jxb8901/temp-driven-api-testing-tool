@@ -3,7 +3,7 @@ import { ResourceTree, resourceKey } from './ResourceTree';
 import { SourceViewer } from './SourceViewer';
 import { CodeEditor } from '../code/CodeEditor';
 import { TypedSidecarForm } from './TypedSidecarForm';
-import type { DebugDraftRequest, DraftResponse, ExplorerApi, ExplorerPageProps, JsonObject, ResourceIdentity, ResourceReference, ResourceSummary } from './types';
+import type { DebugDraftRequest, DraftResponse, ExplorerApi, ExplorerPageProps, JsonObject, ResourceIdentity, ResourceReference, ResourceSortField, ResourceSummary } from './types';
 
 const MAX_DEFINITION_CHARACTERS = 100_000;
 
@@ -48,15 +48,24 @@ function resourceRouteKey(route: ExplorerPageProps['resourceRoute']): string {
 
 function ExplorerReference({ reference, onOpen }: { reference: ResourceReference; onOpen: ExplorerPageProps['onResourceRouteChange'] }) {
   const label = reference.logicalId || reference.name || reference.resourceId || 'Unresolved reference';
+  if (reference.targetKind === 'helper' && reference.resolution === 'resolved') {
+    const callSite = reference.callSite && typeof reference.callSite.actionId === 'string' ? reference.callSite.actionId : '';
+    return <li><details className="att-helper-reference"><summary>{label}<span>Configured Helper method</span></summary>
+      <p>This call resolves through the package Helper configuration. It is not a separate Tool resource and cannot be opened as a Tool.</p>
+      {callSite && <p>Called from action {callSite}.</p>}
+    </details></li>;
+  }
   const valid = Boolean(reference.type && ['case', 'template', 'flow', 'tool'].includes(reference.type) && reference.resourceId && reference.resolution !== 'unresolved');
-  return <li>{valid ? <button type="button" onClick={() => onOpen({ type: reference.type!, resourceId: reference.resourceId! })}>{label}</button> : label}
-    <span>{reference.type || reference.resolution || 'unresolved'}</span></li>;
+  return <li>{valid ? <button type="button" onClick={() => onOpen({ type: reference.type!, resourceId: reference.resourceId!, tab: 'definition' })}>{label}</button> : <span>{label}</span>}
+    <span>{reference.resolution === 'unresolved' ? 'Unresolved reference' : reference.type || reference.resolution || 'unresolved'}</span></li>;
 }
 
 export function ExplorerPage({ api, packageId, resourceRoute, environment, principalLabel = '', onResourceRouteChange,
   onEnvironmentChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad, onOpenConfiguration, onOpenConfigurationFile, registerUnsavedChanges }: ExplorerPageProps) {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>('all');
+  const [sortKey, setSortKey] = useState<ResourceSortField>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [resources, setResources] = useState<ResourceSummary[]>([]);
   const [totalResources, setTotalResources] = useState(0);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -124,7 +133,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setLoadingResources(true);
-      api.listResources(packageId, { query: query.trim() || undefined, type: typeFilter, limit: 50 }, controller.signal)
+      api.listResources(packageId, { query: query.trim() || undefined, type: typeFilter, sort: sortKey, direction: sortDirection, limit: 50 }, controller.signal)
         .then(page => {
           setResources(page.items || []); setTotalResources(Number(page.total || 0)); setCursor(page.nextCursor || null);
           const warning = page.diagnostics?.map(item => item.summary || item.code).filter(Boolean).join(' ');
@@ -135,13 +144,18 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
         }).finally(() => { if (!controller.signal.aborted) setLoadingResources(false); });
     }, query ? 220 : 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [api, packageId, query, typeFilter, resourceRefresh]);
+  }, [api, packageId, query, typeFilter, sortKey, sortDirection, resourceRefresh]);
+
+  const changeSort = (field: ResourceSortField) => {
+    if (field === sortKey) setSortDirection(value => value === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(field); setSortDirection('asc'); }
+  };
 
   const loadMore = async () => {
     if (!cursor || loadingResources) return;
     setLoadingResources(true); setResourceError('');
     try {
-      const page = await api.listResources(packageId, { query: query.trim() || undefined, type: typeFilter, cursor, limit: 50 });
+      const page = await api.listResources(packageId, { query: query.trim() || undefined, type: typeFilter, sort: sortKey, direction: sortDirection, cursor, limit: 50 });
       setResources(current => [...current, ...(page.items || [])]); setCursor(page.nextCursor || null);
       setResourceStatus(`Showing ${resources.length + (page.items || []).length} of ${totalResources} resources.`);
     } catch (error) { setResourceError(userError(error, 'loading more resources')); }
@@ -149,9 +163,9 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   };
 
   useEffect(() => {
-    if (!identity) { setDetail(null); setDefinition(null); setDetailError(''); setTab('definition'); return; }
+    if (!identity) { setDetail(null); setDefinition(null); setDetailError(''); return; }
     const controller = new AbortController();
-    setDetailLoading(true); setDetailError(''); setDetail(null); setDefinition(null); setTab('definition');
+    setDetailLoading(true); setDetailError(''); setDetail(null); setDefinition(null);
     api.getResource(identity, controller.signal).then(response => {
       if (controller.signal.aborted) return;
       setDetail(response.resource); setDefinition(response.definition ?? {}); setDetailError('');
@@ -160,6 +174,11 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
     }).finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
     return () => controller.abort();
   }, [api, identity?.packageId, identity?.type, identity?.resourceId]);
+
+  useEffect(() => {
+    const requestedTab = resourceRoute?.tab;
+    setTab(requestedTab === 'source' || requestedTab === 'relations' || requestedTab === 'definition' ? requestedTab : 'definition');
+  }, [selectedRouteKey, resourceRoute?.tab]);
 
   useEffect(() => {
     setDebugOpen(false); setDebugForm(null); setDebugInput({}); setDraft(null); setDebugError(''); setDebugStatus('');
@@ -266,19 +285,24 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
     const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
       : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
     setTab(tabs[nextIndex]);
+    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, tab: tabs[nextIndex] });
     event.currentTarget.querySelector<HTMLButtonElement>(`[data-tab="${tabs[nextIndex]}"]`)?.focus();
+  };
+  const selectDetailTab = (next: DetailTab) => {
+    setTab(next);
+    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, tab: next });
   };
 
   return <main className="att-explorer-page">
     <header className="att-explorer-page-heading">
       <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>Package Explorer</h1>
-        <p>Browse package Cases, Templates, Flows and Tools. Select a resource to inspect its definition, dependencies and available actions.</p></div>
-      <label>Run, Debug, and Load environment
+        <p>Package resources and counts are independent of runtime environment. Select an environment only when inspecting or running a resource.</p></div>
+      {identity && <label>Run, Debug, and Load environment
         <input value={environment} maxLength={128} onChange={event => changeEnvironment(event.currentTarget.value)} placeholder="Package default" />
-      </label>
+      </label>}
     </header>
 
-    <div className="att-explorer-workspace">
+    <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}`}>
       <aside className="att-explorer-navigation" aria-label="Resource navigation">
         <h2>Resources</h2>
         <label>Search resources <input type="search" value={query} maxLength={200} onChange={event => setQuery(event.currentTarget.value)} /></label>
@@ -291,13 +315,13 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
         </div>
         <p className="att-explorer-status" role="status" aria-live="polite">{resourceStatus}</p>
         {resourceError && <p className="att-error" role="alert">{resourceError}<button type="button" onClick={() => setResourceRefresh(value => value + 1)}>Retry</button></p>}
-        <ResourceTree items={resources} selectedKey={selectedKey} loading={loadingResources} nextCursor={cursor}
+        <ResourceTree items={resources} selectedKey={selectedKey} loading={loadingResources} nextCursor={cursor} sortKey={sortKey} direction={sortDirection} onSortChange={changeSort}
           onSelect={resource => onResourceRouteChange({ type: resource.type, resourceId: resource.resourceId })}
           onLoadMore={() => void loadMore()} />
         <p className="att-explorer-total">{totalResources.toLocaleString()} {typeFilter === 'all' ? 'package resources' : typeFilter + ' resources'}</p>
       </aside>
 
-      <section className="att-explorer-detail" aria-label="Resource details">
+      <section className="att-explorer-detail" aria-label="Resource details" hidden={!identity}>
         {!identity && <div className="att-explorer-empty-state"><h2>Select a resource</h2><p>Choose a Case, Template, Flow, or Tool from the resource list.</p></div>}
         {identity && <>
           <header className="att-resource-title">
@@ -310,7 +334,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
           <div className="att-explorer-tabs" role="tablist" aria-label="Resource content" onKeyDown={onTabsKeyDown}>
             {(['definition', 'source', 'relations'] as const).map(name => <button key={name} type="button" role="tab" data-tab={name}
               id={`att-explorer-tab-${name}`} aria-selected={tab === name} aria-controls={`att-explorer-panel-${name}`}
-              tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)}>{name === 'definition' ? 'Definition' : name === 'source' ? 'Source' : 'Dependencies'}</button>)}
+              tabIndex={tab === name ? 0 : -1} onClick={() => selectDetailTab(name)}>{name === 'definition' ? 'Definition' : name === 'source' ? 'Source' : 'Dependencies'}</button>)}
           </div>
           <section id="att-explorer-panel-definition" role="tabpanel" aria-labelledby="att-explorer-tab-definition" hidden={tab !== 'definition'}>
             {definition == null && !detailLoading ? <p>No definition projection is available.</p> : <CodeEditor value={detailText} language="json" label="Safe resource definition" readOnly sourcePath={detail?.sourcePath} fileReferences={[]} />}
@@ -328,7 +352,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
         </>}
       </section>
 
-      <aside className="att-explorer-inspector" aria-label="Contextual actions">
+      <aside className="att-explorer-inspector" aria-label="Contextual actions" hidden={!identity}>
         <h2>Inspector</h2>
         {!selectedResource && <p>Select a resource to view its metadata and actions.</p>}
         {selectedResource && <>

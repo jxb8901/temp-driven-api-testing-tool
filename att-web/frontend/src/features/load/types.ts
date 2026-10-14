@@ -29,6 +29,15 @@ export interface LoadPolicyResponse {
   policy: Record<string, unknown>;
   previewYaml?: string;
   redacted?: boolean;
+  templates?: LoadPolicyTemplate[];
+  templateCatalogTruncated?: boolean;
+}
+
+export interface LoadPolicyTemplate {
+  id: string;
+  name: string;
+  model: LoadModel;
+  bundled?: boolean;
 }
 
 export interface QuickLoadFormResponse {
@@ -123,7 +132,7 @@ export interface JobEventHandlers {
 
 /** Feature boundary. Shared api.ts implements these operations; components never build REST paths. */
 export interface LoadJobsApi {
-  getLoadPolicy(packageId: string, model: LoadModel, environment?: string, signal?: AbortSignal): Promise<LoadPolicyResponse>;
+  getLoadPolicy(packageId: string, model: LoadModel, environment?: string, signal?: AbortSignal, templateId?: string): Promise<LoadPolicyResponse>;
   getTargetLoadForm(
     packageId: string,
     type: LoadTargetType,

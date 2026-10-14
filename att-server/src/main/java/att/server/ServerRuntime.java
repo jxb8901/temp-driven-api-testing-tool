@@ -271,23 +271,40 @@ final class ServerRuntime implements AutoCloseable {
     List<Map<String,Object>> packages(){List<Map<String,Object>> out=new ArrayList<>();config.packages.forEach((id,path)->out.add(Map.of("packageId",id,"name",path.getFileName().toString())));return out;}
     Map<String,Object> packageView(String id){Path root=config.packages.get(id);if(root==null)throw new NotFoundException();return Map.of("packageId",id,"name",root.getFileName().toString());}
     Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String principal) throws Exception {
+        return inspectResource(packageId,action,type,resourceId,query,requestedLimit,cursor,"name","asc",null,principal);
+    }
+    Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String sourceOriginPath,String principal) throws Exception {
+        return inspectResource(packageId,action,type,resourceId,query,requestedLimit,cursor,"name","asc",sourceOriginPath,principal);
+    }
+    Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,
+                                       String sort,String direction,String sourceOriginPath,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(!List.of("list","detail","source","source-file").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
         if(type!=null&&!List.of("case","template","flow","tool").contains(type))throw new IllegalArgumentException("Unsupported resource type");
+        String normalizedSort=sort==null||sort.isBlank()?"name":sort;
+        String normalizedDirection=direction==null||direction.isBlank()?"asc":direction;
+        if(!List.of("name","type","logicalId","state").contains(normalizedSort))throw new IllegalArgumentException("Unsupported resource sort field");
+        if(!List.of("asc","desc").contains(normalizedDirection))throw new IllegalArgumentException("Resource sort direction must be asc or desc");
+        if(!"list".equals(action)&&((sort!=null&& !"name".equals(sort))||(direction!=null&& !"asc".equals(direction))))
+            throw new IllegalArgumentException("Resource sorting is only valid for list requests");
+        if(sourceOriginPath!=null&&(sourceOriginPath.length()>1024||containsControl(sourceOriginPath)))throw new IllegalArgumentException("Source origin is invalid");
+        if(sourceOriginPath!=null&& !"source-file".equals(action))throw new IllegalArgumentException("Source origin is only valid for a referenced source file");
         String normalizedQuery=query==null?"":query.trim();if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
         int limit=requestedLimit==0?RESOURCE_DEFAULT_PAGE_SIZE:requestedLimit;
         if(limit<1||limit>RESOURCE_MAX_PAGE_SIZE)throw new IllegalArgumentException("limit must be between 1 and 100");
-        Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,type,normalizedQuery,principal);
+        Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,type,normalizedQuery,normalizedSort,normalizedDirection,principal);
         WorkerRequest request=inspectionRequest(packageId,root,null);
         request.inspectionAction=action;request.inspectionType=type;request.inspectionResourceId=resourceId;request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
+        request.inspectionOrigin=sourceOriginPath;
+        request.inspectionSort=normalizedSort;request.inspectionDirection=normalizedDirection;
         request.expectedRevisionDigest=prior==null?null:prior.revision;
         Map<String,Object> result=executeInspection(root,request);
         Object revision=result.remove("revisionDigest");
         if("list".equals(action)) {
             Object next=result.remove("nextOffset");
-            if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,((Number)next).intValue(),(String)revision,principal));
+            if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,normalizedSort,normalizedDirection,((Number)next).intValue(),(String)revision,principal));
             else result.put("nextCursor",null);
         }
         return result;
@@ -309,7 +326,7 @@ final class ServerRuntime implements AutoCloseable {
         request.inspectionAction="quick-load-form";request.inspectionType=type;request.inspectionResourceId=resourceId;request.loadModel=model;
         Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");result.remove("normalizedScenario");return result;
     }
-    Map<String,Object> inspectQuickLoadPolicy(String packageId,String model,String environment,String principal) throws Exception {
+    Map<String,Object> inspectQuickLoadPolicy(String packageId,String model,String environment,String templateId,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
@@ -317,7 +334,7 @@ final class ServerRuntime implements AutoCloseable {
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,environment);
-        request.inspectionAction="quick-load-policy";request.loadModel=model;
+        request.inspectionAction="quick-load-policy";request.loadModel=model;request.inspectionPath=templateId;
         Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");return result;
     }
     private Map<String,Object> inspectDebugFormInternal(String packageId,String type,String resourceId,String environment,
@@ -1012,15 +1029,15 @@ final class ServerRuntime implements AutoCloseable {
 
         @Override public void close() { discard(); }
     }
-    private String encodeCursor(String packageId,String type,String query,int offset,String revision,String principal) throws Exception {
-        Map<String,Object> payload=new LinkedHashMap<>();payload.put("packageId",packageId);payload.put("type",type);payload.put("query",query);payload.put("offset",offset);payload.put("revision",revision);payload.put("principal",principal);
+    private String encodeCursor(String packageId,String type,String query,String sort,String direction,int offset,String revision,String principal) throws Exception {
+        Map<String,Object> payload=new LinkedHashMap<>();payload.put("packageId",packageId);payload.put("type",type);payload.put("query",query);payload.put("sort",sort);payload.put("direction",direction);payload.put("offset",offset);payload.put("revision",revision);payload.put("principal",principal);
         byte[] nonce=new byte[12];cursorRandom.nextBytes(nonce);
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
         byte[] ciphertext=cipher.doFinal(JSON.writeValueAsBytes(payload));byte[] token=new byte[nonce.length+ciphertext.length];
         System.arraycopy(nonce,0,token,0,nonce.length);System.arraycopy(ciphertext,0,token,nonce.length,ciphertext.length);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(token);
     }
-    private Cursor decodeCursor(String token,String packageId,String type,String query,String principal) throws Exception {
+    private Cursor decodeCursor(String token,String packageId,String type,String query,String sort,String direction,String principal) throws Exception {
         if(token.length()>4096)throw new IllegalArgumentException("cursor is too long");byte[] bytes;
         try{bytes=Base64.getUrlDecoder().decode(token);}catch(IllegalArgumentException bad){throw new IllegalArgumentException("cursor is invalid");}
         if(bytes.length<28)throw new IllegalArgumentException("cursor is invalid");
@@ -1028,7 +1045,7 @@ final class ServerRuntime implements AutoCloseable {
         try{Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));payload=cipher.doFinal(ciphertext);}
         catch(Exception bad){throw new IllegalArgumentException("cursor is invalid");}
         JsonNode value;try{value=JSON.readTree(payload);}catch(Exception bad){throw new IllegalArgumentException("cursor is invalid");}
-        if(!packageId.equals(value.path("packageId").asText())||!java.util.Objects.equals(type,value.path("type").isNull()?null:value.path("type").asText())||!query.equals(value.path("query").asText())||!principal.equals(value.path("principal").asText()))throw new IllegalArgumentException("cursor does not match this resource query");
+        if(!packageId.equals(value.path("packageId").asText())||!java.util.Objects.equals(type,value.path("type").isNull()?null:value.path("type").asText())||!query.equals(value.path("query").asText())||!sort.equals(value.path("sort").asText())||!direction.equals(value.path("direction").asText())||!principal.equals(value.path("principal").asText()))throw new IllegalArgumentException("cursor does not match this resource query");
         int offset=value.path("offset").asInt(-1);String revision=value.path("revision").asText("");if(offset<1||offset>20000||!revision.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("cursor is invalid");return new Cursor(offset,revision);
     }
     private static boolean containsControl(String value){for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))return true;return false;}

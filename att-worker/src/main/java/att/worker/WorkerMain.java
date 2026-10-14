@@ -217,7 +217,7 @@ public final class WorkerMain {
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
             if("quick-load-policy".equals(r.inspectionAction)) {
-                Map<String,Object> inspected=inspector.inspectQuickLoadPolicy(r.loadModel);
+                Map<String,Object> inspected=inspector.inspectQuickLoadPolicy(r.loadModel,r.inspectionPath);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
@@ -230,7 +230,9 @@ public final class WorkerMain {
                     r.inspectionResourceId, r.inspectionQuery,
                     r.inspectionOffset == null ? 0 : r.inspectionOffset,
                     r.inspectionLimit == null ? 50 : r.inspectionLimit,
-                    r.expectedRevisionDigest);
+                    r.expectedRevisionDigest,r.inspectionOrigin,
+                    r.inspectionSort == null ? "name" : r.inspectionSort,
+                    r.inspectionDirection == null ? "asc" : r.inspectionDirection);
             return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                     Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
         }

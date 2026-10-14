@@ -172,9 +172,20 @@ async function main() {
         });
       }
       if (method === 'GET' && path === 'packages/payments/load-policy') {
+        const templateId = url.searchParams.get('templateId');
+        const quickSmoke = templateId === 'bundled:quick-smoke';
         return jsonResponse(route, 200, {
           model: url.searchParams.get('model') || 'virtualUsers',
-          policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' }, execution: {}, thresholds: {}, evidence: {} },
+          policy: {
+            schemaVersion: 'att-load/v1.6',
+            load: quickSmoke ? { users: 2, duration: '10s' } : { users: 1, duration: '30s' },
+            execution: quickSmoke ? { thinkTime: '250ms' } : {},
+            thresholds: {}, evidence: quickSmoke ? { mode: 'failures' } : {},
+          },
+          templates: [
+            { id: 'load/load.arrivalrate.yaml', name: 'load.arrivalrate.yaml', model: 'arrivalRate', bundled: false },
+            { id: 'bundled:quick-smoke', name: 'Quick Smoke · 2 users · 10s', model: 'virtualUsers', bundled: true },
+          ],
           redacted: false,
         });
       }
@@ -318,7 +329,8 @@ async function main() {
     await page.getByRole('heading', { name: 'Quick Load', level: 1 }).waitFor();
     await page.getByText(/selected model’s package policy or Server fallback is loaded|Safe model-specific policy defaults loaded/).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), true, 'scheduling requires a validated draft');
-    await page.getByRole('combobox', { name: 'Load template or preset' }).selectOption('quick-profile');
+    await page.locator('select[aria-label="Load template or preset"] option[value="load/load.arrivalrate.yaml"]').waitFor({ state: 'attached' });
+    await page.getByRole('combobox', { name: 'Load template or preset' }).selectOption('bundled:quick-smoke');
     await page.getByRole('button', { name: 'Validate' }).click();
     await page.getByText('The Server accepted this draft for review.').waitFor();
     assert.deepEqual(submittedLoadScenario.workloads[0], {

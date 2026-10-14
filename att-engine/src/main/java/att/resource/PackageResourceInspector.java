@@ -68,6 +68,8 @@ public final class PackageResourceInspector implements AutoCloseable {
     public static final int DEFAULT_PAGE_SIZE = 50;
     private static final int MAX_INLINE_BACK_REFERENCES = 100;
     private static final int MAX_SOURCE_REFERENCES = 100;
+    private static final int MAX_NESTED_SOURCE_DEPTH = 8;
+    private static final int MAX_NESTED_SOURCE_FILES = 256;
     private static final int MAX_RESOURCES = 20000;
     private static final int MAX_WORKBOOKS = 500;
     private static final long MAX_TOTAL_WORKBOOK_BYTES = 128L * 1024L * 1024L;
@@ -166,6 +168,10 @@ public final class PackageResourceInspector implements AutoCloseable {
                 result.put("reason", "visibility-policy");
                 return bounded(result);
             }
+            if (sourceGlobDenied(logicalPath)) {
+                result.put("reason", "deny-policy");
+                return bounded(result);
+            }
             if (Files.size(file.canonicalPath()) > maxSourceBytes) {
                 result.put("reason", "size-limit");
                 return bounded(result);
@@ -175,7 +181,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                 result.put("reason", "binary-file");
                 return bounded(result);
             }
-            String safe = scrub(text);
+            String safe = scrubSourceText(text, logicalPath);
             if (utf8(safe).length > maxSourceBytes) {
                 result.put("reason", "size-limit");
                 return bounded(result);
@@ -185,6 +191,9 @@ public final class PackageResourceInspector implements AutoCloseable {
             result.put("format", sourceFormat(logicalPath));
             result.put("text", safe);
             result.put("redacted", Boolean.valueOf(!safe.equals(text)));
+            SourceFileReferences references = packageFileSourceReferences(file.canonicalPath(), logicalPath, safe);
+            result.put("fileReferences", references.items);
+            result.put("fileReferencesTruncated", Boolean.valueOf(references.truncated));
             return bounded(result);
         } catch (ResourceNotFoundException error) {
             throw error;
@@ -215,6 +224,20 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     public Map<String, Object> inspect(String action, String type, String resourceId,
                                        String query, int offset, int limit, String expectedRevisionDigest) throws Exception {
+        return inspect(action, type, resourceId, query, offset, limit, expectedRevisionDigest, null, "name", "asc");
+    }
+
+    /** Resolves nested package-file references only when their origin is reachable from the safe resource source. */
+    public Map<String, Object> inspect(String action, String type, String resourceId,
+                                       String query, int offset, int limit, String expectedRevisionDigest,
+                                       String sourceOriginPath) throws Exception {
+        return inspect(action, type, resourceId, query, offset, limit, expectedRevisionDigest, sourceOriginPath, "name", "asc");
+    }
+
+    /** Applies stable sorting before pagination so every page shares one server-defined order. */
+    public Map<String, Object> inspect(String action, String type, String resourceId,
+                                       String query, int offset, int limit, String expectedRevisionDigest,
+                                       String sourceOriginPath, String sort, String direction) throws Exception {
         if (!("list".equals(action) || "detail".equals(action) || "source".equals(action)
                 || "source-file".equals(action)))
             throw new IllegalArgumentException("Unsupported inspection action");
@@ -222,19 +245,21 @@ public final class PackageResourceInspector implements AutoCloseable {
         if (limit < 1 || limit > MAX_PAGE_SIZE) throw new IllegalArgumentException("limit must be between 1 and 100");
         if (query != null && query.length() > 200) throw new IllegalArgumentException("query is too long");
         if (type != null && !supportedType(type)) throw new IllegalArgumentException("Unsupported resource type");
+        if (!java.util.Arrays.asList("name", "type", "logicalId", "state").contains(sort)) throw new IllegalArgumentException("Unsupported resource sort field");
+        if (!"asc".equals(direction) && !"desc".equals(direction)) throw new IllegalArgumentException("Resource sort direction must be asc or desc");
         Index index = index();
         if (expectedRevisionDigest != null && !expectedRevisionDigest.equals(index.revisionDigest))
             throw new StaleResourceCursorException();
-        if ("list".equals(action)) return page(index, type, query, offset, limit);
+        if ("list".equals(action)) return page(index, type, query, offset, limit, sort, direction);
         if (resourceId == null || resourceId.length() > 512) throw new IllegalArgumentException("resourceId is invalid");
         Resource resource = index.byId.get(resourceId);
         if (resource == null || type != null && !type.equals(resource.type)) throw new ResourceNotFoundException();
         if ("source".equals(action)) return source(index, resource);
-        if ("source-file".equals(action)) return sourceFile(index, resource, query);
+        if ("source-file".equals(action)) return sourceFile(index, resource, query, sourceOriginPath);
         return detail(index, resource);
     }
 
-    private Map<String, Object> page(Index index, String type, String query, int offset, int limit) {
+    private Map<String, Object> page(Index index, String type, String query, int offset, int limit, String sort, String direction) {
         String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         List<Resource> matches = new ArrayList<Resource>();
         for (Resource resource : index.ordered) {
@@ -242,6 +267,16 @@ public final class PackageResourceInspector implements AutoCloseable {
             if (!needle.isEmpty() && !resource.matches(needle)) continue;
             matches.add(resource);
         }
+        final boolean reverse = "desc".equals(direction);
+        Collections.sort(matches, new Comparator<Resource>() {
+            @Override public int compare(Resource left, Resource right) {
+                String leftValue = sortValue(left, sort), rightValue = sortValue(right, sort);
+                int compared = compareResourceText(leftValue, rightValue);
+                if (compared == 0) compared = compareResourceText(left.type, right.type);
+                if (compared == 0) compared = compareResourceText(left.resourceId, right.resourceId);
+                return reverse ? -compared : compared;
+            }
+        });
         if (offset > matches.size()) throw new IllegalArgumentException("offset exceeds the current resource list");
         int end = Math.min(matches.size(), offset + limit);
         List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
@@ -253,6 +288,22 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("diagnostics", index.diagnostics);
         result.put("revisionDigest", index.revisionDigest);
         return bounded(result);
+    }
+
+    private static String sortValue(Resource resource, String sort) {
+        if ("type".equals(sort)) return resource.type;
+        if ("logicalId".equals(sort)) return resource.logicalId;
+        if ("state".equals(sort)) return resource.state;
+        return resource.name == null || resource.name.isEmpty()
+                ? (resource.logicalId == null || resource.logicalId.isEmpty() ? resource.resourceId : resource.logicalId)
+                : resource.name;
+    }
+
+    private static int compareResourceText(String left, String right) {
+        String a = left == null ? "" : left;
+        String b = right == null ? "" : right;
+        int compared = String.CASE_INSENSITIVE_ORDER.compare(a, b);
+        return compared == 0 ? a.compareTo(b) : compared;
     }
 
     private Map<String, Object> detail(Index index, Resource resource) {
@@ -322,6 +373,9 @@ public final class PackageResourceInspector implements AutoCloseable {
                 String projected = scrubSourceText(text, logicalPath);
                 result.put("text", projected);
                 result.put("redacted", Boolean.valueOf(!text.equals(projected)));
+                SourceFileReferences references = packageFileSourceReferences(resource.textSource, logicalPath, projected);
+                result.put("fileReferences", references.items);
+                result.put("fileReferencesTruncated", Boolean.valueOf(references.truncated));
                 return bounded(result);
             } catch (ResponseTooLargeException oversized) {
                 result.put("available", Boolean.FALSE);
@@ -348,14 +402,25 @@ public final class PackageResourceInspector implements AutoCloseable {
         return bounded(result);
     }
 
-    private Map<String, Object> sourceFile(Index index, Resource resource, String referenceId) {
+    private Map<String, Object> sourceFile(Index index, Resource resource, String referenceId, String sourceOriginPath) {
         if (referenceId == null || !referenceId.matches("[0-9a-f]{64}")
                 || resource.yamlSource == null || !sourceAllowed(resource)) throw new ResourceNotFoundException();
         try {
             Object authored = loadYaml(resource.yamlSource, maxSourceBytes);
             Object safe = sourceYamlProjection(yamlMapping(authored), "");
             SourceFileReference selected = null;
-            for (SourceFileReference candidate : resolveSourceFileReferences(resource, safe).values()) {
+            Map<String, SourceFileReference> references;
+            if (sourceOriginPath == null || sourceOriginPath.isBlank()
+                    || resources.fromInternalPath(resource.yamlSource, PackageResourceResolver.Kind.FILE).logicalName().equals(sourceOriginPath)) {
+                references = resolveSourceFileReferences(resource, safe);
+            } else {
+                PackageResourceResolver.PackageResource origin = resources.resolvePackageRelative(sourceOriginPath, PackageResourceResolver.Kind.FILE);
+                if (!isReachableSourceFile(resource, origin.canonicalPath())) throw new ResourceNotFoundException();
+                if (!referencedTextPathAllowed(origin.logicalName()) || deniedSourcePath(origin.logicalName())) throw new ResourceNotFoundException();
+                String originText = decodeUtf8(readBounded(origin.canonicalPath(), maxSourceBytes));
+                references = resolveSourceFileReferences(resource, origin.canonicalPath(), scrubSourceText(originText, origin.logicalName()));
+            }
+            for (SourceFileReference candidate : references.values()) {
                 if (referenceId.equals(candidate.id)) { selected = candidate; break; }
             }
             if (selected == null) throw new ResourceNotFoundException();
@@ -368,6 +433,9 @@ public final class PackageResourceInspector implements AutoCloseable {
             result.put("logicalPath", selected.logicalPath);
             result.put("text", projected);
             result.put("redacted", Boolean.valueOf(!text.equals(projected)));
+            SourceFileReferences nested = sourceFileReferences(resource, selected.path, projected);
+            result.put("fileReferences", nested.items);
+            result.put("fileReferencesTruncated", Boolean.valueOf(nested.truncated));
             result.put("revisionDigest", index.revisionDigest);
             return bounded(result);
         } catch (ResourceNotFoundException missing) {
@@ -393,6 +461,14 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private SourceFileReferences sourceFileReferences(Resource parent, Object projectedYaml) {
         Map<String, SourceFileReference> resolved = resolveSourceFileReferences(parent, projectedYaml);
+        return sourceFileReferences(resolved);
+    }
+
+    private SourceFileReferences sourceFileReferences(Resource parent, Path sourcePath, String projectedText) {
+        return sourceFileReferences(resolveSourceFileReferences(parent, sourcePath, projectedText));
+    }
+
+    private SourceFileReferences sourceFileReferences(Map<String, SourceFileReference> resolved) {
         List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
         int count = 0;
         for (SourceFileReference reference : resolved.values()) {
@@ -406,11 +482,40 @@ public final class PackageResourceInspector implements AutoCloseable {
         return new SourceFileReferences(items, resolved.size() > MAX_SOURCE_REFERENCES);
     }
 
+    private SourceFileReferences packageFileSourceReferences(Path sourcePath, String sourceLogicalPath, String projectedText) {
+        Map<String, SourceFileReference> resolved = new LinkedHashMap<String, SourceFileReference>();
+        FileExpressionResolver resolver = new FileExpressionResolver(packageRoot);
+        List<String> authoredPaths;
+        try { authoredPaths = resolver.extractReferences(projectedText); }
+        catch (Exception invalidExpression) { return sourceFileReferences(resolved); }
+        for (String authoredPath : authoredPaths) {
+            if (resolved.size() >= MAX_SOURCE_REFERENCES + 1) break;
+            try {
+                Path canonical = resolver.resolve(authoredPath, sourcePath.getParent());
+                PackageResourceResolver.PackageResource target = resources.fromInternalPath(canonical, PackageResourceResolver.Kind.FILE);
+                String logical = target.logicalName();
+                if (!safeTextSources.contains(logical) || sourceGlobDenied(logical) || !referencedTextPathAllowed(logical)
+                        || Files.size(target.canonicalPath()) > maxSourceBytes || !isUtf8Text(target.canonicalPath())) continue;
+                String id = sourceReferenceId(sourceLogicalPath, logical);
+                if (!resolved.containsKey(id)) resolved.put(id, new SourceFileReference(id, logical, target.canonicalPath()));
+            } catch (Exception unavailable) { /* Unlisted, denied, missing, binary and oversized files are not navigable. */ }
+        }
+        return sourceFileReferences(resolved);
+    }
+
     private Map<String, SourceFileReference> resolveSourceFileReferences(Resource parent, Object projectedYaml) {
         Map<String, SourceFileReference> result = new LinkedHashMap<String, SourceFileReference>();
         if (parent == null || parent.yamlSource == null || !("template".equals(parent.type) || "flow".equals(parent.type))) return result;
         FileExpressionResolver resolver = new FileExpressionResolver(packageRoot);
         collectSourceFileReferences(parent, projectedYaml, resolver, result);
+        return result;
+    }
+
+    private Map<String, SourceFileReference> resolveSourceFileReferences(Resource parent, Path sourcePath, String projectedText) {
+        Map<String, SourceFileReference> result = new LinkedHashMap<String, SourceFileReference>();
+        if (parent == null || sourcePath == null || !sourceAllowed(parent)) return result;
+        FileExpressionResolver resolver = new FileExpressionResolver(packageRoot);
+        collectSourceFileReferences(parent, projectedText, sourcePath.getParent(), resolver, result);
         return result;
     }
 
@@ -426,13 +531,19 @@ public final class PackageResourceInspector implements AutoCloseable {
             return;
         }
         if (!(value instanceof String)) return;
+        collectSourceFileReferences(parent, (String) value, parent.yamlSource.getParent(), resolver, result);
+    }
+
+    private void collectSourceFileReferences(Resource parent, String text, Path originDirectory,
+                                             FileExpressionResolver resolver, Map<String, SourceFileReference> result) {
+        if (result.size() >= MAX_SOURCE_REFERENCES + 1) return;
         List<String> paths;
-        try { paths = resolver.extractReferences((String) value); }
+        try { paths = resolver.extractReferences(text); }
         catch (Exception invalidExpression) { return; }
         for (String authoredPath : paths) {
             if (result.size() >= MAX_SOURCE_REFERENCES + 1) return;
             try {
-                Path canonical = resolver.resolve(authoredPath, parent.yamlSource.getParent());
+                Path canonical = resolver.resolve(authoredPath, originDirectory);
                 PackageResourceResolver.PackageResource target = resources.fromInternalPath(canonical, PackageResourceResolver.Kind.FILE);
                 String logical = target.logicalName();
                 if (!referencedTextPathAllowed(logical) || deniedSourcePath(logical)
@@ -442,6 +553,34 @@ public final class PackageResourceInspector implements AutoCloseable {
                 if (!result.containsKey(id)) result.put(id, new SourceFileReference(id, logical, target.canonicalPath()));
             } catch (Exception unavailable) { /* Missing, unsafe, binary, and oversize targets are not projected. */ }
         }
+    }
+
+    private boolean isReachableSourceFile(Resource resource, Path requested) throws Exception {
+        Path target = resources.fromInternalPath(requested, PackageResourceResolver.Kind.FILE).canonicalPath();
+        if (target.equals(resources.fromInternalPath(resource.yamlSource, PackageResourceResolver.Kind.FILE).canonicalPath())) return true;
+        Map<String, SourceFileReference> direct = resolveSourceFileReferences(resource, resource.definition);
+        java.util.ArrayDeque<Path> pending = new java.util.ArrayDeque<Path>();
+        Map<Path, Integer> depth = new HashMap<Path, Integer>();
+        for (SourceFileReference reference : direct.values()) {
+            Path canonical = reference.path.toRealPath();
+            if (!depth.containsKey(canonical)) { pending.add(canonical); depth.put(canonical, Integer.valueOf(1)); }
+        }
+        int visited = 0;
+        while (!pending.isEmpty() && visited++ < MAX_NESTED_SOURCE_FILES) {
+            Path current = pending.remove();
+            if (current.equals(target)) return true;
+            int currentDepth = depth.get(current).intValue();
+            if (currentDepth >= MAX_NESTED_SOURCE_DEPTH) continue;
+            try {
+                String logical = resources.fromInternalPath(current, PackageResourceResolver.Kind.FILE).logicalName();
+                String content = scrubSourceText(decodeUtf8(readBounded(current, maxSourceBytes)), logical);
+                for (SourceFileReference nested : resolveSourceFileReferences(resource, current, content).values()) {
+                    Path canonical = nested.path.toRealPath();
+                    if (!depth.containsKey(canonical)) { pending.add(canonical); depth.put(canonical, Integer.valueOf(currentDepth + 1)); }
+                }
+            } catch (Exception unavailable) { /* Invalid or unreadable nested sources cannot authorize further navigation. */ }
+        }
+        return false;
     }
 
     private void indexReferencedSources(Index index, Resource resource) {
@@ -455,6 +594,30 @@ public final class PackageResourceInspector implements AutoCloseable {
         if (lower.matches(".*\\.(sh|bash|py|js|ts|groovy|rb|pl|ps1|bat|cmd)$"))
             return safeTextSources.contains(logicalPath);
         return lower.matches(".*\\.(xml|json|ya?ml|txt|sql|csv|properties|xsd|wsdl|html|graphql|gql)$");
+    }
+
+    private Set<String> safeFileExpressionTokens(String text, String sourceLogicalPath) {
+        Set<String> preserved = new LinkedHashSet<String>();
+        if (text == null || sourceLogicalPath == null || sourceLogicalPath.isEmpty()) return preserved;
+        try {
+            Path source = resources.resolvePackageRelative(sourceLogicalPath, PackageResourceResolver.Kind.FILE).canonicalPath();
+            FileExpressionResolver resolver = new FileExpressionResolver(packageRoot);
+            for (String authoredPath : resolver.extractReferences(text)) {
+                try {
+                    Path canonical = resolver.resolve(authoredPath, source.getParent());
+                    PackageResourceResolver.PackageResource target = resources.fromInternalPath(canonical, PackageResourceResolver.Kind.FILE);
+                    String logical = target.logicalName();
+                    boolean configurationSource = sourceLogicalPath.startsWith("config/");
+                    boolean allowed = configurationSource
+                            ? safeTextSources.contains(logical) && !sourceGlobDenied(logical) && !sensitiveSourcePath(logical)
+                            : !deniedSourcePath(logical);
+                    if (!allowed || !referencedTextPathAllowed(logical)
+                            || Files.size(target.canonicalPath()) > maxSourceBytes || !isUtf8Text(target.canonicalPath())) continue;
+                    preserved.add("&{" + authoredPath + "}");
+                } catch (Exception unavailable) { /* Unsafe and unavailable expressions are still scrubbed as ordinary text. */ }
+            }
+        } catch (Exception unavailable) { /* Sources without a canonical package origin have no preserved file tokens. */ }
+        return preserved;
     }
 
     private String sourceReferenceId(String resourceId, String logicalPath) {
@@ -638,8 +801,15 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     /** Returns the safe model-specific policy defaults used to initialize Advanced Load. */
     public Map<String, Object> inspectQuickLoadPolicy(String model) throws Exception {
+        return inspectQuickLoadPolicy(model, null);
+    }
+
+    /** Returns one selected safe policy and the bounded compatible package/bundled template catalog. */
+    public Map<String, Object> inspectQuickLoadPolicy(String model, String templateId) throws Exception {
         Index index = index();
-        Map<String, Object> policy = new att.load.LoadScenarioLoader(packageRoot).loadQuickLoadPolicy(model);
+        att.load.LoadScenarioLoader loader = new att.load.LoadScenarioLoader(packageRoot);
+        if (templateId != null && templateId.length() > 1024) throw new IllegalArgumentException("Load template id is invalid");
+        Map<String, Object> policy = loader.loadQuickLoadPolicy(model, templateId);
         Map<String, Object> projection = debugEngine(frameworkConfig()).projectSafeValue(policy);
         @SuppressWarnings("unchecked") Map<String, Object> safePolicy = (Map<String, Object>) projection.get("value");
         DumperOptions options = new DumperOptions();
@@ -651,6 +821,9 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("policy", safePolicy);
         result.put("previewYaml", new Yaml(options).dump(safePolicy));
         result.put("redacted", Boolean.valueOf(Boolean.TRUE.equals(projection.get("redacted"))));
+        att.load.LoadScenarioLoader.QuickLoadTemplateCatalog catalog = loader.quickLoadTemplates();
+        result.put("templates", catalog.toMaps());
+        result.put("templateCatalogTruncated", Boolean.valueOf(catalog.truncated));
         result.put("revisionDigest", index.revisionDigest);
         return bounded(result);
     }
@@ -937,6 +1110,11 @@ public final class PackageResourceInspector implements AutoCloseable {
         Path configFile = configPath.isAbsolute() ? configPath : packageRoot.resolve(configPath);
         configFile = resources.fromInternalPath(configFile, PackageResourceResolver.Kind.FILE).canonicalPath();
         roots.recursive.add(configFile.getParent());
+        Path loadDirectory = packageRoot.resolve("load").normalize();
+        if (Files.isDirectory(loadDirectory, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(loadDirectory))
+            roots.direct.add(loadDirectory);
+        else
+            roots.direct.add(packageRoot);
         FrameworkConfig config = new FrameworkConfigLoader().load(configFile, packageRoot, environment);
         Path templatesRoot = config.templatesRoot().isAbsolute()
                 ? config.templatesRoot() : packageRoot.resolve(config.templatesRoot());
@@ -1445,14 +1623,23 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private boolean deniedSourcePath(String logical) {
         String lower = logical.toLowerCase(Locale.ROOT);
-        String base = lower.substring(lower.lastIndexOf('/') + 1);
         boolean allowlistedToolScript = lower.startsWith("config/tools/") && textExtension(lower);
         if (lower.startsWith("config/") && !allowlistedToolScript || lower.startsWith("testcase/") || lower.startsWith("testdata/")
-                || lower.startsWith("debug-data/") || base.equals("debug.yaml") || base.startsWith(".env")
-                || base.contains("secret") || base.contains("credential") || base.contains("password")
-                || base.contains("token") || base.endsWith(".pem")
-                || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx")
-                || base.endsWith(".jks") || base.endsWith(".keystore")) return true;
+                || lower.startsWith("debug-data/") || sensitiveSourcePath(lower)) return true;
+        return sourceGlobDenied(lower);
+    }
+
+    private boolean sensitiveSourcePath(String logical) {
+        String lower = logical.toLowerCase(Locale.ROOT);
+        String base = lower.substring(lower.lastIndexOf('/') + 1);
+        return base.equals("debug.yaml") || base.startsWith(".env") || base.contains("secret")
+                || base.contains("credential") || base.contains("password") || base.contains("token")
+                || base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12")
+                || base.endsWith(".pfx") || base.endsWith(".jks") || base.endsWith(".keystore");
+    }
+
+    private boolean sourceGlobDenied(String logical) {
+        String lower = logical.toLowerCase(Locale.ROOT);
         for (String glob : sourceDenyGlobs) if (matchesPathGlob(glob, lower)) return true;
         return false;
     }
@@ -1580,7 +1767,7 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private String scrubSourceText(String value, String logicalPath) {
         if (value == null) return null;
-        String result = sourcePathSafe(scrubSensitiveValues(value));
+        String result = sourcePathSafe(scrubSensitiveValues(value), safeFileExpressionTokens(value, logicalPath));
         result = SOURCE_PII_VALUE.matcher(result).replaceAll("$1[REDACTED]");
         result = XML_PII.matcher(result).replaceAll("$1[REDACTED]$3");
         if (logicalPath != null && logicalPath.toLowerCase(Locale.ROOT).endsWith(".csv")) result = scrubCsvPersonalData(result);
@@ -1631,17 +1818,34 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private String sourcePathSafe(String value) {
-        Matcher matcher = XML_CLOSE_TAG.matcher(value);
-        StringBuffer masked = new StringBuffer();
+        return sourcePathSafe(value, Collections.<String>emptySet());
+    }
+
+    private String sourcePathSafe(String value, Set<String> preservedFileTokens) {
+        String masked = value;
+        List<String> restore = new ArrayList<String>();
+        List<String> ordered = new ArrayList<String>(preservedFileTokens);
+        Collections.sort(ordered, new Comparator<String>() {
+            @Override public int compare(String left, String right) { return Integer.compare(right.length(), left.length()); }
+        });
+        for (String token : ordered) {
+            if (token == null || token.isEmpty() || !masked.contains(token)) continue;
+            String placeholder = "\u0001ATT_SAFE_FILE_TOKEN_" + restore.size() + "\u0002";
+            masked = masked.replace(token, placeholder);
+            restore.add(token);
+        }
+        Matcher matcher = XML_CLOSE_TAG.matcher(masked);
+        StringBuffer xmlMasked = new StringBuffer();
         List<String> tags = new ArrayList<String>();
         while (matcher.find()) {
             String token = "\u0001ATT_XML_CLOSE_" + tags.size() + "\u0002";
             tags.add(matcher.group());
-            matcher.appendReplacement(masked, Matcher.quoteReplacement(token));
+            matcher.appendReplacement(xmlMasked, Matcher.quoteReplacement(token));
         }
-        matcher.appendTail(masked);
-        String result = att.core.PathPresentation.displayDiagnosticText(masked.toString(), packageRoot);
+        matcher.appendTail(xmlMasked);
+        String result = att.core.PathPresentation.displayDiagnosticText(xmlMasked.toString(), packageRoot);
         for (int i = 0; i < tags.size(); i++) result = result.replace("\u0001ATT_XML_CLOSE_" + i + "\u0002", tags.get(i));
+        for (int i = 0; i < restore.size(); i++) result = result.replace("\u0001ATT_SAFE_FILE_TOKEN_" + i + "\u0002", restore.get(i));
         return result;
     }
 
@@ -1737,16 +1941,18 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private void indexQuickLoadPolicies(Index index) {
-        for (String filename : new String[]{"load.visualuser.yaml", "load.arrivalrate.yaml"}) {
-            Path candidate = packageRoot.resolve("load").resolve(filename).toAbsolutePath().normalize();
-            String logicalName = packageRoot.relativize(candidate).toString().replace('\\', '/');
-            try {
-                PackageResourceResolver.PackageResource resource = resources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE);
+        try {
+            att.load.LoadScenarioLoader.QuickLoadTemplateCatalog catalog = new att.load.LoadScenarioLoader(packageRoot).quickLoadTemplates();
+            for (att.load.LoadScenarioLoader.QuickLoadTemplate template : catalog.items) {
+                if (template.bundled) continue;
+                PackageResourceResolver.PackageResource resource = resources.resolvePackageRelative(template.id, PackageResourceResolver.Kind.FILE);
                 index.files.add(resource.canonicalPath());
                 index.quickLoadPolicies.put(resource.logicalName(), resource.canonicalPath());
-            } catch (Exception ignored) {
-                index.quickLoadPolicies.put(logicalName, null);
             }
+        } catch (Exception unavailable) { /* An unavailable catalog contributes no selectable policy files. */ }
+        for (String filename : new String[]{"load.visualuser.yaml", "load.arrivalrate.yaml"}) {
+            String logicalName = "load/" + filename;
+            if (!index.quickLoadPolicies.containsKey(logicalName)) index.quickLoadPolicies.put(logicalName, null);
         }
     }
 

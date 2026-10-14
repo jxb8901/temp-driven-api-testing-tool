@@ -210,6 +210,43 @@ class LoadScenarioTest {
                 arrivalPolicy, mapOf(), mapOf(), Collections.emptyList()));
     }
 
+    @Test void quickLoadTemplateCatalogIsModelAwareSafeAndDeterministicallyBounded() throws Exception {
+        Path project = project();
+        Path load = Files.createDirectories(project.resolve("load"));
+        write(project, "load/a-arrival.yaml", "schemaVersion: att-load/v1.6\nload: {arrivalRate: '3/s', maxConcurrent: 4, overloadPolicy: drop, duration: 15s}\n");
+        write(project, "load/z-users.yaml", "schemaVersion: att-load/v1.6\nload: {users: 6, duration: 20s}\nexecution: {thinkTime: 75ms}\n");
+        Files.write(load.resolve("too-large.yaml"), new byte[256 * 1024 + 1]);
+        Path external = temp.resolve("outside.yaml");
+        Files.writeString(external, "schemaVersion: att-load/v1.6\nload: {users: 9, duration: 20s}\n");
+        try { Files.createSymbolicLink(load.resolve("external.yaml"), external); }
+        catch (UnsupportedOperationException | java.io.IOException unavailable) { /* Symlink checks run on supported filesystems. */ }
+
+        LoadScenarioLoader loader = new LoadScenarioLoader(project);
+        LoadScenarioLoader.QuickLoadTemplateCatalog catalog = loader.quickLoadTemplates();
+        List<String> ids = new ArrayList<String>();
+        for (LoadScenarioLoader.QuickLoadTemplate item : catalog.items) ids.add(item.id);
+        assertTrue(ids.contains("load/a-arrival.yaml"));
+        assertTrue(ids.contains("load/z-users.yaml"));
+        assertFalse(ids.contains("load/too-large.yaml"));
+        assertFalse(ids.contains("load/external.yaml"));
+        assertTrue(ids.contains(LoadScenarioLoader.BUNDLED_QUICK_SMOKE));
+        assertEquals("arrivalRate", catalog.items.stream().filter(item -> item.id.equals("load/a-arrival.yaml")).findFirst().get().model);
+        assertEquals("6", String.valueOf(((Map<?, ?>) loader.loadQuickLoadPolicy("virtualUsers", "load/z-users.yaml").get("load")).get("users")));
+        assertEquals("3/s", ((Map<?, ?>) loader.loadQuickLoadPolicy("arrivalRate", "load/a-arrival.yaml").get("load")).get("arrivalRate"));
+        assertThrows(Exception.class, () -> loader.loadQuickLoadPolicy("arrivalRate", "load/z-users.yaml"));
+        assertThrows(Exception.class, () -> loader.loadQuickLoadPolicy("arrivalRate", "../outside.yaml"));
+
+        for (int i = 0; i < 65; i++)
+            write(project, String.format(java.util.Locale.ROOT, "load/policy-%03d.yaml", Integer.valueOf(i)),
+                    "schemaVersion: att-load/v1.6\nload: {users: 1, duration: 5s}\n");
+        LoadScenarioLoader.QuickLoadTemplateCatalog bounded = loader.quickLoadTemplates();
+        assertTrue(bounded.truncated);
+        assertEquals(65, bounded.items.size(), "64 package policies plus the bundled preset are exposed");
+        assertEquals("load/a-arrival.yaml", bounded.items.get(0).id);
+        assertEquals("load/policy-062.yaml", bounded.items.get(63).id);
+        assertEquals(LoadScenarioLoader.BUNDLED_QUICK_SMOKE, bounded.items.get(64).id);
+    }
+
     @Test void previousV14QuickLoadPolicyIsAcceptedWithoutWorkloads() throws Exception {
         Path project = project();
         Files.createDirectories(project.resolve("load"));

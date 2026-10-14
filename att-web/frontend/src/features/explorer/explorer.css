@@ -34,6 +34,9 @@
   background: var(--att-color-surface, #fff);
   overflow: hidden;
 }
+.att-explorer-workspace.is-list-first { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.att-explorer-workspace.is-list-first .att-explorer-navigation { border-right: 0; }
+.att-explorer-workspace [hidden] { display: none !important; }
 .att-explorer-navigation,
 .att-explorer-detail,
 .att-explorer-inspector { min-width: 0; padding: var(--att-space-4, 1rem); }
@@ -116,6 +119,9 @@
 .att-explorer-tabs { display: flex; gap: var(--att-space-1, .25rem); border-bottom: 1px solid var(--att-color-border, #cbd5e1); margin-block: var(--att-space-4, 1rem) var(--att-space-3, .75rem); }
 .att-explorer-tabs [role="tab"] { border: 0; border-radius: 0; background: transparent; }
 .att-explorer-tabs [aria-selected="true"] { color: var(--att-color-primary, #0866c6); border-bottom: 3px solid var(--att-color-primary, #0866c6); font-weight: 650; }
+.att-helper-reference summary { cursor: pointer; }
+.att-helper-reference summary span { margin-inline-start: .6rem; color: var(--att-color-muted, #526171); font-size: .85em; }
+.att-helper-reference p { margin-block: .35rem; color: var(--att-color-muted, #526171); }
 .att-definition-view,
 .att-debug-preview pre {
   max-height: 34rem;

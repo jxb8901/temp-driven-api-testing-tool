@@ -8,11 +8,14 @@ import att.validation.DiagnosticException;
 import att.validation.JsonSchemaVerifier;
 
 import java.math.BigDecimal;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +26,10 @@ import java.util.regex.Pattern;
 
 /** Loads and semantically validates current att-load/v1.6 descriptors and compatible historical scenarios. */
 public final class LoadScenarioLoader {
+    private static final int MAX_QUICK_LOAD_TEMPLATES = 64;
+    private static final int MAX_QUICK_LOAD_TEMPLATE_SCAN = 256;
+    private static final long MAX_QUICK_LOAD_TEMPLATE_BYTES = 256L * 1024L;
+    public static final String BUNDLED_QUICK_SMOKE = "bundled:quick-smoke";
     private static final Pattern DURATION = Pattern.compile("^([0-9]+)(ms|s|m|h)$");
     private static final Pattern RATE = Pattern.compile("^([1-9][0-9]*(?:\\.[0-9]+)?)/(s|m)$");
     private static final Pattern WORKLOAD_ID = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]*$");
@@ -113,16 +120,47 @@ public final class LoadScenarioLoader {
 
     /** Loads a model-specific Quick Load policy, or the low-intensity bundled fallback. */
     public Map<String, Object> loadQuickLoadPolicy(String model) throws Exception {
+        return loadQuickLoadPolicy(model, null);
+    }
+
+    /** Loads one safe package policy template, the bundled Quick Smoke preset, or the model default. */
+    public Map<String, Object> loadQuickLoadPolicy(String model, String templateId) throws Exception {
         if (!LoadScenarioBuilder.MODEL_VIRTUAL_USERS.equals(model)
                 && !LoadScenarioBuilder.MODEL_ARRIVAL_RATE.equals(model))
             throw quickLoadFailure(null, "model", "Quick Load model must be virtualUsers or arrivalRate");
+        if (BUNDLED_QUICK_SMOKE.equals(templateId)) {
+            if (!LoadScenarioBuilder.MODEL_VIRTUAL_USERS.equals(model))
+                throw quickLoadFailure(null, "template", "The bundled Quick Smoke preset supports Virtual Users only");
+            return bundledQuickSmokePolicy();
+        }
         String filename = LoadScenarioBuilder.MODEL_VIRTUAL_USERS.equals(model)
                 ? "load.visualuser.yaml" : "load.arrivalrate.yaml";
-        Path source = projectRoot.resolve("load").resolve(filename).normalize();
+        Path source;
+        if (templateId == null || templateId.trim().isEmpty()) {
+            source = projectRoot.resolve("load").resolve(filename).normalize();
+        } else {
+            QuickLoadTemplate selected = null;
+            for (QuickLoadTemplate candidate : quickLoadTemplates().items) {
+                if (candidate.id.equals(templateId)) { selected = candidate; break; }
+            }
+            if (selected == null || !model.equals(selected.model))
+                throw quickLoadFailure(null, "template", "The selected package Load template is unavailable or incompatible");
+            source = projectRoot.resolve(selected.id.replace('/', java.io.File.separatorChar)).normalize();
+        }
         Map<String, Object> policy;
         if (!Files.exists(source, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            if (templateId != null && !templateId.trim().isEmpty())
+                throw quickLoadFailure(null, "template", "The selected package Load template is unavailable");
             policy = bundledQuickLoadPolicy(model);
         } else {
+            att.resource.PackageResourceResolver.PackageResource resource =
+                    new att.resource.PackageResourceResolver(projectRoot)
+                            .fromInternalPath(source, att.resource.PackageResourceResolver.Kind.FILE);
+            source = resource.canonicalPath();
+            if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS))
+                throw quickLoadFailure(source, "template", "The selected Load template is unavailable or unsafe");
+            if (Files.size(source) > MAX_QUICK_LOAD_TEMPLATE_BYTES)
+                throw quickLoadFailure(null, "template", "The selected Load template exceeds the inspection size limit");
             policy = loadPolicy(source);
             if (policy == null) throw quickLoadFailure(source, "policy", "Quick Load policy is unavailable");
         }
@@ -133,6 +171,109 @@ public final class LoadScenarioLoader {
                 || LoadScenarioBuilder.MODEL_VIRTUAL_USERS.equals(model) != users)
             throw quickLoadFailure(source, "load", "Quick Load policy does not match the selected load model");
         return policy;
+    }
+
+    /** Enumerates compatible, bounded policy-only package templates plus the bundled single-target preset. */
+    public QuickLoadTemplateCatalog quickLoadTemplates() throws Exception {
+        List<QuickLoadTemplate> result = new ArrayList<QuickLoadTemplate>();
+        boolean truncated = false;
+        Path loadDirectory = projectRoot.resolve("load").normalize();
+        if (Files.exists(loadDirectory, LinkOption.NOFOLLOW_LINKS)) {
+            Path canonicalDirectory;
+            try {
+                canonicalDirectory = new att.resource.PackageResourceResolver(projectRoot)
+                        .fromInternalPath(loadDirectory, att.resource.PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
+            } catch (RuntimeException unavailable) {
+                canonicalDirectory = null;
+            }
+            if (canonicalDirectory != null) {
+                List<Path> candidates = new ArrayList<Path>();
+                try (DirectoryStream<Path> entries = Files.newDirectoryStream(canonicalDirectory)) {
+                    int scanned = 0;
+                    for (Path candidate : entries) {
+                        if (scanned++ >= MAX_QUICK_LOAD_TEMPLATE_SCAN) { truncated = true; break; }
+                        String name = candidate.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+                        if (!(name.endsWith(".yaml") || name.endsWith(".yml"))) continue;
+                        candidates.add(candidate);
+                    }
+                } catch (Exception unavailable) {
+                    candidates.clear();
+                }
+                Collections.sort(candidates, new Comparator<Path>() {
+                    @Override public int compare(Path left, Path right) {
+                        return left.getFileName().toString().compareTo(right.getFileName().toString());
+                    }
+                });
+                if (candidates.size() > MAX_QUICK_LOAD_TEMPLATE_SCAN) {
+                    truncated = true;
+                    candidates = new ArrayList<Path>(candidates.subList(0, MAX_QUICK_LOAD_TEMPLATE_SCAN));
+                }
+                att.resource.PackageResourceResolver resolver = new att.resource.PackageResourceResolver(projectRoot);
+                for (Path candidate : candidates) {
+                    if (result.size() >= MAX_QUICK_LOAD_TEMPLATES) { truncated = true; break; }
+                    if (Files.isSymbolicLink(candidate) || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
+                    try {
+                        if (Files.size(candidate) > MAX_QUICK_LOAD_TEMPLATE_BYTES) continue;
+                        String id = resolver.fromInternalPath(candidate, att.resource.PackageResourceResolver.Kind.FILE).logicalName();
+                        Map<String, Object> policy = loadPolicy(candidate);
+                        String compatibleModel = policyModel(policy);
+                        if (compatibleModel == null) continue;
+                        result.add(new QuickLoadTemplate(id, candidate.getFileName().toString(), compatibleModel, false));
+                    } catch (Exception invalidOrUnsafe) {
+                        // Invalid, escaping, oversized, and non-policy files do not enter the selectable catalog.
+                    }
+                }
+            }
+        }
+        result.add(new QuickLoadTemplate(BUNDLED_QUICK_SMOKE, "Quick Smoke · 2 users · 10s", LoadScenarioBuilder.MODEL_VIRTUAL_USERS, true));
+        return new QuickLoadTemplateCatalog(result, truncated);
+    }
+
+    private String policyModel(Map<String, Object> policy) {
+        Object raw = policy.get("load");
+        if (!(raw instanceof Map)) return null;
+        Map<?, ?> load = (Map<?, ?>) raw;
+        boolean users = load.containsKey("users");
+        boolean rate = load.containsKey("arrivalRate");
+        if (users == rate) return null;
+        return users ? LoadScenarioBuilder.MODEL_VIRTUAL_USERS : LoadScenarioBuilder.MODEL_ARRIVAL_RATE;
+    }
+
+    private Map<String, Object> bundledQuickSmokePolicy() throws Exception {
+        Map<String, Object> policy = new LinkedHashMap<String, Object>();
+        policy.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
+        Map<String, Object> load = new LinkedHashMap<String, Object>();
+        load.put("users", Integer.valueOf(2)); load.put("duration", "10s"); policy.put("load", load);
+        Map<String, Object> execution = new LinkedHashMap<String, Object>(); execution.put("thinkTime", "250ms"); policy.put("execution", execution);
+        Map<String, Object> evidence = new LinkedHashMap<String, Object>(); evidence.put("mode", "failures"); policy.put("evidence", evidence);
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.6.schema.json"), policy);
+        semanticCurrent(null, policy, false);
+        return policy;
+    }
+
+    public static final class QuickLoadTemplate {
+        public final String id;
+        public final String name;
+        public final String model;
+        public final boolean bundled;
+        QuickLoadTemplate(String id, String name, String model, boolean bundled) {
+            this.id = id; this.name = name; this.model = model; this.bundled = bundled;
+        }
+        Map<String, Object> toMap() {
+            Map<String, Object> value = new LinkedHashMap<String, Object>();
+            value.put("id", id); value.put("name", name); value.put("model", model); value.put("bundled", Boolean.valueOf(bundled));
+            return value;
+        }
+    }
+    public static final class QuickLoadTemplateCatalog {
+        public final List<QuickLoadTemplate> items;
+        public final boolean truncated;
+        QuickLoadTemplateCatalog(List<QuickLoadTemplate> items, boolean truncated) { this.items = items; this.truncated = truncated; }
+        public List<Map<String, Object>> toMaps() {
+            List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+            for (QuickLoadTemplate item : items) result.add(item.toMap());
+            return result;
+        }
     }
 
     private Map<String, Object> bundledQuickLoadPolicy(String model) throws Exception {

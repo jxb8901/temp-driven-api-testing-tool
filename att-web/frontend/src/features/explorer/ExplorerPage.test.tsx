@@ -221,6 +221,51 @@ describe('typed sidecar form', () => {
 });
 
 describe('Explorer page integration', () => {
+  it('shows an environment-neutral full-width resource list until a package resource is selected', async () => {
+    const flow = resource('flow', 'checkout');
+    const api = apiWith({ listResources: vi.fn(async () => ({ items: [flow], total: 1, nextCursor: null })) });
+    const onResourceRouteChange = vi.fn();
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={onResourceRouteChange}
+      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+    await settle();
+
+    expect(container.querySelector('.att-explorer-workspace')?.classList.contains('is-list-first')).toBe(true);
+    expect(container.querySelector('[aria-label="Resource details"]')?.hasAttribute('hidden')).toBe(true);
+    expect(container.querySelector('[aria-label="Contextual actions"]')?.hasAttribute('hidden')).toBe(true);
+    expect([...container.querySelectorAll('label')].some(label => label.textContent?.includes('Run, Debug, and Load environment'))).toBe(false);
+    expect(container.textContent).toContain('Package resources and counts are independent of runtime environment.');
+    expect(container.querySelector('.att-explorer-table')?.closest('.att-explorer-navigation')).not.toBeNull();
+  });
+
+  it('restores the Dependencies deep link and routes resolved references to the target definition', async () => {
+    const origin = resource('flow', 'payment-flow', {
+      references: [{ type: 'template', resourceId: 'payment-template', logicalId: 'payment-template', resolution: 'resolved' }],
+      referencedBy: [],
+    });
+    const api = apiWith({ getResource: vi.fn(async () => ({ resource: origin, definition: {} })) });
+    const onResourceRouteChange = vi.fn();
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={{ type: 'flow', resourceId: 'payment-flow', tab: 'relations' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={onResourceRouteChange}
+      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+    await settle();
+
+    expect(container.querySelector('[data-tab="relations"]')?.getAttribute('aria-selected')).toBe('true');
+    click(button('payment-template'));
+    expect(onResourceRouteChange).toHaveBeenLastCalledWith({ type: 'template', resourceId: 'payment-template', tab: 'definition' });
+
+    const helperApi = apiWith({ getResource: vi.fn(async () => ({ resource: resource('flow', 'helper-caller', {
+      references: [{ type: 'tool', logicalId: 'MQHelper.publish', targetKind: 'helper', resolution: 'resolved' }],
+    }), definition: {} })) });
+    await render(<ExplorerPage api={helperApi} packageId="payments" resourceRoute={{ type: 'flow', resourceId: 'helper-caller', tab: 'relations' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}}
+      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+    await settle();
+    expect(container.textContent).toContain('This call resolves through the package Helper configuration.');
+    expect(container.textContent).toContain('It is not a separate Tool resource');
+    expect([...container.querySelectorAll('button')].some(item => item.textContent === 'MQHelper.publish')).toBe(false);
+  });
+
   it('supports keyboard source tabs, registers dirty sidecar edits, and carries anonymous labels into accepted jobs', async () => {
     const template = resource('template', 'checkout');
     const debugInput: JsonObject = { inputs: { credential: { $attDebugKeepDefault: '/inputs/credential' } }, vars: { retries: 2 } };

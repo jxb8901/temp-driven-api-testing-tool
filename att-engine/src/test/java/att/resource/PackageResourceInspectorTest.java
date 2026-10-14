@@ -66,6 +66,26 @@ class PackageResourceInspectorTest {
                 ()->inspector.inspect("list","template",null,null,1,1,"stale-revision"));
     }
 
+    @Test void resourceSortingIsAppliedBeforeStableServerPagination() throws Exception {
+        Path root=packageWithTemplate("server-sorted-resources","MID","description: middle");
+        for(String name:java.util.Arrays.asList("AAA","ZZZ")) {
+            Path template=Files.createDirectories(root.resolve("templates").resolve(name)).resolve("template.yaml");
+            writeUtf8(template,templateYaml(name,"description: sorted"));
+        }
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144);
+        Map<String,Object> first=inspector.inspect("list","template",null,null,0,2,null,null,"name","asc");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> firstItems=(List<Map<String,Object>>)first.get("items");
+        assertEquals(java.util.Arrays.asList("AAA","MID"),firstItems.stream().map(item->String.valueOf(item.get("name"))).collect(Collectors.toList()));
+        Map<String,Object> next=inspector.inspect("list","template",null,null,2,2,null,null,"name","asc");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> nextItems=(List<Map<String,Object>>)next.get("items");
+        assertEquals(Collections.singletonList("ZZZ"),nextItems.stream().map(item->String.valueOf(item.get("name"))).collect(Collectors.toList()));
+        Map<String,Object> descending=inspector.inspect("list","template",null,null,0,3,null,null,"name","desc");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> descendingItems=(List<Map<String,Object>>)descending.get("items");
+        assertEquals(java.util.Arrays.asList("ZZZ","MID","AAA"),descendingItems.stream().map(item->String.valueOf(item.get("name"))).collect(Collectors.toList()));
+        assertThrows(IllegalArgumentException.class,()->inspector.inspect("list","template",null,null,0,3,null,null,"unknown","asc"));
+    }
+
     @Test void neverReadsToolSourceWithoutAnExplicitServerAllowlist() throws Exception {
         PackageResourceInspector inspector=inspector();
         @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspect("list","tool",null,null,0,100);
@@ -109,12 +129,13 @@ class PackageResourceInspectorTest {
     @Test void resolvesDescriptorRelativeConfigurationSourcesAndEnforcesVisibilityLimits() throws Exception {
         Path root=packageWithTemplate("configuration-file-source", "SOURCE", "description: harmless");
         Path source=Files.createDirectories(root.resolve("config/queries")).resolve("lookup.sql");
-        writeUtf8(source, "select '${vars.account}' as account; -- cafe\u00e9\npassword=top-secret Bearer abc123\n");
+        writeUtf8(source, "select '${vars.account}' as account; -- cafe\u00e9 &{./result.json}\npassword=top-secret Bearer abc123\n");
+        writeUtf8(root.resolve("config/queries/result.json"), "{\"status\":\"${EXEC.RESULT.status}\"}");
         Path large=source.resolveSibling("large.yaml");
         writeUtf8(large, "0123456789abcdef-more-than-limit\n");
         String origin="templates/SOURCE/template.yaml";
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
-                java.util.Arrays.asList(origin,"config/queries/lookup.sql","config/queries/large.yaml"),65536,262144);
+                java.util.Arrays.asList(origin,"config/queries/lookup.sql","config/queries/result.json","config/queries/large.yaml"),65536,262144);
 
         Map<String,Object> result=inspector.inspectPackageFileSource("../../config/queries/lookup.sql",origin);
         assertEquals(Boolean.TRUE,result.get("available"),result.toString());
@@ -125,9 +146,14 @@ class PackageResourceInspectorTest {
         assertFalse(String.valueOf(result.get("text")).contains("top-secret"));
         assertFalse(String.valueOf(result.get("text")).contains("abc123"));
         assertEquals(Boolean.TRUE,result.get("redacted"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> fileReferences=(List<Map<String,Object>>)result.get("fileReferences");
+        assertTrue(fileReferences.stream().anyMatch(item->"config/queries/result.json".equals(item.get("logicalPath"))),result.toString());
+        Map<String,Object> referenced=inspector.inspectPackageFileSource("config/queries/result.json","config/queries/lookup.sql");
+        assertEquals(Boolean.TRUE,referenced.get("available"));
+        assertTrue(String.valueOf(referenced.get("text")).contains("${EXEC.RESULT.status}"));
 
         Map<String,Object> oversized=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
-                java.util.Arrays.asList(origin,"config/queries/lookup.sql","config/queries/large.yaml"),16,262144)
+                java.util.Arrays.asList(origin,"config/queries/lookup.sql","config/queries/result.json","config/queries/large.yaml"),16,262144)
                 .inspectPackageFileSource("config/queries/large.yaml",null);
         assertEquals(Boolean.FALSE,oversized.get("available"));
         assertEquals("size-limit",oversized.get("reason"));
@@ -135,6 +161,11 @@ class PackageResourceInspectorTest {
                 Collections.<String>emptyList(),65536,262144).inspectPackageFileSource("config/queries/lookup.sql",null);
         assertEquals(Boolean.FALSE,denied.get("available"));
         assertEquals("visibility-policy",denied.get("reason"));
+        Map<String,Object> denylisted=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                java.util.Arrays.asList(origin,"config/queries/lookup.sql","config/queries/result.json"),65536,262144,
+                false,true,"safe-package-files",Collections.singletonList("**/result.json"),false,
+                Collections.<String>emptyList(),Collections.<String>emptyList()).inspectPackageFileSource("config/queries/result.json",null);
+        assertEquals(Boolean.FALSE,denylisted.get("available"));assertEquals("deny-policy",denylisted.get("reason"));
         assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
                 ()->inspector.inspectPackageFileSource("../../../outside.yaml",origin));
     }
@@ -196,7 +227,10 @@ class PackageResourceInspectorTest {
         Path root=packageWithTemplate("referenced-source", "REFS", "description: safe");
         Path payload=Files.createDirectories(root.resolve("payloads")).resolve("request.xml");
         writeUtf8(payload,"<request><accountId>A-1001</accountId><email>private@example.test</email>"
-                +"<address>12 Main Street</address><password>payload-secret</password></request>");
+                +"<address>12 Main Street</address><password>payload-secret</password><child>&{nested/child.json}</child></request>");
+        Files.createDirectories(root.resolve("nested"));
+        writeUtf8(root.resolve("nested/child.json"),"{\"value\":\"${EXEC.INPUT.account}\",\"leaf\":\"&{nested/leaf.xml}\"}");
+        writeUtf8(root.resolve("nested/leaf.xml"),"<leaf>safe nested content</leaf>");
         writeUtf8(root.resolve("payloads/請求.json"),"{\"reference\":\"交易-一\",\"phone\":\"555-0100\"}");
         writeUtf8(root.resolve("payloads/customers.csv"),"accountId,email,address\nA-1001,private@example.test,12 Main Street\n");
         writeUtf8(root.resolve("payloads/oversized.txt"),String.join("",Collections.nCopies(65537,"x")));
@@ -229,6 +263,17 @@ class PackageResourceInspectorTest {
         assertFalse(String.valueOf(referenced.get("text")).contains("payload-secret"));
         assertFalse(String.valueOf(referenced.get("text")).contains("private@example.test"),String.valueOf(referenced.get("text")));
         assertFalse(String.valueOf(referenced.get("text")).contains("12 Main Street"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> nestedReferences=(List<Map<String,Object>>)referenced.get("fileReferences");
+        Map<String,Object> childReference=nestedReferences.stream().filter(file->"nested/child.json".equals(file.get("logicalPath"))).findFirst().orElseThrow(AssertionError::new);
+        Map<String,Object> child=inspector.inspect("source-file","template",resourceId,String.valueOf(childReference.get("referenceId")),0,1,null,"payloads/request.xml");
+        assertEquals("nested/child.json",child.get("logicalPath"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> leafReferences=(List<Map<String,Object>>)child.get("fileReferences");
+        Map<String,Object> leafReference=leafReferences.stream().filter(file->"nested/leaf.xml".equals(file.get("logicalPath"))).findFirst().orElseThrow(AssertionError::new);
+        Map<String,Object> leaf=inspector.inspect("source-file","template",resourceId,String.valueOf(leafReference.get("referenceId")),0,1,null,"nested/child.json");
+        assertEquals("nested/leaf.xml",leaf.get("logicalPath"));
+        assertTrue(String.valueOf(leaf.get("text")).contains("safe nested content"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspect("source-file","template",resourceId,String.valueOf(leafReference.get("referenceId")),0,1,null,"config/config.yaml"));
         Map<String,Object> unicodeReference=inspector.inspect("source-file","template",resourceId,String.valueOf(unicodeFile.get("referenceId")),0,1);
         assertTrue(String.valueOf(unicodeReference.get("text")).contains("交易-一"));
         assertFalse(String.valueOf(unicodeReference.get("text")).contains("555-0100"));
@@ -332,6 +377,28 @@ class PackageResourceInspectorTest {
         assertEquals(Collections.singletonList("testdata/load.yaml"),((Map<?,?>)draft.get("normalizedScenario")).get("testdata"));
         assertTrue(String.valueOf(draft.get("previewYaml")).contains("users: 3"));
         assertArrayEquals(original,Files.readAllBytes(sidecar),"Quick Load must not modify the Debug sidecar");
+    }
+
+    @Test void quickLoadPolicyProjectionIncludesSafePackageAndBundledTemplateCatalog() throws Exception {
+        Path root=packageWithTemplate("quick-load-template-catalog","FORM","description: catalog target");
+        Files.createDirectories(root.resolve("load"));
+        writeUtf8(root.resolve("load/custom-arrival.yaml"),"schemaVersion: att-load/v1.6\nload: {arrivalRate: '4/s', maxConcurrent: 6, overloadPolicy: drop, duration: 25s}\n");
+        writeUtf8(root.resolve("load/custom-users.yml"),"schemaVersion: att-load/v1.6\nload: {users: 3, duration: 35s}\nexecution: {thinkTime: 90ms}\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        Map<String,Object> response=inspector.inspectQuickLoadPolicy("arrivalRate","load/custom-arrival.yaml");
+        @SuppressWarnings("unchecked") Map<String,Object> policy=(Map<String,Object>)response.get("policy");
+        @SuppressWarnings("unchecked") Map<String,Object> load=(Map<String,Object>)policy.get("load");
+        assertEquals("4/s",load.get("arrivalRate"));
+        assertEquals("25s",load.get("duration"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> templates=(List<Map<String,Object>>)response.get("templates");
+        assertTrue(templates.stream().anyMatch(item->"load/custom-arrival.yaml".equals(item.get("id"))&&"arrivalRate".equals(item.get("model"))));
+        assertTrue(templates.stream().anyMatch(item->"load/custom-users.yml".equals(item.get("id"))&&"virtualUsers".equals(item.get("model"))));
+        assertTrue(templates.stream().anyMatch(item->"bundled:quick-smoke".equals(item.get("id"))&&Boolean.TRUE.equals(item.get("bundled"))));
+        assertEquals(Boolean.FALSE,response.get("templateCatalogTruncated"));
+        assertThrows(Exception.class,()->inspector.inspectQuickLoadPolicy("arrivalRate","load/custom-users.yml"));
+        assertThrows(IllegalArgumentException.class,()->inspector.inspectQuickLoadPolicy("arrivalRate","../outside.yaml"));
     }
 
     @Test void quickLoadFormsSupportEveryTargetWithAndWithoutDebugSidecars() throws Exception {

@@ -21,6 +21,15 @@ async function main() {
         },
       },
       {
+        name: 'explorer-list', fixture: 'explorer-workspace',
+        route: '#/packages/payments',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
+          await page.locator('.att-explorer-table tbody tr').first().waitFor();
+          await page.getByText(/sorting applies to all matching resources/i).waitFor();
+        },
+      },
+      {
         name: 'explorer-debug', fixture: 'explorer-workspace',
         route: '#/packages/payments/resources/template/checkout',
         wait: async page => {

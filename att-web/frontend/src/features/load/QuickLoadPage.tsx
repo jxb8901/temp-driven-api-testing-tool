@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { TypedSidecarForm } from '../explorer/TypedSidecarForm';
 import type { JsonObject as SidecarObject, JsonValue } from '../explorer/types';
 import { CodeEditor } from '../code/CodeEditor';
-import type { LoadDraftResponse, LoadJobsApi, LoadModel, LoadTargetType, ServerDiagnostic } from './types';
+import type { LoadDraftResponse, LoadJobsApi, LoadModel, LoadPolicyTemplate, LoadTargetType, ServerDiagnostic } from './types';
 import './load.css';
 
 interface QuickLoadPageProps {
@@ -80,8 +80,11 @@ function makeScenario(policy: JsonObject, model: LoadModel, id: string, targetTy
 export function QuickLoadPage({ api, packageId, target, environment, environments, environmentState, inlineLoadEnabled, schedulingEnabled = false, onEnvironmentChange, onJobAccepted, onSchedule, onCancel, registerUnsavedChanges }: QuickLoadPageProps) {
   const targetType = validTarget(target.type) ? target.type : null;
   const [model, setModel] = useState<LoadModel>('virtualUsers');
-  const [preset, setPreset] = useState<'package-policy' | 'quick-profile' | 'custom'>('package-policy');
+  const [templateId, setTemplateId] = useState('');
+  const [preset, setPreset] = useState('package-policy');
   const [policy, setPolicy] = useState<JsonObject | null>(null);
+  const [templates, setTemplates] = useState<LoadPolicyTemplate[]>([]);
+  const [templateCatalogTruncated, setTemplateCatalogTruncated] = useState(false);
   const [policyState, setPolicyState] = useState<'loading' | 'ready' | 'error' | 'disabled'>('loading');
   const [policyMessage, setPolicyMessage] = useState('Loading Server Load policy…');
   const [users, setUsers] = useState('1');
@@ -102,11 +105,13 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   const [confirming, setConfirming] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const identityKey = `${packageId}:${target.type}:${target.resourceId}`;
+  const availableTemplates = templates;
   const previousIdentity = useRef(identityKey);
   const dirtyRef = useRef(false);
   const templateBusiness = useRef<SidecarObject>({ inputs: {}, vars: {} });
   const policySequence = useRef(0);
   const pendingModelPolicySelection = useRef(false);
+  const pendingTemplatePolicySelection = useRef(false);
   const sidecarSequence = useRef(0);
   const validationSequence = useRef(0);
   const validationController = useRef<AbortController | null>(null);
@@ -117,7 +122,7 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
     catch { return null; }
   }, [policy, model, target.resourceId, targetType, environment, users, tps, maxConcurrent, duration, timing, business, advanced]);
   const rawJson = scenario ? JSON.stringify(scenario, null, 2) : '';
-  const scenarioFingerprint = JSON.stringify([identityKey, environment, model, preset, rawJson]);
+  const scenarioFingerprint = JSON.stringify([identityKey, environment, model, templateId, preset, rawJson]);
   const scenarioFingerprintRef = useRef(scenarioFingerprint);
   scenarioFingerprintRef.current = scenarioFingerprint;
   const [validatedFingerprint, setValidatedFingerprint] = useState<string | null>(null);
@@ -135,16 +140,18 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   useEffect(() => {
     const identityChanged = previousIdentity.current !== identityKey;
     if (identityChanged) { previousIdentity.current = identityKey; invalidateDraft(); dirtyRef.current = false; setDirty(false); setBusiness({ inputs: {}, vars: {} }); }
-    const resetForModelSelection = pendingModelPolicySelection.current;
-    const preserveDraft = dirtyRef.current && !identityChanged && !resetForModelSelection;
+    const resetForPolicySelection = pendingModelPolicySelection.current || pendingTemplatePolicySelection.current;
+    const preserveDraft = dirtyRef.current && !identityChanged && !resetForPolicySelection;
     const controller = new AbortController(); const request = ++policySequence.current;
     setPolicy(null); setDraft(null); setDraftState('idle'); setError(''); setDiagnostics([]); setPolicyState(inlineLoadEnabled ? 'loading' : 'disabled');
     setPolicyMessage(inlineLoadEnabled ? 'Loading safe policy defaults…' : 'Browser-created Load drafts are disabled by Server configuration.');
     if (!packageId || !targetType || !inlineLoadEnabled) return () => controller.abort();
-    api.getLoadPolicy(packageId, model, environment || undefined, controller.signal).then(response => {
+    api.getLoadPolicy(packageId, model, environment || undefined, controller.signal, templateId || undefined).then(response => {
       if (controller.signal.aborted || request !== policySequence.current) return;
       pendingModelPolicySelection.current = false;
-      const loaded = asObject(response.policy); setPolicy(loaded); setPolicyState('ready');
+      pendingTemplatePolicySelection.current = false;
+      const loaded = asObject(response.policy); setPolicy(loaded); setTemplates(response.templates || []);
+      setTemplateCatalogTruncated(Boolean(response.templateCatalogTruncated)); setPolicyState('ready');
       setPolicyMessage(response.redacted ? 'Safe model-specific policy defaults loaded. Sensitive values remain protected.' : 'The selected model’s package policy or Server fallback is loaded. Validate before running.');
       if (!preserveDraft) {
         const load = asObject(loaded.load);
@@ -165,7 +172,7 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
       setPolicyState('error'); setPolicyMessage(reason instanceof Error ? reason.message : 'Load policy is unavailable.');
     });
     return () => controller.abort();
-  }, [api, packageId, targetType, identityKey, model, environment, inlineLoadEnabled]);
+  }, [api, packageId, targetType, identityKey, model, environment, templateId, inlineLoadEnabled]);
 
   useEffect(() => {
     if (!packageId || !targetType || !inlineLoadEnabled) return;
@@ -182,38 +189,26 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   }, [api, packageId, targetType, target.resourceId, identityKey, model, environment, inlineLoadEnabled]);
 
   function change<T>(setter: (value: T) => void, value: T) { invalidateDraft(); setter(value); setPreset('custom'); dirtyRef.current = true; setDirty(true); }
-  function applyPreset(value: 'package-policy' | 'quick-profile' | 'custom') {
+  function selectTemplate(nextTemplateId: string) {
+    if (nextTemplateId === templateId) return;
+    if (dirtyRef.current && !window.confirm('Replace the current Quick Load settings with the selected template?')) return;
+    const nextTemplate = availableTemplates.find(item => item.id === nextTemplateId);
     invalidateDraft();
-    setPreset(value);
-    if (value === 'custom') { dirtyRef.current = true; setDirty(true); return; }
-    if (!policy) return;
-    const load = asObject(policy.load);
-    const execution = asObject(policy.execution);
-    const testdata = Array.isArray(policy.testdata) ? policy.testdata : [];
-    const thresholds = asObject(policy.thresholds);
-    const evidence = asObject(policy.evidence);
-    if (value === 'quick-profile') {
-      setModel('virtualUsers'); setUsers('2'); setDuration('10s');
-      setTiming({ warmup: '', rampUp: '', rampDown: '' });
-      setAdvanced({
-        execution: JSON.stringify({ ...execution, thinkTime: '250ms' }, null, 2),
-        testdata: JSON.stringify(testdata, null, 2),
-        thresholds: JSON.stringify(thresholds, null, 2),
-        evidence: JSON.stringify({ ...evidence, mode: 'failures' }, null, 2),
-        seed: policy.seed == null ? '' : String(policy.seed),
-      });
-    } else {
-      setDuration(String(load.duration || ''));
-      setUsers(String(load.users ?? 1)); setTps(String(load.arrivalRate ?? '1/s')); setMaxConcurrent(String(load.maxConcurrent ?? 1));
-      setTiming({ warmup: String(load.warmup || ''), rampUp: String(load.rampUp || ''), rampDown: String(load.rampDown || '') });
-      setAdvanced({
-        execution: JSON.stringify(execution, null, 2),
-        testdata: JSON.stringify(testdata, null, 2),
-        thresholds: JSON.stringify(thresholds, null, 2),
-        evidence: JSON.stringify(evidence, null, 2),
-        seed: policy.seed == null ? '' : String(policy.seed),
-      });
-    }
+    pendingTemplatePolicySelection.current = true;
+    pendingModelPolicySelection.current = Boolean(nextTemplate && nextTemplate.model !== model);
+    if (nextTemplate && nextTemplate.model !== model) setModel(nextTemplate.model);
+    setTemplateId(nextTemplateId);
+    setPreset(nextTemplateId ? `template:${nextTemplateId}` : 'package-policy');
+    dirtyRef.current = true; setDirty(true);
+  }
+
+  function selectModel(nextModel: LoadModel) {
+    if (nextModel === model) return;
+    if (dirtyRef.current && !window.confirm('Replace the current Quick Load settings with this model’s defaults?')) return;
+    invalidateDraft();
+    pendingModelPolicySelection.current = true;
+    pendingTemplatePolicySelection.current = false;
+    setModel(nextModel); setTemplateId(''); setPreset('package-policy');
     dirtyRef.current = true; setDirty(true);
   }
   async function validate() {
@@ -266,11 +261,11 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
     <section className="att-load-section" aria-labelledby="quick-load-target">
       <div className="att-section-heading"><div><h2 id="quick-load-target">Target</h2><p>The selected resource is fixed for this Quick Load.</p></div><strong>{targetLabel}</strong></div>
       <div className="att-load-grid">
-        <label>Load template / preset<select aria-label="Load template or preset" value={preset} onChange={event => applyPreset(event.currentTarget.value as 'package-policy' | 'quick-profile' | 'custom')} disabled={!policy || !inlineLoadEnabled}>
-          <option value="package-policy">Package / Server policy</option><option value="quick-profile" disabled={model !== 'virtualUsers'}>Quick smoke · 2 users · 10s</option>
-          {preset === 'custom' && <option value="custom">Custom edits</option>}
-        </select><small className="att-help">{preset === 'quick-profile' ? 'Based on examples/load/quick-profile.yaml; target inputs stay unchanged.' : 'The selected model loads its matching package policy (or Server fallback). Selecting a preset only edits this draft; validate before running.'}</small></label>
-        <label>Load model<select value={model} onChange={event => { invalidateDraft(); pendingModelPolicySelection.current = true; setModel(event.currentTarget.value as LoadModel); setPreset('package-policy'); dirtyRef.current = true; setDirty(true); }} disabled={!inlineLoadEnabled}><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select></label>
+        <label>Load template / preset<select aria-label="Load template or preset" value={templateId} onChange={event => selectTemplate(event.currentTarget.value)} disabled={!policy || !inlineLoadEnabled}>
+          <option value="">Model default</option>
+          {availableTemplates.map(item => <option key={item.id} value={item.id}>{item.name} · {item.model === 'virtualUsers' ? 'Virtual Users' : 'Arrival Rate'}{item.bundled ? ' · bundled' : ''}</option>)}
+        </select><small className="att-help">Selecting a template loads its supported settings into this single-target draft. It never starts a job; validate before running.{templateCatalogTruncated ? ' The package template catalog reached its display limit.' : ''}</small></label>
+        <label>Load model<select value={model} onChange={event => selectModel(event.currentTarget.value as LoadModel)} disabled={!inlineLoadEnabled}><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select></label>
         <label>Environment<select value={environment} onChange={event => { invalidateDraft(); onEnvironmentChange(event.currentTarget.value); setPreset('custom'); dirtyRef.current = true; setDirty(true); }}><option value="">Package default</option>{environments.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
         {model === 'virtualUsers' ? <label>Users<input type="number" min="1" step="1" value={users} onChange={event => change(setUsers, event.currentTarget.value)} /></label>
           : <label>Target TPS<input value={tps} onChange={event => change(setTps, event.currentTarget.value)} placeholder="e.g. 5/s" /></label>}

@@ -344,10 +344,13 @@ public final class ApiServlet extends HttpServlet {
             else throw new ServerRuntime.NotFoundException();
             if("list".equals(action)){kind=req.getParameter("type");resourceId=null;}
             if(resourceId!=null&&(resourceId.isEmpty()||resourceId.length()>512))throw new IllegalArgumentException("resourceId is invalid");
+            String sourceOrigin="source-file".equals(action)?req.getParameter("origin"):null;
+            String sort="list".equals(action)?req.getParameter("sort"):null;
+            String direction="list".equals(action)?req.getParameter("direction"):null;
             Map<String,Object> result="debug-form".equals(action)
                     ?runtime.inspectDebugForm(packageId,kind,resourceId,req.getParameter("environment"),principal)
                     :"quick-load-form".equals(action)?runtime.inspectQuickLoadForm(packageId,kind,resourceId,req.getParameter("model"),req.getParameter("environment"),principal)
-                    :runtime.inspectResource(packageId,action,kind,resourceId,query,limit,cursor,principal);
+                    :runtime.inspectResource(packageId,action,kind,resourceId,query,limit,cursor,sort,direction,sourceOrigin,principal);
             if("list".equals(action)) {
                 ResourceInspection.Page response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Page.class);
                 response.requestId=requestId;json(res,200,response);
@@ -426,7 +429,7 @@ public final class ApiServlet extends HttpServlet {
             if(parts.length!=4||!"packages".equals(parts[1])||parts[2].isEmpty()||!"load-policy".equals(parts[3]))
                 throw new ServerRuntime.NotFoundException();
             Map<String,Object> result=runtime.inspectQuickLoadPolicy(parts[2],req.getParameter("model"),
-                    req.getParameter("environment"),principal);
+                    req.getParameter("environment"),req.getParameter("templateId"),principal);
             LoadPolicyForm response=ServerRuntime.JSON.convertValue(result,LoadPolicyForm.class);
             response.requestId=requestId;json(res,200,response);
         } catch(ServerRuntime.NotFoundException e){throw e;}

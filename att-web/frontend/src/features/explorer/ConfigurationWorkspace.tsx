@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import type { PackageOption } from '../load/types';
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
 import { ConfigurationExplorer } from './ConfigurationExplorer';
-import type { ConfigurationEntry, ConfigurationFileNode, ExplorerApi, JsonValue, ResourceReference, ResourceSourceReference, TestdataRecordsResponse } from './types';
+import type { ConfigurationEntry, ConfigurationFileNode, ExplorerApi, JsonValue, ResourceReference, ResourceSourceReference, SourceProjection, TestdataRecordsResponse } from './types';
 import './configuration-workspace.css';
 
 type WorkspaceTab = 'source' | 'declared' | 'effective' | 'compare' | 'testdata';
@@ -55,7 +55,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
   const [searchNextOffset, setSearchNextOffset] = useState<number | null>(null);
   const [searchTruncated, setSearchTruncated] = useState(false);
   const [treeError, setTreeError] = useState('');
-  const [source, setSource] = useState<{ text: string; format: string; logicalPath?: string; reason?: string; available: boolean } | null>(null);
+  const [source, setSource] = useState<{ text: string; format: string; logicalPath?: string; reason?: string; available: boolean; fileReferences?: SourceProjection['fileReferences'] } | null>(null);
   const [sourceError, setSourceError] = useState('');
   const [sourceLoading, setSourceLoading] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
@@ -112,11 +112,11 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
     if (tab !== 'source' || !filePath || !packageId) { setSource(null); setSourceError(''); return; }
     const controller = new AbortController(); setSourceLoading(true); setSource(null); setSourceError('');
     const sourceRequest = sourceReference
-      ? api.getResourceSourceFile?.({ packageId, type: sourceReference.type, resourceId: sourceReference.resourceId }, sourceReference.referenceId, controller.signal)
+      ? api.getResourceSourceFile?.({ packageId, type: sourceReference.type, resourceId: sourceReference.resourceId }, sourceReference.referenceId, controller.signal, fileOrigin)
       : api.getConfigurationFileSource?.(packageId, filePath, fileOrigin, controller.signal);
     if (!sourceRequest) { setSource({ text: '', format: '', available: false, reason: 'unsupported' }); setSourceLoading(false); return () => controller.abort(); }
     sourceRequest.then(result => setSource({
-      text: result.text || '', format: result.format || filePath.split('.').pop() || 'text', logicalPath: result.logicalPath, available: result.available, reason: result.reason,
+      text: result.text || '', format: result.format || filePath.split('.').pop() || 'text', logicalPath: result.logicalPath, available: result.available, reason: result.reason, fileReferences: result.fileReferences,
     })).catch(error => { if (!controller.signal.aborted) setSourceError(errorText(error, 'load safe source')); })
       .finally(() => { if (!controller.signal.aborted) setSourceLoading(false); });
     return () => controller.abort();
@@ -259,7 +259,13 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
           {sourceError && <p className="att-error" role="alert">{sourceError}<button type="button" onClick={() => filePath && void loadDirectory(filePath.split('/').slice(0, -1).join('/'))}>Refresh file list</button></p>}
           {source && !source.available && <div className="att-config-unavailable"><h3>Source is not available</h3><p>The Server withheld or could not read this file. Its path and safe metadata remain visible.</p></div>}
           {source?.available && source.text.includes('&{') && <p className="att-config-tree-message" role="status">This source projection does not include a Server-verified file-reference token. File references are shown as unavailable.</p>}
-          {source?.available && <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || filePath || source.format || '')} label={`Safe source ${filePath || ''}`} readOnly sourcePath={source.logicalPath || filePath} fileReferences={[]} maxCharacters={200_000} />}
+          {source?.available && <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || filePath || source.format || '')} label={`Safe source ${filePath || ''}`} readOnly sourcePath={source.logicalPath || filePath} fileReferences={source.fileReferences || []} onFileReference={(_locator, origin, referenceId) => {
+            const reference = source.fileReferences?.find(item => item.referenceId === referenceId && item.available !== false);
+            if (!reference) return;
+            const nextOrigin = source.logicalPath || origin;
+            if (sourceReference) onFileChange(reference.logicalPath, nextOrigin, { ...sourceReference, referenceId: reference.referenceId });
+            else onFileChange(reference.logicalPath, nextOrigin);
+          }} maxCharacters={200_000} />}
           {!filePath && !sourceLoading && <div className="att-config-empty"><h3>Select a file</h3><p>Choose a configuration file to inspect its safe source.</p></div>}
         </section>}
         {(tab === 'declared' || tab === 'effective' || tab === 'compare') && <ConfigurationExplorer

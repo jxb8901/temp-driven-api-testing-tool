@@ -71,9 +71,10 @@ export function SourceViewer({ api, identity, available, active, onFileReference
       onFileReference={(_path, origin, referenceId) => {
         const reference = projection.fileReferences?.find(item => item.referenceId === referenceId && item.available !== false);
         if (!reference) return;
-        onFileReference?.(reference.logicalPath, projection.logicalPath || origin, {
-          type: identity.type, resourceId: identity.resourceId, referenceId: reference.referenceId,
-        });
+        const sourceOrigin = projection.logicalPath || origin;
+        if (identity.type === 'template' || identity.type === 'flow')
+          onFileReference?.(reference.logicalPath, sourceOrigin, { type: identity.type, resourceId: identity.resourceId, referenceId: reference.referenceId });
+        else onFileReference?.(reference.logicalPath, sourceOrigin);
       }}
       sourcePath={projection.logicalPath}
       maxCharacters={MAX_SOURCE_CHARACTERS}

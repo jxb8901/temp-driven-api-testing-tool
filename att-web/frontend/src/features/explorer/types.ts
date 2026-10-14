@@ -34,6 +34,8 @@ export interface ResourceReference {
   logicalId?: string;
   name?: string;
   resolution?: string;
+  targetKind?: string;
+  callSite?: Record<string, unknown>;
 }
 
 export interface Diagnostic {
@@ -216,7 +218,11 @@ export interface ResourceQuery {
   type?: ResourceType | 'all';
   cursor?: string;
   limit?: number;
+  sort?: ResourceSortField;
+  direction?: 'asc' | 'desc';
 }
+
+export type ResourceSortField = 'name' | 'type' | 'logicalId' | 'state';
 
 export interface EffectiveConfigurationQuery {
   environment?: string;
@@ -239,7 +245,7 @@ export interface ExplorerApi {
   listResources(packageId: string, query: ResourceQuery, signal?: AbortSignal): Promise<ResourcePage>;
   getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail>;
   getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection>;
-  getResourceSourceFile?(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal): Promise<SourceProjection>;
+  getResourceSourceFile?(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection>;
   getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse>;
   getEffectiveConfiguration(packageId: string, query: EffectiveConfigurationQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
   compareConfiguration(packageId: string, query: ConfigurationComparisonQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
@@ -257,10 +263,10 @@ export interface ExplorerPageProps {
   api: ExplorerApi;
   packageId: string;
   /** Route values are untrusted URL segments; Explorer validates the type before API use. */
-  resourceRoute: { type: string; resourceId: string } | null;
+  resourceRoute: { type: string; resourceId: string; tab?: 'definition' | 'source' | 'relations' } | null;
   environment: string;
   principalLabel?: string;
-  onResourceRouteChange: (route: Omit<ResourceIdentity, 'packageId'> | null) => void;
+  onResourceRouteChange: (route: (Omit<ResourceIdentity, 'packageId'> & { tab?: 'definition' | 'source' | 'relations' }) | null) => void;
   onEnvironmentChange: (environment: string) => void;
   onJobAccepted: (jobId: string) => void;
   onPrincipalLabelChange?: (label: string) => void;
