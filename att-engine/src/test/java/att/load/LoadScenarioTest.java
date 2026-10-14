@@ -217,7 +217,7 @@ class LoadScenarioTest {
         write(project, "load/z-users.yaml", "schemaVersion: att-load/v1.6\nload: {users: 6, duration: 20s}\nexecution: {thinkTime: 75ms}\n");
         Files.write(load.resolve("too-large.yaml"), new byte[256 * 1024 + 1]);
         Path external = temp.resolve("outside.yaml");
-        Files.writeString(external, "schemaVersion: att-load/v1.6\nload: {users: 9, duration: 20s}\n");
+        Files.write(external, "schemaVersion: att-load/v1.6\nload: {users: 9, duration: 20s}\n".getBytes(StandardCharsets.UTF_8));
         try { Files.createSymbolicLink(load.resolve("external.yaml"), external); }
         catch (UnsupportedOperationException | java.io.IOException unavailable) { /* Symlink checks run on supported filesystems. */ }
 
