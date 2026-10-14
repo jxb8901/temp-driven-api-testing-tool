@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -41,7 +42,7 @@ class PackageConfigurationInspectorTest {
 
     @Test void comparesOnlyVisibleValuesAndNeverReportsHiddenEqualityOrChanges() throws Exception {
         Path root = packageRoot("compare-config");
-        Map<String, Object> comparison = inspector(root).inspect("compare", "SIT", "UAT");
+        Map<String, Object> comparison = inspector(root).inspect("compare", "SIT", "UAT", "dbhelpers", 0, 100);
         assertEquals("ready", comparison.get("state"));
         @SuppressWarnings("unchecked") List<Map<String, Object>> fields = (List<Map<String, Object>>) comparison.get("fields");
         Map<String, Object> visible = fields.stream().filter(item -> "dbhelpers.orders.readOnly".equals(item.get("path"))).findFirst().orElseThrow(AssertionError::new);
@@ -85,7 +86,7 @@ class PackageConfigurationInspectorTest {
         @SuppressWarnings("unchecked") List<Map<String,Object>> secondEntries=(List<Map<String,Object>>)secondSections.get(0).get("entries");
         assertEquals(1,secondEntries.size());assertNull(second.get("nextOffset"));
 
-        Map<String,Object> comparison=inspector(root).inspect("compare","SIT","UAT",null,0,1);
+        Map<String,Object> comparison=inspector(root).inspect("compare","SIT","UAT","dbhelpers",0,1);
         @SuppressWarnings("unchecked") List<Map<String,Object>> fields=(List<Map<String,Object>>)comparison.get("fields");
         assertEquals(1,fields.size());assertTrue(((Number)comparison.get("total")).intValue()>1);
         assertNotNull(comparison.get("nextOffset"));
@@ -108,9 +109,43 @@ class PackageConfigurationInspectorTest {
         @SuppressWarnings("unchecked") List<Map<String,Object>> sections=(List<Map<String,Object>>)page.get("sections");
         @SuppressWarnings("unchecked") List<Map<String,Object>> entries=(List<Map<String,Object>>)sections.get(0).get("entries");
         assertEquals(5,entries.size());
-        Map<String,Object> compared=bounded.inspect("compare","SIT","UAT",null,0,5);
+        Map<String,Object> compared=bounded.inspect("compare","SIT","UAT","dbhelpers",0,5);
         @SuppressWarnings("unchecked") List<Map<String,Object>> comparedFields=(List<Map<String,Object>>)compared.get("fields");
-        assertEquals(5,comparedFields.size());assertTrue(((Number)compared.get("total")).intValue()>5);
+        assertEquals(5,comparedFields.size());assertTrue(((Number)compared.get("total")).intValue()>50);
+        assertTrue(comparedFields.stream().allMatch(field -> String.valueOf(field.get("path")).startsWith("dbhelpers.")));
+        assertThrows(IllegalArgumentException.class,()->bounded.inspect("compare","SIT","UAT","dbhelpersX",0,5));
+    }
+
+    @Test void pagesTestdataPreviewAndKeepsClassifiedFieldsProtectedWhenMaskingIsOff() throws Exception {
+        Path root=packageRoot("testdata-preview");
+        Files.createDirectories(root.resolve("testdata"));
+        write(root.resolve("testdata/customers.yaml"),"schemaVersion: att-testdata/v1.0\nid: customers\nrecords:\n"
+                +"  - accountId: A-1001\n    status: ACTIVE\n    email: customer@example.test\n    note: 'Bearer abc123; password=inline-secret'\n"
+                +"  - accountId: A-1002\n    status: CLOSED\n    email: other@example.test\nselection:\n  strategy: sequential\n");
+        String configured=baseConfig("config/dbhelpers/sit.yaml","config/dbhelpers/uat.yaml")
+                .replace("  SIT:\n    dbhelpers:","  SIT:\n    testdata: [testdata/customers.yaml]\n    dbhelpers:");
+        write(root.resolve("config/config.yaml"),configured);
+
+        PackageConfigurationInspector visible=new PackageConfigurationInspector(root,Paths.get("config/config.yaml"),262144,
+                false,Collections.emptyList(),Collections.emptyList());
+        Map<String,Object> page=visible.inspect("testdata-records","SIT",null,"customers",0,1);
+        assertEquals(Boolean.FALSE,page.get("redactionEnabled"));assertEquals(2L,page.get("total"));assertEquals(1,page.get("nextOffset"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> records=(List<Map<String,Object>>)page.get("records");
+        @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)records.get(0).get("value");
+        assertEquals("A-1001",value.get("accountId"));assertEquals("ACTIVE",value.get("status"));
+        assertEquals("[REDACTED]",value.get("email"));assertFalse(page.toString().contains("customer@example.test"));
+        assertFalse(page.toString().contains("abc123"));assertFalse(page.toString().contains("inline-secret"));
+        assertEquals(Boolean.TRUE,records.get(0).get("redacted"));
+
+        PackageConfigurationInspector masked=new PackageConfigurationInspector(root,Paths.get("config/config.yaml"),262144,
+                true,Collections.emptyList(),Collections.singletonList("accountId"));
+        Map<String,Object> maskedPage=masked.inspect("testdata-records","SIT",null,"customers",1,1);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> maskedRecords=(List<Map<String,Object>>)maskedPage.get("records");
+        @SuppressWarnings("unchecked") Map<String,Object> maskedValue=(Map<String,Object>)maskedRecords.get(0).get("value");
+        assertEquals("[REDACTED]",maskedValue.get("accountId"));assertEquals("CLOSED",maskedValue.get("status"));
+        assertNull(maskedPage.get("nextOffset"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->visible.inspect("testdata-records","SIT",null,"missing",0,1));
     }
 
     @Test void returnsOnlyStableDiagnosticsForInvalidProfilesAndEscapingDescriptors() throws Exception {

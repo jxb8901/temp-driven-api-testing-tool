@@ -164,7 +164,8 @@ public final class WorkerMain {
         if("inspect".equals(r.command)) {
             if("configuration".equals(r.inspectionType)) {
                 PackageConfigurationInspector inspector = new PackageConfigurationInspector(root, config,
-                        r.maxResponseBytes == null ? 262144 : r.maxResponseBytes);
+                        r.maxResponseBytes == null ? 262144 : r.maxResponseBytes,
+                        Boolean.TRUE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns);
                 Map<String,Object> inspected = inspector.inspect(r.inspectionAction,
                         r.inspectionEnvironment, r.inspectionOtherEnvironment, r.inspectionSection,
                         r.inspectionOffset == null ? 0 : r.inspectionOffset,
@@ -228,11 +229,14 @@ public final class WorkerMain {
         InspectorKey key=new InspectorKey(root.toAbsolutePath().normalize().toString(),
                 config==null?"":config.toString(),request.environment,safeSources,
                 request.maxSourceBytes==null?65536:request.maxSourceBytes,
-                request.maxResponseBytes==null?262144:request.maxResponseBytes);
+                request.maxResponseBytes==null?262144:request.maxResponseBytes,
+                Boolean.TRUE.equals(request.sourceBrowsingEnabled),request.sourceBrowsingPolicy,
+                request.sourceDenyGlobs,Boolean.TRUE.equals(request.redactionEnabled),request.sensitivePaths,request.sensitiveFieldPatterns);
         PackageResourceInspector inspector=resourceInspectors.get(key);
         if(inspector!=null)return inspector;
         inspector=new PackageResourceInspector(root,config,request.environment,safeSources,
-                key.maxSourceBytes,key.maxResponseBytes,inspectionDaemon);
+                key.maxSourceBytes,key.maxResponseBytes,inspectionDaemon,key.sourceBrowsingEnabled,key.sourceBrowsingPolicy,
+                key.sourceDenyGlobs,key.redactionEnabled,key.sensitivePaths,key.sensitiveFieldPatterns);
         resourceInspectors.put(key,inspector);
         while(resourceInspectors.size()>2) {
             Map.Entry<InspectorKey,PackageResourceInspector> eldest=resourceInspectors.entrySet().iterator().next();
@@ -251,22 +255,30 @@ public final class WorkerMain {
         final String root,config,environment;
         final List<String> safeTextSources;
         final int maxSourceBytes,maxResponseBytes;
+        final boolean sourceBrowsingEnabled,redactionEnabled;
+        final String sourceBrowsingPolicy;
+        final List<String> sourceDenyGlobs,sensitivePaths,sensitiveFieldPatterns;
         InspectorKey(String root,String config,String environment,List<String> safeTextSources,
-                     int maxSourceBytes,int maxResponseBytes) {
+                     int maxSourceBytes,int maxResponseBytes,boolean sourceBrowsingEnabled,String sourceBrowsingPolicy,
+                     List<String> sourceDenyGlobs,boolean redactionEnabled,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) {
             this.root=root;this.config=config;this.environment=environment;
             this.safeTextSources=Collections.unmodifiableList(new ArrayList<String>(safeTextSources));
             this.maxSourceBytes=maxSourceBytes;this.maxResponseBytes=maxResponseBytes;
+            this.sourceBrowsingEnabled=sourceBrowsingEnabled;this.sourceBrowsingPolicy=sourceBrowsingPolicy;this.sourceDenyGlobs=copy(sourceDenyGlobs);
+            this.redactionEnabled=redactionEnabled;this.sensitivePaths=copy(sensitivePaths);this.sensitiveFieldPatterns=copy(sensitiveFieldPatterns);
         }
+        private static List<String> copy(List<String> values){return Collections.unmodifiableList(new ArrayList<String>(values==null?Collections.<String>emptyList():values));}
         @Override public boolean equals(Object other) {
             if(this==other)return true;
             if(!(other instanceof InspectorKey))return false;
             InspectorKey value=(InspectorKey)other;
-            return maxSourceBytes==value.maxSourceBytes&&maxResponseBytes==value.maxResponseBytes
+            return maxSourceBytes==value.maxSourceBytes&&maxResponseBytes==value.maxResponseBytes&&sourceBrowsingEnabled==value.sourceBrowsingEnabled&&redactionEnabled==value.redactionEnabled
                     &&java.util.Objects.equals(root,value.root)&&java.util.Objects.equals(config,value.config)
-                    &&java.util.Objects.equals(environment,value.environment)&&safeTextSources.equals(value.safeTextSources);
+                    &&java.util.Objects.equals(environment,value.environment)&&java.util.Objects.equals(sourceBrowsingPolicy,value.sourceBrowsingPolicy)
+                    &&safeTextSources.equals(value.safeTextSources)&&sourceDenyGlobs.equals(value.sourceDenyGlobs)&&sensitivePaths.equals(value.sensitivePaths)&&sensitiveFieldPatterns.equals(value.sensitiveFieldPatterns);
         }
         @Override public int hashCode() {
-            return java.util.Objects.hash(root,config,environment,safeTextSources,maxSourceBytes,maxResponseBytes);
+            return java.util.Objects.hash(root,config,environment,safeTextSources,maxSourceBytes,maxResponseBytes,sourceBrowsingEnabled,sourceBrowsingPolicy,sourceDenyGlobs,redactionEnabled,sensitivePaths,sensitiveFieldPatterns);
         }
     }
     private Map<String,Object> requiredTarget(WorkerRequest r) { if(r.target==null)throw new IllegalArgumentException("target is required"); return r.target; }

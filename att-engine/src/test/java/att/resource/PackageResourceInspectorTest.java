@@ -86,6 +86,25 @@ class PackageResourceInspectorTest {
         assertFalse(String.valueOf(source.get("text")).contains(root.toString()));
     }
 
+    @Test void marksAllowlistedBinaryToolSourceUnavailableWithAStableReason() throws Exception {
+        Path root=packageWithTemplate("binary-tool-source","FORM","description: safe");
+        Path script=Files.createDirectories(root.resolve("tools")).resolve("binary.sh");
+        byte[] prefix="#!/bin/sh\necho safe\n# ".getBytes(StandardCharsets.UTF_8);
+        byte[] binary=java.util.Arrays.copyOf(prefix,prefix.length+1);binary[prefix.length]=(byte)0xff;Files.write(script,binary);
+        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  binary:\n    name: Binary script\n    description: Binary source test\n"
+                +"    command: [tools/binary.sh]\n    stdoutFormat: text\n    arguments: {}\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.singletonList("tools/binary.sh"),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
+        Map<String,Object> item=items.stream().filter(value->"binary".equals(value.get("logicalId"))).findFirst().orElseThrow();
+        assertEquals(Boolean.FALSE,item.get("sourceAvailable"));assertEquals("binary",item.get("sourceReason"));
+        Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(item.get("resourceId")),null,0,1);
+        assertEquals(Boolean.FALSE,source.get("available"));assertEquals("binary",source.get("reason"));
+        assertFalse(source.containsKey("text"));
+    }
+
     @Test void redactsSecretsAndExternalPathsFromProjectedTemplateSource() throws Exception {
         Path root=Files.createDirectories(temp.resolve("package"));
         Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates/SECRET"));Files.createDirectories(root.resolve("testcase"));
@@ -116,8 +135,52 @@ class PackageResourceInspectorTest {
                 Collections.<String>emptyList(),65536,262144);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
         assertEquals(Boolean.FALSE,items.get(0).get("sourceAvailable"));
+        assertEquals("visibility-policy",items.get(0).get("sourceReason"));
         Map<String,Object> source=inspector.inspect("source","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
         assertEquals(Boolean.FALSE,source.get("available"));assertEquals("visibility-policy",source.get("reason"));
+    }
+
+    @Test void exposesSafePackageYamlByDefaultWhileKeepingClassifiedSecretsHidden() throws Exception {
+        Path root=packageWithTemplate("safe-package-yaml", "SAFE", "description: ordinary business description");
+        writeUtf8(root.resolve("templates/SAFE/template.yaml"),"schemaVersion: att-template/v3.6\nname: SAFE\n"
+                +"description: ordinary business description\nactions:\n  note:\n    type: log\n"
+                +"    message: 'customer account 123456789; password=never-show-this'\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        Map<String,Object> source=inspector.inspect("source","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
+        assertEquals(Boolean.TRUE,source.get("available"),source.toString());
+        String text=String.valueOf(source.get("text"));
+        assertTrue(text.contains("ordinary business description"));
+        assertTrue(text.contains("customer account 123456789"));
+        assertFalse(text.contains("never-show-this"));
+        assertEquals(Boolean.TRUE,items.get(0).get("sourceAvailable"));
+    }
+
+    @Test void resolvesOnlyConfiguredHelperOperationsWithoutCreatingToolTargets() throws Exception {
+        Path root=packageWithTemplate("helper-inspection", "HELPERS", "description: safe");
+        writeUtf8(root.resolve("config/mqhelper.yaml"),"schemaVersion: att-mqhelper/v1.2\nid: broker\nname: Broker\n"
+                +"description: test broker\ndefaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV}\n"
+                +"instances: [{id: primary}]\n");
+        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"mqhelpers: [config/mqhelper.yaml]\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        writeUtf8(root.resolve("templates/HELPERS/template.yaml"),"schemaVersion: att-template/v3.6\nname: HELPERS\ndescription: helper calls\nactions:\n"
+                +"  valid:\n    type: tool\n    call: \"#{mq.broker.request(payload='x')}\"\n"
+                +"  validAgain:\n    type: tool\n    call: \"#{mq.broker.send(queue='Q', payload='y')}\"\n"
+                +"  invalidMethod:\n    type: tool\n    call: \"#{mq.broker.destroy(payload='x')}\"\n"
+                +"  unknownHelper:\n    type: tool\n    call: \"#{mq.unknown.request(payload='x')}\"\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        Map<String,Object> detail=inspector.inspect("detail","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> refs=(List<Map<String,Object>>)((Map<?,?>)detail.get("resource")).get("references");
+        Map<String,Object> valid=refs.stream().filter(ref->"mq.broker.request".equals(ref.get("logicalId"))).findFirst().orElseThrow(AssertionError::new);
+        assertEquals("resolved",valid.get("resolution"));assertEquals("helper",valid.get("targetKind"));assertNull(valid.get("resourceId"));
+        @SuppressWarnings("unchecked") Map<String,Object> callSite=(Map<String,Object>)valid.get("callSite");
+        assertEquals("valid",callSite.get("actionId"));
+        assertEquals(2L,refs.stream().filter(ref->"mq.broker.request".equals(ref.get("logicalId"))||"mq.broker.send".equals(ref.get("logicalId"))).count());
+        assertEquals(2L,refs.stream().filter(ref->"unresolved".equals(ref.get("resolution"))).count());
+        assertTrue(detail.toString().contains("ATT-RESOURCE-REFERENCE-UNRESOLVED"));
     }
 
     @Test void debugFormHidesAuthoredDefaultsAndDoesNotReturnTheNormalizedSidecar() throws Exception {

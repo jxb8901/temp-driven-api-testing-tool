@@ -239,6 +239,7 @@ export const api = {
     return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/compare' + queryString({
       left: query.left,
       right: query.right,
+      section: query.section,
       offset: query.offset,
       limit: query.limit,
     }), { signal });

@@ -37,19 +37,20 @@ List responses carry typed resource summaries, safe relationship references, and
 
 Details expose only fields supported by the resource type. Case details retain logical suite, group, Case ID, row or sheet provenance, tags, and mapped input/expected-value metadata. Template, Flow, and Tool details expose their parsed definitions and resolvable references. Unresolved references are diagnostics. Only Case details provide Run. Only Template, Flow, and Tool details provide Debug and Quick Load.
 
-Source responses are generated from a parsed, redacted projection. They are not arbitrary file reads. A Tool script is available only when its exact package-relative path appears in the server-side `server.inspection.safeTextSources` allowlist. Binary-only or unapproved source is reported as unavailable. A source response is limited to 64 KiB; a detail response is limited to 256 KiB; larger content is unavailable with a size-limit state. The private package-content digest is used to detect stale cursors and is never returned.
+Source responses are generated from a parsed, sanitized projection. They are not arbitrary file reads. With the default `safe-package-files` policy, eligible Template and Flow YAML is available without a per-file allowlist. Tool script text requires its exact package-relative path in the server-side `server.inspection.safeTextSources` allowlist. Raw configuration, Testdata descriptors, Debug sidecars, credential-named files, binary files, external paths, and oversized files are unavailable. Symlinks are resolved under the registered package root and escapes are denied. A source response is limited to 64 KiB; a detail response is limited to 256 KiB; larger content is unavailable with a size-limit state. The private package-content digest is used to detect stale cursors and is never returned.
 
-The Debug form endpoint accepts only Template, Flow, or Tool resource IDs. It returns the target's typed `att-debug/v1.2` defaults from its optional sidecar; if the sidecar is absent, it returns valid empty defaults. Sensitive values are masked before serialization. The browser edits JSON objects for `inputs` on all targets, `vars` on Template/Flow targets, and `arguments` on Tool targets; it does not evaluate expressions. Tool `vars` and Template/Flow Tool arguments are rejected. The Load policy endpoint returns the safe model-specific policy used to initialize Advanced Load.
+The Debug form endpoint accepts only Template, Flow, or Tool resource IDs. It returns the target's typed `att-debug/v1.2` defaults from its optional sidecar; if the sidecar is absent, it returns valid empty defaults. Ordinary values are visible by default. Credential/authentication material and common personal-data fields remain protected even when masking is disabled or the caller is anonymous. When `server.inspection.redaction.enabled` is true, configured paths and field patterns are masked before serialization. The browser edits JSON objects for `inputs` on all targets, `vars` on Template/Flow targets, and `arguments` on Tool targets; it does not evaluate expressions. Tool `vars` and Template/Flow Tool arguments are rejected. The Load policy endpoint returns the safe model-specific policy used to initialize Advanced Load.
 
 ### Configuration inspection
 
 ```http
 GET /api/v1/packages/{packageId}/configuration?view=declared
 GET /api/v1/packages/{packageId}/configuration/effective?environment=SIT
-GET /api/v1/packages/{packageId}/configuration/compare?left=SIT&right=UAT
+GET /api/v1/packages/{packageId}/configuration/compare?left=SIT&right=UAT&section=mqhelpers&offset=0&limit=50
+GET /api/v1/packages/{packageId}/configuration/testdata/{descriptorId}/records?environment=SIT&offset=0&limit=50
 ```
 
-The Engine's `FrameworkConfigLoader` selects and resolves the environment. Inspection makes no database, MQ, HTTP, or SSH connection. Declared and effective views are separate. The comparison contains only fields authorized for display. A hidden value is represented as hidden, never as equal, changed, a digest, or a value length.
+The Engine's `FrameworkConfigLoader` selects and resolves the environment. Inspection makes no database, MQ, HTTP, or SSH connection. Declared and effective views are separate. Compare requires a verified section ID, applies that filter on the Server before pagination, and scopes every page to that section. Testdata preview accepts only a descriptor configured for the selected environment and returns bounded pages. Ordinary values are visible by default; credentials, authentication material, and common personal-data fields remain masked for anonymous and authenticated callers. `redaction.enabled` adds configured sensitive paths and field patterns across source, configuration, Testdata, and Debug projections. A hidden comparison value is represented as hidden, never as equal, changed, a digest, or a value length.
 
 ### Draft, preview, validation, and submission
 
@@ -131,15 +132,17 @@ Job metadata continues to store the command and package ID summary, not the subm
 | Logical resource IDs, types, safe names, tags, and relationships | Visible to callers allowed by the configured identity mode | Package-scoped; no absolute paths |
 | Case row and sheet provenance | Visible as logical identifiers | Never include the workbook's physical path |
 | Template, Flow, and Tool definitions | Allowlisted structured projection | Sensitive fields are replaced before serialization |
-| Tool script text | Unavailable | Available only under explicit server-side package/resource allowlisting and source-size cap |
+| Safe Template and Flow YAML source | Available by default under `safe-package-files` | Parsed projection, package-root confinement, deny rules, and source-size cap |
+| Tool script text | Unavailable by default | Available only under exact server-side package-relative allowlisting and source-size cap |
 | Declared or effective configuration | Allowlisted projection | No unrestricted YAML; use the real Engine resolution |
-| Passwords, tokens, private keys, credentials, resolved environment values, auth headers | Always hidden | No preview, diagnostic, event, cache, or export may contain bytes |
-| Testdata records and resolved values | Never returned | Descriptor IDs, schema, and permitted selection metadata may be shown |
+| Passwords, tokens, private keys, credentials, and auth material | Always hidden | No preview, diagnostic, event, cache, or export may contain bytes |
+| Common personal-data fields | Always masked | Includes fields such as email, phone, address, and national identifiers |
+| Testdata records | Paged preview for configured descriptors | Ordinary values visible by default; credential and personal-data fields stay masked |
 | Hostnames, ports, JDBC URLs, endpoints, queues, network topology | Hidden by default | A Server-side visibility policy may allow selected fields for all authenticated callers; the browser cannot grant visibility |
 | Cross-profile comparison of hidden values | Hidden state only | Do not reveal equality, hashes, lengths, or change counts |
 | User-entered Debug/Load values | Safe typed preview | Apply the same sensitive-field rules; mark the preview redacted when any field is hidden |
 
-Redaction runs before JSON or YAML serialization. Errors contain stable codes and safe summaries, not source contents, credentials, absolute paths, or parser snippets that include them. Browser rendering treats all returned strings as text.
+Display masking defaults off for ordinary package values. When enabled, configured field paths and patterns are applied server-side before JSON or YAML serialization across all supported projections. The Server logs a startup warning when masking is disabled. Authentication/authorization, package containment, hard-deny classifications, and credential protections are independent of this display setting. Errors contain stable codes and safe summaries, not source contents, credentials, absolute paths, or parser snippets that include them. Browser rendering treats all returned strings as text.
 
 ## Resource isolation, bounds, and admission
 

@@ -108,10 +108,12 @@ final class ServerRuntime implements AutoCloseable {
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
         if(config.scheduling.enabled) {
             store.recoverScheduleExecutions();
-            if(!config.authenticationRequired)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Scheduled Load management is enabled without authentication; anonymous schedule administration was explicitly allowed");
+            if(!config.authenticationRequired&&config.scheduling.allowAnonymousManagement)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Scheduled Load management is enabled without authentication; anonymous clients share full schedule control");
             loadScheduleScheduler=new LoadScheduleScheduler(config.scheduling,store,this::submitScheduledLoad,clock);
             loadScheduleScheduler.start();
         } else loadScheduleScheduler=null;
+        if(config.inspection.enabled&&!config.inspection.redactionEnabled)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Inspection masking is disabled; ordinary package values are visible to authorized callers, while classified secrets remain protected");
+        if(!config.security.checkCrossOrigin)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("server.security.checkCrossOrigin is disabled; configure trusted proxy origin handling and retain local-auth CSRF protection");
     }
     private void recover() throws Exception {
         for(Map<String,Object> stale:store.staleWorkers()) {
@@ -269,6 +271,7 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> packageView(String id){Path root=config.packages.get(id);if(root==null)throw new NotFoundException();return Map.of("packageId",id,"name",root.getFileName().toString());}
     Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(!List.of("list","detail","source").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
         if(type!=null&&!List.of("case","template","flow","tool").contains(type))throw new IllegalArgumentException("Unsupported resource type");
@@ -276,9 +279,9 @@ final class ServerRuntime implements AutoCloseable {
         int limit=requestedLimit==0?RESOURCE_DEFAULT_PAGE_SIZE:requestedLimit;
         if(limit<1||limit>RESOURCE_MAX_PAGE_SIZE)throw new IllegalArgumentException("limit must be between 1 and 100");
         Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,type,normalizedQuery,principal);
-        WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";request.packageRoot=root.toString();request.config="config/config.yaml";
+        WorkerRequest request=inspectionRequest(packageId,root,null);
         request.inspectionAction=action;request.inspectionType=type;request.inspectionResourceId=resourceId;request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
-        request.expectedRevisionDigest=prior==null?null:prior.revision;request.safeTextSources=config.inspection.safeTextSources(packageId);request.maxSourceBytes=config.inspection.maxSourceBytes;request.maxResponseBytes=config.inspection.maxResponseBytes;
+        request.expectedRevisionDigest=prior==null?null:prior.revision;
         Map<String,Object> result=executeInspection(root,request);
         Object revision=result.remove("revisionDigest");
         if("list".equals(action)) {
@@ -617,6 +620,9 @@ final class ServerRuntime implements AutoCloseable {
         request.packageRoot=root.toString();request.config="config/config.yaml";request.environment=environment;
         request.maxResponseBytes=config.inspection.maxResponseBytes;request.maxSourceBytes=config.inspection.maxSourceBytes;
         request.safeTextSources=config.inspection.safeTextSources(packageId);
+        request.sourceBrowsingEnabled=config.inspection.sourceBrowsingEnabled;request.sourceBrowsingPolicy=config.inspection.sourcePolicy;
+        request.sourceDenyGlobs=config.inspection.sourceDenyGlobs;request.redactionEnabled=config.inspection.redactionEnabled;
+        request.sensitivePaths=config.inspection.sensitivePaths;request.sensitiveFieldPatterns=config.inspection.sensitiveFieldPatterns;
         return request;
     }
     private Map<String,Object> debugDraftView(DebugDraft draft) {
@@ -771,9 +777,9 @@ final class ServerRuntime implements AutoCloseable {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        if(!List.of("declared","effective","compare").contains(action))throw new IllegalArgumentException("Unsupported configuration inspection action");
+        if(!List.of("declared","effective","compare","testdata-records").contains(action))throw new IllegalArgumentException("Unsupported configuration inspection action");
         String selected=null,other=null;
-        if("effective".equals(action)&&environment!=null&&!environment.isBlank())selected=inspectionEnvironment(environment,"environment");
+        if(("effective".equals(action)||"testdata-records".equals(action))&&environment!=null&&!environment.isBlank())selected=inspectionEnvironment(environment,"environment");
         if("compare".equals(action)){
             selected=inspectionEnvironment(environment,"left environment");
             other=inspectionEnvironment(otherEnvironment,"right environment");
@@ -782,6 +788,7 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";request.packageRoot=root.toString();request.config="config/config.yaml";
         request.inspectionAction=action;request.inspectionType="configuration";request.inspectionEnvironment=selected;request.inspectionOtherEnvironment=other;
         request.inspectionSection=section;request.inspectionOffset=offset;request.inspectionLimit=limit;request.maxResponseBytes=config.inspection.maxResponseBytes;
+        request.redactionEnabled=config.inspection.redactionEnabled;request.sensitivePaths=config.inspection.sensitivePaths;request.sensitiveFieldPatterns=config.inspection.sensitiveFieldPatterns;
         return executeInspection(root,request);
     }
     private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {
@@ -1033,6 +1040,9 @@ final class ServerRuntime implements AutoCloseable {
         input.set("inlineLoadScenario",JSON.valueToTree(scenario));input.put("expectedRevisionDigest",validated.revisionDigest);
         input.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(schedule.packageId)));
         input.put("maxSourceBytes",config.inspection.maxSourceBytes);input.put("maxResponseBytes",config.inspection.maxResponseBytes);
+        input.put("sourceBrowsingEnabled",config.inspection.sourceBrowsingEnabled);input.put("sourceBrowsingPolicy",config.inspection.sourcePolicy);
+        input.set("sourceDenyGlobs",JSON.valueToTree(config.inspection.sourceDenyGlobs));input.put("redactionEnabled",config.inspection.redactionEnabled);
+        input.set("sensitivePaths",JSON.valueToTree(config.inspection.sensitivePaths));input.set("sensitiveFieldPatterns",JSON.valueToTree(config.inspection.sensitiveFieldPatterns));
         return submit("load",input,"load-schedule:"+schedule.id,true,occurrenceId,true);
     }
 

@@ -18,6 +18,8 @@ export interface ResourceSummary {
   description?: string;
   state?: string;
   sourceAvailable?: boolean;
+  sourceReason?: string | null;
+  redactionEnabled?: boolean;
   diagnostics?: Diagnostic[];
   provenance?: { suite?: string; [key: string]: unknown };
   tags?: string[];
@@ -108,6 +110,7 @@ export interface ConfigurationResponse {
   diagnostics?: Diagnostic[];
   nextOffset?: number | null;
   total?: number;
+  redactionEnabled?: boolean;
 }
 
 export interface DebugTarget {
@@ -158,6 +161,7 @@ export interface EffectiveConfigurationQuery {
 export interface ConfigurationComparisonQuery {
   left: string;
   right: string;
+  section: string;
   offset?: number;
   limit?: number;
 }

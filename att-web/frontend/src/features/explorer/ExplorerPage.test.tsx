@@ -287,4 +287,70 @@ describe('Explorer page integration', () => {
     expect(container.textContent).toContain('missing');
     expect(container.textContent).not.toContain('must-not-display');
   });
+
+  it('scopes Compare pages to the selected section and preserves that section while loading more', async () => {
+    const compareConfiguration = vi.fn(async (_packageId: string, query: { section: string; offset?: number }) => ({
+      state: 'ready', section: query.section, nextOffset: query.offset === 0 ? 50 : null,
+      total: 60, fields: [{ path: `${query.section}.field${query.offset || 0}`, left: { state: 'visible', value: 1 }, right: { state: 'visible', value: 2 }, change: 'changed' }],
+    }));
+    const api = apiWith({
+      getDeclaredConfiguration: vi.fn(async () => ({
+        state: 'ready', globals: {},
+        environments: [{ name: 'left', state: 'active', default: true }, { name: 'right', state: 'active' }],
+        sections: [{ id: 'globals', title: 'Global fields' }, { id: 'dbhelpers', title: 'DB helpers' }],
+      })),
+      compareConfiguration,
+    });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment=""
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+    click(button('Compare'));
+    await settle();
+    expect(compareConfiguration.mock.calls[0][1]).toMatchObject({ left: 'left', right: 'right', section: 'globals', offset: 0, limit: 50 });
+
+    const section = [...container.querySelectorAll('label')].find(label => label.textContent?.startsWith('Section'))?.querySelector('select');
+    expect(section).toBeTruthy();
+    setValue(section!, 'dbhelpers');
+    await settle();
+    expect(compareConfiguration.mock.calls[1][1]).toMatchObject({ section: 'dbhelpers', offset: 0, limit: 50 });
+
+    click(button('Load more configuration'));
+    await settle();
+    expect(compareConfiguration.mock.calls[2][1]).toMatchObject({ section: 'dbhelpers', offset: 50, limit: 50 });
+    expect(container.textContent).toContain('dbhelpers.field0');
+    expect(container.textContent).toContain('dbhelpers.field50');
+  });
+
+  it('ignores stale Compare responses after a section change and refreshes after profile changes', async () => {
+    const pending: Array<(response: { state: string; fields: Array<{ path: string; left: { state: string }; right: { state: string }; change: string }> }) => void> = [];
+    const compareConfiguration = vi.fn(async () => new Promise<{ state: string; fields: Array<{ path: string; left: { state: string }; right: { state: string }; change: string }> }>(resolve => pending.push(resolve)));
+    const api = apiWith({
+      getDeclaredConfiguration: vi.fn(async () => ({
+        state: 'ready', globals: {},
+        environments: [{ name: 'left', state: 'active', default: true }, { name: 'right', state: 'active' }, { name: 'stage', state: 'active' }],
+        sections: [{ id: 'globals', title: 'Global fields' }, { id: 'dbhelpers', title: 'DB helpers' }],
+      })),
+      compareConfiguration,
+    });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment=""
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+    click(button('Compare'));
+    await settle();
+    const section = [...container.querySelectorAll('label')].find(label => label.textContent?.startsWith('Section'))?.querySelector('select');
+    setValue(section!, 'dbhelpers');
+    await settle();
+    expect(compareConfiguration).toHaveBeenCalledTimes(2);
+    expect(compareConfiguration.mock.calls[1][1]).toMatchObject({ section: 'dbhelpers' });
+
+    await act(async () => { pending[0]({ state: 'ready', fields: [{ path: 'stale-global', left: { state: 'visible' }, right: { state: 'visible' }, change: 'changed' }] }); await Promise.resolve(); });
+    await settle();
+    expect(container.textContent).not.toContain('stale-global');
+    await act(async () => { pending[1]({ state: 'ready', fields: [{ path: 'fresh-db', left: { state: 'visible' }, right: { state: 'visible' }, change: 'changed' }] }); await Promise.resolve(); });
+    await settle();
+    expect(container.textContent).toContain('fresh-db');
+
+    const leftProfile = container.querySelector<HTMLSelectElement>('select[aria-label="Left environment"]');
+    setValue(leftProfile!, 'stage');
+    await settle();
+    expect(compareConfiguration.mock.calls[2][1]).toMatchObject({ left: 'stage', right: 'right', section: 'dbhelpers', offset: 0 });
+  });
 });

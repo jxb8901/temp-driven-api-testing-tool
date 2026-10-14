@@ -15,6 +15,7 @@ public final class ConfigurationInspection {
         public String leftEnvironment;
         public String rightEnvironment;
         public String section;
+        public String descriptorId;
         public Integer offset;
         public Integer limit;
         public Integer total;
@@ -23,6 +24,8 @@ public final class ConfigurationInspection {
         public List<Map<String, Object>> environments;
         public List<Map<String, Object>> sections;
         public List<Map<String, Object>> fields;
+        public List<Map<String, Object>> records;
+        public Boolean redactionEnabled;
         public List<Diagnostic> diagnostics;
         public String requestId;
     }

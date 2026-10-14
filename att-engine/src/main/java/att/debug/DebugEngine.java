@@ -47,17 +47,29 @@ public final class DebugEngine {
     private final Path projectRoot;
     private final FrameworkConfig config;
     private final att.exec.MqTransport.Factory mqTransportFactory;
+    private final boolean redactionEnabled;
+    private final List<String> sensitivePaths, sensitiveFieldPatterns;
 
     public DebugEngine(Path projectRoot, FrameworkConfig config) {
-        this(projectRoot, config, new att.exec.IbmMqClientFactory());
+        this(projectRoot, config, new att.exec.IbmMqClientFactory(), true,
+                java.util.Collections.<String>emptyList(), java.util.Collections.<String>emptyList());
     }
 
     /** Injectable transport boundary for repeatable Debug integration tests. */
     public DebugEngine(Path projectRoot, FrameworkConfig config, att.exec.MqTransport.Factory mqTransportFactory) {
+        this(projectRoot, config, mqTransportFactory, true,
+                java.util.Collections.<String>emptyList(), java.util.Collections.<String>emptyList());
+    }
+
+    public DebugEngine(Path projectRoot, FrameworkConfig config, att.exec.MqTransport.Factory mqTransportFactory,
+                       boolean redactionEnabled, List<String> sensitivePaths, List<String> sensitiveFieldPatterns) {
         if (mqTransportFactory == null) throw new IllegalArgumentException("MQ transport factory is required");
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
         this.config = config;
         this.mqTransportFactory = mqTransportFactory;
+        this.redactionEnabled = redactionEnabled;
+        this.sensitivePaths = sensitivePaths == null ? java.util.Collections.<String>emptyList() : new ArrayList<String>(sensitivePaths);
+        this.sensitiveFieldPatterns = sensitiveFieldPatterns == null ? java.util.Collections.<String>emptyList() : new ArrayList<String>(sensitiveFieldPatterns);
     }
 
     /** Reads and validates a Debug sidecar for in-memory Load promotion without executing the target. */
@@ -202,7 +214,8 @@ public final class DebugEngine {
     }
 
     private Object safeFormValue(Object value, String key, String path, boolean[] redacted) {
-        if (key != null && sensitiveFormKey(key)) return keepDefault(path, redacted);
+        if (key != null && (sensitiveFormKey(key) || configuredSensitivePath(path) || configuredSensitiveField(key)))
+            return keepDefault(path, redacted);
         if (value instanceof Map) {
             Map<String, Object> safe = new LinkedHashMap<String, Object>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
@@ -217,9 +230,44 @@ public final class DebugEngine {
             for (Object item : (Iterable<?>) value) safe.add(safeFormValue(item, null, pointer(path, String.valueOf(index++)), redacted));
             return safe;
         }
-        if (value instanceof String && ("/schemaVersion".equals(path) || ((String) value).isEmpty())) return value;
-        if (value != null) return keepDefault(path, redacted);
+        if (value instanceof String) {
+            if ("/schemaVersion".equals(path) || ((String) value).isEmpty()) return value;
+            return redactionEnabled ? keepDefault(path, redacted) : scrub((String) value);
+        }
+        if (value != null) return redactionEnabled ? keepDefault(path, redacted) : value;
         return value;
+    }
+
+    private boolean configuredSensitivePath(String path) {
+        if (!redactionEnabled) return false;
+        String normalized = path.toLowerCase(java.util.Locale.ROOT);
+        for (String configured : sensitivePaths) {
+            String candidate = configured.toLowerCase(java.util.Locale.ROOT);
+            if (candidate.equals(normalized)) return true;
+            if (candidate.indexOf('*') >= 0) {
+                String regex = java.util.regex.Pattern.quote(candidate).replace("\\Q*\\E", ".*");
+                if (normalized.matches(regex)) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean configuredSensitiveField(String key) {
+        if (!redactionEnabled) return false;
+        for (String expression : sensitiveFieldPatterns) {
+            try { if (java.util.regex.Pattern.compile(expression, java.util.regex.Pattern.CASE_INSENSITIVE).matcher(key).matches()) return true; }
+            catch (RuntimeException ignored) { /* Configuration parsing validates patterns. */ }
+        }
+        return false;
+    }
+
+    private String scrub(String value) {
+        String result = value.replace(projectRoot.toString(), "[package]");
+        result = result.replaceAll("(?i)(authorization\\s*[:=]\\s*(?:basic|bearer)\\s+)[^\\s,;]+", "$1[REDACTED]");
+        result = result.replaceAll("(?i)(password|passwd|token|secret|api[_-]?key|access[_-]?key)\\s*[:=]\\s*([^\\s,;]+)", "$1=[REDACTED]");
+        result = result.replaceAll("(://)[^/@\\s:]+:[^/@\\s]+@", "$1[REDACTED]@");
+        result = result.replaceAll("-----BEGIN [^-]+PRIVATE KEY-----[\\s\\S]*?-----END [^-]+PRIVATE KEY-----", "[REDACTED PRIVATE KEY]");
+        return result;
     }
 
     private Map<String, Object> keepDefault(String path, boolean[] redacted) {
