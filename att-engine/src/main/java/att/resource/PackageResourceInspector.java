@@ -92,6 +92,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             "(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----");
 
     private final Path packageRoot;
+    private final Path packageInputRoot;
     private final PackageResourceResolver resources;
     private final Path configPath;
     private final String environment;
@@ -101,6 +102,8 @@ public final class PackageResourceInspector implements AutoCloseable {
     private final boolean sourceBrowsingEnabled,redactionEnabled;
     private final String sourceBrowsingPolicy;
     private final List<String> sourceDenyGlobs,sensitivePaths,sensitiveFieldPatterns;
+    private final Set<String> externalTextSources;
+    private final List<Path> externalSourceRoots;
     private final boolean cacheEnabled;
     private volatile Index cachedIndex;
     private volatile long cachedIndexVersion = Long.MIN_VALUE;
@@ -127,12 +130,31 @@ public final class PackageResourceInspector implements AutoCloseable {
                                     boolean cacheEnabled,boolean sourceBrowsingEnabled,String sourceBrowsingPolicy,
                                     Collection<String> sourceDenyGlobs,boolean redactionEnabled,
                                     Collection<String> sensitivePaths,Collection<String> sensitiveFieldPatterns) {
+        this(packageRoot,configPath,environment,safeTextSources,Collections.<String>emptyList(),Collections.<String>emptyList(),
+                maxSourceBytes,maxResponseBytes,cacheEnabled,sourceBrowsingEnabled,sourceBrowsingPolicy,sourceDenyGlobs,
+                redactionEnabled,sensitivePaths,sensitiveFieldPatterns);
+    }
+
+    public PackageResourceInspector(Path packageRoot, Path configPath, String environment,
+                                    Collection<String> safeTextSources,Collection<String> externalTextSources,
+                                    Collection<String> externalSourceRoots,int maxSourceBytes,int maxResponseBytes,
+                                    boolean cacheEnabled,boolean sourceBrowsingEnabled,String sourceBrowsingPolicy,
+                                    Collection<String> sourceDenyGlobs,boolean redactionEnabled,
+                                    Collection<String> sensitivePaths,Collection<String> sensitiveFieldPatterns) {
         this.resources = new PackageResourceResolver(packageRoot);
         this.packageRoot = resources.packageRoot();
+        this.packageInputRoot = packageRoot.toAbsolutePath().normalize();
         this.configPath = configPath == null ? Paths.get("config/config.yaml") : configPath;
         this.environment = environment;
         this.safeTextSources = new HashSet<String>(
                 safeTextSources == null ? Collections.<String>emptySet() : safeTextSources);
+        this.externalTextSources = new HashSet<String>(externalTextSources == null ? Collections.<String>emptySet() : externalTextSources);
+        List<Path> roots=new ArrayList<Path>();
+        if(externalSourceRoots!=null)for(String root:externalSourceRoots)try {
+            Path path=Paths.get(root).toRealPath();
+            roots.add(path);
+        } catch(Exception ignored) { /* Invalid Worker-supplied roots fail closed at access time. */ }
+        this.externalSourceRoots=Collections.unmodifiableList(roots);
         this.maxSourceBytes = positive(maxSourceBytes, 65536, "maxSourceBytes");
         this.maxResponseBytes = positive(maxResponseBytes, 262144, "maxResponseBytes");
         this.cacheEnabled = cacheEnabled;
@@ -145,33 +167,41 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
 
-    /** Projects one package-local text source only when the Server allowlist permits its resolved path. */
+    /** Projects a config-tree file or a file referenced by a previously authorized source projection. */
     public Map<String,Object> inspectPackageFileSource(String locator, String originPath) throws Exception {
+        return inspectPackageFileSource(locator,originPath,null);
+    }
+
+    public Map<String,Object> inspectPackageFileSource(String locator, String originPath, String referenceId) throws Exception {
         if (locator == null || locator.length() > 1024) throw new IllegalArgumentException("Package file locator is invalid");
-        PackageResourceResolver.ResourceOrigin origin = resources.origin(packageRoot);
         try {
-            if (originPath != null && !originPath.codePoints().allMatch(Character::isWhitespace)) {
-                PackageResourceResolver.PackageResource sourceFile = resources.resolvePackageRelative(
-                        originPath, PackageResourceResolver.Kind.FILE);
-                origin = resources.origin(sourceFile.canonicalPath().getParent());
+            boolean linked=originPath!=null&&!originPath.codePoints().allMatch(Character::isWhitespace);
+            if(linked!=(referenceId!=null&&!referenceId.isBlank()))throw new ResourceNotFoundException();
+            PackageResourceResolver.ResourceOrigin origin=resources.origin(packageRoot);
+            PackageResourceResolver.PackageResource sourceFile=null;
+            if(linked) {
+                sourceFile=resources.resolvePackageRelative(originPath,PackageResourceResolver.Kind.FILE);
+                if(!packageSourceAllowed(sourceFile.logicalName(),sourceFile.canonicalPath()))throw new ResourceNotFoundException();
+                origin=resources.origin(sourceFile.canonicalPath().getParent());
             }
             PackageResourceResolver.PackageResource file = resources.resolve(
                     new PackageResourceResolver.ResourceLocator(locator), origin, PackageResourceResolver.Kind.FILE);
             String logicalPath = file.logicalName();
             Map<String,Object> result = new LinkedHashMap<>();
             result.put("available", Boolean.FALSE);
+            if (!linked&&!logicalPath.startsWith("config/")) {
+                result.put("reason","forbidden");
+                return bounded(result);
+            }
             if (!textExtension(logicalPath)) {
                 result.put("reason", "unsupported-file-type");
                 return bounded(result);
             }
-            if (!safeTextSources.contains(logicalPath)) {
-                result.put("reason", "visibility-policy");
+            if (!packageSourceAllowed(logicalPath,file.canonicalPath())) {
+                result.put("reason", sourceDisabledOrDenied(logicalPath));
                 return bounded(result);
             }
-            if (sourceGlobDenied(logicalPath)) {
-                result.put("reason", "deny-policy");
-                return bounded(result);
-            }
+            if(linked&&!directlyReferenced(sourceFile.canonicalPath(),file.canonicalPath()))throw new ResourceNotFoundException();
             if (Files.size(file.canonicalPath()) > maxSourceBytes) {
                 result.put("reason", "size-limit");
                 return bounded(result);
@@ -205,6 +235,21 @@ public final class PackageResourceInspector implements AutoCloseable {
         } catch (IllegalArgumentException error) {
             throw new ResourceNotFoundException();
         }
+    }
+
+    private boolean directlyReferenced(Path sourcePath,Path targetPath) {
+        try {
+            String source=decodeUtf8(readBounded(sourcePath,maxSourceBytes));
+            FileExpressionResolver resolver=new FileExpressionResolver(packageRoot);
+            for(String authored:resolver.extractReferences(source)) {
+                try {
+                    Path resolved=resolver.resolve(authored,sourcePath.getParent());
+                    if(resources.fromInternalPath(resolved,PackageResourceResolver.Kind.FILE).canonicalPath().equals(targetPath))return true;
+                }
+                catch(Exception ignored) { }
+            }
+            return false;
+        } catch(Exception invalid) { return false; }
     }
 
     private static String sourceFormat(String path) {
@@ -328,7 +373,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             try {
                 String logicalPath = resources.fromInternalPath(resource.yamlSource, PackageResourceResolver.Kind.FILE).logicalName();
                 Object authored = loadYaml(resource.yamlSource, maxSourceBytes);
-                Object safe = sourceYamlProjection(yamlMapping(authored),"");
+                Object safe = sourceYamlProjection(yamlMapping(authored),"",logicalPath);
                 String text = dumpYaml(safe);
                 if (utf8(text).length > maxSourceBytes) {
                     result.put("available", Boolean.FALSE);
@@ -360,20 +405,25 @@ public final class PackageResourceInspector implements AutoCloseable {
         }
         if (resource.textSource != null) {
             try {
-                String logicalPath = resources.fromInternalPath(resource.textSource, PackageResourceResolver.Kind.FILE).logicalName();
-                if (!sourceBrowsingEnabled||!safeTextSources.contains(logicalPath)||deniedSourcePath(logicalPath)) {
+                String logicalPath = resource.textSourceLogicalPath == null
+                        ? resources.fromInternalPath(resource.textSource, PackageResourceResolver.Kind.FILE).logicalName()
+                        : resource.textSourceLogicalPath;
+                String reason=textSourceReason(resource,resource.textSource);
+                if (reason != null) {
                     result.put("available", Boolean.FALSE);
-                    result.put("reason", !sourceBrowsingEnabled?"source-disabled":deniedSourcePath(logicalPath)?"sensitive-path":"visibility-policy");
+                    result.put("reason", reason);
                     return bounded(result);
                 }
                 String text = decodeUtf8(readBounded(resource.textSource, maxSourceBytes));
                 result.put("available", Boolean.TRUE);
-                result.put("format", "text");
+                result.put("format", sourceFormat(logicalPath));
                 result.put("logicalPath", logicalPath);
                 String projected = scrubSourceText(text, logicalPath);
                 result.put("text", projected);
                 result.put("redacted", Boolean.valueOf(!text.equals(projected)));
-                SourceFileReferences references = packageFileSourceReferences(resource.textSource, logicalPath, projected);
+                SourceFileReferences references = resource.textSourceExternal
+                        ? sourceFileReferences(Collections.<String,SourceFileReference>emptyMap())
+                        : packageFileSourceReferences(resource.textSource, logicalPath, projected);
                 result.put("fileReferences", references.items);
                 result.put("fileReferencesTruncated", Boolean.valueOf(references.truncated));
                 return bounded(result);
@@ -407,7 +457,8 @@ public final class PackageResourceInspector implements AutoCloseable {
                 || resource.yamlSource == null || !sourceAllowed(resource)) throw new ResourceNotFoundException();
         try {
             Object authored = loadYaml(resource.yamlSource, maxSourceBytes);
-            Object safe = sourceYamlProjection(yamlMapping(authored), "");
+            String parentLogicalPath=resources.fromInternalPath(resource.yamlSource,PackageResourceResolver.Kind.FILE).logicalName();
+            Object safe = sourceYamlProjection(yamlMapping(authored), "",parentLogicalPath);
             SourceFileReference selected = null;
             Map<String, SourceFileReference> references;
             if (sourceOriginPath == null || whitespaceOnly(sourceOriginPath)
@@ -494,7 +545,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                 Path canonical = resolver.resolve(authoredPath, sourcePath.getParent());
                 PackageResourceResolver.PackageResource target = resources.fromInternalPath(canonical, PackageResourceResolver.Kind.FILE);
                 String logical = target.logicalName();
-                if (!safeTextSources.contains(logical) || sourceGlobDenied(logical) || !referencedTextPathAllowed(logical)
+                if (!packageSourceAllowed(logical,target.canonicalPath()) || !referencedTextPathAllowed(logical) || sourceGlobDenied(logical)
                         || Files.size(target.canonicalPath()) > maxSourceBytes || !isUtf8Text(target.canonicalPath())) continue;
                 String id = sourceReferenceId(sourceLogicalPath, logical);
                 if (!resolved.containsKey(id)) resolved.put(id, new SourceFileReference(id, logical, target.canonicalPath()));
@@ -590,10 +641,7 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private boolean referencedTextPathAllowed(String logicalPath) {
-        String lower = logicalPath.toLowerCase(Locale.ROOT);
-        if (lower.matches(".*\\.(sh|bash|py|js|ts|groovy|rb|pl|ps1|bat|cmd)$"))
-            return safeTextSources.contains(logicalPath);
-        return lower.matches(".*\\.(xml|json|ya?ml|txt|sql|csv|properties|xsd|wsdl|html|graphql|gql)$");
+        return textExtension(logicalPath);
     }
 
     private Set<String> safeFileExpressionTokens(String text, String sourceLogicalPath) {
@@ -609,8 +657,8 @@ public final class PackageResourceInspector implements AutoCloseable {
                     String logical = target.logicalName();
                     boolean configurationSource = sourceLogicalPath.startsWith("config/");
                     boolean allowed = configurationSource
-                            ? safeTextSources.contains(logical) && !sourceGlobDenied(logical) && !sensitiveSourcePath(logical)
-                            : !deniedSourcePath(logical);
+                            ? packageSourceAllowed(logical,target.canonicalPath()) && !sourceGlobDenied(logical) && !sensitiveSourcePath(logical)
+                            : packageSourceAllowed(logical,target.canonicalPath()) && !deniedSourcePath(logical);
                     if (!allowed || !referencedTextPathAllowed(logical)
                             || Files.size(target.canonicalPath()) > maxSourceBytes || !isUtf8Text(target.canonicalPath())) continue;
                     preserved.add("&{" + authoredPath + "}");
@@ -1167,7 +1215,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                     resource.description = stringValue(yamlMap(descriptor).get("description"));
                     resource.state = "ready";
                     resource.yamlSource = descriptor;
-                    resource.definition = sourceYamlMap(yamlMap(descriptor));
+                    resource.definition = sourceYamlMap(yamlMap(descriptor),resources.fromInternalPath(descriptor,PackageResourceResolver.Kind.FILE).logicalName());
                     indexReferencedSources(index, resource);
                     index.templateAliases.put(alias("template", relative), resource);
                     index.templateAliases.put(alias("template", template.name()), resource);
@@ -1204,7 +1252,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                     resource.description = flow.description();
                     resource.state = "ready";
                     resource.yamlSource = descriptor;
-                    resource.definition = sourceYamlMap(yamlMap(descriptor));
+                    resource.definition = sourceYamlMap(yamlMap(descriptor),resources.fromInternalPath(descriptor,PackageResourceResolver.Kind.FILE).logicalName());
                     indexReferencedSources(index, resource);
                     index.flowAliases.put(alias("flow", id), resource);
                     index.flowAliases.put(alias("flow", flow.name()), resource);
@@ -1418,7 +1466,8 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
         try {
             Path sourcePath = resource.yamlSource != null ? resource.yamlSource : resource.textSource;
-            if (sourcePath != null && sourceAvailable(resource)) result.put("sourcePath", resources.fromInternalPath(sourcePath, PackageResourceResolver.Kind.FILE).logicalName());
+            if (sourcePath != null && sourceAvailable(resource)) result.put("sourcePath", resource.yamlSource == null && resource.textSourceLogicalPath != null
+                    ? resource.textSourceLogicalPath : resources.fromInternalPath(sourcePath, PackageResourceResolver.Kind.FILE).logicalName());
         } catch (Exception ignored) { }
         result.put("provenance", sanitize(resource.provenance, null));
         result.put("references", resource.references);
@@ -1463,16 +1512,128 @@ public final class PackageResourceInspector implements AutoCloseable {
             try {
                 Path candidate = Paths.get(token);
                 if (!candidate.isAbsolute()) candidate = packageRoot.resolve(candidate);
-                PackageResourceResolver.PackageResource resolved =
-                        resources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE);
-                if (textExtension(resolved.logicalName())) {
-                    resource.textSourceCandidate = resolved.canonicalPath();
-                    if (safeTextSources.contains(resolved.logicalName()) && !deniedSourcePath(resolved.logicalName())
-                            && Files.size(resolved.canonicalPath()) <= maxSourceBytes) return resolved.canonicalPath();
+                candidate=candidate.toAbsolutePath().normalize();
+                String filename=candidate.getFileName()==null?candidate.toString():candidate.getFileName().toString();
+                if(!textExtension(filename))continue;
+                boolean packageCandidate=candidate.startsWith(packageInputRoot)||candidate.startsWith(packageRoot);
+                if(!packageCandidate&&Files.exists(candidate,LinkOption.NOFOLLOW_LINKS))try {
+                    packageCandidate=candidate.toRealPath().startsWith(packageRoot);
+                } catch(Exception ignored) { }
+                if(packageCandidate) {
+                    String logical=packageRoot.relativize(candidate).toString().replace('\\','/');
+                    resource.textSourceCandidate=candidate;resource.textSourceCandidateLogicalPath=logical;
+                    resource.textSourceCandidateExternal=false;
+                    resource.textSourceCandidateReason=packageSourceReason(logical,candidate);
+                    if(!Files.exists(candidate,LinkOption.NOFOLLOW_LINKS))resource.textSourceCandidateReason="missing";
+                    else try {
+                        PackageResourceResolver.PackageResource resolved=resources.fromInternalPath(candidate,PackageResourceResolver.Kind.FILE);
+                        String canonicalLogical=resolved.logicalName();
+                        resource.textSourceCandidate=resolved.canonicalPath();resource.textSourceCandidateLogicalPath=canonicalLogical;
+                        resource.textSourceCandidateReason=packageSourceReason(canonicalLogical,resolved.canonicalPath());
+                        if(resource.textSourceCandidateReason==null&&Files.isRegularFile(resolved.canonicalPath(),LinkOption.NOFOLLOW_LINKS)) {
+                            if(Files.size(resolved.canonicalPath())>maxSourceBytes)resource.textSourceCandidateReason="size-limit";
+                            else if(!isUtf8Text(resolved.canonicalPath()))resource.textSourceCandidateReason="binary-file";
+                            else {resource.textSourceLogicalPath=canonicalLogical;resource.textSourceExternal=false;return resolved.canonicalPath();}
+                        }
+                    } catch(Exception denied) { resource.textSourceCandidateReason="out-of-root"; }
+                } else {
+                    ExternalSourceCheck check=externalSourceCheck(candidate);
+                    resource.textSourceCandidate=check.canonicalPath==null?candidate:check.canonicalPath;
+                    resource.textSourceCandidateLogicalPath=externalAlias(resource.textSourceCandidate);
+                    resource.textSourceCandidateExternal=true;resource.textSourceCandidateReason=check.reason;
+                    if(check.allowed) {
+                        resource.textSourceLogicalPath=externalAlias(check.canonicalPath);resource.textSourceExternal=true;
+                        return check.canonicalPath;
+                    }
                 }
             } catch (Exception ignored) { }
         }
         return null;
+    }
+
+    private ExternalSourceCheck externalSourceCheck(Path authoredPath) {
+        Path normalized=authoredPath.toAbsolutePath().normalize();
+        boolean exists=Files.exists(normalized,LinkOption.NOFOLLOW_LINKS);
+        Path canonical;
+        try { canonical=exists?normalized.toRealPath():canonicalMissingCandidate(normalized); }
+        catch(Exception invalid) { return new ExternalSourceCheck(null,false,"forbidden"); }
+        boolean inside=false;
+        for(Path root:externalSourceRoots) if(canonical.startsWith(root)) {inside=true;break;}
+        if(!inside)return new ExternalSourceCheck(canonical,false,"out-of-root");
+        if(!externalTextSources.contains(canonical.toString()))return new ExternalSourceCheck(canonical,false,"not-allowlisted");
+        if(!exists)return new ExternalSourceCheck(canonical,false,"missing");
+        if(!Files.isRegularFile(canonical,LinkOption.NOFOLLOW_LINKS)||!Files.isReadable(canonical))
+            return new ExternalSourceCheck(canonical,false,"forbidden");
+        if(sensitiveSourcePath(canonical.toString()))return new ExternalSourceCheck(canonical,false,"sensitive-path");
+        if(sourceGlobDenied(externalAlias(canonical)))return new ExternalSourceCheck(canonical,false,"forbidden");
+        try {
+            if(Files.size(canonical)>maxSourceBytes)return new ExternalSourceCheck(canonical,false,"size-limit");
+            if(!isUtf8Text(canonical))return new ExternalSourceCheck(canonical,false,"binary-file");
+        } catch(Exception ignored) { return new ExternalSourceCheck(canonical,false,"missing"); }
+        return new ExternalSourceCheck(canonical,true,null);
+    }
+
+    private static Path canonicalMissingCandidate(Path normalized) throws Exception {
+        Path ancestor=normalized;
+        while(ancestor!=null&&!Files.exists(ancestor,LinkOption.NOFOLLOW_LINKS))ancestor=ancestor.getParent();
+        if(ancestor==null)throw new IllegalArgumentException("External source has no existing ancestor");
+        Path canonicalAncestor=ancestor.toRealPath();
+        return canonicalAncestor.resolve(ancestor.relativize(normalized)).normalize();
+    }
+
+    private static boolean canonicalPathStartsWith(Path path,Path root) {
+        try { return path.toRealPath().startsWith(root.toRealPath()); }
+        catch(Exception ignored) { return false; }
+    }
+
+    private String externalAlias(Path path) {
+        String filename=path.getFileName()==null?"":path.getFileName().toString();
+        int dot=filename.lastIndexOf('.');String extension=dot<0?"":filename.substring(dot).toLowerCase(Locale.ROOT);
+        try { return "external/"+hex(MessageDigest.getInstance("SHA-256").digest(utf8(path.toAbsolutePath().normalize().toString())))+extension; }
+        catch(Exception unavailable) { return "external/source"+extension; }
+    }
+
+    private String packageSourceReason(String logical,Path path) {
+        if(!sourceBrowsingEnabled)return "source-disabled";
+        if(sensitiveSourcePath(logical))return "sensitive-path";
+        if(sourceGlobDenied(logical))return "forbidden";
+        if(!textExtension(logical))return "unsupported-file-type";
+        if("allowlist-only".equals(sourceBrowsingPolicy)&&!safeTextSources.contains(logical))return "not-allowlisted";
+        if(!"safe-package-files".equals(sourceBrowsingPolicy)&&!"allowlist-only".equals(sourceBrowsingPolicy))return "forbidden";
+        return null;
+    }
+
+    private boolean packageSourceAllowed(String logical,Path path) { return packageSourceReason(logical,path)==null; }
+
+    private String sourceDisabledOrDenied(String logical) {
+        if(!sourceBrowsingEnabled)return "source-disabled";
+        if(sensitiveSourcePath(logical))return "sensitive-path";
+        if(sourceGlobDenied(logical))return "forbidden";
+        if("allowlist-only".equals(sourceBrowsingPolicy)&&!safeTextSources.contains(logical))return "not-allowlisted";
+        return "forbidden";
+    }
+
+    private String textSourceReason(Resource resource,Path path) {
+        if(!sourceBrowsingEnabled)return "source-disabled";
+        if(resource.textSourceExternal) {
+            ExternalSourceCheck check=externalSourceCheck(path);
+            return check.allowed?null:check.reason;
+        }
+        try {
+            String logical=resource.textSourceLogicalPath==null?resources.fromInternalPath(path,PackageResourceResolver.Kind.FILE).logicalName():resource.textSourceLogicalPath;
+            String reason=packageSourceReason(logical,path);
+            if(reason!=null)return reason;
+            if(!Files.exists(path,LinkOption.NOFOLLOW_LINKS))return "missing";
+            if(!Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS))return "forbidden";
+            if(Files.size(path)>maxSourceBytes)return "size-limit";
+            if(!isUtf8Text(path))return "binary-file";
+            return null;
+        } catch(Exception denied) { return "out-of-root"; }
+    }
+
+    private static final class ExternalSourceCheck {
+        final Path canonicalPath;final boolean allowed;final String reason;
+        ExternalSourceCheck(Path canonicalPath,boolean allowed,String reason){this.canonicalPath=canonicalPath;this.allowed=allowed;this.reason=reason;}
     }
 
     private static boolean textExtension(String path) {
@@ -1482,7 +1643,9 @@ public final class PackageResourceInspector implements AutoCloseable {
                 || value.endsWith(".yaml") || value.endsWith(".yml") || value.endsWith(".json") || value.endsWith(".xml")
                 || value.endsWith(".groovy") || value.endsWith(".rb") || value.endsWith(".pl")
                 || value.endsWith(".ps1") || value.endsWith(".bat") || value.endsWith(".cmd")
-                || value.endsWith(".txt");
+                || value.endsWith(".txt") || value.endsWith(".csv") || value.endsWith(".properties")
+                || value.endsWith(".xsd") || value.endsWith(".wsdl") || value.endsWith(".html")
+                || value.endsWith(".graphql") || value.endsWith(".gql");
     }
 
     private Map<String, Object> referenceOf(Resource resource) {
@@ -1564,8 +1727,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             String lower = logical.toLowerCase(Locale.ROOT);
             if (!(lower.endsWith("/template.yaml") || lower.endsWith("/flow.yaml"))) return false;
             if (deniedSourcePath(logical)) return false;
-            if ("allowlist-only".equals(sourceBrowsingPolicy) && !safeTextSources.contains(logical)) return false;
-            if (!"safe-package-files".equals(sourceBrowsingPolicy) && !"allowlist-only".equals(sourceBrowsingPolicy)) return false;
+            if (!packageSourceAllowed(logical,resolved.canonicalPath())) return false;
             long size = Files.size(resolved.canonicalPath());
             return size <= maxSourceBytes && size > 0 && Files.isRegularFile(resolved.canonicalPath(), LinkOption.NOFOLLOW_LINKS)
                     && isUtf8Text(resolved.canonicalPath());
@@ -1577,17 +1739,12 @@ public final class PackageResourceInspector implements AutoCloseable {
     private boolean sourceAvailable(Resource resource) {
         if (resource == null) return false;
         if (resource.yamlSource != null) return sourceAllowed(resource);
-        if (resource.textSource == null || !sourceBrowsingEnabled) return false;
-        try {
-            String logical = resources.fromInternalPath(resource.textSource, PackageResourceResolver.Kind.FILE).logicalName();
-            return safeTextSources.contains(logical) && !deniedSourcePath(logical)
-                    && textExtension(logical) && Files.size(resource.textSource) <= maxSourceBytes
-                    && isUtf8Text(resource.textSource);
-        } catch (Exception ignored) { return false; }
+        return resource.textSource != null && textSourceReason(resource,resource.textSource)==null;
     }
 
     private String sourceUnavailableReason(Resource resource) {
         if (!sourceBrowsingEnabled) return "source-disabled";
+        if (resource != null && resource.textSource != null) return textSourceReason(resource,resource.textSource);
         if (resource != null && resource.textSourceCandidate != null) return textSourceUnavailableReason(resource);
         if (resource == null || resource.yamlSource == null)
             return resource != null && ("case".equals(resource.type) || "tool".equals(resource.type))
@@ -1595,13 +1752,12 @@ public final class PackageResourceInspector implements AutoCloseable {
         try {
             if (!Files.exists(resource.yamlSource, LinkOption.NOFOLLOW_LINKS)) return "missing";
             String logical = resources.fromInternalPath(resource.yamlSource, PackageResourceResolver.Kind.FILE).logicalName();
-            if (deniedSourcePath(logical)) return "sensitive-path";
+            if (sensitiveSourcePath(logical)) return "sensitive-path";
             if (!("template".equals(resource.type) || "flow".equals(resource.type))) return "visibility-policy";
-            if ("allowlist-only".equals(sourceBrowsingPolicy) && !safeTextSources.contains(logical)) return "visibility-policy";
-            if (!"safe-package-files".equals(sourceBrowsingPolicy) && !"allowlist-only".equals(sourceBrowsingPolicy)) return "visibility-policy";
+            if (!packageSourceAllowed(logical,resource.yamlSource)) return sourceDisabledOrDenied(logical);
             if (Files.size(resource.yamlSource) > maxSourceBytes) return "size-limit";
-            if (!Files.isRegularFile(resource.yamlSource, LinkOption.NOFOLLOW_LINKS)) return "source-unavailable";
-            if (!isUtf8Text(resource.yamlSource)) return "binary";
+            if (!Files.isRegularFile(resource.yamlSource, LinkOption.NOFOLLOW_LINKS)) return "forbidden";
+            if (!isUtf8Text(resource.yamlSource)) return "binary-file";
             if (!sourceAllowed(resource)) return "source-unavailable";
         } catch (Exception ignored) { return "path-denied"; }
         return "source-unavailable";
@@ -1609,30 +1765,29 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private String textSourceUnavailableReason(Resource resource) {
         if (!sourceBrowsingEnabled) return "source-disabled";
+        if(resource.textSourceCandidateExternal)return externalSourceCheck(resource.textSourceCandidate).reason;
+        if(resource.textSourceCandidateReason!=null)return resource.textSourceCandidateReason;
         try {
             if (!Files.exists(resource.textSourceCandidate, LinkOption.NOFOLLOW_LINKS)) return "missing";
-            String logical = resources.fromInternalPath(resource.textSourceCandidate, PackageResourceResolver.Kind.FILE).logicalName();
-            if (deniedSourcePath(logical)) return "sensitive-path";
-            if (!safeTextSources.contains(logical) || !textExtension(logical)) return "visibility-policy";
+            String logical = resource.textSourceCandidateLogicalPath==null
+                    ? resources.fromInternalPath(resource.textSourceCandidate, PackageResourceResolver.Kind.FILE).logicalName()
+                    : resource.textSourceCandidateLogicalPath;
+            String policy=packageSourceReason(logical,resource.textSourceCandidate);if(policy!=null)return policy;
             if (Files.size(resource.textSourceCandidate) > maxSourceBytes) return "size-limit";
-            if (!Files.isRegularFile(resource.textSourceCandidate, LinkOption.NOFOLLOW_LINKS)) return "source-unavailable";
-            if (!isUtf8Text(resource.textSourceCandidate)) return "binary";
-            return "source-unavailable";
-        } catch (Exception ignored) { return "path-denied"; }
+            if (!Files.isRegularFile(resource.textSourceCandidate, LinkOption.NOFOLLOW_LINKS)) return "forbidden";
+            if (!isUtf8Text(resource.textSourceCandidate)) return "binary-file";
+            return "forbidden";
+        } catch (Exception ignored) { return "out-of-root"; }
     }
 
     private boolean deniedSourcePath(String logical) {
-        String lower = logical.toLowerCase(Locale.ROOT);
-        boolean allowlistedToolScript = lower.startsWith("config/tools/") && textExtension(lower);
-        if (lower.startsWith("config/") && !allowlistedToolScript || lower.startsWith("testcase/") || lower.startsWith("testdata/")
-                || lower.startsWith("debug-data/") || sensitiveSourcePath(lower)) return true;
-        return sourceGlobDenied(lower);
+        return sensitiveSourcePath(logical)||sourceGlobDenied(logical);
     }
 
     private boolean sensitiveSourcePath(String logical) {
         String lower = logical.toLowerCase(Locale.ROOT);
         String base = lower.substring(lower.lastIndexOf('/') + 1);
-        return base.equals("debug.yaml") || base.startsWith(".env") || base.contains("secret")
+        return base.startsWith(".env") || base.contains("secret")
                 || base.contains("credential") || base.contains("password") || base.contains("token")
                 || base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12")
                 || base.endsWith(".pfx") || base.endsWith(".jks") || base.endsWith(".keystore");
@@ -1666,6 +1821,10 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private Object sourceYamlProjection(Object value, String path) {
+        return sourceYamlProjection(value,path,null);
+    }
+
+    private Object sourceYamlProjection(Object value, String path, String sourceLogicalPath) {
         if (value instanceof Map) {
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
@@ -1673,22 +1832,27 @@ public final class PackageResourceInspector implements AutoCloseable {
                 String childPath = path.isEmpty() ? key : path + "." + key;
                 if (sensitiveKey(key) || configuredSensitivePath(childPath) || configuredSensitiveField(key)
                         || redactionEnabled && (freeFormKey(key) || isSensitivePath(childPath))) result.put(key, "[REDACTED]");
-                else result.put(key, sourceYamlProjection(entry.getValue(), childPath));
+                else result.put(key, sourceYamlProjection(entry.getValue(), childPath,sourceLogicalPath));
             }
             return result;
         }
         if (value instanceof Iterable) {
             List<Object> result = new ArrayList<Object>(); int i = 0;
-            for (Object item : (Iterable<?>) value) result.add(sourceYamlProjection(item, path + "[" + i++ + "]"));
+            for (Object item : (Iterable<?>) value) result.add(sourceYamlProjection(item, path + "[" + i++ + "]",sourceLogicalPath));
             return result;
         }
-        if (value instanceof String) return scrub((String) value);
+        if (value instanceof String) return sourceLogicalPath==null?scrub((String)value):scrubSourceText((String)value,sourceLogicalPath);
         return value;
     }
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> sourceYamlMap(Map<?, ?> source) {
         return (Map<String, Object>) sourceYamlProjection(source, "");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String,Object> sourceYamlMap(Map<?,?> source,String sourceLogicalPath) {
+        return (Map<String,Object>)sourceYamlProjection(source,"",sourceLogicalPath);
     }
 
     private boolean configuredSensitivePath(String path) {
@@ -2196,6 +2360,11 @@ public final class PackageResourceInspector implements AutoCloseable {
         Path yamlSource;
         Path textSource;
         Path textSourceCandidate;
+        String textSourceLogicalPath;
+        String textSourceCandidateLogicalPath;
+        String textSourceCandidateReason;
+        boolean textSourceExternal;
+        boolean textSourceCandidateExternal;
         Map<String, Object> definition = new LinkedHashMap<String, Object>();
         final Map<String, Object> provenance = new LinkedHashMap<String, Object>();
         final List<String> tags = new ArrayList<String>();

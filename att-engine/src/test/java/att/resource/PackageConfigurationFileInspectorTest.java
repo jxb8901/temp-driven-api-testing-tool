@@ -67,6 +67,24 @@ class PackageConfigurationFileInspectorTest {
         assertFalse(byPath.get("config/private.bin").containsKey("text"));
     }
 
+    @Test void safePackagePolicyAllowsEligibleConfigTextWithoutChangingLegacyAllowlistPolicy() throws Exception {
+        Path root = packageRoot();
+        write(root.resolve("config/nested/ordinary.yaml"), "name: ordinary\n");
+        write(root.resolve("config/.env.local"), "token=never-expose\n");
+        PackageConfigurationFileInspector inspector = new PackageConfigurationFileInspector(root,
+                Collections.emptySet(), 65536, 262144, true, "safe-package-files", Collections.emptyList());
+        @SuppressWarnings("unchecked") List<Map<String, Object>> items =
+                (List<Map<String, Object>>) inspector.list("config/nested", null, 0, 20).get("items");
+        Map<String, Object> ordinary = items.stream().filter(item -> "config/nested/ordinary.yaml".equals(item.get("path"))).findFirst().get();
+        assertEquals(Boolean.TRUE, ordinary.get("sourceAvailable"));
+
+        @SuppressWarnings("unchecked") List<Map<String, Object>> rootItems =
+                (List<Map<String, Object>>) inspector.list("config", null, 0, 20).get("items");
+        Map<String, Object> sensitive = rootItems.stream().filter(item -> "config/.env.local".equals(item.get("path"))).findFirst().get();
+        assertEquals(Boolean.FALSE, sensitive.get("sourceAvailable"));
+        assertEquals("sensitive-path", sensitive.get("reason"));
+    }
+
     @Test void rejectsTraversalAndAmbiguousDirectorySegments() throws Exception {
         PackageConfigurationFileInspector inspector = inspector(packageRoot(), Collections.emptySet());
         for (String path : java.util.Arrays.asList("../outside", "config/../outside", "config/./nested",

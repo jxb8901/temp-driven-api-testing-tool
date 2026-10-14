@@ -14,10 +14,11 @@ interface ConfigurationWorkspaceProps {
   filePath?: string;
   fileOrigin?: string;
   sourceReference?: ResourceSourceReference;
+  configurationReferenceId?: string;
   tab: WorkspaceTab;
   onPackageChange(packageId: string): void;
   onEnvironmentChange(environment: string): void;
-  onFileChange(filePath?: string, origin?: string, reference?: ResourceSourceReference): void;
+  onFileChange(filePath?: string, origin?: string, reference?: ResourceSourceReference, configurationReferenceId?: string): void;
   onTabChange(tab: WorkspaceTab): void;
   onOpenResource(resource: { type: string; resourceId: string }): void;
 }
@@ -46,7 +47,7 @@ function safeCell(value: unknown): string {
   try { return JSON.stringify(value, null, 2); } catch { return '[unavailable]'; }
 }
 
-export function ConfigurationWorkspace({ api, packages, packageId, environment, filePath, fileOrigin, sourceReference, tab, onPackageChange, onEnvironmentChange, onFileChange, onTabChange, onOpenResource }: ConfigurationWorkspaceProps) {
+export function ConfigurationWorkspace({ api, packages, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onPackageChange, onEnvironmentChange, onFileChange, onTabChange, onOpenResource }: ConfigurationWorkspaceProps) {
   const [declared, setDeclared] = useState<Awaited<ReturnType<ExplorerApi['getDeclaredConfiguration']>> | null>(null);
   const [directoryMap, setDirectoryMap] = useState<Record<string, DirectoryState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['']));
@@ -113,14 +114,14 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
     const controller = new AbortController(); setSourceLoading(true); setSource(null); setSourceError('');
     const sourceRequest = sourceReference
       ? api.getResourceSourceFile?.({ packageId, type: sourceReference.type, resourceId: sourceReference.resourceId }, sourceReference.referenceId, controller.signal, fileOrigin)
-      : api.getConfigurationFileSource?.(packageId, filePath, fileOrigin, controller.signal);
+      : api.getConfigurationFileSource?.(packageId, filePath, fileOrigin, controller.signal, configurationReferenceId);
     if (!sourceRequest) { setSource({ text: '', format: '', available: false, reason: 'unsupported' }); setSourceLoading(false); return () => controller.abort(); }
     sourceRequest.then(result => setSource({
       text: result.text || '', format: result.format || filePath.split('.').pop() || 'text', logicalPath: result.logicalPath, available: result.available, reason: result.reason, fileReferences: result.fileReferences,
     })).catch(error => { if (!controller.signal.aborted) setSourceError(errorText(error, 'load safe source')); })
       .finally(() => { if (!controller.signal.aborted) setSourceLoading(false); });
     return () => controller.abort();
-  }, [api, packageId, filePath, fileOrigin, sourceReference?.type, sourceReference?.resourceId, sourceReference?.referenceId, tab]);
+  }, [api, packageId, filePath, fileOrigin, sourceReference?.type, sourceReference?.resourceId, sourceReference?.referenceId, configurationReferenceId, tab]);
 
   useEffect(() => {
     if (!filePath || !filePath.startsWith('config/') || !packageId) return;
@@ -268,13 +269,13 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
           {sourceLoading && <p role="status">Loading safe configuration source…</p>}
           {sourceError && <p className="att-error" role="alert">{sourceError}<button type="button" onClick={() => filePath && void loadDirectory(filePath.split('/').slice(0, -1).join('/'))}>Refresh file list</button></p>}
           {source && !source.available && <div className="att-config-unavailable"><h3>Source is not available</h3><p>The Server withheld or could not read this file. Its path and safe metadata remain visible.</p></div>}
-          {source?.available && source.text.includes('&{') && !source.fileReferences?.some(item => item.referenceId && item.available !== false) && <p className="att-config-tree-message" role="status">{sourceReference ? 'This projection includes no Server-verified file-reference token, so file references cannot be opened.' : 'References in config/ source remain visible but cannot be opened because this endpoint did not return Server-verified reference tokens.'}</p>}
+          {source?.available && source.text.includes('&{') && !source.fileReferences?.some(item => item.referenceId && item.available !== false) && <p className="att-config-tree-message" role="status">The Server did not authorize any referenced files for navigation from this source.</p>}
           {source?.available && <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || filePath || source.format || '')} label={`Safe source ${filePath || ''}`} readOnly sourcePath={source.logicalPath || filePath} fileReferences={source.fileReferences || []} onFileReference={(_locator, origin, referenceId) => {
             const reference = source.fileReferences?.find(item => item.referenceId === referenceId && item.available !== false);
             if (!reference) return;
             const nextOrigin = source.logicalPath || origin;
             if (sourceReference) onFileChange(reference.logicalPath, nextOrigin, { ...sourceReference, referenceId: reference.referenceId });
-            else onFileChange(reference.logicalPath, nextOrigin);
+            else onFileChange(reference.logicalPath, nextOrigin, undefined, reference.referenceId);
           }} maxCharacters={200_000} />}
           {!filePath && !sourceLoading && <div className="att-config-empty"><h3>Select a file</h3><p>Choose a configuration file to inspect its safe source.</p></div>}
         </section>}

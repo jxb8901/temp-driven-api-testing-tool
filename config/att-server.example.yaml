@@ -28,11 +28,19 @@ server:
       enabled: true
       policy: safe-package-files
       denyGlobs: []
+      # Optional external script roots; use canonical absolute directories.
+      # externalSourceRoots:
+      #   - /srv/att/external-scripts
+      # Exact canonical files are enabled per package; wildcards are not accepted.
+      # externalTextSources:
+      #   payments:
+      #     - /srv/att/external-scripts/mq/check-queue.sh
     redaction:
       enabled: false
       sensitivePaths: []
       sensitiveFieldPatterns: []
-    # Optional Tool script source allowlist. Paths are package-relative.
+    # Legacy exact package-relative allowlist, used with policy: allowlist-only.
+    # These paths are never treated as external filesystem paths.
     # safeTextSources:
     #   default:
     #     - tools/payment-check.sh

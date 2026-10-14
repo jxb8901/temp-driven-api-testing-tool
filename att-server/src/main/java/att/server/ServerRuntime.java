@@ -525,8 +525,7 @@ final class ServerRuntime implements AutoCloseable {
             internal.set("target",JSON.valueToTree(Map.of("type",draft.targetType,"id",draft.targetId)));
             internal.set("inlineDebugInput",JSON.valueToTree(draft.input));
             internal.put("expectedRevisionDigest",draft.revisionDigest);internal.put("draftResourceId",draft.resourceId);
-            internal.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(draft.packageId)));
-            internal.put("maxSourceBytes",config.inspection.maxSourceBytes);internal.put("maxResponseBytes",config.inspection.maxResponseBytes);
+            applyInspectionPolicy(internal,draft.packageId);
             requireLiveDraft(draft);
             Map<String,Object> accepted=submit("debug",internal,persistedPrincipal,true);
             debugDrafts.remove(draft.id,draft);submitted=true;return accepted;
@@ -561,8 +560,7 @@ final class ServerRuntime implements AutoCloseable {
             internal.set("target",JSON.valueToTree(Map.of("type",draft.targetType,"id",draft.targetId)));
             internal.put("loadModel",draft.model);internal.set("inlineLoadScenario",JSON.valueToTree(draft.scenario));
             internal.put("expectedRevisionDigest",draft.revisionDigest);internal.put("draftResourceId",draft.resourceId);
-            internal.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(draft.packageId)));
-            internal.put("maxSourceBytes",config.inspection.maxSourceBytes);internal.put("maxResponseBytes",config.inspection.maxResponseBytes);
+            applyInspectionPolicy(internal,draft.packageId);
             requireLiveDraft(draft.expiresAt);
             Map<String,Object> accepted=submit("load",internal,persistedPrincipal,true);
             quickLoadDrafts.remove(draft.id,draft);submitted=true;return accepted;
@@ -596,8 +594,7 @@ final class ServerRuntime implements AutoCloseable {
             internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
             internal.put("loadModel",draft.model);internal.set("inlineLoadScenario",JSON.valueToTree(draft.scenario));
             internal.put("expectedRevisionDigest",draft.revisionDigest);
-            internal.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(draft.packageId)));
-            internal.put("maxSourceBytes",config.inspection.maxSourceBytes);internal.put("maxResponseBytes",config.inspection.maxResponseBytes);
+            applyInspectionPolicy(internal,draft.packageId);
             requireLiveDraft(draft.expiresAt);
             Map<String,Object> accepted=submit("load",internal,persistedPrincipal,true);
             advancedLoadDrafts.remove(draft.id,draft);submitted=true;return accepted;
@@ -639,10 +636,21 @@ final class ServerRuntime implements AutoCloseable {
         request.packageRoot=root.toString();request.config="config/config.yaml";request.environment=environment;
         request.maxResponseBytes=config.inspection.maxResponseBytes;request.maxSourceBytes=config.inspection.maxSourceBytes;
         request.safeTextSources=config.inspection.safeTextSources(packageId);
+        request.externalTextSources=config.inspection.externalTextSources(packageId);
+        request.externalSourceRoots=config.inspection.externalSourceRoots;
         request.sourceBrowsingEnabled=config.inspection.sourceBrowsingEnabled;request.sourceBrowsingPolicy=config.inspection.sourcePolicy;
         request.sourceDenyGlobs=config.inspection.sourceDenyGlobs;request.redactionEnabled=config.inspection.redactionEnabled;
         request.sensitivePaths=config.inspection.sensitivePaths;request.sensitiveFieldPatterns=config.inspection.sensitiveFieldPatterns;
         return request;
+    }
+    private void applyInspectionPolicy(com.fasterxml.jackson.databind.node.ObjectNode request,String packageId) {
+        request.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(packageId)));
+        request.set("externalTextSources",JSON.valueToTree(config.inspection.externalTextSources(packageId)));
+        request.set("externalSourceRoots",JSON.valueToTree(config.inspection.externalSourceRoots));
+        request.put("maxSourceBytes",config.inspection.maxSourceBytes);request.put("maxResponseBytes",config.inspection.maxResponseBytes);
+        request.put("sourceBrowsingEnabled",config.inspection.sourceBrowsingEnabled);request.put("sourceBrowsingPolicy",config.inspection.sourcePolicy);
+        request.set("sourceDenyGlobs",JSON.valueToTree(config.inspection.sourceDenyGlobs));request.put("redactionEnabled",config.inspection.redactionEnabled);
+        request.set("sensitivePaths",JSON.valueToTree(config.inspection.sensitivePaths));request.set("sensitiveFieldPatterns",JSON.valueToTree(config.inspection.sensitiveFieldPatterns));
     }
     private Map<String,Object> debugDraftView(DebugDraft draft) {
         Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
@@ -818,6 +826,12 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
                                             String section,int offset,int limit,String inspectionPath,String inspectionOrigin,
                                             String inspectionQuery,boolean includeInherited,String principal) throws Exception {
+        return inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,inspectionPath,
+                inspectionOrigin,inspectionQuery,includeInherited,null,principal);
+    }
+    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
+                                            String section,int offset,int limit,String inspectionPath,String inspectionOrigin,
+                                            String inspectionQuery,boolean includeInherited,String inspectionReferenceId,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
@@ -835,6 +849,16 @@ final class ServerRuntime implements AutoCloseable {
             throw new IllegalArgumentException("Configuration path is invalid");
         if("source".equals(action)&&(inspectionPath==null||inspectionPath.isBlank()))
             throw new IllegalArgumentException("A package-relative source path is required");
+        if("source".equals(action)) {
+            if(inspectionReferenceId==null||inspectionReferenceId.isBlank()) {
+                if((inspectionOrigin!=null&&!inspectionOrigin.isBlank())||!inspectionPath.startsWith("config/"))throw new NotFoundException();
+            } else {
+                JsonNode claim=decodeConfigurationSourceReference(inspectionReferenceId);
+                if(!packageId.equals(claim.path("packageId").asText())
+                        ||!java.util.Objects.equals(inspectionOrigin,claim.path("origin").asText())
+                        ||!java.util.Objects.equals(inspectionPath,claim.path("target").asText()))throw new NotFoundException();
+            }
+        }
         String selected=null,other=null;
         if(("effective".equals(action)||"testdata-records".equals(action))&&environment!=null&&!environment.isBlank())selected=inspectionEnvironment(environment,"environment");
         if("compare".equals(action)){
@@ -842,14 +866,16 @@ final class ServerRuntime implements AutoCloseable {
             other=inspectionEnvironment(otherEnvironment,"right environment");
             if(selected.equalsIgnoreCase(other))throw new IllegalArgumentException("left and right environments must differ");
         }
-        WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";request.packageRoot=root.toString();request.config="config/config.yaml";
+        WorkerRequest request=inspectionRequest(packageId,root,selected);
         request.inspectionAction=action;request.inspectionType="configuration";request.inspectionEnvironment=selected;request.inspectionOtherEnvironment=other;
         request.inspectionSection=section;request.inspectionIncludeInherited=Boolean.valueOf(includeInherited);
         request.inspectionOffset=offset;request.inspectionLimit=limit;
         request.redactionEnabled=config.inspection.redactionEnabled;request.sensitivePaths=config.inspection.sensitivePaths;request.sensitiveFieldPatterns=config.inspection.sensitiveFieldPatterns;
         request.inspectionPath=inspectionPath;request.inspectionOrigin=inspectionOrigin;request.inspectionQuery=inspectionQuery;
-        request.safeTextSources=config.inspection.safeTextSources(packageId);request.maxSourceBytes=config.inspection.maxSourceBytes;request.maxResponseBytes=config.inspection.maxResponseBytes;
-        return executeInspection(root,request);
+        request.inspectionReferenceId=inspectionReferenceId;
+        Map<String,Object> inspected=executeInspection(root,request);
+        if("source".equals(action))signConfigurationSourceReferences(packageId,inspected);
+        return inspected;
     }
     private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {
         Future<Map<String,Object>> future;
@@ -1037,6 +1063,38 @@ final class ServerRuntime implements AutoCloseable {
         System.arraycopy(nonce,0,token,0,nonce.length);System.arraycopy(ciphertext,0,token,nonce.length,ciphertext.length);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(token);
     }
+    private void signConfigurationSourceReferences(String packageId,Map<String,Object> source) throws Exception {
+        Object rawOrigin=source.get("logicalPath"),rawReferences=source.get("fileReferences");
+        if(!(rawOrigin instanceof String)||!(rawReferences instanceof List))return;
+        String origin=(String)rawOrigin;
+        for(Object raw:(List<?>)rawReferences)if(raw instanceof Map) {
+            @SuppressWarnings("unchecked") Map<String,Object> reference=(Map<String,Object>)raw;
+            Object target=reference.get("logicalPath");
+            if(target instanceof String)reference.put("referenceId",encodeConfigurationSourceReference(packageId,origin,(String)target));
+        }
+    }
+    private String encodeConfigurationSourceReference(String packageId,String origin,String target) throws Exception {
+        Map<String,Object> payload=new LinkedHashMap<>();payload.put("kind","configuration-source-reference");
+        payload.put("packageId",packageId);payload.put("origin",origin);payload.put("target",target);
+        byte[] nonce=new byte[12];cursorRandom.nextBytes(nonce);
+        Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
+        byte[] encrypted=cipher.doFinal(JSON.writeValueAsBytes(payload));byte[] token=new byte[nonce.length+encrypted.length];
+        System.arraycopy(nonce,0,token,0,nonce.length);System.arraycopy(encrypted,0,token,nonce.length,encrypted.length);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(token);
+    }
+    private JsonNode decodeConfigurationSourceReference(String token) {
+        try {
+            if(token==null||token.length()>4096)throw new IllegalArgumentException();
+            byte[] bytes=Base64.getUrlDecoder().decode(token);if(bytes.length<28)throw new IllegalArgumentException();
+            byte[] nonce=java.util.Arrays.copyOfRange(bytes,0,12),encrypted=java.util.Arrays.copyOfRange(bytes,12,bytes.length);
+            Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
+            JsonNode claim=JSON.readTree(cipher.doFinal(encrypted));
+            if(!"configuration-source-reference".equals(claim.path("kind").asText())
+                    ||claim.path("packageId").asText().isBlank()||claim.path("origin").asText().isBlank()
+                    ||claim.path("target").asText().isBlank())throw new IllegalArgumentException();
+            return claim;
+        } catch(Exception invalid) { throw new NotFoundException(); }
+    }
     private Cursor decodeCursor(String token,String packageId,String type,String query,String sort,String direction,String principal) throws Exception {
         if(token.length()>4096)throw new IllegalArgumentException("cursor is too long");byte[] bytes;
         try{bytes=Base64.getUrlDecoder().decode(token);}catch(IllegalArgumentException bad){throw new IllegalArgumentException("cursor is invalid");}
@@ -1103,11 +1161,7 @@ final class ServerRuntime implements AutoCloseable {
         com.fasterxml.jackson.databind.node.ObjectNode input=JSON.createObjectNode();input.put("packageId",schedule.packageId);
         if(schedule.config!=null)input.put("config",schedule.config);if(schedule.environment!=null)input.put("environment",schedule.environment);
         input.set("inlineLoadScenario",JSON.valueToTree(scenario));input.put("expectedRevisionDigest",validated.revisionDigest);
-        input.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(schedule.packageId)));
-        input.put("maxSourceBytes",config.inspection.maxSourceBytes);input.put("maxResponseBytes",config.inspection.maxResponseBytes);
-        input.put("sourceBrowsingEnabled",config.inspection.sourceBrowsingEnabled);input.put("sourceBrowsingPolicy",config.inspection.sourcePolicy);
-        input.set("sourceDenyGlobs",JSON.valueToTree(config.inspection.sourceDenyGlobs));input.put("redactionEnabled",config.inspection.redactionEnabled);
-        input.set("sensitivePaths",JSON.valueToTree(config.inspection.sensitivePaths));input.set("sensitiveFieldPatterns",JSON.valueToTree(config.inspection.sensitiveFieldPatterns));
+        applyInspectionPolicy(input,schedule.packageId);
         return submit("load",input,"load-schedule:"+schedule.id,true,occurrenceId,true);
     }
 

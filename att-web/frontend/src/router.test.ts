@@ -36,4 +36,12 @@ describe('ATT hash route contract', () => {
     expect(parseRoute('#/configuration/payments?tab=source&sourceType=flow&sourceResourceId=flow.checkout&sourceReferenceId=bad'))
       .not.toHaveProperty('sourceReference');
   });
+
+  it('round-trips opaque Configuration-source reference tokens', () => {
+    const route={kind:'configuration',packageId:'payments',filePath:'config/queries/result.json',
+      fileOrigin:'config/queries/lookup.sql',configurationReferenceId:'aB_-token',tab:'source'} as const;
+    expect(parseRoute(formatRoute(route))).toEqual(route);
+    expect(parseRoute('#/configuration/payments?configurationReferenceId=bad%2Ftoken'))
+      .not.toHaveProperty('configurationReferenceId');
+  });
 });

@@ -130,8 +130,8 @@ function ConfigurationRouteView({ route, packages }: {
     workspace.onEnvironmentChange(environment);
     navigation.navigate({ ...route, environment });
   }, [navigation.navigate, route, workspace.onEnvironmentChange]);
-  const onFileChange = useCallback((filePath?: string, fileOrigin?: string, sourceReference?: ResourceSourceReference) => {
-    navigation.navigate({ ...route, filePath, fileOrigin, sourceReference, tab: filePath ? 'source' : route.tab });
+  const onFileChange = useCallback((filePath?: string, fileOrigin?: string, sourceReference?: ResourceSourceReference, configurationReferenceId?: string) => {
+    navigation.navigate({ ...route, filePath, fileOrigin, sourceReference, configurationReferenceId, tab: filePath ? 'source' : route.tab });
   }, [navigation.navigate, route]);
   const onTabChange = useCallback((tab: 'source' | 'declared' | 'effective' | 'compare' | 'testdata') => {
     navigation.navigate({ ...route, tab });
@@ -147,6 +147,7 @@ function ConfigurationRouteView({ route, packages }: {
     filePath={route.filePath}
     fileOrigin={route.fileOrigin}
     sourceReference={route.sourceReference}
+    configurationReferenceId={route.configurationReferenceId}
     tab={route.tab || (route.filePath ? 'source' : 'declared')}
     onPackageChange={onPackageChange}
     onEnvironmentChange={onEnvironmentChange}

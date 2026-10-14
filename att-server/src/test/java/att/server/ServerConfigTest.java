@@ -174,6 +174,31 @@ class ServerConfigTest {
         assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file));
     }
 
+    @Test void validatesExternalInspectionRootsAndExactCanonicalScriptEntries() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("external-inspection-packages"));
+        Path pkg=Files.createDirectory(allowed.resolve("payments"));
+        Path externalRoot=Files.createDirectories(temp.resolve("approved-external-scripts"));
+        Path script=Files.createDirectories(externalRoot.resolve("mq")).resolve("檢查佇列.sh");Files.writeString(script,"#!/bin/sh\necho ok\n");
+        Path canonicalExternalRoot=externalRoot.toRealPath(),canonicalScript=script.toRealPath();
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path valid=temp.resolve("external-inspection-valid.yaml");Files.writeString(valid,"server:\n  dataDir: "+yaml(temp.resolve("external-inspection-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  inspection:\n    sourceBrowsing:\n      externalSourceRoots:\n        - "+yaml(canonicalExternalRoot)+"\n      externalTextSources:\n        payments:\n          - "+yaml(canonicalScript)+"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    payments: "+yaml(pkg)+"\n");
+        ServerConfig config=ServerConfig.load(valid);
+        assertEquals(List.of(canonicalExternalRoot.toString()),config.inspection.externalSourceRoots);
+        assertEquals(List.of(canonicalScript.toString()),config.inspection.externalTextSources("payments"));
+
+        Path outside=Files.createDirectories(temp.resolve("unapproved-external")).resolve("outside.sh");Files.writeString(outside,"echo no\n");
+        Path canonicalOutside=outside.toRealPath();
+        Path outsideConfig=temp.resolve("external-inspection-outside.yaml");Files.writeString(outsideConfig,"server:\n  dataDir: "+yaml(temp.resolve("external-inspection-outside-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  inspection:\n    sourceBrowsing:\n      externalSourceRoots:\n        - "+yaml(canonicalExternalRoot)+"\n      externalTextSources:\n        payments:\n          - "+yaml(canonicalOutside)+"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    payments: "+yaml(pkg)+"\n");
+        IllegalArgumentException outOfRoot=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(outsideConfig));
+        assertTrue(outOfRoot.getMessage().contains("externalSourceRoots"));
+
+        Path relativeConfig=temp.resolve("external-inspection-relative.yaml");Files.writeString(relativeConfig,"server:\n  dataDir: "+yaml(temp.resolve("external-inspection-relative-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  inspection:\n    sourceBrowsing:\n      externalSourceRoots:\n        - "+yaml(canonicalExternalRoot)+"\n      externalTextSources:\n        payments:\n          - scripts/tool.sh\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    payments: "+yaml(pkg)+"\n");
+        assertThrows(IllegalArgumentException.class,()->ServerConfig.load(relativeConfig));
+    }
+
     @Test void schedulingIsDisabledByDefaultAndAnonymousAdministrationDefaultsOnOnlyInAnonymousMode() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("schedule-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");

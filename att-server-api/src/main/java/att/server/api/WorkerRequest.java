@@ -45,6 +45,8 @@ public class WorkerRequest {
     public Boolean inspectionIncludeInherited;
     public String inspectionPath;
     public String inspectionOrigin;
+    /** Server-issued token for a Configuration-source file reference. */
+    public String inspectionReferenceId;
     public String inspectionResourceId;
     public String inspectionTargetId;
     public String draftResourceId;
@@ -55,6 +57,10 @@ public class WorkerRequest {
     public Integer inspectionLimit;
     public String expectedRevisionDigest;
     public List<String> safeTextSources;
+    /** Exact canonical external script files approved by the Server for this package. */
+    public List<String> externalTextSources;
+    /** Canonical roots against which externalTextSources are independently checked. */
+    public List<String> externalSourceRoots;
     public Integer maxSourceBytes;
     public Integer maxResponseBytes;
     public Boolean sourceBrowsingEnabled;

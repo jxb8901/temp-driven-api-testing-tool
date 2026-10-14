@@ -181,13 +181,55 @@ public final class ServerConfig {
         int response=intValue(values,"maxResponseBytes",262144,1024,1048576);
         int source=intValue(values,"maxSourceBytes",65536,256,262144);
         Map<?,?> sourceBrowsing=values.get("sourceBrowsing")==null?Collections.emptyMap():map(values.get("sourceBrowsing"),"server.inspection.sourceBrowsing");
-        for(Object key:sourceBrowsing.keySet())if(!(key instanceof String)||!Set.of("enabled","policy","denyGlobs","maxSourceBytes").contains(key))throw new IllegalArgumentException("server.inspection.sourceBrowsing contains an unknown setting");
+        for(Object key:sourceBrowsing.keySet())if(!(key instanceof String)||!Set.of("enabled","policy","denyGlobs","maxSourceBytes","externalSourceRoots","externalTextSources").contains(key))throw new IllegalArgumentException("server.inspection.sourceBrowsing contains an unknown setting");
         boolean sourceBrowsingEnabled=boolValue(sourceBrowsing,"enabled",true);
         String sourcePolicy=sourceBrowsing.get("policy")==null?"safe-package-files":string(sourceBrowsing.get("policy"),"server.inspection.sourceBrowsing.policy");
         if(!Set.of("safe-package-files","allowlist-only").contains(sourcePolicy))throw new IllegalArgumentException("server.inspection.sourceBrowsing.policy must be safe-package-files or allowlist-only");
         source=intValue(sourceBrowsing,"maxSourceBytes",source,256,262144);
         if(source>=response)throw new IllegalArgumentException("server.inspection.maxSourceBytes must be less than maxResponseBytes");
         List<String> denyGlobs=checkedGlobs(sourceBrowsing.get("denyGlobs"),"server.inspection.sourceBrowsing.denyGlobs");
+        List<Path> externalRoots=new java.util.ArrayList<>();
+        if(sourceBrowsing.get("externalSourceRoots")!=null) {
+            List<?> configuredRoots=list(sourceBrowsing.get("externalSourceRoots"),"server.inspection.sourceBrowsing.externalSourceRoots");
+            if(configuredRoots.size()>100)throw new IllegalArgumentException("server.inspection.sourceBrowsing.externalSourceRoots may contain at most 100 paths");
+            java.util.HashSet<Path> uniqueRoots=new java.util.HashSet<>();
+            for(Object entry:configuredRoots) {
+                Path root=canonicalRequired(string(entry,"server.inspection.sourceBrowsing.externalSourceRoots entry"),"server.inspection.sourceBrowsing.externalSourceRoots entry",true);
+                if(!Files.isReadable(root))throw new IllegalArgumentException("External source root must be readable");
+                if(!uniqueRoots.add(root))throw new IllegalArgumentException("Duplicate external source root");
+                externalRoots.add(root);
+            }
+        }
+        Map<String,List<String>> externalSources=new LinkedHashMap<>();
+        Map<?,?> rawExternalSources=sourceBrowsing.get("externalTextSources")==null?Collections.emptyMap():map(sourceBrowsing.get("externalTextSources"),"server.inspection.sourceBrowsing.externalTextSources");
+        for(Map.Entry<?,?> entry:rawExternalSources.entrySet()) {
+            String packageId=string(entry.getKey(),"server.inspection.sourceBrowsing.externalTextSources package ID");
+            if(!packages.containsKey(packageId))throw new IllegalArgumentException("External inspection sources reference an unknown package: "+packageId);
+            List<?> paths=list(entry.getValue(),"server.inspection.sourceBrowsing.externalTextSources."+packageId);
+            if(paths.size()>100)throw new IllegalArgumentException("An external source allowlist may contain at most 100 files per package");
+            java.util.ArrayList<String> checked=new java.util.ArrayList<>();
+            java.util.HashSet<Path> unique=new java.util.HashSet<>();
+            for(Object value:paths) {
+                String authored=string(value,"server.inspection.sourceBrowsing.externalTextSources entry");
+                Path configured=Paths.get(authored);
+                if(!configured.isAbsolute()||!configured.normalize().equals(configured))
+                    throw new IllegalArgumentException("External inspection sources must be normalized absolute file paths");
+                Path canonical=configured.toRealPath();
+                if(!canonical.equals(configured))throw new IllegalArgumentException("External inspection source paths must be canonical");
+                if(!Files.isRegularFile(canonical,java.nio.file.LinkOption.NOFOLLOW_LINKS)||!Files.isReadable(canonical))
+                    throw new IllegalArgumentException("External inspection sources must be readable regular files");
+                if(externalRoots.stream().noneMatch(canonical::startsWith))
+                    throw new IllegalArgumentException("External inspection source is outside configured externalSourceRoots");
+                if(packages.values().stream().anyMatch(canonical::startsWith))
+                    throw new IllegalArgumentException("External inspection source must be outside every registered package root");
+                String lower=canonical.getFileName().toString().toLowerCase(Locale.ROOT);
+                if(!(lower.endsWith(".sh")||lower.endsWith(".bash")||lower.endsWith(".py")||lower.endsWith(".js")||lower.endsWith(".ts")||lower.endsWith(".groovy")||lower.endsWith(".rb")||lower.endsWith(".pl")||lower.endsWith(".ps1")||lower.endsWith(".bat")||lower.endsWith(".cmd")))
+                    throw new IllegalArgumentException("External inspection sources must use a supported script extension");
+                if(!unique.add(canonical))throw new IllegalArgumentException("Duplicate external inspection source");
+                checked.add(canonical.toString());
+            }
+            externalSources.put(packageId,List.copyOf(checked));
+        }
         Map<?,?> redaction=values.get("redaction")==null?Collections.emptyMap():map(values.get("redaction"),"server.inspection.redaction");
         for(Object key:redaction.keySet())if(!(key instanceof String)||!Set.of("enabled","sensitivePaths","sensitiveFieldPatterns").contains(key))throw new IllegalArgumentException("server.inspection.redaction contains an unknown setting");
         boolean redactionEnabled=boolValue(redaction,"enabled",false);
@@ -220,7 +262,7 @@ public final class ServerConfig {
             }
             safeSources.put(packageId,List.copyOf(checked));
         }
-        return new Inspection(enabled,concurrent,queued,timeout,heap,response,source,safeSources,
+        return new Inspection(enabled,concurrent,queued,timeout,heap,response,source,safeSources,externalRoots,externalSources,
                 sourceBrowsingEnabled,sourcePolicy,denyGlobs,redactionEnabled,sensitivePaths,sensitiveFieldPatterns);
     }
 
@@ -345,16 +387,21 @@ public final class ServerConfig {
         public final boolean enabled;
         public final int maxConcurrent,queuedLimit,timeoutMs,heapMaxMb,maxResponseBytes,maxSourceBytes;
         public final Map<String,List<String>> safeTextSources;
+        public final List<String> externalSourceRoots;
+        public final Map<String,List<String>> externalTextSources;
         public final boolean sourceBrowsingEnabled,redactionEnabled;
         public final String sourcePolicy;
         public final List<String> sourceDenyGlobs,sensitivePaths,sensitiveFieldPatterns;
-        private Inspection(boolean enabled,int maxConcurrent,int queuedLimit,int timeoutMs,int heapMaxMb,int maxResponseBytes,int maxSourceBytes,Map<String,List<String>> safeTextSources,
+        private Inspection(boolean enabled,int maxConcurrent,int queuedLimit,int timeoutMs,int heapMaxMb,int maxResponseBytes,int maxSourceBytes,Map<String,List<String>> safeTextSources,List<Path> externalSourceRoots,Map<String,List<String>> externalTextSources,
                            boolean sourceBrowsingEnabled,String sourcePolicy,List<String> sourceDenyGlobs,boolean redactionEnabled,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) {
             this.enabled=enabled;this.maxConcurrent=maxConcurrent;this.queuedLimit=queuedLimit;this.timeoutMs=timeoutMs;this.heapMaxMb=heapMaxMb;this.maxResponseBytes=maxResponseBytes;this.maxSourceBytes=maxSourceBytes;
             this.safeTextSources=Collections.unmodifiableMap(new LinkedHashMap<>(safeTextSources));
+            this.externalSourceRoots=externalSourceRoots.stream().map(Path::toString).toList();
+            this.externalTextSources=Collections.unmodifiableMap(new LinkedHashMap<>(externalTextSources));
             this.sourceBrowsingEnabled=sourceBrowsingEnabled;this.sourcePolicy=sourcePolicy;this.sourceDenyGlobs=List.copyOf(sourceDenyGlobs);this.redactionEnabled=redactionEnabled;
             this.sensitivePaths=List.copyOf(sensitivePaths);this.sensitiveFieldPatterns=List.copyOf(sensitiveFieldPatterns);
         }
         public List<String> safeTextSources(String packageId) { return safeTextSources.getOrDefault(packageId,List.of()); }
+        public List<String> externalTextSources(String packageId) { return externalTextSources.getOrDefault(packageId,List.of()); }
     }
 }

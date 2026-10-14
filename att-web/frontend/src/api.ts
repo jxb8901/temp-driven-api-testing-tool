@@ -253,8 +253,8 @@ export const api = {
   listConfigurationFiles(packageId: string, path?: string, search?: string, offset = 0, signal?: AbortSignal): Promise<ConfigurationFilePage> {
     return request<ConfigurationFilePage>('packages/' + encodeURIComponent(packageId) + '/configuration/files' + queryString({ path, query: search, offset, limit: 100 }), { signal });
   },
-  getConfigurationFileSource(packageId: string, path: string, origin?: string, signal?: AbortSignal): Promise<SourceProjection> {
-    return request<SourceProjection>('packages/' + encodeURIComponent(packageId) + '/configuration/source' + queryString({ path, origin }), { signal });
+  getConfigurationFileSource(packageId: string, path: string, origin?: string, signal?: AbortSignal, referenceId?: string): Promise<SourceProjection> {
+    return request<SourceProjection>('packages/' + encodeURIComponent(packageId) + '/configuration/source' + queryString({ path, origin, referenceId }), { signal });
   },
   getTestdataRecords(packageId: string, descriptorId: string, query: { environment?: string; offset?: number; limit?: number; previewGenerated?: boolean }, signal?: AbortSignal): Promise<TestdataRecordsResponse> {
     return request<TestdataRecordsResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/testdata/' + encodeURIComponent(descriptorId) + '/records' + queryString(query), { signal });

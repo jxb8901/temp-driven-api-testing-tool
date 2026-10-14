@@ -49,7 +49,7 @@ class ServerWarUiIT {
         Path config = Files.writeString(temp.resolve("server.yaml"),
                 "server:\n  dataDir: " + yaml(temp.resolve("data")) + "\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n"
                         + "  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
-                        + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n        - templates/SCHEDULED/payload/request.txt\n"
+                        + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n"
                         + "  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n"
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"
                         + "packages:\n  allowedRoots:\n    - " + yaml(packages) + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
@@ -131,6 +131,20 @@ class ServerWarUiIT {
                     referenceFlowSource.toString());
             assertEquals("templates/SCHEDULED/payload/request.xml",
                     referenceFlowSource.path("fileReferences").get(0).path("logicalPath").asText(), referenceFlowSource.toString());
+            JsonNode toolResources = getJson(port, api + "/packages/payments/resources?type=tool", auth);
+            JsonNode checkQueue = null;
+            for (JsonNode item : toolResources.path("items"))
+                if ("checkQueue".equals(item.path("logicalId").asText())) checkQueue = item;
+            assertNotNull(checkQueue, toolResources.toString());
+            assertTrue(checkQueue.path("sourceAvailable").asBoolean(),
+                    "A package-local nested script is browsable under the default policy without safeTextSources.");
+            String toolSourcePath = api + "/packages/payments/resources/tool/" + checkQueue.path("resourceId").asText() + "/source";
+            assertEquals(401, get(port, toolSourcePath, null), "Tool source retains the Tomcat authentication boundary.");
+            JsonNode toolSource = getJson(port, toolSourcePath, auth);
+            assertTrue(toolSource.path("available").asBoolean(), toolSource.toString());
+            assertEquals("tools/mq/check-queue.sh", toolSource.path("logicalPath").asText());
+            assertTrue(toolSource.path("text").asText().contains("package-local script source"));
+            assertFalse(toolSource.toString().contains(packageRoot.toString()), "Package filesystem paths remain private.");
             if ("1".equals(System.getenv("ATT_UI_SERVER_PLAYWRIGHT"))) runServerUiPlaywright(origin);
         } finally {
             try { tomcat.stop(); } finally { tomcat.destroy(); }
@@ -188,7 +202,7 @@ class ServerWarUiIT {
         Path config = Files.writeString(temp.resolve("scheduled-war-server.yaml"),
                 "server:\n  dataDir: " + yaml(temp.resolve("scheduled-war-data")) + "\n  javaExecutable: " + yaml(javaBin)
                         + "\n  authenticationRequired: true\n  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
-                        + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n        - templates/SCHEDULED/payload/request.txt"
+                        + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh"
                         + "\n  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n    minimumIntervalMinutes: 1\n    pollIntervalSeconds: 5\n    maxConcurrentRuns: 1"
                         + "\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - " + yaml(packages)
                         + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
@@ -226,9 +240,8 @@ class ServerWarUiIT {
                 if ("config/tools/att-helper.sh".equals(item.path("path").asText())) listedSafeHelper = item;
             }
             assertNotNull(listedConfigSource);
-            assertFalse(listedConfigSource.path("sourceAvailable").asBoolean(),
-                    "The package config YAML stays unavailable unless the Server source policy explicitly permits it.");
-            assertEquals("visibility-policy", listedConfigSource.path("reason").asText());
+            assertTrue(listedConfigSource.path("sourceAvailable").asBoolean(),
+                    "The default safe-package-files policy permits bounded, sanitized package-local text.");
             assertNotNull(listedSafeHelper);
             assertTrue(listedSafeHelper.path("sourceAvailable").asBoolean());
             String configurationSourcePath = api + "/packages/payments/configuration/source?path="
@@ -238,6 +251,10 @@ class ServerWarUiIT {
             assertTrue(configurationSource.path("available").asBoolean());
             assertEquals("config/tools/att-helper.sh", configurationSource.path("logicalPath").asText());
             assertTrue(configurationSource.path("text").asText().contains("# Safe configuration helper source"));
+            JsonNode safeConfigSource = getJson(port, api + "/packages/payments/configuration/source?path="
+                    + java.net.URLEncoder.encode("config/config.yaml", java.nio.charset.StandardCharsets.UTF_8), ordinary);
+            assertTrue(safeConfigSource.path("available").asBoolean());
+            assertTrue(safeConfigSource.path("text").asText().contains("testcase:"));
             String recordsPath = api + "/packages/payments/configuration/testdata/generatedAccounts/records?environment=SIT&limit=5";
             assertEquals(401, get(port, recordsPath, null), "Testdata records remain behind the Tomcat authentication boundary.");
             JsonNode generatedMetadata = getJson(port, recordsPath, ordinary);
@@ -249,9 +266,19 @@ class ServerWarUiIT {
             assertEquals(5, generatedPreview.path("records").size());
             assertEquals(1000, generatedPreview.path("records").get(0).path("sequence").asInt());
 
+            JsonNode configurationOrigin = getJson(port, api + "/packages/payments/configuration/source?path="
+                    + java.net.URLEncoder.encode("config/source-references.yaml", java.nio.charset.StandardCharsets.UTF_8), ordinary);
+            assertTrue(configurationOrigin.path("available").asBoolean(), configurationOrigin.toString());
+            JsonNode configurationReference = null;
+            for (JsonNode item : configurationOrigin.path("fileReferences"))
+                if ("templates/SCHEDULED/payload/request.txt".equals(item.path("logicalPath").asText())) configurationReference = item;
+            assertNotNull(configurationReference, configurationOrigin.toString());
+            String referenceId = configurationReference.path("referenceId").asText();
+            assertTrue(referenceId.matches("[A-Za-z0-9_-]{20,4096}"), "The public reference is an opaque Server token.");
             String referencedSourcePath = api + "/packages/payments/configuration/source?path="
                     + java.net.URLEncoder.encode("templates/SCHEDULED/payload/request.txt", java.nio.charset.StandardCharsets.UTF_8)
-                    + "&origin=" + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8);
+                    + "&origin=" + java.net.URLEncoder.encode("config/source-references.yaml", java.nio.charset.StandardCharsets.UTF_8)
+                    + "&referenceId=" + java.net.URLEncoder.encode(referenceId, java.nio.charset.StandardCharsets.UTF_8);
             assertEquals(401, get(port, referencedSourcePath, null), "Referenced package files retain the Server authentication boundary.");
             JsonNode referencedSource = getJson(port, referencedSourcePath, ordinary);
             assertTrue(referencedSource.path("available").asBoolean());
@@ -261,12 +288,14 @@ class ServerWarUiIT {
             assertFalse(referencedSource.path("text").asText().contains("template-secret"),
                     "Safe source projection must scrub classified-looking password values before the UI receives them.");
             assertTrue(referencedSource.path("redacted").asBoolean());
+            String unverifiedReferencePath = referencedSourcePath.substring(0, referencedSourcePath.indexOf("&referenceId="));
+            assertEquals(404, get(port, unverifiedReferencePath, ordinary),
+                    "Origin and path alone cannot authorize navigation to a referenced package file.");
             String deniedSourcePath = api + "/packages/payments/configuration/source?path="
                     + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8)
                     + "&origin=" + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8);
-            JsonNode deniedSource = getJson(port, deniedSourcePath, ordinary);
-            assertFalse(deniedSource.path("available").asBoolean());
-            assertEquals("visibility-policy", deniedSource.path("reason").asText());
+            assertEquals(404, get(port, deniedSourcePath, ordinary),
+                    "A caller-supplied origin does not authorize configuration navigation to arbitrary package files.");
 
             Map<String, Object> inlineScenario = Map.of(
                     "schemaVersion", "att-load/v1.6",
@@ -316,11 +345,18 @@ class ServerWarUiIT {
             jobId = trigger.path("jobId").asText();
             assertTrue(jobId.matches("J[0-9A-F]{16}"));
             JsonNode activeJob = getJson(port, api + "/jobs/" + jobId, admin);
+            JsonNode jobResult = getJson(port, api + "/jobs/" + jobId + "/result", admin);
             assertTrue(List.of("QUEUED", "PREPARING", "RUNNING").contains(activeJob.path("status").asText()),
-                    "The real scheduled Load should remain active long enough to exercise capacity handling.");
+                    "The real scheduled Load should remain active long enough to exercise capacity handling: "
+                            + activeJob + " result=" + jobResult);
 
             JsonNode rejected = apiJson(port, "POST", api + "/load-schedules/" + secondScheduleId + "/trigger", admin, origin, null, 202);
-            assertEquals("skipped", rejected.path("status").asText());
+            JsonNode firstJobResult = getJson(port, api + "/jobs/" + jobId + "/result", admin);
+            assertEquals("skipped", rejected.path("status").asText(),
+                    "A concurrent scheduled run must occupy global capacity; occurrence=" + rejected
+                            + " job=" + getJson(port, api + "/jobs/" + jobId, admin)
+                            + " result=" + firstJobResult
+                            + " metrics=" + getJson(port, api + "/metrics", admin));
             assertEquals("global-scheduled-load-capacity", rejected.path("reason").asText());
             JsonNode secondHistory = getJson(port, api + "/load-schedules/" + secondScheduleId + "/executions", admin);
             assertEquals("global-scheduled-load-capacity", secondHistory.path("items").get(0).path("reason").asText());
@@ -404,10 +440,16 @@ class ServerWarUiIT {
         Path loads = Files.createDirectories(packageRoot.resolve("load"));
         Files.createDirectories(packageRoot.resolve("testcase"));
         Files.createDirectories(packageRoot.resolve("config"));
+        Path nestedTool = Files.createDirectories(packageRoot.resolve("tools/mq")).resolve("check-queue.sh");
         copySchemas(packageRoot);
         Files.writeString(packageRoot.resolve("config/config.yaml"),
                 "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [config/testdata/generated.yaml]\n"
-                        + "testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+                        + "testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  checkQueue:\n"
+                        + "    name: Check queue\n    description: Nested Tool script default source\n"
+                        + "    command: [bash, tools/mq/check-queue.sh]\n    stdoutFormat: text\n    arguments: {}\n");
+        Files.writeString(packageRoot.resolve("config/source-references.yaml"),
+                "payload: '&{../templates/SCHEDULED/payload/request.txt}'\n");
+        Files.writeString(nestedTool, "#!/bin/sh\n# package-local script source\necho safe\n");
         Path testdata = Files.createDirectories(packageRoot.resolve("config/testdata"));
         Path tools = Files.createDirectories(packageRoot.resolve("config/tools"));
         Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\nexit 0\n");

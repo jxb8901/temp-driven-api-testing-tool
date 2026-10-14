@@ -250,7 +250,7 @@ export interface ExplorerApi {
   getEffectiveConfiguration(packageId: string, query: EffectiveConfigurationQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
   compareConfiguration(packageId: string, query: ConfigurationComparisonQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
   listConfigurationFiles?(packageId: string, path?: string, query?: string, offset?: number, signal?: AbortSignal): Promise<ConfigurationFilePage>;
-  getConfigurationFileSource?(packageId: string, path: string, origin?: string, signal?: AbortSignal): Promise<SourceProjection>;
+  getConfigurationFileSource?(packageId: string, path: string, origin?: string, signal?: AbortSignal, referenceId?: string): Promise<SourceProjection>;
   getTestdataRecords?(packageId: string, descriptorId: string, query: { environment?: string; offset?: number; limit?: number; previewGenerated?: boolean }, signal?: AbortSignal): Promise<TestdataRecordsResponse>;
   getDebugForm(identity: ResourceIdentity, environment?: string, signal?: AbortSignal): Promise<DebugFormResponse>;
   previewDebug(input: DebugDraftRequest, signal?: AbortSignal): Promise<DraftResponse>;

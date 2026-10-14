@@ -26,14 +26,26 @@ public final class PackageConfigurationFileInspector {
     private final PackageResourceResolver resources;
     private final Path packageRoot;
     private final Set<String> safeTextSources;
+    private final boolean sourceBrowsingEnabled;
+    private final String sourceBrowsingPolicy;
+    private final List<String> sourceDenyGlobs;
     private final int maxSourceBytes;
     private final int maxResponseBytes;
 
     public PackageConfigurationFileInspector(Path packageRoot, Set<String> safeTextSources,
                                              int maxSourceBytes, int maxResponseBytes) {
+        this(packageRoot,safeTextSources,maxSourceBytes,maxResponseBytes,true,"allowlist-only",Collections.<String>emptyList());
+    }
+
+    public PackageConfigurationFileInspector(Path packageRoot, Set<String> safeTextSources,
+                                             int maxSourceBytes,int maxResponseBytes,boolean sourceBrowsingEnabled,
+                                             String sourceBrowsingPolicy,List<String> sourceDenyGlobs) {
         this.resources = new PackageResourceResolver(packageRoot);
         this.packageRoot = resources.packageRoot();
         this.safeTextSources = safeTextSources == null ? Collections.emptySet() : new HashSet<>(safeTextSources);
+        this.sourceBrowsingEnabled=sourceBrowsingEnabled;
+        this.sourceBrowsingPolicy=sourceBrowsingPolicy==null?"safe-package-files":sourceBrowsingPolicy;
+        this.sourceDenyGlobs=sourceDenyGlobs==null?Collections.emptyList():new ArrayList<>(sourceDenyGlobs);
         if (maxSourceBytes < 1 || maxResponseBytes < 1024 || maxSourceBytes >= maxResponseBytes)
             throw new IllegalArgumentException("Invalid configuration source limits");
         this.maxSourceBytes = maxSourceBytes;
@@ -126,11 +138,17 @@ public final class PackageConfigurationFileInspector {
                 result.put("sizeBytes", size);
                 result.put("format", format(logical));
                 boolean textFile = textExtension(logical);
-                boolean allowed = safeTextSources.contains(logical) && textFile;
-                result.put("sourceAvailable", allowed && size <= maxSourceBytes);
-                if (!textFile) result.put("reason", "unsupported-file-type");
-                else if (!allowed) result.put("reason", "visibility-policy");
-                else if (size > maxSourceBytes) result.put("reason", "size-limit");
+                String reason=null;
+                if(!sourceBrowsingEnabled)reason="source-disabled";
+                else if(sensitiveSourcePath(logical))reason="sensitive-path";
+                else if(!textFile)reason="unsupported-file-type";
+                else if(sourceGlobDenied(logical))reason="forbidden";
+                else if("allowlist-only".equals(sourceBrowsingPolicy)&&!safeTextSources.contains(logical))reason="not-allowlisted";
+                else if(!"allowlist-only".equals(sourceBrowsingPolicy)&&!"safe-package-files".equals(sourceBrowsingPolicy))reason="forbidden";
+                else if(size>maxSourceBytes)reason="size-limit";
+                else if(!isUtf8Text(path))reason="binary-file";
+                result.put("sourceAvailable",reason==null);
+                if(reason!=null)result.put("reason",reason);
             } catch (Exception ignored) {
                 result.put("sourceAvailable", Boolean.FALSE);
                 result.put("reason", "source-unavailable");
@@ -185,6 +203,47 @@ public final class PackageConfigurationFileInspector {
     private static boolean hasControl(String value) {
         for (int index = 0; index < value.length(); index++) if (Character.isISOControl(value.charAt(index))) return true;
         return false;
+    }
+
+    private boolean sourceGlobDenied(String logical) {
+        String lower=logical.toLowerCase(Locale.ROOT);
+        for(String glob:sourceDenyGlobs) {
+            StringBuilder regex=new StringBuilder("^");String pattern=glob.toLowerCase(Locale.ROOT);
+            for(int i=0;i<pattern.length();i++) {
+                char c=pattern.charAt(i);
+                if(c=='*') {
+                    boolean recursive=i+1<pattern.length()&&pattern.charAt(i+1)=='*';
+                    if(recursive) { i++; if(i+1<pattern.length()&&pattern.charAt(i+1)=='/') {regex.append("(?:.*/)?");i++;} else regex.append(".*"); }
+                    else regex.append("[^/]*");
+                } else if(c=='?')regex.append("[^/]");
+                else {if(".(){}+$^|[]\\".indexOf(c)>=0)regex.append('\\');regex.append(c);}
+            }
+            if(lower.matches(regex.append('$').toString()))return true;
+        }
+        return false;
+    }
+
+    private static boolean sensitiveSourcePath(String logical) {
+        String lower=logical.toLowerCase(Locale.ROOT);String base=lower.substring(lower.lastIndexOf('/')+1);
+        return base.startsWith(".env")||base.contains("secret")||base.contains("credential")||base.contains("password")
+                ||base.contains("token")||base.endsWith(".pem")||base.endsWith(".key")||base.endsWith(".p12")
+                ||base.endsWith(".pfx")||base.endsWith(".jks")||base.endsWith(".keystore");
+    }
+
+    private boolean isUtf8Text(Path path) {
+        try {
+            byte[] bytes;
+            try(java.io.InputStream input=Files.newInputStream(path,LinkOption.NOFOLLOW_LINKS)) {
+                java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();byte[] buffer=new byte[4096];int count,total=0;
+                while((count=input.read(buffer))!=-1) {total+=count;if(total>maxSourceBytes)return false;output.write(buffer,0,count);}
+                bytes=output.toByteArray();
+            }
+            java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes));
+            for(byte value:bytes)if(value==0)return false;
+            return true;
+        } catch(Exception invalid) { return false; }
     }
 
     private Map<String,Object> response(String path, List<Map<String,Object>> items, int total, int offset,
