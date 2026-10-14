@@ -27,13 +27,16 @@
 .att-config-heading > label { display: grid; gap: var(--att-space-1, .25rem); min-width: 14rem; }
 .att-explorer-workspace {
   display: grid;
-  grid-template-columns: minmax(14rem, .85fr) minmax(22rem, 2fr) minmax(18rem, 1fr);
+  grid-template-columns: minmax(22rem, 1.45fr) minmax(24rem, 2fr) minmax(18rem, 1fr);
   min-height: 34rem;
   border: 1px solid var(--att-color-border, #cbd5e1);
   border-radius: var(--att-radius-card, .65rem);
   background: var(--att-color-surface, #fff);
   overflow: hidden;
 }
+.att-explorer-workspace.is-list-first { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.att-explorer-workspace.is-list-first .att-explorer-navigation { border-right: 0; }
+.att-explorer-workspace [hidden] { display: none !important; }
 .att-explorer-navigation,
 .att-explorer-detail,
 .att-explorer-inspector { min-width: 0; padding: var(--att-space-4, 1rem); }
@@ -80,7 +83,19 @@
 .att-explorer-total,
 .att-debug-status,
 .att-source-status { color: var(--att-color-muted, #526171); font-size: .875rem; }
-.att-explorer-tree { border-block: 1px solid var(--att-color-border, #cbd5e1); }
+
+.att-explorer-categories { display: flex; flex-wrap: wrap; gap: .35rem; margin-block: var(--att-space-3, .75rem); }
+.att-explorer-categories [aria-selected="true"] { color: var(--att-color-primary, #0866c6); border-color: var(--att-color-primary, #0866c6); box-shadow: inset 0 -2px var(--att-color-primary, #0866c6); font-weight: 650; }
+.att-explorer-table-hint { margin: 0; color: var(--att-color-muted, #526171); font-size: .8rem; }
+.att-explorer-table-scroll { overflow: auto; max-height: 35rem; border: 1px solid var(--att-color-border, #cbd5e1); border-radius: var(--att-radius-control, .35rem); }
+.att-explorer-table { width: 100%; border-collapse: collapse; text-align: left; }
+.att-explorer-table th, .att-explorer-table td { padding: .55rem; border-bottom: 1px solid var(--att-color-border, #cbd5e1); vertical-align: top; overflow-wrap: anywhere; }
+.att-explorer-table thead { position: sticky; inset-block-start: 0; background: var(--att-color-surface, #fff); z-index: 1; }
+.att-explorer-table tbody tr[aria-selected="true"] { background: color-mix(in srgb, var(--att-color-primary, #0866c6) 10%, var(--att-color-surface, #fff)); }
+.att-explorer-sort { width: 100%; text-align: left; border: 0 !important; background: transparent !important; padding: .2rem !important; font-weight: 700; }
+.att-explorer-resource-name { width: 100%; text-align: left; border: 0 !important; background: transparent !important; padding: .15rem !important; overflow-wrap: anywhere; }
+.att-explorer-tree { display: grid; gap: var(--att-space-2, .5rem); border-block: 1px solid var(--att-color-border, #cbd5e1); padding-block: var(--att-space-2, .5rem); }
+
 .att-explorer-tree-scroll { max-height: 32rem; overflow: auto; overscroll-behavior: contain; }
 .att-explorer-tree-row {
   display: flex;
@@ -104,6 +119,9 @@
 .att-explorer-tabs { display: flex; gap: var(--att-space-1, .25rem); border-bottom: 1px solid var(--att-color-border, #cbd5e1); margin-block: var(--att-space-4, 1rem) var(--att-space-3, .75rem); }
 .att-explorer-tabs [role="tab"] { border: 0; border-radius: 0; background: transparent; }
 .att-explorer-tabs [aria-selected="true"] { color: var(--att-color-primary, #0866c6); border-bottom: 3px solid var(--att-color-primary, #0866c6); font-weight: 650; }
+.att-helper-reference summary { cursor: pointer; }
+.att-helper-reference summary span { margin-inline-start: .6rem; color: var(--att-color-muted, #526171); font-size: .85em; }
+.att-helper-reference p { margin-block: .35rem; color: var(--att-color-muted, #526171); }
 .att-definition-view,
 .att-debug-preview pre {
   max-height: 34rem;
@@ -192,7 +210,7 @@
   .att-explorer-workspace { grid-template-columns: minmax(0, 1fr); }
   .att-explorer-navigation,
   .att-explorer-inspector { border: 0; border-bottom: 1px solid var(--att-color-border, #cbd5e1); }
-  .att-explorer-tree-scroll { max-height: 16rem; }
+  .att-explorer-table-scroll { max-height: 24rem; }
   .att-explorer-detail { min-height: 24rem; }
   .att-relation-columns { grid-template-columns: 1fr; }
   .att-sidecar-field-controls { grid-template-columns: minmax(0, 1fr); }

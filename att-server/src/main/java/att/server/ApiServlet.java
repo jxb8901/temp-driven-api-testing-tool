@@ -201,13 +201,14 @@ public final class ApiServlet extends HttpServlet {
         if(!scheduleAdmin(req,res,requestId))return;
         try {
             String[] parts=path.split("/");
-            if(parts.length==2){json(res,200,Map.of("items",runtime.loadSchedules(),"requestId",requestId));return;}
+            if(parts.length==2){json(res,200,Map.of("items",runtime.loadSchedules().stream().map(runtime::loadScheduleView).toList(),"requestId",requestId));return;}
             String id=parts[2];
-            if(parts.length==3){LoadSchedule item=runtime.loadSchedule(id);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,200,view);return;}
+            if(parts.length==3){LoadSchedule item=runtime.loadSchedule(id);Map<String,Object> view=runtime.loadScheduleView(item);view.put("requestId",requestId);json(res,200,view);return;}
             if(parts.length==4&&"executions".equals(parts[3])){int limit=parseScheduleLimit(req.getParameter("limit"));json(res,200,Map.of("items",runtime.loadScheduleExecutions(id,limit),"scheduleId",id,"requestId",requestId));return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
         } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
+          catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","The validated Load draft expired; validate the scenario again",requestId);}
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
@@ -220,15 +221,16 @@ public final class ApiServlet extends HttpServlet {
         if(!checkOrigin(req,res,requestId,false))return;
         String[] parts=path.split("/");
         try {
-            if(parts.length==2){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;LoadSchedule item=runtime.createLoadSchedule(body,principal);res.setHeader("Location",req.getContextPath()+"/api/v1/load-schedules/"+item.id);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,201,view);return;}
+            if(parts.length==2){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;LoadSchedule item=runtime.createLoadSchedule(body,principal);res.setHeader("Location",req.getContextPath()+"/api/v1/load-schedules/"+item.id);Map<String,Object> view=runtime.loadScheduleView(item);view.put("requestId",requestId);json(res,201,view);return;}
             if(parts.length==3&&"preview".equals(parts[2])){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;Map<String,Object> preview=new LinkedHashMap<>(runtime.previewLoadSchedule(body));preview.put("requestId",requestId);json(res,200,preview);return;}
             if(parts.length==4&&"trigger".equals(parts[3])){Map<String,Object> result=runtime.triggerLoadSchedule(parts[2],principal);result.put("requestId",requestId);json(res,202,result);return;}
             if(parts.length==4&&("pause".equals(parts[3])||"resume".equals(parts[3]))) {
-                LoadSchedule item=runtime.setLoadScheduleEnabled(parts[2],"resume".equals(parts[3]),principal);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,200,view);return;
+                LoadSchedule item=runtime.setLoadScheduleEnabled(parts[2],"resume".equals(parts[3]),principal);Map<String,Object> view=runtime.loadScheduleView(item);view.put("requestId",requestId);json(res,200,view);return;
             }
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
         } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
+          catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","The validated Load draft expired; validate the scenario again",requestId);}
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
@@ -244,7 +246,7 @@ public final class ApiServlet extends HttpServlet {
         if(!checkOrigin(req,res,requestId,false))return;
         String[] parts=path.split("/");if(parts.length!=3){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;
-        try{LoadSchedule item=runtime.updateLoadSchedule(parts[2],body,principal);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,200,view);}
+        try{LoadSchedule item=runtime.updateLoadSchedule(parts[2],body,principal);Map<String,Object> view=runtime.loadScheduleView(item);view.put("requestId",requestId);json(res,200,view);}
         catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
         catch(ServerRuntime.ScheduleConflictException e){error(res,409,"ATT-SERVER-SCHEDULE-CHANGED","The schedule changed while it was being edited; reload it and retry",requestId);}
         catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
@@ -342,10 +344,13 @@ public final class ApiServlet extends HttpServlet {
             else throw new ServerRuntime.NotFoundException();
             if("list".equals(action)){kind=req.getParameter("type");resourceId=null;}
             if(resourceId!=null&&(resourceId.isEmpty()||resourceId.length()>512))throw new IllegalArgumentException("resourceId is invalid");
+            String sourceOrigin="source-file".equals(action)?req.getParameter("origin"):null;
+            String sort="list".equals(action)?req.getParameter("sort"):null;
+            String direction="list".equals(action)?req.getParameter("direction"):null;
             Map<String,Object> result="debug-form".equals(action)
                     ?runtime.inspectDebugForm(packageId,kind,resourceId,req.getParameter("environment"),principal)
                     :"quick-load-form".equals(action)?runtime.inspectQuickLoadForm(packageId,kind,resourceId,req.getParameter("model"),req.getParameter("environment"),principal)
-                    :runtime.inspectResource(packageId,action,kind,resourceId,query,limit,cursor,principal);
+                    :runtime.inspectResource(packageId,action,kind,resourceId,query,limit,cursor,sort,direction,sourceOrigin,principal);
             if("list".equals(action)) {
                 ResourceInspection.Page response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Page.class);
                 response.requestId=requestId;json(res,200,response);
@@ -372,6 +377,13 @@ public final class ApiServlet extends HttpServlet {
     private void configurationGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
         String[] parts=path.split("/");
         try {
+            if(parts.length==7&&"packages".equals(parts[1])&&!parts[2].isEmpty()&&"configuration".equals(parts[3])
+                    &&"testdata".equals(parts[4])&&"records".equals(parts[6])) {
+                boolean previewGenerated=parseOptionalBoolean(req.getParameter("previewGenerated"),"previewGenerated");
+                Map<String,Object> records=runtime.inspectTestdataRecords(parts[2],segment(path,5),req.getParameter("environment"),
+                        parseOffset(req.getParameter("offset")),parseConfigurationLimit(req.getParameter("limit")),previewGenerated,principal);
+                records.put("requestId",requestId);json(res,200,records);return;
+            }
             if(parts.length<4||!"packages".equals(parts[1])||parts[2].isEmpty()||!"configuration".equals(parts[3]))throw new ServerRuntime.NotFoundException();
             String packageId=parts[2],action;
             if(parts.length==4) {
@@ -381,15 +393,29 @@ public final class ApiServlet extends HttpServlet {
             } else if(parts.length==5&&"effective".equals(parts[4])) action="effective";
             else if(parts.length==5&&"compare".equals(parts[4])) action="compare";
             else if(parts.length==7&&"testdata".equals(parts[4])&&"records".equals(parts[6])) action="testdata-records";
+            else if(parts.length==5&&"files".equals(parts[4])) action="files";
+            else if(parts.length==5&&"source".equals(parts[4])) action="source";
             else throw new ServerRuntime.NotFoundException();
             String environment="effective".equals(action)||"testdata-records".equals(action)?req.getParameter("environment"):"compare".equals(action)?req.getParameter("left"):null;
             String otherEnvironment="compare".equals(action)?req.getParameter("right"):null;
-            String section="effective".equals(action)||"compare".equals(action)?req.getParameter("section"):"testdata-records".equals(action)?parts[5]:null;
+            String section="effective".equals(action)||"compare".equals(action)?req.getParameter("section"):
+                    "testdata-records".equals(action)?parts[5]:null;
+            boolean includeInherited="compare".equals(action)&&parseOptionalBoolean(req.getParameter("includeInherited"),"includeInherited");
             int offset=parseOffset(req.getParameter("offset"));
-            int limit="declared".equals(action)?0:parseConfigurationLimit(req.getParameter("limit"));
-            Map<String,Object> result=runtime.inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,principal);
-            ConfigurationInspection.Response response=ServerRuntime.JSON.convertValue(result,ConfigurationInspection.Response.class);
-            response.requestId=requestId;json(res,200,response);
+            int limit="declared".equals(action)||"source".equals(action)?0:parseConfigurationLimit(req.getParameter("limit"));
+            String inspectionPath="files".equals(action)||"source".equals(action)?req.getParameter("path"):null;
+            String inspectionOrigin="source".equals(action)?req.getParameter("origin"):null;
+            String inspectionQuery="files".equals(action)?req.getParameter("query"):
+                    "testdata-records".equals(action)&&parseOptionalBoolean(req.getParameter("previewGenerated"),"previewGenerated")
+                            ?"preview-generated":null;
+            Map<String,Object> result=runtime.inspectConfiguration(packageId,action,environment,otherEnvironment,section,
+                    offset,limit,inspectionPath,inspectionOrigin,inspectionQuery,includeInherited,principal);
+            if("declared".equals(action)||"effective".equals(action)||"compare".equals(action)) {
+                ConfigurationInspection.Response response=ServerRuntime.JSON.convertValue(result,ConfigurationInspection.Response.class);
+                response.requestId=requestId;json(res,200,response);
+            } else {
+                result.put("requestId",requestId);json(res,200,result);
+            }
         } catch(ServerRuntime.NotFoundException e){throw e;}
           catch(ServerRuntime.InspectionCapacityException e){throw e;}
           catch(ServerRuntime.InspectionTimeoutException e){throw e;}
@@ -403,7 +429,7 @@ public final class ApiServlet extends HttpServlet {
             if(parts.length!=4||!"packages".equals(parts[1])||parts[2].isEmpty()||!"load-policy".equals(parts[3]))
                 throw new ServerRuntime.NotFoundException();
             Map<String,Object> result=runtime.inspectQuickLoadPolicy(parts[2],req.getParameter("model"),
-                    req.getParameter("environment"),principal);
+                    req.getParameter("environment"),req.getParameter("templateId"),principal);
             LoadPolicyForm response=ServerRuntime.JSON.convertValue(result,LoadPolicyForm.class);
             response.requestId=requestId;json(res,200,response);
         } catch(ServerRuntime.NotFoundException e){throw e;}
@@ -417,6 +443,7 @@ public final class ApiServlet extends HttpServlet {
     private static int parseLimit(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be an integer between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new IllegalArgumentException("limit must be between 1 and 100");return value;}
     private static int parseOffset(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,6}"))throw new IllegalArgumentException("offset must be a non-negative integer");return Integer.parseInt(raw);}
     private static int parseConfigurationLimit(String raw){if(raw==null||raw.isEmpty())return 50;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new IllegalArgumentException("limit must be between 1 and 100");return value;}
+    private static boolean parseOptionalBoolean(String raw,String name){if(raw==null||raw.isEmpty())return false;if("true".equalsIgnoreCase(raw))return true;if("false".equalsIgnoreCase(raw))return false;throw new IllegalArgumentException(name+" must be true or false");}
     private static String principalSearch(HttpServletRequest req){String value=req.getParameter("principal");if(value==null)return null;value=value.strip();if(value.codePointCount(0,value.length())>120)throw new IllegalArgumentException("principal search must be at most 120 characters");for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))throw new IllegalArgumentException("principal search contains an invalid character");return value.isEmpty()?null:value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
     private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/configuration(?:/.*)?");}

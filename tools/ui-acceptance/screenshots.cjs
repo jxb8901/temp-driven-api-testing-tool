@@ -21,11 +21,41 @@ async function main() {
         },
       },
       {
+        name: 'explorer-list', fixture: 'explorer-workspace',
+        route: '#/packages/payments',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
+          await page.locator('.att-explorer-table tbody tr').first().waitFor();
+          await page.getByText(/sorting applies to all matching resources/i).waitFor();
+        },
+      },
+      {
         name: 'explorer-debug', fixture: 'explorer-workspace',
         route: '#/packages/payments/resources/template/checkout',
         wait: async page => {
           await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
           await page.getByRole('heading', { name: 'checkout' }).waitFor();
+          await page.locator('.att-code-editor[aria-label="Safe resource definition"] .cm-line')
+            .filter({ hasText: '"name"' }).waitFor();
+        },
+      },
+      {
+        name: 'configuration', fixture: 'explorer-workspace',
+        route: '#/configuration/payments?tab=source&file=config%2Fapplication.yaml',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'Configuration', exact: true }).waitFor();
+          await page.getByText('Safe read-only source').waitFor();
+          await page.getByText('environment: dev', { exact: false }).waitFor();
+          await page.locator('.att-config-source-view .cm-line').filter({ hasText: 'environment:' }).waitFor();
+        },
+      },
+      {
+        name: 'quick-load', fixture: 'explorer-workspace',
+        route: '#/quick-load/payments/template/checkout',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'Quick Load', exact: true }).waitFor();
+          await page.getByText(/package policy or Server fallback is loaded/i).waitFor();
+          await page.getByText('template · checkout', { exact: true }).waitFor();
         },
       },
       {
@@ -93,7 +123,7 @@ async function main() {
     }
     await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
       generatedAt: new Date().toISOString(),
-      repositoryVersion: '4.1.4',
+      repositoryVersion: '4.2.0',
       browser: await browser.version(),
       playwright: require('playwright/package.json').version,
       fixtureOrigin: fixture.origin,

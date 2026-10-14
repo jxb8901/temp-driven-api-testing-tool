@@ -42,10 +42,15 @@ public class WorkerRequest {
     public String inspectionEnvironment;
     public String inspectionOtherEnvironment;
     public String inspectionSection;
+    public Boolean inspectionIncludeInherited;
+    public String inspectionPath;
+    public String inspectionOrigin;
     public String inspectionResourceId;
     public String inspectionTargetId;
     public String draftResourceId;
     public String inspectionQuery;
+    public String inspectionSort;
+    public String inspectionDirection;
     public Integer inspectionOffset;
     public Integer inspectionLimit;
     public String expectedRevisionDigest;

@@ -43,6 +43,19 @@ public final class TestdataDescriptor {
     public boolean generated() { return from != null; }
     public TestdataSelectionPolicy selection() { return selection; }
 
+    /** Safe authored generator metadata for an explicit bounded preview. */
+    public Map<String, Object> generatorDefinition() {
+        if (!generated()) return Collections.emptyMap();
+        Map<String, Object> sequence = new LinkedHashMap<String, Object>();
+        sequence.put("from", from);
+        sequence.put("to", Long.valueOf(Math.addExact(from.longValue(), count - 1L)));
+        sequence.put("format", format);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("generate", Collections.singletonMap("seq", Collections.unmodifiableMap(sequence)));
+        result.put("record", immutable(recordTemplate));
+        return Collections.unmodifiableMap(result);
+    }
+
     public Object record(long index) {
         if (index < 0 || index >= count) throw new IndexOutOfBoundsException("Testdata record index out of range");
         if (from == null) return immutable(literalRecords.get((int) index));

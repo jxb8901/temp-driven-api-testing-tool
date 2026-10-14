@@ -16,6 +16,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarInputStream;
@@ -32,9 +33,7 @@ class ServerWarUiIT {
     void packagedWarServesAuthenticatedUiAssetsUnderNonRootContext() throws Exception {
         Path war = Path.of(System.getProperty("att.server.war"));
         assertTrue(Files.isRegularFile(war), "Packaged server WAR must exist: " + war);
-        Path localHome=Files.createDirectories(temp.resolve("att-home"));
-        Path localLib=Files.createDirectories(localHome.resolve("lib"));
-        writeWorkerRuntime(localLib.resolve("att-local-"+ServerBuildInfo.PRODUCT+".jar"));
+        Path localHome = createScheduledLocalRuntime();
 
         assertServerApplicationJar(war);
 
@@ -43,12 +42,17 @@ class ServerWarUiIT {
                         + "<user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/>"
                         + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER,ATT_SCHEDULE_ADMIN\"/></tomcat-users>");
         Path packages = Files.createDirectories(temp.resolve("packages"));
-        Path dummyPackage = Files.createDirectories(packages.resolve("dummy"));
+        Path packageRoot = Files.createDirectories(packages.resolve("payments"));
+        writeScheduledPackage(packageRoot);
+        // Keep Flow-link inspection in this isolated browser fixture, away from the scheduler capacity fixture.
+        writeReferenceFlowSource(packageRoot);
         Path config = Files.writeString(temp.resolve("server.yaml"),
-                "server:\n  dataDir: " + temp.resolve("data") + "\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n"
+                "server:\n  dataDir: " + yaml(temp.resolve("data")) + "\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n"
+                        + "  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
+                        + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n        - templates/SCHEDULED/payload/request.txt\n"
                         + "  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n"
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"
-                        + "packages:\n  allowedRoots:\n    - " + packages + "\n  entries:\n    dummy: " + dummyPackage + "\n");
+                        + "packages:\n  allowedRoots:\n    - " + yaml(packages) + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
         String oldConfig = System.getProperty("att.server.config");
         String oldHome = System.getProperty("att.home");
         System.setProperty("att.server.config", config.toString());
@@ -66,6 +70,7 @@ class ServerWarUiIT {
         try {
             tomcat.start();
             int port = tomcat.getConnector().getLocalPort();
+            String origin = "http://127.0.0.1:" + port;
             assertEquals(401, get(port, "/tools/att/ui/index.html", null));
             String auth = "Basic " + Base64.getEncoder().encodeToString(
                     "att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -111,6 +116,22 @@ class ServerWarUiIT {
                     connection.disconnect();
                 }
             }
+            String api = "/tools/att/api/v1";
+            JsonNode flowResources = getJson(port, api + "/packages/payments/resources?type=flow", scheduleAdminAuth);
+            JsonNode referenceFlow = null;
+            for (JsonNode item : flowResources.path("items")) {
+                if ("reference.flow.v1".equals(item.path("logicalId").asText())) referenceFlow = item;
+            }
+            assertNotNull(referenceFlow, flowResources.toString());
+            JsonNode referenceFlowSource = getJson(port, api + "/packages/payments/resources/flow/"
+                    + referenceFlow.path("resourceId").asText() + "/source", scheduleAdminAuth);
+            assertTrue(referenceFlowSource.path("available").asBoolean(), referenceFlowSource.toString());
+            assertEquals("templates/flows/reference/flow.yaml", referenceFlowSource.path("logicalPath").asText());
+            assertTrue(referenceFlowSource.path("text").asText().contains("&{templates/SCHEDULED/payload/request.xml}"),
+                    referenceFlowSource.toString());
+            assertEquals("templates/SCHEDULED/payload/request.xml",
+                    referenceFlowSource.path("fileReferences").get(0).path("logicalPath").asText(), referenceFlowSource.toString());
+            if ("1".equals(System.getenv("ATT_UI_SERVER_PLAYWRIGHT"))) runServerUiPlaywright(origin);
         } finally {
             try { tomcat.stop(); } finally { tomcat.destroy(); }
             if (oldConfig == null) System.clearProperty("att.server.config");
@@ -166,7 +187,8 @@ class ServerWarUiIT {
         Path javaBin = Path.of(System.getProperty("java.home"), "bin", System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
         Path config = Files.writeString(temp.resolve("scheduled-war-server.yaml"),
                 "server:\n  dataDir: " + yaml(temp.resolve("scheduled-war-data")) + "\n  javaExecutable: " + yaml(javaBin)
-                        + "\n  authenticationRequired: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
+                        + "\n  authenticationRequired: true\n  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
+                        + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n        - templates/SCHEDULED/payload/request.txt"
                         + "\n  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n    minimumIntervalMinutes: 1\n    pollIntervalSeconds: 5\n    maxConcurrentRuns: 1"
                         + "\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - " + yaml(packages)
                         + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
@@ -180,6 +202,7 @@ class ServerWarUiIT {
         String api = "/tools/att/api/v1";
         String firstScheduleId;
         String secondScheduleId;
+        String inlineScheduleId;
         String jobId;
         try {
             tomcat = startScheduledWar(war, users);
@@ -188,6 +211,79 @@ class ServerWarUiIT {
             assertEquals(401, get(port, api + "/load-schedules", null));
             assertEquals(403, get(port, api + "/load-schedules", ordinary));
             assertEquals(200, get(port, api + "/load-schedules", admin));
+            String configurationFilesPath = api + "/packages/payments/configuration/files?path=config&limit=100";
+            assertEquals(401, get(port, configurationFilesPath, null), "Configuration file listings retain the Tomcat authentication boundary.");
+            JsonNode configurationFiles = getJson(port, configurationFilesPath, ordinary);
+            assertEquals("ready", configurationFiles.path("state").asText());
+            JsonNode listedConfigSource = null;
+            JsonNode safeHelperFiles = getJson(port, api + "/packages/payments/configuration/files?path=config/tools&limit=100", ordinary);
+            assertEquals("ready", safeHelperFiles.path("state").asText());
+            JsonNode listedSafeHelper = null;
+            for (JsonNode item : configurationFiles.path("items")) {
+                if ("config/config.yaml".equals(item.path("path").asText())) listedConfigSource = item;
+            }
+            for (JsonNode item : safeHelperFiles.path("items")) {
+                if ("config/tools/att-helper.sh".equals(item.path("path").asText())) listedSafeHelper = item;
+            }
+            assertNotNull(listedConfigSource);
+            assertFalse(listedConfigSource.path("sourceAvailable").asBoolean(),
+                    "The package config YAML stays unavailable unless the Server source policy explicitly permits it.");
+            assertEquals("visibility-policy", listedConfigSource.path("reason").asText());
+            assertNotNull(listedSafeHelper);
+            assertTrue(listedSafeHelper.path("sourceAvailable").asBoolean());
+            String configurationSourcePath = api + "/packages/payments/configuration/source?path="
+                    + java.net.URLEncoder.encode("config/tools/att-helper.sh", java.nio.charset.StandardCharsets.UTF_8);
+            assertEquals(401, get(port, configurationSourcePath, null), "Configuration source retains the Tomcat authentication boundary.");
+            JsonNode configurationSource = getJson(port, configurationSourcePath, ordinary);
+            assertTrue(configurationSource.path("available").asBoolean());
+            assertEquals("config/tools/att-helper.sh", configurationSource.path("logicalPath").asText());
+            assertTrue(configurationSource.path("text").asText().contains("# Safe configuration helper source"));
+            String recordsPath = api + "/packages/payments/configuration/testdata/generatedAccounts/records?environment=SIT&limit=5";
+            assertEquals(401, get(port, recordsPath, null), "Testdata records remain behind the Tomcat authentication boundary.");
+            JsonNode generatedMetadata = getJson(port, recordsPath, ordinary);
+            assertEquals("preview-required", generatedMetadata.path("state").asText());
+            assertEquals(121, generatedMetadata.path("recordCount").asInt());
+            assertEquals(0, generatedMetadata.path("records").size(), "Generated rows must stay unloaded until explicitly requested.");
+            JsonNode generatedPreview = getJson(port, recordsPath + "&previewGenerated=true", ordinary);
+            assertEquals("ready", generatedPreview.path("state").asText());
+            assertEquals(5, generatedPreview.path("records").size());
+            assertEquals(1000, generatedPreview.path("records").get(0).path("sequence").asInt());
+
+            String referencedSourcePath = api + "/packages/payments/configuration/source?path="
+                    + java.net.URLEncoder.encode("templates/SCHEDULED/payload/request.txt", java.nio.charset.StandardCharsets.UTF_8)
+                    + "&origin=" + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8);
+            assertEquals(401, get(port, referencedSourcePath, null), "Referenced package files retain the Server authentication boundary.");
+            JsonNode referencedSource = getJson(port, referencedSourcePath, ordinary);
+            assertTrue(referencedSource.path("available").asBoolean());
+            assertEquals("templates/SCHEDULED/payload/request.txt", referencedSource.path("logicalPath").asText());
+            assertEquals("text", referencedSource.path("format").asText());
+            assertTrue(referencedSource.path("text").asText().contains("request: payload"));
+            assertFalse(referencedSource.path("text").asText().contains("template-secret"),
+                    "Safe source projection must scrub classified-looking password values before the UI receives them.");
+            assertTrue(referencedSource.path("redacted").asBoolean());
+            String deniedSourcePath = api + "/packages/payments/configuration/source?path="
+                    + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8)
+                    + "&origin=" + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8);
+            JsonNode deniedSource = getJson(port, deniedSourcePath, ordinary);
+            assertFalse(deniedSource.path("available").asBoolean());
+            assertEquals("visibility-policy", deniedSource.path("reason").asText());
+
+            Map<String, Object> inlineScenario = Map.of(
+                    "schemaVersion", "att-load/v1.6",
+                    "workloads", List.of(Map.of("id", "scheduled-snapshot", "target", Map.of("type", "template", "id", "SCHEDULED"),
+                            "load", Map.of("users", 1, "duration", "1s"))));
+            JsonNode inlineDraft = apiJson(port, "POST", api + "/drafts/load", admin, origin,
+                    Map.of("packageId", "payments", "environment", "SIT", "scenario", inlineScenario), 201);
+            Map<String, Object> inlineScheduleInput = new java.util.LinkedHashMap<>();
+            inlineScheduleInput.put("name", "Validated UI snapshot");inlineScheduleInput.put("packageId", "payments");
+            inlineScheduleInput.put("draftId", inlineDraft.path("draftId").asText());inlineScheduleInput.put("environment", "SIT");
+            inlineScheduleInput.put("timezone", "UTC");inlineScheduleInput.put("cron", "0 2 * * *");
+            inlineScheduleInput.put("maxConcurrentRuns", 1);inlineScheduleInput.put("enabled", false);
+            JsonNode inlineSchedule = apiJson(port, "POST", api + "/load-schedules", admin, origin, inlineScheduleInput, 201);
+            inlineScheduleId = inlineSchedule.path("id").asText();
+            assertTrue(inlineSchedule.path("inlineSnapshot").asBoolean());
+            assertFalse(inlineSchedule.has("inlineScenario"), "Validated scenario contents must not be returned in schedule API views.");
+            assertTrue(inlineSchedule.path("scenario").isNull());
 
             JsonNode preview = apiJson(port, "POST", api + "/load-schedules/preview", admin, origin,
                     Map.of("timezone", "UTC", "cron", "0 2 * * *"), 200);
@@ -245,7 +341,11 @@ class ServerWarUiIT {
             port = tomcat.getConnector().getLocalPort();
             origin = "http://127.0.0.1:" + port;
             JsonNode restored = getJson(port, api + "/load-schedules", admin);
-            assertEquals(2, restored.path("items").size(), "Schedules must persist across a Tomcat restart.");
+            assertEquals(3, restored.path("items").size(), "Path-based schedules and the validated snapshot must persist across a Tomcat restart.");
+            JsonNode restoredInlineSchedule = getJson(port, api + "/load-schedules/" + inlineScheduleId, admin);
+            assertTrue(restoredInlineSchedule.path("inlineSnapshot").asBoolean());
+            assertTrue(restoredInlineSchedule.path("scenario").isNull());
+            assertFalse(restoredInlineSchedule.has("inlineScenario"));
             assertTrue(getJson(port, api + "/load-schedules/" + firstScheduleId, admin).path("enabled").asBoolean(),
                     "The resumed schedule state must persist across restart.");
             assertEquals(jobId, getJson(port, api + "/load-schedules/" + firstScheduleId + "/executions", admin)
@@ -257,6 +357,7 @@ class ServerWarUiIT {
                     .path("items").get(0).path("reason").asText(), "Deleting a schedule must retain its occurrence history.");
             assertEquals(200, apiStatus(port, "DELETE", api + "/load-schedules/" + firstScheduleId, admin, origin, null));
             assertEquals(404, get(port, api + "/load-schedules/" + firstScheduleId, admin));
+            assertEquals(200, apiStatus(port, "DELETE", api + "/load-schedules/" + inlineScheduleId, admin, origin, null));
         } finally {
             if (tomcat != null) {
                 try { tomcat.stop(); } finally { tomcat.destroy(); }
@@ -305,15 +406,51 @@ class ServerWarUiIT {
         Files.createDirectories(packageRoot.resolve("config"));
         copySchemas(packageRoot);
         Files.writeString(packageRoot.resolve("config/config.yaml"),
-                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [config/testdata/generated.yaml]\n"
                         + "testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        Path testdata = Files.createDirectories(packageRoot.resolve("config/testdata"));
+        Path tools = Files.createDirectories(packageRoot.resolve("config/tools"));
+        Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\nexit 0\n");
+        Files.writeString(testdata.resolve("generated.yaml"),
+                "schemaVersion: att-testdata/v1.0\nid: generatedAccounts\nrecords:\n  generate:\n    seq:\n      from: 1000\n      to: 1120\n      format: '%06d'\n  record:\n    id: 'A-%{seq}'\n"
+                        + "selection:\n  strategy: sequential\n  exhaustion: stop\n");
         Files.writeString(templates.resolve("template.yaml"),
                 "schemaVersion: att-template/v3.6\nname: SCHEDULED\ndescription: stock Tomcat scheduler test\nactions:\n"
                         + "  message:\n    type: log\n    message: scheduled Load integration\n");
+        Path payload = Files.createDirectories(templates.resolve("payload"));
+        Files.writeString(payload.resolve("request.txt"), "request: payload\npassword: template-secret\n");
         Files.writeString(loads.resolve("scenario.yaml"),
                 "schemaVersion: att-load/v1.6\nworkloads:\n  - id: scheduled-long-run\n    target:\n      type: template\n      id: SCHEDULED\n"
                         + "    load:\n      users: 1\n      duration: 30s\n    execution:\n      thinkTime: 1s\n");
         Files.writeString(loads.resolve("invalid.yaml"), "schemaVersion: att-load/invalid\nworkloads: []\n");
+    }
+
+    private static void writeReferenceFlowSource(Path packageRoot) throws Exception {
+        Path payload = Files.createDirectories(packageRoot.resolve("templates/SCHEDULED/payload"));
+        Path referenceFlow = Files.createDirectories(packageRoot.resolve("templates/flows/reference"));
+        Files.writeString(payload.resolve("request.xml"), "<request>safe payload</request>\n");
+        Files.writeString(referenceFlow.resolve("flow.yaml"),
+                "schemaVersion: att-flow/v3.6\nid: reference.flow.v1\nname: Reference Flow\n"
+                        + "description: Exercises safe package file links in a Flow source.\nactions:\n"
+                        + "  inspectPayload:\n    type: log\n    message: \"Request &{templates/SCHEDULED/payload/request.xml}\"\n");
+    }
+
+    private void runServerUiPlaywright(String origin) throws Exception {
+        Path harness = Path.of("tools", "ui-acceptance").toAbsolutePath();
+        Path output = temp.resolve("server-ui-playwright.log");
+        ProcessBuilder builder = new ProcessBuilder("node", "server-api-smoke.cjs")
+                .directory(harness.toFile()).redirectErrorStream(true).redirectOutput(output.toFile());
+        builder.environment().put("ATT_UI_SERVER_ORIGIN", origin);
+        builder.environment().put("ATT_UI_SERVER_USERNAME", "schedule-admin");
+        builder.environment().put("ATT_UI_SERVER_PASSWORD", "secret");
+        Process process = builder.start();
+        if (!process.waitFor(120, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            fail("Playwright did not finish its packaged-WAR API smoke within 120 seconds. "
+                    + (Files.exists(output) ? Files.readString(output) : ""));
+        }
+        String log = Files.exists(output) ? Files.readString(output) : "";
+        assertEquals(0, process.exitValue(), "Playwright against the authenticated non-root Tomcat WAR failed:\n" + log);
     }
 
     private static void copySchemas(Path packageRoot) throws Exception {
@@ -453,24 +590,6 @@ class ServerWarUiIT {
         tomcat.addWebapp("/tools/att", war.toString());
         tomcat.start();
         return tomcat;
-    }
-
-    private static void writeWorkerRuntime(Path jarPath) throws Exception {
-        try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(jarPath))) {
-            for (String name : new String[] {
-                    "att/worker/WorkerMain.class",
-                    "att/server/api/WorkerRequest.class",
-                    "att/server/api/internal/DiagnosticSanitizer.class",
-                    "att-build.properties"
-            }) {
-                jar.putNextEntry(new JarEntry(name));
-                if (name.equals("att-build.properties"))
-                    jar.write("att.version=4.1.4\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                else
-                    jar.write(0);
-                jar.closeEntry();
-            }
-        }
     }
 
     private static void assertJobDeepLink(int port, String authorization) throws Exception {

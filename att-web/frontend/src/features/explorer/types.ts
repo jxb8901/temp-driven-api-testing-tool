@@ -20,6 +20,7 @@ export interface ResourceSummary {
   sourceAvailable?: boolean;
   sourceReason?: string | null;
   redactionEnabled?: boolean;
+  sourcePath?: string;
   diagnostics?: Diagnostic[];
   provenance?: { suite?: string; [key: string]: unknown };
   tags?: string[];
@@ -33,6 +34,8 @@ export interface ResourceReference {
   logicalId?: string;
   name?: string;
   resolution?: string;
+  targetKind?: string;
+  callSite?: Record<string, unknown>;
 }
 
 export interface Diagnostic {
@@ -59,7 +62,22 @@ export interface SourceProjection {
   available: boolean;
   text?: string;
   format?: string;
+  logicalPath?: string;
   reason?: string;
+  fileReferences?: SafeSourceFileReference[];
+  fileReferencesTruncated?: boolean;
+}
+
+export interface SafeSourceFileReference {
+  referenceId: string;
+  logicalPath: string;
+  available?: boolean;
+}
+
+export interface ResourceSourceReference {
+  type: ResourceIdentity['type'];
+  resourceId: string;
+  referenceId: string;
 }
 
 export interface EnvironmentProfile {
@@ -83,8 +101,11 @@ export interface ConfigurationComparisonField {
 
 export interface ConfigurationEntry {
   id: string;
+  source?: string;
+  generated?: boolean;
   fields?: Record<string, ConfigurationField>;
   entries?: ConfigurationEntry[];
+  references?: ResourceReference[];
 }
 
 export interface ConfigurationSection {
@@ -94,6 +115,54 @@ export interface ConfigurationSection {
   root?: { entryCount?: number };
   profiles?: Array<{ environment: string; state: string }>;
   entries?: ConfigurationEntry[];
+}
+
+
+export interface ConfigurationFileNode {
+  name: string;
+  path: string;
+  kind: 'file' | 'directory';
+  sizeBytes?: number;
+  format?: string;
+  sourceAvailable?: boolean;
+  reason?: string;
+  references?: ResourceReference[];
+  diagnostics?: Diagnostic[];
+}
+
+export interface ConfigurationFilePage {
+  path?: string;
+  items: ConfigurationFileNode[];
+  total?: number;
+  truncated?: boolean;
+  nextOffset?: number | null;
+  nextCursor?: string | null;
+}
+
+export interface TestdataRecord {
+  index: number;
+  sequence?: number;
+  value: JsonValue;
+  redacted?: boolean;
+}
+
+export interface TestdataRecordsResponse {
+  descriptorId: string;
+  source?: string;
+  environment?: string;
+  state?: string;
+  generated?: boolean;
+  previewRequired?: boolean;
+  previewGenerated?: boolean;
+  recordCount?: number;
+  generation?: JsonValue;
+  offset: number;
+  limit: number;
+  total: number;
+  nextOffset?: number | null;
+  records: TestdataRecord[];
+  diagnostics?: Diagnostic[];
+  redactionEnabled?: boolean;
 }
 
 export interface ConfigurationResponse {
@@ -149,7 +218,11 @@ export interface ResourceQuery {
   type?: ResourceType | 'all';
   cursor?: string;
   limit?: number;
+  sort?: ResourceSortField;
+  direction?: 'asc' | 'desc';
 }
+
+export type ResourceSortField = 'name' | 'type' | 'logicalId' | 'state';
 
 export interface EffectiveConfigurationQuery {
   environment?: string;
@@ -162,6 +235,7 @@ export interface ConfigurationComparisonQuery {
   left: string;
   right: string;
   section: string;
+  includeInherited?: boolean;
   offset?: number;
   limit?: number;
 }
@@ -171,9 +245,13 @@ export interface ExplorerApi {
   listResources(packageId: string, query: ResourceQuery, signal?: AbortSignal): Promise<ResourcePage>;
   getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail>;
   getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection>;
+  getResourceSourceFile?(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection>;
   getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse>;
   getEffectiveConfiguration(packageId: string, query: EffectiveConfigurationQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
   compareConfiguration(packageId: string, query: ConfigurationComparisonQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
+  listConfigurationFiles?(packageId: string, path?: string, query?: string, offset?: number, signal?: AbortSignal): Promise<ConfigurationFilePage>;
+  getConfigurationFileSource?(packageId: string, path: string, origin?: string, signal?: AbortSignal): Promise<SourceProjection>;
+  getTestdataRecords?(packageId: string, descriptorId: string, query: { environment?: string; offset?: number; limit?: number; previewGenerated?: boolean }, signal?: AbortSignal): Promise<TestdataRecordsResponse>;
   getDebugForm(identity: ResourceIdentity, environment?: string, signal?: AbortSignal): Promise<DebugFormResponse>;
   previewDebug(input: DebugDraftRequest, signal?: AbortSignal): Promise<DraftResponse>;
   submitDebug(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob>;
@@ -185,12 +263,14 @@ export interface ExplorerPageProps {
   api: ExplorerApi;
   packageId: string;
   /** Route values are untrusted URL segments; Explorer validates the type before API use. */
-  resourceRoute: { type: string; resourceId: string } | null;
+  resourceRoute: { type: string; resourceId: string; tab?: 'definition' | 'source' | 'relations' } | null;
   environment: string;
   principalLabel?: string;
-  onResourceRouteChange: (route: Omit<ResourceIdentity, 'packageId'> | null) => void;
+  onResourceRouteChange: (route: (Omit<ResourceIdentity, 'packageId'> & { tab?: 'definition' | 'source' | 'relations' }) | null) => void;
   onEnvironmentChange: (environment: string) => void;
   onJobAccepted: (jobId: string) => void;
   onPrincipalLabelChange?: (label: string) => void;
   onOpenQuickLoad?: (identity: ResourceIdentity) => void;
+  onOpenConfiguration?: (identity: ResourceIdentity) => void;
+  onOpenConfigurationFile?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
 }

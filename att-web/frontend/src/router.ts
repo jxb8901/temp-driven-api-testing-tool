@@ -3,12 +3,18 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 export interface ResourceRoute {
   type: string;
   resourceId: string;
+  tab?: 'definition' | 'source' | 'relations';
 }
+
+export type ConfigurationTab = 'source' | 'declared' | 'effective' | 'compare' | 'testdata';
+export interface ResourceSourceReferenceRoute { type: 'case' | 'template' | 'flow' | 'tool'; resourceId: string; referenceId: string }
 
 export type AppRoute =
   | { kind: 'dashboard' }
   | { kind: 'packages' }
   | { kind: 'package'; packageId: string; resource?: ResourceRoute }
+  | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; tab?: ConfigurationTab }
+  | { kind: 'quick-load'; packageId: string; target: ResourceRoute; environment?: string }
   | { kind: 'jobs'; jobId?: string }
   | { kind: 'load'; packageId?: string }
   | { kind: 'schedules' }
@@ -16,8 +22,13 @@ export type AppRoute =
 
 export function parseRoute(hash: string): AppRoute {
   let parts: string[];
+  let query: URLSearchParams;
   try {
-    parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+    const withoutHash = hash.replace(/^#/, '');
+    const queryIndex = withoutHash.indexOf('?');
+    const pathname = queryIndex < 0 ? withoutHash : withoutHash.slice(0, queryIndex);
+    query = new URLSearchParams(queryIndex < 0 ? '' : withoutHash.slice(queryIndex + 1));
+    parts = pathname.replace(/^\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
   } catch {
     return { kind: 'dashboard' };
   }
@@ -25,9 +36,40 @@ export function parseRoute(hash: string): AppRoute {
   if (parts[0] === 'packages' && parts.length === 1) return { kind: 'packages' };
   if (parts[0] === 'packages' && parts[1]) {
     if (parts.length === 5 && parts[2] === 'resources') {
-      return { kind: 'package', packageId: parts[1], resource: { type: parts[3], resourceId: parts[4] } };
+      const rawDetailTab = query.get('detail');
+      const detailTab = rawDetailTab === 'definition' || rawDetailTab === 'source' || rawDetailTab === 'relations'
+        ? rawDetailTab : undefined;
+      return { kind: 'package', packageId: parts[1], resource: {
+        type: parts[3], resourceId: parts[4], ...(detailTab && detailTab !== 'definition' ? { tab: detailTab } : {}),
+      } };
     }
     return { kind: 'package', packageId: parts[1] };
+  }
+  if (parts[0] === 'configuration') {
+    const rawTab = query.get('tab');
+    const tab: ConfigurationTab | undefined = rawTab === 'source' || rawTab === 'declared' || rawTab === 'effective' || rawTab === 'compare' || rawTab === 'testdata' ? rawTab : undefined;
+    const sourceType = query.get('sourceType');
+    const sourceResourceId = query.get('sourceResourceId');
+    const sourceReferenceId = query.get('sourceReferenceId');
+    const sourceReference = sourceType && ['case', 'template', 'flow', 'tool'].includes(sourceType)
+      && sourceResourceId && sourceResourceId.length <= 512
+      && sourceReferenceId && /^[0-9a-f]{64}$/.test(sourceReferenceId)
+      ? { type: sourceType as ResourceSourceReferenceRoute['type'], resourceId: sourceResourceId, referenceId: sourceReferenceId } : undefined;
+    return {
+      kind: 'configuration',
+      packageId: parts[1] || undefined,
+      environment: query.has('environment') ? query.get('environment') || '' : undefined,
+      filePath: query.get('file') || undefined,
+      ...(query.get('origin') ? { fileOrigin: query.get('origin')! } : {}),
+      ...(sourceReference ? { sourceReference } : {}),
+      tab,
+    };
+  }
+  if (parts[0] === 'quick-load' && parts[1] && parts[2] && parts[3]) {
+    return {
+      kind: 'quick-load', packageId: parts[1], target: { type: parts[2], resourceId: parts[3] },
+      environment: query.has('environment') ? query.get('environment') || '' : undefined,
+    };
   }
   if (parts[0] === 'jobs') return parts[1] ? { kind: 'jobs', jobId: parts[1] } : { kind: 'jobs' };
   if (parts[0] === 'advanced-load') return parts[1] ? { kind: 'load', packageId: parts[1] } : { kind: 'load' };
@@ -42,9 +84,32 @@ export function formatRoute(route: AppRoute): string {
     case 'packages': return '#/packages';
     case 'package': {
       const root = '#/packages/' + encodeURIComponent(route.packageId);
-      return route.resource
-        ? root + '/resources/' + encodeURIComponent(route.resource.type) + '/' + encodeURIComponent(route.resource.resourceId)
-        : root;
+      if (!route.resource) return root;
+      const resource = root + '/resources/' + encodeURIComponent(route.resource.type) + '/' + encodeURIComponent(route.resource.resourceId);
+      if (!route.resource.tab || route.resource.tab === 'definition') return resource;
+      const query = new URLSearchParams({ detail: route.resource.tab });
+      return resource + '?' + query.toString();
+    }
+    case 'configuration': {
+      const query = new URLSearchParams();
+      if (route.environment !== undefined) query.set('environment', route.environment);
+      if (route.filePath) query.set('file', route.filePath);
+      if (route.fileOrigin) query.set('origin', route.fileOrigin);
+      if (route.sourceReference) {
+        query.set('sourceType', route.sourceReference.type);
+        query.set('sourceResourceId', route.sourceReference.resourceId);
+        query.set('sourceReferenceId', route.sourceReference.referenceId);
+      }
+      if (route.tab) query.set('tab', route.tab);
+      const suffix = query.toString();
+      return '#/configuration' + (route.packageId ? '/' + encodeURIComponent(route.packageId) : '') + (suffix ? '?' + suffix : '');
+    }
+    case 'quick-load': {
+      const query = new URLSearchParams();
+      if (route.environment !== undefined) query.set('environment', route.environment);
+      const suffix = query.toString();
+      return '#/quick-load/' + encodeURIComponent(route.packageId) + '/' + encodeURIComponent(route.target.type)
+        + '/' + encodeURIComponent(route.target.resourceId) + (suffix ? '?' + suffix : '');
     }
     case 'jobs': return route.jobId ? '#/jobs/' + encodeURIComponent(route.jobId) : '#/jobs';
     case 'load': return route.packageId ? '#/advanced-load/' + encodeURIComponent(route.packageId) : '#/advanced-load';

@@ -4,8 +4,23 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExplorerPage } from './ExplorerPage';
 import { SourceViewer, sourceViewerLimits } from './SourceViewer';
+import { ConfigurationExplorer } from './ConfigurationExplorer';
 import { TypedSidecarForm } from './TypedSidecarForm';
 import type { ConfigurationResponse, ExplorerApi, JsonObject, ResourceIdentity, ResourceSummary } from './types';
+
+vi.mock('../code/CodeEditor', () => ({
+  CodeEditor: ({ value, label, readOnly = true, onChange, sourcePath, fileReferences, onFileReference }: {
+    value: string; label: string; readOnly?: boolean; onChange?: (value: string) => void; sourcePath?: string;
+    fileReferences?: Array<{ referenceId: string; logicalPath: string }>;
+    onFileReference?: (path: string, origin?: string, referenceId?: string) => void;
+  }) => <section className="att-code-editor" aria-label={label}>
+    <div className="att-code-host">{readOnly ? <pre>{value}</pre>
+      : <textarea aria-label={label} value={value} onChange={event => onChange?.(event.currentTarget.value)} />}</div>
+    {fileReferences?.[0] && <button type="button" onClick={() => onFileReference?.('./payloads/request.xml', sourcePath, fileReferences[0].referenceId)}>Open safe referenced file</button>}
+    {readOnly && <button type="button" onClick={() => void navigator.clipboard?.writeText(value)}>Copy displayed source</button>}
+  </section>,
+  detectCodeLanguage: () => 'yaml',
+}));
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -89,17 +104,9 @@ describe('Explorer source viewer', () => {
 
     await render(<SourceViewer api={api} identity={identity} available active />);
     expect(container.textContent).toMatch(/5[,.]?000 lines/);
-    expect(container.querySelectorAll('.att-source-line').length).toBeLessThanOrEqual(60);
-    expect(container.querySelector('.att-source-line')?.textContent).toContain('line-1: <img src=x onerror=alert(1)>');
+    expect(container.querySelector('.att-code-editor pre')?.textContent).toContain('line-1: <img src=x onerror=alert(1)>');
     expect(container.querySelector('img,script,svg')).toBeNull();
-
-    const viewport = container.querySelector<HTMLElement>('.att-source-viewport');
-    expect(viewport).not.toBeNull();
-    act(() => {
-      viewport!.scrollTop = 4990 * 20;
-      viewport!.dispatchEvent(new Event('scroll'));
-    });
-    expect(container.textContent).toContain('line-5000: value');
+    expect(container.querySelector('.att-code-editor pre')?.textContent).toContain('line-5000: value');
 
     click(button('Refresh source'));
     await settle();
@@ -119,7 +126,7 @@ describe('Explorer source viewer', () => {
     const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, text: '', format: 'yaml' })) });
     await render(<SourceViewer api={api} identity={identity} available active />);
     expect(container.textContent).toContain('Safe source is empty.');
-    expect(button('Copy displayed source').disabled).toBe(true);
+    expect(container.querySelector('.att-code-editor')).toBeNull();
 
     const authApi = apiWith({ getSafeSource: vi.fn(async () => { throw Object.assign(new Error('token=must-not-display'), { status: 401 }); }) });
     await render(<SourceViewer api={authApi} identity={identity} available active />);
@@ -127,12 +134,28 @@ describe('Explorer source viewer', () => {
     expect(container.textContent).not.toContain('token=must-not-display');
   });
 
+  it('opens only a server-projected package file reference using its opaque reference id', async () => {
+    const referenceId = 'a'.repeat(64);
+    const identity: ResourceIdentity = { packageId: 'payments', type: 'flow', resourceId: 'checkout-flow' };
+    const openReference = vi.fn();
+    const api = apiWith({ getSafeSource: vi.fn(async () => ({
+      available: true, text: 'request: &{./payloads/request.xml}', format: 'yaml', logicalPath: 'templates/checkout/flow.yaml',
+      fileReferences: [{ referenceId, logicalPath: 'templates/checkout/payloads/request.xml', available: true }],
+    })) });
+    await render(<SourceViewer api={api} identity={identity} available active onFileReference={openReference} />);
+
+    click(button('Open safe referenced file'));
+    expect(openReference).toHaveBeenCalledWith('templates/checkout/payloads/request.xml', 'templates/checkout/flow.yaml', {
+      type: 'flow', resourceId: 'checkout-flow', referenceId,
+    });
+  });
+
   it('caps the safe source projection before rendering', async () => {
     const text = 'x'.repeat(sourceViewerLimits.maxCharacters + 100);
     const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, text })) });
     await render(<SourceViewer api={api} identity={{ packageId: 'p', type: 'template', resourceId: 'r' }} available active />);
     expect(container.textContent).toContain('Source exceeds the viewer limit.');
-    expect(container.querySelectorAll('.att-source-line').length).toBeLessThanOrEqual(60);
+    expect(container.querySelector('.att-code-editor pre')?.textContent?.length).toBeLessThanOrEqual(sourceViewerLimits.maxCharacters);
   });
 });
 
@@ -172,7 +195,7 @@ describe('typed sidecar form', () => {
     setValue(advanced!, '{');
     await settle();
     expect(container.textContent).toContain('Expected property name or');
-    expect(advanced!.getAttribute('aria-invalid')).toBe('true');
+    expect(container.querySelector('.att-sidecar-advanced [aria-invalid="true"]')).not.toBeNull();
 
     setValue(advanced!, '{"inputs":{"count":4},"arguments":{"enabled":true,"nested":{"ok":true}}}');
     await settle();
@@ -198,6 +221,92 @@ describe('typed sidecar form', () => {
 });
 
 describe('Explorer page integration', () => {
+  it('shows an environment-neutral full-width resource list until a package resource is selected', async () => {
+    const flow = resource('flow', 'checkout');
+    const api = apiWith({ listResources: vi.fn(async () => ({ items: [flow], total: 1, nextCursor: null })) });
+    const onResourceRouteChange = vi.fn();
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={onResourceRouteChange}
+      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+    await settle();
+
+    expect(container.querySelector('.att-explorer-workspace')?.classList.contains('is-list-first')).toBe(true);
+    expect(container.querySelector('[aria-label="Resource details"]')?.hasAttribute('hidden')).toBe(true);
+    expect(container.querySelector('[aria-label="Contextual actions"]')?.hasAttribute('hidden')).toBe(true);
+    expect([...container.querySelectorAll('label')].some(label => label.textContent?.includes('Run, Debug, and Load environment'))).toBe(false);
+    expect(container.textContent).toContain('Package resources and counts are independent of runtime environment.');
+    expect(container.querySelector('.att-explorer-table')?.closest('.att-explorer-navigation')).not.toBeNull();
+  });
+
+  it('restores list search, category, sorting, loaded pages, and scroll after returning from a resource route', async () => {
+    const flow = resource('flow', 'flow-1');
+    const listResources = vi.fn(async (_packageId: string, query: { cursor?: string }) => query.cursor === 'flows-page-2'
+      ? { items: [resource('flow', 'flow-51')], total: 51, nextCursor: null }
+      : { items: [flow], total: 51, nextCursor: 'flows-page-2' });
+    const api = apiWith({ listResources });
+    const props = {
+      api, packageId: 'payments-list-state', resourceRoute: null, environment: '',
+      registerUnsavedChanges: () => () => {}, onResourceRouteChange: () => {},
+      onEnvironmentChange: () => {}, onJobAccepted: () => {},
+    };
+    await render(<ExplorerPage {...props} />);
+    const search = container.querySelector<HTMLInputElement>('input[type="search"]')!;
+    setValue(search, 'payment flow');
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
+    click([...container.querySelectorAll<HTMLElement>('[role="tab"]')].find(item => item.textContent === 'Flows')!);
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
+    click(container.querySelector('.att-explorer-sort')!);
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
+    click(button('Load more'));
+    await settle();
+    const scrollContainer = container.querySelector<HTMLDivElement>('.att-explorer-table-scroll')!;
+    scrollContainer.scrollTop = 37;
+    act(() => scrollContainer.dispatchEvent(new Event('scroll', { bubbles: true })));
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 120)); });
+
+    const callsBeforeReturn = listResources.mock.calls.length;
+    await act(async () => root.render(null));
+    await render(<ExplorerPage {...props} resourceRoute={{ type: 'flow', resourceId: 'flow-1' }} />);
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
+
+    expect(container.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('payment flow');
+    expect([...container.querySelectorAll<HTMLElement>('[role="tab"]')].find(item => item.textContent === 'Flows')?.getAttribute('aria-selected')).toBe('true');
+    expect(container.querySelector('.att-explorer-sort')?.textContent).toContain('↓');
+    expect(listResources.mock.calls.slice(callsBeforeReturn).map(call => call[1])).toEqual([
+      expect.objectContaining({ query: 'payment flow', type: 'flow', sort: 'name', direction: 'desc', limit: 50 }),
+      expect.objectContaining({ query: 'payment flow', type: 'flow', sort: 'name', direction: 'desc', cursor: 'flows-page-2', limit: 50 }),
+    ]);
+    expect(container.querySelector<HTMLDivElement>('.att-explorer-table-scroll')?.scrollTop).toBe(37);
+  });
+
+  it('restores the Dependencies deep link and routes resolved references to the target definition', async () => {
+    const origin = resource('flow', 'payment-flow', {
+      references: [{ type: 'template', resourceId: 'payment-template', logicalId: 'payment-template', resolution: 'resolved' }],
+      referencedBy: [],
+    });
+    const api = apiWith({ getResource: vi.fn(async () => ({ resource: origin, definition: {} })) });
+    const onResourceRouteChange = vi.fn();
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={{ type: 'flow', resourceId: 'payment-flow', tab: 'relations' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={onResourceRouteChange}
+      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+    await settle();
+
+    expect(container.querySelector('[data-tab="relations"]')?.getAttribute('aria-selected')).toBe('true');
+    click(button('payment-template'));
+    expect(onResourceRouteChange).toHaveBeenLastCalledWith({ type: 'template', resourceId: 'payment-template', tab: 'definition' });
+
+    const helperApi = apiWith({ getResource: vi.fn(async () => ({ resource: resource('flow', 'helper-caller', {
+      references: [{ type: 'tool', logicalId: 'MQHelper.publish', targetKind: 'helper', resolution: 'resolved' }],
+    }), definition: {} })) });
+    await render(<ExplorerPage api={helperApi} packageId="payments" resourceRoute={{ type: 'flow', resourceId: 'helper-caller', tab: 'relations' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}}
+      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+    await settle();
+    expect(container.textContent).toContain('This call resolves through the package Helper configuration.');
+    expect(container.textContent).toContain('It is not a separate Tool resource');
+    expect([...container.querySelectorAll('button')].some(item => item.textContent === 'MQHelper.publish')).toBe(false);
+  });
+
   it('supports keyboard source tabs, registers dirty sidecar edits, and carries anonymous labels into accepted jobs', async () => {
     const template = resource('template', 'checkout');
     const debugInput: JsonObject = { inputs: { credential: { $attDebugKeepDefault: '/inputs/credential' } }, vars: { retries: 2 } };
@@ -223,7 +332,7 @@ describe('Explorer page integration', () => {
     await render(<ExplorerPage {...props} />);
     await settle();
 
-    const tabs = container.querySelector<HTMLElement>('[role="tablist"]');
+    const tabs = container.querySelector<HTMLElement>('[aria-label="Resource content"]');
     expect(tabs).not.toBeNull();
     act(() => tabs!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
     await settle();
@@ -233,6 +342,8 @@ describe('Explorer page integration', () => {
     click(button('Debug this target'));
     await settle();
     expect(container.textContent).toContain('Hidden package-authored values are preserved');
+    expect(button('Schedule…').disabled).toBe(true);
+    expect(container.textContent).toContain('Debug runs are one-shot. Schedule is available only for validated immutable Load scenarios; Debug draft overrides are not converted to recurring Load jobs.');
     click(container.querySelector('.att-sidecar-keep-default input')!);
     const type = [...container.querySelectorAll('select')].find(item => item.getAttribute('aria-label') === 'credential value type');
     setValue(type!, 'string');
@@ -279,8 +390,9 @@ describe('Explorer page integration', () => {
         fields: [{ path: 'database.password', left: { state: 'hidden', value: 'must-not-display' }, right: { state: 'missing' }, change: 'changed' }],
       })),
     });
-    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment=""
-      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+    await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
+      onEnvironmentChange={() => {}} initialMode="declared" />);
+    await settle();
     click(button('Compare'));
     await settle();
     expect(container.textContent).toContain('hidden');
@@ -301,21 +413,23 @@ describe('Explorer page integration', () => {
       })),
       compareConfiguration,
     });
-    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment=""
-      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
-    click(button('Compare'));
+    await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
+      onEnvironmentChange={() => {}} initialMode="compare" />);
     await settle();
-    expect(compareConfiguration.mock.calls[0][1]).toMatchObject({ left: 'left', right: 'right', section: 'globals', offset: 0, limit: 50 });
+    expect(compareConfiguration.mock.calls[0][1]).toMatchObject({ left: 'left', right: 'right', section: 'dbhelpers', offset: 0, limit: 50 });
 
-    const section = [...container.querySelectorAll('label')].find(label => label.textContent?.startsWith('Section'))?.querySelector('select');
+    const section = [...container.querySelectorAll('label')].find(label => label.textContent?.startsWith('Compare section'))?.querySelector('select');
     expect(section).toBeTruthy();
+    setValue(section!, 'globals');
+    await settle();
+    expect(compareConfiguration.mock.calls[1][1]).toMatchObject({ section: 'globals', offset: 0, limit: 50 });
     setValue(section!, 'dbhelpers');
     await settle();
-    expect(compareConfiguration.mock.calls[1][1]).toMatchObject({ section: 'dbhelpers', offset: 0, limit: 50 });
+    expect(compareConfiguration.mock.calls[2][1]).toMatchObject({ section: 'dbhelpers', offset: 0, limit: 50 });
 
     click(button('Load more configuration'));
     await settle();
-    expect(compareConfiguration.mock.calls[2][1]).toMatchObject({ section: 'dbhelpers', offset: 50, limit: 50 });
+    expect(compareConfiguration.mock.calls[3][1]).toMatchObject({ section: 'dbhelpers', offset: 50, limit: 50 });
     expect(container.textContent).toContain('dbhelpers.field0');
     expect(container.textContent).toContain('dbhelpers.field50');
   });
@@ -332,26 +446,31 @@ describe('Explorer page integration', () => {
       })),
       compareConfiguration,
     });
-    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment=""
-      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
-    click(button('Compare'));
+    await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
+      onEnvironmentChange={() => {}} initialMode="compare" />);
     await settle();
-    const section = [...container.querySelectorAll('label')].find(label => label.textContent?.startsWith('Section'))?.querySelector('select');
-    setValue(section!, 'dbhelpers');
+    const section = [...container.querySelectorAll('label')].find(label => label.textContent?.startsWith('Compare section'))?.querySelector('select');
+    setValue(section!, 'globals');
     await settle();
     expect(compareConfiguration).toHaveBeenCalledTimes(2);
-    expect(compareConfiguration.mock.calls[1][1]).toMatchObject({ section: 'dbhelpers' });
+    expect(compareConfiguration.mock.calls[1][1]).toMatchObject({ section: 'globals' });
 
-    await act(async () => { pending[0]({ state: 'ready', fields: [{ path: 'stale-global', left: { state: 'visible' }, right: { state: 'visible' }, change: 'changed' }] }); await Promise.resolve(); });
+    await act(async () => { pending[0]({ state: 'ready', fields: [{ path: 'stale-db', left: { state: 'visible' }, right: { state: 'visible' }, change: 'changed' }] }); await Promise.resolve(); });
     await settle();
-    expect(container.textContent).not.toContain('stale-global');
-    await act(async () => { pending[1]({ state: 'ready', fields: [{ path: 'fresh-db', left: { state: 'visible' }, right: { state: 'visible' }, change: 'changed' }] }); await Promise.resolve(); });
+    expect(container.textContent).not.toContain('stale-db');
+    await act(async () => { pending[1]({ state: 'ready', fields: [{ path: 'fresh-global', left: { state: 'visible' }, right: { state: 'visible' }, change: 'changed' }] }); await Promise.resolve(); });
+    await settle();
+    expect(container.textContent).toContain('fresh-global');
+
+    setValue(section!, 'dbhelpers');
+    await settle();
+    await act(async () => { pending[2]({ state: 'ready', fields: [{ path: 'fresh-db', left: { state: 'visible' }, right: { state: 'visible' }, change: 'changed' }] }); await Promise.resolve(); });
     await settle();
     expect(container.textContent).toContain('fresh-db');
 
     const leftProfile = container.querySelector<HTMLSelectElement>('select[aria-label="Left environment"]');
     setValue(leftProfile!, 'stage');
     await settle();
-    expect(compareConfiguration.mock.calls[2][1]).toMatchObject({ left: 'stage', right: 'right', section: 'dbhelpers', offset: 0 });
+    expect(compareConfiguration.mock.calls[3][1]).toMatchObject({ left: 'stage', right: 'right', section: 'dbhelpers', offset: 0 });
   });
 });

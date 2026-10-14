@@ -1,5 +1,11 @@
 # Changelog
 
+# ATT 4.2.0 - 2026-10-14
+
+- Add a standalone Configuration workspace and improve Explorer navigation, source browsing, Testdata inspection, and environment comparison (#216).
+- Improve Debug and Load authoring with editable sidecar defaults, threshold and evidence forms, Quick Load, and schedule entry points (#216).
+- Add shared syntax-aware source viewing with ATT expression and package-file navigation (#216).
+
 # ATT 4.1.4 - 2026-10-14
 
 - Add ATT-managed local accounts, crash-safe one-time administrator bootstrap, bounded password verification, revocable sessions, CSRF protection, secure-transport checks for every password endpoint, and Login/Logout UI for ATT Server (#198).

@@ -56,6 +56,22 @@ class PackageConfigurationInspectorTest {
         assertFalse(serialized.contains("uat-secret"));
     }
 
+    @Test void compareDefaultsToProfileScopedFieldsAndCanIncludeInheritedGlobalValues() throws Exception {
+        Path root=packageRoot("compare-profile-scope");
+        Map<String,Object> helperScoped=inspector(root).inspect("compare","SIT","UAT","dbhelpers",0,0,false);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> helperFields=(List<Map<String,Object>>)helperScoped.get("fields");
+        assertTrue(helperFields.stream().anyMatch(item->"dbhelpers.orders.readOnly".equals(item.get("path"))));
+        assertTrue(helperFields.stream().allMatch(item->String.valueOf(item.get("path")).startsWith("dbhelpers.")));
+
+        Map<String,Object> globalScoped=inspector(root).inspect("compare","SIT","UAT","globals",0,0,false);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> scopedGlobals=(List<Map<String,Object>>)globalScoped.get("fields");
+        assertFalse(scopedGlobals.stream().anyMatch(item->"globals.timeoutMs".equals(item.get("path"))));
+
+        Map<String,Object> expanded=inspector(root).inspect("compare","SIT","UAT","globals",0,0,true);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> expandedFields=(List<Map<String,Object>>)expanded.get("fields");
+        assertTrue(expandedFields.stream().anyMatch(item->"globals.timeoutMs".equals(item.get("path"))));
+    }
+
     @Test void supportsRootOnlyEffectiveConfigurationAndReportsSelectedProfileOrigin() throws Exception {
         Path root=packageRoot("root-only-config");
         write(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: LOCAL\ntimeoutMs: 5000\ntemplates:\n  root: templates\ntestcase:\n  root: testcase\n");
@@ -188,6 +204,42 @@ class PackageConfigurationInspectorTest {
         assertNull(maskedPage.get("nextOffset"));
         assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
                 ()->visible.inspect("testdata-records","SIT",null,"missing",0,1));
+    }
+
+    @Test void generatedTestdataRequiresExplicitPreviewAndUsesTheSharedRedactionPolicy() throws Exception {
+        Path root=packageRoot("generated-testdata-preview");
+        Files.createDirectories(root.resolve("config/testdata"));
+        String configured=baseConfig("config/dbhelpers/sit.yaml","config/dbhelpers/uat.yaml")
+                .replace("  SIT:\n    dbhelpers:","  SIT:\n    testdata: [config/testdata/generated.yaml]\n    dbhelpers:");
+        write(root.resolve("config/config.yaml"),configured);
+        write(root.resolve("config/testdata/generated.yaml"),"schemaVersion: att-testdata/v1.0\nid: generatedAccounts\n"
+                +"records:\n  generate:\n    seq:\n      from: 1000\n      to: 1120\n      format: \"%06d\"\n"
+                +"  record:\n    id: \"A-%{seq}\"\n    status: ACTIVE\n    email: customer@example.test\n"
+                +"selection:\n  strategy: sequential\n  exhaustion: stop\n");
+        PackageConfigurationInspector inspector=inspector(root);
+
+        Map<String,Object> required=inspector.inspect("testdata-records","SIT",null,"generatedAccounts",0,50,false,false);
+        assertEquals("preview-required",required.get("state"));
+        assertEquals(Boolean.TRUE,required.get("generated"));
+        assertEquals(Boolean.TRUE,required.get("previewRequired"));
+        assertEquals(121L,required.get("recordCount"));
+        assertEquals("config/testdata/generated.yaml",required.get("source"));
+        assertTrue(((List<?>)required.get("records")).isEmpty());
+        assertFalse(required.toString().contains("customer@example.test"));
+
+        Map<String,Object> page=inspector.inspect("testdata-records","SIT",null,"generatedAccounts",0,50,false,true);
+        assertEquals("ready",page.get("state"));
+        assertEquals(Boolean.TRUE,page.get("previewGenerated"));
+        assertEquals(50,page.get("nextOffset"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> records=(List<Map<String,Object>>)page.get("records");
+        assertEquals(50,records.size());
+        assertEquals(1000L,records.get(0).get("sequence"));
+        @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)records.get(0).get("value");
+        assertEquals("A-001000",value.get("id"));
+        assertEquals("[REDACTED]",value.get("email"));
+        assertFalse(page.toString().contains("customer@example.test"));
+        assertThrows(IllegalArgumentException.class,
+                ()->inspector.inspect("testdata-records","SIT",null,"generatedAccounts",0,101,false,true));
     }
 
     @Test void maskingOffShowsOperationalConnectionValuesButKeepsCredentialFieldsHidden() throws Exception {

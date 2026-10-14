@@ -55,11 +55,12 @@ final class ServerRuntime implements AutoCloseable {
     static final int MAX_ACTIVE_DRAFTS=128, MAX_DRAFTS_PER_PRINCIPAL=16;
     // Public inspection limits; keep aligned with PackageResourceInspector in the Local runtime.
     private static final int RESOURCE_DEFAULT_PAGE_SIZE=50, RESOURCE_MAX_PAGE_SIZE=100;
+    private static final int TESTDATA_RECORD_MAX_PAGE_SIZE=100;
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
     private static final class ValidatedScheduledScenario {
-        final Map<String,Object> scenario;final String revisionDigest,model;
-        ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;}
+        final Map<String,Object> scenario;final String revisionDigest,model;final boolean containsSensitiveValues;
+        ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model,boolean containsSensitiveValues){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;this.containsSensitiveValues=containsSensitiveValues;}
     }
     final ServerConfig config;
     final JobStore store;
@@ -270,23 +271,40 @@ final class ServerRuntime implements AutoCloseable {
     List<Map<String,Object>> packages(){List<Map<String,Object>> out=new ArrayList<>();config.packages.forEach((id,path)->out.add(Map.of("packageId",id,"name",path.getFileName().toString())));return out;}
     Map<String,Object> packageView(String id){Path root=config.packages.get(id);if(root==null)throw new NotFoundException();return Map.of("packageId",id,"name",root.getFileName().toString());}
     Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String principal) throws Exception {
+        return inspectResource(packageId,action,type,resourceId,query,requestedLimit,cursor,"name","asc",null,principal);
+    }
+    Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String sourceOriginPath,String principal) throws Exception {
+        return inspectResource(packageId,action,type,resourceId,query,requestedLimit,cursor,"name","asc",sourceOriginPath,principal);
+    }
+    Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,
+                                       String sort,String direction,String sourceOriginPath,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(!List.of("list","detail","source","source-file").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
         if(type!=null&&!List.of("case","template","flow","tool").contains(type))throw new IllegalArgumentException("Unsupported resource type");
+        String normalizedSort=sort==null||sort.isBlank()?"name":sort;
+        String normalizedDirection=direction==null||direction.isBlank()?"asc":direction;
+        if(!List.of("name","type","logicalId","state").contains(normalizedSort))throw new IllegalArgumentException("Unsupported resource sort field");
+        if(!List.of("asc","desc").contains(normalizedDirection))throw new IllegalArgumentException("Resource sort direction must be asc or desc");
+        if(!"list".equals(action)&&((sort!=null&& !"name".equals(sort))||(direction!=null&& !"asc".equals(direction))))
+            throw new IllegalArgumentException("Resource sorting is only valid for list requests");
+        if(sourceOriginPath!=null&&(sourceOriginPath.length()>1024||containsControl(sourceOriginPath)))throw new IllegalArgumentException("Source origin is invalid");
+        if(sourceOriginPath!=null&& !"source-file".equals(action))throw new IllegalArgumentException("Source origin is only valid for a referenced source file");
         String normalizedQuery=query==null?"":query.trim();if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
         int limit=requestedLimit==0?RESOURCE_DEFAULT_PAGE_SIZE:requestedLimit;
         if(limit<1||limit>RESOURCE_MAX_PAGE_SIZE)throw new IllegalArgumentException("limit must be between 1 and 100");
-        Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,type,normalizedQuery,principal);
+        Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,type,normalizedQuery,normalizedSort,normalizedDirection,principal);
         WorkerRequest request=inspectionRequest(packageId,root,null);
         request.inspectionAction=action;request.inspectionType=type;request.inspectionResourceId=resourceId;request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
+        request.inspectionOrigin=sourceOriginPath;
+        request.inspectionSort=normalizedSort;request.inspectionDirection=normalizedDirection;
         request.expectedRevisionDigest=prior==null?null:prior.revision;
         Map<String,Object> result=executeInspection(root,request);
         Object revision=result.remove("revisionDigest");
         if("list".equals(action)) {
             Object next=result.remove("nextOffset");
-            if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,((Number)next).intValue(),(String)revision,principal));
+            if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,normalizedSort,normalizedDirection,((Number)next).intValue(),(String)revision,principal));
             else result.put("nextCursor",null);
         }
         return result;
@@ -308,7 +326,7 @@ final class ServerRuntime implements AutoCloseable {
         request.inspectionAction="quick-load-form";request.inspectionType=type;request.inspectionResourceId=resourceId;request.loadModel=model;
         Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");result.remove("normalizedScenario");return result;
     }
-    Map<String,Object> inspectQuickLoadPolicy(String packageId,String model,String environment,String principal) throws Exception {
+    Map<String,Object> inspectQuickLoadPolicy(String packageId,String model,String environment,String templateId,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
@@ -316,7 +334,7 @@ final class ServerRuntime implements AutoCloseable {
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,environment);
-        request.inspectionAction="quick-load-policy";request.loadModel=model;
+        request.inspectionAction="quick-load-policy";request.loadModel=model;request.inspectionPath=templateId;
         Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");return result;
     }
     private Map<String,Object> inspectDebugFormInternal(String packageId,String type,String resourceId,String environment,
@@ -433,6 +451,7 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction="load-scenario";request.inlineLoadScenario=scenarioInput;
         Map<String,Object> inspected=executeInspection(root,request);
         Object rawScenario=inspected.remove("normalizedScenario"),rawDigest=inspected.remove("revisionDigest");
+        inspected.remove("containsSensitiveValues");
         Object rawModel=inspected.get("model");
         if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
                 ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel))
@@ -772,12 +791,50 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,String principal) throws Exception {
         return inspectConfiguration(packageId,action,environment,otherEnvironment,null,0,0,principal);
     }
+    Map<String,Object> inspectTestdataRecords(String packageId,String descriptorId,String environment,int offset,int limit,
+                                              boolean previewGenerated,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        if(offset<0||limit<1||limit>TESTDATA_RECORD_MAX_PAGE_SIZE)
+            throw new IllegalArgumentException("Testdata pagination is invalid");
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
+        WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionType="configuration";
+        request.inspectionAction="testdata-records";request.inspectionResourceId=descriptorId;request.inspectionSection=descriptorId;
+        request.inspectionOffset=offset;request.inspectionLimit=limit;
+        request.inspectionQuery=previewGenerated?"preview-generated":null;
+        return executeInspection(root,request);
+    }
     Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
                                             String section,int offset,int limit,String principal) throws Exception {
+        return inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,null,null,null,principal);
+    }
+    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
+                                            String section,int offset,int limit,String inspectionPath,String inspectionOrigin,
+                                            String inspectionQuery,String principal) throws Exception {
+        return inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,
+                inspectionPath,inspectionOrigin,inspectionQuery,false,principal);
+    }
+    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
+                                            String section,int offset,int limit,String inspectionPath,String inspectionOrigin,
+                                            String inspectionQuery,boolean includeInherited,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        if(!List.of("declared","effective","compare","testdata-records").contains(action))throw new IllegalArgumentException("Unsupported configuration inspection action");
+        if(!List.of("declared","effective","compare","testdata-records","files","source").contains(action))
+            throw new IllegalArgumentException("Unsupported configuration inspection action");
+        if(offset<0||limit<0||limit>100||"testdata-records".equals(action)&&limit<1)
+            throw new IllegalArgumentException("Configuration pagination is invalid");
+        if(inspectionPath!=null&&(inspectionPath.length()>1024||containsControl(inspectionPath)))
+            throw new IllegalArgumentException("Configuration path is invalid");
+        if(inspectionOrigin!=null&&(inspectionOrigin.length()>1024||containsControl(inspectionOrigin)))
+            throw new IllegalArgumentException("Configuration source origin is invalid");
+        if(inspectionQuery!=null&&(inspectionQuery.length()>200||containsControl(inspectionQuery)))
+            throw new IllegalArgumentException("Configuration query must contain at most 200 printable characters");
+        if(("source".equals(action)||"files".equals(action))&&(inspectionPath!=null&&inspectionPath.isBlank()))
+            throw new IllegalArgumentException("Configuration path is invalid");
+        if("source".equals(action)&&(inspectionPath==null||inspectionPath.isBlank()))
+            throw new IllegalArgumentException("A package-relative source path is required");
         String selected=null,other=null;
         if(("effective".equals(action)||"testdata-records".equals(action))&&environment!=null&&!environment.isBlank())selected=inspectionEnvironment(environment,"environment");
         if("compare".equals(action)){
@@ -787,8 +844,11 @@ final class ServerRuntime implements AutoCloseable {
         }
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";request.packageRoot=root.toString();request.config="config/config.yaml";
         request.inspectionAction=action;request.inspectionType="configuration";request.inspectionEnvironment=selected;request.inspectionOtherEnvironment=other;
-        request.inspectionSection=section;request.inspectionOffset=offset;request.inspectionLimit=limit;request.maxResponseBytes=config.inspection.maxResponseBytes;
+        request.inspectionSection=section;request.inspectionIncludeInherited=Boolean.valueOf(includeInherited);
+        request.inspectionOffset=offset;request.inspectionLimit=limit;
         request.redactionEnabled=config.inspection.redactionEnabled;request.sensitivePaths=config.inspection.sensitivePaths;request.sensitiveFieldPatterns=config.inspection.sensitiveFieldPatterns;
+        request.inspectionPath=inspectionPath;request.inspectionOrigin=inspectionOrigin;request.inspectionQuery=inspectionQuery;
+        request.safeTextSources=config.inspection.safeTextSources(packageId);request.maxSourceBytes=config.inspection.maxSourceBytes;request.maxResponseBytes=config.inspection.maxResponseBytes;
         return executeInspection(root,request);
     }
     private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {
@@ -969,15 +1029,15 @@ final class ServerRuntime implements AutoCloseable {
 
         @Override public void close() { discard(); }
     }
-    private String encodeCursor(String packageId,String type,String query,int offset,String revision,String principal) throws Exception {
-        Map<String,Object> payload=new LinkedHashMap<>();payload.put("packageId",packageId);payload.put("type",type);payload.put("query",query);payload.put("offset",offset);payload.put("revision",revision);payload.put("principal",principal);
+    private String encodeCursor(String packageId,String type,String query,String sort,String direction,int offset,String revision,String principal) throws Exception {
+        Map<String,Object> payload=new LinkedHashMap<>();payload.put("packageId",packageId);payload.put("type",type);payload.put("query",query);payload.put("sort",sort);payload.put("direction",direction);payload.put("offset",offset);payload.put("revision",revision);payload.put("principal",principal);
         byte[] nonce=new byte[12];cursorRandom.nextBytes(nonce);
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
         byte[] ciphertext=cipher.doFinal(JSON.writeValueAsBytes(payload));byte[] token=new byte[nonce.length+ciphertext.length];
         System.arraycopy(nonce,0,token,0,nonce.length);System.arraycopy(ciphertext,0,token,nonce.length,ciphertext.length);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(token);
     }
-    private Cursor decodeCursor(String token,String packageId,String type,String query,String principal) throws Exception {
+    private Cursor decodeCursor(String token,String packageId,String type,String query,String sort,String direction,String principal) throws Exception {
         if(token.length()>4096)throw new IllegalArgumentException("cursor is too long");byte[] bytes;
         try{bytes=Base64.getUrlDecoder().decode(token);}catch(IllegalArgumentException bad){throw new IllegalArgumentException("cursor is invalid");}
         if(bytes.length<28)throw new IllegalArgumentException("cursor is invalid");
@@ -985,12 +1045,17 @@ final class ServerRuntime implements AutoCloseable {
         try{Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));payload=cipher.doFinal(ciphertext);}
         catch(Exception bad){throw new IllegalArgumentException("cursor is invalid");}
         JsonNode value;try{value=JSON.readTree(payload);}catch(Exception bad){throw new IllegalArgumentException("cursor is invalid");}
-        if(!packageId.equals(value.path("packageId").asText())||!java.util.Objects.equals(type,value.path("type").isNull()?null:value.path("type").asText())||!query.equals(value.path("query").asText())||!principal.equals(value.path("principal").asText()))throw new IllegalArgumentException("cursor does not match this resource query");
+        if(!packageId.equals(value.path("packageId").asText())||!java.util.Objects.equals(type,value.path("type").isNull()?null:value.path("type").asText())||!query.equals(value.path("query").asText())||!sort.equals(value.path("sort").asText())||!direction.equals(value.path("direction").asText())||!principal.equals(value.path("principal").asText()))throw new IllegalArgumentException("cursor does not match this resource query");
         int offset=value.path("offset").asInt(-1);String revision=value.path("revision").asText("");if(offset<1||offset>20000||!revision.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("cursor is invalid");return new Cursor(offset,revision);
     }
     private static boolean containsControl(String value){for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))return true;return false;}
     List<LoadSchedule> loadSchedules() throws Exception {requireSchedulingEnabled();return store.schedules();}
     LoadSchedule loadSchedule(String id) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();return schedule;}
+    Map<String,Object> loadScheduleView(LoadSchedule schedule) {
+        Map<String,Object> view=JSON.convertValue(schedule,Map.class);
+        view.remove("inlineScenario");view.put("inlineSnapshot",Boolean.valueOf(schedule.inlineScenario!=null));
+        return view;
+    }
     List<Map<String,Object>> loadScheduleExecutions(String id,int limit) throws Exception {requireSchedulingEnabled();if(store.schedule(id)==null&&store.scheduleExecutions(id,1).isEmpty())throw new NotFoundException();return store.scheduleExecutions(id,limit);}
     LoadSchedule createLoadSchedule(JsonNode input,String principal) throws Exception {
         requireSchedulingEnabled();
@@ -1047,12 +1112,14 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private ValidatedScheduledScenario validateScheduleScenario(Path root,LoadSchedule schedule) throws Exception {
-        Map<String,Object> requested=readScheduledScenario(root,schedule.scenario);
+        Map<String,Object> requested=schedule.inlineScenario==null?readScheduledScenario(root,schedule.scenario):deepMap(schedule.inlineScenario);
         ValidatedScheduledScenario validated=validateScheduledScenario(root,schedule,requested);
         if(schedule.load!=null&&!schedule.load.isEmpty()) {
             Map<String,Object> overridden=withScheduledLoadOptions(validated.scenario,schedule.load);
             validated=validateScheduledScenario(root,schedule,overridden);
         }
+        if(schedule.inlineScenario!=null&&validated.containsSensitiveValues)
+            throw new IllegalArgumentException("An inline schedule cannot store credentials, private values, or other classified sensitive fields. Remove them from the Load draft or keep them in package-managed configuration.");
         validateScheduledLoadLimits(config.inlineLoad,validated.scenario);schedule.loadModel=validated.model;return validated;
     }
 
@@ -1073,12 +1140,12 @@ final class ServerRuntime implements AutoCloseable {
         if(schedule.config!=null){request.config=safeRelative(schedule.config,"config");validatePackagePath(root,request.config,"config");}
         request.inspectionAction="load-scenario";request.inlineLoadScenario=scenario;
         Map<String,Object> inspected=executeInspection(root,request);
-        Object rawScenario=inspected.get("normalizedScenario"),rawDigest=inspected.get("revisionDigest"),rawModel=inspected.get("model");
+        Object rawScenario=inspected.get("normalizedScenario"),rawDigest=inspected.get("revisionDigest"),rawModel=inspected.get("model"),rawSensitive=inspected.get("containsSensitiveValues");
         if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
-                ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel))
+                ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel)||!(rawSensitive instanceof Boolean))
             throw new IllegalStateException("Load validation Worker returned an invalid response");
         @SuppressWarnings("unchecked") Map<String,Object> normalized=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
-        return new ValidatedScheduledScenario(normalized,(String)rawDigest,(String)rawModel);
+        return new ValidatedScheduledScenario(normalized,(String)rawDigest,(String)rawModel,((Boolean)rawSensitive).booleanValue());
     }
 
     private static Map<String,Object> withScheduledLoadOptions(Map<String,Object> source,Map<String,String> options) {
@@ -1096,12 +1163,27 @@ final class ServerRuntime implements AutoCloseable {
 
     private LoadSchedule buildLoadSchedule(JsonNode input,LoadSchedule prior,String principal) throws Exception {
         if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
-        Set<String> allowed=Set.of("name","description","tags","packageId","scenario","config","environment","timezone","cron","load","maxConcurrentRuns","enabled");
+        Set<String> allowed=Set.of("name","description","tags","packageId","scenario","draftId","config","environment","timezone","cron","load","maxConcurrentRuns","enabled");
         input.fieldNames().forEachRemaining(key->{if(!allowed.contains(key))throw new IllegalArgumentException("Unknown schedule field: "+key);});
         LoadSchedule s=prior==null?new LoadSchedule():prior.copy();
         s.name=fieldText(input,"name",s.name,true);s.description=fieldText(input,"description",s.description,false);
         if(input.has("tags"))s.tags=scheduleTags(input.get("tags"));else if(s.tags==null)s.tags=List.of();
-        s.packageId=fieldText(input,"packageId",s.packageId,true);s.scenario=fieldText(input,"scenario",s.scenario,true);
+        s.packageId=fieldText(input,"packageId",s.packageId,true);
+        String draftId=fieldText(input,"draftId",null,false);
+        if(draftId!=null) {
+            if(prior!=null)throw new IllegalArgumentException("A validated Load draft can only create a new schedule");
+            if(input.has("scenario")&&!input.get("scenario").isNull())throw new IllegalArgumentException("Provide either a validated draft or a package scenario path");
+            s.scenario=null;
+            String draftEnvironment=input.has("environment")?fieldText(input,"environment",null,false):null;
+            draftEnvironment=draftEnvironment==null||draftEnvironment.isBlank()?null:inspectionEnvironment(draftEnvironment,"environment");
+            s.inlineScenario=scheduleDraftScenario(draftId,principal,s.packageId,draftEnvironment);
+        } else if(s.inlineScenario==null) {
+            s.scenario=fieldText(input,"scenario",s.scenario,true);
+        } else {
+            if(input.has("scenario")&&!input.get("scenario").isNull()&&!input.get("scenario").asText().isBlank())
+                throw new IllegalArgumentException("An inline scenario snapshot cannot be replaced by a package path");
+            if(input.has("draftId"))throw new IllegalArgumentException("An inline scenario snapshot cannot be replaced");
+        }
         s.config=fieldText(input,"config",s.config,false);s.environment=fieldText(input,"environment",s.environment,false);
         s.timezone=fieldText(input,"timezone",s.timezone,true);s.cron=fieldText(input,"cron",s.cron,true);
         if(input.has("enabled")){if(!input.get("enabled").isBoolean())throw new IllegalArgumentException("enabled must be true or false");s.enabled=input.get("enabled").booleanValue();}
@@ -1114,17 +1196,54 @@ final class ServerRuntime implements AutoCloseable {
         if(s.description!=null&&(s.description.length()>500||containsControl(s.description)))throw new IllegalArgumentException("description must be at most 500 characters without control characters");
         if(!config.packages.containsKey(s.packageId))throw new IllegalArgumentException("Unknown packageId");
         Path root=config.packages.get(s.packageId);validatePackageRoot(root);
-        s.scenario=safeRelative(s.scenario,"scenario");if(s.scenario==null)throw new IllegalArgumentException("scenario is required");
-        validatePackagePath(root,s.scenario,"scenario");Path scenarioPath=root.resolve(s.scenario).normalize();
-        if(!Files.isRegularFile(scenarioPath)||!scenarioPath.toRealPath().startsWith(root.toRealPath()))throw new IllegalArgumentException("scenario must be a regular file inside the configured package");
+        if(s.inlineScenario==null) {
+            s.scenario=safeRelative(s.scenario,"scenario");if(s.scenario==null)throw new IllegalArgumentException("scenario or draftId is required");
+            validatePackagePath(root,s.scenario,"scenario");Path scenarioPath=root.resolve(s.scenario).normalize();
+            if(!Files.isRegularFile(scenarioPath)||!scenarioPath.toRealPath().startsWith(root.toRealPath()))throw new IllegalArgumentException("scenario must be a regular file inside the configured package");
+        } else {
+            if(!config.inlineLoad.enabled)throw new InlineLoadDisabledException();
+            if(scenarioInputChanged(prior,s,input))throw new IllegalArgumentException("An inline scenario snapshot is immutable; create a new schedule for changed values");
+            if(s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("Inline scenario snapshots cannot use separate Load overrides");
+        }
         s.config=safeRelative(s.config,"config");validatePackagePath(root,s.config,"config");
         s.environment=s.environment==null||s.environment.isBlank()?null:safeText(s.environment,128,"environment");
         java.time.ZoneId zone=scheduleZone(s.timezone);
         CronExpression cron=CronExpression.parse(s.cron,config.scheduling.minimumIntervalMinutes);
         cron.validateTimezoneMinimumInterval(zone,config.scheduling.minimumIntervalMinutes,clock.instant());
-        validateScheduleScenario(root,s);
+        ValidatedScheduledScenario validated=validateScheduleScenario(root,s);
+        if(s.inlineScenario!=null)s.inlineScenario=deepMap(validated.scenario);
         s.nextRunAt=nextRun(s.cron,s.timezone,clock.instant()).toString();
         s.updatedBy=principal;s.updatedAt=clock.instant().toString();return s;
+    }
+    private Map<String,Object> scheduleDraftScenario(String draftId,String principal,String packageId,String environment) {
+        synchronized(draftLock) {
+            expireDrafts();
+            QuickLoadDraft quick=quickLoadDrafts.get(draftId);
+            if(quick!=null) {
+                requireLiveDraft(quick.expiresAt);
+                if(!quick.principal.equals(principal)||!quick.packageId.equals(packageId)||!java.util.Objects.equals(quick.environment,environment))throw new NotFoundException();
+                return deepMap(quick.scenario);
+            }
+            AdvancedLoadDraftState advanced=advancedLoadDrafts.get(draftId);
+            if(advanced!=null) {
+                requireLiveDraft(advanced.expiresAt);
+                if(!advanced.principal.equals(principal)||!advanced.packageId.equals(packageId)||!java.util.Objects.equals(advanced.environment,environment))throw new NotFoundException();
+                return deepMap(advanced.scenario);
+            }
+            throw new NotFoundException();
+        }
+    }
+    private static boolean scenarioInputChanged(LoadSchedule prior,LoadSchedule current,JsonNode input) {
+        if(prior==null||prior.inlineScenario==null)return false;
+        if(input.has("draftId")||input.has("inlineScenario"))return true;
+        return !java.util.Objects.equals(prior.packageId,current.packageId)
+                ||!sameOptionalText(prior.environment,current.environment)
+                ||!sameOptionalText(prior.config,current.config);
+    }
+    private static boolean sameOptionalText(String left,String right) {
+        String normalizedLeft=left==null||left.isBlank()?null:left.trim();
+        String normalizedRight=right==null||right.isBlank()?null:right.trim();
+        return java.util.Objects.equals(normalizedLeft,normalizedRight);
     }
     private static java.time.ZoneId scheduleZone(String timezone) {
         try{java.time.ZoneId zone=java.time.ZoneId.of(timezone);if(!java.time.ZoneId.getAvailableZoneIds().contains(timezone))throw new IllegalArgumentException();return zone;}

@@ -351,7 +351,17 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": {"code": "FIXTURE_NOT_FOUND", "summary": "No fixture route is defined."}})
             return
         elif len(parts) == 3 and parts[:2] == ["packages", "payments"] and parts[2] == "load-policy":
-            self._json(200, {"model": query.get("model", ["virtualUsers"])[0], "policy": {"enabled": True, "maxVirtualUsers": 200, "maxArrivalRate": 50}, "previewYaml": "load:\n  enabled: true\n", "redacted": False})
+            self._json(200, {
+                "model": query.get("model", ["virtualUsers"])[0],
+                "policy": {
+                    "enabled": True, "maxVirtualUsers": 200, "maxArrivalRate": 50,
+                    "load": {"duration": "10s", "users": 2, "arrivalRate": "2/s", "maxConcurrent": 5},
+                    "execution": {"thinkTime": "250ms"},
+                    "thresholds": {"errorRate": 0.01, "p95Ms": 500},
+                    "evidence": {"mode": "failures"},
+                },
+                "previewYaml": "load:\n  enabled: true\n  duration: 10s\n", "redacted": False,
+            })
             return
         elif (len(parts) == 3 and parts[:2] == ["packages", "payments"] and parts[2] == "quick-load-form") or (len(parts) == 6 and parts[:2] == ["packages", "payments"] and parts[2] == "resources" and parts[5] == "quick-load-form"):
             target_type = parts[3] if len(parts) == 6 else query.get("type", ["template"])[0]
@@ -404,7 +414,111 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(404, {"error": {"code": "JOB_NOT_FOUND", "summary": "Job not found."}})
             return
-        elif scenario == "explorer-workspace" and len(parts) == 3 and parts[:2] == ["packages", "payments"] and parts[2] in {"configuration", "config", "declared-configuration", "effective-configuration", "compare-configuration"}:
+        elif len(parts) == 3 and parts[:2] == ["packages", "payments"] and parts[2] == "configuration":
+            self._json(200, {
+                "state": "ready", "view": "declared", "environments": [
+                    {"name": "dev", "state": "active", "default": True},
+                    {"name": "staging", "state": "active"}, {"name": "prod", "state": "active"},
+                ],
+                "globals": {"baseDir": {"state": "visible", "value": "config"}},
+                "sections": [
+                    {"id": "testdata", "title": "Testdata", "entryCount": 1},
+                    {"id": "helpers", "title": "Helpers", "entryCount": 1},
+                ],
+            })
+            return
+        elif len(parts) == 4 and parts[:3] == ["packages", "payments", "configuration"] and parts[3] == "files":
+            requested = query.get("path", [""])[0].strip("/")
+            search = query.get("query", [""])[0].lower()
+            if requested == "":
+                items = [
+                    {"name": "config", "path": "config", "kind": "directory"},
+                    {"name": "load", "path": "load", "kind": "directory"},
+                ]
+            elif requested == "config":
+                items = [
+                    {"name": "application.yaml", "path": "config/application.yaml", "kind": "file", "format": "yaml", "sizeBytes": 248, "sourceAvailable": True},
+                    {"name": "config.yaml", "path": "config/config.yaml", "kind": "file", "format": "yaml", "sizeBytes": 432, "sourceAvailable": True},
+                    {"name": "restricted.yaml", "path": "config/restricted.yaml", "kind": "file", "format": "yaml", "sizeBytes": 96, "sourceAvailable": False, "reason": "visibility-policy"},
+                    {"name": "testdata", "path": "config/testdata", "kind": "directory"},
+                ]
+            elif requested == "config/testdata":
+                items = [{"name": "accounts.yaml", "path": "config/testdata/accounts.yaml", "kind": "file", "format": "yaml", "sizeBytes": 156, "sourceAvailable": True}]
+            elif requested == "load":
+                items = [{"name": "load.visualuser.yaml", "path": "load/load.visualuser.yaml", "kind": "file", "format": "yaml", "sizeBytes": 188, "sourceAvailable": False, "reason": "visibility-policy"}]
+            else:
+                items = []
+            if search:
+                all_items = [
+                    {"name": "application.yaml", "path": "config/application.yaml", "kind": "file", "format": "yaml", "sizeBytes": 248, "sourceAvailable": True},
+                    {"name": "config.yaml", "path": "config/config.yaml", "kind": "file", "format": "yaml", "sizeBytes": 432, "sourceAvailable": True},
+                    {"name": "accounts.yaml", "path": "config/testdata/accounts.yaml", "kind": "file", "format": "yaml", "sizeBytes": 156, "sourceAvailable": True},
+                ]
+                items = [item for item in all_items if search in item["path"].lower()]
+            offset = int(query.get("offset", ["0"])[0])
+            limit = int(query.get("limit", ["100"])[0])
+            page = items[offset:offset + limit]
+            next_offset = offset + len(page) if offset + len(page) < len(items) else None
+            self._json(200, {"path": requested, "items": page, "total": len(items), "nextOffset": next_offset, "truncated": False})
+            return
+        elif len(parts) == 4 and parts[:3] == ["packages", "payments", "configuration"] and parts[3] == "source":
+            file_path = query.get("path", [""])[0]
+            text = {
+                "config/application.yaml": "server:\n  environment: dev\n  timeout: 5s\n# descriptor: config/testdata/accounts.yaml\n",
+                "config/config.yaml": "schemaVersion: att-config/v1\nprofiles:\n  - name: dev\n    config: application.yaml\n",
+                "config/testdata/accounts.yaml": "schemaVersion: att-testdata/v1\nrecords:\n  - id: account-001\n    tier: standard\n",
+            }.get(file_path)
+            if text is None:
+                self._json(200, {"available": False, "reason": "visibility-policy", "logicalPath": file_path, "format": "yaml"})
+            else:
+                self._json(200, {"available": True, "logicalPath": file_path, "format": "yaml", "text": text})
+            return
+        elif len(parts) == 4 and parts[:3] == ["packages", "payments", "configuration"] and parts[3] == "effective":
+            environment = query.get("environment", ["dev"])[0]
+            section = query.get("section", ["globals"])[0]
+            if section == "testdata":
+                entries = [{
+                    "id": "accounts", "source": "config/testdata/accounts.yaml", "generated": False,
+                    "fields": {
+                        "recordCount": {"state": "visible", "value": 3},
+                        "selection.strategy": {"state": "visible", "value": "roundRobin"},
+                        "selection.exhaustion": {"state": "visible", "value": "cycle"},
+                    },
+                    "references": [{"type": "template", "resourceId": "checkout", "resolution": "resolved"}],
+                }]
+                sections = [{"id": "testdata", "title": "Testdata", "entries": entries}]
+            else:
+                sections = [
+                    {"id": "testdata", "title": "Testdata", "entries": []},
+                    {"id": "helpers", "title": "Helpers", "entries": []},
+                ]
+            self._json(200, {
+                "state": "ready", "view": "effective", "environment": environment, "section": section,
+                "globals": {"baseDir": {"state": "visible", "value": "/opt/att/packages/payments/config"}},
+                "sections": sections, "nextOffset": None,
+            })
+            return
+        elif len(parts) == 4 and parts[:3] == ["packages", "payments", "configuration"] and parts[3] == "compare":
+            self._json(200, {
+                "state": "ready", "view": "compare",
+                "leftEnvironment": query.get("left", ["dev"])[0], "rightEnvironment": query.get("right", ["staging"])[0],
+                "fields": [{"path": "database.password", "left": {"state": "hidden"}, "right": {"state": "missing"}, "change": "changed"}],
+                "nextOffset": None,
+            })
+            return
+        elif len(parts) == 6 and parts[:4] == ["packages", "payments", "configuration", "testdata"] and parts[5] == "records":
+            self._json(200, {
+                "descriptorId": parts[4], "environment": query.get("environment", ["dev"])[0],
+                "state": "ready", "offset": int(query.get("offset", ["0"])[0]),
+                "limit": int(query.get("limit", ["50"])[0]), "total": 3, "nextOffset": None,
+                "redactionEnabled": True, "records": [
+                    {"index": 0, "sequence": 1, "value": {"id": "account-001", "tier": "standard"}},
+                    {"index": 1, "sequence": 2, "value": {"id": "account-002", "tier": "business"}},
+                    {"index": 2, "sequence": 3, "value": {"id": "account-003", "tier": "standard"}},
+                ],
+            })
+            return
+        elif scenario == "explorer-workspace" and len(parts) == 3 and parts[:2] == ["packages", "payments"] and parts[2] in {"config", "declared-configuration", "effective-configuration", "compare-configuration"}:
             self._json(200, {"state": "ready", "environments": ["dev", "staging", "prod"], "globals": {}, "sections": [], "items": [], "total": 0})
             return
         elif scenario == "explorer-workspace" and parts[:2] == ["packages", "payments"] and len(parts) >= 5 and parts[2] == "resources":

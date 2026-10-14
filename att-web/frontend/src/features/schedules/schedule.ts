@@ -8,6 +8,8 @@ export interface ScheduleDraft {
   tags: string;
   packageId: string;
   scenario: string;
+  inlineSnapshot: boolean;
+  draftId?: string;
   config: string;
   environment: string;
   timezone: string;
@@ -47,7 +49,7 @@ export function isIanaTimeZone(value: string): boolean {
 
 export function createScheduleDraft(timezone = localTimeZone()): ScheduleDraft {
   return {
-    name: '', description: '', tags: '', packageId: '', scenario: '', config: '', environment: '', timezone,
+    name: '', description: '', tags: '', packageId: '', scenario: '', inlineSnapshot: false, config: '', environment: '', timezone,
     recurrence: 'daily', timeOfDay: '02:00', dayOfWeek: '1-5', cron: '', maxConcurrentRuns: '1', load: '{}', enabled: false,
   };
 }
@@ -85,7 +87,7 @@ function cronTime(match: RegExpExecArray): string | null {
 export function draftFromSchedule(schedule: LoadSchedule): ScheduleDraft {
   return {
     name: schedule.name || '', description: schedule.description || '', tags: (schedule.tags || []).join(', '),
-    packageId: schedule.packageId || '', scenario: schedule.scenario || '', config: schedule.config || '',
+    packageId: schedule.packageId || '', scenario: schedule.scenario || '', inlineSnapshot: schedule.inlineSnapshot === true, config: schedule.config || '',
     environment: schedule.environment || '', timezone: schedule.timezone || 'UTC',
     ...recurrenceFromCron(schedule.cron || ''), cron: schedule.cron || '',
     maxConcurrentRuns: String(schedule.maxConcurrentRuns || 1), load: JSON.stringify(schedule.load || {}, null, 2),
@@ -109,12 +111,16 @@ export function scheduleInputFromDraft(draft: ScheduleDraft): LoadScheduleInput 
   const cron = cronForDraft(draft);
   if (!cron) throw new Error('Enter a valid local time before previewing this schedule.');
   if (!isIanaTimeZone(draft.timezone)) throw new Error('Enter a valid IANA timezone, such as Asia/Hong_Kong.');
-  return {
+  const input: LoadScheduleInput = {
     name: draft.name.trim(), description: draft.description.trim(), tags,
-    packageId: draft.packageId, scenario: draft.scenario.trim(), config: draft.config.trim(),
+    packageId: draft.packageId, config: draft.config.trim(),
     environment: draft.environment.trim(), timezone: draft.timezone.trim(), cron,
     load: load as Record<string, string>, maxConcurrentRuns, enabled: draft.enabled,
   };
+  if (draft.inlineSnapshot) {
+    if (draft.draftId) input.draftId = draft.draftId;
+  } else input.scenario = draft.scenario.trim();
+  return input;
 }
 
 export function formatScheduleTime(value: string | null | undefined, timezone: string, locale?: string): string {

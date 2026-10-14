@@ -97,9 +97,6 @@ jobs:
           node --check att-web/src/main/resources/META-INF/resources/ui/app.js
           node --test att-web/src/test/js/*.test.mjs
 
-      - name: Verify
-        run: mvn -B -ntp clean verify
-
       - name: Install browser acceptance dependencies
         run: npm ci
         working-directory: tools/ui-acceptance
@@ -108,8 +105,15 @@ jobs:
         run: npx playwright install --with-deps chromium firefox webkit
         working-directory: tools/ui-acceptance
 
+      - name: Verify
+        run: ATT_UI_SERVER_PLAYWRIGHT=1 mvn -B -ntp clean verify
+
       - name: Verify UI browser smoke and axe accessibility
         run: npm run smoke
+        working-directory: tools/ui-acceptance
+
+      - name: Verify Explorer, Configuration, Quick Load, and inline scheduling flows
+        run: npm run smoke:explorer
         working-directory: tools/ui-acceptance
 
       - name: Verify native authentication UI flows and accessibility

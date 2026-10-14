@@ -13,6 +13,8 @@ final class LoadSchedule {
     public List<String> tags=List.of();
     public String packageId;
     public String scenario;
+    /** Server-validated immutable scenario snapshot for schedules created from a UI draft. */
+    public Map<String,Object> inlineScenario;
     public String loadModel;
     public String config;
     public String environment;
@@ -29,7 +31,8 @@ final class LoadSchedule {
 
     LoadSchedule copy() {
         LoadSchedule copy=new LoadSchedule();
-        copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.scenario=scenario;copy.loadModel=loadModel;
+        copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.scenario=scenario;
+        copy.inlineScenario=inlineScenario==null?null:new LinkedHashMap<>(inlineScenario);copy.loadModel=loadModel;
         copy.tags=tags==null?List.of():List.copyOf(tags);
         copy.config=config;copy.environment=environment;copy.timezone=timezone;copy.cron=cron;
         copy.load=load==null?new LinkedHashMap<>():new LinkedHashMap<>(load);copy.maxConcurrentRuns=maxConcurrentRuns;copy.enabled=enabled;

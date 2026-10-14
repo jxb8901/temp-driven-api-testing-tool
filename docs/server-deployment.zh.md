@@ -1,6 +1,6 @@
 # ATT Server 部署與 API
 
-ATT Server 4.1.4 提供單節點控制平面，讓用戶透過版本化 REST API 提交 ATT Run、Debug、Load 及 Validate 工作。請將 WAR 部署至使用 Java 17 或更新版本的外部 Tomcat 10.1+。CLI、Engine 及 Worker 仍相容 Java 8。
+ATT Server 4.2.0 提供單節點控制平面，讓用戶透過版本化 REST API 提交 ATT Run、Debug、Load 及 Validate 工作。請將 WAR 部署至使用 Java 17 或更新版本的外部 Tomcat 10.1+。CLI、Engine 及 Worker 仍相容 Java 8。
 
 ## 準備部署
 
@@ -8,9 +8,9 @@ ATT Server 4.1.4 提供單節點控制平面，讓用戶透過版本化 REST API
 2. 將 package root 設於 allowed root 之下，並確保 Tomcat 服務帳戶可讀取。解壓後的 `$ATT_HOME/packages/default` 可直接註冊為 package root。
 3. 啟動前先建立 `server.dataDir`，並只允許 Tomcat 服務帳戶寫入。範例使用 `$ATT_HOME/data`；只要它與所有已註冊 package root 不相等、互不包含，即可使用。亦可使用 `/var/lib/att-server`。Server data 不可放入 package 內容。
 4. 將 `$ATT_HOME/config/att-server.example.yaml` 複製至 `$ATT_HOME/config/att-server.yaml` 或受保護的外部路徑，更新絕對路徑，並勿將憑證放入 package。升級時不可覆寫既有的 active config。
-5. 將 `att-server-4.1.4.war` 部署至 Tomcat 10.1+。Tomcat 可直接部署 packed WAR；隔離的 Worker 會從 `$ATT_HOME/lib` 載入版本相符的 `att-local-4.1.4.jar`。
+5. 將 `att-server-4.2.0.war` 部署至 Tomcat 10.1+。Tomcat 可直接部署 packed WAR；隔離的 Worker 會從 `$ATT_HOME/lib` 載入版本相符的 `att-local-4.2.0.jar`。
 
-Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.1.4.jar` 中共用的 Worker/Engine runtime；請在 Server WAR 旁安裝版本相符的 Local archive。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
+Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.2.0.jar` 中共用的 Worker/Engine runtime；請在 Server WAR 旁安裝版本相符的 Local archive。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
 
 Server 依次尋找 JVM property `-Datt.server.config`、環境變數 `ATT_SERVER_CONFIG`，再尋找 `$ATT_HOME/config/att-server.yaml`。最後一個路徑的 `ATT_HOME` 先取自 `-Datt.home`，再取自 `ATT_HOME` 環境變數。若選定的 config 不存在、不可讀或無效，Server 會在診斷中指出其路徑並停止啟動，不會改用其他來源。沒有明確來源或可用的預設 config 時，啟動錯誤會提供設定指引。
 
@@ -50,7 +50,7 @@ att/                              # ATT_HOME
 
 週期性 package-backed Load 排程另有獨立 opt-in：`server.scheduling.enabled` 預設為 `false`。啟用前請先選定管理員角色並檢視排程上限。已驗證部署需要 Servlet container role `server.scheduling.adminRole`（預設 `ATT_ADMIN`）；請在 Tomcat 將此 role 對應至可信操作人員。只有在 `authenticationRequired: false` 且排程已啟用時，`allowAnonymousManagement` 才預設為 `true`；設為 `false` 可保留 role 限制。匿名 caller 會共享排程管理權限，Server 會記錄明顯啟動警告；這只適用刻意隔離的測試部署，不建議用於共享或正式環境。此功能需要有界 package inspection。排程定義及執行歷史保存在 `server.dataDir` 的 H2 資料庫；請在同一 dataDir 只執行一個 Server 程序。每個排程預設保留最新 10,000 筆 terminal occurrence（`maxExecutionsPerSchedule` 可設為 100–100,000）；執行中及處理中的 occurrence 會保留。本 scheduler 不提供多節點 leader election。
 
-排程以 package ID 及 package-relative Load scenario 檔案為輸入。建立/編輯及每次 occurrence 前，有界 Inspector 會驗證和正規化完整 scenario 及 target closure；即使瀏覽器建立的 Load draft 停用，Server 的 Load users、rate、duration、workload 及 target 上限仍然適用。每個工作都使用檢查所得的 immutable scenario 及 package revision，再經標準 Worker 和 Server Load admission 路徑提交；既有 Load concurrency 及 queue 上限仍然適用。排程 API 只接受 scenario、選填 config/environment 及現有的字串型 Load options；options 會在儲存和提交前以 Server 上限及 Engine 驗證。不接受輸出路徑、package root、Worker 設定、憑證或 caller 提供的 principal。工作使用 Server 建立的 `load-schedule:<id>` principal。提交失敗會記錄且不重試。已接納工作的狀態與 evidence 維持標準 job 生命週期，與 schedule occurrence 分開。
+排程可使用 package-relative Load scenario 檔案，或將有效的 Quick/Advanced Load draft 存成 snapshot。建立 draft snapshot 時，resolved principal、package 及 environment 必須與 draft 相同；Debug draft 不可排程。有界 Inspector 會在保存前及每次 occurrence 前驗證和正規化完整 scenario 及 target closure。Schedule 會私下保存 normalized scenario，只在 API view 回傳 `inlineSnapshot: true`，不包含 scenario 內容。Inline snapshot 不可直接替換或編輯，亦不可使用獨立 Load overrides；如需變更 workload，請以新的有效 draft 建立新排程。即使瀏覽器建立的 Load draft 停用，Server 的 Load users、rate、duration、workload 及 target 上限仍然適用。每個工作都經標準 Worker 和 Server Load admission 路徑提交；既有 Load concurrency 及 queue 上限仍然適用。不接受輸出路徑、package root、Worker 設定、憑證或 caller 提供的 principal。工作使用 Server 建立的 `load-schedule:<id>` principal。提交失敗會記錄且不重試。已接納工作的狀態與 evidence 維持標準 job 生命週期，與 schedule occurrence 分開。
 
 UI 提供每日及每週本地時間選項，亦支援五欄位 cron（`minute hour day-of-month month day-of-week`），包括 `*`、清單、範圍及 `/step`；不接受月份/星期名稱或擴充 cron 語法。日及星期欄位同時受限時，任一欄位匹配即算符合。Timezone 必須是 IANA zone ID。春季 DST 跳時中不存在的本地分鐘會略過；秋季重複時段中，每個實際 instant 都會執行一次。Occurrence 間隔至少為 `minimumIntervalMinutes`（預設 15，範圍 1–10080）。重啟或延遲 poll 錯過的 firing 會直接推進至下一個未來 instant，並按每個排程及每次 poll 合併為一筆 `skipped` history/audit 記錄，原因為 `misfire-no-backfill`；不會補跑 Load。每次 poll 對每個排程最多提交一個 occurrence。每個排程的 `maxConcurrentRuns` 預設為 1，並且不可高於全域 `server.scheduling.maxConcurrentRuns`；達到排程自己的執行中上限時會略過新 occurrence。全域 `maxConcurrentRuns`（預設 1，且不可高於 `workers.maxConcurrentLoad`）限制由 scheduler 提交的工作。容量或 package 驗證拒絕會記錄為 `failed-to-submit`，不會重試。`failurePolicy: continue`（預設值）會讓排程繼續啟用；`pauseAfterSubmitFailure` 會在首次提交失敗後暫停排程。此設定只處理提交錯誤；已提交工作的後續結果仍是標準 job outcome。暫停、編輯或刪除排程不會取消已接納的工作。
 
@@ -250,6 +250,8 @@ Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的
 }
 ```
 
+如要排程已驗證的 UI draft，請用 `draftId`（`A...` Advanced Load ID 或 `L...` Quick Load ID）取代 `scenario`，並提供驗證時使用的相同 `environment`。此方式只適用於建立排程；之後不可替換已保存的 snapshot。
+
 排程預設為 paused。建立、編輯及恢復時會按目前時間計算下一個符合的 instant。Occurrence 狀態為 `scheduled`、`submitted`、`skipped` 及 `failed-to-submit`；job 執行結果仍使用一般 job API。刪除排程會移除定義，但保留歷史，也不會取消已接納的工作。刪除前請記下 UI/API 顯示的 schedule ID；只要仍有保留記錄，管理員在定義刪除後仍可使用 `/load-schedules/{scheduleId}/executions` 讀取歷史，即使該排程不再出現在 UI 或 schedule list。History 受 `maxExecutionsPerSchedule` 限制；處理中 occurrence 及連結至執行中工作的 occurrence 可暫時超出上限，相關工作進入 terminal 狀態時會執行 pruning，schedule 定義刪除後亦會如此。
 
 使用穩定 package ID 及該 ATT Worker command 的欄位提交工作：
@@ -427,13 +429,17 @@ GET /api/v1/packages/payments/configuration?view=declared
 GET /api/v1/packages/payments/configuration/effective?environment=SIT
 GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&offset=0&limit=50
 GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&section=dbhelpers
-GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&section=dbhelpers&offset=0&limit=50
-GET /api/v1/packages/payments/configuration/testdata/{descriptorId}/records?environment=SIT&offset=0&limit=50
+GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&section=dbhelpers&includeInherited=true&offset=0&limit=50
+GET /api/v1/packages/payments/configuration/source?path=templates%2Fpayment%2Fpayload%2Frequest.xml&origin=flows%2Fpayment.yaml
+GET /api/v1/packages/payments/configuration/testdata/accounts/records?environment=SIT&offset=0&limit=50
+GET /api/v1/packages/payments/configuration/testdata/generatedAccounts/records?environment=SIT&offset=0&limit=50&previewGenerated=true
 ```
 
 Declared view 會回傳 schema version、安全的 global 欄位、已設定 profile，以及每個設定 section 的 declared/absent 狀態、項目數量和 profile 繼承或替換狀態。Effective view 使用 `FrameworkConfigLoader` 選擇 environment，並回傳安全的 helper、Tool 及 Testdata descriptor metadata。Root-only package 或使用已設定的預設值時可省略 `environment`。第一個 effective 回應會提供各 section 的數量；按 section ID（`dbhelpers`、`mqhelpers`、`sshhelpers`、`httphelpers`、`tools` 或 `testdata`）要求其項目。Effective section 及 comparison 欄位回應支援 `offset` 與 `limit`（1–100，預設 50），並回傳 `total` 和 `nextOffset` 以供分頁。比較要求必須提供 section ID；Server 會先驗證並篩選兩個 profile，再分頁。檢查過程不會連接 DB、MQ、HTTP 或 SSH 服務，也不會回傳未限制的設定 YAML。只有所選 environment 已設定的 Testdata descriptor 可透過上述 records endpoint 分頁預覽；一般值預設可見，憑證、認證資料及常見個人資料欄位始終遮蔽。啟用 `redaction` 後亦會套用設定的敏感路徑和欄位 pattern。未知或未設定的 descriptor 回傳 `404`。
 
-比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對本機路徑、憑證、Server 自身的秘密或未限制的 descriptor 內容。關閉 masking 時，非憑證 URL、host 及 port 等一般連線設定會顯示；啟用 masking 後，設定的操作欄位及路徑亦會遮蔽。
+Compare 預設比較 profile-sourced values；`includeInherited=true` 會一併包括 inherited/global values 及其來源。Section filter 會在分頁前套用。比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對本機路徑、憑證、Server 自身的秘密或未限制的 descriptor 內容。關閉 masking 時，非憑證 URL、host 及 port 等一般連線設定會顯示；啟用 masking 後，設定的操作欄位及路徑亦會遮蔽。
+
+`source` endpoint 可依 origin 解析 package-relative file reference，但仍只允許位於 package 內、canonical 的文字檔，並須符合 `server.inspection.safeTextSources`；它不是任意檔案 endpoint。Testdata records endpoint 需要 effective descriptor ID。Literal records 使用 `limit` 1–100 分頁（UI 每次讀取 50 筆）。Generated descriptor 預設回傳 `state: "preview-required"` 且不含 records；只有明確設定 `previewGenerated=true` 才會回傳有界 generated preview。此 endpoint 使用相同身份、redaction policy、bounded inspection worker、source/response 大小、佇列和逾時限制。
 
 設定回應包含 `view`、`state`、可用時的 `schemaVersion` 及 `diagnostics`。分頁回應亦包含 `section`、`offset`、`limit`、`total` 及 `nextOffset`。無效設定會以 HTTP 200 回傳 `state: "invalid"` 及穩定診斷碼；格式錯誤的 profile 參數回傳 `400`。未知 package 回傳 `404`，超大回應回傳 `413`，檢查佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。回應大小、佇列和逾時限制與資源探索相同。
 
@@ -458,7 +464,7 @@ Artifact 路徑必須相對於工作輸出目錄。絕對路徑、目錄 travers
 
 ## 發行與相容性
 
-Server binary 會以獨立的 `att-4.1.4-server.tar.gz` 發佈，內含 `server/att-server-4.1.4.war`（ATT application code 已合併至 `WEB-INF/lib/att-server-4.1.4.jar`）及部署指南。Local CLI 位於 `att-4.1.4-local.tar.gz`，其 `lib/att-local-4.1.4.jar` 提供共用 Worker/Engine runtime；Server 會載入相同版本的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
+Server binary 會以獨立的 `att-4.2.0-server.tar.gz` 發佈，內含 `server/att-server-4.2.0.war`（ATT application code 已合併至 `WEB-INF/lib/att-server-4.2.0.jar`）及部署指南。Local CLI 位於 `att-4.2.0-local.tar.gz`，其 `lib/att-local-4.2.0.jar` 提供共用 Worker/Engine runtime；Server 會載入相同版本的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
 
 ### Issue #176 rollout checklist
 

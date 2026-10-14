@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ApiError, type AsyncState, type PackageSummary } from '../../types';
 import { useNavigationGuard } from '../../router';
-import type { ScheduledLoadApi, LoadSchedule, ScheduleOccurrence } from './types';
+import type { ScheduledLoadApi, LoadSchedule, ScheduleOccurrence, ValidatedLoadDraftIntent } from './types';
 import {
   createScheduleDraft, cronForDraft, draftFromSchedule, explainOccurrence,
   formatScheduleTime, isIanaTimeZone, localTimeZone, scheduleInputFromDraft, WEEKDAYS,
@@ -19,6 +19,10 @@ export interface ScheduledLoadPageProps {
   packages: AsyncState<PackageSummary[]>;
   enabled: boolean;
   onOpenJob(jobId: string): void;
+  initialDraft?: ValidatedLoadDraftIntent | null;
+  onInitialDraftConsumed?(): void;
+  modal?: boolean;
+  onClose?(): void;
 }
 
 function errorStatus(error: unknown): number {
@@ -57,7 +61,7 @@ function statusLabel(status: string): string {
   return status.replaceAll('-', ' ').replaceAll('_', ' ');
 }
 
-export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: ScheduledLoadPageProps): React.JSX.Element {
+export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDraft, onInitialDraftConsumed, modal = false, onClose }: ScheduledLoadPageProps): React.JSX.Element {
   const navigation = useNavigationGuard();
   const [schedules, setSchedules] = useState<LoadSchedule[]>([]);
   const [loadState, setLoadState] = useState<LoadState>(enabled ? 'loading' : 'disabled');
@@ -68,6 +72,8 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
   const [stateFilter, setStateFilter] = useState<'all' | 'enabled' | 'paused'>('all');
   const [packageFilter, setPackageFilter] = useState('');
   const [draft, setDraft] = useState<ScheduleDraft>(() => createScheduleDraft());
+  const [scenarioPreviewYaml, setScenarioPreviewYaml] = useState('');
+  const [saved, setSaved] = useState(false);
   const [editingId, setEditingId] = useState('');
   const [baseline, setBaseline] = useState(() => JSON.stringify(createScheduleDraft()));
   const [preview, setPreview] = useState<PreviewState>({ status: 'idle', signature: '' });
@@ -82,6 +88,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
   const previewController = useRef<AbortController | null>(null);
   const previewSequence = useRef(0);
   const confirmationDialog = useRef<HTMLDialogElement>(null);
+  const modalDialog = useRef<HTMLDialogElement>(null);
   const cancelConfirmation = useRef<HTMLButtonElement>(null);
   const timezoneOptions = useMemo(timeZoneChoices, []);
 
@@ -120,7 +127,39 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
     };
   }, [loadSchedules]);
 
-  useEffect(() => navigation.registerUnsavedChanges(dirty, 'Scheduled Load changes'), [dirty, navigation.registerUnsavedChanges]);
+  useEffect(() => modal ? undefined : navigation.registerUnsavedChanges(dirty, 'Scheduled Load changes'), [dirty, modal, navigation.registerUnsavedChanges]);
+
+  useEffect(() => {
+    if (!initialDraft?.draftId) return;
+    const seeded = createScheduleDraft();
+    seeded.name = 'Validated Load snapshot';
+    seeded.packageId = initialDraft.packageId;
+    seeded.environment = initialDraft.environment || '';
+    seeded.inlineSnapshot = true;
+    seeded.draftId = initialDraft.draftId;
+    setScenarioPreviewYaml(initialDraft.previewYaml || '');
+    setDraft(seeded);
+    setBaseline(JSON.stringify(seeded));
+    setEditingId('');
+    setMutationError('');
+    setNotice('Schedule form loaded from the validated Load draft. Choose a recurrence and review the Server next-run preview.');
+    onInitialDraftConsumed?.();
+  }, [initialDraft, onInitialDraftConsumed]);
+
+  useEffect(() => {
+    const dialog = modalDialog.current;
+    if (!modal || !dialog) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const cancel = (event: Event) => { event.preventDefault(); onClose?.(); };
+    dialog.addEventListener('cancel', cancel);
+    if (!dialog.open) dialog.showModal();
+    dialog.querySelector<HTMLElement>('#schedule-name')?.focus();
+    return () => {
+      dialog.removeEventListener('cancel', cancel);
+      if (dialog.open) dialog.close();
+      previousFocus?.focus();
+    };
+  }, [modal, onClose]);
 
   useEffect(() => {
     const sequence = ++previewSequence.current;
@@ -176,7 +215,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
   const visibleSchedules = useMemo(() => {
     const query = filter.trim().toLocaleLowerCase();
     return schedules.filter(schedule => {
-      const matchesText = !query || [schedule.name, schedule.description, schedule.packageId, schedule.scenario, schedule.cron]
+      const matchesText = !query || [schedule.name, schedule.description, schedule.packageId, schedule.scenario || 'Validated inline snapshot', schedule.cron]
         .some(value => String(value || '').toLocaleLowerCase().includes(query));
       const matchesState = stateFilter === 'all' || (stateFilter === 'enabled' ? schedule.enabled : !schedule.enabled);
       return matchesText && matchesState && (!packageFilter || schedule.packageId === packageFilter);
@@ -185,6 +224,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
 
   function updateDraft<K extends keyof ScheduleDraft>(key: K, value: ScheduleDraft[K]) {
     setDraft(current => ({ ...current, [key]: value }));
+    setSaved(false);
     setMutationError('');
     setNotice('');
   }
@@ -194,6 +234,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
     setDraft(fresh);
     setBaseline(JSON.stringify(fresh));
     setEditingId('');
+    setSaved(false);
     setMutationError('');
     setNotice('');
   }
@@ -225,7 +266,11 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
       const saved = editingId
         ? await api.updateLoadSchedule(editingId, input)
         : await api.createLoadSchedule(input);
-      resetForm();
+      if (modal) {
+        setBaseline(JSON.stringify(draft));
+        setEditingId('');
+        setSaved(true);
+      } else resetForm();
       setNotice(`Saved ${saved.name}. Next run: ${formatScheduleTime(saved.nextRunAt, saved.timezone)} (${saved.timezone}).`);
       await loadSchedules();
     } catch (error) { setMutationError(errorMessage(error, 'Saving schedule')); }
@@ -275,12 +320,14 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
 
   const packageItems = packages.status === 'ready' ? packages.data : [];
 
-  if (!enabled) return <section className="page-content att-schedules-page" aria-labelledby="schedules-title">
+  if (!enabled) return <section className={modal ? 'att-schedule-disabled-modal' : 'page-content att-schedules-page'} aria-labelledby="schedules-title">
     <div className="page-heading"><div><p className="eyebrow">ATT Studio</p><h1 id="schedules-title">Scheduled Load</h1></div></div>
     <p className="att-schedule-callout" role="status">Scheduled Load is disabled by Server configuration. Ask the Server administrator to enable scheduling.</p>
+    {modal && <button className="button button-quiet" type="button" onClick={onClose}>Return to Load</button>}
   </section>;
 
-  return <section className="page-content att-schedules-page" aria-labelledby="schedules-title">
+  const pageContent = <>
+    {!modal && <>
     <header className="page-heading att-schedules-heading">
       <div><p className="eyebrow">Load testing</p><h1 id="schedules-title">Scheduled Load</h1>
         <p className="page-description">Manage recurring Load scenarios and inspect the Server's recorded occurrences.</p>
@@ -327,7 +374,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
             <thead><tr><th scope="col">Name</th><th scope="col">Package and scenario</th><th scope="col">Recurrence</th><th scope="col">Next run</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
             <tbody>{visibleSchedules.map(schedule => <tr key={schedule.id}>
               <th scope="row" data-label="Name"><span>{schedule.name}</span>{schedule.description && <small>{schedule.description}</small>}</th>
-              <td data-label="Package and scenario"><span>{schedule.packageId}</span><small>{schedule.scenario}{schedule.config ? ` · ${schedule.config}` : ''}</small></td>
+              <td data-label="Package and scenario"><span>{schedule.packageId}</span><small>{schedule.inlineSnapshot ? 'Validated inline snapshot' : schedule.scenario || 'Scenario unavailable'}{schedule.config ? ` · ${schedule.config}` : ''}</small></td>
               <td data-label="Recurrence"><span>{recurrenceLabel(schedule)}</span><small>{schedule.timezone}</small></td>
               <td data-label="Next run">{formatScheduleTime(schedule.nextRunAt, schedule.timezone)}</td>
               <td data-label="Status"><span className={`att-schedule-state ${schedule.enabled ? 'is-enabled' : 'is-paused'}`}><span aria-hidden="true">{schedule.enabled ? '●' : '■'}</span> {schedule.enabled ? 'Enabled' : 'Paused'}</span></td>
@@ -345,7 +392,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
           {visibleSchedules.map(schedule => <article className="att-schedule-card" key={schedule.id}>
             <div className="att-schedule-card-heading"><h3>{schedule.name}</h3><span className={`att-schedule-state ${schedule.enabled ? 'is-enabled' : 'is-paused'}`}>{schedule.enabled ? '● Enabled' : '■ Paused'}</span></div>
             {schedule.description && <p>{schedule.description}</p>}
-            <dl><div><dt>Package</dt><dd>{schedule.packageId}</dd></div><div><dt>Scenario</dt><dd>{schedule.scenario}</dd></div>
+            <dl><div><dt>Package</dt><dd>{schedule.packageId}</dd></div><div><dt>Scenario</dt><dd>{schedule.inlineSnapshot ? 'Validated inline snapshot' : schedule.scenario || 'Scenario unavailable'}</dd></div>
               <div><dt>Recurrence</dt><dd>{recurrenceLabel(schedule)}</dd></div><div><dt>Next run · {schedule.timezone}</dt><dd>{formatScheduleTime(schedule.nextRunAt, schedule.timezone)}</dd></div></dl>
             <div className="att-schedule-actions">
               <button type="button" onClick={() => openHistory(schedule)} aria-label={`History ${schedule.name}`}>History</button>
@@ -377,12 +424,18 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
           </tr>)}</tbody></table>
       </div>}
     </section>}
+    </>}
 
-    <section className="att-schedule-panel att-schedule-editor" aria-labelledby="schedule-editor-heading">
+    <section className={`att-schedule-panel att-schedule-editor${modal ? ' att-schedule-modal-panel' : ''}`} aria-labelledby="schedule-editor-heading">
       <div className="att-schedule-section-heading"><div><h2 id="schedule-editor-heading" tabIndex={-1}>{editingId ? `Edit schedule: ${draft.name || editingId}` : 'Create schedule'}</h2>
-        <p>Scenario and config paths are package-relative. The Server validates the complete Load scenario when a run is submitted.</p></div>
-        {editingId && <button type="button" className="button button-quiet" onClick={resetForm}>Cancel edit</button>}
+        <p>{draft.inlineSnapshot ? 'This schedule stores the immutable scenario snapshot from your validated Load draft. The Load editor stays open behind this form.' : 'Scenario and config paths are package-relative. The Server validates the complete Load scenario when a run is submitted.'}</p></div>
+        {modal && <button type="button" className="button button-quiet" onClick={onClose}>Cancel and return to Load</button>}
+        {!modal && editingId && <button type="button" className="button button-quiet" onClick={resetForm}>Cancel edit</button>}
       </div>
+      {modal && scenarioPreviewYaml && <details className="att-schedule-snapshot-review">
+        <summary>Review the validated Load scenario snapshot</summary>
+        <pre tabIndex={0} aria-label="Validated Load scenario snapshot">{scenarioPreviewYaml}</pre>
+      </details>}
       {notice && <p className="att-schedule-notice" role="status" aria-live="polite">{notice}</p>}
       {mutationError && <p className="att-schedule-error" role="alert">{mutationError}</p>}
       {actionPending && <p className="att-schedule-status" role="status" aria-live="polite" aria-busy="true">Applying the confirmed action to {schedules.find(item => item.id === actionPending)?.name || 'the schedule'}…</p>}
@@ -400,18 +453,18 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
             <input id="schedule-tags" value={draft.tags} onChange={event => updateDraft('tags', event.currentTarget.value)} maxLength={1000} />
           </label>
           <label htmlFor="schedule-package">Package <span aria-hidden="true">*</span>
-            <select id="schedule-package" value={draft.packageId} onChange={event => updateDraft('packageId', event.currentTarget.value)} required disabled={packages.status !== 'ready'}>
+            <select id="schedule-package" value={draft.packageId} onChange={event => updateDraft('packageId', event.currentTarget.value)} required disabled={packages.status !== 'ready' || draft.inlineSnapshot}>
               <option value="">Choose a configured package</option>{packageItems.map(item => <option key={item.packageId} value={item.packageId}>{item.name ? `${item.packageId} · ${item.name}` : item.packageId}</option>)}
             </select>
           </label>
-          <label htmlFor="schedule-scenario">Scenario path <span className="att-schedule-hint">Package-relative</span>
-            <input id="schedule-scenario" value={draft.scenario} onChange={event => updateDraft('scenario', event.currentTarget.value)} maxLength={512} placeholder="load/scenario.yaml" required />
+          <label htmlFor="schedule-scenario">{draft.inlineSnapshot ? 'Scenario source' : 'Scenario path'} <span className="att-schedule-hint">{draft.inlineSnapshot ? 'Immutable validated snapshot' : 'Package-relative'}</span>
+            <input id="schedule-scenario" value={draft.inlineSnapshot ? 'Validated Load snapshot' : draft.scenario} onChange={event => updateDraft('scenario', event.currentTarget.value)} maxLength={512} placeholder="load/scenario.yaml" required={!draft.inlineSnapshot} disabled={draft.inlineSnapshot} />
           </label>
           <label htmlFor="schedule-config">Config path <span className="att-schedule-hint">Optional, package-relative</span>
-            <input id="schedule-config" value={draft.config} onChange={event => updateDraft('config', event.currentTarget.value)} maxLength={512} placeholder="config/config.yaml" />
+            <input id="schedule-config" value={draft.config} onChange={event => updateDraft('config', event.currentTarget.value)} maxLength={512} placeholder="config/config.yaml" disabled={draft.inlineSnapshot} />
           </label>
           <label htmlFor="schedule-environment">Environment <span className="att-schedule-hint">Optional</span>
-            <input id="schedule-environment" value={draft.environment} onChange={event => updateDraft('environment', event.currentTarget.value)} maxLength={128} placeholder="SIT" />
+            <input id="schedule-environment" value={draft.environment} onChange={event => updateDraft('environment', event.currentTarget.value)} maxLength={128} placeholder="SIT" disabled={draft.inlineSnapshot} />
           </label>
           <label htmlFor="schedule-timezone">Timezone · IANA <span aria-hidden="true">*</span>
             <input id="schedule-timezone" list="schedule-timezone-options" value={draft.timezone} onChange={event => updateDraft('timezone', event.currentTarget.value)} maxLength={80} aria-invalid={Boolean(draft.timezone && !isIanaTimeZone(draft.timezone))} required />
@@ -437,8 +490,8 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
             <span className="att-schedule-hint">When this limit or the Server's global capacity is reached, that occurrence is recorded as skipped.</span>
           </label>
           <label className="att-schedule-load-options" htmlFor="schedule-load-options">Load options · JSON object
-            <textarea id="schedule-load-options" rows={5} spellCheck={false} value={draft.load} onChange={event => updateDraft('load', event.currentTarget.value)} aria-describedby="schedule-load-help" />
-            <span id="schedule-load-help" className="att-schedule-hint">Optional Load overrides. The Server revalidates this scenario before submitting each job.</span>
+            <textarea id="schedule-load-options" rows={5} spellCheck={false} value={draft.load} onChange={event => updateDraft('load', event.currentTarget.value)} aria-describedby="schedule-load-help" disabled={draft.inlineSnapshot} />
+            <span id="schedule-load-help" className="att-schedule-hint">{draft.inlineSnapshot ? 'Load values are part of this immutable scenario snapshot.' : 'Optional Load overrides. The Server revalidates this scenario before submitting each job.'}</span>
           </label>
         </div>
         <section className="att-schedule-preview" aria-labelledby="schedule-preview-title">
@@ -454,16 +507,17 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
         </section>
         <label className="att-schedule-enable"><input type="checkbox" checked={draft.enabled} onChange={event => updateDraft('enabled', event.currentTarget.checked)} /> Enable after saving</label>
         <div className="att-schedule-form-actions">
-          <button className="button button-primary" type="submit" disabled={saving || !previewIsCurrent || packages.status !== 'ready' || packageItems.length === 0}>
-            {saving ? 'Saving…' : editingId ? 'Save changes' : 'Save schedule'}
+          <button className="button button-primary" type="submit" disabled={saving || saved || !previewIsCurrent || packages.status !== 'ready' || packageItems.length === 0}>
+            {saving ? 'Saving…' : saved ? 'Saved' : editingId ? 'Save changes' : 'Save schedule'}
           </button>
-          {!editingId && <button className="button button-quiet" type="button" onClick={resetForm}>Clear form</button>}
+          {!modal && !editingId && <button className="button button-quiet" type="button" onClick={resetForm}>Clear form</button>}
+          {modal && <button className="button button-quiet" type="button" onClick={onClose}>Return to Load</button>}
           {dirty && <span role="status">Unsaved schedule changes</span>}
         </div>
       </form>
     </section>
 
-    <dialog className="att-schedule-confirm" ref={confirmationDialog} aria-labelledby="schedule-confirm-title" aria-describedby="schedule-confirm-description"
+    {!modal && <dialog className="att-schedule-confirm" ref={confirmationDialog} aria-labelledby="schedule-confirm-title" aria-describedby="schedule-confirm-description"
       onCancel={event => { event.preventDefault(); setPendingConfirmation(null); }}>
       <h2 id="schedule-confirm-title">{pendingConfirmation?.action === 'run' ? 'Run this schedule now?' : 'Delete this schedule?'}</h2>
       <p id="schedule-confirm-description">{pendingConfirmation?.action === 'run'
@@ -475,6 +529,10 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob }: Schedul
           {pendingConfirmation?.action === 'run' ? 'Confirm Run Now' : 'Confirm delete'}
         </button>
       </div>
-    </dialog>
-  </section>;
+    </dialog>}
+  </>;
+
+  if (modal) return <dialog className="att-schedule-create-dialog" ref={modalDialog} aria-labelledby="schedule-editor-heading"
+    onClick={event => { if (event.target === event.currentTarget) onClose?.(); }}>{pageContent}</dialog>;
+  return <section className="page-content att-schedules-page" aria-labelledby="schedules-title">{pageContent}</section>;
 }

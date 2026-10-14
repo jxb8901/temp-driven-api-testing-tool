@@ -1,8 +1,8 @@
 import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type PackageSummary, type ServerVersion } from './types';
 import type {
-  AcceptedJob, ConfigurationComparisonQuery, ConfigurationResponse, DebugDraftRequest, DraftResponse,
-  DebugFormResponse, EffectiveConfigurationQuery, ResourceDetail, ResourceIdentity,
-  ResourcePage, ResourceQuery, SourceProjection,
+  AcceptedJob, ConfigurationComparisonQuery, ConfigurationFilePage, ConfigurationResponse, DebugDraftRequest, DraftResponse,
+  DebugFormResponse, EffectiveConfigurationQuery, ResourceDetail, ResourceIdentity, SourceProjection, TestdataRecordsResponse,
+  ResourcePage, ResourceQuery,
 } from './features/explorer/types';
 import type {
   JobAccepted as LoadJobAccepted, JobArtifact, JobEventHandlers, JobResultResponse,
@@ -76,7 +76,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   return body as T;
 }
 
-function queryString(values: Record<string, string | number | undefined>): string {
+function queryString(values: Record<string, string | number | boolean | undefined>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(values)) {
     if (value !== undefined && String(value).length > 0) params.set(key, String(value));
@@ -164,8 +164,8 @@ export const api = {
   getJobs(signal?: AbortSignal): Promise<ApiEnvelope<JobSummary>> {
     return request<ApiEnvelope<JobSummary>>('jobs', { signal });
   },
-  getLoadPolicy(packageId: string, model: LoadModel, environment?: string, signal?: AbortSignal): Promise<LoadPolicyResponse> {
-    return request<LoadPolicyResponse>('packages/' + encodeURIComponent(packageId) + '/load-policy' + queryString({ model, environment }), { signal });
+  getLoadPolicy(packageId: string, model: LoadModel, environment?: string, signal?: AbortSignal, templateId?: string): Promise<LoadPolicyResponse> {
+    return request<LoadPolicyResponse>('packages/' + encodeURIComponent(packageId) + '/load-policy' + queryString({ model, environment, templateId }), { signal });
   },
   getTargetLoadForm(
     packageId: string,
@@ -216,6 +216,8 @@ export const api = {
       type: query.type === 'all' ? undefined : query.type,
       cursor: query.cursor,
       limit: query.limit,
+      sort: query.sort,
+      direction: query.direction,
     }), { signal });
   },
   getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail> {
@@ -223,6 +225,9 @@ export const api = {
   },
   getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection> {
     return request<SourceProjection>(resourcePath(identity) + '/source', { signal });
+  },
+  getResourceSourceFile(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection> {
+    return request<SourceProjection>(resourcePath(identity) + '/source-file' + queryString({ referenceId, origin }), { signal });
   },
   getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse> {
     return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration?view=declared', { signal });
@@ -240,9 +245,19 @@ export const api = {
       left: query.left,
       right: query.right,
       section: query.section,
+      includeInherited: query.includeInherited,
       offset: query.offset,
       limit: query.limit,
     }), { signal });
+  },
+  listConfigurationFiles(packageId: string, path?: string, search?: string, offset = 0, signal?: AbortSignal): Promise<ConfigurationFilePage> {
+    return request<ConfigurationFilePage>('packages/' + encodeURIComponent(packageId) + '/configuration/files' + queryString({ path, query: search, offset, limit: 100 }), { signal });
+  },
+  getConfigurationFileSource(packageId: string, path: string, origin?: string, signal?: AbortSignal): Promise<SourceProjection> {
+    return request<SourceProjection>('packages/' + encodeURIComponent(packageId) + '/configuration/source' + queryString({ path, origin }), { signal });
+  },
+  getTestdataRecords(packageId: string, descriptorId: string, query: { environment?: string; offset?: number; limit?: number; previewGenerated?: boolean }, signal?: AbortSignal): Promise<TestdataRecordsResponse> {
+    return request<TestdataRecordsResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/testdata/' + encodeURIComponent(descriptorId) + '/records' + queryString(query), { signal });
   },
   getDebugForm(identity: ResourceIdentity, environment?: string, signal?: AbortSignal): Promise<DebugFormResponse> {
     return request<DebugFormResponse>(resourcePath(identity) + '/debug-form' + queryString({ environment }), { signal });

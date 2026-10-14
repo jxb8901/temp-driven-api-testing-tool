@@ -6,7 +6,8 @@ export interface LoadSchedule {
   description?: string | null;
   tags?: string[];
   packageId: string;
-  scenario: string;
+  scenario?: string | null;
+  inlineSnapshot?: boolean;
   loadModel?: string | null;
   config?: string | null;
   environment?: string | null;
@@ -25,7 +26,8 @@ export interface LoadScheduleInput {
   description: string;
   tags: string[];
   packageId: string;
-  scenario: string;
+  scenario?: string;
+  draftId?: string;
   config: string;
   environment: string;
   timezone: string;
@@ -42,6 +44,13 @@ export interface SchedulePreviewInput {
 
 export interface SchedulePreview extends SchedulePreviewInput {
   nextRunAt: string;
+}
+
+export interface ValidatedLoadDraftIntent {
+  packageId: string;
+  environment?: string;
+  draftId: string;
+  previewYaml?: string;
 }
 
 export interface ScheduleOccurrence {
