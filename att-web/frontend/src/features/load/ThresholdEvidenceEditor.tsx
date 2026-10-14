@@ -82,10 +82,9 @@ function evidenceError(object: JsonObject): string {
 }
 
 
-function ThresholdRow({ metric, expression, disabled, onChange, onRemove }: {
+function ThresholdRow({ metric, expression, onChange, onRemove }: {
   metric: (typeof commonMetrics)[number] | (typeof arrivalMetrics)[number];
   expression: unknown;
-  disabled: boolean;
   onChange(value: string): void;
   onRemove(): void;
 }) {
@@ -93,7 +92,11 @@ function ThresholdRow({ metric, expression, disabled, onChange, onRemove }: {
   const [operator, setOperator] = useState(parsed?.operator || '<');
   const [amount, setAmount] = useState(parsed?.amount || '');
   const [unit, setUnit] = useState(parsed?.unit || metric.unit);
-  useEffect(() => { const next = parseExpression(expression); setOperator(next?.operator || '<'); setAmount(next?.amount || ''); setUnit(next?.unit || metric.unit); }, [expression, metric.unit]);
+  useEffect(() => {
+    const next = parseExpression(expression);
+    if (!next) return;
+    setOperator(next.operator); setAmount(next.amount); setUnit(next.unit);
+  }, [expression, metric.unit]);
   const update = (next: { operator?: string; amount?: string; unit?: string }) => {
     const op = next.operator ?? operator; const value = next.amount ?? amount; const suffix = next.unit ?? unit;
     if (next.operator !== undefined) setOperator(next.operator);
@@ -103,10 +106,10 @@ function ThresholdRow({ metric, expression, disabled, onChange, onRemove }: {
   };
   return <div className="att-threshold-row">
     <strong>{metric.label}</strong>
-    <label>Condition<select disabled={disabled} value={operator} onChange={event => update({ operator: event.currentTarget.value })}>{operators.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
-    <label>Target value<input disabled={disabled} type="number" min="0" step="any" value={amount} onChange={event => update({ amount: event.currentTarget.value })} aria-invalid={!parsed && Boolean(expression)} /></label>
-    <label>Unit<select disabled={disabled} value={unit} onChange={event => update({ unit: event.currentTarget.value })}>{metric.units.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
-    <button type="button" disabled={disabled} onClick={onRemove}>Remove</button>
+    <label>Condition<select value={operator} onChange={event => update({ operator: event.currentTarget.value })}>{operators.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+    <label>Target value<input type="number" min="0" step="any" value={amount} onChange={event => update({ amount: event.currentTarget.value })} aria-invalid={!parsed && Boolean(expression)} /></label>
+    <label>Unit<select value={unit} onChange={event => update({ unit: event.currentTarget.value })}>{metric.units.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+    <button type="button" onClick={onRemove}>Remove</button>
   </div>;
 }
 
@@ -117,18 +120,22 @@ function ThresholdScopeEditor({ scope, raw, model, onChange, onValidityChange }:
   const object = useMemo(() => parseObject(raw) || {}, [raw]);
   const metrics = useMemo(() => model === 'arrivalRate' ? [...commonMetrics, ...arrivalMetrics] : commonMetrics, [model]);
   const supported = useMemo(() => new Set(metrics.map(item => item.key)), [metrics]);
-  const rows = Object.keys(object).filter(key => supported.has(key));
-  const unknown = describeUnknown(object, supported);
   const advancedObject = useMemo(() => parseObject(advancedDraft || '{}'), [advancedDraft]);
+  const draftObject = advancedObject || object;
+  const rows = Object.keys(draftObject).filter(key => supported.has(key));
+  const unknown = describeUnknown(draftObject, supported);
   const validationMessage = advancedObject ? thresholdError(advancedObject, metrics, model) : scope + ' thresholds must be a JSON object.';
   const validityRef = useRef(onValidityChange);
   useEffect(() => { validityRef.current = onValidityChange; }, [onValidityChange]);
   useEffect(() => { validityRef.current(validationMessage); }, [validationMessage]);
   useEffect(() => { setAdvancedDraft(raw); }, [raw]);
   const setMetric = (key: string, value: string | undefined) => {
-    const next = { ...object };
+    const next = { ...draftObject };
     if (value === undefined) delete next[key]; else next[key] = value;
-    const serialized = JSON.stringify(next, null, 2); onChange(serialized); setAdvancedDraft(serialized); onValidityChange('');
+    const serialized = JSON.stringify(next, null, 2); setAdvancedDraft(serialized);
+    const error = thresholdError(next, metrics, model);
+    if (error) { onValidityChange(error); return; }
+    onChange(serialized); onValidityChange('');
   };
   function advancedChange(text: string) {
     setAdvancedDraft(text);
@@ -138,14 +145,15 @@ function ThresholdScopeEditor({ scope, raw, model, onChange, onValidityChange }:
     if (error) { onValidityChange(error); return; }
     onValidityChange(''); onChange(JSON.stringify(parsed, null, 2));
   }
-  const nextMetric = metrics.find(metric => !Object.hasOwn(object, metric.key));
+  const nextMetric = metrics.find(metric => !Object.hasOwn(draftObject, metric.key));
   return <section className="att-threshold-scope" aria-label={`${scope} thresholds`}>
     <div className="att-threshold-heading"><div><h3>{scope === 'aggregate' ? 'Aggregate thresholds' : 'Workload thresholds'}</h3><p>ATT accepts only documented metric/operator/unit combinations. Server validation remains authoritative.</p></div>
-      <button type="button" onClick={() => nextMetric && setMetric(nextMetric.key, defaultThreshold(nextMetric.key, nextMetric.unit))} disabled={!nextMetric || Boolean(validationMessage)}>Add threshold</button>
+      <button type="button" onClick={() => nextMetric && setMetric(nextMetric.key, defaultThreshold(nextMetric.key, nextMetric.unit))} disabled={!nextMetric}>Add threshold</button>
     </div>
+    {validationMessage && <p className="att-inline-error" role="alert">{validationMessage}</p>}
     {rows.map(key => {
       const metric = metrics.find(item => item.key === key)!;
-      return <ThresholdRow key={key} metric={metric} expression={object[key]} disabled={Boolean(validationMessage)} onChange={value => setMetric(key, value)} onRemove={() => setMetric(key, undefined)} />;
+      return <ThresholdRow key={key} metric={metric} expression={draftObject[key]} onChange={value => setMetric(key, value)} onRemove={() => setMetric(key, undefined)} />;
     })}
     {!rows.length && <p className="att-threshold-empty">No {scope} thresholds. Empty <code>{'{}'}</code> means no thresholds.</p>}
     {unknown.length > 0 && <p className="att-help">Unrepresented keys stay in Advanced JSON: {unknown.join(', ')}.</p>}
@@ -160,23 +168,27 @@ function EvidenceEditor({ raw, onChange, onValidityChange }: { raw: string; onCh
   const [advancedDraft, setAdvancedDraft] = useState(raw);
   const object = useMemo(() => parseObject(raw) || {}, [raw]);
   const advancedObject = useMemo(() => parseObject(advancedDraft || '{}'), [advancedDraft]);
+  const draftObject = advancedObject || object;
   const validationMessage = advancedObject ? evidenceError(advancedObject) : 'Evidence settings must be a JSON object.';
   const validityRef = useRef(onValidityChange);
   useEffect(() => { validityRef.current = onValidityChange; }, [onValidityChange]);
   useEffect(() => { validityRef.current(validationMessage); }, [validationMessage]);
-  const mode = String(object.mode ?? '');
-  const success = String(object.success ?? '');
-  const failure = String(object.failure ?? '');
-  const resources = parseObject(JSON.stringify(object.resources ?? {})) || {};
+  const mode = String(draftObject.mode ?? '');
+  const success = String(draftObject.success ?? '');
+  const failure = String(draftObject.failure ?? '');
+  const resources = parseObject(JSON.stringify(draftObject.resources ?? {})) || {};
   useEffect(() => { setAdvancedDraft(raw); }, [raw]);
   function update(key: string, value: unknown, nested = false) {
-    const next = { ...object };
+    const next = { ...draftObject };
     if (nested) {
       const current = { ...resources };
       if (value === '') delete current[key]; else current[key] = value;
       if (Object.keys(current).length) next.resources = current; else delete next.resources;
     } else if (value === '') delete next[key]; else next[key] = value;
-    const serialized = JSON.stringify(next, null, 2); onChange(serialized); setAdvancedDraft(serialized); onValidityChange('');
+    const serialized = JSON.stringify(next, null, 2); setAdvancedDraft(serialized);
+    const error = evidenceError(next);
+    if (error) { onValidityChange(error); return; }
+    onChange(serialized); onValidityChange('');
   }
   function advancedChange(text: string) {
     setAdvancedDraft(text);
@@ -189,7 +201,7 @@ function EvidenceEditor({ raw, onChange, onValidityChange }: { raw: string; onCh
   const samplingActive = mode === 'samples' || success === 'sample';
   const fullCapture = mode === 'all' || success === 'full';
   return <section className="att-evidence-form" aria-label="Evidence settings">
-    <fieldset className="att-evidence-controls" disabled={Boolean(validationMessage)}>
+    <fieldset className="att-evidence-controls">
     <legend><h3>Evidence capture</h3></legend>
     <div className="att-load-grid">
       <label>Capture mode<select value={mode} onChange={event => update('mode', event.currentTarget.value)}>
@@ -210,7 +222,7 @@ function EvidenceEditor({ raw, onChange, onValidityChange }: { raw: string; onCh
     {fullCapture && <p className="att-evidence-impact" role="note">Full capture can increase disk use and report size. Set Maximum retained samples to a finite limit for bounded storage.</p>}
     {samplingActive && <p className="att-help">Sampling retains selected successful iterations; failures follow the selected failure policy. Dropped arrivals do not create iteration evidence.</p>}
     </fieldset>
-    {validationMessage && <p className="att-inline-error" role="alert">{validationMessage} Fix the Advanced JSON to re-enable the form.</p>}
+    {validationMessage && <p className="att-inline-error" role="alert">{validationMessage} Correct the value in the form or Advanced JSON before submitting.</p>}
     <details className="att-advanced-settings"><summary>Advanced JSON</summary>
       <label>Complete evidence settings object</label>
       <CodeEditor value={advancedDraft} language="json" label="Evidence settings advanced JSON" readOnly={false} onChange={advancedChange} />

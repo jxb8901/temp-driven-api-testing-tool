@@ -167,7 +167,7 @@ class ServerWarUiIT {
         Path config = Files.writeString(temp.resolve("scheduled-war-server.yaml"),
                 "server:\n  dataDir: " + yaml(temp.resolve("scheduled-war-data")) + "\n  javaExecutable: " + yaml(javaBin)
                         + "\n  authenticationRequired: true\n  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
-                        + "\n    safeTextSources:\n      payments:\n        - templates/SCHEDULED/payload/request.txt"
+                        + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n        - templates/SCHEDULED/payload/request.txt"
                         + "\n  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n    minimumIntervalMinutes: 1\n    pollIntervalSeconds: 5\n    maxConcurrentRuns: 1"
                         + "\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - " + yaml(packages)
                         + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
@@ -190,6 +190,33 @@ class ServerWarUiIT {
             assertEquals(401, get(port, api + "/load-schedules", null));
             assertEquals(403, get(port, api + "/load-schedules", ordinary));
             assertEquals(200, get(port, api + "/load-schedules", admin));
+            String configurationFilesPath = api + "/packages/payments/configuration/files?path=config&limit=100";
+            assertEquals(401, get(port, configurationFilesPath, null), "Configuration file listings retain the Tomcat authentication boundary.");
+            JsonNode configurationFiles = getJson(port, configurationFilesPath, ordinary);
+            assertEquals("ready", configurationFiles.path("state").asText());
+            JsonNode listedConfigSource = null;
+            JsonNode safeHelperFiles = getJson(port, api + "/packages/payments/configuration/files?path=config/tools&limit=100", ordinary);
+            assertEquals("ready", safeHelperFiles.path("state").asText());
+            JsonNode listedSafeHelper = null;
+            for (JsonNode item : configurationFiles.path("items")) {
+                if ("config/config.yaml".equals(item.path("path").asText())) listedConfigSource = item;
+            }
+            for (JsonNode item : safeHelperFiles.path("items")) {
+                if ("config/tools/att-helper.sh".equals(item.path("path").asText())) listedSafeHelper = item;
+            }
+            assertNotNull(listedConfigSource);
+            assertFalse(listedConfigSource.path("sourceAvailable").asBoolean(),
+                    "The package config YAML stays unavailable unless the Server source policy explicitly permits it.");
+            assertEquals("visibility-policy", listedConfigSource.path("reason").asText());
+            assertNotNull(listedSafeHelper);
+            assertTrue(listedSafeHelper.path("sourceAvailable").asBoolean());
+            String configurationSourcePath = api + "/packages/payments/configuration/source?path="
+                    + java.net.URLEncoder.encode("config/tools/att-helper.sh", java.nio.charset.StandardCharsets.UTF_8);
+            assertEquals(401, get(port, configurationSourcePath, null), "Configuration source retains the Tomcat authentication boundary.");
+            JsonNode configurationSource = getJson(port, configurationSourcePath, ordinary);
+            assertTrue(configurationSource.path("available").asBoolean());
+            assertEquals("config/tools/att-helper.sh", configurationSource.path("logicalPath").asText());
+            assertTrue(configurationSource.path("text").asText().contains("# Safe configuration helper source"));
             String recordsPath = api + "/packages/payments/configuration/testdata/generatedAccounts/records?environment=SIT&limit=5";
             assertEquals(401, get(port, recordsPath, null), "Testdata records remain behind the Tomcat authentication boundary.");
             JsonNode generatedMetadata = getJson(port, recordsPath, ordinary);
@@ -361,6 +388,8 @@ class ServerWarUiIT {
                 "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [config/testdata/generated.yaml]\n"
                         + "testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         Path testdata = Files.createDirectories(packageRoot.resolve("config/testdata"));
+        Path tools = Files.createDirectories(packageRoot.resolve("config/tools"));
+        Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\nexit 0\n");
         Files.writeString(testdata.resolve("generated.yaml"),
                 "schemaVersion: att-testdata/v1.0\nid: generatedAccounts\nrecords:\n  generate:\n    seq:\n      from: 1000\n      to: 1120\n      format: '%06d'\n  record:\n    id: 'A-%{seq}'\n"
                         + "selection:\n  strategy: sequential\n  exhaustion: stop\n");

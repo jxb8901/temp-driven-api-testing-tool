@@ -24,6 +24,9 @@ async function main() {
   let submittedLoadScenario;
   let submittedScheduleInput;
   let createdSchedule;
+  const resourceReferenceId = 'a'.repeat(64);
+  const nestedReferenceId = 'b'.repeat(64);
+  const referenceRequests = [];
   const generatedPreviewCalls = [];
   let authorizationHeaderSeen = false;
   try {
@@ -92,8 +95,25 @@ async function main() {
         return jsonResponse(route, 200, {
           available: true,
           format: 'yaml',
-          text: id === 'empty' ? '' : Array.from({ length: 5000 }, (_, index) => `step-${index + 1}: ${index === 0 ? '<img src=x onerror=alert(1)>' : 'safe'}`).join('\n'),
+          logicalPath: 'templates/checkout/template.yaml',
+          text: id === 'empty' ? '' : Array.from({ length: 5000 }, (_, index) => `step-${index + 1}: ${index === 0 ? '<img src=x onerror=alert(1)>' : 'safe'}`).join('\n') + '\npayload: &{./payloads/request.xml}\n',
+          fileReferences: id === 'empty' ? [] : [{ referenceId: resourceReferenceId, logicalPath: 'templates/checkout/payloads/request.xml', available: true }],
         });
+      }
+      if (method === 'GET' && path === 'packages/payments/resources/template/checkout/source-file') {
+        const referenceId = url.searchParams.get('referenceId');
+        const origin = url.searchParams.get('origin');
+        referenceRequests.push({ referenceId, origin });
+        if (referenceId === resourceReferenceId) {
+          return jsonResponse(route, 200, {
+            available: true, logicalPath: 'templates/checkout/payloads/request.xml', format: 'xml',
+            text: '<request>&{./refs/child.json}</request>',
+            fileReferences: [{ referenceId: nestedReferenceId, logicalPath: 'templates/checkout/payloads/refs/child.json', available: true }],
+          });
+        }
+        if (referenceId === nestedReferenceId) {
+          return jsonResponse(route, 200, { available: true, logicalPath: 'templates/checkout/payloads/refs/child.json', format: 'json', text: '{"ok":true}', fileReferences: [] });
+        }
       }
       if (method === 'GET' && path === 'packages/payments/configuration') {
         return jsonResponse(route, 200, {
@@ -247,6 +267,28 @@ async function main() {
     await page.getByRole('button', { name: 'Refresh source' }).waitFor();
     assert.equal(sourceCalls >= 3, true, 'source can be refreshed repeatedly');
 
+    await page.locator('.att-explorer-source .att-code-goto input').fill('5001');
+    await page.locator('.att-explorer-source .att-code-editor').getByRole('button', { name: 'Go' }).click();
+    const firstReference = page.getByRole('link', { name: 'Open package file ./payloads/request.xml' });
+    await firstReference.waitFor();
+    await firstReference.click();
+    await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
+    assert.equal(await page.locator('.att-config-source-view .att-code-language').innerText(), 'XML');
+    await page.locator('.att-config-source-view .att-code-status').getByText('Code viewer ready.').waitFor();
+    const nestedReference = page.getByRole('link', { name: 'Open package file ./refs/child.json' });
+    await nestedReference.waitFor();
+    await nestedReference.click();
+    await page.getByText('{"ok":true}', { exact: true }).waitFor();
+    assert.deepEqual(referenceRequests, [
+      { referenceId: resourceReferenceId, origin: 'templates/checkout/template.yaml' },
+      { referenceId: nestedReferenceId, origin: 'templates/checkout/payloads/request.xml' },
+    ], 'linked-file clicks use the server-issued opaque reference and the current origin');
+    await page.goBack();
+    await page.getByRole('link', { name: 'Open package file ./refs/child.json' }).waitFor();
+    await page.goBack();
+    await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
+    assert.match(page.url(), /#\/packages\/payments\/resources\/template\/checkout(?:\?detail=source)?$/);
+
     await page.goto(`${base}#/packages/payments/resources/template/empty`);
     await page.getByRole('heading', { name: 'empty' }).waitFor();
     await page.getByRole('tab', { name: 'Definition' }).focus();
@@ -310,11 +352,32 @@ async function main() {
     await page.getByRole('heading', { name: 'Jobs' }).waitFor();
     assert.match(page.url(), /#\/jobs$/);
 
-    await page.goto(`${base}#/configuration/payments?tab=source&file=config%2Fapplication.yaml`);
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.goto(`${base}#/configuration/payments?tab=source`);
     await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
+    const configurationTree = page.getByRole('tree', { name: 'Configuration file tree' });
+    const configurationFolder = configurationTree.locator('[role="treeitem"][data-path="config"]');
+    await configurationFolder.focus();
+    await page.keyboard.press('ArrowRight');
+    const applicationFile = configurationTree.locator('[role="treeitem"][data-path="config/application.yaml"]');
+    await applicationFile.waitFor({ state: 'visible' });
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.dataset.path : undefined)), 'config/application.yaml');
+    await page.keyboard.press('ArrowLeft');
+    assert.equal(await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.dataset.path : undefined)), 'config');
+    await page.keyboard.press('ArrowLeft');
+    assert.equal(await configurationFolder.getAttribute('aria-expanded'), 'false');
+    assert.equal(await applicationFile.count(), 0, 'ArrowLeft collapses the open configuration directory');
+    await configurationFolder.focus();
+    await page.keyboard.press('ArrowRight');
+    await applicationFile.waitFor({ state: 'visible' });
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Enter');
     await page.getByText('Safe read-only source').waitFor();
     await page.getByText('environment: dev', { exact: false }).waitFor();
     assert.equal(await page.locator('.att-config-source-view img').count(), 0, 'configuration source is rendered as text');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, 'the Configuration workspace has no horizontal overflow at tablet width');
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByRole('tab', { name: 'Testdata' }).click();
     await page.getByRole('table').filter({ hasText: 'account-001' }).waitFor();
     assert.equal(await page.locator('.att-testdata-table-scroll').last().innerText().then(text => text.includes('account-001')), true);

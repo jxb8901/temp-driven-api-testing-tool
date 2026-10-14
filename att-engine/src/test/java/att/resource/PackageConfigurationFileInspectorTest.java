@@ -101,6 +101,40 @@ class PackageConfigurationFileInspectorTest {
         assertFalse(result.toString().contains(root.toString()));
     }
 
+    @Test void preservesUnicodeNamesAndBoundsLargeAndDeepConfigurationTrees() throws Exception {
+        Path root = packageRoot();
+        write(root.resolve("config/支付/設定.yaml"), "currency: HKD\n");
+        PackageConfigurationFileInspector inspector = inspector(root, Collections.emptySet());
+        Map<String, Object> search = inspector.list(null, "設定", 0, 10);
+        @SuppressWarnings("unchecked") List<Map<String, Object>> matches = (List<Map<String, Object>>) search.get("items");
+        assertEquals(1, matches.size());
+        assertEquals("config/支付/設定.yaml", matches.get(0).get("path"));
+        assertEquals("設定.yaml", matches.get(0).get("name"));
+
+        Path crowded = Files.createDirectories(root.resolve("config/crowded"));
+        for (int index = 0; index <= 5000; index++)
+            Files.createDirectory(crowded.resolve(String.format(java.util.Locale.ROOT, "directory-%04d", index)));
+        Map<String, Object> bounded = inspector.list("config/crowded", null, 0, 100);
+        assertEquals(5000, bounded.get("total"));
+        assertEquals(Boolean.TRUE, bounded.get("truncated"));
+        assertEquals(100, bounded.get("nextOffset"));
+
+        List<String> segments = new java.util.ArrayList<>();
+        Path deepest = root.resolve("config");
+        for (int depth = 1; depth <= 13; depth++) {
+            String segment = "d" + depth;
+            segments.add(segment);
+            deepest = Files.createDirectories(deepest.resolve(segment));
+        }
+        write(deepest.resolve("leaf.yaml"), "value: deep\n");
+        String parent = "config/" + String.join("/", segments.subList(0, 11));
+        @SuppressWarnings("unchecked") List<Map<String, Object>> atLimit = (List<Map<String, Object>>) inspector.list(parent, null, 0, 100).get("items");
+        Map<String, Object> limitNode = atLimit.stream().filter(item -> item.get("path").equals("config/" + String.join("/", segments.subList(0, 12)))).findFirst().orElse(null);
+        assertNotNull(limitNode);
+        assertEquals("depth-limit", limitNode.get("reason"));
+        assertThrows(IllegalArgumentException.class, () -> inspector.list("config/" + String.join("/", segments), null, 0, 100));
+    }
+
     private PackageConfigurationFileInspector inspector(Path root, java.util.Set<String> allowlist) {
         return inspector(root, allowlist, 65536);
     }

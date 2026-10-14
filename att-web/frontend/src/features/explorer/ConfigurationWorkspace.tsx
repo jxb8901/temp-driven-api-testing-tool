@@ -168,9 +168,19 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault(); items[index + (event.key === 'ArrowDown' ? 1 : -1)]?.focus();
     } else if (event.key === 'ArrowRight' && current.dataset.kind === 'directory') {
-      event.preventDefault(); toggleDirectory(current.dataset.path || '');
+      event.preventDefault();
+      const path = current.dataset.path || '';
+      if (!expanded.has(path)) toggleDirectory(path);
+      else (current.nextElementSibling as HTMLElement | null)?.querySelector<HTMLElement>('[role="treeitem"]')?.focus();
     } else if (event.key === 'ArrowLeft') {
-      event.preventDefault(); current.closest('[role="group"]')?.previousElementSibling?.querySelector<HTMLElement>('[role="treeitem"]')?.focus();
+      event.preventDefault();
+      const path = current.dataset.path || '';
+      if (current.dataset.kind === 'directory' && expanded.has(path)) toggleDirectory(path);
+      else {
+        const parent = current.closest('[role="group"]')?.previousElementSibling as HTMLElement | null;
+        if (parent?.matches('[role="treeitem"]')) parent.focus();
+        else parent?.querySelector<HTMLElement>('[role="treeitem"]')?.focus();
+      }
     }
   }
 

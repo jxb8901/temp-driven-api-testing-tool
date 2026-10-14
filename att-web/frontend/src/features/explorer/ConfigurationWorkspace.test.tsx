@@ -83,6 +83,48 @@ describe('ConfigurationWorkspace', () => {
     expect(host.textContent).not.toContain('Package file reference is unavailable from this safe source projection.');
   });
 
+  it('uses tree arrow keys to expand, enter children, return to parents, and collapse', async () => {
+    const api = {
+      listResources: vi.fn(async () => ({ items: [], total: 0 })),
+      getResource: vi.fn(async () => ({ resource: { type: 'template', resourceId: 'x' } })),
+      getSafeSource: vi.fn(async () => ({ available: false })),
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getEffectiveConfiguration: vi.fn(async () => ({ sections: [] })),
+      compareConfiguration: vi.fn(async () => ({ fields: [] })),
+      listConfigurationFiles: vi.fn(async (_packageId: string, path = '') => ({
+        path, total: 1, items: path === 'config/helpers'
+          ? [{ name: 'one.yaml', path: 'config/helpers/one.yaml', kind: 'file' as const, sourceAvailable: true }]
+          : [{ name: 'helpers', path: 'config/helpers', kind: 'directory' as const }],
+      })),
+      getConfigurationFileSource: vi.fn(async () => ({ available: false })),
+      getTestdataRecords: vi.fn(async () => ({ descriptorId: 'x', offset: 0, limit: 50, total: 0, records: [] })),
+      getDebugForm: vi.fn(), previewDebug: vi.fn(), submitDebug: vi.fn(), runCase: vi.fn(),
+    } as unknown as ExplorerApi;
+
+    await act(async () => root.render(<Harness api={api} />));
+    await flush();
+    const tree = host.querySelector('[role="tree"]')!;
+    const press = async (item: HTMLElement, key: string) => act(async () => {
+      item.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    });
+    let parent = [...tree.querySelectorAll<HTMLElement>('[role="treeitem"]')].find(item => item.textContent?.includes('helpers'))!;
+    parent.focus();
+    await press(parent, 'ArrowRight');
+    await flush();
+    parent = [...tree.querySelectorAll<HTMLElement>('[role="treeitem"]')].find(item => item.textContent?.includes('helpers'))!;
+    expect(parent.getAttribute('aria-expanded')).toBe('true');
+
+    await press(parent, 'ArrowRight');
+    const child = [...tree.querySelectorAll<HTMLElement>('[role="treeitem"]')].find(item => item.textContent?.includes('one.yaml'))!;
+    expect(document.activeElement).toBe(child);
+
+    await press(child, 'ArrowLeft');
+    expect(document.activeElement).toBe(parent);
+    await press(parent, 'ArrowLeft');
+    expect(parent.getAttribute('aria-expanded')).toBe('false');
+    expect(tree.textContent).not.toContain('one.yaml');
+  });
+
   it('opens a projected template payload by its resource reference id', async () => {
     const referenceId = 'b'.repeat(64);
     const nestedReferenceId = 'd'.repeat(64);
