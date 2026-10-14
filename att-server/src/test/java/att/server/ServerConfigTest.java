@@ -36,6 +36,18 @@ class ServerConfigTest {
         assertTrue(absent.getMessage().contains("ATT_SERVER_CONFIG"));
     }
 
+    @Test void authModeDefaultsToContainerAndLocalRejectsLegacyAnonymousMode() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("auth-packages"));Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path base=temp.resolve("auth-base.yaml");Files.writeString(base,"server:\n  dataDir: "+yaml(temp.resolve("auth-data"))+"\n  javaExecutable: "+yaml(java)+"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    default: "+yaml(pkg)+"\n");
+        assertEquals("container",ServerConfig.load(base).authMode);
+        Path local=temp.resolve("auth-local.yaml");Files.writeString(local,Files.readString(base).replace("auth-data","auth-local-data").replace("server:\n","server:\n  auth:\n    mode: local\n"));
+        assertEquals("local",ServerConfig.load(local).authMode);
+        Path anonymous=temp.resolve("auth-anonymous.yaml");Files.writeString(anonymous,Files.readString(local).replace("auth-local-data","auth-anonymous-data").replace("  auth:\n    mode: local","  authenticationRequired: false\n  auth:\n    mode: local"));
+        IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(anonymous));
+        assertTrue(error.getMessage().contains("must be true when server.auth.mode is local"));
+    }
+
     @Test void missingExplicitConfigDoesNotFallBackToAttHomeCandidate() throws Exception {
         Path home=Files.createDirectories(temp.resolve("config-home"));
         Path fallback=Files.createDirectories(home.resolve("config")).resolve("att-server.yaml");

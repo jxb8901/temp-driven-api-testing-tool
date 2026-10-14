@@ -11,6 +11,7 @@ import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -22,6 +23,7 @@ public final class ServerConfig {
     public final int workerHeapInitialMb, workerHeapMaxMb;
     public final int maxRequestBytes, maxEventsPerJob, maxArtifacts;
     public final boolean authenticationRequired;
+    public final String authMode;
     public final Map<String, Path> packages;
     public final List<Path> allowedRoots;
     public final List<Path> workerLibraryDirs;
@@ -32,11 +34,11 @@ public final class ServerConfig {
     private ServerConfig(Path dataDir, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling) {
         this.dataDir=dataDir; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
-        this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;
+        this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;this.authMode=authMode;
         this.packages=Collections.unmodifiableMap(new LinkedHashMap<>(packages));
         this.allowedRoots=List.copyOf(allowedRoots);
         this.workerLibraryDirs=List.copyOf(workerLibraryDirs);
@@ -100,6 +102,10 @@ public final class ServerConfig {
         int retention=intValue(server,"jobRetentionDays",30,1,3650);
         int request=intValue(server,"maxRequestBytes",1048576,1024,16777216), events=intValue(server,"maxEventsPerJob",10000,100,1000000),
             artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
+        Map<?,?> auth=server.get("auth")==null?Collections.emptyMap():map(server.get("auth"),"server.auth");
+        String authMode=auth.get("mode")==null?"container":string(auth.get("mode"),"server.auth.mode").toLowerCase(Locale.ROOT);
+        if(!Set.of("container","local").contains(authMode))throw new IllegalArgumentException("server.auth.mode must be container or local");
+        if("local".equals(authMode)&&!authenticationRequired)throw new IllegalArgumentException("server.authenticationRequired must be true when server.auth.mode is local");
         Inspection inspection=inspection(server.get("inspection"),resolved);
         InlineLoad inlineLoad=inlineLoad(server.get("inlineLoad"));
         Scheduling scheduling=scheduling(server.get("scheduling"),authenticationRequired,load,inspection.enabled);
@@ -111,7 +117,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling);
+        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling);
     }
 
     public static Path configPath() {
@@ -151,7 +157,7 @@ public final class ServerConfig {
         if(!Files.exists(path)) throw new IllegalArgumentException(field+" does not exist: "+path);
         Path real=path.toRealPath(); if(directory&&!Files.isDirectory(real)) throw new IllegalArgumentException(field+" must be a directory: "+path); return real;
     }
-    private static void privateDirectory(Path path){try{Files.createDirectories(path);Files.setPosixFilePermissions(path,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));}catch(UnsupportedOperationException ignored){}catch(Exception e){throw new IllegalStateException("Unable to secure ATT Server data directory",e);}}
+    private static void privateDirectory(Path path){try{Files.createDirectories(path);try{Files.setPosixFilePermissions(path,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));}catch(UnsupportedOperationException unsupported){var view=Files.getFileAttributeView(path,java.nio.file.attribute.AclFileAttributeView.class);if(view==null)throw new IllegalStateException("Filesystem does not support private ATT Server data permissions");var owner=Files.getOwner(path);var entry=java.nio.file.attribute.AclEntry.newBuilder().setType(java.nio.file.attribute.AclEntryType.ALLOW).setPrincipal(owner).setPermissions(java.util.EnumSet.allOf(java.nio.file.attribute.AclEntryPermission.class)).setFlags(java.nio.file.attribute.AclEntryFlag.DIRECTORY_INHERIT,java.nio.file.attribute.AclEntryFlag.FILE_INHERIT).build();view.setAcl(java.util.List.of(entry));}}catch(Exception e){throw new IllegalStateException("Unable to secure ATT Server data directory",e);}}
     private static boolean boolValue(Map<?,?> map,String key,boolean fallback){Object value=map.get(key);if(value==null)return fallback;if(!(value instanceof Boolean))throw new IllegalArgumentException(key+" must be true or false");return (Boolean)value;}
     private static int intValue(Map<?,?> map,String key,int fallback,int min,int max) {
         Object v=map.get(key); if(v==null)return fallback; if(!(v instanceof Number n)) throw new IllegalArgumentException(key+" must be an integer");

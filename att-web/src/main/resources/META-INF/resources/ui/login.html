@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Sign in · ATT Server</title>
+  <link rel="stylesheet" href="login.css">
+  <script defer src="login.js"></script>
+</head>
+<body>
+  <main class="login-card">
+    <h1>ATT Server</h1>
+    <p id="intro">Sign in to continue.</p>
+    <form id="login-form">
+      <label>Login ID<input name="loginId" autocomplete="username" required maxlength="120"></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="1024"></label>
+      <button type="submit">Sign in</button>
+    </form>
+    <form id="bootstrap-form" hidden>
+      <label>One-time setup token<input name="token" autocomplete="off" required></label>
+      <label>Administrator login ID<input name="loginId" autocomplete="username" required minlength="3" maxlength="120"></label>
+      <label>Display name<input name="displayName" autocomplete="name" required maxlength="120"></label>
+      <label>Password (12 characters minimum)<input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="1024"></label>
+      <button type="submit">Create administrator</button>
+    </form>
+    <p id="error" role="alert" aria-live="polite"></p>
+  </main>
+</body>
+</html>

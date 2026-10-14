@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add ATT-managed local accounts, one-time administrator bootstrap, password-hashed authentication, revocable sessions, CSRF protection, and Login/Logout UI for ATT Server (#198).
+- Preserve Tomcat container authentication as the default mode and isolate local users' drafts and jobs.
+
 # ATT 4.1.3 - 2026-10-13
 
 - Add the responsive Server UI shell, shared light/dark design tokens, API-backed dashboard, and collection routes (#204).

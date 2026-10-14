@@ -14,6 +14,8 @@ import type {
   SchedulePreviewInput,
 } from './features/schedules/types';
 
+let csrfToken = '';
+
 /** Resolve the API below the current UI context (for example /att/ui/ -> /att/api/v1/). */
 export function apiBaseUrl(): URL {
   return new URL('../api/v1/', document.baseURI);
@@ -43,7 +45,11 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   if (init.body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  const method = (init.method || 'GET').toUpperCase();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken) headers.set('X-ATT-CSRF', csrfToken);
   const response = await fetch(url, { ...init, headers, credentials: 'same-origin' });
+  const nextCsrf = response.headers.get('X-ATT-CSRF');
+  if (nextCsrf) csrfToken = nextCsrf;
   const body = parseBody(await response.text());
   if (!response.ok) {
     const payload = body && typeof body === 'object' ? body as { error?: ApiErrorBody; requestId?: string; diagnostics?: unknown } : {};
@@ -122,6 +128,12 @@ function subscribeJob(jobId: string, handlers: JobEventHandlers): () => void {
 export const api = {
   getVersion(signal?: AbortSignal): Promise<ServerVersion> {
     return request<ServerVersion>('version', { signal });
+  },
+  getCurrentUser(signal?: AbortSignal): Promise<{ loginId: string; displayName: string; role: string; csrfToken?: string }> {
+    return request('auth/me', { signal });
+  },
+  logout(): Promise<{ loggedOut: boolean }> {
+    return request('auth/logout', { method: 'POST', body: '{}' });
   },
   getPackages(signal?: AbortSignal): Promise<ApiEnvelope<PackageSummary>> {
     return request<ApiEnvelope<PackageSummary>>('packages', { signal });

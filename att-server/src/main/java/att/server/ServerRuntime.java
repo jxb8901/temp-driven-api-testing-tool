@@ -63,6 +63,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     final ServerConfig config;
     final JobStore store;
+    final AuthService auth;
     final ThreadPoolExecutor workers,streams,inspectors;
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
@@ -93,7 +94,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.config=config;this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.auth=new AuthService(config,store);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -246,11 +247,17 @@ final class ServerRuntime implements AutoCloseable {
     }
     private String normalizeTerminal(String s){return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(s)?s:"ERROR";}
     String cancel(String id,String principal) throws Exception {
+        if("local".equals(config.authMode))requireJobOwner(id,principal);
         Job j=jobs.get(id);if(j==null){Map<String,Object> stored=store.get(id);if(stored==null||!JOB_ID.matcher(id).matches())throw new NotFoundException();return String.valueOf(stored.get("status"));}
         synchronized(j){if(j.terminal())return j.status;append(j,"status",Map.of("jobId",id,"status","CANCEL_REQUESTED"));
             Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){boolean cancelled=task.cancel(false);workers.remove(task);if(cancelled){AdmissionLease lease=leases.remove(id);if(lease!=null)lease.release();}}finish(j,"CANCELLED",143);jobs.remove(id,j);}
             else {terminateTree(p);try{if(!p.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS)){forceTree(p);p.waitFor();}}catch(InterruptedException e){Thread.currentThread().interrupt();forceTree(p);}finish(j,"CANCELLED",143);}}
         store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");return j.status;
+    }
+    void requireJobOwner(String id,String principal) throws Exception {if(!JOB_ID.matcher(id).matches()||!store.ownsJob(id,principal))throw new NotFoundException();}
+    List<Map<String,Object>> jobsFor(String principal,String search) throws Exception {
+        if("local".equals(config.authMode)){List<Map<String,Object>> owned=store.listOwned(100,principal);if(search==null||search.isBlank())return owned;String q=search.toLowerCase(java.util.Locale.ROOT);return owned.stream().filter(row->String.valueOf(row.get("principal")).toLowerCase(java.util.Locale.ROOT).contains(q)).toList();}
+        return store.list(100,search);
     }
     Job job(String id){if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Job j=jobs.get(id);if(j==null)throw new NotFoundException();return j;}
     Map<String,Object> jobRecord(String id) throws Exception {Job j=jobs.get(id);if(j!=null)return j.view();if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();record.remove("resultJson");record.remove("diagnosticJson");String performance=(String)record.remove("performanceJson");if(performance!=null&&!performance.isBlank())record.put("performance",JSON.readValue(performance,Map.class));return record;}

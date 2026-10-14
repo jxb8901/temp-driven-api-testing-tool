@@ -126,7 +126,17 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 ## 驗證與身份
 
-`server.authenticationRequired: true`（預設值）時，Tomcat 負責驗證請求，ATT Server 會在 Web UI 及受保護的 API 操作使用 Servlet Principal。Health 及 version 維持公開。設為 `false` 時，完整 Web UI、REST 及 Remote API 均可在沒有 Servlet Principal 下使用；Server 會把所有 caller 統一解析為共享授權身份 `anonymous`，即使 container 同時提供 Principal 亦然。所有匿名 caller 共享 drafts、jobs 及 artifacts，沒有個別用戶隔離或責任追蹤。啟用此模式時 ATT 會在啟動日誌發出警告。此設定不會略過 `web.xml` 中的 Tomcat security constraint；Tomcat 會在 ATT 處理請求前執行這些限制。
+`server.auth.mode` 選擇驗證提供者。為保留現有部署，預設為 `container`。設為 `local` 後，ATT 會管理本地帳戶。Local mode 必須同時設定 `authenticationRequired: true`；若與舊式匿名設定 `false` 一起使用，Server 會拒絕啟動。
+
+在 `container` mode 中，Tomcat 驗證請求，ATT 使用 Servlet Principal。現有 BASIC、FORM 及 SSO 部署會保留由 container 管理的登入流程。Health 及 version 維持公開。舊式 `server.authenticationRequired: false` 只適用於 container mode，會讓 UI 及 API 共用匿名存取，只應用於隔離且可信的網絡。所有匿名 caller 共用 drafts、jobs 及 artifacts。啟用時 ATT 會在啟動日誌發出警告。
+
+在 `local` mode 中，未登入的瀏覽器開啟 `/ui/` 時會轉至 ATT 登入頁；REST API 則回傳結構化 JSON `401`。首次管理員帳戶使用 `dataDir/bootstrap-admin.token` 內的隨機一次性 token 建立。請限制 `dataDir` 只供 Server 作業系統帳戶存取，在登入頁輸入 token 完成建立，之後移除對 token 檔案的存取。系統沒有預設帳戶或密碼。除 loopback 開發外，登入及 bootstrap 只接受 HTTPS。本地密碼以每位用戶獨立 salt 的 PBKDF2-HMAC-SHA-256 雜湊保存。首個版本支援 `ADMIN` 及 `USER`；所有已驗證用戶均可使用一般 Server 操作，帳戶管理及 Scheduled Load 管理則要求 `ADMIN`。
+
+Local session 使用不透明的 server-side identifier，登入時會輪替，閒置 30 分鐘或累計 12 小時後失效。登出、密碼變更或重設、停用帳戶都會撤銷 session。Server 重啟後，未到期或未撤銷的 session 仍有效。Cookie 設為 HttpOnly、SameSite=Lax，Path 限於部署 context；Tomcat 判斷請求使用 HTTPS 時亦會設 Secure。啟用 TLS termination 前，請先設定可信任的反向代理，讓 Tomcat 識別外部 HTTPS scheme。所有使用 cookie 驗證的狀態變更請求，以及由瀏覽器發出的 Basic-authenticated 狀態變更請求，必須在 `X-ATT-CSRF` 提交 CSRF token；登入及一次性 bootstrap endpoint 則要求 same-origin JSON。同一 login ID 及 client address 在 10 分鐘內連續失敗 8 次後會被限速。登入回應不會區分不存在、已停用或密碼錯誤的帳戶。登入成功及失敗都會寫入 audit，並不記錄憑證。密碼以 310,000 次 PBKDF2-HMAC-SHA-256 計算雜湊；成功登入時會升級計算次數較低的舊 hash。
+
+`GET /api/v1/auth/me` 回傳安全的目前用戶資料及瀏覽器所需的 CSRF token。`POST /api/v1/auth/login` 及 `/api/v1/auth/logout` 管理 session。使用 local account 的 CLI 及 REST client 亦可透過 HTTPS Basic authentication 存取。管理員可使用 `GET`、`POST /api/v1/auth/users`、`POST /api/v1/auth/users/{loginId}/password`、`POST /api/v1/auth/users/{loginId}/enable` 及 `DELETE /api/v1/auth/users/{loginId}` 管理帳戶。`POST /api/v1/auth/password` 會先核對目前密碼，再變更自己的密碼。API 回應不會包含密碼雜湊、session identifier 或密碼。
+
+Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的工作歸屬於已驗證的 login ID；其他用戶即使猜中 ID，也無法存取該 draft 或 job。同一歸屬檢查亦保護 job 狀態、結果、SSE、artifacts 及取消操作。Container mode 保留現有授權行為。
 
 匿名 job submission 可在最外層 JSON 加入選填的 `principal` label，只供顯示及 audit 使用。Server 會 trim 並以 Unicode 正規化 label、驗證長度及字元，然後在既有 job/audit `principal` 欄位加上 `(anonym)` 後綴，例如 `Bob(anonym)`。省略時維持既有值 `anonymous`；caller 不可自行提交保留後綴。此 label 由 caller 自行聲稱，不會改變授權、draft 存取、job 可見範圍、artifact 存取、取消或排程。驗證模式永遠使用 Servlet Principal，並忽略提交的 label。此歸屬資料不會傳給 Worker，也不會放進 ATT expression Context；不會新增持久化欄位或回應欄位。
 
@@ -141,9 +151,9 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
        portHeader="X-Forwarded-Port" />
 ```
 
-所有已驗證的 Servlet Principal 在 v1 均有相同權限；ATT 不要求特定 container role，也沒有 ATT 專用 RBAC。匿名模式會為整個 UI 及 API 略過驗證，只應用於可信的 SIT/development 部署。請將 Tomcat 綁定 loopback 或 private interface。若使用 reverse proxy，請以 VPN、防火牆或 IP allowlist 保護，並避免將 API 暴露於不可信網絡。離開 localhost 的流量必須使用 TLS。Draft 存於記憶體，Server 重啟後會清除；切換驗證模式亦須重啟，因此 draft 會被丟棄，不會轉交已驗證身份。ATT Server 不會實作密碼、JWT/OIDC 驗證、LDAP 驗證或登入流程。請勿在 API payload 或 package 檔案中放置憑證。
+`RemoteIpValve` 只應信任實際 proxy 位址。Proxy 加入 forwarded headers 前，必須先移除 client 自行提交的值。請將 Tomcat 綁定 loopback 或 private interface，並用 VPN、防火牆或 IP allowlist 保護 proxy。localhost 以外的流量必須使用 HTTPS。Draft 存於記憶體，Server 重啟後會清除。切換驗證 mode 需要重啟；現有 draft 不會轉移到其他身份。Local mode 不會讀取或修改 JSPWiki 帳戶檔案，也不提供外部 LDAP、OIDC、SAML 或共用 SSO。
 
-內建瀏覽器主控台位於 `<context path>/ui/`，使用與 API 相同的容器驗證機制。詳見 [ATT Server Web UI](reference.zh/att-server-web-ui.md)。
+內建瀏覽器主控台位於 `<context path>/ui/`，使用所選的 container 或 local 驗證 mode。Local mode 會在主控台顯示目前用戶並提供登出控制。詳見 [ATT Server Web UI](reference.zh/att-server-web-ui.md)。
 
 ## REST API
 
@@ -152,6 +162,10 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 | 方法 | 路徑 | 用途 |
 | --- | --- | --- |
 | `GET` | `/health`、`/version` | 健康狀態、build 及瀏覽器 Load capability 資訊 |
+| `GET`、`POST` | `/auth/bootstrap/status`、`/auth/bootstrap` | 檢查及執行一次性本地管理員初始化 |
+| `POST`、`GET` | `/auth/login`、`/auth/logout`、`/auth/me` | 建立／撤銷 local session 及讀取目前用戶資料 |
+| `GET`、`POST`、`DELETE` | `/auth/users`、`/auth/users/{loginId}` | 列出、建立、停用、啟用或重設本地帳戶（管理員） |
+| `POST` | `/auth/password` | 變更目前本地用戶的密碼 |
 | `GET` | `/metrics` | 有界的工作、Worker 及已啟用排程數量 |
 | `GET` | `/packages`、`/packages/{packageId}` | 讀取設定中的 registry |
 | `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | 列出安全的 Case、Template、Flow 及 Tool 投影 |

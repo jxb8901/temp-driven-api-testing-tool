@@ -3,9 +3,10 @@
 # Copy to ATT_HOME/config/att-server.yaml or a protected external path.
 server:
   dataDir: /opt/att/data
-  # true keeps Tomcat authentication. false enables full anonymous UI/API access:
-  # every caller shares identity "anonymous" and shared drafts/jobs, with no user isolation.
-  # Use false only on a trusted isolated network; see the deployment guide warning.
+  auth:
+    # container preserves Tomcat Realm/SSO; local enables ATT login and local accounts.
+    mode: container
+  # Legacy container-mode setting. false enables shared anonymous access; never use with local mode.
   authenticationRequired: true
   # Optional. Defaults to the Java runtime hosting Tomcat.
   # javaExecutable: /usr/lib/jvm/java-17/bin/java

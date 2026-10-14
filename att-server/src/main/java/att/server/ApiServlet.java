@@ -37,14 +37,16 @@ public final class ApiServlet extends HttpServlet {
     private ServerRuntime runtime;
     @Override public void init() throws ServletException {Object r=getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(!(r instanceof ServerRuntime))throw new ServletException("ATT Server runtime did not initialize");runtime=(ServerRuntime)r;}
     @Override protected void service(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
+        if(path(req).startsWith("/auth/")){super.service(req,res);return;}
         if("PATCH".equalsIgnoreCase(req.getMethod())){schedulePatch(req,res);return;}
         super.service(req,res);
     }
     @Override protected void doGet(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String path=path(req);String requestId=requestId(req,res);
         try {
+            if(path.startsWith("/auth/")){authGet(req,res,path,requestId);return;}
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
-            if("/version".equals(path)){json(res,200,Map.of("version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"buildTime",ServerBuildInfo.BUILD_TIME,"gitCommit",ServerBuildInfo.GIT_COMMIT,"javaMinimum",17,"inlineLoadEnabled",runtime.config.inlineLoad.enabled,"loadSchedulingEnabled",runtime.config.scheduling.enabled,"requestId",requestId));return;}
+            if("/version".equals(path)){json(res,200,Map.of("version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"buildTime",ServerBuildInfo.BUILD_TIME,"gitCommit",ServerBuildInfo.GIT_COMMIT,"javaMinimum",17,"inlineLoadEnabled",runtime.config.inlineLoad.enabled,"loadSchedulingEnabled",runtime.config.scheduling.enabled,"authMode",runtime.config.authMode,"requestId",requestId));return;}
             boolean resourceRequest=resourcePath(path);
             boolean configurationRequest=configurationPath(path);
             boolean loadPolicyRequest=loadPolicyPath(path);
@@ -64,7 +66,8 @@ public final class ApiServlet extends HttpServlet {
             }
             if("/packages".equals(path)){json(res,200,Map.of("items",runtime.packages(),"requestId",requestId));return;}
             if(path.startsWith("/packages/")){String id=segment(path,2);json(res,200,runtime.packageView(id));return;}
-            if("/jobs".equals(path)){json(res,200,Map.of("items",runtime.store.list(100,principalSearch(req)),"requestId",requestId));return;}
+            if("/jobs".equals(path)){json(res,200,Map.of("items",runtime.jobsFor(principal,principalSearch(req)),"requestId",requestId));return;}
+            if(path.startsWith("/jobs/"))runtime.requireJobOwner(segment(path,2),principal);
             if(path.matches("/jobs/[^/]+/events")){sse(req,res,segment(path,2));return;}
             if(path.startsWith("/jobs/")&&path.contains("/artifacts/")){String prefix=path.substring(0,path.indexOf("/artifacts/"));String id=segment(prefix,2);String relative=path.substring(path.indexOf("/artifacts/")+11);sendArtifact(res,runtime.artifact(id,relative));return;}
             if(path.matches("/jobs/[^/]+/artifacts")){String id=segment(path,2);json(res,200,Map.of("items",artifacts(id),"requestId",requestId));return;}
@@ -86,6 +89,7 @@ public final class ApiServlet extends HttpServlet {
     }
     @Override protected void doPost(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req);String authorizationPrincipal=principal(req);
+        if(path.startsWith("/auth/")){authPost(req,res,path,requestId);return;}
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
         boolean createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path);
@@ -94,6 +98,7 @@ public final class ApiServlet extends HttpServlet {
         try {
             if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
             if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+            if(("/auth/login".equals(path)||"/auth/bootstrap".equals(path))&&!secureLocalAuthTransport(req)){error(res,403,"ATT-AUTH-HTTPS-REQUIRED","Local credentials require HTTPS outside loopback development",requestId);return;}
             byte[] body=req.getInputStream().readNBytes(runtime.config.maxRequestBytes+1);
             if(body.length>runtime.config.maxRequestBytes){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Request body exceeds the configured size limit",requestId);return;}
             JsonNode input;
@@ -126,6 +131,7 @@ public final class ApiServlet extends HttpServlet {
     }
     @Override protected void doDelete(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req),principal=principal(req);
+        if(path.startsWith("/auth/")){authDelete(req,res,path,requestId);return;}
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){scheduleDelete(req,res,path,requestId,principal);return;}
         if(!path.matches("/jobs/[^/]+")){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
@@ -135,6 +141,55 @@ public final class ApiServlet extends HttpServlet {
         catch(Exception e){error(res,500,"ATT-SERVER-CANCEL-FAILED","The job could not be cancelled",requestId);}
     }
     @Override protected void doPut(HttpServletRequest req,HttpServletResponse res) throws IOException {error(res,405,"ATT-SERVER-METHOD-NOT-ALLOWED","Package administration is read-only in v1",requestId(req,res));}
+
+    private void authGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
+        try {
+            if(!runtime.auth.local(runtime.config)){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
+            if("/auth/bootstrap/status".equals(path)){json(res,200,Map.of("required",runtime.auth.bootstrapRequired(),"requestId",requestId));return;}
+            if("/auth/users".equals(path)){if(!requireAdmin(req,res,requestId))return;json(res,200,Map.of("items",runtime.store.authUsers(),"requestId",requestId));return;}
+            if("/auth/me".equals(path)) {String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
+                @SuppressWarnings("unchecked") Map<String,String> session=(Map<String,String>)req.getAttribute(AuthService.SESSION);
+                Map<String,Object> profile=runtime.auth.safeUser(runtime.store.authUser(principal));Map<String,Object> result=new LinkedHashMap<>(profile);Object csrf=session==null?req.getAttribute(AuthService.BASIC_CSRF):session.get("csrfToken");if(csrf instanceof String)result.put("csrfToken",csrf);result.put("requestId",requestId);json(res,200,result);return;}
+            error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);
+        }catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authentication request could not be completed",requestId);}
+    }
+    private void authPost(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
+        try {
+            if(!runtime.auth.local(runtime.config)){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
+            if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
+            if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+            JsonNode body=authBody(req);if(body==null||!body.isObject())throw new IllegalArgumentException("A JSON object is required");
+            if("/auth/bootstrap".equals(path)) {Map<String,Object> user=runtime.auth.bootstrap(text(body,"token"),text(body,"loginId"),text(body,"displayName"),text(body,"password"));runtime.store.audit((String)user.get("loginId"),"BOOTSTRAP",null,null,"SUCCESS");json(res,201,Map.of("user",user,"requestId",requestId));return;}
+            if("/auth/login".equals(path)) {runtime.auth.logout(req);Map<String,Object> session=runtime.auth.login(text(body,"loginId"),text(body,"password"),req.getRemoteAddr());String token=(String)session.get("token");setSessionCookie(res,req,token,AuthService.ABSOLUTE_MILLIS/1000);runtime.store.audit((String)((Map<?,?>)session.get("user")).get("loginId"),"LOGIN",null,null,"SUCCESS");json(res,200,Map.of("user",session.get("user"),"requestId",requestId));return;}
+            if("/auth/logout".equals(path)){String user=principal(req);runtime.auth.logout(req);expireSessionCookie(res,req);if(user!=null)runtime.store.audit(user,"LOGOUT",null,null,"SUCCESS");json(res,200,Map.of("loggedOut",true,"requestId",requestId));return;}
+            if("/auth/password".equals(path)){String user=principal(req);runtime.auth.changePassword(user,text(body,"currentPassword"),text(body,"newPassword"));expireSessionCookie(res,req);runtime.store.audit(user,"PASSWORD_CHANGE",null,null,"SUCCESS");json(res,200,Map.of("updated",true,"requestId",requestId));return;}
+            if(path.matches("/auth/users/[^/]+/enable")){if(!requireAdmin(req,res,requestId))return;String target=path.split("/")[3];runtime.auth.enable(target);runtime.store.audit(principal(req),"USER_ENABLE",null,null,target);json(res,200,Map.of("enabled",true,"requestId",requestId));return;}
+            if("/auth/users".equals(path)){if(!requireAdmin(req,res,requestId))return;String target=text(body,"loginId");runtime.auth.createUser(target,text(body,"displayName"),text(body,"password"),text(body,"role"));runtime.store.audit(principal(req),"USER_CREATE",null,null,target);json(res,201,Map.of("user",runtime.auth.safeUser(runtime.store.authUser(AuthService.normalize(target))),"requestId",requestId));return;}
+            if(path.matches("/auth/users/[^/]+/password")){if(!requireAdmin(req,res,requestId))return;String target=path.split("/")[3];runtime.auth.password(target,text(body,"password"));runtime.store.audit(principal(req),"PASSWORD_RESET",null,null,target);json(res,200,Map.of("updated",true,"requestId",requestId));return;}
+            error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);
+        }catch(AuthService.AuthFailure failure){String action="/auth/login".equals(path)?"LOGIN":"/auth/bootstrap".equals(path)?"BOOTSTRAP":"AUTH_CHANGE";try{runtime.store.audit("anonymous",action,null,null,failure.code);}catch(Exception ignored){}error(res,failure.status,failure.code,"Authentication request could not be completed",requestId);}
+         catch(IllegalArgumentException failure){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(failure),requestId);}
+         catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authentication request could not be completed",requestId);}
+    }
+    private void authDelete(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
+        if(!runtime.auth.local(runtime.config)){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
+        if(!path.matches("/auth/users/[^/]+")){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
+        if(!requireAdmin(req,res,requestId))return;
+        try{String target=path.substring("/auth/users/".length());runtime.auth.disable(target);runtime.store.audit(principal(req),"USER_DISABLE",null,null,target);json(res,200,Map.of("disabled",true,"requestId",requestId));}
+        catch(AuthService.AuthFailure e){error(res,e.status,e.code,"Authentication request could not be completed",requestId);}
+        catch(IllegalArgumentException e){error(res,404,"ATT-SERVER-NOT-FOUND","User was not found",requestId);}
+        catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authentication request could not be completed",requestId);}
+    }
+    private boolean requireAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
+        String login=principal(req);if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;}
+        try{Map<String,Object> user=runtime.store.authUser(login);if(user==null||!"ADMIN".equals(user.get("role"))){error(res,403,"ATT-SERVER-FORBIDDEN","Administrator access is required",requestId);return false;}return true;}
+        catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authentication request could not be completed",requestId);return false;}
+    }
+    private JsonNode authBody(HttpServletRequest req)throws IOException {byte[] bytes=req.getInputStream().readNBytes(Math.min(runtime.config.maxRequestBytes,65536)+1);if(bytes.length>Math.min(runtime.config.maxRequestBytes,65536))throw new IllegalArgumentException("Authentication request body is too large");try{return ServerRuntime.JSON.readTree(bytes);}catch(JsonProcessingException e){throw new IllegalArgumentException("Request body is not valid JSON");}}
+    private static String text(JsonNode body,String name){JsonNode value=body.get(name);if(value==null||!value.isTextual())throw new IllegalArgumentException(name+" must be text");return value.asText();}
+    private static boolean secureLocalAuthTransport(HttpServletRequest req){if(req.isSecure())return true;try{return java.net.InetAddress.getByName(req.getRemoteAddr()).isLoopbackAddress();}catch(Exception invalid){return false;}}
+    private static void setSessionCookie(HttpServletResponse res,HttpServletRequest req,String token,long maxAge){String path=req.getContextPath().isEmpty()?"/":req.getContextPath()+"/";res.addHeader("Set-Cookie",AuthService.COOKIE+"="+token+"; Path="+path+"; Max-Age="+maxAge+"; HttpOnly; SameSite=Lax"+(req.isSecure()?"; Secure":""));}
+    private static void expireSessionCookie(HttpServletResponse res,HttpServletRequest req){String path=req.getContextPath().isEmpty()?"/":req.getContextPath()+"/";res.addHeader("Set-Cookie",AuthService.COOKIE+"=; Path="+path+"; Max-Age=0; HttpOnly; SameSite=Lax"+(req.isSecure()?"; Secure":""));}
 
     private void scheduleGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
         String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
@@ -206,6 +261,7 @@ public final class ApiServlet extends HttpServlet {
 
     private boolean scheduleAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
         if(!runtime.config.scheduling.enabled){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return false;}
+        if("local".equals(runtime.config.authMode)){String login=principal(req);try{Map<String,Object> user=login==null?null:runtime.store.authUser(login);if(user!=null&&"ADMIN".equals(user.get("role")))return true;}catch(Exception ignored){}error(res,403,"ATT-SERVER-SCHEDULE-ADMIN-REQUIRED","Administrator access is required",requestId);return false;}
         if(!runtime.config.authenticationRequired&&runtime.config.scheduling.allowAnonymousManagement)return true;
         if(req.isUserInRole(runtime.config.scheduling.adminRole))return true;
         error(res,403,"ATT-SERVER-SCHEDULE-ADMIN-REQUIRED","The configured schedule administrator role is required",requestId);return false;
@@ -223,6 +279,7 @@ public final class ApiServlet extends HttpServlet {
     private static boolean loadSchedulePath(String path){return path.matches("/load-schedules(?:/[^/]+(?:/(?:executions|trigger|pause|resume))?)?");}
 
     private void sse(HttpServletRequest req,HttpServletResponse res,String jobId) throws IOException {
+        String sessionHash=null;Object localSession=req.getAttribute(AuthService.SESSION);if(localSession instanceof Map<?,?> session&&session.get("tokenHash") instanceof String hash)sessionHash=hash;
         String last=req.getHeader("Last-Event-ID");long cursor=0;
         if(last!=null&&!last.isBlank())try{cursor=Long.parseLong(last);}catch(NumberFormatException e){error(res,400,"ATT-SERVER-INVALID-LAST-EVENT-ID","Last-Event-ID must be a non-negative integer",requestId(req,res));return;}
         if(cursor<0){error(res,400,"ATT-SERVER-INVALID-LAST-EVENT-ID","Last-Event-ID must be a non-negative integer",requestId(req,res));return;}
@@ -232,18 +289,19 @@ public final class ApiServlet extends HttpServlet {
         try {
             AsyncContext async=req.startAsync();async.setTimeout(0);final long start=cursor;
             res.setStatus(200);res.setCharacterEncoding("UTF-8");res.setContentType("text/event-stream");res.setHeader("Cache-Control","no-cache, no-transform");res.setHeader("X-Accel-Buffering","no");
-            runtime.streams.execute(()->{try{stream(async,jobId,events,start,outputDirectory,packageRoot);}finally{runtime.streamSlots.release();}});handedOff=true;
+            String activeSessionHash=sessionHash;runtime.streams.execute(()->{try{stream(async,jobId,events,start,outputDirectory,packageRoot,activeSessionHash);}finally{runtime.streamSlots.release();}});handedOff=true;
         } catch(RejectedExecutionException full) {
             if(!res.isCommitted()){res.resetBuffer();error(res,503,"ATT-SERVER-STREAM-CAPACITY","SSE observer capacity is full",requestId(req,res));}
             if(req.isAsyncStarted())req.getAsyncContext().complete();
         } finally {if(!handedOff)runtime.streamSlots.release();}
     }
-    private void stream(AsyncContext async,String jobId,JobEvents journal,long cursor,Path outputDirectory,Path packageRoot){
+    private void stream(AsyncContext async,String jobId,JobEvents journal,long cursor,Path outputDirectory,Path packageRoot,String sessionHash){
         long lastWrite=System.nanoTime();java.util.concurrent.ArrayBlockingQueue<Boolean> wakeup=new java.util.concurrent.ArrayBlockingQueue<>(1);
         AutoCloseable subscription=journal.listen(event->wakeup.offer(Boolean.TRUE));wakeup.offer(Boolean.TRUE);
         try(PrintWriter out=async.getResponse().getWriter()){
             while(true){
                 wakeup.poll(15,TimeUnit.SECONDS);
+                if(sessionHash!=null&&!runtime.auth.sessionStillValid(sessionHash))break;
                 List<Map<String,Object>> events=journal.after(cursor,100);
                 for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(runtime.publicEventData(event.get("data"),outputDirectory,packageRoot))+"\n\n");cursor=id;}
                 if(!events.isEmpty()){out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
@@ -360,7 +418,7 @@ public final class ApiServlet extends HttpServlet {
     private static boolean sameOrigin(HttpServletRequest req){String origin=req.getHeader("Origin");if(origin==null)return true;if("null".equalsIgnoreCase(origin.trim()))return false;try{java.net.URI parsed=java.net.URI.create(origin);if(parsed.getHost()==null||parsed.getUserInfo()!=null||parsed.getRawPath()!=null&&!parsed.getRawPath().isEmpty()||parsed.getRawQuery()!=null||parsed.getFragment()!=null)return false;String scheme=req.getScheme().toLowerCase(java.util.Locale.ROOT),originScheme=parsed.getScheme().toLowerCase(java.util.Locale.ROOT);int requestPort=req.getServerPort(),originPort=parsed.getPort()<0?("https".equals(originScheme)?443:80):parsed.getPort();int effectiveRequest=requestPort<0?("https".equals(scheme)?443:80):requestPort;return scheme.equals(originScheme)&&req.getServerName().equalsIgnoreCase(parsed.getHost())&&effectiveRequest==originPort;}catch(Exception invalid){return false;}}
     private static String path(HttpServletRequest r){String p=r.getPathInfo();return p==null||p.isEmpty()?"/":p;}
     private static String segment(String path,int index){String[] parts=path.split("/");return parts.length>index?parts[index]:"";}
-    static String principal(HttpServletRequest req){Object value=req.getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(value instanceof ServerRuntime runtime&&!runtime.config.authenticationRequired)return RequestIdentity.ANONYMOUS;Principal p=req.getUserPrincipal();if(p==null)return null;String name=p.getName();if(name==null||name.isBlank()||name.length()>256)return null;for(int i=0;i<name.length();i++)if(Character.isISOControl(name.charAt(i)))return null;return name.trim();}
+    static String principal(HttpServletRequest req){Object value=req.getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(value instanceof ServerRuntime runtime&&"local".equals(runtime.config.authMode)){Object identity=req.getAttribute(AuthService.IDENTITY);return identity instanceof String?(String)identity:null;}if(value instanceof ServerRuntime runtime&&!runtime.config.authenticationRequired)return RequestIdentity.ANONYMOUS;Principal p=req.getUserPrincipal();if(p==null)return null;String name=p.getName();if(name==null||name.isBlank()||name.length()>256)return null;for(int i=0;i<name.length();i++)if(Character.isISOControl(name.charAt(i)))return null;return name.trim();}
     private static String requestId(HttpServletRequest req,HttpServletResponse res){String value=req.getHeader("X-Request-ID");if(value==null||!value.matches("[A-Za-z0-9._-]{1,80}"))value=UUID.randomUUID().toString();res.setHeader("X-Request-ID",value);return value;}
     private static void json(HttpServletResponse res,int status,Object body)throws IOException{res.setStatus(status);res.setCharacterEncoding("UTF-8");res.setContentType("application/json");ServerRuntime.JSON.writeValue(res.getOutputStream(),body);}
     private static void error(HttpServletResponse res,int status,String code,String summary,String requestId)throws IOException{Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);json(res,status,Map.of("error",e));}

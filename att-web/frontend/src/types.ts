@@ -35,6 +35,7 @@ export interface ServerVersion {
   javaMinimum?: number;
   inlineLoadEnabled: boolean;
   loadSchedulingEnabled?: boolean;
+  authMode?: 'container' | 'local';
 }
 
 export interface PackageSummary {

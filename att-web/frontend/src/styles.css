@@ -79,6 +79,9 @@ button:focus-visible, a:focus-visible, [tabindex="-1"]:focus-visible { outline: 
 .shortcut-help { border-color: var(--att-color-border); font-weight: 750; }
 .topbar-status { display: flex; align-items: center; gap: var(--att-space-2); color: var(--att-color-muted); font-size: 0.82rem; }
 .topbar-status-label { font-weight: 650; }
+.att-current-user { display: flex; align-items: center; gap: var(--att-space-2); color: var(--att-color-muted); font-size: .84rem; }
+.att-current-user button { min-height: 36px; padding: 0 var(--att-space-3); border: 1px solid var(--att-color-border); border-radius: var(--att-radius-control); background: var(--att-color-surface); color: var(--att-color-text); cursor: pointer; font: inherit; font-weight: 650; }
+.att-current-user button:hover { border-color: var(--att-color-primary); }
 .connection-status { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--att-color-success); font-weight: 700; }
 .connection-status::before { width: 7px; height: 7px; border-radius: 50%; background: currentColor; content: ""; }
 .connection-status[data-state="connecting…"] { color: var(--att-color-warning); }

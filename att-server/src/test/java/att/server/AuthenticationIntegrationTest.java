@@ -25,6 +25,12 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Future;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.CookieManager;
+import java.net.CookiePolicy;
+import java.net.URI;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AuthenticationIntegrationTest {
@@ -34,6 +40,63 @@ class AuthenticationIntegrationTest {
     @AfterEach void restoreAttHome() {
         if (previousAttHome == null) System.clearProperty("att.home");
         else System.setProperty("att.home", previousAttHome);
+    }
+
+    @Test void localAuthenticationBootstrapsLogsInEnforcesCsrfAndSupportsAdminUserManagement() throws Exception {
+        previousAttHome=System.getProperty("att.home");Path localHome=createLocalRuntime();System.setProperty("att.home",localHome.toString());
+        Path packages=Files.createDirectory(temp.resolve("local-auth-packages"));Path pkg=Files.createDirectory(packages.resolve("p"));
+        Path data=temp.resolve("local-auth-data");Path config=Files.writeString(temp.resolve("local-auth.yaml"),"server:\n  dataDir: "+data+"\n  auth:\n    mode: local\nworkers: {}\npackages:\n  allowedRoots:\n    - "+packages+"\n  entries:\n    p: "+pkg+"\n");
+        String oldConfig=System.getProperty("att.server.config");System.setProperty("att.server.config",config.toString());
+        Path users=Files.writeString(temp.resolve("local-auth-users.xml"),"<tomcat-users></tomcat-users>");Tomcat tomcat=start(users,appDirectory("local-auth"),true);
+        try {
+            int port=tomcat.getConnector().getLocalPort();String origin="http://localhost:"+port;HttpClient client=HttpClient.newBuilder().cookieHandler(new CookieManager(null,CookiePolicy.ACCEPT_ALL)).followRedirects(HttpClient.Redirect.NEVER).build();
+            assertEquals(401,send(client,port,"GET","/att/api/v1/packages",null,null,null).statusCode());
+            HttpResponse<String> ui=send(client,port,"GET","/att/ui/",null,null,null);assertEquals(302,ui.statusCode());assertTrue(ui.headers().firstValue("Location").orElse("").contains("/att/ui/login.html"));
+            assertEquals(200,send(client,port,"GET","/att/ui/login.html",null,null,null).statusCode());
+            assertEquals(200,send(client,port,"GET","/att/api/v1/auth/bootstrap/status",null,null,null).statusCode());
+            String token=Files.readString(data.resolve("bootstrap-admin.token")).strip();
+            HttpResponse<String> setup=send(client,port,"POST","/att/api/v1/auth/bootstrap",origin,null,"{\"token\":\""+token+"\",\"loginId\":\"owner\",\"displayName\":\"ATT Owner\",\"password\":\"correct horse battery staple\"}");assertEquals(201,setup.statusCode(),setup.body());
+            assertFalse(setup.body().contains("passwordHash"));assertFalse(Files.exists(data.resolve("bootstrap-admin.token")));
+            HttpResponse<String> proxyLogin=sendViaTrustedProxy(client,port,"POST","/att/api/v1/auth/login","https://att.example.test","{\"loginId\":\"owner\",\"password\":\"correct horse battery staple\"}");
+            assertEquals(200,proxyLogin.statusCode(),proxyLogin.body());String proxyCookie=proxyLogin.headers().firstValue("Set-Cookie").orElseThrow();assertTrue(proxyCookie.contains("; Secure"));assertTrue(proxyCookie.contains("Path=/att/"));assertTrue(proxyCookie.contains("HttpOnly"));assertTrue(proxyCookie.contains("SameSite=Lax"));
+            String basic="Basic "+Base64.getEncoder().encodeToString("owner:correct horse battery staple".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            HttpResponse<String> basicMe=sendBasicViaTrustedProxy(client,port,"GET","/att/api/v1/auth/me","https://att.example.test",null,basic,null);assertEquals(200,basicMe.statusCode());assertTrue(basicMe.body().contains("owner"));String basicCsrf=basicMe.headers().firstValue("X-ATT-CSRF").orElseThrow();
+            assertEquals(403,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users","https://att.example.test","{}",basic,null).statusCode(),"Browser-originated Basic-auth mutations require the returned CSRF token");
+            String secondUser="{\"loginId\":\"basic-user\",\"displayName\":\"Basic User\",\"password\":\"basic user secure password\",\"role\":\"USER\"}";
+            assertEquals(403,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users","https://attacker.example",secondUser,basic,basicCsrf).statusCode(),"Basic credentials cannot authorize cross-origin cookie-style mutations");
+            assertEquals(201,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users","https://att.example.test",secondUser,basic,basicCsrf).statusCode());
+            assertEquals(200,send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"owner\",\"password\":\"correct horse battery staple\"}").statusCode());
+            HttpResponse<String> me=send(client,port,"GET","/att/api/v1/auth/me",null,null,null);assertEquals(200,me.statusCode());assertFalse(me.body().contains("passwordHash"));String csrf=me.headers().firstValue("X-ATT-CSRF").orElseThrow();
+            assertEquals(200,send(client,port,"GET","/att/api/v1/packages",null,null,null).statusCode());
+            assertEquals(403,send(client,port,"POST","/att/api/v1/auth/logout",origin,null,"{}").statusCode());
+            assertEquals(201,send(client,port,"POST","/att/api/v1/auth/users",origin,csrf,"{\"loginId\":\"viewer\",\"displayName\":\"Read Only\",\"password\":\"viewer secure password\",\"role\":\"USER\"}").statusCode());
+            HttpResponse<String> submitted=send(client,port,"POST","/att/api/v1/jobs/run",origin,csrf,"{\"packageId\":\"p\",\"all\":true}");assertEquals(202,submitted.statusCode(),submitted.body());
+            String ownedJobId=ServerRuntime.JSON.readTree(submitted.body()).path("jobId").asText();assertTrue(ownedJobId.matches("J[0-9A-F]{16}"));
+            assertEquals(200,send(client,port,"POST","/att/api/v1/auth/logout",origin,csrf,"{}").statusCode());
+            assertEquals(401,send(client,port,"GET","/att/api/v1/packages",null,null,null).statusCode());
+            assertEquals(200,send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"viewer\",\"password\":\"viewer secure password\"}").statusCode());
+            assertEquals(403,send(client,port,"GET","/att/api/v1/auth/users",null,null,null).statusCode());
+            assertEquals(200,send(client,port,"GET","/att/api/v1/packages",null,null,null).statusCode());
+            assertEquals(404,send(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,null,null,null).statusCode(),"Known IDs must not expose another local user's job");
+            assertEquals(404,send(client,port,"GET","/att/api/v1/jobs/"+ownedJobId+"/events",null,null,null).statusCode(),"SSE must use the same local identity ownership check");
+        } finally {try{tomcat.stop();}finally{tomcat.destroy();if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);}}
+    }
+
+    private static HttpResponse<String> send(HttpClient client,int port,String method,String path,String origin,String csrf,String body)throws Exception {
+        URI uri=URI.create("http://localhost:"+port+path);HttpRequest.Builder request=HttpRequest.newBuilder(uri);
+        if(origin!=null)request.header("Origin",origin);if(csrf!=null)request.header("X-ATT-CSRF",csrf);
+        if("GET".equals(method))request.GET();else request.header("Content-Type","application/json").method(method,HttpRequest.BodyPublishers.ofString(body==null?"{}":body));
+        return client.send(request.build(),HttpResponse.BodyHandlers.ofString());
+    }
+    private static HttpResponse<String> sendViaTrustedProxy(HttpClient client,int port,String method,String path,String origin,String body)throws Exception {
+        HttpRequest request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Origin",origin).header("X-Forwarded-For","203.0.113.9").header("X-Forwarded-Proto","https").header("X-Forwarded-Host","att.example.test").header("X-Forwarded-Port","443").header("Content-Type","application/json").method(method,HttpRequest.BodyPublishers.ofString(body)).build();
+        return client.send(request,HttpResponse.BodyHandlers.ofString());
+    }
+    private static HttpResponse<String> sendBasicViaTrustedProxy(HttpClient client,int port,String method,String path,String origin,String body,String authorization,String csrf)throws Exception {
+        HttpRequest.Builder request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Origin",origin).header("X-Forwarded-For","203.0.113.10").header("X-Forwarded-Proto","https").header("X-Forwarded-Host","att.example.test").header("X-Forwarded-Port","443").header("Authorization",authorization);
+        if(csrf!=null)request.header("X-ATT-CSRF",csrf);
+        if("GET".equals(method))request.GET();else request.header("Content-Type","application/json").method(method,HttpRequest.BodyPublishers.ofString(body==null?"{}":body));
+        return client.send(request.build(),HttpResponse.BodyHandlers.ofString());
     }
 
     @Test void tomcatBasicRealmProtectsServerApiAndSupportsConfiguredAnonymousMode() throws Exception {
@@ -321,7 +384,7 @@ class AuthenticationIntegrationTest {
         if(!Files.isRegularFile(descriptor))descriptor=Path.of("att-server/src/main/webapp/WEB-INF/web.xml");
         try(var input=Files.newInputStream(descriptor)){Files.copy(input,webInf.resolve("web.xml"));}
         Path ui=Files.createDirectories(app.resolve("ui"));
-        for(String asset:java.util.List.of("index.html","app.js","app.css")) {
+        for(String asset:java.util.List.of("index.html","app.js","app.css","login.html","login.js","login.css")) {
             try(var stream=Thread.currentThread().getContextClassLoader().getResourceAsStream("META-INF/resources/ui/"+asset)) {
                 assertNotNull(stream,"ATT Web UI asset must exist on test classpath: "+asset);
                 Files.copy(stream,ui.resolve(asset));
