@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExplorerPage } from './ExplorerPage';
 import { SourceViewer, sourceViewerLimits } from './SourceViewer';
 import { TypedSidecarForm } from './TypedSidecarForm';
-import type { ExplorerApi, JsonObject, ResourceIdentity, ResourceSummary } from './types';
+import type { ConfigurationResponse, ExplorerApi, JsonObject, ResourceIdentity, ResourceSummary } from './types';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -321,8 +321,9 @@ describe('Explorer page integration', () => {
   });
 
   it('ignores stale Compare responses after a section change and refreshes after profile changes', async () => {
-    const pending: Array<(response: { state: string; fields: Array<{ path: string; left: { state: string }; right: { state: string }; change: string }> }) => void> = [];
-    const compareConfiguration = vi.fn(async () => new Promise<{ state: string; fields: Array<{ path: string; left: { state: string }; right: { state: string }; change: string }> }>(resolve => pending.push(resolve)));
+    const pending: Array<(response: ConfigurationResponse) => void> = [];
+    const compareConfiguration = vi.fn<ExplorerApi['compareConfiguration']>((_packageId, _query, _signal) =>
+      new Promise<ConfigurationResponse>(resolve => pending.push(resolve)));
     const api = apiWith({
       getDeclaredConfiguration: vi.fn(async () => ({
         state: 'ready', globals: {},
