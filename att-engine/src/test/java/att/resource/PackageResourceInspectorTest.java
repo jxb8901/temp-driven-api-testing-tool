@@ -106,6 +106,39 @@ class PackageResourceInspectorTest {
         assertFalse(source.containsKey("text"));
     }
 
+    @Test void resolvesDescriptorRelativeConfigurationSourcesAndEnforcesVisibilityLimits() throws Exception {
+        Path root=packageWithTemplate("configuration-file-source", "SOURCE", "description: harmless");
+        Path source=Files.createDirectories(root.resolve("config/queries")).resolve("lookup.sql");
+        writeUtf8(source, "select '${vars.account}' as account; -- cafe\u00e9\npassword=top-secret Bearer abc123\n");
+        Path large=source.resolveSibling("large.yaml");
+        writeUtf8(large, "0123456789abcdef-more-than-limit\n");
+        String origin="templates/SOURCE/template.yaml";
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                java.util.Arrays.asList(origin,"config/queries/lookup.sql","config/queries/large.yaml"),65536,262144);
+
+        Map<String,Object> result=inspector.inspectPackageFileSource("../../config/queries/lookup.sql",origin);
+        assertEquals(Boolean.TRUE,result.get("available"),result.toString());
+        assertEquals("config/queries/lookup.sql",result.get("logicalPath"));
+        assertEquals("sql",result.get("format"));
+        assertTrue(String.valueOf(result.get("text")).contains("${vars.account}"));
+        assertTrue(String.valueOf(result.get("text")).contains("cafe\u00e9"));
+        assertFalse(String.valueOf(result.get("text")).contains("top-secret"));
+        assertFalse(String.valueOf(result.get("text")).contains("abc123"));
+        assertEquals(Boolean.TRUE,result.get("redacted"));
+
+        Map<String,Object> oversized=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                java.util.Arrays.asList(origin,"config/queries/lookup.sql","config/queries/large.yaml"),16,262144)
+                .inspectPackageFileSource("config/queries/large.yaml",null);
+        assertEquals(Boolean.FALSE,oversized.get("available"));
+        assertEquals("size-limit",oversized.get("reason"));
+        Map<String,Object> denied=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144).inspectPackageFileSource("config/queries/lookup.sql",null);
+        assertEquals(Boolean.FALSE,denied.get("available"));
+        assertEquals("visibility-policy",denied.get("reason"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspectPackageFileSource("../../../outside.yaml",origin));
+    }
+
     @Test void redactsSecretsAndExternalPathsFromProjectedTemplateSource() throws Exception {
         Path root=Files.createDirectories(temp.resolve("package"));
         Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates/SECRET"));Files.createDirectories(root.resolve("testcase"));

@@ -142,6 +142,72 @@ public final class PackageResourceInspector implements AutoCloseable {
         this.sensitiveFieldPatterns=sensitiveFieldPatterns==null?Collections.<String>emptyList():new ArrayList<String>(sensitiveFieldPatterns);
     }
 
+
+    /** Projects one package-local text source only when the Server allowlist permits its resolved path. */
+    public Map<String,Object> inspectPackageFileSource(String locator, String originPath) throws Exception {
+        if (locator == null || locator.length() > 1024) throw new IllegalArgumentException("Package file locator is invalid");
+        PackageResourceResolver.ResourceOrigin origin = resources.origin(packageRoot);
+        try {
+            if (originPath != null && !originPath.isBlank()) {
+                PackageResourceResolver.PackageResource sourceFile = resources.resolvePackageRelative(
+                        originPath, PackageResourceResolver.Kind.FILE);
+                origin = resources.origin(sourceFile.canonicalPath().getParent());
+            }
+            PackageResourceResolver.PackageResource file = resources.resolve(
+                    new PackageResourceResolver.ResourceLocator(locator), origin, PackageResourceResolver.Kind.FILE);
+            String logicalPath = file.logicalName();
+            Map<String,Object> result = new LinkedHashMap<>();
+            result.put("available", Boolean.FALSE);
+            if (!textExtension(logicalPath)) {
+                result.put("reason", "unsupported-file-type");
+                return bounded(result);
+            }
+            if (!safeTextSources.contains(logicalPath)) {
+                result.put("reason", "visibility-policy");
+                return bounded(result);
+            }
+            if (Files.size(file.canonicalPath()) > maxSourceBytes) {
+                result.put("reason", "size-limit");
+                return bounded(result);
+            }
+            String text = decodeUtf8(readBounded(file.canonicalPath(), maxSourceBytes));
+            if (text.indexOf('\0') >= 0) {
+                result.put("reason", "binary-file");
+                return bounded(result);
+            }
+            String safe = scrub(text);
+            if (utf8(safe).length > maxSourceBytes) {
+                result.put("reason", "size-limit");
+                return bounded(result);
+            }
+            result.put("available", Boolean.TRUE);
+            result.put("logicalPath", logicalPath);
+            result.put("format", sourceFormat(logicalPath));
+            result.put("text", safe);
+            result.put("redacted", Boolean.valueOf(!safe.equals(text)));
+            return bounded(result);
+        } catch (ResourceNotFoundException error) {
+            throw error;
+        } catch (ResponseTooLargeException error) {
+            Map<String,Object> result = new LinkedHashMap<>();
+            result.put("available", Boolean.FALSE);
+            result.put("reason", "size-limit");
+            return bounded(result);
+        } catch (IllegalArgumentException error) {
+            throw new ResourceNotFoundException();
+        }
+    }
+
+    private static String sourceFormat(String path) {
+        String lower = path.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "yaml";
+        if (lower.endsWith(".json")) return "json";
+        if (lower.endsWith(".xml")) return "xml";
+        if (lower.endsWith(".sql")) return "sql";
+        if (lower.endsWith(".sh") || lower.endsWith(".bash")) return "shell";
+        return "text";
+    }
+
     public Map<String, Object> inspect(String action, String type, String resourceId,
                                        String query, int offset, int limit) throws Exception {
         return inspect(action,type,resourceId,query,offset,limit,null);
@@ -209,6 +275,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                 return bounded(result);
             }
             try {
+                String logicalPath = resources.fromInternalPath(resource.yamlSource, PackageResourceResolver.Kind.FILE).logicalName();
                 Object authored = loadYaml(resource.yamlSource, maxSourceBytes);
                 Object safe = sourceYamlProjection(yamlMapping(authored),"");
                 String text = dumpYaml(safe);
@@ -218,6 +285,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                     return bounded(result);
                 }
                 result.put("available", Boolean.TRUE);
+                result.put("logicalPath", logicalPath);
                 result.put("format", "yaml");
                 result.put("text", text);
                 result.put("redacted", Boolean.valueOf(!deepEquals(authored, safe)));
@@ -1169,6 +1237,10 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("sourceAvailable", Boolean.valueOf(sourceAvailable(resource)));
         result.put("sourceReason", sourceAvailable(resource) ? null : sourceUnavailableReason(resource));
         result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
+        try {
+            Path sourcePath = resource.yamlSource != null ? resource.yamlSource : resource.textSource;
+            if (sourcePath != null && sourceAvailable(resource)) result.put("sourcePath", resources.fromInternalPath(sourcePath, PackageResourceResolver.Kind.FILE).logicalName());
+        } catch (Exception ignored) { }
         result.put("provenance", sanitize(resource.provenance, null));
         result.put("references", resource.references);
         result.put("referencedBy", resource.backReferences);
@@ -1228,6 +1300,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         String value = path.toLowerCase(Locale.ROOT);
         return value.endsWith(".sh") || value.endsWith(".bash") || value.endsWith(".py")
                 || value.endsWith(".js") || value.endsWith(".ts") || value.endsWith(".sql")
+                || value.endsWith(".yaml") || value.endsWith(".yml") || value.endsWith(".json") || value.endsWith(".xml")
                 || value.endsWith(".groovy") || value.endsWith(".rb") || value.endsWith(".pl")
                 || value.endsWith(".ps1") || value.endsWith(".bat") || value.endsWith(".cmd")
                 || value.endsWith(".txt");

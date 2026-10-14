@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import './load.css';
 import { TypedSidecarForm, type SidecarGroup } from '../explorer/TypedSidecarForm';
+import { ThresholdEvidenceEditor } from './ThresholdEvidenceEditor';
+import { CodeEditor } from '../code/CodeEditor';
 import type { JsonObject as SidecarJsonObject } from '../explorer/types';
 import type {
   LoadFeatureProps,
@@ -218,6 +220,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const [requestError, setRequestError] = useState('');
   const [rawScenarioJson, setRawScenarioJson] = useState('');
   const [advancedJsonError, setAdvancedJsonError] = useState('');
+  const [thresholdEditorErrors, setThresholdEditorErrors] = useState<Record<string, string>>({});
   const requestSequence = useRef(0);
   const packageRef = useRef(selectedPackage);
   const submitLock = useRef(false);
@@ -295,6 +298,8 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   function readScenario(): JsonObject {
     if (!policy) throw new Error('Load policy is not ready.');
     if (advancedJsonError) throw new Error(advancedJsonError);
+    const editorError = Object.values(thresholdEditorErrors).find(Boolean);
+    if (editorError) throw new Error(editorError);
     return makeScenario(policy, model, timing, workloads, advanced);
   }
 
@@ -393,6 +398,9 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   function updateAdvanced<K extends keyof typeof advanced>(key: K, value: (typeof advanced)[K]) {
     setAdvanced(current => ({ ...current, [key]: value }));
   }
+  function updateThresholdEditorValidity(key: string, message: string) {
+    setThresholdEditorErrors(current => { const next = { ...current }; if (message) next[key] = message; else delete next[key]; return next; });
+  }
 
   const preview = draft?.previewYaml || (draft?.preview ? JSON.stringify(draft.preview, null, 2) : '');
   const hasLiveDraft = Boolean(draft && Date.parse(draft.expiresAt) > Date.now());
@@ -489,10 +497,16 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
 
       <section id="load-thresholds" className="att-load-section" aria-labelledby="load-thresholds-title" tabIndex={-1}>
         <h2 id="load-thresholds-title">Thresholds and evidence</h2>
-        <div className="att-load-grid">
-          <JsonObjectField label="Aggregate thresholds" value={advanced.thresholds} onChange={value => updateAdvanced('thresholds', value)} />
-          <JsonObjectField label="Evidence settings" value={advanced.evidence} onChange={value => updateAdvanced('evidence', value)} />
-        </div>
+        <ThresholdEvidenceEditor
+          model={model}
+          aggregate={advanced.thresholds}
+          workloads={workloads.map(item => ({ id: item.id, thresholdsJson: item.thresholdsJson }))}
+          evidence={advanced.evidence}
+          onAggregateChange={value => updateAdvanced('thresholds', value)}
+          onWorkloadChange={(id, value) => updateWorkload(id, current => ({ ...current, thresholdsJson: value }))}
+          onEvidenceChange={value => updateAdvanced('evidence', value)}
+          onValidityChange={updateThresholdEditorValidity}
+        />
         <details className="att-advanced-settings">
           <summary>Advanced scenario settings</summary>
           <div className="att-load-grid">
@@ -502,7 +516,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             <JsonObjectField label="Root execution defaults" value={advanced.execution} onChange={value => updateAdvanced('execution', value)} />
             <JsonArrayField label="Package-relative Testdata paths" value={advanced.testdata} onChange={value => updateAdvanced('testdata', value)} />
           </div>
-          {rawScenarioJson && <details><summary>Current complete scenario JSON</summary><pre>{rawScenarioJson}</pre></details>}
+          {rawScenarioJson && <details><summary>Current complete scenario JSON</summary><CodeEditor value={rawScenarioJson} language="json" label="Complete scenario JSON" readOnly /></details>}
         </details>
       </section>
 
@@ -516,15 +530,17 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
           </li>)}</ul>}
         </div>
         {draft && <p className="att-draft-expiry">Draft expires {new Date(draft.expiresAt).toLocaleString()}.</p>}
-        {preview && <pre className="att-load-preview" aria-label="Server-validated scenario preview">{preview}</pre>}
+        {preview && <CodeEditor value={preview} language="yaml" label="Server-validated scenario preview" readOnly />}
         <div className="att-review-actions">
           <button type="button" onClick={() => void validateScenario()} disabled={!policy || !inlineLoadEnabled || draftState === 'validating' || draftState === 'submitting'}>Validate scenario</button>
+          <button type="button" disabled title="The Server does not yet support immutable inline Load schedule definitions.">Schedule…</button>
           <button type="button" onClick={() => void copyYaml()} disabled={!draft?.previewYaml || Boolean(draft.redacted)}>Copy YAML</button>
           <button type="button" onClick={exportYaml} disabled={!draft?.previewYaml || Boolean(draft.redacted)}>Export YAML</button>
           <button type="button" className="att-primary-action" onClick={() => void startLoad()} disabled={!hasLiveDraft || draftState === 'submitting' || confirmationPending || !inlineLoadEnabled}>
             {confirmationPending ? 'Waiting for confirmation…' : draftState === 'submitting' ? 'Starting…' : 'Review and start Load'}
           </button>
         </div>
+        <p className="att-quick-load-schedule-note">Scheduling is unavailable until the Server can store immutable inline Load snapshots. The current scenario will not be scheduled.</p>
       </section>
     </div>
   );
@@ -655,7 +671,6 @@ function WorkloadEditor({
       <summary>Advanced workload settings</summary>
       <div className="att-load-grid">
         <JsonObjectField label="Workload Testdata policies" value={workload.testdataJson} onChange={testdataJson => onChange({ ...workload, testdataJson })} />
-        <JsonObjectField label="Workload thresholds" value={workload.thresholdsJson} onChange={thresholdsJson => onChange({ ...workload, thresholdsJson })} />
       </div>
     </details>
   </article>;
@@ -856,13 +871,13 @@ function BusinessValuesEditor({ label, json, groups, onChange, onValidityChange,
 }
 
 function JsonObjectField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }): React.JSX.Element {
-  return <label className="att-json-field">{label}<textarea rows={6} spellCheck={false} value={value} onChange={event => onChange(event.target.value)} />
+  return <div className="att-json-field"><span>{label}</span><CodeEditor value={value} language="json" label={label} readOnly={false} onChange={onChange} />
     <span className="att-help">JSON object; final validation is performed by the Server.</span>
-  </label>;
+  </div>;
 }
 
 function JsonArrayField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }): React.JSX.Element {
-  return <label className="att-json-field">{label}<textarea rows={5} spellCheck={false} value={value} onChange={event => onChange(event.target.value)} />
+  return <div className="att-json-field"><span>{label}</span><CodeEditor value={value} language="json" label={label} readOnly={false} onChange={onChange} />
     <span className="att-help">JSON array of package-relative paths.</span>
-  </label>;
+  </div>;
 }

@@ -774,10 +774,27 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
                                             String section,int offset,int limit,String principal) throws Exception {
+        return inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,null,null,null,principal);
+    }
+    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
+                                            String section,int offset,int limit,String inspectionPath,String inspectionOrigin,
+                                            String inspectionQuery,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        if(!List.of("declared","effective","compare","testdata-records").contains(action))throw new IllegalArgumentException("Unsupported configuration inspection action");
+        if(!List.of("declared","effective","compare","testdata-records","files","source").contains(action))
+            throw new IllegalArgumentException("Unsupported configuration inspection action");
+        if(offset<0||limit<0||limit>100)throw new IllegalArgumentException("Configuration pagination is invalid");
+        if(inspectionPath!=null&&(inspectionPath.length()>1024||containsControl(inspectionPath)))
+            throw new IllegalArgumentException("Configuration path is invalid");
+        if(inspectionOrigin!=null&&(inspectionOrigin.length()>1024||containsControl(inspectionOrigin)))
+            throw new IllegalArgumentException("Configuration source origin is invalid");
+        if(inspectionQuery!=null&&(inspectionQuery.length()>200||containsControl(inspectionQuery)))
+            throw new IllegalArgumentException("Configuration query must contain at most 200 printable characters");
+        if(("source".equals(action)||"files".equals(action))&&(inspectionPath!=null&&inspectionPath.isBlank()))
+            throw new IllegalArgumentException("Configuration path is invalid");
+        if("source".equals(action)&&(inspectionPath==null||inspectionPath.isBlank()))
+            throw new IllegalArgumentException("A package-relative source path is required");
         String selected=null,other=null;
         if(("effective".equals(action)||"testdata-records".equals(action))&&environment!=null&&!environment.isBlank())selected=inspectionEnvironment(environment,"environment");
         if("compare".equals(action)){
@@ -789,6 +806,8 @@ final class ServerRuntime implements AutoCloseable {
         request.inspectionAction=action;request.inspectionType="configuration";request.inspectionEnvironment=selected;request.inspectionOtherEnvironment=other;
         request.inspectionSection=section;request.inspectionOffset=offset;request.inspectionLimit=limit;request.maxResponseBytes=config.inspection.maxResponseBytes;
         request.redactionEnabled=config.inspection.redactionEnabled;request.sensitivePaths=config.inspection.sensitivePaths;request.sensitiveFieldPatterns=config.inspection.sensitiveFieldPatterns;
+        request.inspectionPath=inspectionPath;request.inspectionOrigin=inspectionOrigin;request.inspectionQuery=inspectionQuery;
+        request.safeTextSources=config.inspection.safeTextSources(packageId);request.maxSourceBytes=config.inspection.maxSourceBytes;request.maxResponseBytes=config.inspection.maxResponseBytes;
         return executeInspection(root,request);
     }
     private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {

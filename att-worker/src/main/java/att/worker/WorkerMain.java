@@ -3,6 +3,7 @@ package att.worker;
 import att.api.*;
 import att.resource.PackageResourceInspector;
 import att.resource.PackageConfigurationInspector;
+import att.resource.PackageConfigurationFileInspector;
 import att.server.api.internal.DiagnosticSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -163,13 +164,25 @@ public final class WorkerMain {
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
             if("configuration".equals(r.inspectionType)) {
-                PackageConfigurationInspector inspector = new PackageConfigurationInspector(root, config,
-                        r.maxResponseBytes == null ? 262144 : r.maxResponseBytes,
-                        Boolean.TRUE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns);
-                Map<String,Object> inspected = inspector.inspect(r.inspectionAction,
-                        r.inspectionEnvironment, r.inspectionOtherEnvironment, r.inspectionSection,
-                        r.inspectionOffset == null ? 0 : r.inspectionOffset,
-                        r.inspectionLimit == null ? 0 : r.inspectionLimit);
+                int maxResponseBytes = r.maxResponseBytes == null ? 262144 : r.maxResponseBytes;
+                Map<String,Object> inspected;
+                if ("files".equals(r.inspectionAction)) {
+                    PackageConfigurationFileInspector files = new PackageConfigurationFileInspector(root,
+                            new java.util.HashSet<>(r.safeTextSources == null ? Collections.emptyList() : r.safeTextSources),
+                            r.maxSourceBytes == null ? 65536 : r.maxSourceBytes, maxResponseBytes);
+                    inspected = files.list(r.inspectionPath, r.inspectionQuery,
+                            r.inspectionOffset == null ? 0 : r.inspectionOffset,
+                            r.inspectionLimit == null ? 50 : r.inspectionLimit);
+                } else if ("source".equals(r.inspectionAction)) {
+                    inspected = resourceInspector(root, config, r).inspectPackageFileSource(r.inspectionPath, r.inspectionOrigin);
+                } else {
+                    PackageConfigurationInspector inspector = new PackageConfigurationInspector(root, config,
+                            maxResponseBytes, Boolean.TRUE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns);
+                    inspected = inspector.inspect(r.inspectionAction,
+                            r.inspectionEnvironment, r.inspectionOtherEnvironment, r.inspectionSection,
+                            r.inspectionOffset == null ? 0 : r.inspectionOffset,
+                            r.inspectionLimit == null ? 0 : r.inspectionLimit);
+                }
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }

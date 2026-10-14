@@ -381,15 +381,25 @@ public final class ApiServlet extends HttpServlet {
             } else if(parts.length==5&&"effective".equals(parts[4])) action="effective";
             else if(parts.length==5&&"compare".equals(parts[4])) action="compare";
             else if(parts.length==7&&"testdata".equals(parts[4])&&"records".equals(parts[6])) action="testdata-records";
+            else if(parts.length==5&&"files".equals(parts[4])) action="files";
+            else if(parts.length==5&&"source".equals(parts[4])) action="source";
             else throw new ServerRuntime.NotFoundException();
             String environment="effective".equals(action)||"testdata-records".equals(action)?req.getParameter("environment"):"compare".equals(action)?req.getParameter("left"):null;
             String otherEnvironment="compare".equals(action)?req.getParameter("right"):null;
             String section="effective".equals(action)||"compare".equals(action)?req.getParameter("section"):"testdata-records".equals(action)?parts[5]:null;
             int offset=parseOffset(req.getParameter("offset"));
-            int limit="declared".equals(action)?0:parseConfigurationLimit(req.getParameter("limit"));
-            Map<String,Object> result=runtime.inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,principal);
-            ConfigurationInspection.Response response=ServerRuntime.JSON.convertValue(result,ConfigurationInspection.Response.class);
-            response.requestId=requestId;json(res,200,response);
+            int limit="declared".equals(action)||"source".equals(action)?0:parseConfigurationLimit(req.getParameter("limit"));
+            String inspectionPath="files".equals(action)||"source".equals(action)?req.getParameter("path"):null;
+            String inspectionOrigin="source".equals(action)?req.getParameter("origin"):null;
+            String inspectionQuery="files".equals(action)?req.getParameter("query"):null;
+            Map<String,Object> result=runtime.inspectConfiguration(packageId,action,environment,otherEnvironment,section,
+                    offset,limit,inspectionPath,inspectionOrigin,inspectionQuery,principal);
+            if("declared".equals(action)||"effective".equals(action)||"compare".equals(action)) {
+                ConfigurationInspection.Response response=ServerRuntime.JSON.convertValue(result,ConfigurationInspection.Response.class);
+                response.requestId=requestId;json(res,200,response);
+            } else {
+                result.put("requestId",requestId);json(res,200,result);
+            }
         } catch(ServerRuntime.NotFoundException e){throw e;}
           catch(ServerRuntime.InspectionCapacityException e){throw e;}
           catch(ServerRuntime.InspectionTimeoutException e){throw e;}

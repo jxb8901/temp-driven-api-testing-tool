@@ -1,5 +1,6 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { JsonObject, JsonValue } from './types';
+import { CodeEditor } from '../code/CodeEditor';
 
 const KEEP_DEFAULT = '$attDebugKeepDefault';
 export interface SidecarGroup { key: string; label: string }
@@ -55,6 +56,7 @@ function ScalarField({ formId, id, label, value, onChange, onInvalid }: ScalarFi
   const [keepDefault, setKeepDefault] = useState(marker);
   const [kind, setKind] = useState(() => marker ? '' : valueKind(value) || 'string');
   const [draft, setDraft] = useState(() => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value) : '');
+  const inferred = !marker && valueKind(value) !== null;
 
   const apply = (nextKind: string, raw = draft) => {
     if (nextKind === 'null') { onChange(null); onInvalid(id, false); return; }
@@ -93,12 +95,17 @@ function ScalarField({ formId, id, label, value, onChange, onInvalid }: ScalarFi
         }} />
         Keep hidden package default
       </label>}
-      <select aria-label={`${label} value type`} value={kind} disabled={marker && keepDefault}
+      {(!inferred || marker && !keepDefault) && <select aria-label={`${label} value type`} value={kind} disabled={marker && keepDefault}
         onChange={event => changeKind(event.currentTarget.value)}>
         {marker && <option value="">Choose type</option>}
         <option value="string">Text</option><option value="number">Number</option>
         <option value="boolean">Boolean</option><option value="null">Null</option>
-      </select>
+      </select>}
+      {inferred && <details className="att-sidecar-type-override"><summary>Change inferred type ({kind === 'string' ? 'Text' : kind === 'number' ? 'Number' : kind === 'boolean' ? 'Boolean' : 'Null'})</summary>
+        <select aria-label={`${label} value type`} value={kind} onChange={event => changeKind(event.currentTarget.value)}>
+          <option value="string">Text</option><option value="number">Number</option><option value="boolean">Boolean</option><option value="null">Null</option>
+        </select>
+      </details>}
       {kind === 'null'
         ? <span id={`${controlId}-value`} className="att-sidecar-null" aria-label={`${label}: null`}>null</span>
         : kind === 'boolean'
@@ -119,13 +126,15 @@ export function TypedSidecarForm({ value, groups, resetKey, onChange, onValidity
   const [advancedError, setAdvancedError] = useState('');
   const [revision, setRevision] = useState(0);
   const [invalidFields, setInvalidFields] = useState<Set<string>>(() => new Set());
+  const advancedEditing = useRef(false);
   const groupSignature = groups.map(group => group.key).join('|');
   const serializedValue = useMemo(() => JSON.stringify(value, null, 2), [value]);
 
   useEffect(() => {
-    setAdvancedText(serializedValue);
+    if (!advancedEditing.current) setAdvancedText(serializedValue);
   }, [serializedValue]);
   useEffect(() => {
+    advancedEditing.current = false;
     setAdvancedText(JSON.stringify(value, null, 2));
     setAdvancedError(''); setInvalidFields(new Set()); setRevision(current => current + 1);
   // resetKey deliberately resets local marker/type errors along with parent-owned values.
@@ -144,6 +153,7 @@ export function TypedSidecarForm({ value, groups, resetKey, onChange, onValidity
   };
 
   const handleAdvanced = (text: string) => {
+    advancedEditing.current = true;
     setAdvancedText(text);
     try {
       const parsed: unknown = JSON.parse(text || '{}');
@@ -166,15 +176,17 @@ export function TypedSidecarForm({ value, groups, resetKey, onChange, onValidity
           const path = `${group.key}.${name}`;
           return <ScalarField key={`${revision}:${path}`} formId={formId} id={path} label={name} value={child}
             onInvalid={reportInvalid}
-            onChange={next => onChange(replacePath(value, [group.key, name], next))} />;
+            onChange={next => { advancedEditing.current = false; onChange(replacePath(value, [group.key, name], next)); }} />;
         })}
       </fieldset>;
     })}
     <details className="att-sidecar-advanced">
       <summary>Advanced JSON</summary>
       <label htmlFor={`att-sidecar-advanced-json-${formId}`}>Edit complete business input JSON, including nested values</label>
-      <textarea id={`att-sidecar-advanced-json-${formId}`}  spellCheck={false} value={advancedText}
-        onChange={event => handleAdvanced(event.currentTarget.value)} aria-invalid={Boolean(advancedError)} />
+      <div id={`att-sidecar-advanced-json-${formId}`} aria-invalid={Boolean(advancedError)}>
+        <CodeEditor value={advancedText} language="json" label="Complete business input JSON" readOnly={false}
+          onChange={handleAdvanced} />
+      </div>
       {advancedError && <p className="att-field-error" role="alert">{advancedError}</p>}
     </details>
   </div>;

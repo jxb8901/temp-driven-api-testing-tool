@@ -42,6 +42,8 @@ public class WorkerRequest {
     public String inspectionEnvironment;
     public String inspectionOtherEnvironment;
     public String inspectionSection;
+    public String inspectionPath;
+    public String inspectionOrigin;
     public String inspectionResourceId;
     public String inspectionTargetId;
     public String draftResourceId;

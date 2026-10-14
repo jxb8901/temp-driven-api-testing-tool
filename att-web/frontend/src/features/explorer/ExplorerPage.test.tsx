@@ -4,8 +4,20 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExplorerPage } from './ExplorerPage';
 import { SourceViewer, sourceViewerLimits } from './SourceViewer';
+import { ConfigurationExplorer } from './ConfigurationExplorer';
 import { TypedSidecarForm } from './TypedSidecarForm';
 import type { ConfigurationResponse, ExplorerApi, JsonObject, ResourceIdentity, ResourceSummary } from './types';
+
+vi.mock('../code/CodeEditor', () => ({
+  CodeEditor: ({ value, label, readOnly = true, onChange }: {
+    value: string; label: string; readOnly?: boolean; onChange?: (value: string) => void;
+  }) => <section className="att-code-editor" aria-label={label}>
+    <div className="att-code-host">{readOnly ? <pre>{value}</pre>
+      : <textarea aria-label={label} value={value} onChange={event => onChange?.(event.currentTarget.value)} />}</div>
+    {readOnly && <button type="button" onClick={() => void navigator.clipboard?.writeText(value)}>Copy displayed source</button>}
+  </section>,
+  detectCodeLanguage: () => 'yaml',
+}));
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -89,17 +101,9 @@ describe('Explorer source viewer', () => {
 
     await render(<SourceViewer api={api} identity={identity} available active />);
     expect(container.textContent).toMatch(/5[,.]?000 lines/);
-    expect(container.querySelectorAll('.att-source-line').length).toBeLessThanOrEqual(60);
-    expect(container.querySelector('.att-source-line')?.textContent).toContain('line-1: <img src=x onerror=alert(1)>');
+    expect(container.querySelector('.att-code-editor pre')?.textContent).toContain('line-1: <img src=x onerror=alert(1)>');
     expect(container.querySelector('img,script,svg')).toBeNull();
-
-    const viewport = container.querySelector<HTMLElement>('.att-source-viewport');
-    expect(viewport).not.toBeNull();
-    act(() => {
-      viewport!.scrollTop = 4990 * 20;
-      viewport!.dispatchEvent(new Event('scroll'));
-    });
-    expect(container.textContent).toContain('line-5000: value');
+    expect(container.querySelector('.att-code-editor pre')?.textContent).toContain('line-5000: value');
 
     click(button('Refresh source'));
     await settle();
@@ -119,7 +123,7 @@ describe('Explorer source viewer', () => {
     const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, text: '', format: 'yaml' })) });
     await render(<SourceViewer api={api} identity={identity} available active />);
     expect(container.textContent).toContain('Safe source is empty.');
-    expect(button('Copy displayed source').disabled).toBe(true);
+    expect(container.querySelector('.att-code-editor')).toBeNull();
 
     const authApi = apiWith({ getSafeSource: vi.fn(async () => { throw Object.assign(new Error('token=must-not-display'), { status: 401 }); }) });
     await render(<SourceViewer api={authApi} identity={identity} available active />);
@@ -132,7 +136,7 @@ describe('Explorer source viewer', () => {
     const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, text })) });
     await render(<SourceViewer api={api} identity={{ packageId: 'p', type: 'template', resourceId: 'r' }} available active />);
     expect(container.textContent).toContain('Source exceeds the viewer limit.');
-    expect(container.querySelectorAll('.att-source-line').length).toBeLessThanOrEqual(60);
+    expect(container.querySelector('.att-code-editor pre')?.textContent?.length).toBeLessThanOrEqual(sourceViewerLimits.maxCharacters);
   });
 });
 
@@ -172,7 +176,7 @@ describe('typed sidecar form', () => {
     setValue(advanced!, '{');
     await settle();
     expect(container.textContent).toContain('Expected property name or');
-    expect(advanced!.getAttribute('aria-invalid')).toBe('true');
+    expect(container.querySelector('.att-sidecar-advanced [aria-invalid="true"]')).not.toBeNull();
 
     setValue(advanced!, '{"inputs":{"count":4},"arguments":{"enabled":true,"nested":{"ok":true}}}');
     await settle();
@@ -223,7 +227,7 @@ describe('Explorer page integration', () => {
     await render(<ExplorerPage {...props} />);
     await settle();
 
-    const tabs = container.querySelector<HTMLElement>('[role="tablist"]');
+    const tabs = container.querySelector<HTMLElement>('[aria-label="Resource content"]');
     expect(tabs).not.toBeNull();
     act(() => tabs!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
     await settle();
@@ -279,8 +283,9 @@ describe('Explorer page integration', () => {
         fields: [{ path: 'database.password', left: { state: 'hidden', value: 'must-not-display' }, right: { state: 'missing' }, change: 'changed' }],
       })),
     });
-    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment=""
-      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+    await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
+      onEnvironmentChange={() => {}} initialMode="declared" />);
+    await settle();
     click(button('Compare'));
     await settle();
     expect(container.textContent).toContain('hidden');

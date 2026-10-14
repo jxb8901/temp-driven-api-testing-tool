@@ -291,7 +291,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
             assertEquals(200,get(port,"/att/ui/app.js",null));
             assertEquals(200,get(port,"/att/api/v1/health",null));
-            assertEquals("4.1.4",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            assertEquals("4.2.0",getJson(port,"/att/api/v1/version",null).path("version").asText());
             assertEquals("debug",getJson(port,"/att/api/v1/packages/debug",null).path("packageId").asText());
             JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",null);
             String resourceId=resources.path("items").get(0).path("resourceId").asText();
@@ -299,6 +299,11 @@ class AuthenticationIntegrationTest {
             JsonNode form=getJson(port,resourcePath+"/debug-form",null);
             assertEquals("FORM",form.path("target").path("id").asText());
             assertEquals("declared",getJson(port,"/att/api/v1/packages/debug/configuration?view=declared",null).path("view").asText());
+            JsonNode configFiles=getJson(port,"/att/api/v1/packages/debug/configuration/files?limit=100",null);
+            assertEquals("ready",configFiles.path("state").asText());
+            assertTrue(configFiles.path("items").isArray());
+            JsonNode configSource=getJson(port,"/att/api/v1/packages/debug/configuration/source?path=config/config.yaml",null);
+            assertTrue(configSource.has("available"));
             assertEquals("virtualUsers",getJson(port,"/att/api/v1/packages/debug/load-policy?model=virtualUsers",null).path("model").asText());
 
             // Browser requests pass through the reverse-proxy context path and retain same-origin checks.

@@ -29,6 +29,24 @@ async function main() {
         },
       },
       {
+        name: 'configuration', fixture: 'explorer-workspace',
+        route: '#/configuration/payments?tab=source&file=config%2Fapplication.yaml',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'Configuration', exact: true }).waitFor();
+          await page.getByText('Safe read-only source').waitFor();
+          await page.getByText('environment: dev', { exact: false }).waitFor();
+        },
+      },
+      {
+        name: 'quick-load', fixture: 'explorer-workspace',
+        route: '#/quick-load/payments/template/checkout',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'Quick Load', exact: true }).waitFor();
+          await page.getByText(/Server policy defaults loaded|Safe policy defaults loaded/).waitFor();
+          await page.getByText('template · checkout', { exact: true }).waitFor();
+        },
+      },
+      {
         name: 'load-builder', fixture: 'load-workspace', route: '#/advanced-load/payments',
         wait: async page => {
           await page.getByRole('heading', { name: 'New Load scenario' }).waitFor();
@@ -93,7 +111,7 @@ async function main() {
     }
     await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
       generatedAt: new Date().toISOString(),
-      repositoryVersion: '4.1.4',
+      repositoryVersion: '4.2.0',
       browser: await browser.version(),
       playwright: require('playwright/package.json').version,
       fixtureOrigin: fixture.origin,

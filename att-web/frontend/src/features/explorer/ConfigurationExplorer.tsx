@@ -8,6 +8,9 @@ interface ConfigurationExplorerProps {
   packageId: string;
   environment: string;
   onEnvironmentChange: (environment: string) => void;
+  initialMode?: ConfigMode;
+  showEnvironmentSelector?: boolean;
+  onViewChange?: (mode: ConfigMode) => void;
 }
 
 function errorText(error: unknown): string {
@@ -42,8 +45,8 @@ function flattenEntries(response: ConfigurationResponse, section: string): Array
   return rows;
 }
 
-export function ConfigurationExplorer({ api, packageId, environment, onEnvironmentChange }: ConfigurationExplorerProps) {
-  const [mode, setMode] = useState<ConfigMode>('declared');
+export function ConfigurationExplorer({ api, packageId, environment, onEnvironmentChange, initialMode, showEnvironmentSelector = true, onViewChange }: ConfigurationExplorerProps) {
+  const [mode, setMode] = useState<ConfigMode>(initialMode || 'declared');
   const [data, setData] = useState<ConfigurationResponse | null>(null);
   const [declaredData, setDeclaredData] = useState<ConfigurationResponse | null>(null);
   const [status, setStatus] = useState('Loading declared configuration…');
@@ -52,6 +55,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
   const [query, setQuery] = useState('');
   const [left, setLeft] = useState('');
   const [right, setRight] = useState('');
+  const [compareSection, setCompareSection] = useState('');
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const requestSequence = useRef(0);
@@ -73,7 +77,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
 
   useEffect(() => {
     const { controller, sequence } = startRequest();
-    setMode('declared'); setData(null); setDeclaredData(null); setError(''); setStatus('Loading declared configuration…');
+    setMode(initialMode || 'declared'); setData(null); setDeclaredData(null); setError(''); setStatus('Loading declared configuration…');
     api.getDeclaredConfiguration(packageId, controller.signal).then(response => {
       if (sequence !== requestSequence.current) return;
       setData(response); setDeclaredData(response); setStatus(`Declared configuration: ${response.state || 'ready'}.`);
@@ -81,11 +85,14 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
       const defaultName = environments.find(item => item.default)?.name || environments[0]?.name || '';
       setLeft(defaultName);
       setRight(environments.find(item => item.name !== defaultName)?.name || '');
+      setCompareSection(current => current || response.sections?.find(item => item.id !== 'globals')?.id || 'globals');
       if (!environment && defaultName) onEnvironmentChange(defaultName);
     }).catch(reason => {
       if (!controller.signal.aborted && sequence === requestSequence.current) { setError(errorText(reason)); setStatus('Declared configuration could not be loaded.'); }
     });
     return () => { controller.abort(); if (sequence === requestSequence.current) requestSequence.current += 1; };
+    // Initial mode changes are handled by the route effect below; refetch only when package/API changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, packageId]);
 
   const profiles = useMemo(() => (declaredData?.environments || []).filter(item => item.state === 'active' && item.name), [declaredData]);
@@ -116,26 +123,38 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
     finally { if (sequence === requestSequence.current) setLoadingMore(false); }
   };
 
-  const compare = async (leftProfile = left, rightProfile = right, requestedSection = section) => {
+  const compare = async (leftProfile = left, rightProfile = right, requestedSection = compareSection || 'globals') => {
     if (!leftProfile || !rightProfile || leftProfile === rightProfile) { setError('Choose two different active environments to compare.'); return; }
     setError(''); setStatus(`Comparing ${leftProfile} with ${rightProfile}…`);
     setMode('compare');
     setData(null); setNextOffset(null);
     const { controller, sequence } = startRequest();
     try {
-      const response = await api.compareConfiguration(packageId, { left: leftProfile, right: rightProfile, section: requestedSection, offset: 0, limit: 50 }, controller.signal);
+      const response = await api.compareConfiguration(packageId, { left: leftProfile, right: rightProfile, section: requestedSection || 'globals', offset: 0, limit: 50 }, controller.signal);
       if (controller.signal.aborted || sequence !== requestSequence.current) return;
-      setData(response); setMode('compare'); setNextOffset(response.nextOffset == null ? null : Number(response.nextOffset));
+      setData(response); setMode('compare'); onViewChange?.('compare'); setNextOffset(response.nextOffset == null ? null : Number(response.nextOffset));
       setStatus(`Configuration comparison: ${response.state || 'ready'}.`);
     } catch (reason) { if (!controller.signal.aborted && sequence === requestSequence.current) { setError(errorText(reason)); setStatus('Configuration comparison could not be loaded.'); } }
   };
+
+  useEffect(() => {
+    if (!declaredData) return;
+    if (initialMode === 'declared') {
+      cancelPending(); setMode('declared'); setData(declaredData); setNextOffset(null);
+      return;
+    }
+    if (initialMode === 'effective') void loadEffective(section);
+    if (initialMode === 'compare' && profiles.length > 1) void compare();
+    // Route changes intentionally trigger the matching projection request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMode, packageId, profiles.length, declaredData]);
 
   const loadMore = async () => {
     if (nextOffset == null) return;
     if (mode === 'effective') return loadEffective(section, true);
     if (mode !== 'compare') return;
     setLoadingMore(true); setError('');
-    const requestedLeft = left, requestedRight = right, requestedSection = section, offset = nextOffset;
+    const requestedLeft = left, requestedRight = right, requestedSection = compareSection || 'globals', offset = nextOffset;
     const { controller, sequence } = startRequest();
     try {
       const incoming = await api.compareConfiguration(packageId, { left: requestedLeft, right: requestedRight, section: requestedSection, offset, limit: 50 }, controller.signal);
@@ -154,15 +173,18 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
   const changeSection = (value: string) => {
     cancelPending(); setSection(value); setData(null); setNextOffset(null);
     if (mode === 'effective') void loadEffective(value);
-    else if (mode === 'compare') void compare(left, right, value);
+  };
+  const changeCompareSection = (value: string) => {
+    cancelPending(); setCompareSection(value); setData(null); setNextOffset(null);
+    if (mode === 'compare') void compare(left, right, value);
   };
   const changeLeft = (value: string) => {
     cancelPending(); setLeft(value); setData(null); setNextOffset(null);
-    if (mode === 'compare') void compare(value, right, section);
+    if (mode === 'compare') void compare(value, right, compareSection || 'globals');
   };
   const changeRight = (value: string) => {
     cancelPending(); setRight(value); setData(null); setNextOffset(null);
-    if (mode === 'compare') void compare(left, value, section);
+    if (mode === 'compare') void compare(left, value, compareSection || 'globals');
   };
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -176,24 +198,24 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
 
   return <section className="att-config-explorer" aria-labelledby="att-config-title">
     <div className="att-config-heading"><div><h2 id="att-config-title">Configuration</h2><p>Values are shown only when the Server marks a field visible. {data?.redactionEnabled ? 'Sensitive-field masking is enabled; classified secrets stay hidden.' : 'Redaction is off; classified secrets stay hidden.'}</p></div>
-      <label>Run, Debug, and Load environment
+      {showEnvironmentSelector && <label>Run, Debug, and Load environment
         <select value={environment} onChange={event => onEnvironmentChange(event.currentTarget.value)}>
           <option value="">Package default</option>
           {profiles.map(profile => <option key={profile.name} value={profile.name}>{profile.name}{profile.default ? ' · default' : ''}</option>)}
         </select>
-      </label>
+      </label>}
     </div>
     <div className="att-config-toolbar" role="group" aria-label="Configuration views">
       <button type="button" aria-pressed={mode === 'declared'} onClick={() => {
-        cancelPending(); setMode('declared'); setData(declaredData); setNextOffset(null); setError(''); setStatus(`Declared configuration: ${declaredData?.state || 'ready'}.`);
+        cancelPending(); setMode('declared'); onViewChange?.('declared'); setData(declaredData); setNextOffset(null); setError(''); setStatus(`Declared configuration: ${declaredData?.state || 'ready'}.`);
       }}>Declared</button>
-      <button type="button" aria-pressed={mode === 'effective'} onClick={() => void loadEffective('globals')}>Effective</button>
-      <label>Section
+      <button type="button" aria-pressed={mode === 'effective'} onClick={() => { onViewChange?.('effective'); void loadEffective('globals'); }}>Effective</button>
+      {mode === 'effective' && <label>Section
         <select value={section} onChange={event => changeSection(event.currentTarget.value)}>
           <option value="globals">Global fields</option>
           {(declaredData?.sections || []).map(item => <option key={item.id} value={item.id}>{item.id}</option>)}
         </select>
-      </label>
+      </label>}
       <label>Compare
         <select aria-label="Left environment" value={left} onChange={event => changeLeft(event.currentTarget.value)}>
           {profiles.map(profile => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
@@ -204,7 +226,10 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
       <select id="att-config-right" aria-label="Right environment" value={right} onChange={event => changeRight(event.currentTarget.value)}>
         {profiles.map(profile => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
       </select>
-      <button type="button" onClick={() => void compare(left, right, section)} disabled={!left || !right || left === right}>Compare</button>
+      {mode === 'compare' && <label>Compare section<select aria-label="Configuration section to compare" value={compareSection || 'globals'} onChange={event => changeCompareSection(event.currentTarget.value)}>
+        <option value="globals">Global fields (optional)</option>{(declaredData?.sections || []).filter(item => item.id !== 'globals').map(item => <option key={item.id} value={item.id}>{item.title || item.id}</option>)}
+      </select></label>}
+      <button type="button" onClick={() => { onViewChange?.('compare'); void compare(left, right, compareSection || 'globals'); }} disabled={!left || !right || left === right}>Compare</button>
       <label>Filter fields <input type="search" value={query} maxLength={200} onChange={event => setQuery(event.currentTarget.value)} /></label>
     </div>
     <p role="status" aria-live="polite">{status}</p>

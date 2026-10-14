@@ -24,7 +24,7 @@ Vite emits static files to `att-web/frontend/dist`. Maven copies those files int
 
 - `types.ts`, `api.ts`, `state.ts`, and `router.ts` are the shared TypeScript foundation. Feature operations can be added centrally to `api.ts`; pages do not construct API URLs.
 - `ServerVersion.inlineLoadEnabled` and `loadSchedulingEnabled` are retained as server capabilities and passed into the shell and feature routes. The API does not expose the current principal, so the identity chip says “Server managed” and “not exposed by API.”
-- `AppRoute` has dashboard, package collection, package/resource, jobs/job, load/package, Scheduled Load, and Settings variants. `useNavigationGuard()` provides `navigate()` and `registerUnsavedChanges()`; the shell presents a keyboard-accessible discard dialog for internal and browser-history navigation.
+- `AppRoute` has dashboard, package collection, package/resource, first-level Configuration, single-target Quick Load, jobs/job, Advanced Load/package, Scheduled Load, and Settings variants. `useNavigationGuard()` provides `navigate()` and `registerUnsavedChanges()`; the shell presents a keyboard-accessible discard dialog for internal and browser-history navigation.
 - Package, environment, and accepted-job callbacks are exposed through shell context so later modules can stay controlled by the application root.
 - Dashboard summaries and lists use only `/version`, `/packages`, and `/jobs` responses. Counts describe returned rows; an API error is not displayed as zero.
 - External CSS and scripts preserve the existing self-only Content Security Policy. All requests remain same-origin.
@@ -41,7 +41,7 @@ To roll back the shell, restore the prior `index.html` and static resources in t
 
 ## Browser acceptance
 
-The development-only fixture and browser commands are documented in [`tools/ui-acceptance/README.md`](../../tools/ui-acceptance/README.md). The harness targets the built Vite output under `/att/ui/`, supplies deterministic API responses, and runs dashboard, Settings, Explorer, Load/Jobs, and Scheduled Load flows with axe checks. The cross-browser suite covers Chromium, Firefox, and WebKit at desktop, tablet, and phone widths in light and dark themes; it checks responsive layout and overflow, runs axe at every viewport, compares each Scheduled Load capture with its browser/viewport/theme baseline in [`tools/ui-acceptance/visual-baselines/scheduled-load/`](../../tools/ui-acceptance/visual-baselines/scheduled-load/), and stores screenshots as CI artifacts. Dashboard reference captures remain in [`ui-shell-baseline/`](ui-shell-baseline/). Browser screenshots and axe checks do not replace Java WAR packaging or non-root Tomcat tests.
+The development-only fixture and browser commands are documented in [`tools/ui-acceptance/README.md`](../../tools/ui-acceptance/README.md). The harness targets the built Vite output under `/att/ui/`, supplies deterministic API responses, and runs dashboard, Settings, Explorer, Configuration, Quick Load, Load/Jobs, and Scheduled Load flows with axe checks. The cross-browser suite covers Chromium, Firefox, and WebKit at desktop, tablet, and phone widths in light and dark themes; it checks responsive layout and overflow, runs axe at every viewport, compares each Scheduled Load capture with its browser/viewport/theme baseline in [`tools/ui-acceptance/visual-baselines/scheduled-load/`](../../tools/ui-acceptance/visual-baselines/scheduled-load/), and stores screenshots as CI artifacts. Dashboard reference captures remain in [`ui-shell-baseline/`](ui-shell-baseline/). Browser screenshots and axe checks do not replace Java WAR packaging or non-root Tomcat tests.
 
 The cross-browser job runs on `ubuntu-latest` and compares against the `linux` baseline; local macOS runs use `darwin`. The harness verifies the selected manifest platform and fails when that platform's manifest or captures are missing. It does not reuse another platform's screenshots.
 
@@ -60,6 +60,8 @@ The gallery uses synthetic fixture responses and shows the same design system ac
 | Phase 3: Load Builder | [Screenshot](ui-shell-baseline/load-builder-1440-light.png) | [Screenshot](ui-shell-baseline/load-builder-1440-dark.png) |
 | Phase 3: Job Results | [Screenshot](ui-shell-baseline/job-results-1440-light.png) | [Screenshot](ui-shell-baseline/job-results-1440-dark.png) |
 | Phase 4: Scheduled Load | [Screenshot](ui-shell-baseline/scheduled-load-1440-light.png) | [Screenshot](ui-shell-baseline/scheduled-load-1440-dark.png) |
+| Phase 5: Configuration workspace | [Screenshot](ui-shell-baseline/configuration-1440-light.png) | [Screenshot](ui-shell-baseline/configuration-1440-dark.png) |
+| Phase 5: Quick Load | [Screenshot](ui-shell-baseline/quick-load-1440-light.png) | [Screenshot](ui-shell-baseline/quick-load-1440-dark.png) |
 The [screenshot manifest](ui-shell-baseline/manifest.json) records each route, fixture, browser, viewport, and theme.
 
 To remove the acceptance harness, revert `tools/ui-acceptance/` and `docs/system-design/ui-shell-baseline/`. Keep that artifact rollback separate from the application rollback above.

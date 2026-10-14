@@ -216,3 +216,29 @@
 @media (prefers-reduced-motion: reduce) {
   .att-load-page *, .att-jobs-page *, .att-job-detail * { scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
+
+.att-quick-load-page { max-width: 86rem; margin: 0 auto; padding: var(--att-space-5, 1.25rem); }
+.att-quick-load-actions { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; }
+.att-quick-load-page .att-quick-load-disclosure { width:100%; text-align:left; font-size:1.1rem; font-weight:700; }
+.att-quick-load-page .att-code-editor { min-height:12rem; }
+.att-quick-load-schedule-note { padding:.75rem; border:1px solid var(--att-color-border,#dce2ec); border-radius:var(--att-radius-card,.9rem); background:var(--att-color-surface,#fff); }
+.att-quick-load-schedule-note summary { cursor:pointer; font-weight:700; }
+@media(max-width:700px) { .att-quick-load-page { padding:.75rem; } .att-quick-load-actions button { flex:1 1 auto; } }
+
+.att-threshold-evidence-editor { display:grid; gap:1rem; }
+.att-threshold-scope-picker { display:flex; flex-wrap:wrap; gap:.75rem; }
+.att-threshold-scope-picker label { display:grid; gap:.25rem; color:var(--att-color-muted,#637087); font-size:.88rem; }
+.att-threshold-scope-picker select,.att-threshold-row select,.att-threshold-row input,.att-evidence-form select,.att-evidence-form input { min-height:2.35rem; padding:.4rem .55rem; border:1px solid var(--att-color-border,#dce2ec); border-radius:var(--att-radius-control,.55rem); background:var(--att-color-surface,#fff); color:var(--att-color-text,#182237); font:inherit; }
+.att-threshold-scope { display:grid; gap:.65rem; }
+.att-threshold-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:.75rem; }
+.att-threshold-heading h3,.att-evidence-form h3 { margin:.1rem 0; }
+.att-threshold-heading p { margin:.2rem 0; color:var(--att-color-muted,#637087); font-size:.82rem; }
+.att-threshold-row { display:grid; grid-template-columns:minmax(8rem,1fr) minmax(7rem,.7fr) minmax(7rem,.7fr) minmax(5rem,.5fr) auto; align-items:end; gap:.5rem; padding:.65rem; border:1px solid var(--att-color-border,#dce2ec); border-radius:.55rem; }
+.att-threshold-row label { display:grid; gap:.25rem; color:var(--att-color-muted,#637087); font-size:.78rem; }
+.att-threshold-row strong { align-self:center; }
+.att-threshold-row [aria-invalid=true] { border-color:var(--att-color-danger,#b42318); }
+.att-threshold-empty { padding:.8rem; border:1px dashed var(--att-color-border,#dce2ec); border-radius:.5rem; color:var(--att-color-muted,#637087); }
+.att-evidence-form { display:grid; gap:.6rem; padding:.8rem; border:1px solid var(--att-color-border,#dce2ec); border-radius:.65rem; }
+.att-evidence-impact { margin:0; padding:.65rem; border-inline-start:3px solid var(--att-color-warning,#b54708); background:color-mix(in srgb,var(--att-color-warning,#b54708) 8%,transparent); }
+.att-threshold-scope .att-code-editor,.att-evidence-form .att-code-editor { min-height:11rem; }
+@media(max-width:800px) { .att-threshold-row { grid-template-columns:repeat(2,minmax(0,1fr)); } .att-threshold-row strong { grid-column:1/-1; } }

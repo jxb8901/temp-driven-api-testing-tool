@@ -17,7 +17,7 @@
         <fileSet><directory>${project.basedir}/../tools</directory><outputDirectory>packages/default/tools</outputDirectory><includes><include>**/*.sh</include></includes><excludes><exclude>**/node_modules/**</exclude><exclude>ui-acceptance/**</exclude></excludes><fileMode>0755</fileMode></fileSet>
         <fileSet><directory>${project.basedir}/../testcase</directory><outputDirectory>packages/default/testcase</outputDirectory></fileSet>
         <fileSet><directory>${project.basedir}/../sql</directory><outputDirectory>packages/default/sql</outputDirectory></fileSet>
-        <fileSet><directory>${project.basedir}/../docs</directory><outputDirectory>docs</outputDirectory></fileSet>
+        <fileSet><directory>${project.basedir}/../docs</directory><outputDirectory>docs</outputDirectory><excludes><exclude>system-design/ui-shell-architecture.md</exclude><exclude>system-design/ui-shell-architecture.zh.md</exclude><exclude>system-design/ui-shell-baseline/**</exclude></excludes></fileSet>
         <fileSet><directory>${project.basedir}/../schemas</directory><outputDirectory>packages/default/schemas</outputDirectory></fileSet>
     </fileSets>
     <dependencySets>

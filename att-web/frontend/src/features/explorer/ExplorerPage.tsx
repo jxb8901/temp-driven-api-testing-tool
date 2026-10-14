@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { ConfigurationExplorer } from './ConfigurationExplorer';
 import { ResourceTree, resourceKey } from './ResourceTree';
 import { SourceViewer } from './SourceViewer';
+import { CodeEditor } from '../code/CodeEditor';
 import { TypedSidecarForm } from './TypedSidecarForm';
-import type { DebugDraftRequest, DraftResponse, ExplorerApi, ExplorerPageProps, JsonObject, ResourceIdentity, ResourceSummary } from './types';
+import type { DebugDraftRequest, DraftResponse, ExplorerApi, ExplorerPageProps, JsonObject, ResourceIdentity, ResourceReference, ResourceSummary } from './types';
 
 const MAX_DEFINITION_CHARACTERS = 100_000;
 
@@ -46,8 +46,15 @@ function resourceRouteKey(route: ExplorerPageProps['resourceRoute']): string {
   return route ? `${route.type}:${route.resourceId}` : '';
 }
 
+function ExplorerReference({ reference, onOpen }: { reference: ResourceReference; onOpen: ExplorerPageProps['onResourceRouteChange'] }) {
+  const label = reference.logicalId || reference.name || reference.resourceId || 'Unresolved reference';
+  const valid = Boolean(reference.type && ['case', 'template', 'flow', 'tool'].includes(reference.type) && reference.resourceId && reference.resolution !== 'unresolved');
+  return <li>{valid ? <button type="button" onClick={() => onOpen({ type: reference.type!, resourceId: reference.resourceId! })}>{label}</button> : label}
+    <span>{reference.type || reference.resolution || 'unresolved'}</span></li>;
+}
+
 export function ExplorerPage({ api, packageId, resourceRoute, environment, principalLabel = '', onResourceRouteChange,
-  onEnvironmentChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad, registerUnsavedChanges }: ExplorerPageProps) {
+  onEnvironmentChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad, onOpenConfiguration, onOpenConfigurationFile, registerUnsavedChanges }: ExplorerPageProps) {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>('all');
   const [resources, setResources] = useState<ResourceSummary[]>([]);
@@ -265,7 +272,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   return <main className="att-explorer-page">
     <header className="att-explorer-page-heading">
       <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>Package Explorer</h1>
-        <p>Browse safe resource projections, inspect configuration, and run a selected case or Debug target.</p></div>
+        <p>Browse package Cases, Templates, Flows and Tools. Select a resource to inspect its definition, dependencies and available actions.</p></div>
       <label>Run, Debug, and Load environment
         <input value={environment} maxLength={128} onChange={event => changeEnvironment(event.currentTarget.value)} placeholder="Package default" />
       </label>
@@ -275,19 +282,23 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
       <aside className="att-explorer-navigation" aria-label="Resource navigation">
         <h2>Resources</h2>
         <label>Search resources <input type="search" value={query} maxLength={200} onChange={event => setQuery(event.currentTarget.value)} /></label>
-        <label>Resource type <select value={typeFilter} onChange={event => setTypeFilter(event.currentTarget.value as typeof typeFilter)}>
-          <option value="all">All types</option><option value="case">Cases</option><option value="template">Templates</option><option value="flow">Flows</option><option value="tool">Tools</option>
-        </select></label>
+        <div className="att-explorer-categories" role="tablist" aria-label="Resource categories">
+          {([
+            ['all', 'All'], ['case', 'Test Cases'], ['template', 'Templates'], ['flow', 'Flows'], ['tool', 'Tools'],
+          ] as Array<[ResourceSummary['type'] | 'all', string]>).map(([value, label]) =>
+            <button key={value} type="button" role="tab" aria-selected={typeFilter === value}
+              onClick={() => setTypeFilter(value)}>{label}</button>)}
+        </div>
         <p className="att-explorer-status" role="status" aria-live="polite">{resourceStatus}</p>
         {resourceError && <p className="att-error" role="alert">{resourceError}<button type="button" onClick={() => setResourceRefresh(value => value + 1)}>Retry</button></p>}
         <ResourceTree items={resources} selectedKey={selectedKey} loading={loadingResources} nextCursor={cursor}
           onSelect={resource => onResourceRouteChange({ type: resource.type, resourceId: resource.resourceId })}
           onLoadMore={() => void loadMore()} />
-        <p className="att-explorer-total">{totalResources.toLocaleString()} total indexed resources</p>
+        <p className="att-explorer-total">{totalResources.toLocaleString()} {typeFilter === 'all' ? 'package resources' : typeFilter + ' resources'}</p>
       </aside>
 
       <section className="att-explorer-detail" aria-label="Resource details">
-        {!identity && <div className="att-explorer-empty-state"><h2>Select a resource</h2><p>Choose a Case, Template, Flow, or Tool from the resource tree.</p></div>}
+        {!identity && <div className="att-explorer-empty-state"><h2>Select a resource</h2><p>Choose a Case, Template, Flow, or Tool from the resource list.</p></div>}
         {identity && <>
           <header className="att-resource-title">
             <div><p>{identity.type} · {packageId}</p><h2>{detail?.name || detail?.logicalId || identity.resourceId}</h2>
@@ -302,19 +313,15 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
               tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)}>{name === 'definition' ? 'Definition' : name === 'source' ? 'Source' : 'Dependencies'}</button>)}
           </div>
           <section id="att-explorer-panel-definition" role="tabpanel" aria-labelledby="att-explorer-tab-definition" hidden={tab !== 'definition'}>
-            {definition == null && !detailLoading ? <p>No definition projection is available.</p> : <pre className="att-definition-view">{detailText}</pre>}
+            {definition == null && !detailLoading ? <p>No definition projection is available.</p> : <CodeEditor value={detailText} language="json" label="Safe resource definition" readOnly sourcePath={detail?.sourcePath} onFileReference={(path, origin) => onOpenConfigurationFile?.(path, origin)} />}
           </section>
           {sourceIdentity && <section id="att-explorer-panel-source" role="tabpanel" aria-labelledby="att-explorer-tab-source" hidden={tab !== 'source'}>
-            <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active={tab === 'source'} />
+            <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active={tab === 'source'} onFileReference={onOpenConfigurationFile} />
           </section>}
           <section id="att-explorer-panel-relations" role="tabpanel" aria-labelledby="att-explorer-tab-relations" hidden={tab !== 'relations'}>
             <div className="att-relation-columns">
-              <div><h3>References</h3><ul>{(detail?.references || []).map((reference, index) => <li key={`${reference.type}:${reference.resourceId}:${index}`}>
-                {reference.logicalId || reference.name || reference.resourceId} <span>{reference.type || reference.resolution || 'unresolved'}</span>
-              </li>)}</ul>{!detail?.references?.length && <p>None</p>}</div>
-              <div><h3>Referenced by</h3><ul>{(detail?.referencedBy || []).map((reference, index) => <li key={`${reference.type}:${reference.resourceId}:${index}`}>
-                {reference.logicalId || reference.name || reference.resourceId} <span>{reference.type || reference.resolution || 'unresolved'}</span>
-              </li>)}</ul>{!detail?.referencedBy?.length && <p>None</p>}</div>
+              <div><h3>References</h3><ul>{(detail?.references || []).map((reference, index) => <ExplorerReference key={`${reference.type}:${reference.resourceId}:${index}`} reference={reference} onOpen={onResourceRouteChange} />)}</ul>{!detail?.references?.length && <p>None</p>}</div>
+              <div><h3>Referenced by</h3><ul>{(detail?.referencedBy || []).map((reference, index) => <ExplorerReference key={`${reference.type}:${reference.resourceId}:${index}`} reference={reference} onOpen={onResourceRouteChange} />)}</ul>{!detail?.referencedBy?.length && <p>None</p>}</div>
             </div>
             {detail?.diagnostics?.map((item, index) => <p className="att-diagnostic" key={`${item.code}:${index}`}>{item.code ? `${item.code}: ` : ''}{item.summary}</p>)}
           </section>
@@ -332,6 +339,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
           <label>Anonymous job label (optional)<input value={principal} maxLength={120} onChange={event => changePrincipal(event.currentTarget.value)} /></label>
           {selectedResource.type === 'case' && <button type="button" disabled={detailLoading || !detail?.provenance?.suite || !detail.logicalId} onClick={() => void runCase()}>Run selected case</button>}
           {debugEnabled && <button type="button" aria-expanded={debugOpen} onClick={() => setDebugOpen(value => !value)}>{debugOpen ? 'Close Debug' : 'Debug this target'}</button>}
+          {onOpenConfiguration && identity && ['template', 'flow', 'tool'].includes(identity.type) && <button type="button" onClick={() => onOpenConfiguration(identity)}>Open in Configuration</button>}
           {onOpenQuickLoad && debugEnabled && identity && <button type="button" onClick={() => onOpenQuickLoad(identity)}>Quick Load</button>}
           {debugOpen && <section className="att-debug-panel" aria-labelledby="att-debug-heading">
             <h3 id="att-debug-heading">Debug / Test Runner</h3>
@@ -341,16 +349,17 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
               <TypedSidecarForm key={`${selectedRouteKey}:${resetKey}`} value={debugInput} groups={groups} resetKey={resetKey}
                 onChange={setBusinessInput} onValidityChange={setFormValid} />
               <div className="att-debug-actions">
+                <button type="button" disabled title="The Server scheduler accepts immutable Load scenarios, not Debug draft overrides.">Schedule…</button>
                 <button type="button" onClick={resetDebug} disabled={previewLoading || submitLoading}>Reset defaults</button>
                 <button type="button" onClick={() => void previewDebug()} disabled={previewLoading || submitLoading || !formValid}>{previewLoading ? 'Validating…' : 'Validate and preview'}</button>
                 <button type="button" onClick={() => void startDebug()} disabled={submitLoading || previewLoading || !formValid}>{submitLoading ? 'Starting…' : 'Start Debug'}</button>
               </div>
-              {previewText && <section className="att-debug-preview"><h4>Safe effective Debug preview</h4><pre>{previewText}</pre></section>}
+              <p className="att-help">Scheduling is unavailable for Debug inputs because the Server cannot snapshot Debug draft overrides.</p>
+              {previewText && <section className="att-debug-preview"><h4>Safe effective Debug preview</h4><CodeEditor value={previewText} language={draft?.previewYaml ? 'yaml' : 'json'} label="Safe effective Debug preview" readOnly /></section>}
             </>}
           </section>}
         </>}
       </aside>
     </div>
-    <ConfigurationExplorer api={api} packageId={packageId} environment={environment} onEnvironmentChange={changeEnvironment} />
   </main>;
 }

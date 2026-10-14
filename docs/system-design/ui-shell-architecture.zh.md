@@ -24,7 +24,7 @@ Vite 將靜態輸出寫入 `att-web/frontend/dist`。Maven 將這些檔案複製
 
 - `types.ts`、`api.ts`、`state.ts` 和 `router.ts` 是共用 TypeScript 基礎。Feature operations 可集中加入 `api.ts`；pages 不自行建構 API URLs。
 - `ServerVersion.inlineLoadEnabled` 和 `loadSchedulingEnabled` 會保存在 server capability state，並傳入 shell 和 feature routes。API 不會提供目前 principal，因此 identity chip 明確顯示「Server managed」和「not exposed by API」。
-- `AppRoute` 包含 dashboard、package list、package/resource、jobs/job、load/package、Scheduled Load 及 Settings。`useNavigationGuard()` 提供 `navigate()` 和 `registerUnsavedChanges()`；Shell 使用 keyboard-accessible discard dialog 確認內部或 browser-history navigation。
+- `AppRoute` 包含 dashboard、package list、package/resource、第一層 Configuration、單一 target Quick Load、jobs/job、Advanced Load/package、Scheduled Load 及 Settings。`useNavigationGuard()` 提供 `navigate()` 和 `registerUnsavedChanges()`；Shell 使用 keyboard-accessible discard dialog 確認內部或 browser-history navigation。
 - Shell context 會提供 package、environment 和 accepted-job callbacks，讓後續 modules 由 app root 管理狀態。
 - Dashboard summary 和 lists 只使用 `/version`、`/packages` 和 `/jobs` responses。數量只描述回傳 rows；API error 不會顯示為零。
 - 外部 CSS 和 scripts 保留 self-only Content Security Policy。所有 requests 都是 same-origin。
@@ -41,7 +41,7 @@ Vite 產生的 `index.html` 和 bundles 是 active app entry。舊版會直接�
 
 ## Browser acceptance
 
-Development-only fixture 和 browser commands 記錄於 [`tools/ui-acceptance/README.md`](../../tools/ui-acceptance/README.md)。Harness 會在 `/att/ui/` 測試已 build 的 Vite output、提供 deterministic API responses，並以 axe 檢查 Dashboard、Settings、Explorer、Load/Jobs 及 Scheduled Load flows。Cross-browser suite 在 desktop、tablet 和 phone widths 以 light/dark themes 覆蓋 Chromium、Firefox 及 WebKit，檢查 responsive layout 與 overflow，在每個 viewport 執行 axe，並把截圖與各 browser/viewport/theme 的 Scheduled Load baseline 比較；截圖亦會保存為 CI artifacts。Dashboard 參考截圖仍保留於 [`ui-shell-baseline/`](ui-shell-baseline/)，Scheduled Load visual baselines 位於 [`tools/ui-acceptance/visual-baselines/scheduled-load/`](../../tools/ui-acceptance/visual-baselines/scheduled-load/)。Browser screenshots 和 axe checks 不能取代 Java WAR packaging 或 non-root Tomcat tests。
+Development-only fixture 和 browser commands 記錄於 [`tools/ui-acceptance/README.md`](../../tools/ui-acceptance/README.md)。Harness 會在 `/att/ui/` 測試已 build 的 Vite output、提供 deterministic API responses，並以 axe 檢查 Dashboard、Settings、Explorer、Configuration、Quick Load、Load/Jobs 及 Scheduled Load flows。Cross-browser suite 在 desktop、tablet 和 phone widths 以 light/dark themes 覆蓋 Chromium、Firefox 及 WebKit，檢查 responsive layout 與 overflow，在每個 viewport 執行 axe，並把截圖與各 browser/viewport/theme 的 Scheduled Load baseline 比較；截圖亦會保存為 CI artifacts。Dashboard 參考截圖仍保留於 [`ui-shell-baseline/`](ui-shell-baseline/)，Scheduled Load visual baselines 位於 [`tools/ui-acceptance/visual-baselines/scheduled-load/`](../../tools/ui-acceptance/visual-baselines/scheduled-load/)。Browser screenshots 和 axe checks 不能取代 Java WAR packaging 或 non-root Tomcat tests。
 
 Cross-browser job 於 `ubuntu-latest` 執行，並比對 `linux` baseline；本機 macOS 使用 `darwin`。Harness 會核對所選 manifest 的 platform；該平台缺少 manifest 或 captures 時會令檢查失敗，不會改用其他平台的截圖。
 
@@ -60,6 +60,8 @@ Gallery 使用 synthetic fixture responses，展示各個 phase 共用的 design
 | Phase 3：Load Builder | [截圖](ui-shell-baseline/load-builder-1440-light.png) | [截圖](ui-shell-baseline/load-builder-1440-dark.png) |
 | Phase 3：Job Results | [截圖](ui-shell-baseline/job-results-1440-light.png) | [截圖](ui-shell-baseline/job-results-1440-dark.png) |
 | Phase 4：Scheduled Load | [截圖](ui-shell-baseline/scheduled-load-1440-light.png) | [截圖](ui-shell-baseline/scheduled-load-1440-dark.png) |
+| Phase 5：Configuration workspace | [截圖](ui-shell-baseline/configuration-1440-light.png) | [截圖](ui-shell-baseline/configuration-1440-dark.png) |
+| Phase 5：Quick Load | [截圖](ui-shell-baseline/quick-load-1440-light.png) | [截圖](ui-shell-baseline/quick-load-1440-dark.png) |
 [Screenshot manifest](ui-shell-baseline/manifest.json) 記錄每張截圖的 route、fixture、browser、viewport 和 theme。
 
 如需移除 acceptance harness，回復 `tools/ui-acceptance/` 和 `docs/system-design/ui-shell-baseline/`。請將測試 artifact rollback 與 app rollback 分開處理。

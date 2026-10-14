@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import type { AsyncState, ServerVersion } from './types';
-import type { AppRoute, RouteState } from './router';
+import { formatRoute, type AppRoute, type RouteState } from './router';
 import { NavigationGuardContext } from './router';
 import { api } from './api';
 import { authUiText } from './authUiText';
@@ -52,6 +52,8 @@ function routeTitle(route: AppRoute): string {
   if (route.kind === 'dashboard') return 'Dashboard';
   if (route.kind === 'packages') return 'Packages';
   if (route.kind === 'package') return route.resource ? route.resource.resourceId : route.packageId;
+  if (route.kind === 'configuration') return route.filePath?.split('/').filter(Boolean).pop() || 'Configuration';
+  if (route.kind === 'quick-load') return 'Quick Load';
   if (route.kind === 'jobs') return route.jobId ? 'Job ' + route.jobId : 'Jobs and results';
   if (route.kind === 'load') return route.packageId ? 'Advanced Load' : 'Load testing';
   if (route.kind === 'schedules') return 'Scheduled Load';
@@ -62,6 +64,8 @@ function routeTitle(route: AppRoute): string {
 function activeNavigation(route: AppRoute): string {
   if (route.kind === 'packages') return 'packages';
   if (route.kind === 'package') return 'explorer';
+  if (route.kind === 'configuration') return 'configuration';
+  if (route.kind === 'quick-load') return 'load-testing';
   if (route.kind === 'jobs') return 'jobs';
   if (route.kind === 'load') return 'load-testing';
   if (route.kind === 'schedules') return 'scheduled-load';
@@ -85,6 +89,7 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, onClos
     { label: 'Dashboard', description: 'Workspace overview', route: { kind: 'dashboard' } },
     { label: 'Packages', description: 'Configured packages', route: { kind: 'packages' } },
     { label: 'Explorer and Run', description: 'Browse package resources', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
+    { label: 'Configuration', description: 'Inspect package configuration and Testdata', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
     { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
     { label: 'Jobs and results', description: 'Inspect recent jobs', route: { kind: 'jobs' } },
     ...(showScheduledLoad ? [{ label: 'Scheduled Load', description: 'Manage recurring Load schedules', route: { kind: 'schedules' } as AppRoute }] : []),
@@ -230,11 +235,15 @@ export function AppShell({
   }
   const action = route.kind === 'load' && route.packageId
     ? { label: 'Open package', target: '#/packages/' + encodeURIComponent(route.packageId), hidden: false }
-    : route.kind === 'package' && versionData?.inlineLoadEnabled === true
-      ? { label: 'Start Load', target: '#/advanced-load/' + encodeURIComponent(route.packageId), hidden: false }
-      : route.kind === 'load' || route.kind === 'jobs'
-        ? { label: 'Browse packages', target: '#/packages', hidden: false }
-        : { label: 'Browse packages', target: '#/packages', hidden: false };
+    : route.kind === 'quick-load'
+      ? { label: 'Return to Explorer', target: formatRoute({ kind: 'package', packageId: route.packageId, resource: route.target }), hidden: false }
+      : route.kind === 'configuration' && route.packageId
+        ? { label: 'Open Explorer', target: '#/packages/' + encodeURIComponent(route.packageId), hidden: false }
+        : route.kind === 'package' && versionData?.inlineLoadEnabled === true
+          ? { label: 'Start Load', target: '#/advanced-load/' + encodeURIComponent(route.packageId), hidden: false }
+          : route.kind === 'load' || route.kind === 'jobs'
+            ? { label: 'Browse packages', target: '#/packages', hidden: false }
+            : { label: 'Browse packages', target: '#/packages', hidden: false };
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -312,6 +321,9 @@ export function AppShell({
   });
   const packageHref = selectedPackage ? '#/packages/' + encodeURIComponent(selectedPackage) : '#/packages';
   const loadHref = selectedPackage ? '#/advanced-load/' + encodeURIComponent(selectedPackage) : '#/advanced-load';
+  const configurationHref = formatRoute(selectedPackage
+    ? { kind: 'configuration', packageId: selectedPackage, environment: selectedEnvironment }
+    : { kind: 'configuration' });
   const changeThemePreference = (preference: ThemePreference) => {
     setThemePreference(preference);
     if (preference === 'system') {
@@ -352,6 +364,9 @@ export function AppShell({
             <a className="nav-link" href={packageHref} data-nav="explorer" aria-current={activeNav === 'explorer' ? 'page' : undefined} onClick={link(packageHref)}>
               <span className="nav-icon" aria-hidden="true">⌕</span><span className="nav-label">Explorer and Run</span>
             </a>
+            <a className="nav-link" href={configurationHref} data-nav="configuration" aria-current={activeNav === 'configuration' ? 'page' : undefined} onClick={link(configurationHref)}>
+              <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Configuration</span>
+            </a>
             <a className="nav-link" href={loadHref} data-nav="load-testing" aria-current={activeNav === 'load-testing' ? 'page' : undefined} onClick={link(loadHref)}>
               <span className="nav-icon" aria-hidden="true">⌁</span><span className="nav-label">Load testing</span>
             </a>
@@ -365,7 +380,7 @@ export function AppShell({
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span>
             </a>
           </nav>
-          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.1.4'}</span></div>
+          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.0'}</span></div>
         </aside>
 
         <div className="app-frame">
@@ -401,6 +416,15 @@ export function AppShell({
                   <Breadcrumb label="Packages" href="#/packages" navigate={navigate} />
                   <Breadcrumb label={route.packageId} href={route.resource ? packageHref : undefined} navigate={navigate} />
                   {route.resource && <Breadcrumb label={route.resource.resourceId} navigate={navigate} />}
+                </>}
+                {route.kind === 'configuration' && <>
+                  <Breadcrumb label="Configuration" href={route.packageId ? '#/configuration' : undefined} navigate={navigate} />
+                  {route.packageId && <Breadcrumb label={route.packageId} navigate={navigate} />}
+                  {route.filePath && <Breadcrumb label={route.filePath.split('/').filter(Boolean).pop() || route.filePath} navigate={navigate} />}
+                </>}
+                {route.kind === 'quick-load' && <>
+                  <Breadcrumb label="Load testing" href="#/advanced-load" navigate={navigate} />
+                  <Breadcrumb label="Quick Load" navigate={navigate} />
                 </>}
                 {route.kind === 'load' && <>
                   <Breadcrumb label="Load testing" href={route.packageId ? '#/advanced-load' : undefined} navigate={navigate} />

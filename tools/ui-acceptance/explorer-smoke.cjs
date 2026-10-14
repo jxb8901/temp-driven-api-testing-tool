@@ -12,6 +12,7 @@ async function main() {
   let sourceCalls = 0;
   let submittedInput;
   let submittedPrincipal;
+  let submittedLoadScenario;
   let authorizationHeaderSeen = false;
   try {
     browser = await launchBrowser();
@@ -33,7 +34,7 @@ async function main() {
         return jsonResponse(route, 401, { error: { code: 'UNAUTHORIZED', summary: 'authorization header rejected: canary-401-secret' } });
       }
       if (method === 'GET' && path === 'version') {
-        return jsonResponse(route, 200, { apiVersion: '1', version: '4.1.4', inlineLoadEnabled: true });
+        return jsonResponse(route, 200, { apiVersion: '1', version: '4.2.0', inlineLoadEnabled: true });
       }
       if (method === 'GET' && path === 'packages') {
         return jsonResponse(route, 200, { items: [{ packageId: 'payments', name: 'payments', state: 'ready' }], total: 1 });
@@ -80,6 +81,73 @@ async function main() {
           fields: [{ path: 'database.password', left: { state: 'hidden' }, right: { state: 'missing' }, change: 'changed' }],
         });
       }
+      if (method === 'GET' && path === 'packages/payments/configuration/files') {
+        const requested = url.searchParams.get('path') || '';
+        const items = requested === '' ? [
+          { name: 'config', path: 'config', kind: 'directory' },
+        ] : requested === 'config' ? [
+          { name: 'application.yaml', path: 'config/application.yaml', kind: 'file', format: 'yaml', sourceAvailable: true, sizeBytes: 248 },
+          { name: 'restricted.yaml', path: 'config/restricted.yaml', kind: 'file', format: 'yaml', sourceAvailable: false, reason: 'visibility-policy' },
+          { name: 'testdata', path: 'config/testdata', kind: 'directory' },
+        ] : requested === 'config/testdata' ? [
+          { name: 'accounts.yaml', path: 'config/testdata/accounts.yaml', kind: 'file', format: 'yaml', sourceAvailable: true, sizeBytes: 156 },
+        ] : [];
+        return jsonResponse(route, 200, { path: requested, items, total: items.length, nextOffset: null, truncated: false });
+      }
+      if (method === 'GET' && path === 'packages/payments/configuration/source') {
+        assert.equal(url.searchParams.get('path'), 'config/application.yaml');
+        return jsonResponse(route, 200, {
+          available: true, logicalPath: 'config/application.yaml', format: 'yaml',
+          text: 'server:\n  environment: dev\n# descriptor: config/testdata/accounts.yaml\n',
+        });
+      }
+      if (method === 'GET' && path === 'packages/payments/configuration/effective') {
+        const section = url.searchParams.get('section') || 'globals';
+        const entries = section === 'testdata' ? [{
+          id: 'accounts', source: 'config/testdata/accounts.yaml', generated: false,
+          fields: {
+            recordCount: { state: 'visible', value: 3 },
+            'selection.strategy': { state: 'visible', value: 'roundRobin' },
+            'selection.exhaustion': { state: 'visible', value: 'cycle' },
+          },
+          references: [{ type: 'template', resourceId: 'checkout', resolution: 'resolved' }],
+        }] : [];
+        return jsonResponse(route, 200, {
+          state: 'ready', environment: 'staging', section,
+          globals: { baseDir: { state: 'visible', value: 'config' } },
+          sections: [{ id: 'testdata', title: 'Testdata', entries }],
+          nextOffset: null,
+        });
+      }
+      if (method === 'GET' && path === 'packages/payments/configuration/testdata/accounts/records') {
+        return jsonResponse(route, 200, {
+          descriptorId: 'accounts', environment: 'staging', state: 'ready', offset: 0, limit: 50,
+          total: 1, nextOffset: null, redactionEnabled: true,
+          records: [{ index: 0, sequence: 1, value: { id: 'account-001', tier: 'standard' } }],
+        });
+      }
+      if (method === 'GET' && path === 'packages/payments/load-policy') {
+        return jsonResponse(route, 200, {
+          model: url.searchParams.get('model') || 'virtualUsers',
+          policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' }, execution: {}, thresholds: {}, evidence: {} },
+          redacted: false,
+        });
+      }
+      if (method === 'GET' && path === 'packages/payments/resources/template/checkout/quick-load-form') {
+        return jsonResponse(route, 200, {
+          target: { type: 'template', id: 'checkout' },
+          model: url.searchParams.get('model') || 'virtualUsers',
+          input: { inputs: { account: 'A-1' }, vars: {} }, redacted: false,
+        });
+      }
+      if (method === 'POST' && path === 'drafts/load') {
+        submittedLoadScenario = request.postDataJSON().scenario;
+        return jsonResponse(route, 201, {
+          draftId: 'LOAD-DRAFT-QUICK-99', packageId: 'payments',
+          preview: { status: 'PASS' }, previewYaml: 'schemaVersion: att-load/v1.6\n',
+          redacted: false, diagnostics: [], expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        });
+      }
       if (method === 'GET' && path === 'packages/payments/resources/template/checkout/debug-form') {
         return jsonResponse(route, 200, {
           target: { type: 'template', id: 'checkout' },
@@ -108,16 +176,14 @@ async function main() {
     await page.keyboard.press('ArrowRight');
     await page.getByRole('tab', { name: 'Source' }).waitFor({ state: 'visible' });
     await page.waitForFunction(() => document.querySelector('[role="tab"][data-tab="source"]')?.getAttribute('aria-selected') === 'true');
-    await page.getByText(/5[,.]?000 lines/).waitFor();
-    assert.equal(await page.locator('.att-source-line').count() <= 60, true, 'thousands of lines should remain virtualized');
-    await page.locator('.att-source-viewport').evaluate(viewport => {
-      viewport.scrollTop = viewport.scrollHeight;
-      viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
-    });
-    await page.getByText('step-5000: safe', { exact: false }).waitFor();
-    assert.equal(await page.locator('.att-source-viewport img').count(), 0, 'source is rendered as text, not HTML');
-    await page.getByRole('button', { name: 'Copy displayed source' }).click();
-    await page.getByText('Copied safe source.').waitFor();
+    await page.locator('.att-explorer-source').getByText('Code viewer ready.').waitFor();
+    assert.equal(await page.locator('.att-explorer-source .att-code-host .cm-line').count() <= 80, true, 'thousands of CodeMirror lines should remain virtualized');
+    await page.locator('.att-explorer-source .att-code-goto input').fill('5000');
+    await page.locator('.att-explorer-source .att-code-editor').getByRole('button', { name: 'Go' }).click();
+    await page.locator('.att-explorer-source .att-code-host .cm-line').filter({ hasText: 'step-5000: safe' }).waitFor();
+    assert.equal(await page.locator('.att-explorer-source .att-code-host img').count(), 0, 'source is rendered as text, not HTML');
+    await page.locator('.att-explorer-source .att-code-editor').getByRole('button', { name: 'Copy' }).click();
+    await page.getByText('Copied displayed code.').waitFor();
     assert.equal((await page.evaluate(() => navigator.clipboard.readText())).includes('step-5000: safe'), true);
     await page.getByRole('button', { name: 'Refresh source' }).click();
     await page.getByRole('button', { name: 'Refresh source' }).waitFor();
@@ -130,13 +196,14 @@ async function main() {
     await page.getByRole('tab', { name: 'Definition' }).focus();
     await page.keyboard.press('ArrowRight');
     await page.getByText('Safe source is empty.').waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Copy displayed source' }).isDisabled(), true);
+    assert.equal(await page.locator('.att-explorer-source .att-code-editor').count(), 0, 'an empty source does not mount a copy toolbar');
 
-    await page.goto(`${base}#/packages/payments/resources/template/checkout`);
-    await page.getByRole('heading', { name: 'checkout' }).waitFor();
-    await page.getByRole('button', { name: 'Compare', exact: true }).click();
+    await page.goto(`${base}#/configuration/payments?tab=compare`);
+    await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
     await page.getByRole('table', { name: 'Configuration profile comparison' }).waitFor();
     assert.equal(await page.getByRole('table', { name: 'Configuration profile comparison' }).innerText().then(text => text.includes('hidden') && text.includes('missing')), true, 'configuration comparison distinguishes hidden from missing');
+    await page.goto(`${base}#/packages/payments/resources/template/checkout`);
+    await page.getByRole('heading', { name: 'checkout' }).waitFor();
     await page.getByRole('button', { name: 'Debug this target' }).click();
     await page.getByText(/Hidden package-authored values are preserved/).waitFor();
     const keepDefault = page.getByRole('checkbox', { name: /Keep hidden package default/ });
@@ -159,7 +226,11 @@ async function main() {
     assert.equal(await keepDefault.isChecked(), true, 'reset restores the redacted marker');
     await keepDefault.uncheck();
     await page.getByRole('combobox', { name: 'credential value type' }).selectOption('string');
-    await page.getByRole('textbox', { name: 'credential value' }).fill('submitted-override');
+    const credentialValue = page.getByRole('textbox', { name: 'credential value' });
+    await credentialValue.fill('submitted-override');
+    assert.equal(await credentialValue.inputValue(), 'submitted-override', 'typed sidecar override stays visible before submitting');
+    await page.locator('.att-sidecar-advanced summary').click();
+    await page.waitForFunction(() => document.querySelector('.att-sidecar-advanced .cm-content')?.textContent?.includes('submitted-override'));
     await page.getByLabel('Anonymous job label (optional)').fill('anonymous-e2e');
     page.once('dialog', dialogEvent => dialogEvent.accept());
     await page.getByRole('button', { name: 'Start Debug' }).click();
@@ -183,6 +254,31 @@ async function main() {
     await page.getByRole('heading', { name: 'Jobs' }).waitFor();
     assert.match(page.url(), /#\/jobs$/);
 
+    await page.goto(`${base}#/configuration/payments?tab=source&file=config%2Fapplication.yaml`);
+    await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
+    await page.getByText('Safe read-only source').waitFor();
+    await page.getByText('environment: dev', { exact: false }).waitFor();
+    assert.equal(await page.locator('.att-config-source-view img').count(), 0, 'configuration source is rendered as text');
+    await page.getByRole('tab', { name: 'Testdata' }).click();
+    await page.getByRole('table').filter({ hasText: 'account-001' }).waitFor();
+    assert.equal(await page.locator('.att-testdata-table-scroll').last().innerText().then(text => text.includes('account-001')), true);
+
+    await page.goto(`${base}#/quick-load/payments/template/checkout`);
+    await page.getByRole('heading', { name: 'Quick Load', level: 1 }).waitFor();
+    await page.getByText(/Server policy defaults loaded|Safe policy defaults loaded/).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), true, 'inline schedules remain unavailable');
+    await page.getByRole('combobox', { name: 'Load template or preset' }).selectOption('quick-profile');
+    await page.getByRole('button', { name: 'Validate' }).click();
+    await page.getByText('The Server accepted this draft for review.').waitFor();
+    assert.deepEqual(submittedLoadScenario.workloads[0], {
+      id: 'quick-load', load: { users: 2 }, target: { type: 'template', id: 'checkout' },
+      inputs: { account: 'A-1' },
+    });
+    assert.equal(submittedLoadScenario.load.duration, '10s');
+    assert.equal(submittedLoadScenario.execution.thinkTime, '250ms');
+    assert.equal(await page.getByRole('button', { name: 'Run Now' }).isDisabled(), false);
+    assert.deepEqual(pageErrors, [], 'Configuration and Quick Load should not produce uncaught browser errors');
+
     authFailure = true;
     await page.goto(`${base}#/packages/payments/resources/template/checkout`);
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
@@ -191,7 +287,7 @@ async function main() {
     await page.getByText('Your session has expired. Sign in again, then refresh safe source.').waitFor();
     assert.equal(await page.locator('body').innerText().then(text => text.includes('canary-401-secret')), false, 'auth errors must not expose response bodies');
     assert.deepEqual(pageErrors, [], 'Explorer interactions should not produce uncaught browser errors');
-    console.log('ATT Explorer Playwright smoke passed: virtualized and empty source, clipboard/refresh, redaction, dirty navigation, anonymous job, and 401 handling.');
+    console.log('ATT Explorer Playwright smoke passed: resource source/redaction, Configuration files and Testdata records, Quick Load preset validation, dirty navigation, anonymous job, and 401 handling.');
   } finally {
     if (browser) await browser.close();
     await stopFixture(fixture);
