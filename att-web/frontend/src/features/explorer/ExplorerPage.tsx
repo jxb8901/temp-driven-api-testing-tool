@@ -473,7 +473,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
                 <button type="button" onClick={() => void previewDebug()} disabled={previewLoading || submitLoading || !formValid}>{previewLoading ? 'Validating…' : 'Validate and preview'}</button>
                 <button type="button" onClick={() => void startDebug()} disabled={submitLoading || previewLoading || !formValid}>{submitLoading ? 'Starting…' : 'Start Debug'}</button>
               </div>
-              <p className="att-help">Scheduling is unavailable for Debug inputs because the Server cannot snapshot Debug draft overrides.</p>
+              <p className="att-help" role="note">Debug runs are one-shot. Schedule is available only for validated immutable Load scenarios; Debug draft overrides are not converted to recurring Load jobs.</p>
               {previewText && <section className="att-debug-preview"><h4>Safe effective Debug preview</h4><CodeEditor value={previewText} language={draft?.previewYaml ? 'yaml' : 'json'} label="Safe effective Debug preview" readOnly /></section>}
             </>}
           </section>}

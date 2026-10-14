@@ -304,6 +304,8 @@ async function main() {
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
     await page.getByRole('button', { name: 'Debug this target' }).click();
     await page.getByText(/Hidden package-authored values are preserved/).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), true, 'Debug remains one-shot until the Server supports immutable Debug snapshots');
+    await page.getByText('Debug runs are one-shot. Schedule is available only for validated immutable Load scenarios; Debug draft overrides are not converted to recurring Load jobs.').waitFor();
     const keepDefault = page.getByRole('checkbox', { name: /Keep hidden package default/ });
     await keepDefault.waitFor();
     assert.equal(await keepDefault.isChecked(), true, 'redacted defaults remain untouched until the user opts out');

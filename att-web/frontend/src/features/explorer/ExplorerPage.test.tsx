@@ -342,6 +342,8 @@ describe('Explorer page integration', () => {
     click(button('Debug this target'));
     await settle();
     expect(container.textContent).toContain('Hidden package-authored values are preserved');
+    expect(button('Schedule…').disabled).toBe(true);
+    expect(container.textContent).toContain('Debug runs are one-shot. Schedule is available only for validated immutable Load scenarios; Debug draft overrides are not converted to recurring Load jobs.');
     click(container.querySelector('.att-sidecar-keep-default input')!);
     const type = [...container.querySelectorAll('select')].find(item => item.getAttribute('aria-label') === 'credential value type');
     setValue(type!, 'string');
