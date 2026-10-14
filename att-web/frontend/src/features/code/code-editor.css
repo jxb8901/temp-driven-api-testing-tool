@@ -19,6 +19,7 @@
 .att-expression--link { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: .16em; cursor: pointer; }
 .att-expression--link:focus-visible { outline: 2px solid var(--att-color-focus, #3b82f6); }
 .att-expression--unsafe-file { color: var(--att-color-danger, #b42318); text-decoration: line-through; }
+.att-expression--unavailable-file { color: var(--att-color-muted, #667085); text-decoration: underline dotted; text-underline-offset: .16em; }
 .att-code-editor.is-fullscreen { position: fixed; z-index: 1000; inset: .75rem; min-height: auto; box-shadow: 0 1rem 4rem #0005; }
 .att-code-editor.is-fullscreen .att-code-host { min-height: 0; }
 :root[data-theme='dark'] .att-code-editor { --att-code-context: #7db8ff; --att-code-expression: #ffb07a; --att-code-testdata: #d2a8ff; --att-code-file: #6dd6a6; }

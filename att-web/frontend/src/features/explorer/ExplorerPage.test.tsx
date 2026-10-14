@@ -9,11 +9,14 @@ import { TypedSidecarForm } from './TypedSidecarForm';
 import type { ConfigurationResponse, ExplorerApi, JsonObject, ResourceIdentity, ResourceSummary } from './types';
 
 vi.mock('../code/CodeEditor', () => ({
-  CodeEditor: ({ value, label, readOnly = true, onChange }: {
-    value: string; label: string; readOnly?: boolean; onChange?: (value: string) => void;
+  CodeEditor: ({ value, label, readOnly = true, onChange, sourcePath, fileReferences, onFileReference }: {
+    value: string; label: string; readOnly?: boolean; onChange?: (value: string) => void; sourcePath?: string;
+    fileReferences?: Array<{ referenceId: string; logicalPath: string }>;
+    onFileReference?: (path: string, origin?: string, referenceId?: string) => void;
   }) => <section className="att-code-editor" aria-label={label}>
     <div className="att-code-host">{readOnly ? <pre>{value}</pre>
       : <textarea aria-label={label} value={value} onChange={event => onChange?.(event.currentTarget.value)} />}</div>
+    {fileReferences?.[0] && <button type="button" onClick={() => onFileReference?.('./payloads/request.xml', sourcePath, fileReferences[0].referenceId)}>Open safe referenced file</button>}
     {readOnly && <button type="button" onClick={() => void navigator.clipboard?.writeText(value)}>Copy displayed source</button>}
   </section>,
   detectCodeLanguage: () => 'yaml',
@@ -129,6 +132,22 @@ describe('Explorer source viewer', () => {
     await render(<SourceViewer api={authApi} identity={identity} available active />);
     expect(container.textContent).toContain('Your session has expired.');
     expect(container.textContent).not.toContain('token=must-not-display');
+  });
+
+  it('opens only a server-projected package file reference using its opaque reference id', async () => {
+    const referenceId = 'a'.repeat(64);
+    const identity: ResourceIdentity = { packageId: 'payments', type: 'flow', resourceId: 'checkout-flow' };
+    const openReference = vi.fn();
+    const api = apiWith({ getSafeSource: vi.fn(async () => ({
+      available: true, text: 'request: &{./payloads/request.xml}', format: 'yaml', logicalPath: 'templates/checkout/flow.yaml',
+      fileReferences: [{ referenceId, logicalPath: 'templates/checkout/payloads/request.xml', available: true }],
+    })) });
+    await render(<SourceViewer api={api} identity={identity} available active onFileReference={openReference} />);
+
+    click(button('Open safe referenced file'));
+    expect(openReference).toHaveBeenCalledWith('templates/checkout/payloads/request.xml', 'templates/checkout/flow.yaml', {
+      type: 'flow', resourceId: 'checkout-flow', referenceId,
+    });
   });
 
   it('caps the safe source projection before rendering', async () => {

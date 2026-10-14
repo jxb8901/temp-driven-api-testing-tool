@@ -224,6 +224,9 @@ export const api = {
   getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection> {
     return request<SourceProjection>(resourcePath(identity) + '/source', { signal });
   },
+  getResourceSourceFile(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal): Promise<SourceProjection> {
+    return request<SourceProjection>(resourcePath(identity) + '/source-file' + queryString({ referenceId }), { signal });
+  },
   getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse> {
     return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration?view=declared', { signal });
   },

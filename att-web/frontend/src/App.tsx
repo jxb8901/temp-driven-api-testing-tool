@@ -6,7 +6,7 @@ import { useNavigationGuard, useRouteState } from './router';
 import { appReducer, initialAppState, serverCapabilities } from './state';
 import { ExplorerPage } from './features/explorer/ExplorerPage';
 import './features/explorer/explorer.css';
-import type { ExplorerPageProps } from './features/explorer/types';
+import type { ExplorerPageProps, ResourceSourceReference } from './features/explorer/types';
 import { LoadPage } from './features/load/LoadPage';
 import { JobsPage } from './features/load/JobsPage';
 import type { LoadJobsApi, PackageOption } from './features/load/types';
@@ -56,7 +56,7 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled }: {
     onJobAccepted={onJobAccepted}
     onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
     onOpenConfiguration={onOpenConfiguration}
-    onOpenConfigurationFile={(path, origin) => navigation.navigate({ kind: 'configuration', packageId, environment: workspace.selectedEnvironment, filePath: path, fileOrigin: origin, tab: 'source' })}
+    onOpenConfigurationFile={(path, origin, sourceReference) => navigation.navigate({ kind: 'configuration', packageId, environment: workspace.selectedEnvironment, filePath: path, fileOrigin: origin, sourceReference, tab: 'source' })}
   />;
 }
 
@@ -130,8 +130,8 @@ function ConfigurationRouteView({ route, packages }: {
     workspace.onEnvironmentChange(environment);
     navigation.navigate({ ...route, environment });
   }, [navigation.navigate, route, workspace.onEnvironmentChange]);
-  const onFileChange = useCallback((filePath?: string, fileOrigin?: string) => {
-    navigation.navigate({ ...route, filePath, fileOrigin, tab: filePath ? 'source' : route.tab });
+  const onFileChange = useCallback((filePath?: string, fileOrigin?: string, sourceReference?: ResourceSourceReference) => {
+    navigation.navigate({ ...route, filePath, fileOrigin, sourceReference, tab: filePath ? 'source' : route.tab });
   }, [navigation.navigate, route]);
   const onTabChange = useCallback((tab: 'source' | 'declared' | 'effective' | 'compare' | 'testdata') => {
     navigation.navigate({ ...route, tab });
@@ -146,6 +146,7 @@ function ConfigurationRouteView({ route, packages }: {
     environment={selectedEnvironment}
     filePath={route.filePath}
     fileOrigin={route.fileOrigin}
+    sourceReference={route.sourceReference}
     tab={route.tab || (route.filePath ? 'source' : 'declared')}
     onPackageChange={onPackageChange}
     onEnvironmentChange={onEnvironmentChange}

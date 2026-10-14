@@ -62,6 +62,20 @@ export interface SourceProjection {
   format?: string;
   logicalPath?: string;
   reason?: string;
+  fileReferences?: SafeSourceFileReference[];
+  fileReferencesTruncated?: boolean;
+}
+
+export interface SafeSourceFileReference {
+  referenceId: string;
+  logicalPath: string;
+  available?: boolean;
+}
+
+export interface ResourceSourceReference {
+  type: ResourceIdentity['type'];
+  resourceId: string;
+  referenceId: string;
 }
 
 export interface EnvironmentProfile {
@@ -225,6 +239,7 @@ export interface ExplorerApi {
   listResources(packageId: string, query: ResourceQuery, signal?: AbortSignal): Promise<ResourcePage>;
   getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail>;
   getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection>;
+  getResourceSourceFile?(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal): Promise<SourceProjection>;
   getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse>;
   getEffectiveConfiguration(packageId: string, query: EffectiveConfigurationQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
   compareConfiguration(packageId: string, query: ConfigurationComparisonQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
@@ -251,5 +266,5 @@ export interface ExplorerPageProps {
   onPrincipalLabelChange?: (label: string) => void;
   onOpenQuickLoad?: (identity: ResourceIdentity) => void;
   onOpenConfiguration?: (identity: ResourceIdentity) => void;
-  onOpenConfigurationFile?: (path: string, origin?: string) => void;
+  onOpenConfigurationFile?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
 }

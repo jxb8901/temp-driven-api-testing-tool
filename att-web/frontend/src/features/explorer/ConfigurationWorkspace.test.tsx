@@ -6,11 +6,11 @@ import { ConfigurationWorkspace } from './ConfigurationWorkspace';
 import type { ExplorerApi } from './types';
 
 vi.mock('../code/CodeEditor', () => ({
-  CodeEditor: ({ value, label, sourcePath, onFileReference }: {
-    value: string; label: string; sourcePath?: string; onFileReference?: (path: string, origin?: string) => void;
+  CodeEditor: ({ value, label, fileReferences }: {
+    value: string; label: string; fileReferences?: Array<{ referenceId: string; logicalPath: string }>;
   }) => <>
     <pre aria-label={label}>{value}</pre>
-    {sourcePath && onFileReference && <button type="button" onClick={() => onFileReference('./refs/child.json', sourcePath)}>Open linked file</button>}
+    {value.includes('&{') && fileReferences?.length === 0 && <p role="status">Package file reference is unavailable from this safe source projection.</p>}
   </>,
   detectCodeLanguage: () => 'yaml',
 }));
@@ -31,17 +31,17 @@ async function flush() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
-function Harness({ api }: { api: ExplorerApi }) {
-  const [filePath, setFilePath] = useState<string>();
-  const [fileOrigin, setFileOrigin] = useState<string>();
+function Harness({ api, sourceReference }: { api: ExplorerApi; sourceReference?: { type: 'flow'; resourceId: string; referenceId: string } }) {
+  const [filePath, setFilePath] = useState<string | undefined>(sourceReference ? 'templates/payment/payload/request.xml' : undefined);
+  const [fileOrigin, setFileOrigin] = useState<string | undefined>(sourceReference ? 'templates/payment/flow.yaml' : undefined);
   const [tab, setTab] = useState<'source' | 'declared' | 'effective' | 'compare' | 'testdata'>('source');
   return <ConfigurationWorkspace api={api} packages={[{ packageId: 'payments' }]} packageId="payments" environment=""
-    filePath={filePath} fileOrigin={fileOrigin} tab={tab} onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()}
+    filePath={filePath} fileOrigin={fileOrigin} sourceReference={sourceReference} tab={tab} onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()}
     onFileChange={(path, origin) => { setFilePath(path); setFileOrigin(origin); }} onTabChange={setTab} onOpenResource={vi.fn()} />;
 }
 
 describe('ConfigurationWorkspace', () => {
-  it('opens safe source from the file tree and preserves descriptor origin for linked files', async () => {
+  it('opens safe source from the file tree and marks unprojected package references unavailable', async () => {
     const api = {
       listResources: vi.fn(async () => ({ items: [], total: 0 })),
       getResource: vi.fn(async () => ({ resource: { type: 'template', resourceId: 'x' } })),
@@ -58,7 +58,7 @@ describe('ConfigurationWorkspace', () => {
       getConfigurationFileSource: vi.fn(async (_packageId: string, path: string) => ({
         available: true, format: path.endsWith('.json') ? 'json' : 'yaml',
         logicalPath: path.startsWith('./') ? 'config/refs/child.json' : path,
-        text: path.startsWith('./') ? '{"ok":true}' : 'name: base',
+        text: path.startsWith('./') ? '{"ok":true}' : 'name: base\npayload: &{./refs/child.json}',
       })),
       getTestdataRecords: vi.fn(async () => ({ descriptorId: 'x', offset: 0, limit: 50, total: 0, records: [] })),
       getDebugForm: vi.fn(), previewDebug: vi.fn(), submitDebug: vi.fn(), runCase: vi.fn(),
@@ -69,12 +69,36 @@ describe('ConfigurationWorkspace', () => {
     await act(async () => host.querySelector<HTMLButtonElement>('[role="tree"] button[role="treeitem"]')?.click());
     await flush();
     expect(api.getConfigurationFileSource).toHaveBeenCalledWith('payments', 'config/main.yaml', undefined, expect.any(AbortSignal));
-    expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('name: base');
+    expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('name: base\npayload: &{./refs/child.json}');
 
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open linked file')?.click());
+    expect(host.textContent).toContain('Package file reference is unavailable from this safe source projection.');
+    expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Open linked file')).toBe(false);
+    expect(api.getConfigurationFileSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a projected template payload by its resource reference id', async () => {
+    const referenceId = 'b'.repeat(64);
+    const getResourceSourceFile = vi.fn(async () => ({ available: true, logicalPath: 'templates/payment/payload/request.xml', format: 'xml', text: '<request />' }));
+    const api = {
+      listResources: vi.fn(async () => ({ items: [], total: 0 })),
+      getResource: vi.fn(async () => ({ resource: { type: 'flow', resourceId: 'checkout-flow' } })),
+      getSafeSource: vi.fn(async () => ({ available: false })),
+      getResourceSourceFile,
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getEffectiveConfiguration: vi.fn(async () => ({ sections: [] })),
+      compareConfiguration: vi.fn(async () => ({ fields: [] })),
+      listConfigurationFiles: vi.fn(async () => ({ items: [], total: 0 })),
+      getConfigurationFileSource: vi.fn(async () => ({ available: false })),
+      getTestdataRecords: vi.fn(async () => ({ descriptorId: 'x', offset: 0, limit: 50, total: 0, records: [] })),
+      getDebugForm: vi.fn(), previewDebug: vi.fn(), submitDebug: vi.fn(), runCase: vi.fn(),
+    } as unknown as ExplorerApi;
+
+    await act(async () => root.render(<Harness api={api} sourceReference={{ type: 'flow', resourceId: 'checkout-flow', referenceId }} />));
     await flush();
-    expect(api.getConfigurationFileSource).toHaveBeenLastCalledWith('payments', './refs/child.json', 'config/main.yaml', expect.any(AbortSignal));
-    expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('{"ok":true}');
+
+    expect(getResourceSourceFile).toHaveBeenCalledWith({ packageId: 'payments', type: 'flow', resourceId: 'checkout-flow' }, referenceId, expect.any(AbortSignal));
+    expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('<request />');
+    expect(api.getConfigurationFileSource).not.toHaveBeenCalled();
   });
 
   it('keeps safe descriptor metadata visible when a Server does not expose the records endpoint', async () => {

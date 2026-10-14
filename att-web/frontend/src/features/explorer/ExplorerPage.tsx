@@ -313,7 +313,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
               tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)}>{name === 'definition' ? 'Definition' : name === 'source' ? 'Source' : 'Dependencies'}</button>)}
           </div>
           <section id="att-explorer-panel-definition" role="tabpanel" aria-labelledby="att-explorer-tab-definition" hidden={tab !== 'definition'}>
-            {definition == null && !detailLoading ? <p>No definition projection is available.</p> : <CodeEditor value={detailText} language="json" label="Safe resource definition" readOnly sourcePath={detail?.sourcePath} onFileReference={(path, origin) => onOpenConfigurationFile?.(path, origin)} />}
+            {definition == null && !detailLoading ? <p>No definition projection is available.</p> : <CodeEditor value={detailText} language="json" label="Safe resource definition" readOnly sourcePath={detail?.sourcePath} fileReferences={[]} />}
           </section>
           {sourceIdentity && <section id="att-explorer-panel-source" role="tabpanel" aria-labelledby="att-explorer-tab-source" hidden={tab !== 'source'}>
             <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active={tab === 'source'} onFileReference={onOpenConfigurationFile} />

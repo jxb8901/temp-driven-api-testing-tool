@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ExplorerApi, ResourceIdentity, SourceProjection } from './types';
+import type { ExplorerApi, ResourceIdentity, ResourceSourceReference, SourceProjection } from './types';
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
 
 const MAX_SOURCE_CHARACTERS = 200_000;
@@ -10,7 +10,7 @@ interface SourceViewerProps {
   identity: ResourceIdentity;
   available: boolean;
   active: boolean;
-  onFileReference?: (path: string, origin?: string) => void;
+  onFileReference?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
 }
 
 function friendlyError(error: unknown): string {
@@ -67,7 +67,14 @@ export function SourceViewer({ api, identity, available, active, onFileReference
       language={detectCodeLanguage(projection.logicalPath || identity.resourceId || projection.format || '')}
       label="Safe source; line numbers shown"
       readOnly
-      onFileReference={onFileReference}
+      fileReferences={projection.fileReferences || []}
+      onFileReference={(_path, origin, referenceId) => {
+        const reference = projection.fileReferences?.find(item => item.referenceId === referenceId && item.available !== false);
+        if (!reference) return;
+        onFileReference?.(reference.logicalPath, projection.logicalPath || origin, {
+          type: identity.type, resourceId: identity.resourceId, referenceId: reference.referenceId,
+        });
+      }}
       sourcePath={projection.logicalPath}
       maxCharacters={MAX_SOURCE_CHARACTERS}
     />}

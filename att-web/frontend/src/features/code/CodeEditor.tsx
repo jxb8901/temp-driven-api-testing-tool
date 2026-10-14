@@ -11,8 +11,9 @@ export interface CodeEditorProps {
   label: string;
   readOnly?: boolean;
   onChange?: (value: string) => void;
-  onFileReference?: (path: string, origin?: string) => void;
+  onFileReference?: (path: string, origin?: string, referenceId?: string) => void;
   sourcePath?: string;
+  fileReferences?: Array<{ referenceId: string; logicalPath: string }>;
   suggestions?: string[];
   maxCharacters?: number;
   className?: string;
@@ -31,7 +32,7 @@ async function formatted(value: string, language: CodeLanguage): Promise<string 
   return null;
 }
 
-export function CodeEditor({ value, language, label, readOnly = true, onChange, onFileReference, sourcePath, suggestions = [], maxCharacters = 200_000, className = '' }: CodeEditorProps) {
+export function CodeEditor({ value, language, label, readOnly = true, onChange, onFileReference, sourcePath, fileReferences, suggestions = [], maxCharacters = 200_000, className = '' }: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -46,7 +47,8 @@ export function CodeEditor({ value, language, label, readOnly = true, onChange, 
   const bounded = value.length > maxCharacters ? value.slice(0, maxCharacters) : value;
   latestValue.current = bounded;
   const suggestionsKey = suggestions.join('\u0000');
-  const editorKey = JSON.stringify([language, readOnly, sourcePath, suggestionsKey]);
+  const fileReferencesKey = JSON.stringify(fileReferences);
+  const editorKey = JSON.stringify([language, readOnly, sourcePath, suggestionsKey, fileReferencesKey]);
   useEffect(() => { onChangeRef.current = onChange; onFileRef.current = onFileReference; }, [onChange, onFileReference]);
 
   useEffect(() => {
@@ -60,8 +62,9 @@ export function CodeEditor({ value, language, label, readOnly = true, onChange, 
       return runtime.createEditor(editorHost, {
       value: latestValue.current, language, readOnly,
       onChange: next => { latestValue.current = next; if (!syncingValue.current) onChangeRef.current?.(next); },
-      onFileReference: (path, origin) => onFileRef.current?.(path, origin),
+      onFileReference: (path, origin, referenceId) => onFileRef.current?.(path, origin, referenceId),
       sourcePath,
+      fileReferences,
       suggestions,
     });
     }).then(instance => {
@@ -77,7 +80,7 @@ export function CodeEditor({ value, language, label, readOnly = true, onChange, 
       setReadyKey(editorKey);
     }).catch(() => { if (!cancelled) { setError('The code viewer could not be loaded.'); setStatus('Code viewer unavailable.'); } });
     return () => { cancelled = true; created?.destroy(); if (view.current === created) view.current = null; };
-  }, [language, readOnly, sourcePath, suggestionsKey, editorKey]);
+  }, [language, readOnly, sourcePath, suggestionsKey, fileReferencesKey, editorKey]);
 
   useEffect(() => {
     const current = view.current;

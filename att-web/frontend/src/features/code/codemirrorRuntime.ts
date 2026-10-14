@@ -12,12 +12,13 @@ export interface EditorOptions {
   language: CodeLanguage;
   readOnly: boolean;
   onChange(value: string): void;
-  onFileReference?(path: string, origin?: string): void;
+  onFileReference?(path: string, origin?: string, referenceId?: string): void;
   sourcePath?: string;
+  fileReferences?: Array<{ referenceId: string; logicalPath: string }>;
   suggestions?: string[];
 }
 
-interface AttToken { from: number; to: number; kind: 'context' | 'expression' | 'testdata' | 'file'; path?: string; safe: boolean }
+interface AttToken { from: number; to: number; kind: 'context' | 'expression' | 'testdata' | 'file'; path?: string; referenceId?: string; safe: boolean; available: boolean }
 function safeFileLocator(path: string, sourcePath?: string): boolean {
   if (!path || path.startsWith('/') || path.includes('\\') || path.includes('\0') || /[\u0000-\u001f\u007f]/.test(path) || /^[a-z][a-z\d+.-]*:/i.test(path)) return false;
   const segments = path.split('/');
@@ -32,7 +33,19 @@ function safeFileLocator(path: string, sourcePath?: string): boolean {
   }
   return resolved.length > 0;
 }
-function attTokens(text: string, sourcePath?: string): AttToken[] {
+function logicalFilePath(path: string, sourcePath?: string): string | undefined {
+  if (!safeFileLocator(path, sourcePath)) return undefined;
+  const resolved = path.startsWith('./') || path.startsWith('../')
+    ? (sourcePath ? sourcePath.split('/').slice(0, -1) : [])
+    : [];
+  for (const segment of path.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') resolved.pop();
+    else resolved.push(segment);
+  }
+  return resolved.join('/');
+}
+function attTokens(text: string, sourcePath?: string, fileReferences?: EditorOptions['fileReferences']): AttToken[] {
   const tokens: AttToken[] = [];
   for (let index = 0; index < text.length - 2; index++) {
     const prefix = text[index];
@@ -51,14 +64,17 @@ function attTokens(text: string, sourcePath?: string): AttToken[] {
     if (end >= text.length) continue;
     const kind = prefix === '$' ? 'context' : prefix === '#' ? 'expression' : prefix === '@' ? 'testdata' : 'file';
     const body = text.slice(index + 2, end);
-    const safe = kind !== 'file' || safeFileLocator(body, sourcePath);
-    tokens.push({ from: index, to: end + 1, kind, path: kind === 'file' && safe ? body : undefined, safe });
+    const resolvedPath = kind === 'file' ? logicalFilePath(body, sourcePath) : undefined;
+    const reference = resolvedPath ? fileReferences?.find(item => item.logicalPath === resolvedPath) : undefined;
+    const safe = kind !== 'file' || resolvedPath !== undefined;
+    tokens.push({ from: index, to: end + 1, kind, path: kind === 'file' && safe ? body : undefined,
+      referenceId: reference?.referenceId, safe, available: kind !== 'file' || fileReferences === undefined || reference !== undefined });
     index = end;
   }
   return tokens;
 }
 
-function expressionDecorations(sourcePath?: string) { return ViewPlugin.fromClass(class {
+function expressionDecorations(sourcePath?: string, fileReferences?: EditorOptions['fileReferences']) { return ViewPlugin.fromClass(class {
   decorations: DecorationSet;
   constructor(view: EditorView) { this.decorations = this.build(view); }
   update(update: { docChanged: boolean; viewportChanged: boolean; view: EditorView }) {
@@ -68,19 +84,23 @@ function expressionDecorations(sourcePath?: string) { return ViewPlugin.fromClas
     const decorations = [];
     for (const range of view.visibleRanges) {
       const text = view.state.doc.sliceString(range.from, range.to);
-      for (const token of attTokens(text, sourcePath)) {
+      for (const token of attTokens(text, sourcePath, fileReferences)) {
         const attributes: Record<string, string> = {};
         let className = `att-expression att-expression--${token.kind}`;
         if (token.kind === 'file') {
-          if (token.safe && token.path) {
+          if (token.safe && token.path && token.available && token.referenceId) {
             className += ' att-expression--link';
             attributes['data-att-file'] = token.path;
+            attributes['data-att-reference'] = token.referenceId;
             attributes.role = 'link';
             attributes.tabindex = '0';
             attributes['aria-label'] = `Open package file ${token.path}`;
-          } else {
+          } else if (!token.safe) {
             className += ' att-expression--unsafe-file';
             attributes['aria-label'] = 'Unsafe package file reference';
+          } else if (!token.available) {
+            className += ' att-expression--unavailable-file';
+            attributes['aria-label'] = 'Package file reference is unavailable from this safe source projection';
           }
         }
         decorations.push(Decoration.mark({ class: className, attributes }).range(range.from + token.from, range.from + token.to));
@@ -121,20 +141,26 @@ export async function createEditor(host: HTMLElement, options: EditorOptions): P
   const extensions: Extension[] = [
     lineNumbers(), foldGutter(), highlightActiveLineGutter(), highlightActiveLine(), drawSelection(),
     history(), indentOnInput(), bracketMatching(), syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-    expressionDecorations(options.sourcePath),
+    expressionDecorations(options.sourcePath, options.fileReferences),
     EditorView.updateListener.of(update => { if (update.docChanged && !options.readOnly) options.onChange(update.state.doc.toString()); }),
     EditorView.domEventHandlers({
       click(event) {
         const target = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-att-file]') : null;
         const path = target?.dataset.attFile;
-        if (path && safeFileLocator(path, options.sourcePath)) { options.onFileReference?.(path, options.sourcePath); return true; }
+        const referenceId = target?.dataset.attReference;
+        const reference = options.fileReferences?.find(item => item.referenceId === referenceId
+          && item.logicalPath === logicalFilePath(path || '', options.sourcePath));
+        if (path && reference && safeFileLocator(path, options.sourcePath)) { options.onFileReference?.(path, options.sourcePath, reference.referenceId); return true; }
         return false;
       },
       keydown(event) {
         const target = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-att-file]') : null;
         const path = target?.dataset.attFile;
-        if (path && safeFileLocator(path, options.sourcePath) && (event.key === 'Enter' || event.key === ' ')) {
-          event.preventDefault(); options.onFileReference?.(path, options.sourcePath); return true;
+        const referenceId = target?.dataset.attReference;
+        const reference = options.fileReferences?.find(item => item.referenceId === referenceId
+          && item.logicalPath === logicalFilePath(path || '', options.sourcePath));
+        if (path && reference && safeFileLocator(path, options.sourcePath) && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault(); options.onFileReference?.(path, options.sourcePath, reference.referenceId); return true;
         }
         return false;
       },

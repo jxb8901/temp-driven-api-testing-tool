@@ -6,12 +6,13 @@ export interface ResourceRoute {
 }
 
 export type ConfigurationTab = 'source' | 'declared' | 'effective' | 'compare' | 'testdata';
+export interface ResourceSourceReferenceRoute { type: 'case' | 'template' | 'flow' | 'tool'; resourceId: string; referenceId: string }
 
 export type AppRoute =
   | { kind: 'dashboard' }
   | { kind: 'packages' }
   | { kind: 'package'; packageId: string; resource?: ResourceRoute }
-  | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; tab?: ConfigurationTab }
+  | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; tab?: ConfigurationTab }
   | { kind: 'quick-load'; packageId: string; target: ResourceRoute; environment?: string }
   | { kind: 'jobs'; jobId?: string }
   | { kind: 'load'; packageId?: string }
@@ -41,12 +42,20 @@ export function parseRoute(hash: string): AppRoute {
   if (parts[0] === 'configuration') {
     const rawTab = query.get('tab');
     const tab: ConfigurationTab | undefined = rawTab === 'source' || rawTab === 'declared' || rawTab === 'effective' || rawTab === 'compare' || rawTab === 'testdata' ? rawTab : undefined;
+    const sourceType = query.get('sourceType');
+    const sourceResourceId = query.get('sourceResourceId');
+    const sourceReferenceId = query.get('sourceReferenceId');
+    const sourceReference = sourceType && ['case', 'template', 'flow', 'tool'].includes(sourceType)
+      && sourceResourceId && sourceResourceId.length <= 512
+      && sourceReferenceId && /^[0-9a-f]{64}$/.test(sourceReferenceId)
+      ? { type: sourceType as ResourceSourceReferenceRoute['type'], resourceId: sourceResourceId, referenceId: sourceReferenceId } : undefined;
     return {
       kind: 'configuration',
       packageId: parts[1] || undefined,
       environment: query.has('environment') ? query.get('environment') || '' : undefined,
       filePath: query.get('file') || undefined,
       ...(query.get('origin') ? { fileOrigin: query.get('origin')! } : {}),
+      ...(sourceReference ? { sourceReference } : {}),
       tab,
     };
   }
@@ -78,6 +87,11 @@ export function formatRoute(route: AppRoute): string {
       if (route.environment !== undefined) query.set('environment', route.environment);
       if (route.filePath) query.set('file', route.filePath);
       if (route.fileOrigin) query.set('origin', route.fileOrigin);
+      if (route.sourceReference) {
+        query.set('sourceType', route.sourceReference.type);
+        query.set('sourceResourceId', route.sourceReference.resourceId);
+        query.set('sourceReferenceId', route.sourceReference.referenceId);
+      }
       if (route.tab) query.set('tab', route.tab);
       const suffix = query.toString();
       return '#/configuration' + (route.packageId ? '/' + encodeURIComponent(route.packageId) : '') + (suffix ? '?' + suffix : '');

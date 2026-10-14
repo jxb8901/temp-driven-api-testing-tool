@@ -20,4 +20,15 @@ describe('ATT hash route contract', () => {
     expect(parseRoute(formatRoute({ kind: 'schedules' }))).toEqual({ kind: 'schedules' });
     expect(parseRoute(formatRoute({ kind: 'settings' }))).toEqual({ kind: 'settings' });
   });
+
+  it('round-trips safe resource-source references and rejects malformed reference tokens', () => {
+    const route = {
+      kind: 'configuration', packageId: 'payments', filePath: 'templates/payment/payload/request.xml',
+      fileOrigin: 'templates/payment/flow.yaml', tab: 'source',
+      sourceReference: { type: 'flow', resourceId: 'flow.checkout', referenceId: 'a'.repeat(64) },
+    } as const;
+    expect(parseRoute(formatRoute(route))).toEqual(route);
+    expect(parseRoute('#/configuration/payments?tab=source&sourceType=flow&sourceResourceId=flow.checkout&sourceReferenceId=bad'))
+      .not.toHaveProperty('sourceReference');
+  });
 });
