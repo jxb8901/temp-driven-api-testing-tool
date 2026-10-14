@@ -72,15 +72,21 @@ class AuthenticationIntegrationTest {
             assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,"http://attacker.example",csrf,"{}").statusCode(),"Cookie-authenticated state changes also enforce same-origin when an Origin is supplied");
             assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,origin,null,"{}").statusCode());
             assertEquals(201,sendWithCookie(client,port,"POST","/att/api/v1/auth/users",ownerCookie,origin,csrf,"{\"loginId\":\"viewer\",\"displayName\":\"Read Only\",\"password\":\"viewer secure password\",\"role\":\"USER\"}").statusCode());
+            HttpResponse<String> viewerLogin=send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"viewer\",\"password\":\"viewer secure password\"}");assertEquals(200,viewerLogin.statusCode());String viewerCookie=viewerLogin.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
+            assertEquals(200,sendWithCookie(client,port,"POST","/att/api/v1/auth/users/viewer/password",ownerCookie,origin,csrf,"{\"password\":\"viewer reset secure password\"}").statusCode());
+            assertEquals(401,sendWithCookie(client,port,"GET","/att/api/v1/auth/me",viewerCookie,null,null,null).statusCode(),"Admin password reset must revoke existing sessions");
+            assertEquals(401,send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"viewer\",\"password\":\"viewer secure password\"}").statusCode());
+            viewerLogin=send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"viewer\",\"password\":\"viewer reset secure password\"}");assertEquals(200,viewerLogin.statusCode());viewerCookie=viewerLogin.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
             HttpResponse<String> submitted=sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",ownerCookie,origin,csrf,"{\"packageId\":\"p\",\"all\":true}");assertEquals(202,submitted.statusCode(),submitted.body());
             String ownedJobId=ServerRuntime.JSON.readTree(submitted.body()).path("jobId").asText();assertTrue(ownedJobId.matches("J[0-9A-F]{16}"));
             assertEquals(200,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,origin,csrf,"{}").statusCode());
             assertEquals(401,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
-            HttpResponse<String> viewerLogin=send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"viewer\",\"password\":\"viewer secure password\"}");assertEquals(200,viewerLogin.statusCode());String viewerCookie=viewerLogin.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/auth/users",viewerCookie,null,null,null).statusCode());
             assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/packages",viewerCookie,null,null,null).statusCode());
             assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,viewerCookie,null,null,null).statusCode(),"Known IDs must not expose another local user's job");
             assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId+"/events",viewerCookie,null,null,null).statusCode(),"SSE must use the same local identity ownership check");
+            assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId+"/artifacts",viewerCookie,null,null,null).statusCode(),"Artifact listings must enforce the same local identity ownership check");
+            assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId+"/artifacts/result.json",viewerCookie,null,null,null).statusCode(),"Artifact downloads must enforce the same local identity ownership check");
         } finally {try{tomcat.stop();}finally{tomcat.destroy();if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);}}
     }
 
