@@ -39,6 +39,13 @@ public final class PackageConfigurationInspector {
     private static final long MAX_TOTAL_DESCRIPTOR_BYTES = 16L * 1024L * 1024L;
     private static final Pattern ENVIRONMENT = Pattern.compile("[A-Za-z][A-Za-z0-9_-]{0,31}");
     private static final Pattern JAVA_CLASS = Pattern.compile("[A-Za-z_$][A-Za-z0-9_$.]{0,255}");
+    private static final Pattern KEY_VALUE_SECRET = Pattern.compile(
+            "(?i)([\"']?(?:password|passwd|passphrase|token|secret|authorization|credential|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|refresh[_-]?token)[\"']?\\s*(?::|=|\\bis\\b)\\s*[\"']?)([^\\s,'\";}<>]+)");
+    private static final Pattern AUTH_SCHEME = Pattern.compile("(?i)\\b(Bearer|Basic)\\s+[A-Za-z0-9+/=_-]+");
+    private static final Pattern URL_CREDENTIALS = Pattern.compile("(?i)(\\b(?:jdbc:)?[a-z][a-z0-9+.-]*://)[^/@\\s:]+:[^/@\\s]+@");
+    private static final Pattern XML_SECRET = Pattern.compile(
+            "(?is)(<(password|passwd|passphrase|token|secret|authorization|credential|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)(?:\\s+[^>]*)?>)[^<]*(</\\2\\s*>)");
+    private static final Pattern PRIVATE_KEY = Pattern.compile("(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----");
     private static final List<String> RESOURCE_LISTS = Arrays.asList(
             "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata");
     private static final List<String> ALL_SECTIONS = Arrays.asList(
@@ -48,13 +55,24 @@ public final class PackageConfigurationInspector {
     private final Path configPath;
     private final PackageResourceResolver resources;
     private final int maxResponseBytes;
+    private final boolean redactionEnabled;
+    private final List<String> sensitivePaths, sensitiveFieldPatterns;
 
     public PackageConfigurationInspector(Path packageRoot, Path configPath, int maxResponseBytes) {
+        this(packageRoot, configPath, maxResponseBytes, true, Collections.<String>emptyList(), Collections.<String>emptyList());
+    }
+
+    public PackageConfigurationInspector(Path packageRoot, Path configPath, int maxResponseBytes,
+                                         boolean redactionEnabled, List<String> sensitivePaths,
+                                         List<String> sensitiveFieldPatterns) {
         this.resources = new PackageResourceResolver(packageRoot);
         this.packageRoot = resources.packageRoot();
         this.configPath = configPath == null ? Paths.get("config/config.yaml") : configPath;
         if (maxResponseBytes < 1024) throw new IllegalArgumentException("maxResponseBytes must be at least 1024");
         this.maxResponseBytes = maxResponseBytes;
+        this.redactionEnabled = redactionEnabled;
+        this.sensitivePaths = sensitivePaths == null ? Collections.<String>emptyList() : new ArrayList<String>(sensitivePaths);
+        this.sensitiveFieldPatterns = sensitiveFieldPatterns == null ? Collections.<String>emptyList() : new ArrayList<String>(sensitiveFieldPatterns);
     }
 
     public Map<String, Object> inspect(String action, String environment, String otherEnvironment) throws Exception {
@@ -67,8 +85,106 @@ public final class PackageConfigurationInspector {
         if (limit < 0 || limit > 100) throw new IllegalArgumentException("limit must be between 1 and 100");
         if ("declared".equals(action)) return bounded(declared());
         if ("effective".equals(action)) return bounded(effective(environment, section, offset, limit));
-        if ("compare".equals(action)) return bounded(compare(environment, otherEnvironment, offset, limit));
+        if ("compare".equals(action)) return bounded(compare(environment, otherEnvironment, section, offset, limit));
+        if ("testdata-records".equals(action)) return bounded(testdataRecords(environment, section, offset, limit));
         throw new IllegalArgumentException("Unsupported configuration inspection action");
+    }
+
+    private Map<String,Object> testdataRecords(String environment, String descriptorId, int offset, int limit) throws Exception {
+        if (descriptorId == null || !descriptorId.matches("[A-Za-z][A-Za-z0-9_-]*"))
+            throw new PackageResourceInspector.ResourceNotFoundException();
+        if (limit < 1 || limit > 100) throw new IllegalArgumentException("limit must be between 1 and 100");
+        String safeEnvironment = normalizedEnvironment(environment);
+        Map<?,?> raw = readConfig();
+        validateReferencedFiles(raw, safeEnvironment);
+        FrameworkConfig config = new FrameworkConfigLoader().load(configFile(), packageRoot, safeEnvironment);
+        TestdataDescriptor selected = null;
+        for (Path path : config.testdataDescriptors()) {
+            PackageResourceResolver.PackageResource resolved = resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE);
+            if (Files.size(resolved.canonicalPath()) > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException();
+            TestdataDescriptor candidate = new TestdataDescriptorLoader(packageRoot).load(resolved.canonicalPath());
+            if (descriptorId.equals(candidate.id())) selected = candidate;
+        }
+        if (selected == null) throw new PackageResourceInspector.ResourceNotFoundException();
+        if (offset > selected.count()) throw new IllegalArgumentException("offset exceeds the current Testdata descriptor");
+        int start = offset;
+        int end = (int)Math.min(selected.count(), (long)start + limit);
+        List<Map<String,Object>> records = new ArrayList<Map<String,Object>>();
+        for (int index = start; index < end; index++) {
+            Object authored = selected.record(index);
+            boolean[] redacted = new boolean[]{false};
+            Object safe = projectTestdataValue(authored, "testdata." + descriptorId + ".records[" + index + "]", null, redacted);
+            Map<String,Object> record = new LinkedHashMap<String,Object>();
+            record.put("index", Integer.valueOf(index));
+            Long sequence = selected.sequence(index);
+            if (sequence != null) record.put("sequence", sequence);
+            record.put("value", safe);
+            record.put("redacted", Boolean.valueOf(redacted[0]));
+            records.add(record);
+        }
+        Map<String,Object> result = base("testdata-records", "ready", att.Version.TESTDATA_SCHEMA);
+        result.put("descriptorId", selected.id());
+        result.put("environment", config.environment());
+        result.put("offset", Integer.valueOf(start));
+        result.put("limit", Integer.valueOf(limit));
+        result.put("total", Long.valueOf(selected.count()));
+        result.put("nextOffset", end < selected.count() ? Integer.valueOf(end) : null);
+        result.put("records", records);
+        result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
+        result.put("diagnostics", Collections.emptyList());
+        return result;
+    }
+
+    private Object projectTestdataValue(Object value, String path, String key, boolean[] redacted) {
+        if (key != null && (alwaysHiddenField(key) || configuredSensitivePath(path)
+                || configuredSensitiveField(key) || redactionEnabled && freeFormValueField(key))) {
+            redacted[0] = true;
+            return "[REDACTED]";
+        }
+        if (value instanceof Map) {
+            Map<String,Object> result = new LinkedHashMap<String,Object>();
+            for (Map.Entry<?,?> entry : ((Map<?,?>)value).entrySet()) {
+                String childKey = String.valueOf(entry.getKey());
+                String childPath = path + "." + childKey;
+                result.put(childKey, projectTestdataValue(entry.getValue(), childPath, childKey, redacted));
+            }
+            return result;
+        }
+        if (value instanceof Iterable) {
+            List<Object> result = new ArrayList<Object>(); int index = 0;
+            for (Object item : (Iterable<?>)value)
+                result.add(projectTestdataValue(item, path + "[" + index++ + "]", null, redacted));
+            return result;
+        }
+        if (value instanceof String) {
+            String authored = (String)value;
+            String safe = scrubTestdataText(authored);
+            if (!authored.equals(safe)) redacted[0] = true;
+            return safe;
+        }
+        return value;
+    }
+
+    private static boolean alwaysHiddenField(String name) {
+        String normalized = name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        return normalized.matches(".*(password|passwd|passphrase|secret|token|authorization|credential|apikey|accesskey|privatekey|clientsecret|cookie|username|email|phone|address|ssn|nationalid|passport|dateofbirth|birthdate|creditcard|cardnumber|cvv|iban|routingnumber).*" )
+                || normalized.equals("headers");
+    }
+
+    private static boolean freeFormValueField(String name) {
+        String normalized = name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        return normalized.equals("payload") || normalized.equals("value") || normalized.equals("body")
+                || normalized.equals("message") || normalized.equals("description");
+    }
+
+    private String scrubTestdataText(String value) {
+        String result = value.replace(packageRoot.toString(), "[package]");
+        result = AUTH_SCHEME.matcher(result).replaceAll("$1 [REDACTED]");
+        result = KEY_VALUE_SECRET.matcher(result).replaceAll("$1[REDACTED]");
+        result = URL_CREDENTIALS.matcher(result).replaceAll("$1[REDACTED]@");
+        result = XML_SECRET.matcher(result).replaceAll("$1[REDACTED]$3");
+        result = PRIVATE_KEY.matcher(result).replaceAll("[REDACTED PRIVATE KEY]");
+        return att.core.PathPresentation.displayDiagnosticText(result, packageRoot);
     }
 
     private Map<String, Object> declared() {
@@ -80,6 +196,7 @@ public final class PackageConfigurationInspector {
             result.put("environments", profiles);
             result.put("sections", declaredSections(raw, profiles));
             result.put("diagnostics", Collections.emptyList());
+            result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
             return result;
         } catch (ConfigurationLimitException exceeded) {
             throw exceeded;
@@ -98,11 +215,15 @@ public final class PackageConfigurationInspector {
         } catch (ConfigurationLimitException exceeded) {
             throw exceeded;
         } catch (Exception invalid) {
-            return invalid("effective", safeEnvironment, "ATT-CONFIG-INVALID", "Selected configuration is unavailable or invalid");
+            Map<String, Object> result = invalid("effective", safeEnvironment, "ATT-CONFIG-INVALID", "Selected configuration is unavailable or invalid");
+            result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
+            return result;
         }
     }
 
-    private Map<String, Object> compare(String leftEnvironment, String rightEnvironment, int offset, int limit) {
+    private Map<String, Object> compare(String leftEnvironment, String rightEnvironment, String selectedSection, int offset, int limit) {
+        if (selectedSection == null || selectedSection.trim().isEmpty())
+            throw new IllegalArgumentException("section is required for configuration comparison");
         String leftName = normalizedEnvironment(leftEnvironment);
         String rightName = normalizedEnvironment(rightEnvironment);
         if (leftName == null || rightName == null) throw new IllegalArgumentException("left and right environments must be valid profile names");
@@ -112,6 +233,8 @@ public final class PackageConfigurationInspector {
         Map<String, Object> result = base("compare", "ready", text(left.get("schemaVersion"), 64));
         result.put("leftEnvironment", leftName);
         result.put("rightEnvironment", rightName);
+        result.put("section", selectedSection);
+        result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
         List<Map<String, Object>> diagnostics = new ArrayList<Map<String, Object>>();
         if (!"ready".equals(left.get("state"))) diagnostics.addAll(diagnostics(left));
         if (!"ready".equals(right.get("state"))) diagnostics.addAll(diagnostics(right));
@@ -121,16 +244,23 @@ public final class PackageConfigurationInspector {
             result.put("fields", Collections.emptyList());
             return result;
         }
+        if (!sectionExists(left, selectedSection) && !sectionExists(right, selectedSection))
+            throw new IllegalArgumentException("Unknown configuration section");
         @SuppressWarnings("unchecked") Map<String, Map<String, Object>> leftFields = flatten(left);
         @SuppressWarnings("unchecked") Map<String, Map<String, Object>> rightFields = flatten(right);
         Set<String> paths = new LinkedHashSet<String>();
         paths.addAll(leftFields.keySet());
         paths.addAll(rightFields.keySet());
+        String sectionPrefix = "globals".equals(selectedSection) ? "globals." : selectedSection + ".";
+        paths.removeIf(path -> !path.startsWith(sectionPrefix));
         List<Map<String, Object>> fields = new ArrayList<Map<String, Object>>();
         for (String path : paths) {
             Map<String, Object> before = leftFields.get(path);
             Map<String, Object> after = rightFields.get(path);
-            boolean hidden = isSensitivePath(path)
+            boolean hidden = redactionEnabled && isSensitivePath(path)
+                    || alwaysHiddenField(path.substring(path.lastIndexOf('.') + 1))
+                    || configuredSensitivePath(path)
+                    || configuredSensitiveField(path.substring(path.lastIndexOf('.') + 1))
                     || before != null && "hidden".equals(before.get("state"))
                     || after != null && "hidden".equals(after.get("state"));
             Map<String, Object> item = new LinkedHashMap<String, Object>();
@@ -197,6 +327,10 @@ public final class PackageConfigurationInspector {
         sections.add(httpSection(config.httpHelpers(), httpOrigin));
         sections.add(toolSection(config.tools()));
         sections.add(testdataSection(config, origin(raw, environment, "testdata")));
+        result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
+        result.put("sections", sections);
+        result.put("diagnostics", Collections.emptyList());
+        hideSensitiveFields(result);
         if (limit > 0) {
             Map<String, Object> selected = null;
             int total = "globals".equals(selectedSection) ? globals.size() : 0;
@@ -221,9 +355,76 @@ public final class PackageConfigurationInspector {
             result.put("total", Integer.valueOf(total));
             result.put("nextOffset", selectedSection != null && offset + limit < total ? Integer.valueOf(offset + limit) : null);
         }
-        result.put("sections", sections);
-        result.put("diagnostics", Collections.emptyList());
         return result;
+    }
+
+    private static boolean sectionExists(Map<String, Object> snapshot, String requested) {
+        if ("globals".equals(requested)) return true;
+        Object raw = snapshot.get("sections");
+        if (!(raw instanceof Iterable)) return false;
+        for (Object item : (Iterable<?>) raw) if (requested.equals(object(item).get("id"))) return true;
+        return false;
+    }
+
+    private void hideSensitiveFields(Map<String, Object> snapshot) {
+        Object rawGlobals = snapshot.get("globals");
+        if (rawGlobals instanceof Map) for (Map.Entry<?, ?> field : ((Map<?, ?>) rawGlobals).entrySet())
+            hideField(field.getValue(), "globals." + field.getKey());
+        Object rawSections = snapshot.get("sections");
+        if (!(rawSections instanceof Iterable)) return;
+        for (Object rawSection : (Iterable<?>) rawSections) {
+            Map<?, ?> section = object(rawSection);
+            String sectionId = String.valueOf(section.get("id"));
+            Object rawEntries = section.get("entries");
+            if (!(rawEntries instanceof Iterable)) continue;
+            for (Object rawEntry : (Iterable<?>) rawEntries) {
+                Map<?, ?> entry = object(rawEntry);
+                String prefix = sectionId + "." + entry.get("id");
+                Object rawFields = entry.get("fields");
+                if (rawFields instanceof Map) for (Map.Entry<?, ?> field : ((Map<?, ?>) rawFields).entrySet())
+                    hideField(field.getValue(), prefix + "." + field.getKey());
+                Object rawArguments = entry.get("arguments");
+                if (rawArguments instanceof Iterable) for (Object rawArgument : (Iterable<?>) rawArguments) {
+                    Map<?, ?> argument = object(rawArgument);
+                    Object argumentFields = argument.get("fields");
+                    if (argumentFields instanceof Map) for (Map.Entry<?, ?> field : ((Map<?, ?>) argumentFields).entrySet())
+                        hideField(field.getValue(), prefix + ".arguments." + argument.get("id") + "." + field.getKey());
+                }
+            }
+        }
+    }
+
+    private void hideField(Object rawField, String path) {
+        if (!(rawField instanceof Map)) return;
+        @SuppressWarnings("unchecked") Map<String, Object> field = (Map<String, Object>) rawField;
+        if ("visible".equals(field.get("state")) && (redactionEnabled && isSensitivePath(path)
+                || alwaysHiddenField(path.substring(path.lastIndexOf('.') + 1))
+                || configuredSensitivePath(path) || configuredSensitiveField(path.substring(path.lastIndexOf('.') + 1)))) {
+            field.clear(); field.put("state", "hidden");
+        }
+    }
+
+    private boolean configuredSensitivePath(String path) {
+        if (!redactionEnabled) return false;
+        String lower = path.toLowerCase(Locale.ROOT);
+        for (String configured : sensitivePaths) {
+            String pattern = configured.toLowerCase(Locale.ROOT);
+            if (pattern.equals(lower)) return true;
+            if (pattern.indexOf('*') >= 0) {
+                String regex = java.util.regex.Pattern.quote(pattern).replace("\\Q*\\E", ".*");
+                if (lower.matches(regex)) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean configuredSensitiveField(String fieldName) {
+        if (!redactionEnabled) return false;
+        for (String expression : sensitiveFieldPatterns) {
+            try { if (Pattern.compile(expression, Pattern.CASE_INSENSITIVE).matcher(fieldName).matches()) return true; }
+            catch (RuntimeException ignored) { /* Configuration parsing validates patterns. */ }
+        }
+        return false;
     }
 
     private Map<String, Object> declaredGlobals(Map<?, ?> raw) {
@@ -316,7 +517,8 @@ public final class PackageConfigurationInspector {
             visible(fields, "pool.maxSize", Integer.valueOf(helper.poolMaxSize()), source);
             visible(fields, "pool.minIdle", Integer.valueOf(helper.poolMinIdle()), source);
             visible(fields, "pool.connectionTimeoutMs", Long.valueOf(helper.poolConnectionTimeoutMs()), source);
-            for (String hidden : Arrays.asList("url", "username", "password", "properties", "evidence.sql", "evidence.parameters")) hidden(fields, hidden);
+            visible(fields, "url", scrubTestdataText(helper.url()), source);
+            for (String hidden : Arrays.asList("username", "password", "properties", "evidence.sql", "evidence.parameters")) hidden(fields, hidden);
             logicalSource(entry, helper.sourceFile());
             entries.add(entry);
         }
@@ -341,12 +543,24 @@ public final class PackageConfigurationInspector {
             visible(fields, "pool.maxSize", Integer.valueOf(helper.poolMaxSize()), source);
             visible(fields, "pool.minIdle", Integer.valueOf(helper.poolMinIdle()), source);
             visible(fields, "pool.borrowTimeoutMs", Long.valueOf(helper.poolBorrowTimeoutMs()), source);
-            for (String hidden : Arrays.asList("queueManager", "host", "port", "channel", "username", "password", "requestQueue", "replyQueue", "evidencePayload")) hidden(fields, hidden);
+            visible(fields, "queueManager", helper.queueManager(), source);
+            visible(fields, "host", helper.host(), source);
+            visible(fields, "port", Integer.valueOf(helper.port()), source);
+            visible(fields, "channel", helper.channel(), source);
+            visible(fields, "requestQueue", helper.requestQueue(), source);
+            visible(fields, "replyQueue", helper.replyQueue(), source);
+            for (String hidden : Arrays.asList("username", "password", "evidencePayload")) hidden(fields, hidden);
             List<Map<String, Object>> instances = new ArrayList<Map<String, Object>>();
             for (Map.Entry<String, MqHelperConfig> instance : helper.instances().entrySet()) {
                 Map<String, Object> child = entry(instance.getKey(), source);
                 Map<String, Object> childFields = fields(child);
-                for (String hidden : Arrays.asList("queueManager", "host", "port", "channel", "username", "password", "requestQueue", "replyQueue")) hidden(childFields, hidden);
+                visible(childFields, "queueManager", instance.getValue().queueManager(), source);
+                visible(childFields, "host", instance.getValue().host(), source);
+                visible(childFields, "port", Integer.valueOf(instance.getValue().port()), source);
+                visible(childFields, "channel", instance.getValue().channel(), source);
+                visible(childFields, "requestQueue", instance.getValue().requestQueue(), source);
+                visible(childFields, "replyQueue", instance.getValue().replyQueue(), source);
+                for (String hidden : Arrays.asList("username", "password")) hidden(childFields, hidden);
                 instances.add(child);
             }
             entry.put("instances", instances);
@@ -394,7 +608,8 @@ public final class PackageConfigurationInspector {
             visible(fields, "connectionRequestTimeoutMs", Integer.valueOf(helper.connectionRequestTimeoutMs()), source);
             visible(fields, "keepAliveMs", Integer.valueOf(helper.keepAliveMs()), source);
             visible(fields, "idleEvictMs", Integer.valueOf(helper.idleEvictMs()), source);
-            for (String hidden : Arrays.asList("baseUrl", "headers", "username", "password", "token", "trustStore", "trustStorePassword")) hidden(fields, hidden);
+            visible(fields, "baseUrl", scrubTestdataText(helper.baseUrl().toString()), source);
+            for (String hidden : Arrays.asList("headers", "username", "password", "token", "trustStore", "trustStorePassword")) hidden(fields, hidden);
             entries.add(entry);
         }
         return section("httphelpers", "HTTP helpers", source, entries);
@@ -449,6 +664,7 @@ public final class PackageConfigurationInspector {
                 missing(fields, "selection.strategy", source);
                 missing(fields, "selection.exhaustion", source);
             }
+            visible(fields, "recordCount", Long.valueOf(descriptor.count()), source);
             hidden(fields, "records");
             entries.add(entry);
         }

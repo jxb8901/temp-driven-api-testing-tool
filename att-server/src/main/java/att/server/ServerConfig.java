@@ -11,6 +11,7 @@ import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -22,6 +23,8 @@ public final class ServerConfig {
     public final int workerHeapInitialMb, workerHeapMaxMb;
     public final int maxRequestBytes, maxEventsPerJob, maxArtifacts;
     public final boolean authenticationRequired;
+    public final String authMode;
+    public final Security security;
     public final Map<String, Path> packages;
     public final List<Path> allowedRoots;
     public final List<Path> workerLibraryDirs;
@@ -32,11 +35,11 @@ public final class ServerConfig {
     private ServerConfig(Path dataDir, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling) {
         this.dataDir=dataDir; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
-        this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;
+        this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;this.authMode=authMode;this.security=security;
         this.packages=Collections.unmodifiableMap(new LinkedHashMap<>(packages));
         this.allowedRoots=List.copyOf(allowedRoots);
         this.workerLibraryDirs=List.copyOf(workerLibraryDirs);
@@ -100,6 +103,11 @@ public final class ServerConfig {
         int retention=intValue(server,"jobRetentionDays",30,1,3650);
         int request=intValue(server,"maxRequestBytes",1048576,1024,16777216), events=intValue(server,"maxEventsPerJob",10000,100,1000000),
             artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
+        Map<?,?> auth=server.get("auth")==null?Collections.emptyMap():map(server.get("auth"),"server.auth");
+        String authMode=auth.get("mode")==null?"container":string(auth.get("mode"),"server.auth.mode").toLowerCase(Locale.ROOT);
+        if(!Set.of("container","local").contains(authMode))throw new IllegalArgumentException("server.auth.mode must be container or local");
+        if("local".equals(authMode)&&!authenticationRequired)throw new IllegalArgumentException("server.authenticationRequired must be true when server.auth.mode is local");
+        Security security=security(server.get("security"));
         Inspection inspection=inspection(server.get("inspection"),resolved);
         InlineLoad inlineLoad=inlineLoad(server.get("inlineLoad"));
         Scheduling scheduling=scheduling(server.get("scheduling"),authenticationRequired,load,inspection.enabled);
@@ -111,7 +119,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling);
+        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling);
     }
 
     public static Path configPath() {
@@ -151,7 +159,7 @@ public final class ServerConfig {
         if(!Files.exists(path)) throw new IllegalArgumentException(field+" does not exist: "+path);
         Path real=path.toRealPath(); if(directory&&!Files.isDirectory(real)) throw new IllegalArgumentException(field+" must be a directory: "+path); return real;
     }
-    private static void privateDirectory(Path path){try{Files.createDirectories(path);Files.setPosixFilePermissions(path,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));}catch(UnsupportedOperationException ignored){}catch(Exception e){throw new IllegalStateException("Unable to secure ATT Server data directory",e);}}
+    private static void privateDirectory(Path path){try{Files.createDirectories(path);try{Files.setPosixFilePermissions(path,java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));}catch(UnsupportedOperationException unsupported){var view=Files.getFileAttributeView(path,java.nio.file.attribute.AclFileAttributeView.class);if(view==null)throw new IllegalStateException("Filesystem does not support private ATT Server data permissions");var owner=Files.getOwner(path);var entry=java.nio.file.attribute.AclEntry.newBuilder().setType(java.nio.file.attribute.AclEntryType.ALLOW).setPrincipal(owner).setPermissions(java.util.EnumSet.allOf(java.nio.file.attribute.AclEntryPermission.class)).setFlags(java.nio.file.attribute.AclEntryFlag.DIRECTORY_INHERIT,java.nio.file.attribute.AclEntryFlag.FILE_INHERIT).build();view.setAcl(java.util.List.of(entry));}}catch(Exception e){throw new IllegalStateException("Unable to secure ATT Server data directory",e);}}
     private static boolean boolValue(Map<?,?> map,String key,boolean fallback){Object value=map.get(key);if(value==null)return fallback;if(!(value instanceof Boolean))throw new IllegalArgumentException(key+" must be true or false");return (Boolean)value;}
     private static int intValue(Map<?,?> map,String key,int fallback,int min,int max) {
         Object v=map.get(key); if(v==null)return fallback; if(!(v instanceof Number n)) throw new IllegalArgumentException(key+" must be an integer");
@@ -163,6 +171,8 @@ public final class ServerConfig {
 
     private static Inspection inspection(Object raw,Map<String,Path> packages) throws Exception {
         Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.inspection");
+        Set<String> allowed=Set.of("enabled","maxConcurrent","queuedLimit","timeoutMs","heapMaxMb","maxResponseBytes","maxSourceBytes","safeTextSources","sourceBrowsing","redaction");
+        for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))throw new IllegalArgumentException("server.inspection contains an unknown setting");
         boolean enabled=boolValue(values,"enabled",true);
         int concurrent=intValue(values,"maxConcurrent",2,1,16);
         int queued=intValue(values,"queuedLimit",16,0,1024);
@@ -170,7 +180,19 @@ public final class ServerConfig {
         int heap=intValue(values,"heapMaxMb",512,64,4096);
         int response=intValue(values,"maxResponseBytes",262144,1024,1048576);
         int source=intValue(values,"maxSourceBytes",65536,256,262144);
+        Map<?,?> sourceBrowsing=values.get("sourceBrowsing")==null?Collections.emptyMap():map(values.get("sourceBrowsing"),"server.inspection.sourceBrowsing");
+        for(Object key:sourceBrowsing.keySet())if(!(key instanceof String)||!Set.of("enabled","policy","denyGlobs","maxSourceBytes").contains(key))throw new IllegalArgumentException("server.inspection.sourceBrowsing contains an unknown setting");
+        boolean sourceBrowsingEnabled=boolValue(sourceBrowsing,"enabled",true);
+        String sourcePolicy=sourceBrowsing.get("policy")==null?"safe-package-files":string(sourceBrowsing.get("policy"),"server.inspection.sourceBrowsing.policy");
+        if(!Set.of("safe-package-files","allowlist-only").contains(sourcePolicy))throw new IllegalArgumentException("server.inspection.sourceBrowsing.policy must be safe-package-files or allowlist-only");
+        source=intValue(sourceBrowsing,"maxSourceBytes",source,256,262144);
         if(source>=response)throw new IllegalArgumentException("server.inspection.maxSourceBytes must be less than maxResponseBytes");
+        List<String> denyGlobs=checkedGlobs(sourceBrowsing.get("denyGlobs"),"server.inspection.sourceBrowsing.denyGlobs");
+        Map<?,?> redaction=values.get("redaction")==null?Collections.emptyMap():map(values.get("redaction"),"server.inspection.redaction");
+        for(Object key:redaction.keySet())if(!(key instanceof String)||!Set.of("enabled","sensitivePaths","sensitiveFieldPatterns").contains(key))throw new IllegalArgumentException("server.inspection.redaction contains an unknown setting");
+        boolean redactionEnabled=boolValue(redaction,"enabled",false);
+        List<String> sensitivePaths=checkedSensitivePaths(redaction.get("sensitivePaths"));
+        List<String> sensitiveFieldPatterns=checkedRegexes(redaction.get("sensitiveFieldPatterns"));
         Map<?,?> rawSources=values.get("safeTextSources")==null?Collections.emptyMap():map(values.get("safeTextSources"),"server.inspection.safeTextSources");
         Map<String,List<String>> safeSources=new LinkedHashMap<>();
         for(Map.Entry<?,?> entry:rawSources.entrySet()) {
@@ -198,7 +220,37 @@ public final class ServerConfig {
             }
             safeSources.put(packageId,List.copyOf(checked));
         }
-        return new Inspection(enabled,concurrent,queued,timeout,heap,response,source,safeSources);
+        return new Inspection(enabled,concurrent,queued,timeout,heap,response,source,safeSources,
+                sourceBrowsingEnabled,sourcePolicy,denyGlobs,redactionEnabled,sensitivePaths,sensitiveFieldPatterns);
+    }
+
+    private static Security security(Object raw) {
+        Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.security");
+        for(Object key:values.keySet())if(!(key instanceof String)||!Set.of("checkCrossOrigin").contains(key))throw new IllegalArgumentException("server.security contains an unknown setting");
+        return new Security(boolValue(values,"checkCrossOrigin",false));
+    }
+
+    private static List<String> checkedGlobs(Object raw,String field) {
+        if(raw==null)return List.of();List<?> entries=list(raw,field);if(entries.size()>100)throw new IllegalArgumentException(field+" may contain at most 100 patterns");
+        java.util.ArrayList<String> result=new java.util.ArrayList<>();java.util.HashSet<String> unique=new java.util.HashSet<>();
+        for(Object item:entries){String value=string(item,field+" entry");Path path=Paths.get(value);
+            if(value.indexOf('\\')>=0||value.indexOf('\0')>=0||path.isAbsolute()||path.startsWith("..")||value.contains("../")||value.equals("..")||value.length()>256)
+                throw new IllegalArgumentException(field+" entries must be safe package-relative globs");
+            if(!unique.add(value))throw new IllegalArgumentException(field+" contains a duplicate pattern");result.add(value);
+        }
+        return List.copyOf(result);
+    }
+    private static List<String> checkedSensitivePaths(Object raw) {
+        if(raw==null)return List.of();List<?> entries=list(raw,"server.inspection.redaction.sensitivePaths");if(entries.size()>100)throw new IllegalArgumentException("sensitivePaths may contain at most 100 entries");
+        java.util.ArrayList<String> result=new java.util.ArrayList<>();java.util.HashSet<String> unique=new java.util.HashSet<>();
+        for(Object item:entries){String value=string(item,"server.inspection.redaction.sensitivePaths entry");if(value.length()>256||value.startsWith(".")||value.endsWith(".")||value.contains("..")||value.indexOf('\\')>=0)throw new IllegalArgumentException("sensitivePaths entries must be normalized field paths");String normalized=value.toLowerCase(Locale.ROOT);if(!unique.add(normalized))throw new IllegalArgumentException("sensitivePaths contains a duplicate entry");result.add(normalized);}
+        return List.copyOf(result);
+    }
+    private static List<String> checkedRegexes(Object raw) {
+        if(raw==null)return List.of();List<?> entries=list(raw,"server.inspection.redaction.sensitiveFieldPatterns");if(entries.size()>100)throw new IllegalArgumentException("sensitiveFieldPatterns may contain at most 100 entries");
+        java.util.ArrayList<String> result=new java.util.ArrayList<>();java.util.HashSet<String> unique=new java.util.HashSet<>();
+        for(Object item:entries){String value=string(item,"sensitiveFieldPatterns entry");if(value.length()>128||!unique.add(value))throw new IllegalArgumentException("sensitiveFieldPatterns entries must be unique and at most 128 characters");try{java.util.regex.Pattern.compile(value,java.util.regex.Pattern.CASE_INSENSITIVE);}catch(java.util.regex.PatternSyntaxException invalid){throw new IllegalArgumentException("sensitiveFieldPatterns contains an invalid regular expression",invalid);}result.add(value);}
+        return List.copyOf(result);
     }
 
     private static InlineLoad inlineLoad(Object raw) {
@@ -228,10 +280,8 @@ public final class ServerConfig {
         for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))
             throw new IllegalArgumentException("server.scheduling contains an unknown setting");
         boolean enabled=boolValue(values,"enabled",false);
-        boolean allowAnonymous=boolValue(values,"allowAnonymousManagement",false);
+        boolean allowAnonymous=boolValue(values,"allowAnonymousManagement",!authenticationRequired&&enabled);
         if(enabled&&!inspectionEnabled)throw new IllegalArgumentException("server.inspection.enabled must be true when server.scheduling.enabled is true");
-        if(enabled&&!authenticationRequired&&!allowAnonymous)
-            throw new IllegalArgumentException("server.scheduling.allowAnonymousManagement must be true before schedules can run without authentication");
         Object rawRole=values.get("adminRole");
         String role=rawRole==null?"ATT_ADMIN":string(rawRole,"server.scheduling.adminRole");
         if(!role.matches("[A-Za-z][A-Za-z0-9._-]{0,63}"))throw new IllegalArgumentException("server.scheduling.adminRole is invalid");
@@ -286,13 +336,24 @@ public final class ServerConfig {
         }
     }
 
+    public static final class Security {
+        public final boolean checkCrossOrigin;
+        private Security(boolean checkCrossOrigin){this.checkCrossOrigin=checkCrossOrigin;}
+    }
+
     public static final class Inspection {
         public final boolean enabled;
         public final int maxConcurrent,queuedLimit,timeoutMs,heapMaxMb,maxResponseBytes,maxSourceBytes;
         public final Map<String,List<String>> safeTextSources;
-        private Inspection(boolean enabled,int maxConcurrent,int queuedLimit,int timeoutMs,int heapMaxMb,int maxResponseBytes,int maxSourceBytes,Map<String,List<String>> safeTextSources) {
+        public final boolean sourceBrowsingEnabled,redactionEnabled;
+        public final String sourcePolicy;
+        public final List<String> sourceDenyGlobs,sensitivePaths,sensitiveFieldPatterns;
+        private Inspection(boolean enabled,int maxConcurrent,int queuedLimit,int timeoutMs,int heapMaxMb,int maxResponseBytes,int maxSourceBytes,Map<String,List<String>> safeTextSources,
+                           boolean sourceBrowsingEnabled,String sourcePolicy,List<String> sourceDenyGlobs,boolean redactionEnabled,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) {
             this.enabled=enabled;this.maxConcurrent=maxConcurrent;this.queuedLimit=queuedLimit;this.timeoutMs=timeoutMs;this.heapMaxMb=heapMaxMb;this.maxResponseBytes=maxResponseBytes;this.maxSourceBytes=maxSourceBytes;
             this.safeTextSources=Collections.unmodifiableMap(new LinkedHashMap<>(safeTextSources));
+            this.sourceBrowsingEnabled=sourceBrowsingEnabled;this.sourcePolicy=sourcePolicy;this.sourceDenyGlobs=List.copyOf(sourceDenyGlobs);this.redactionEnabled=redactionEnabled;
+            this.sensitivePaths=List.copyOf(sensitivePaths);this.sensitiveFieldPatterns=List.copyOf(sensitiveFieldPatterns);
         }
         public List<String> safeTextSources(String packageId) { return safeTextSources.getOrDefault(packageId,List.of()); }
     }

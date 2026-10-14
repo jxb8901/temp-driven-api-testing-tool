@@ -2,6 +2,10 @@ import { createContext, useContext, useEffect, useRef, useState, type MouseEvent
 import type { AsyncState, ServerVersion } from './types';
 import type { AppRoute, RouteState } from './router';
 import { NavigationGuardContext } from './router';
+import { api } from './api';
+import { authUiText } from './authUiText';
+import { ChangePasswordDialog } from './ChangePasswordDialog';
+import type { LocalAuthUser } from './types';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
@@ -22,6 +26,8 @@ export interface AppShellContextValue {
   selectedPackage: string;
   selectedEnvironment: string;
   themePreference: ThemePreference;
+  authMode?: 'container' | 'local';
+  currentUser: Pick<LocalAuthUser,'loginId'|'displayName'|'role'> | null;
   onPackageChange(packageId: string): void;
   onEnvironmentChange(environment: string): void;
   onThemePreferenceChange(preference: ThemePreference): void;
@@ -197,6 +203,8 @@ export function AppShell({
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [mobileViewport, setMobileViewport] = useState(() => window.matchMedia?.('(max-width: 820px)').matches || false);
   const [keyboardMode, setKeyboardMode] = useState<'palette' | 'shortcuts' | null>(null);
+  const [currentUser, setCurrentUser] = useState<Pick<LocalAuthUser,'loginId'|'displayName'|'role'>|null>(null);
+  const [changePasswordOpen,setChangePasswordOpen]=useState(false);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const wasMobileNavigationOpen = useRef(false);
@@ -205,6 +213,21 @@ export function AppShell({
   const versionStatus = serverVersion.status === 'ready' ? 'Connected'
     : serverVersion.status === 'error' ? 'Unavailable' : 'Connecting…';
   const versionData = serverVersion.status === 'ready' ? serverVersion.data : null;
+  useEffect(() => {
+    if (versionData?.authMode !== 'local') { setCurrentUser(null); return; }
+    const controller = new AbortController();
+    api.getCurrentUser(controller.signal).then(setCurrentUser).catch(() => {
+      const returnTo = location.pathname + location.search + location.hash;
+      location.assign(new URL('login.html?returnTo=' + encodeURIComponent(returnTo), document.baseURI).toString());
+    });
+    return () => controller.abort();
+  }, [versionData?.authMode]);
+  async function signOut() {
+    try { await api.logout(); } finally {
+      const login = new URL('login.html', document.baseURI);
+      location.assign(login.toString());
+    }
+  }
   const action = route.kind === 'load' && route.packageId
     ? { label: 'Open package', target: '#/packages/' + encodeURIComponent(route.packageId), hidden: false }
     : route.kind === 'package' && versionData?.inlineLoadEnabled === true
@@ -303,7 +326,7 @@ export function AppShell({
 
   return (
     <NavigationGuardContext.Provider value={navigation}>
-      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onJobAccepted }}>
+      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, authMode: versionData?.authMode, currentUser, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onJobAccepted }}>
       <div className={'app-layout' + (collapsed ? ' is-collapsed' : '') + (mobileNavigationOpen ? ' mobile-nav-open' : '')} data-page={currentPage}>
         <a className="skip-link" href="#main-content">Skip to main content</a>
         <button className="sidebar-backdrop" type="button" aria-label="Close navigation" aria-hidden={!mobileNavigationOpen} onClick={() => setMobileNavigationOpen(false)} tabIndex={-1} />
@@ -342,7 +365,7 @@ export function AppShell({
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span>
             </a>
           </nav>
-          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.1.3'}</span></div>
+          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.1.4'}</span></div>
         </aside>
 
         <div className="app-frame">
@@ -357,6 +380,13 @@ export function AppShell({
             </button>
             <button className="icon-button shortcut-help" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={() => setKeyboardMode('shortcuts')}>?</button>
             <div className="topbar-status"><span className="topbar-status-label">Server</span><span className="connection-status" role="status" aria-live="polite" data-state={versionStatus.toLowerCase()}>{versionStatus}</span></div>
+            {currentUser && <details className="att-current-user-menu" onKeyDown={event=>{if(event.key==='Escape')event.currentTarget.open=false;}}>
+              <summary aria-label={authUiText('accountMenu')}><span>{currentUser.displayName}</span><span className="att-user-menu-caret" aria-hidden="true">⌄</span></summary>
+              <div className="att-user-menu-panel"><span className="att-user-menu-identity">{currentUser.loginId} · {currentUser.role}</span>
+                <button type="button" onClick={event=>{event.currentTarget.closest('details')?.removeAttribute('open');setChangePasswordOpen(true);}}>{authUiText('changePassword')}</button>
+                <button type="button" onClick={signOut}>{authUiText('signOut')}</button>
+              </div>
+            </details>}
             <button className="theme-toggle" type="button" aria-pressed={theme === 'dark'} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={changeTheme}>
               <span className="theme-icon" aria-hidden="true">{theme === 'dark' ? '☼' : '◐'}</span><span className="theme-label">{theme === 'dark' ? 'Light' : 'Dark'}</span>
             </button>
@@ -397,6 +427,7 @@ export function AppShell({
           <footer className="page-footer"><span>ATT Server</span><span>API v{versionData?.apiVersion || '1'}</span></footer>
         </div>
         <DiscardChangesDialog navigation={navigation} />
+        <ChangePasswordDialog open={changePasswordOpen} onClose={()=>setChangePasswordOpen(false)} />
         <KeyboardDialog open={keyboardMode !== null} mode={keyboardMode || 'palette'} showScheduledLoad={showScheduledLoad} selectedPackage={selectedPackage}
           onClose={() => setKeyboardMode(null)} onNavigate={target => { navigate(target); setKeyboardMode(null); setMobileNavigationOpen(false); }} />
       </div>

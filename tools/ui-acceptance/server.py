@@ -102,6 +102,42 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": {"code": "INVALID_JSON", "summary": "Request body must be JSON."}})
             return
         scenario = self._fixture()
+        if scenario in {"auth-admin", "auth-user", "auth-container"} and resource.startswith("auth/"):
+            if scenario == "auth-container":
+                self._json(404, {"error": {"code": "NOT_FOUND", "summary": "ATT local authentication is unavailable."}})
+                return
+            if self.headers.get("X-ATT-CSRF") != "csrf-fixture":
+                self._json(403, {"error": {"code": "ATT-AUTH-CSRF-INVALID", "summary": "Request verification failed."}})
+                return
+            if resource == "auth/users" and scenario != "auth-admin":
+                self._json(403, {"error": {"code": "ATT-SERVER-FORBIDDEN", "summary": "Administrator access is required."}})
+                return
+            if resource == "auth/users":
+                login_id = str(body.get("loginId", "")).strip().lower()
+                if any(user["loginId"] == login_id for user in self.server.auth_users):
+                    self._json(409, {"error": {"code": "ATT-AUTH-LOGIN-ID-TAKEN", "summary": "Authentication request could not be completed."}})
+                    return
+                user = {"loginId": login_id, "displayName": body.get("displayName", ""), "role": body.get("role", "USER"), "active": True}
+                self.server.auth_users.append(user)
+                self._json(201, {"user": {key: user[key] for key in ("loginId", "displayName", "role")}})
+                return
+            if resource == "auth/password":
+                self.server.auth_password_changes += 1
+                self._json(200, {"updated": True})
+                return
+            parts = [unquote(part) for part in resource.strip("/").split("/") if part]
+            if len(parts) == 4 and parts[:2] == ["auth", "users"] and parts[3] == "password":
+                self.server.auth_password_resets.append(parts[2])
+                self._json(200, {"updated": True})
+                return
+            if len(parts) == 4 and parts[:2] == ["auth", "users"] and parts[3] == "enable":
+                user = next((item for item in self.server.auth_users if item["loginId"] == parts[2]), None)
+                if user is None:
+                    self._json(404, {"error": {"code": "ATT-SERVER-NOT-FOUND", "summary": "User was not found."}})
+                else:
+                    user["active"] = True
+                    self._json(200, {"enabled": True})
+                return
         if resource.startswith("load-schedules"):
             if scenario == "schedule-unauthenticated":
                 self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Sign in to manage Scheduled Load."}})
@@ -190,6 +226,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         resource = request.path.removeprefix("/att/api/v1/")
+        scenario = self._fixture()
+        if scenario in {"auth-admin", "auth-user"} and resource.startswith("auth/users/"):
+            if self.headers.get("X-ATT-CSRF") != "csrf-fixture":
+                self._json(403, {"error": {"code": "ATT-AUTH-CSRF-INVALID", "summary": "Request verification failed."}})
+                return
+            if scenario != "auth-admin":
+                self._json(403, {"error": {"code": "ATT-SERVER-FORBIDDEN", "summary": "Administrator access is required."}})
+                return
+            login_id = unquote(resource.removeprefix("auth/users/"))
+            user = next((item for item in self.server.auth_users if item["loginId"] == login_id), None)
+            if user is None:
+                self._json(404, {"error": {"code": "ATT-SERVER-NOT-FOUND", "summary": "User was not found."}})
+            else:
+                user["active"] = False
+                self.server.auth_revoked_users.append(login_id)
+                self._json(200, {"disabled": True})
+            return
         if self._fixture() == "load-workspace" and resource == "jobs/" + LOAD_JOB["jobId"]:
             self.server.cancel_requested = True
             self._json(202, {"jobId": LOAD_JOB["jobId"], "status": "CANCEL_REQUESTED"})
@@ -204,12 +257,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(404, {"error": {"code": "FIXTURE_NOT_FOUND", "summary": "No fixture route is defined."}})
 
-    def _json(self, status: int, value: dict[str, object]) -> None:
+    def _json(self, status: int, value: dict[str, object], headers: dict[str, str] | None = None) -> None:
         body = json.dumps(value, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, header_value in (headers or {}).items():
+            self.send_header(name, header_value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -235,12 +290,31 @@ class Handler(BaseHTTPRequestHandler):
         scenario = self._fixture()
         if resource == "version":
             schedules_enabled = scenario in {"scheduled-workspace", "schedule-forbidden", "schedule-unauthenticated"}
-            self._json(200, {"apiVersion": "1", "inlineLoadEnabled": True, "loadSchedulingEnabled": schedules_enabled})
+            auth_mode = "local" if scenario in {"auth-admin", "auth-user"} else "container" if scenario == "auth-container" else None
+            payload = {"apiVersion": "1", "inlineLoadEnabled": True, "loadSchedulingEnabled": schedules_enabled}
+            if auth_mode:
+                payload["authMode"] = auth_mode
+            self._json(200, payload)
             return
         if scenario == "authenticated" and self.headers.get("Authorization") != "Basic YXR0LWZpeHR1cmU6cGFzcw==":
             self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Fixture authentication is required."}})
             return
         parts = [unquote(part) for part in resource.strip("/").split("/") if part]
+        if scenario in {"auth-admin", "auth-user"} and parts == ["auth", "me"]:
+            user = self.server.auth_users[0 if scenario == "auth-admin" else 1]
+            user_role = "ADMIN" if scenario == "auth-admin" else "USER"
+            self._json(200, {"loginId": user["loginId"], "displayName": user["displayName"], "role": user_role, "csrfToken": "csrf-fixture"}, {"X-ATT-CSRF": "csrf-fixture"})
+            return
+        if scenario in {"auth-admin", "auth-user", "auth-container"} and parts == ["auth", "bootstrap", "status"]:
+            self._json(200, {"required": False})
+            return
+        if scenario in {"auth-admin", "auth-user"} and parts == ["auth", "users"]:
+            self.server.auth_user_list_requests += 1
+            if scenario != "auth-admin":
+                self._json(403, {"error": {"code": "ATT-SERVER-FORBIDDEN", "summary": "Administrator access is required."}})
+            else:
+                self._json(200, {"items": [dict(user) for user in self.server.auth_users]})
+            return
         if parts and parts[0] == "load-schedules":
             if self._schedule_access_error(scenario):
                 return
@@ -403,7 +477,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         if "fixture=" in query:
             scenario = parse_qs(query).get("fixture", [""])[0]
-            if scenario in {"loaded", "empty", "error", "loading", "authenticated", "anonymous", "explorer-workspace", "load-workspace", "scheduled-workspace", "schedule-forbidden", "schedule-unauthenticated", "schedule-disabled"}:
+            if scenario in {"loaded", "empty", "error", "loading", "authenticated", "anonymous", "explorer-workspace", "load-workspace", "scheduled-workspace", "schedule-forbidden", "schedule-unauthenticated", "schedule-disabled", "auth-admin", "auth-user", "auth-container"}:
                 self.send_header("Set-Cookie", f"att-ui-fixture={scenario}; Path=/att/; SameSite=Lax")
         self.end_headers()
         self.wfile.write(body)
@@ -417,6 +491,14 @@ def main() -> None:
     server.valid_drafts = set()
     server.cancel_requested = False
     server.job_list_requests = 0
+    server.auth_users = [
+        {"loginId": "admin", "displayName": "Studio Admin", "role": "ADMIN", "active": True},
+        {"loginId": "jane", "displayName": "Jane Tester", "role": "USER", "active": True},
+    ]
+    server.auth_user_list_requests = 0
+    server.auth_password_changes = 0
+    server.auth_password_resets = []
+    server.auth_revoked_users = []
     server.schedules = [dict(SCHEDULE)]
     server.schedule_occurrences = list(SCHEDULE_OCCURRENCES)
     actual_port = server.server_address[1]

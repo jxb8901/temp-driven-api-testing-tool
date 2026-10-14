@@ -31,6 +31,10 @@ final class JobStore implements AutoCloseable {
             s.execute("CREATE TABLE IF NOT EXISTS load_schedules (schedule_id VARCHAR(40) PRIMARY KEY, schedule_json CLOB NOT NULL, enabled BOOLEAN NOT NULL, next_run_at VARCHAR(40), updated_at VARCHAR(40) NOT NULL)");
             s.execute("CREATE INDEX IF NOT EXISTS load_schedules_due_idx ON load_schedules(enabled,next_run_at)");
             s.execute("CREATE TABLE IF NOT EXISTS load_schedule_executions (occurrence_id VARCHAR(160) PRIMARY KEY, schedule_id VARCHAR(40) NOT NULL, scheduled_for VARCHAR(40) NOT NULL, status VARCHAR(32) NOT NULL, reason VARCHAR(240), job_id VARCHAR(80), trigger_type VARCHAR(16) NOT NULL, created_at VARCHAR(40) NOT NULL)");
+            s.execute("CREATE TABLE IF NOT EXISTS auth_users (login_id VARCHAR(120) PRIMARY KEY, display_name VARCHAR(120) NOT NULL, password_hash VARCHAR(512) NOT NULL, role VARCHAR(16) NOT NULL, active BOOLEAN NOT NULL, updated_at VARCHAR(40) NOT NULL)");
+            s.execute("ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS csrf_token VARCHAR(64)");
+            s.execute("CREATE TABLE IF NOT EXISTS auth_sessions (token_hash VARCHAR(64) PRIMARY KEY, login_id VARCHAR(120) NOT NULL, csrf_token VARCHAR(64) NOT NULL, created_at BIGINT NOT NULL, last_seen BIGINT NOT NULL, absolute_expiry BIGINT NOT NULL)");
+            s.execute("CREATE TABLE IF NOT EXISTS auth_bootstrap_claim (claim_id INT PRIMARY KEY, claimed_at VARCHAR(40) NOT NULL)");
             s.execute("CREATE INDEX IF NOT EXISTS load_schedule_execution_history_idx ON load_schedule_executions(schedule_id,scheduled_for)");
         }
     }
@@ -238,6 +242,104 @@ final class JobStore implements AutoCloseable {
         long latest=0;try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT MAX(audit_id) FROM audit")){if(r.next())latest=r.getLong(1);}
         if(latest>0&&latest%256==0)try(Connection c=connect();Statement s=c.createStatement()){s.execute("DELETE FROM audit WHERE audit_id NOT IN (SELECT audit_id FROM audit ORDER BY audit_id DESC LIMIT 100000)");}
     }
+    synchronized int authUserCount() throws Exception {try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM auth_users")){r.next();return r.getInt(1);}}
+    synchronized boolean bootstrapClaimed() throws Exception {try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM auth_bootstrap_claim WHERE claim_id=1")){r.next();return r.getInt(1)>0;}}
+    synchronized Map<String,Object> authUser(String login) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT login_id,display_name,password_hash,role,active,csrf_token FROM auth_users WHERE login_id=?")){p.setString(1,login);try(ResultSet r=p.executeQuery()){if(!r.next())return null;Map<String,Object> m=new LinkedHashMap<>();m.put("loginId",r.getString(1));m.put("displayName",r.getString(2));m.put("passwordHash",r.getString(3));m.put("role",r.getString(4));m.put("active",r.getBoolean(5));m.put("csrfToken",r.getString(6));return m;}}
+    }
+    synchronized List<Map<String,Object>> authUsers() throws Exception {
+        List<Map<String,Object>> users=new ArrayList<>();try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT login_id,display_name,role,active,updated_at FROM auth_users ORDER BY login_id")){while(r.next()){Map<String,Object> u=new LinkedHashMap<>();u.put("loginId",r.getString(1));u.put("displayName",r.getString(2));u.put("role",r.getString(3));u.put("active",r.getBoolean(4));u.put("updatedAt",r.getString(5));users.add(u);}}return users;
+    }
+    synchronized long activeAdminCount() throws Exception {try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM auth_users WHERE role='ADMIN' AND active=TRUE")){r.next();return r.getLong(1);}}
+    boolean ownsJob(String id,String login) throws Exception {String owner;try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT principal FROM jobs WHERE job_id=?")){p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next())return false;owner=r.getString(1);}}if(login.equals(owner))return true;if(!owner.startsWith("load-schedule:"))return false;String scheduleId=owner.substring("load-schedule:".length());try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT schedule_json FROM load_schedules WHERE schedule_id=?")){p.setString(1,scheduleId);try(ResultSet r=p.executeQuery()){return r.next()&&login.equals(ServerRuntime.JSON.readValue(r.getString(1),LoadSchedule.class).createdBy);}}}
+    synchronized List<Map<String,Object>> listOwned(int limit,String login) throws Exception {
+        List<String> scheduleOwners=new ArrayList<>();for(LoadSchedule schedule:schedules())if(login.equals(schedule.createdBy))scheduleOwners.add("load-schedule:"+schedule.id);
+        String ownerPredicate=scheduleOwners.isEmpty()?"":" OR principal IN ("+String.join(",",java.util.Collections.nCopies(scheduleOwners.size(),"?"))+")";
+        List<Map<String,Object>> out=new ArrayList<>();try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code FROM jobs WHERE principal=?"+ownerPredicate+" ORDER BY created_at DESC LIMIT ?")){int index=1;p.setString(index++,login);for(String owner:scheduleOwners)p.setString(index++,owner);p.setInt(index,limit);try(ResultSet r=p.executeQuery()){while(r.next()){Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));out.add(m);}}}return out;
+    }
+    synchronized void createAuthUser(String login,String display,String hash,String role,String csrf) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO auth_users(login_id,display_name,password_hash,role,active,updated_at,csrf_token) VALUES(?,?,?,?,TRUE,?,?)")){p.setString(1,login);p.setString(2,display);p.setString(3,hash);p.setString(4,role);p.setString(5,Instant.now().toString());p.setString(6,csrf);p.executeUpdate();}}
+    void createBootstrapAdmin(String login,String display,String hash,String csrf) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                try(Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM auth_users")){r.next();if(r.getLong(1)>0)throw new AuthService.AuthFailure(409,"ATT-AUTH-BOOTSTRAP-CLOSED");}
+                try(PreparedStatement claim=c.prepareStatement("INSERT INTO auth_bootstrap_claim(claim_id,claimed_at) VALUES(1,?)")){claim.setString(1,Instant.now().toString());claim.executeUpdate();}
+                try(PreparedStatement user=c.prepareStatement("INSERT INTO auth_users(login_id,display_name,password_hash,role,active,updated_at,csrf_token) VALUES(?,?,?,'ADMIN',TRUE,?,?)")){user.setString(1,login);user.setString(2,display);user.setString(3,hash);user.setString(4,Instant.now().toString());user.setString(5,csrf);user.executeUpdate();}
+                c.commit();
+            } catch(Exception failure) {
+                c.rollback();
+                if(failure instanceof java.sql.SQLException sql&&"23505".equals(sql.getSQLState()))throw new AuthService.AuthFailure(409,"ATT-AUTH-BOOTSTRAP-CLOSED");
+                throw failure;
+            }
+        }
+    }
+    synchronized void updateAuthPassword(String login,String hash,String csrf) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try(PreparedStatement update=c.prepareStatement("UPDATE auth_users SET password_hash=?,csrf_token=?,updated_at=? WHERE login_id=?")) {
+                update.setString(1,hash);update.setString(2,csrf);update.setString(3,Instant.now().toString());update.setString(4,login);
+                if(update.executeUpdate()==0)throw new AuthService.AuthFailure(404,"ATT-AUTH-USER-NOT-FOUND");
+                try(PreparedStatement revoke=c.prepareStatement("DELETE FROM auth_sessions WHERE login_id=?")){revoke.setString(1,login);revoke.executeUpdate();}
+                c.commit();
+            } catch(Exception failure) {c.rollback();throw failure;}
+        }
+    }
+    synchronized void recoverExistingAdmin(String login,String hash,String csrf) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                String role;
+                try(PreparedStatement lookup=c.prepareStatement("SELECT role FROM auth_users WHERE login_id=? FOR UPDATE")) {
+                    lookup.setString(1,login);try(ResultSet result=lookup.executeQuery()) {
+                        if(!result.next())throw new IllegalArgumentException("The requested existing account was not found");
+                        role=result.getString(1);
+                    }
+                }
+                if(!"ADMIN".equals(role))throw new IllegalArgumentException("Recovery can update an existing ADMIN account only");
+                try(PreparedStatement update=c.prepareStatement("UPDATE auth_users SET password_hash=?,csrf_token=?,active=TRUE,updated_at=? WHERE login_id=? AND role='ADMIN'")) {
+                    update.setString(1,hash);update.setString(2,csrf);update.setString(3,Instant.now().toString());update.setString(4,login);update.executeUpdate();
+                }
+                try(PreparedStatement revoke=c.prepareStatement("DELETE FROM auth_sessions WHERE login_id=?")){revoke.setString(1,login);revoke.executeUpdate();}
+                try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,created_at,outcome) VALUES(?,?,?,?)")) {
+                    audit.setString(1,"offline-admin-recovery:"+login);audit.setString(2,"ADMIN_RECOVERY");audit.setString(3,Instant.now().toString());audit.setString(4,"SUCCESS");audit.executeUpdate();
+                }
+                c.commit();
+            } catch(Exception failure) {c.rollback();throw failure;}
+        }
+    }
+    synchronized void setAuthActive(String login,boolean active) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                String role;boolean wasActive;
+                try(PreparedStatement lookup=c.prepareStatement("SELECT role,active FROM auth_users WHERE login_id=?")) {
+                    lookup.setString(1,login);try(ResultSet result=lookup.executeQuery()) {
+                        if(!result.next())throw new IllegalArgumentException("Unknown user");
+                        role=result.getString(1);wasActive=result.getBoolean(2);
+                    }
+                }
+                if(!active&&wasActive&&"ADMIN".equals(role)) {
+                    try(Statement lock=c.createStatement();ResultSet guard=lock.executeQuery("SELECT claim_id FROM auth_bootstrap_claim WHERE claim_id=1 FOR UPDATE")) {
+                        if(!guard.next())throw new IllegalStateException("The local administrator guard is missing");
+                    }
+                    try(Statement count=c.createStatement();ResultSet admins=count.executeQuery("SELECT COUNT(*) FROM auth_users WHERE role='ADMIN' AND active=TRUE")) {
+                        admins.next();if(admins.getLong(1)<=1)throw new AuthService.AuthFailure(409,"ATT-AUTH-LAST-ADMIN");
+                    }
+                }
+                try(PreparedStatement update=c.prepareStatement("UPDATE auth_users SET active=?,updated_at=? WHERE login_id=?")) {
+                    update.setBoolean(1,active);update.setString(2,Instant.now().toString());update.setString(3,login);update.executeUpdate();
+                }
+                if(!active)try(PreparedStatement revoke=c.prepareStatement("DELETE FROM auth_sessions WHERE login_id=?")){revoke.setString(1,login);revoke.executeUpdate();}
+                c.commit();
+            } catch(Exception failure) {c.rollback();throw failure;}
+        }
+    }
+    synchronized void saveAuthSession(String tokenHash,String login,String csrf,long now,long expiry) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO auth_sessions(token_hash,login_id,csrf_token,created_at,last_seen,absolute_expiry) VALUES(?,?,?,?,?,?)")){p.setString(1,tokenHash);p.setString(2,login);p.setString(3,csrf);p.setLong(4,now);p.setLong(5,now);p.setLong(6,expiry);p.executeUpdate();}}
+    synchronized Map<String,String> authSession(String hash,long now,long idleMillis) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT s.login_id,s.csrf_token,s.last_seen,s.absolute_expiry,u.display_name,u.role,u.active FROM auth_sessions s JOIN auth_users u ON u.login_id=s.login_id WHERE s.token_hash=?")){p.setString(1,hash);try(ResultSet r=p.executeQuery()){if(!r.next())return null;long seen=r.getLong(3),expiry=r.getLong(4);if(!r.getBoolean(7)||now>expiry||now-seen>idleMillis){deleteAuthSession(hash);return null;}try(Connection touchConnection=connect();PreparedStatement touch=touchConnection.prepareStatement("UPDATE auth_sessions SET last_seen=? WHERE token_hash=?")){touch.setLong(1,now);touch.setString(2,hash);touch.executeUpdate();}Map<String,String> m=new LinkedHashMap<>();m.put("loginId",r.getString(1));m.put("csrfToken",r.getString(2));m.put("displayName",r.getString(5));m.put("role",r.getString(6));return m;}}
+    }
+    synchronized void deleteAuthSession(String hash) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM auth_sessions WHERE token_hash=?")){p.setString(1,hash);p.executeUpdate();}}
+    synchronized void revokeAuthSessions(String login) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM auth_sessions WHERE login_id=?")){p.setString(1,login);p.executeUpdate();}}
     synchronized List<String> staleJobIds() throws Exception {
         List<String> ids=new ArrayList<>();
         try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT job_id FROM jobs WHERE status IN ('QUEUED','PREPARING','RUNNING')")) { while(r.next())ids.add(r.getString(1)); }

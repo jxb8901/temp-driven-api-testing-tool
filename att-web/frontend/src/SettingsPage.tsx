@@ -1,4 +1,6 @@
 import { useAppShellContext, type ThemePreference } from './AppShell';
+import { authUiLocale, authUiText } from './authUiText';
+import { UserManagementPanel } from './UserManagement';
 import './SettingsPage.css';
 
 const themeOptions: Array<{ value: ThemePreference; label: string; description: string }> = [
@@ -9,16 +11,19 @@ const themeOptions: Array<{ value: ThemePreference; label: string; description: 
 
 export function SettingsPage() {
   const { themePreference, onThemePreferenceChange } = useAppShellContext();
+  const locale = authUiLocale();
 
   return (
     <section className="page-content att-settings-page" aria-labelledby="settings-title">
       <header className="page-heading">
         <div>
           <p className="eyebrow">ATT Studio</p>
-          <h1 id="settings-title">Settings</h1>
-          <p className="page-description">Manage preferences for this browser. These choices do not change server configuration.</p>
+          <h1 id="settings-title">{authUiText('settingsTitle',locale)}</h1>
+          <p className="page-description">{authUiText('settingsDescription',locale)}</p>
         </div>
       </header>
+
+      <UserManagementPanel />
 
       <section className="panel att-settings-section" aria-labelledby="appearance-title">
         <div className="att-settings-section-heading">

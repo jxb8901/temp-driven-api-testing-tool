@@ -104,12 +104,12 @@ async function main() {
       }
     }
     await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
-      repositoryVersion: '4.1.3', generatedAt: new Date().toISOString(), platform: process.platform,
+      repositoryVersion: '4.1.4', generatedAt: new Date().toISOString(), platform: process.platform,
       architecture: process.arch, captures: manifest,
     }, null, 2)}\n`);
     if (updateVisualBaselines) {
       await fs.writeFile(path.join(visualBaselineDirectory, 'manifest.json'), `${JSON.stringify({
-        repositoryVersion: '4.1.3', generatedAt: new Date().toISOString(), platform: process.platform,
+        repositoryVersion: '4.1.4', generatedAt: new Date().toISOString(), platform: process.platform,
         architecture: process.arch,
         maxChangedPixelRatio: visualDifferenceLimit, channelTolerance, captures: manifest,
       }, null, 2)}\n`);

@@ -36,6 +36,18 @@ class ServerConfigTest {
         assertTrue(absent.getMessage().contains("ATT_SERVER_CONFIG"));
     }
 
+    @Test void authModeDefaultsToContainerAndLocalRejectsLegacyAnonymousMode() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("auth-packages"));Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path base=temp.resolve("auth-base.yaml");Files.writeString(base,"server:\n  dataDir: "+yaml(temp.resolve("auth-data"))+"\n  javaExecutable: "+yaml(java)+"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    default: "+yaml(pkg)+"\n");
+        assertEquals("container",ServerConfig.load(base).authMode);
+        Path local=temp.resolve("auth-local.yaml");Files.writeString(local,Files.readString(base).replace("auth-data","auth-local-data").replace("server:\n","server:\n  auth:\n    mode: local\n"));
+        assertEquals("local",ServerConfig.load(local).authMode);
+        Path anonymous=temp.resolve("auth-anonymous.yaml");Files.writeString(anonymous,Files.readString(local).replace("auth-local-data","auth-anonymous-data").replace("  auth:\n    mode: local","  authenticationRequired: false\n  auth:\n    mode: local"));
+        IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(anonymous));
+        assertTrue(error.getMessage().contains("must be true when server.auth.mode is local"));
+    }
+
     @Test void missingExplicitConfigDoesNotFallBackToAttHomeCandidate() throws Exception {
         Path home=Files.createDirectories(temp.resolve("config-home"));
         Path fallback=Files.createDirectories(home.resolve("config")).resolve("att-server.yaml");
@@ -104,8 +116,21 @@ class ServerConfigTest {
         Files.writeString(file,"server:\n  dataDir: "+data+"\n  javaExecutable: "+java+"\nworkers:\n  maxConcurrent: 2\n  queuedLimit: 3\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    payments: "+pkg+"\n");
         ServerConfig config=ServerConfig.load(file);
         assertEquals(pkg.toRealPath(),config.packages.get("payments"));assertTrue(Files.isDirectory(data.resolve("db")));assertTrue(Files.isDirectory(data.resolve("jobs")));
+        assertFalse(config.security.checkCrossOrigin);assertTrue(config.inspection.sourceBrowsingEnabled);assertFalse(config.inspection.redactionEnabled);
         assertFalse(config.inlineLoad.enabled);assertEquals(1000,config.inlineLoad.maxTotalConcurrent);
         assertThrows(UnsupportedOperationException.class,()->config.packages.put("other",pkg));
+    }
+
+    @Test void acceptsStrictOriginCheckingAndBoundsInspectionPolicySettings() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("policy-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path configFile=temp.resolve("policy-server.yaml");Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("policy-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  security:\n    checkCrossOrigin: true\n  inspection:\n    sourceBrowsing:\n      enabled: true\n      policy: safe-package-files\n      denyGlobs: ['**/secrets/**']\n    redaction:\n      enabled: true\n      sensitivePaths: ['inputs.cardNumber']\n      sensitiveFieldPatterns: ['(?i)account.*']\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        ServerConfig config=ServerConfig.load(configFile);
+        assertTrue(config.security.checkCrossOrigin);assertTrue(config.inspection.redactionEnabled);
+        assertEquals(List.of("**/secrets/**"),config.inspection.sourceDenyGlobs);
+        assertEquals(List.of("inputs.cardnumber"),config.inspection.sensitivePaths);
+        assertEquals(List.of("(?i)account.*"),config.inspection.sensitiveFieldPatterns);
     }
 
     @Test void validatesAggregateInlineLoadConcurrencyBound() throws Exception {
@@ -149,21 +174,25 @@ class ServerConfigTest {
         assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file));
     }
 
-    @Test void schedulingIsDisabledByDefaultAndAnonymousAdministrationRequiresAnExplicitGate() throws Exception {
+    @Test void schedulingIsDisabledByDefaultAndAnonymousAdministrationDefaultsOnOnlyInAnonymousMode() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("schedule-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path defaults=temp.resolve("schedule-defaults.yaml");Files.writeString(defaults,"server:\n  dataDir: "+yaml(temp.resolve("schedule-default-data"))+"\n  javaExecutable: "+yaml(java)
                 +"\nworkers:\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
         assertFalse(ServerConfig.load(defaults).scheduling.enabled);
 
-        Path rejected=temp.resolve("schedule-anonymous-rejected.yaml");Files.writeString(rejected,"server:\n  dataDir: "+yaml(temp.resolve("schedule-anonymous-rejected-data"))+"\n  javaExecutable: "+yaml(java)
+        Path anonymousDefault=temp.resolve("schedule-anonymous-default.yaml");Files.writeString(anonymousDefault,"server:\n  dataDir: "+yaml(temp.resolve("schedule-anonymous-default-data"))+"\n  javaExecutable: "+yaml(java)
                 +"\n  authenticationRequired: false\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
-        IllegalArgumentException noGate=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(rejected));
-        assertTrue(noGate.getMessage().contains("allowAnonymousManagement"));
+        ServerConfig anonymousDefaultConfig=ServerConfig.load(anonymousDefault);
+        assertTrue(anonymousDefaultConfig.scheduling.allowAnonymousManagement);
 
         Path allowedAnonymous=temp.resolve("schedule-anonymous-allowed.yaml");Files.writeString(allowedAnonymous,"server:\n  dataDir: "+yaml(temp.resolve("schedule-anonymous-allowed-data"))+"\n  javaExecutable: "+yaml(java)
                 +"\n  authenticationRequired: false\n  scheduling:\n    enabled: true\n    allowAnonymousManagement: true\n    adminRole: SIT_OPERATORS\nworkers:\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
         ServerConfig anonymous=ServerConfig.load(allowedAnonymous);assertTrue(anonymous.scheduling.enabled);assertTrue(anonymous.scheduling.allowAnonymousManagement);assertEquals("SIT_OPERATORS",anonymous.scheduling.adminRole);
+
+        Path disabledAnonymous=temp.resolve("schedule-anonymous-disabled.yaml");Files.writeString(disabledAnonymous,"server:\n  dataDir: "+yaml(temp.resolve("schedule-anonymous-disabled-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  authenticationRequired: false\n  scheduling:\n    enabled: true\n    allowAnonymousManagement: false\nworkers:\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        assertFalse(ServerConfig.load(disabledAnonymous).scheduling.allowAnonymousManagement);
 
         Path disabledInspection=temp.resolve("schedule-inspection-disabled.yaml");Files.writeString(disabledInspection,"server:\n  dataDir: "+yaml(temp.resolve("schedule-inspection-disabled-data"))+"\n  javaExecutable: "+yaml(java)
                 +"\n  inspection:\n    enabled: false\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");

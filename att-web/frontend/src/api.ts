@@ -1,4 +1,4 @@
-import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type PackageSummary, type ServerVersion } from './types';
+import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type PackageSummary, type ServerVersion } from './types';
 import type {
   AcceptedJob, ConfigurationComparisonQuery, ConfigurationResponse, DebugDraftRequest, DraftResponse,
   DebugFormResponse, EffectiveConfigurationQuery, ResourceDetail, ResourceIdentity,
@@ -13,6 +13,9 @@ import type {
   DeleteScheduleResponse, LoadSchedule, LoadScheduleInput, ScheduleOccurrence, SchedulePreview,
   SchedulePreviewInput,
 } from './features/schedules/types';
+
+let csrfToken = '';
+let localAuthMode = false;
 
 /** Resolve the API below the current UI context (for example /att/ui/ -> /att/api/v1/). */
 export function apiBaseUrl(): URL {
@@ -43,11 +46,19 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   if (init.body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  const method = (init.method || 'GET').toUpperCase();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken) headers.set('X-ATT-CSRF', csrfToken);
   const response = await fetch(url, { ...init, headers, credentials: 'same-origin' });
+  const nextCsrf = response.headers.get('X-ATT-CSRF');
+  if (nextCsrf) csrfToken = nextCsrf;
   const body = parseBody(await response.text());
   if (!response.ok) {
     const payload = body && typeof body === 'object' ? body as { error?: ApiErrorBody; requestId?: string; diagnostics?: unknown } : {};
     const detail = payload.error;
+    if (localAuthMode && detail?.code === 'ATT-SERVER-AUTHENTICATION-REQUIRED' && path !== 'auth/me') {
+      const returnTo = location.pathname + location.search + location.hash;
+      location.assign(new URL('login.html?returnTo=' + encodeURIComponent(returnTo), document.baseURI).toString());
+    }
     throw new ApiError(detail?.summary || ('ATT API request failed (' + response.status + ').'), {
       status: response.status,
       code: detail?.code,
@@ -120,8 +131,32 @@ function subscribeJob(jobId: string, handlers: JobEventHandlers): () => void {
 }
 
 export const api = {
-  getVersion(signal?: AbortSignal): Promise<ServerVersion> {
-    return request<ServerVersion>('version', { signal });
+  async getVersion(signal?: AbortSignal): Promise<ServerVersion> {
+    const version = await request<ServerVersion>('version', { signal });
+    localAuthMode = version.authMode === 'local';
+    return version;
+  },
+  getCurrentUser(signal?: AbortSignal): Promise<{ loginId: string; displayName: string; role: 'ADMIN' | 'USER'; csrfToken?: string }> {
+    return request('auth/me', { signal });
+  },
+  logout(): Promise<{ loggedOut: boolean }> {
+    return request('auth/logout', { method: 'POST', body: '{}' });
+  },
+  listLocalUsers(signal?: AbortSignal): Promise<{ items: LocalAuthUser[] }> {
+    return request('auth/users', { signal });
+  },
+  createLocalUser(input: { loginId: string; displayName: string; role: 'ADMIN' | 'USER'; password: string }): Promise<{ user: LocalAuthUser }> {
+    return postJson('auth/users', input);
+  },
+  setLocalUserEnabled(loginId: string, enabled: boolean): Promise<{ enabled: boolean } | { disabled: boolean }> {
+    const path = 'auth/users/' + encodeURIComponent(loginId);
+    return enabled ? postJson(path + '/enable', {}) : request(path, { method: 'DELETE' });
+  },
+  resetLocalUserPassword(loginId: string, password: string): Promise<{ updated: boolean }> {
+    return postJson('auth/users/' + encodeURIComponent(loginId) + '/password', { password });
+  },
+  changeLocalPassword(currentPassword: string, newPassword: string): Promise<{ updated: boolean }> {
+    return postJson('auth/password', { currentPassword, newPassword });
   },
   getPackages(signal?: AbortSignal): Promise<ApiEnvelope<PackageSummary>> {
     return request<ApiEnvelope<PackageSummary>>('packages', { signal });
@@ -204,6 +239,7 @@ export const api = {
     return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/compare' + queryString({
       left: query.left,
       right: query.right,
+      section: query.section,
       offset: query.offset,
       limit: query.limit,
     }), { signal });

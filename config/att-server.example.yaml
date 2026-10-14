@@ -3,9 +3,10 @@
 # Copy to ATT_HOME/config/att-server.yaml or a protected external path.
 server:
   dataDir: /opt/att/data
-  # true keeps Tomcat authentication. false enables full anonymous UI/API access:
-  # every caller shares identity "anonymous" and shared drafts/jobs, with no user isolation.
-  # Use false only on a trusted isolated network; see the deployment guide warning.
+  auth:
+    # container preserves Tomcat Realm/SSO; local enables ATT login and local accounts.
+    mode: container
+  # Legacy container-mode setting. false enables shared anonymous access; never use with local mode.
   authenticationRequired: true
   # Optional. Defaults to the Java runtime hosting Tomcat.
   # javaExecutable: /usr/lib/jvm/java-17/bin/java
@@ -23,10 +24,21 @@ server:
     heapMaxMb: 512
     maxResponseBytes: 262144
     maxSourceBytes: 65536
+    sourceBrowsing:
+      enabled: true
+      policy: safe-package-files
+      denyGlobs: []
+    redaction:
+      enabled: false
+      sensitivePaths: []
+      sensitiveFieldPatterns: []
     # Optional Tool script source allowlist. Paths are package-relative.
     # safeTextSources:
     #   default:
     #     - tools/payment-check.sh
+  # Origin equality checking is disabled by default; local cookie auth still requires CSRF.
+  security:
+    checkCrossOrigin: false
   # Browser-submitted Quick and Advanced Load are disabled unless explicitly enabled.
   inlineLoad:
     enabled: false
@@ -40,7 +52,9 @@ server:
   # Recurring package-backed Load schedules are disabled unless enabled here.
   scheduling:
     enabled: false
-    allowAnonymousManagement: false
+    # Defaults to true only when authenticationRequired is false and scheduling is enabled.
+    # Set false to keep schedule management restricted to the configured role.
+    # allowAnonymousManagement: false
     adminRole: ATT_ADMIN
     maxSchedules: 100
     minimumIntervalMinutes: 15

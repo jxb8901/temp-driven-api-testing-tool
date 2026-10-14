@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
+import { api } from './api';
 import type { RouteState } from './router';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -13,6 +14,7 @@ describe('AppShell', () => {
   afterEach(() => {
     if (root) act(() => root?.unmount());
     host?.remove();
+    vi.restoreAllMocks();
     root = undefined;
     host = undefined;
   });
@@ -37,7 +39,7 @@ describe('AppShell', () => {
       <AppShell
         route={navigation.route}
         navigation={navigation}
-        serverVersion={{ status: 'ready', data: { apiVersion: '1', version: '4.1.3', inlineLoadEnabled: true } }}
+        serverVersion={{ status: 'ready', data: { apiVersion: '1', version: '4.1.4', inlineLoadEnabled: true } }}
         selectedPackage="payments"
         selectedEnvironment=""
         onPackageChange={vi.fn()}
@@ -105,5 +107,25 @@ describe('AppShell', () => {
 
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true })));
     expect(host.textContent).toContain('Start a validated Load draft');
+  });
+
+  it('offers Change Password from the authenticated local user menu for a USER role', async () => {
+    vi.spyOn(api,'getCurrentUser').mockResolvedValue({loginId:'jane',displayName:'Jane Tester',role:'USER'});
+    localStorage.setItem('att-ui-theme','light');
+    host=document.createElement('div');document.body.append(host);root=createRoot(host);
+    const navigation:RouteState={route:{kind:'settings'},pendingNavigation:null,pendingDescription:'',isDirty:false,
+      navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>()=>{}),confirmNavigation:vi.fn(),cancelNavigation:vi.fn()};
+    await act(async()=>{root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{status:'ready',data:{apiVersion:'1',version:'4.1.4',authMode:'local',inlineLoadEnabled:false}}}
+      selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <p>Settings</p></AppShell>);await Promise.resolve();});
+    expect(host.textContent).toContain('Jane Tester');
+    const menu=host.querySelector('.att-current-user-menu') as HTMLDetailsElement;
+    act(()=>{menu.open=true;});
+    const change=[...host.querySelectorAll('.att-user-menu-panel button')].find(button=>button.textContent==='Change password') as HTMLButtonElement|undefined;
+    act(()=>change?.click());
+    expect(host.querySelector('#change-password-title')?.textContent).toBe('Change your password');
+    expect(host.querySelector('dialog[open]')).not.toBeNull();
+    expect(api.getCurrentUser).toHaveBeenCalledOnce();
   });
 });

@@ -1,6 +1,6 @@
 # ATT Server 部署與 API
 
-ATT Server 4.1.3 提供單節點控制平面，讓用戶透過版本化 REST API 提交 ATT Run、Debug、Load 及 Validate 工作。請將 WAR 部署至使用 Java 17 或更新版本的外部 Tomcat 10.1+。CLI、Engine 及 Worker 仍相容 Java 8。
+ATT Server 4.1.4 提供單節點控制平面，讓用戶透過版本化 REST API 提交 ATT Run、Debug、Load 及 Validate 工作。請將 WAR 部署至使用 Java 17 或更新版本的外部 Tomcat 10.1+。CLI、Engine 及 Worker 仍相容 Java 8。
 
 ## 準備部署
 
@@ -8,9 +8,9 @@ ATT Server 4.1.3 提供單節點控制平面，讓用戶透過版本化 REST API
 2. 將 package root 設於 allowed root 之下，並確保 Tomcat 服務帳戶可讀取。解壓後的 `$ATT_HOME/packages/default` 可直接註冊為 package root。
 3. 啟動前先建立 `server.dataDir`，並只允許 Tomcat 服務帳戶寫入。範例使用 `$ATT_HOME/data`；只要它與所有已註冊 package root 不相等、互不包含，即可使用。亦可使用 `/var/lib/att-server`。Server data 不可放入 package 內容。
 4. 將 `$ATT_HOME/config/att-server.example.yaml` 複製至 `$ATT_HOME/config/att-server.yaml` 或受保護的外部路徑，更新絕對路徑，並勿將憑證放入 package。升級時不可覆寫既有的 active config。
-5. 將 `att-server-4.1.3.war` 部署至 Tomcat 10.1+。Tomcat 可直接部署 packed WAR；隔離的 Worker 會從 `$ATT_HOME/lib` 載入版本相符的 `att-local-4.1.3.jar`。
+5. 將 `att-server-4.1.4.war` 部署至 Tomcat 10.1+。Tomcat 可直接部署 packed WAR；隔離的 Worker 會從 `$ATT_HOME/lib` 載入版本相符的 `att-local-4.1.4.jar`。
 
-Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.1.3.jar` 中共用的 Worker/Engine runtime；請在 Server WAR 旁安裝版本相符的 Local archive。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
+Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.1.4.jar` 中共用的 Worker/Engine runtime；請在 Server WAR 旁安裝版本相符的 Local archive。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
 
 Server 依次尋找 JVM property `-Datt.server.config`、環境變數 `ATT_SERVER_CONFIG`，再尋找 `$ATT_HOME/config/att-server.yaml`。最後一個路徑的 `ATT_HOME` 先取自 `-Datt.home`，再取自 `ATT_HOME` 環境變數。若選定的 config 不存在、不可讀或無效，Server 會在診斷中指出其路徑並停止啟動，不會改用其他來源。沒有明確來源或可用的預設 config 時，啟動錯誤會提供設定指引。
 
@@ -40,11 +40,15 @@ att/                              # ATT_HOME
 
 ## 設定
 
-`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。`server.inspection` 以有界的常駐 Worker pool 獨立限制唯讀資源探索。Worker pool 的程序數不會超過 `maxConcurrent`，每個程序會依次處理請求，並快取最多兩個 package index；package 檔案變更事件會令快取失效。資源探索另設佇列、逾時、heap、source 及 response 上限。除非 package 的 `server.inspection.safeTextSources` 明確列出相對路徑，否則不會提供 Tool script 文字。
+`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。`server.inspection` 以有界的常駐 Worker pool 獨立限制唯讀資源探索。Worker pool 的程序數不會超過 `maxConcurrent`，每個程序會依次處理請求，並快取最多兩個 package index；package 檔案變更事件會令快取失效。資源探索另設佇列、逾時、heap、source 及 response 上限。`sourceBrowsing.policy: safe-package-files` 預設允許受大小限制的 Template/Flow YAML 安全投影，無須逐檔 allowlist；設定檔、Testdata descriptor、Debug sidecar、secret 命名檔、binary、package root 以外的檔案及超大檔案不會透過 Source endpoint 提供。Tool script 文字仍須在 `server.inspection.safeTextSources` 以完全相同的 package-relative path 明確 allowlist。
+
+`server.inspection.redaction.enabled` 預設為 `false`，會在安全 projection 中顯示一般 package 值。即使關閉遮蔽或匿名存取，憑證、認證資料、private key 及常見個人資料欄位仍會保護；啟用遮蔽後亦會套用設定的敏感路徑、欄位 pattern 及自由文字預設值。遮蔽關閉時 Server 會記錄啟動警告，UI 會顯示目前設定。共享或正式資料建議啟用遮蔽並要求登入；未遮蔽值只應用於隔離的 SIT 網絡。
+
+`server.security.checkCrossOrigin` 預設為 `false`，只控制 state-changing API 的 Origin 相等檢查；設為 `true` 時，不匹配會回傳 `ATT-SERVER-ORIGIN-MISMATCH`。關閉此檢查不會略過 local cookie authentication 的 CSRF 驗證或 login/bootstrap 的 Origin 檢查，也不會啟用 CORS 或 wildcard header。反向代理應以可信來源設定 Tomcat `RemoteIpValve`，讓 Servlet request 提供外部 scheme、host 及 port；應用程式不會信任任意 forwarded header。Origin 檢查關閉時 Server 會記錄啟動警告。
 
 瀏覽器建立的 Quick Load 及 Advanced Load draft 另有獨立 opt-in：`server.inlineLoad.enabled` 預設為 `false`。啟用後，Server 會在 Engine 驗證後及進入佇列前，再次檢查 workload 數、target 數、Virtual User 總數、Arrival Rate 總和、每個 workload 及整體並行數上限，以及完整時間窗口上限。以下範例設定保守預設值。時間窗口上限為 warmup、ramp-up、duration、ramp-down 的總和；target 數包含固定 target 及每個 VU mix entry。功能停用時回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出設定上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。這些限制適用於瀏覽器建立的 draft；既有 path-based Load request 維持相容行為，並繼續受 `workers.maxConcurrentLoad` 限制。
 
-週期性 package-backed Load 排程另有獨立 opt-in：`server.scheduling.enabled` 預設為 `false`。啟用前請先選定管理員角色並檢視排程上限。已驗證部署需要 Servlet container role `server.scheduling.adminRole`（預設 `ATT_ADMIN`）；請在 Tomcat 將此 role 對應至可信操作人員。若關閉驗證，必須同時設定 `server.scheduling.allowAnonymousManagement: true` 才能啟動排程；所有匿名 caller 會共享排程管理權限，Server 亦會記錄啟動警告。此功能需要有界 package inspection。排程定義及執行歷史保存在 `server.dataDir` 的 H2 資料庫；請在同一 dataDir 只執行一個 Server 程序。每個排程預設保留最新 10,000 筆 terminal occurrence（`maxExecutionsPerSchedule` 可設為 100–100,000）；執行中及處理中的 occurrence 會保留。本 scheduler 不提供多節點 leader election。
+週期性 package-backed Load 排程另有獨立 opt-in：`server.scheduling.enabled` 預設為 `false`。啟用前請先選定管理員角色並檢視排程上限。已驗證部署需要 Servlet container role `server.scheduling.adminRole`（預設 `ATT_ADMIN`）；請在 Tomcat 將此 role 對應至可信操作人員。只有在 `authenticationRequired: false` 且排程已啟用時，`allowAnonymousManagement` 才預設為 `true`；設為 `false` 可保留 role 限制。匿名 caller 會共享排程管理權限，Server 會記錄明顯啟動警告；這只適用刻意隔離的測試部署，不建議用於共享或正式環境。此功能需要有界 package inspection。排程定義及執行歷史保存在 `server.dataDir` 的 H2 資料庫；請在同一 dataDir 只執行一個 Server 程序。每個排程預設保留最新 10,000 筆 terminal occurrence（`maxExecutionsPerSchedule` 可設為 100–100,000）；執行中及處理中的 occurrence 會保留。本 scheduler 不提供多節點 leader election。
 
 排程以 package ID 及 package-relative Load scenario 檔案為輸入。建立/編輯及每次 occurrence 前，有界 Inspector 會驗證和正規化完整 scenario 及 target closure；即使瀏覽器建立的 Load draft 停用，Server 的 Load users、rate、duration、workload 及 target 上限仍然適用。每個工作都使用檢查所得的 immutable scenario 及 package revision，再經標準 Worker 和 Server Load admission 路徑提交；既有 Load concurrency 及 queue 上限仍然適用。排程 API 只接受 scenario、選填 config/environment 及現有的字串型 Load options；options 會在儲存和提交前以 Server 上限及 Engine 驗證。不接受輸出路徑、package root、Worker 設定、憑證或 caller 提供的 principal。工作使用 Server 建立的 `load-schedule:<id>` principal。提交失敗會記錄且不重試。已接納工作的狀態與 evidence 維持標準 job 生命週期，與 schedule occurrence 分開。
 
@@ -67,10 +71,20 @@ server:
     heapMaxMb: 512
     maxResponseBytes: 262144
     maxSourceBytes: 65536
+    sourceBrowsing:
+      enabled: true
+      policy: safe-package-files
+      denyGlobs: []
+    redaction:
+      enabled: false
+      sensitivePaths: []
+      sensitiveFieldPatterns: []
     # 選填 Tool script source allowlist；路徑相對於 package。
     # safeTextSources:
     #   payments:
     #     - tools/payment-check.sh
+  security:
+    checkCrossOrigin: false
   inlineLoad:
     enabled: false
     maxWorkloads: 10
@@ -126,7 +140,43 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 ## 驗證與身份
 
-`server.authenticationRequired: true`（預設值）時，Tomcat 負責驗證請求，ATT Server 會在 Web UI 及受保護的 API 操作使用 Servlet Principal。Health 及 version 維持公開。設為 `false` 時，完整 Web UI、REST 及 Remote API 均可在沒有 Servlet Principal 下使用；Server 會把所有 caller 統一解析為共享授權身份 `anonymous`，即使 container 同時提供 Principal 亦然。所有匿名 caller 共享 drafts、jobs 及 artifacts，沒有個別用戶隔離或責任追蹤。啟用此模式時 ATT 會在啟動日誌發出警告。此設定不會略過 `web.xml` 中的 Tomcat security constraint；Tomcat 會在 ATT 處理請求前執行這些限制。
+`server.auth.mode` 選擇驗證提供者。為保留現有部署，預設為 `container`。設為 `local` 後，ATT 會管理本地帳戶。Local mode 必須同時設定 `authenticationRequired: true`；若與舊式匿名設定 `false` 一起使用，Server 會拒絕啟動。
+
+在 `container` mode 中，Tomcat 驗證請求，ATT 使用 Servlet Principal。現有 BASIC、FORM 及 SSO 部署會保留由 container 管理的登入流程。Health 及 version 維持公開。舊式 `server.authenticationRequired: false` 只適用於 container mode，會讓 UI 及 API 共用匿名存取，只應用於隔離且可信的網絡。所有匿名 caller 共用 drafts、jobs 及 artifacts。啟用時 ATT 會在啟動日誌發出警告。
+
+在 `local` mode 中，未登入的瀏覽器開啟 `/ui/` 時會轉至 ATT 登入頁；REST API 則回傳結構化 JSON `401`。首次管理員帳戶使用 `dataDir/bootstrap-admin.token` 內的隨機一次性 token 建立。請限制 `dataDir` 只供 Server 作業系統帳戶存取，在登入頁輸入 token 完成建立，之後移除對 token 檔案的存取。初始化時會先寫入權限受限的暫存檔，再以原子 rename 安裝 token；啟動時只有在尚無帳戶且 bootstrap 未被認領時才會修復無效 token。Bootstrap 一經認領便不會重新開啟。系統沒有預設帳戶或密碼。除 loopback 開發外，所有包含本地密碼的請求（登入、bootstrap、建立帳戶、重設及自行變更密碼）都必須使用 HTTPS。Tomcat 只會透過已設定的可信任 proxy 判斷 proxy 終止的 HTTPS；不可信任的 forwarded header 不會建立 HTTPS 狀態。本地密碼以每位用戶獨立 salt 的 PBKDF2-HMAC-SHA-256 雜湊保存。首個版本支援 `ADMIN` 及 `USER`；所有已驗證用戶均可使用一般 Server 操作，帳戶管理及 Scheduled Load 管理則要求 `ADMIN`。
+
+Local session 使用不透明的 server-side identifier，登入時會輪替，閒置 30 分鐘或累計 12 小時後失效。登出、密碼變更或重設、停用帳戶都會撤銷 session。Server 重啟後，未到期或未撤銷的 session 仍有效。Cookie 設為 HttpOnly、SameSite=Lax，Path 限於部署 context；Tomcat 判斷請求使用 HTTPS 時亦會設 Secure。啟用 TLS termination 前，請先設定可信任的反向代理，讓 Tomcat 識別外部 HTTPS scheme。所有使用 cookie 驗證的狀態變更請求，以及由瀏覽器發出的 Basic-authenticated 狀態變更請求，必須在 `X-ATT-CSRF` 提交 CSRF token；登入及一次性 bootstrap endpoint 則要求 same-origin JSON。設為 `security.checkCrossOrigin: false` 只會放寬 Origin 相同來源檢查，不會略過 cookie CSRF token，也不會略過登入/bootstrap 的 same-origin JSON 要求，亦不會啟用 wildcard CORS。同一 login ID 及 client address 在 10 分鐘內失敗 8 次，或同一 client address 以不同 login ID 失敗 32 次後，登入會被限速。Bootstrap 每個 client address 在 10 分鐘內最多可輸入錯誤 token 8 次。自行變更密碼的 current-password 驗證使用相同限速及有界 hash semaphore。這些記憶體限速只適用於單一 Server process；多個 instance 請在共用的 edge 層設定 rate limit。登入回應不會區分不存在、已停用或密碼錯誤的帳戶。登入成功及失敗都會寫入 audit，並不記錄憑證。密碼以 310,000 次 PBKDF2-HMAC-SHA-256 計算雜湊；成功登入時會升級計算次數較低的舊 hash。
+
+`GET /api/v1/auth/me` 回傳安全的目前用戶資料及瀏覽器所需的 CSRF token。`POST /api/v1/auth/login` 及 `/api/v1/auth/logout` 管理 session。使用 local account 的 CLI 及 REST client 亦可透過 HTTPS Basic authentication 存取。管理員可使用 `GET`、`POST /api/v1/auth/users`、`POST /api/v1/auth/users/{loginId}/password`、`POST /api/v1/auth/users/{loginId}/enable` 及 `DELETE /api/v1/auth/users/{loginId}` 管理帳戶。`POST /api/v1/auth/password` 會先核對目前密碼，再變更自己的密碼。API 回應不會包含密碼雜湊、session identifier 或密碼。
+
+在 Studio 中，local `ADMIN` 可於 **Settings → User Management** 管理帳戶。列表只顯示登入 ID、顯示名稱、角色及啟用狀態。建立、啟用／停用及重設密碼都需要明確確認；停用或重設密碼會撤銷該用戶的 session。即使來自不同 Server runtime 的請求同時執行，Server 仍會拒絕停用最後一個啟用中的 `ADMIN`。所有 local 用戶均可在目前用戶選單使用 **Change password**。密碼變更成功後會撤銷目前 session，並返回登入頁面。密碼只會在表單開啟時暫存，不會寫入瀏覽器儲存空間或應用程式日誌。Container mode 的 Settings 會說明帳戶由 Tomcat 或設定的 SSO provider 管理。
+
+### 復原失去存取權的本地管理員
+
+一次性 bootstrap 不會重新開啟，也不是帳戶復原方式。若現有 `ADMIN` 忘記密碼或已被停用，請使用離線復原工具。此操作不能建立帳戶；若帳戶不存在或不是 `ADMIN`，工具會拒絕執行。
+
+1. 停止所有使用此 `server.dataDir` 的 Tomcat process，並等待完全結束。以下命令須以 Server 作業系統帳戶執行，並可寫入現有的 `dataDir`。
+2. 設定 `ATT_SERVER_WAR` 為部署中的 `att-server-4.1.4.war`、`CATALINA_HOME` 為 Tomcat 安裝目錄，以及 `JAVA_HOME` 為 Java 17 或更新版本。將 WAR 解壓至權限受限的暫存目錄，再以套件內 library 及 Tomcat Servlet API 啟動工具：
+
+   ```sh
+   umask 077
+   recovery_dir="$(mktemp -d)"
+   trap 'rm -rf "$recovery_dir"' EXIT
+   (
+     cd "$recovery_dir"
+     "$JAVA_HOME/bin/jar" xf "$ATT_SERVER_WAR"
+     "$JAVA_HOME/bin/java" -Datt.server.config=/absolute/path/to/att-server.yaml \
+       -cp "WEB-INF/lib/*:$CATALINA_HOME/lib/*" att.server.AuthRecoveryTool
+   )
+   ```
+
+3. 按互動提示輸入現有 ADMIN 登入 ID、輸入 `RECOVER ADMIN` 確認，然後輸入新密碼兩次。密碼輸入時不會顯示，也不接受作為命令列參數。
+4. 重新啟動 Tomcat，並使用新密碼登入。
+
+工具只會更新所選的現有 `ADMIN` row；若帳戶已停用，會重新啟用，並更新密碼雜湊及 CSRF token、撤銷該帳戶所有 session，以及記錄 `ADMIN_RECOVERY` audit event。工具不會修改 bootstrap claim 或建立 bootstrap token。若找不到現有資料庫、資料庫無法開啟，或指定帳戶不是 `ADMIN`，復原會失敗且不會建立帳戶。請保護備份、暫存解壓目錄及 `server.dataDir`，並視為 Server 憑證處理。
+
+Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的工作歸屬於已驗證的 login ID；其他用戶即使猜中 ID，也無法存取該 draft 或 job。同一歸屬檢查亦保護 job 狀態、結果、SSE、artifacts 及取消操作。Container mode 保留現有授權行為。
 
 匿名 job submission 可在最外層 JSON 加入選填的 `principal` label，只供顯示及 audit 使用。Server 會 trim 並以 Unicode 正規化 label、驗證長度及字元，然後在既有 job/audit `principal` 欄位加上 `(anonym)` 後綴，例如 `Bob(anonym)`。省略時維持既有值 `anonymous`；caller 不可自行提交保留後綴。此 label 由 caller 自行聲稱，不會改變授權、draft 存取、job 可見範圍、artifact 存取、取消或排程。驗證模式永遠使用 Servlet Principal，並忽略提交的 label。此歸屬資料不會傳給 Worker，也不會放進 ATT expression Context；不會新增持久化欄位或回應欄位。
 
@@ -141,9 +191,9 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
        portHeader="X-Forwarded-Port" />
 ```
 
-所有已驗證的 Servlet Principal 在 v1 均有相同權限；ATT 不要求特定 container role，也沒有 ATT 專用 RBAC。匿名模式會為整個 UI 及 API 略過驗證，只應用於可信的 SIT/development 部署。請將 Tomcat 綁定 loopback 或 private interface。若使用 reverse proxy，請以 VPN、防火牆或 IP allowlist 保護，並避免將 API 暴露於不可信網絡。離開 localhost 的流量必須使用 TLS。Draft 存於記憶體，Server 重啟後會清除；切換驗證模式亦須重啟，因此 draft 會被丟棄，不會轉交已驗證身份。ATT Server 不會實作密碼、JWT/OIDC 驗證、LDAP 驗證或登入流程。請勿在 API payload 或 package 檔案中放置憑證。
+`RemoteIpValve` 只應信任實際 proxy 位址。Proxy 加入 forwarded headers 前，必須先移除 client 自行提交的值。請將 Tomcat 綁定 loopback 或 private interface，並用 VPN、防火牆或 IP allowlist 保護 proxy。localhost 以外的流量必須使用 HTTPS。Draft 存於記憶體，Server 重啟後會清除。切換驗證 mode 需要重啟；現有 draft 不會轉移到其他身份。Local mode 不會讀取或修改 JSPWiki 帳戶檔案，也不提供外部 LDAP、OIDC、SAML 或共用 SSO。
 
-內建瀏覽器主控台位於 `<context path>/ui/`，使用與 API 相同的容器驗證機制。詳見 [ATT Server Web UI](reference.zh/att-server-web-ui.md)。
+內建瀏覽器主控台位於 `<context path>/ui/`，使用所選的 container 或 local 驗證 mode。Local mode 會在主控台提供帳戶管理及密碼變更功能。詳見 [ATT Server Web UI](att-server-web-ui.zh.md)。
 
 ## REST API
 
@@ -152,11 +202,16 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 | 方法 | 路徑 | 用途 |
 | --- | --- | --- |
 | `GET` | `/health`、`/version` | 健康狀態、build 及瀏覽器 Load capability 資訊 |
+| `GET`、`POST` | `/auth/bootstrap/status`、`/auth/bootstrap` | 檢查及執行一次性本地管理員初始化 |
+| `POST`、`GET` | `/auth/login`、`/auth/logout`、`/auth/me` | 建立／撤銷 local session 及讀取目前用戶資料 |
+| `GET`、`POST`、`DELETE` | `/auth/users`、`/auth/users/{loginId}` | 列出、建立、停用、啟用或重設本地帳戶（管理員） |
+| `POST` | `/auth/password` | 變更目前本地用戶的密碼 |
 | `GET` | `/metrics` | 有界的工作、Worker 及已啟用排程數量 |
 | `GET` | `/packages`、`/packages/{packageId}` | 讀取設定中的 registry |
 | `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | 列出安全的 Case、Template、Flow 及 Tool 投影 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | 讀取單一資源定義及關聯 |
-| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已遮蔽的 YAML 投影或允許清單內的 Tool script |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已淨化的 YAML 投影或允許清單內的 Tool script，並列出安全引用檔案 |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source-file?referenceId=...` | 透過不透明的資源範圍引用讀取一個合資格文字檔 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/debug-form?environment=SIT` | 讀取目標範圍內的安全 Debug 預設值 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT` | 讀取安全預設值及單 workload Quick Load 預覽 |
 | `GET` | `/packages/{packageId}/load-policy?model=virtualUsers&environment=SIT` | 讀取 Advanced Load 使用的安全 model policy 預設值 |
@@ -216,7 +271,7 @@ API 會回傳 `202 Accepted` 及 job ID。工作狀態依序為 `QUEUED`、`PREP
 
 `GET /jobs` 回傳最近 100 項工作。可加上 `?principal=<text>`，在既有 `principal` property 內作不區分大小寫的文字搜尋；搜尋會在 100 項上限前執行，並採用子字串比對，因此搜尋 `alice` 亦會匹配 `alice(anonym)`。Web UI 及 `att remote jobs --principal <text>` 均使用此篩選。舊紀錄保留原有值，包括先前的 `anonymous` 紀錄。系統不會保存提交 payload，只保存 command 及 package ID 摘要。Engine result 及診斷會作為控制平面 metadata 保存。較大的報告、log 及其他證據會留在工作輸出目錄。
 
-資源探索可用 `case`、`template`、`flow` 或 `tool` 篩選。每頁預設 50 項，最多 100 項；續頁 cursor 會加密並綁定 Server 解析出的身份及查詢。匿名模式下所有 caller 共用同一 cursor 身份。若 package 內容改變，舊 cursor 會以 `409` 拒絕。Explorer 回傳邏輯資源 ID、安全投影、來源資訊、關聯及穩定診斷碼。YAML source 是解析及遮蔽後的投影，並非原始檔案內容。只有 Server 設定明確允許的 package 相對路徑才會提供 Tool script source。探索程序不會執行 Tool，也不提供檔案系統瀏覽器；檢查佇列、Worker heap、逾時及 response 大小均與一般工作執行分開限制。
+資源探索可用 `case`、`template`、`flow` 或 `tool` 篩選。每頁預設 50 項，最多 100 項；續頁 cursor 會加密並綁定 Server 解析出的身份及查詢。匿名模式下所有 caller 共用同一 cursor 身份。若 package 內容改變，舊 cursor 會以 `409` 拒絕。Explorer 回傳邏輯資源 ID、安全投影、來源資訊、關聯及穩定診斷碼。YAML source 是解析及淨化後的投影，並非原始檔案內容。Template/Flow 的安全 `&{...}` 引用文字可透過 `source-file` endpoint 讀取；Server 會確認 canonical path 留在 package root，並檢查副檔名、deny path、文字編碼及大小，再以資源範圍不透明 `referenceId` 取用。Tool script source 只會在 Server 明確允許其 package 相對路徑時提供。憑證、個人資料、原始 config/Testdata、Debug sidecar、binary 及拒絕路徑仍會遮蔽或禁止，不受 display masking 設定影響。探索程序不會執行 Tool，也不提供檔案系統瀏覽器；檢查佇列、Worker heap、逾時及 response 大小均與一般工作執行分開限制。
 
 ### 套件資源探索
 
@@ -254,9 +309,10 @@ GET /api/v1/packages/payments/resources?type=case&query=refund&limit=50
 ```http
 GET /api/v1/packages/payments/resources/template/{resourceId}
 GET /api/v1/packages/payments/resources/template/{resourceId}/source
+GET /api/v1/packages/payments/resources/template/{resourceId}/source-file?referenceId=<opaque>
 ```
 
-詳細回應包含 `resource`、`definition`、`diagnostics` 及 `requestId`。來源回應包含 `resource`、`available`、`format`、`text`、`redacted` 及 `requestId`。來源不可用時，`available` 為 `false`，`reason` 為 `source-unavailable` 或 `size-limit`，而且不會回傳部分內容。找不到目標的關聯會標示 `resolution: "unresolved"`，並附有穩定資源診斷碼。
+詳細回應包含 `resource`、`definition`、`diagnostics` 及 `requestId`。Template/Flow YAML source 回應包含 `resource`、`available`、`format`、`text`、`redacted`、`fileReferences`、`fileReferencesTruncated` 及 `requestId`。每個合資格 `fileReferences` 項目包含 package-relative `logicalPath` 及不透明 `referenceId`；將 ID 傳給 `source-file` 後，Server 會再次執行 canonical containment 及 visibility 檢查並回傳有界文字。Source-file 回應包含 `logicalPath`、已淨化的 `text` 及 `redacted`。此 route 使用與其他 inspection endpoint 相同的身份及授權 mode；匿名模式仍受個別 inspection feature gate 限制。不要由 logical path 建立 filesystem URL。來源不可用時，`available` 為 `false`，會回傳穩定 reason，而且不會回傳部分內容。找不到目標的關聯會標示 `resolution: "unresolved"`，並附有穩定資源診斷碼。
 
 無效清單參數會回傳 `400`；未知 package/resource 使用相同的 `404` 格式。過期 cursor 回傳 `409`，超大回應回傳 `413`，探索佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。錯誤回應使用既有的 `error.code`、`error.summary` 及 `requestId` 格式，不會包含實體路徑或 parser exception 訊息。
 
@@ -370,13 +426,14 @@ Server 會驗證完整 scenario 並 resolve 所有 target，不會排程流量�
 GET /api/v1/packages/payments/configuration?view=declared
 GET /api/v1/packages/payments/configuration/effective?environment=SIT
 GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&offset=0&limit=50
-GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT
-GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&offset=0&limit=50
+GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&section=dbhelpers
+GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&section=dbhelpers&offset=0&limit=50
+GET /api/v1/packages/payments/configuration/testdata/{descriptorId}/records?environment=SIT&offset=0&limit=50
 ```
 
-Declared view 會回傳 schema version、安全的 global 欄位、已設定 profile，以及每個設定 section 的 declared/absent 狀態、項目數量和 profile 繼承或替換狀態。Effective view 使用 `FrameworkConfigLoader` 選擇 environment，並回傳安全的 helper、Tool 及 Testdata descriptor metadata。Root-only package 或使用已設定的預設值時可省略 `environment`。第一個 effective 回應會提供各 section 的數量；按 section ID（`dbhelpers`、`mqhelpers`、`sshhelpers`、`httphelpers`、`tools` 或 `testdata`）要求其項目。Effective section 及 comparison 欄位回應支援 `offset` 與 `limit`（1–100，預設 50），並回傳 `total` 和 `nextOffset` 以供分頁。檢查過程不會連接 DB、MQ、HTTP 或 SSH 服務，也不會回傳未限制的設定 YAML 或 Testdata records。
+Declared view 會回傳 schema version、安全的 global 欄位、已設定 profile，以及每個設定 section 的 declared/absent 狀態、項目數量和 profile 繼承或替換狀態。Effective view 使用 `FrameworkConfigLoader` 選擇 environment，並回傳安全的 helper、Tool 及 Testdata descriptor metadata。Root-only package 或使用已設定的預設值時可省略 `environment`。第一個 effective 回應會提供各 section 的數量；按 section ID（`dbhelpers`、`mqhelpers`、`sshhelpers`、`httphelpers`、`tools` 或 `testdata`）要求其項目。Effective section 及 comparison 欄位回應支援 `offset` 與 `limit`（1–100，預設 50），並回傳 `total` 和 `nextOffset` 以供分頁。比較要求必須提供 section ID；Server 會先驗證並篩選兩個 profile，再分頁。檢查過程不會連接 DB、MQ、HTTP 或 SSH 服務，也不會回傳未限制的設定 YAML。只有所選 environment 已設定的 Testdata descriptor 可透過上述 records endpoint 分頁預覽；一般值預設可見，憑證、認證資料及常見個人資料欄位始終遮蔽。啟用 `redaction` 後亦會套用設定的敏感路徑和欄位 pattern。未知或未設定的 descriptor 回傳 `404`。
 
-比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對路徑、憑證、連線 endpoint、網絡拓撲或未限制的 descriptor 內容。
+比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對本機路徑、憑證、Server 自身的秘密或未限制的 descriptor 內容。關閉 masking 時，非憑證 URL、host 及 port 等一般連線設定會顯示；啟用 masking 後，設定的操作欄位及路徑亦會遮蔽。
 
 設定回應包含 `view`、`state`、可用時的 `schemaVersion` 及 `diagnostics`。分頁回應亦包含 `section`、`offset`、`limit`、`total` 及 `nextOffset`。無效設定會以 HTTP 200 回傳 `state: "invalid"` 及穩定診斷碼；格式錯誤的 profile 參數回傳 `400`。未知 package 回傳 `404`，超大回應回傳 `413`，檢查佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。回應大小、佇列和逾時限制與資源探索相同。
 
@@ -401,7 +458,7 @@ Artifact 路徑必須相對於工作輸出目錄。絕對路徑、目錄 travers
 
 ## 發行與相容性
 
-Server binary 會以獨立的 `att-4.1.3-server.tar.gz` 發佈，內含 `server/att-server-4.1.3.war`（ATT application code 已合併至 `WEB-INF/lib/att-server-4.1.3.jar`）及部署指南。Local CLI 位於 `att-4.1.3-local.tar.gz`，其 `lib/att-local-4.1.3.jar` 提供共用 Worker/Engine runtime；Server 會載入相同版本的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
+Server binary 會以獨立的 `att-4.1.4-server.tar.gz` 發佈，內含 `server/att-server-4.1.4.war`（ATT application code 已合併至 `WEB-INF/lib/att-server-4.1.4.jar`）及部署指南。Local CLI 位於 `att-4.1.4-local.tar.gz`，其 `lib/att-local-4.1.4.jar` 提供共用 Worker/Engine runtime；Server 會載入相同版本的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
 
 ### Issue #176 rollout checklist
 

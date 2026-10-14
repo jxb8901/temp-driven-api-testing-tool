@@ -35,6 +35,9 @@ class WebUiPackagingTest {
                 "The generated stylesheet must include the shared tokens.");
         assertNotNull(loader.getResource("META-INF/resources/ui/legacy.html"), "Keep the explicit rollback page during migration.");
         assertNotNull(loader.getResource("META-INF/resources/ui/app.js"), "Legacy workflow assets remain available only to the rollback page.");
+        String login=read(loader,"META-INF/resources/ui/login.html");
+        assertTrue(login.contains("bootstrap-form")&&login.contains("login-form"),"The packaged unauthenticated page must support first-admin setup and login.");
+        assertNotNull(loader.getResource("META-INF/resources/ui/login.js"));assertNotNull(loader.getResource("META-INF/resources/ui/login.css"));
     }
 
     @Test void uiSharesTheContainerAuthenticationFilter() {
