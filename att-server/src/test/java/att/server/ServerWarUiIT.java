@@ -16,6 +16,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarInputStream;
@@ -240,6 +241,21 @@ class ServerWarUiIT {
             assertFalse(referencedSource.path("text").asText().contains("template-secret"),
                     "Safe source projection must scrub classified-looking password values before the UI receives them.");
             assertTrue(referencedSource.path("redacted").asBoolean());
+            JsonNode flowResources = getJson(port, api + "/packages/payments/resources?type=flow", ordinary);
+            JsonNode referenceFlow = null;
+            for (JsonNode item : flowResources.path("items")) {
+                if ("reference.flow.v1".equals(item.path("logicalId").asText())) referenceFlow = item;
+            }
+            assertNotNull(referenceFlow, flowResources.toString());
+            JsonNode referenceFlowSource = getJson(port, api + "/packages/payments/resources/flow/"
+                    + referenceFlow.path("resourceId").asText() + "/source", ordinary);
+            assertTrue(referenceFlowSource.path("available").asBoolean(), referenceFlowSource.toString());
+            assertEquals("templates/flows/reference/flow.yaml", referenceFlowSource.path("logicalPath").asText());
+            assertTrue(referenceFlowSource.path("text").asText().contains("&{templates/SCHEDULED/payload/request.xml}"),
+                    referenceFlowSource.toString());
+            assertEquals("templates/SCHEDULED/payload/request.xml",
+                    referenceFlowSource.path("fileReferences").get(0).path("logicalPath").asText(), referenceFlowSource.toString());
+            if ("1".equals(System.getenv("ATT_UI_SERVER_PLAYWRIGHT"))) runServerUiPlaywright(origin);
             String deniedSourcePath = api + "/packages/payments/configuration/source?path="
                     + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8)
                     + "&origin=" + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8);
@@ -380,6 +396,7 @@ class ServerWarUiIT {
 
     private static void writeScheduledPackage(Path packageRoot) throws Exception {
         Path templates = Files.createDirectories(packageRoot.resolve("templates/SCHEDULED"));
+        Path referenceFlow = Files.createDirectories(packageRoot.resolve("templates/flows/reference"));
         Path loads = Files.createDirectories(packageRoot.resolve("load"));
         Files.createDirectories(packageRoot.resolve("testcase"));
         Files.createDirectories(packageRoot.resolve("config"));
@@ -398,10 +415,33 @@ class ServerWarUiIT {
                         + "  message:\n    type: log\n    message: scheduled Load integration\n");
         Path payload = Files.createDirectories(templates.resolve("payload"));
         Files.writeString(payload.resolve("request.txt"), "request: payload\npassword: template-secret\n");
+        Files.writeString(payload.resolve("request.xml"), "<request>safe payload</request>\n");
+        Files.writeString(referenceFlow.resolve("flow.yaml"),
+                "schemaVersion: att-flow/v3.6\nid: reference.flow.v1\nname: Reference Flow\n"
+                        + "description: Exercises safe package file links in a Flow source.\nactions:\n"
+                        + "  inspectPayload:\n    type: log\n    message: \"Request &{templates/SCHEDULED/payload/request.xml}\"\n");
         Files.writeString(loads.resolve("scenario.yaml"),
                 "schemaVersion: att-load/v1.6\nworkloads:\n  - id: scheduled-long-run\n    target:\n      type: template\n      id: SCHEDULED\n"
                         + "    load:\n      users: 1\n      duration: 30s\n    execution:\n      thinkTime: 1s\n");
         Files.writeString(loads.resolve("invalid.yaml"), "schemaVersion: att-load/invalid\nworkloads: []\n");
+    }
+
+    private void runServerUiPlaywright(String origin) throws Exception {
+        Path harness = Path.of("tools", "ui-acceptance").toAbsolutePath();
+        Path output = temp.resolve("server-ui-playwright.log");
+        ProcessBuilder builder = new ProcessBuilder("node", "server-api-smoke.cjs")
+                .directory(harness.toFile()).redirectErrorStream(true).redirectOutput(output.toFile());
+        builder.environment().put("ATT_UI_SERVER_ORIGIN", origin);
+        builder.environment().put("ATT_UI_SERVER_USERNAME", "schedule-admin");
+        builder.environment().put("ATT_UI_SERVER_PASSWORD", "secret");
+        Process process = builder.start();
+        if (!process.waitFor(120, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            fail("Playwright did not finish its packaged-WAR API smoke within 120 seconds. "
+                    + (Files.exists(output) ? Files.readString(output) : ""));
+        }
+        String log = Files.exists(output) ? Files.readString(output) : "";
+        assertEquals(0, process.exitValue(), "Playwright against the authenticated non-root Tomcat WAR failed:\n" + log);
     }
 
     private static void copySchemas(Path packageRoot) throws Exception {

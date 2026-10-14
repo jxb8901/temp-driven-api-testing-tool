@@ -1,11 +1,29 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type UIEvent } from 'react';
 import { ResourceTree, resourceKey } from './ResourceTree';
 import { SourceViewer } from './SourceViewer';
 import { CodeEditor } from '../code/CodeEditor';
 import { TypedSidecarForm } from './TypedSidecarForm';
-import type { DebugDraftRequest, DraftResponse, ExplorerApi, ExplorerPageProps, JsonObject, ResourceIdentity, ResourceReference, ResourceSortField, ResourceSummary } from './types';
+import type { DebugDraftRequest, Diagnostic, DraftResponse, ExplorerApi, ExplorerPageProps, JsonObject, ResourceIdentity, ResourceReference, ResourceSortField, ResourceSummary } from './types';
 
 const MAX_DEFINITION_CHARACTERS = 100_000;
+const RESOURCE_PAGE_SIZE = 50;
+
+interface ExplorerListSnapshot {
+  query: string;
+  typeFilter: ResourceSummary['type'] | 'all';
+  sortKey: ResourceSortField;
+  sortDirection: 'asc' | 'desc';
+  pagesLoaded: number;
+  scrollTop: number;
+}
+
+const explorerListSnapshots = new Map<string, ExplorerListSnapshot>();
+
+function savedExplorerList(packageId: string): ExplorerListSnapshot {
+  return explorerListSnapshots.get(packageId) || {
+    query: '', typeFilter: 'all', sortKey: 'name', sortDirection: 'asc', pagesLoaded: 1, scrollTop: 0,
+  };
+}
 
 type DetailTab = 'definition' | 'source' | 'relations';
 
@@ -62,10 +80,11 @@ function ExplorerReference({ reference, onOpen }: { reference: ResourceReference
 
 export function ExplorerPage({ api, packageId, resourceRoute, environment, principalLabel = '', onResourceRouteChange,
   onEnvironmentChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad, onOpenConfiguration, onOpenConfigurationFile, registerUnsavedChanges }: ExplorerPageProps) {
-  const [query, setQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>('all');
-  const [sortKey, setSortKey] = useState<ResourceSortField>('name');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const initialListState = useRef(savedExplorerList(packageId)).current;
+  const [query, setQuery] = useState(initialListState.query);
+  const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
+  const [sortKey, setSortKey] = useState<ResourceSortField>(initialListState.sortKey);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(initialListState.sortDirection);
   const [resources, setResources] = useState<ResourceSummary[]>([]);
   const [totalResources, setTotalResources] = useState(0);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -90,6 +109,13 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   const [dirty, setDirty] = useState(false);
   const [principal, setPrincipal] = useState(principalLabel);
   const [resourceRefresh, setResourceRefresh] = useState(0);
+  const resourceListRef = useRef<HTMLDivElement | null>(null);
+  const pagesToRestore = useRef(Math.max(1, initialListState.pagesLoaded));
+  const savedScrollTop = useRef(Math.max(0, initialListState.scrollTop));
+  const didRestoreScroll = useRef(false);
+  const scrollSaveTimer = useRef<number | null>(null);
+  const listStateRef = useRef({ packageId, query, typeFilter, sortKey, sortDirection });
+  listStateRef.current = { packageId, query, typeFilter, sortKey, sortDirection };
   const dirtyRef = useRef(false);
   const unregisterDirtyRef = useRef<(() => void) | null>(null);
   const selectedRouteKey = resourceRouteKey(resourceRoute);
@@ -131,22 +157,87 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   useEffect(() => {
     setResources([]); setCursor(null); setResourceError(''); setResourceStatus('Loading package resources…');
     const controller = new AbortController();
+    setLoadingResources(true);
+    const requestedPages = Math.min(pagesToRestore.current, 1000);
     const timer = window.setTimeout(() => {
-      setLoadingResources(true);
-      api.listResources(packageId, { query: query.trim() || undefined, type: typeFilter, sort: sortKey, direction: sortDirection, limit: 50 }, controller.signal)
-        .then(page => {
-          setResources(page.items || []); setTotalResources(Number(page.total || 0)); setCursor(page.nextCursor || null);
-          const warning = page.diagnostics?.map(item => item.summary || item.code).filter(Boolean).join(' ');
-          setResourceStatus(`Showing ${(page.items || []).length} of ${Number(page.total || 0)} resources.${warning ? ` ${warning}` : ''}`);
+      void (async () => {
+        const accumulated: ResourceSummary[] = [];
+        let nextCursor: string | null = null;
+        let total = 0;
+        let diagnostics: Diagnostic[] = [];
+        let pagesFetched = 0;
+        try {
+          for (let index = 0; index < requestedPages; index++) {
+            const page = await api.listResources(packageId, {
+              query: query.trim() || undefined, type: typeFilter, sort: sortKey, direction: sortDirection,
+              ...(nextCursor ? { cursor: nextCursor } : {}), limit: RESOURCE_PAGE_SIZE,
+            }, controller.signal);
+            if (controller.signal.aborted) return;
+            accumulated.push(...(page.items || []));
+            total = Number(page.total || 0);
+            nextCursor = page.nextCursor || null;
+            diagnostics = page.diagnostics || [];
+            pagesFetched++;
+            if (!nextCursor) break;
+          }
+          if (controller.signal.aborted) return;
+          pagesToRestore.current = Math.max(1, pagesFetched);
+          setResources(accumulated); setTotalResources(total); setCursor(nextCursor);
+          const warning = diagnostics.map(item => item.summary || item.code).filter(Boolean).join(' ');
+          setResourceStatus(`Showing ${accumulated.length} of ${total} resources.${warning ? ` ${warning}` : ''}`);
           setResourceError('');
-        }).catch(error => {
+          explorerListSnapshots.set(packageId, {
+            ...listStateRef.current, pagesLoaded: pagesToRestore.current, scrollTop: savedScrollTop.current,
+          });
+        } catch (error) {
           if (!controller.signal.aborted) { setResourceError(userError(error, 'resource discovery')); setResourceStatus('Resource discovery failed.'); }
-        }).finally(() => { if (!controller.signal.aborted) setLoadingResources(false); });
+        } finally { if (!controller.signal.aborted) setLoadingResources(false); }
+      })();
     }, query ? 220 : 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [api, packageId, query, typeFilter, sortKey, sortDirection, resourceRefresh]);
 
+  useEffect(() => {
+    explorerListSnapshots.set(packageId, {
+      ...listStateRef.current, pagesLoaded: pagesToRestore.current, scrollTop: savedScrollTop.current,
+    });
+  }, [packageId, query, typeFilter, sortKey, sortDirection]);
+
+  useEffect(() => {
+    if (loadingResources || didRestoreScroll.current) return;
+    const container = resourceListRef.current;
+    if (!container) return;
+    container.scrollTop = savedScrollTop.current;
+    didRestoreScroll.current = true;
+  }, [loadingResources, resources.length]);
+
+  useEffect(() => () => {
+    if (scrollSaveTimer.current !== null) window.clearTimeout(scrollSaveTimer.current);
+    explorerListSnapshots.set(packageId, {
+      ...listStateRef.current, pagesLoaded: pagesToRestore.current, scrollTop: savedScrollTop.current,
+    });
+  }, [packageId]);
+
+  const resetListPosition = () => {
+    pagesToRestore.current = 1;
+    savedScrollTop.current = 0;
+    didRestoreScroll.current = true;
+    if (resourceListRef.current) resourceListRef.current.scrollTop = 0;
+  };
+
+  const handleListScroll = (event: UIEvent<HTMLDivElement>) => {
+    savedScrollTop.current = event.currentTarget.scrollTop;
+    if (scrollSaveTimer.current !== null) window.clearTimeout(scrollSaveTimer.current);
+    scrollSaveTimer.current = window.setTimeout(() => {
+      explorerListSnapshots.set(packageId, {
+        ...listStateRef.current, pagesLoaded: pagesToRestore.current, scrollTop: savedScrollTop.current,
+      });
+      scrollSaveTimer.current = null;
+    }, 100);
+  };
+
   const changeSort = (field: ResourceSortField) => {
+    resetListPosition();
     if (field === sortKey) setSortDirection(value => value === 'asc' ? 'desc' : 'asc');
     else { setSortKey(field); setSortDirection('asc'); }
   };
@@ -158,6 +249,10 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
       const page = await api.listResources(packageId, { query: query.trim() || undefined, type: typeFilter, sort: sortKey, direction: sortDirection, cursor, limit: 50 });
       setResources(current => [...current, ...(page.items || [])]); setCursor(page.nextCursor || null);
       setResourceStatus(`Showing ${resources.length + (page.items || []).length} of ${totalResources} resources.`);
+      pagesToRestore.current++;
+      explorerListSnapshots.set(packageId, {
+        ...listStateRef.current, pagesLoaded: pagesToRestore.current, scrollTop: savedScrollTop.current,
+      });
     } catch (error) { setResourceError(userError(error, 'loading more resources')); }
     finally { setLoadingResources(false); }
   };
@@ -305,19 +400,19 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
     <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}`}>
       <aside className="att-explorer-navigation" aria-label="Resource navigation">
         <h2>Resources</h2>
-        <label>Search resources <input type="search" value={query} maxLength={200} onChange={event => setQuery(event.currentTarget.value)} /></label>
+        <label>Search resources <input type="search" value={query} maxLength={200} onChange={event => { resetListPosition(); setQuery(event.currentTarget.value); }} /></label>
         <div className="att-explorer-categories" role="tablist" aria-label="Resource categories">
           {([
             ['all', 'All'], ['case', 'Test Cases'], ['template', 'Templates'], ['flow', 'Flows'], ['tool', 'Tools'],
           ] as Array<[ResourceSummary['type'] | 'all', string]>).map(([value, label]) =>
             <button key={value} type="button" role="tab" aria-selected={typeFilter === value}
-              onClick={() => setTypeFilter(value)}>{label}</button>)}
+              onClick={() => { resetListPosition(); setTypeFilter(value); }}>{label}</button>)}
         </div>
         <p className="att-explorer-status" role="status" aria-live="polite">{resourceStatus}</p>
         {resourceError && <p className="att-error" role="alert">{resourceError}<button type="button" onClick={() => setResourceRefresh(value => value + 1)}>Retry</button></p>}
         <ResourceTree items={resources} selectedKey={selectedKey} loading={loadingResources} nextCursor={cursor} sortKey={sortKey} direction={sortDirection} onSortChange={changeSort}
           onSelect={resource => onResourceRouteChange({ type: resource.type, resourceId: resource.resourceId })}
-          onLoadMore={() => void loadMore()} />
+          onLoadMore={() => void loadMore()} scrollContainerRef={resourceListRef} onListScroll={handleListScroll} />
         <p className="att-explorer-total">{totalResources.toLocaleString()} {typeFilter === 'all' ? 'package resources' : typeFilter + ' resources'}</p>
       </aside>
 

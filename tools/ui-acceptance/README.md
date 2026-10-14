@@ -27,6 +27,8 @@ The script covers static resources below the non-root `/att/` context, loaded/em
 
 The fixture prefers the packaged Maven UI, then `att-web/frontend/dist`. Set `ATT_UI_DIST` to a built Vite output directory to test a build stored outside the repository worktree.
 
+The issue-216 integration check also runs Playwright against the packaged WAR while `ServerWarUiIT` has authenticated stock Tomcat mounted at the non-root `/tools/att` context. It uses the real API without route interception to open a Flow's server-projected XML reference, inspect allowed and withheld configuration sources, preview generated Testdata, and open Quick Load at a tablet viewport. CI installs this harness and its browsers before Maven, then sets `ATT_UI_SERVER_PLAYWRIGHT=1` for `mvn clean verify`. To run it locally, install the harness and browser dependencies as above, then run `ATT_UI_SERVER_PLAYWRIGHT=1 mvn -B -ntp clean verify` from the repository root.
+
 Run the Scheduled Load workflow and accessibility check with:
 
 ```sh
@@ -63,4 +65,4 @@ Review the four PNGs beside the annotated reference in `docs/system-design/ui-sh
 
 To remove only this acceptance harness and its generated baseline, revert `tools/ui-acceptance/` and `docs/system-design/ui-shell-baseline/`. To roll back the app shell itself, follow the `Migration and rollback` section in `docs/system-design/ui-shell-architecture.md`; retain the earlier WAR UI regression test with that change.
 
-These checks use a local Python fixture and real browser. They do not replace the Java `ServerWarUiIT` packaging test or the stock-Tomcat non-root-context deployment check. Run the Maven integration checks separately in the project's normal Java CI/development environment.
+The general dashboard and workflow smoke scripts use a local Python API fixture. The opt-in `ServerWarUiIT` Playwright step is separate: it runs inside the packaged-WAR test while authenticated Tomcat and the Server API are live under `/tools/att`.

@@ -45,7 +45,7 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled }: {
     navigation.navigate({ kind: 'configuration', packageId: identity.packageId, environment: workspace.selectedEnvironment, tab: 'effective' });
   }, [navigation.navigate, workspace.selectedEnvironment]);
 
-  return <ExplorerPage
+  return <ExplorerPage key={packageId}
     api={api}
     packageId={packageId}
     resourceRoute={resourceRoute}

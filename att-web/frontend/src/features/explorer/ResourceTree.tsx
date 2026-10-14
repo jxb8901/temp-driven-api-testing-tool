@@ -1,4 +1,5 @@
 import type { ResourceSortField, ResourceSummary } from './types';
+import type { RefObject, UIEvent } from 'react';
 
 interface ResourceTreeProps {
   items: ResourceSummary[];
@@ -10,13 +11,15 @@ interface ResourceTreeProps {
   onSortChange: (field: ResourceSortField) => void;
   onSelect: (resource: ResourceSummary) => void;
   onLoadMore: () => void;
+  scrollContainerRef?: RefObject<HTMLDivElement | null>;
+  onListScroll?: (event: UIEvent<HTMLDivElement>) => void;
 }
 
 export function resourceKey(resource: Pick<ResourceSummary, 'type' | 'resourceId'>): string {
   return resource.type + ':' + resource.resourceId;
 }
 
-export function ResourceTree({ items, selectedKey, loading, nextCursor, sortKey, direction, onSortChange, onSelect, onLoadMore }: ResourceTreeProps) {
+export function ResourceTree({ items, selectedKey, loading, nextCursor, sortKey, direction, onSortChange, onSelect, onLoadMore, scrollContainerRef, onListScroll }: ResourceTreeProps) {
   const sortLabel = (key: ResourceSortField, label: string) => <button type="button" className="att-explorer-sort"
     aria-label={'Sort all matching resources by ' + label} onClick={() => onSortChange(key)}>
     {label}{sortKey === key ? (direction === 'desc' ? ' ↓' : ' ↑') : ''}
@@ -24,7 +27,7 @@ export function ResourceTree({ items, selectedKey, loading, nextCursor, sortKey,
 
   return <section className="att-explorer-tree" aria-label="Package resources">
     <p className="att-explorer-table-hint">Column sorting applies to all matching resources before pagination.</p>
-    <div className="att-explorer-table-scroll">
+    <div ref={scrollContainerRef} onScroll={onListScroll} className="att-explorer-table-scroll">
       <table className="att-explorer-table">
         <thead><tr>
           <th scope="col" aria-sort={sortKey === 'name' ? direction === 'desc' ? 'descending' : 'ascending' : 'none'}>{sortLabel('name', 'Name')}</th>

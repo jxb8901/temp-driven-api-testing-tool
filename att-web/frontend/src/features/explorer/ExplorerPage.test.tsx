@@ -238,6 +238,47 @@ describe('Explorer page integration', () => {
     expect(container.querySelector('.att-explorer-table')?.closest('.att-explorer-navigation')).not.toBeNull();
   });
 
+  it('restores list search, category, sorting, loaded pages, and scroll after returning from a resource route', async () => {
+    const flow = resource('flow', 'flow-1');
+    const listResources = vi.fn(async (_packageId: string, query: { cursor?: string }) => query.cursor === 'flows-page-2'
+      ? { items: [resource('flow', 'flow-51')], total: 51, nextCursor: null }
+      : { items: [flow], total: 51, nextCursor: 'flows-page-2' });
+    const api = apiWith({ listResources });
+    const props = {
+      api, packageId: 'payments-list-state', resourceRoute: null, environment: '',
+      registerUnsavedChanges: () => () => {}, onResourceRouteChange: () => {},
+      onEnvironmentChange: () => {}, onJobAccepted: () => {},
+    };
+    await render(<ExplorerPage {...props} />);
+    const search = container.querySelector<HTMLInputElement>('input[type="search"]')!;
+    setValue(search, 'payment flow');
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
+    click([...container.querySelectorAll<HTMLElement>('[role="tab"]')].find(item => item.textContent === 'Flows')!);
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
+    click(container.querySelector('.att-explorer-sort')!);
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
+    click(button('Load more'));
+    await settle();
+    const scrollContainer = container.querySelector<HTMLDivElement>('.att-explorer-table-scroll')!;
+    scrollContainer.scrollTop = 37;
+    act(() => scrollContainer.dispatchEvent(new Event('scroll', { bubbles: true })));
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 120)); });
+
+    const callsBeforeReturn = listResources.mock.calls.length;
+    await act(async () => root.render(null));
+    await render(<ExplorerPage {...props} resourceRoute={{ type: 'flow', resourceId: 'flow-1' }} />);
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
+
+    expect(container.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('payment flow');
+    expect([...container.querySelectorAll<HTMLElement>('[role="tab"]')].find(item => item.textContent === 'Flows')?.getAttribute('aria-selected')).toBe('true');
+    expect(container.querySelector('.att-explorer-sort')?.textContent).toContain('↓');
+    expect(listResources.mock.calls.slice(callsBeforeReturn).map(call => call[1])).toEqual([
+      expect.objectContaining({ query: 'payment flow', type: 'flow', sort: 'name', direction: 'desc', limit: 50 }),
+      expect.objectContaining({ query: 'payment flow', type: 'flow', sort: 'name', direction: 'desc', cursor: 'flows-page-2', limit: 50 }),
+    ]);
+    expect(container.querySelector<HTMLDivElement>('.att-explorer-table-scroll')?.scrollTop).toBe(37);
+  });
+
   it('restores the Dependencies deep link and routes resolved references to the target definition', async () => {
     const origin = resource('flow', 'payment-flow', {
       references: [{ type: 'template', resourceId: 'payment-template', logicalId: 'payment-template', resolution: 'resolved' }],
