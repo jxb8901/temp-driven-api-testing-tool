@@ -47,6 +47,55 @@ class AuthServiceTest {
         assertEquals(missing.status,disabledOrWrong.status);assertEquals(missing.code,disabledOrWrong.code);store.close();
     }
 
+    @Test void interruptedBootstrapTokenInitializationIsRepairedWithoutReopeningAClaimedBootstrap() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("bootstrap-repair-packages"));Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path javaExecutable=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path configFile=Files.writeString(temp.resolve("bootstrap-repair-server.yaml"),"server:\n  dataDir: "+temp.resolve("bootstrap-repair-data")+"\n  javaExecutable: "+javaExecutable+"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    default: "+pkg+"\n");
+        ServerConfig config=ServerConfig.load(configFile);JobStore store=new JobStore(config);Path tokenFile=config.dataDir.resolve("bootstrap-admin.token");
+        Files.writeString(tokenFile,"");
+        AuthService auth=new AuthService(config,store);
+        assertTrue(auth.bootstrapRequired(),"A stranded empty file from interrupted initialization must be repaired before bootstrap is offered");
+        String token=Files.readString(tokenFile);
+        assertTrue(token.matches("[A-Za-z0-9_-]{43}"));assertEquals(32,java.util.Base64.getUrlDecoder().decode(token).length);
+        try(var files=Files.list(config.dataDir)) {
+            assertFalse(files.anyMatch(path->path.getFileName().toString().startsWith(".bootstrap-admin-token-")&&path.toString().endsWith(".tmp")));
+        }
+        auth.bootstrap(token,"admin","ATT Administrator","initial admin password","127.0.0.1");
+        Files.writeString(tokenFile,"malformed-after-claim");store.close();
+
+        JobStore restartedStore=new JobStore(config);
+        try {
+            AuthService restarted=new AuthService(config,restartedStore);
+            assertFalse(restarted.bootstrapRequired(),"A claimed bootstrap must stay closed after restart, even with a malformed leftover file");
+            assertEquals("malformed-after-claim",Files.readString(tokenFile));
+            AuthService.AuthFailure closed=assertThrows(AuthService.AuthFailure.class,
+                    ()->restarted.bootstrap("A".repeat(43),"another-admin","Another Admin","another admin password","127.0.0.1"));
+            assertEquals(409,closed.status);
+            assertEquals(1,restartedStore.authUserCount());
+        } finally {restartedStore.close();}
+    }
+
+    @Test void passwordChangeUsesTheBoundedVerifierAndRateLimitsParallelFailures() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("password-change-packages"));Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path javaExecutable=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path configFile=Files.writeString(temp.resolve("password-change-server.yaml"),"server:\n  dataDir: "+temp.resolve("password-change-data")+"\n  javaExecutable: "+javaExecutable+"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    default: "+pkg+"\n");
+        ServerConfig config=ServerConfig.load(configFile);JobStore store=new JobStore(config);AuthService auth=new AuthService(config,store);
+        auth.bootstrap(Files.readString(config.dataDir.resolve("bootstrap-admin.token")),"admin","ATT Administrator","current admin password","127.0.0.1");
+        var pool=Executors.newFixedThreadPool(24);CountDownLatch start=new CountDownLatch(1);
+        try {
+            java.util.List<Future<Integer>> responses=new java.util.ArrayList<>();
+            for(int i=0;i<24;i++)responses.add(pool.submit(()->{
+                start.await();
+                try {auth.changePassword("admin","wrong current password","replacement password","198.51.100.24");return 200;}
+                catch(AuthService.AuthFailure failure){return failure.status;}
+            }));
+            start.countDown();
+            java.util.List<Integer> statuses=new java.util.ArrayList<>();for(Future<Integer> response:responses)statuses.add(response.get());
+            assertTrue(statuses.contains(401));assertTrue(statuses.contains(429),"Parallel password checks must be bounded and failures throttled");
+            assertNotNull(auth.login("admin","current admin password","198.51.100.25"),"Failed change-password attempts must preserve the existing password");
+        } finally {pool.shutdownNow();store.close();}
+    }
+
     @Test void resettingDisabledUserPasswordDoesNotReenableAccount() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("disabled-reset-packages"));Path pkg=Files.createDirectory(allowed.resolve("default"));
         Path javaExecutable=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");

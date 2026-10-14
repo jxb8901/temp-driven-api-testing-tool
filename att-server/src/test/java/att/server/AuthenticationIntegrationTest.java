@@ -69,10 +69,16 @@ class AuthenticationIntegrationTest {
             HttpResponse<String> localLogin=send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"owner\",\"password\":\"correct horse battery staple\"}");assertEquals(200,localLogin.statusCode());String ownerCookie=localLogin.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
             HttpResponse<String> me=sendWithCookie(client,port,"GET","/att/api/v1/auth/me",ownerCookie,null,null,null);assertEquals(200,me.statusCode(),me.body());assertFalse(me.body().contains("passwordHash"));String csrf=me.headers().firstValue("X-ATT-CSRF").orElseThrow();
             assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
+            assertHttpsRequired(sendWithCookieViaTrustedProxyScheme(client,port,"/att/api/v1/auth/password",ownerCookie,"http",csrf,
+                    "{\"currentPassword\":\"correct horse battery staple\",\"newPassword\":\"replacement secure password\"}"));
+            assertHttpsRequired(sendWithCookieViaTrustedProxyScheme(client,port,"/att/api/v1/auth/users",ownerCookie,"http",csrf,
+                    "{\"loginId\":\"plaintext-user\",\"displayName\":\"Plaintext User\",\"password\":\"plaintext secure password\",\"role\":\"USER\"}"));
             assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,"http://attacker.example",csrf,"{}").statusCode(),"Cookie-authenticated state changes also enforce same-origin when an Origin is supplied");
             assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,origin,null,"{}").statusCode());
             assertEquals(201,sendWithCookie(client,port,"POST","/att/api/v1/auth/users",ownerCookie,origin,csrf,"{\"loginId\":\"viewer\",\"displayName\":\"Read Only\",\"password\":\"viewer secure password\",\"role\":\"USER\"}").statusCode());
             HttpResponse<String> viewerLogin=send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"viewer\",\"password\":\"viewer secure password\"}");assertEquals(200,viewerLogin.statusCode());String viewerCookie=viewerLogin.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
+            assertHttpsRequired(sendWithCookieViaTrustedProxyScheme(client,port,"/att/api/v1/auth/users/viewer/password",ownerCookie,"http",csrf,
+                    "{\"password\":\"plaintext reset password\"}"));
             assertEquals(200,sendWithCookie(client,port,"POST","/att/api/v1/auth/users/viewer/password",ownerCookie,origin,csrf,"{\"password\":\"viewer reset secure password\"}").statusCode());
             assertEquals(401,sendWithCookie(client,port,"GET","/att/api/v1/auth/me",viewerCookie,null,null,null).statusCode(),"Admin password reset must revoke existing sessions");
             assertEquals(401,send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"viewer\",\"password\":\"viewer secure password\"}").statusCode());
@@ -110,6 +116,18 @@ class AuthenticationIntegrationTest {
         int forwardedPort="https".equals(scheme)?443:80;
         HttpRequest request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Origin",scheme+"://att.example.test").header("X-Forwarded-For","203.0.113.9").header("X-Forwarded-Proto",scheme).header("X-Forwarded-Host","att.example.test").header("X-Forwarded-Port",Integer.toString(forwardedPort)).header("Content-Type","application/json").method(method,HttpRequest.BodyPublishers.ofString(body)).build();
         return client.send(request,HttpResponse.BodyHandlers.ofString());
+    }
+    private static HttpResponse<String> sendWithCookieViaTrustedProxyScheme(HttpClient client,int port,String path,String cookie,String scheme,String csrf,String body)throws Exception {
+        int forwardedPort="https".equals(scheme)?443:80;
+        HttpRequest request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Origin",scheme+"://att.example.test")
+                .header("Cookie",cookie).header("X-ATT-CSRF",csrf).header("X-Forwarded-For","203.0.113.9")
+                .header("X-Forwarded-Proto",scheme).header("X-Forwarded-Host","att.example.test").header("X-Forwarded-Port",Integer.toString(forwardedPort))
+                .header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build();
+        return client.send(request,HttpResponse.BodyHandlers.ofString());
+    }
+    private static void assertHttpsRequired(HttpResponse<String> response)throws Exception {
+        assertEquals(403,response.statusCode(),response.body());
+        assertEquals("ATT-AUTH-HTTPS-REQUIRED",ServerRuntime.JSON.readTree(response.body()).path("error").path("code").asText());
     }
     private static HttpResponse<String> sendBasicViaTrustedProxy(HttpClient client,int port,String method,String path,String origin,String body,String authorization,String csrf)throws Exception {
         HttpRequest.Builder request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Origin",origin).header("X-Forwarded-For","203.0.113.10").header("X-Forwarded-Proto","https").header("X-Forwarded-Host","att.example.test").header("X-Forwarded-Port","443").header("Authorization",authorization);
