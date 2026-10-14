@@ -142,7 +142,7 @@ In Studio, local `ADMIN` users can manage accounts under **Settings → User Man
 
 The one-time bootstrap is not a recovery mechanism and is never reopened. To recover an existing `ADMIN` who has lost the password or was disabled, use the offline recovery tool. This operation cannot create an account and will reject a missing account or a non-`ADMIN` account.
 
-1. Stop every Tomcat process that uses this `server.dataDir` and wait for it to exit. Run the command below as the Server operating-system account, with write access to the existing `dataDir`.
+1. Stop every Tomcat process that uses this `server.dataDir` and wait for it to exit. Run the offline recovery command as the Server operating-system account, with write access to the existing `dataDir`.
 2. Set `ATT_SERVER_WAR` to the deployed `att-server-4.1.4.war`, `CATALINA_HOME` to the Tomcat installation, and `JAVA_HOME` to Java 17 or later. Extract the WAR to a private temporary directory and launch the tool with its packaged libraries and Tomcat's Servlet API:
 
    ```sh
