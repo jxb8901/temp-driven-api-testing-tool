@@ -66,16 +66,18 @@ final class AuthService {
     }
     private Map<String,Object> verifyCredentialsBounded(String login,String password,String client) throws Exception {
         String normalized=normalize(login),clientKey=clientKey(client),key=normalized+"\u0000"+clientKey;long now=System.currentTimeMillis();
-        Attempt userAttempt=attempt(attempts,key,now,10_000),ipAttempt=attempt(clientAttempts,clientKey,now,10_000);
-        if(userAttempt.failures>=8||ipAttempt.failures>=32)throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");
-        Map<String,Object> user=store.authUser(normalized);
-        String storedHash=user==null?DUMMY_HASH:(String)user.get("passwordHash");boolean supportedPassword=validPasswordInput(password),matches;
-        if(!passwordChecks.tryAcquire())throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");
-        try {matches=supportedPassword?verify(password,storedHash):verify("invalid-password-input",DUMMY_HASH);} finally {passwordChecks.release();}
-        boolean valid=user!=null&&Boolean.TRUE.equals(user.get("active"))&&matches;
-        if(!valid){increment(attempts,key,now);increment(clientAttempts,clientKey,now);throw new AuthFailure(401,"ATT-AUTH-INVALID-CREDENTIALS");}
-        attempts.remove(key);
-        return user;
+        reserveVerification(key,clientKey,now);
+        boolean reserved=true;
+        try {
+            Map<String,Object> user=store.authUser(normalized);
+            String storedHash=user==null?DUMMY_HASH:(String)user.get("passwordHash");boolean supportedPassword=validPasswordInput(password),matches;
+            if(!passwordChecks.tryAcquire())throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");
+            try {matches=supportedPassword?verify(password,storedHash):verify("invalid-password-input",DUMMY_HASH);} finally {passwordChecks.release();}
+            boolean valid=user!=null&&Boolean.TRUE.equals(user.get("active"))&&matches;
+            finishVerification(key,clientKey,now,valid);reserved=false;
+            if(!valid)throw new AuthFailure(401,"ATT-AUTH-INVALID-CREDENTIALS");
+            return user;
+        } finally {if(reserved)releaseVerification(key,clientKey,now);}
     }
     Map<String,String> session(HttpServletRequest req) throws Exception {
         jakarta.servlet.http.Cookie[] cookies=req.getCookies();if(cookies==null)return null;
@@ -103,8 +105,39 @@ final class AuthService {
     }
     private static String displayName(String login,String display){String value=display==null?login:Normalizer.normalize(display.strip(),Normalizer.Form.NFC);if(value.isBlank()||value.length()>120||value.codePoints().anyMatch(Character::isISOControl))throw new IllegalArgumentException("displayName must be 1-120 printable characters");return value;}
     private static String clientKey(String client){return client==null||client.isBlank()?"unknown":client;}
-    private static synchronized Attempt attempt(ConcurrentHashMap<String,Attempt> map,String key,long now,int maximum){if(map.size()>=maximum&&!map.containsKey(key)){map.entrySet().removeIf(entry->now-entry.getValue().window>600_000);if(map.size()>=maximum)throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");}return map.compute(key,(k,v)->v==null||now-v.window>600_000?new Attempt(now,0):v);}
-    private static void increment(ConcurrentHashMap<String,Attempt> map,String key,long now){map.compute(key,(k,v)->v==null||now-v.window>600_000?new Attempt(now,1):new Attempt(v.window,v.failures+1));}
+    private static synchronized Attempt attempt(ConcurrentHashMap<String,Attempt> map,String key,long now,int maximum){ensureAttemptCapacity(map,key,now,maximum);return map.compute(key,(k,v)->current(v,now));}
+    private static synchronized void increment(ConcurrentHashMap<String,Attempt> map,String key,long now){Attempt value=current(map.get(key),now);map.put(key,new Attempt(value.window,value.failures+1,value.inFlight));}
+    private synchronized void reserveVerification(String userKey,String clientKey,long now) {
+        ensureAttemptCapacity(attempts,userKey,now,10_000);ensureAttemptCapacity(clientAttempts,clientKey,now,10_000);
+        Attempt user=current(attempts.get(userKey),now),client=current(clientAttempts.get(clientKey),now);
+        if(user.failures+user.inFlight>=8||client.failures+client.inFlight>=32)throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");
+        attempts.put(userKey,new Attempt(user.window,user.failures,user.inFlight+1));
+        clientAttempts.put(clientKey,new Attempt(client.window,client.failures,client.inFlight+1));
+    }
+    private synchronized void finishVerification(String userKey,String clientKey,long now,boolean valid) {
+        completeVerification(attempts,userKey,now,valid,true);
+        completeVerification(clientAttempts,clientKey,now,valid,false);
+    }
+    private synchronized void releaseVerification(String userKey,String clientKey,long now) {
+        completeVerification(attempts,userKey,now,true,false);
+        completeVerification(clientAttempts,clientKey,now,true,false);
+    }
+    private static void completeVerification(ConcurrentHashMap<String,Attempt> map,String key,long now,boolean valid,boolean resetOnSuccess) {
+        Attempt value=current(map.get(key),now);int inFlight=Math.max(0,value.inFlight-1);
+        int failures=valid?(resetOnSuccess?0:value.failures):value.failures+1;
+        if(inFlight==0&&failures==0)map.remove(key);else map.put(key,new Attempt(value.window,failures,inFlight));
+    }
+    private static void ensureAttemptCapacity(ConcurrentHashMap<String,Attempt> map,String key,long now,int maximum) {
+        if(map.size()>=maximum&&!map.containsKey(key)) {
+            map.entrySet().removeIf(entry->entry.getValue().inFlight==0&&now-entry.getValue().window>600_000);
+            if(map.size()>=maximum)throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");
+        }
+    }
+    private static Attempt current(Attempt value,long now) {
+        if(value==null)return new Attempt(now,0,0);
+        if(now-value.window>600_000)return new Attempt(now,0,value.inFlight);
+        return value;
+    }
     static Map<String,Object> safeUser(Map<String,Object> user) {if(user==null)return Map.of();return Map.of("loginId",user.get("loginId"),"displayName",user.get("displayName"),"role",user.get("role"));}
     private static String hash(String password) throws Exception {
         validatePassword(password);return hash(password.toCharArray());
@@ -150,6 +183,6 @@ final class AuthService {
     private static String randomToken(){byte[] bytes=new byte[32];RANDOM.nextBytes(bytes);return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);}
     private static String sha256(String token) throws Exception{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.US_ASCII)));}
     private static void secureFile(Path file){try{Files.setPosixFilePermissions(file,PosixFilePermissions.fromString("rw-------"));}catch(UnsupportedOperationException unsupported){try{var view=Files.getFileAttributeView(file,java.nio.file.attribute.AclFileAttributeView.class);if(view==null)throw new IllegalStateException("Filesystem does not support private bootstrap-token permissions");var owner=Files.getOwner(file);var entry=java.nio.file.attribute.AclEntry.newBuilder().setType(java.nio.file.attribute.AclEntryType.ALLOW).setPrincipal(owner).setPermissions(java.util.EnumSet.allOf(java.nio.file.attribute.AclEntryPermission.class)).build();view.setAcl(java.util.List.of(entry));}catch(Exception e){throw new IllegalStateException("Unable to secure local authentication bootstrap token",e);}}catch(Exception e){throw new IllegalStateException("Unable to secure local authentication bootstrap token",e);}}
-    private record Attempt(long window,int failures){}
+    private record Attempt(long window,int failures,int inFlight){}
     static final class AuthFailure extends RuntimeException {final int status;final String code;AuthFailure(int status,String code){super("Authentication request could not be completed");this.status=status;this.code=code;}}
 }

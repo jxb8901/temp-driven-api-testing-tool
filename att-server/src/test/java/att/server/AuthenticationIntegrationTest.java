@@ -47,7 +47,7 @@ class AuthenticationIntegrationTest {
     @Test void localAuthenticationBootstrapsLogsInEnforcesCsrfAndSupportsAdminUserManagement() throws Exception {
         previousAttHome=System.getProperty("att.home");Path localHome=createLocalRuntime();System.setProperty("att.home",localHome.toString());
         Path packages=Files.createDirectory(temp.resolve("local-auth-packages"));Path pkg=Files.createDirectory(packages.resolve("p"));
-        Path data=temp.resolve("local-auth-data");Path config=Files.writeString(temp.resolve("local-auth.yaml"),"server:\n  dataDir: "+data+"\n  auth:\n    mode: local\nworkers: {}\npackages:\n  allowedRoots:\n    - "+packages+"\n  entries:\n    p: "+pkg+"\n");
+        Path data=temp.resolve("local-auth-data");Path config=Files.writeString(temp.resolve("local-auth.yaml"),"server:\n  dataDir: "+data+"\n  auth:\n    mode: local\n  security:\n    checkCrossOrigin: false\nworkers: {}\npackages:\n  allowedRoots:\n    - "+packages+"\n  entries:\n    p: "+pkg+"\n");
         String oldConfig=System.getProperty("att.server.config");System.setProperty("att.server.config",config.toString());
         Path users=Files.writeString(temp.resolve("local-auth-users.xml"),"<tomcat-users></tomcat-users>");Tomcat tomcat=start(users,appDirectory("local-auth"),true,true);
         try {
@@ -71,18 +71,28 @@ class AuthenticationIntegrationTest {
             assertEquals(500,sendBasicViaTrustedProxy(client,port,"GET","/att/api/v1/test-failure","https://att.example.test",null,basic,null).statusCode(),"A downstream servlet failure must remain a server error after Basic authentication succeeds");
             assertEquals(403,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users","https://att.example.test","{}",basic,null).statusCode(),"Browser-originated Basic-auth mutations require the returned CSRF token");
             String secondUser="{\"loginId\":\"basic-user\",\"displayName\":\"Basic User\",\"password\":\"basic user secure password\",\"role\":\"USER\"}";
-            assertEquals(403,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users","https://attacker.example",secondUser,basic,basicCsrf).statusCode(),"Basic credentials cannot authorize cross-origin cookie-style mutations");
+            String crossOriginBasicUser="{\"loginId\":\"cross-origin-basic-user\",\"displayName\":\"Cross-Origin Basic User\",\"password\":\"cross origin basic secure password\",\"role\":\"USER\"}";
+            assertEquals(201,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users","https://attacker.example",crossOriginBasicUser,basic,basicCsrf).statusCode(),"checkCrossOrigin=false permits a verified cross-origin Basic mutation after the CSRF token is supplied");
             assertEquals(201,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users","https://att.example.test",secondUser,basic,basicCsrf).statusCode());
             HttpResponse<String> localLogin=send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"owner\",\"password\":\"correct horse battery staple\"}");assertEquals(200,localLogin.statusCode());String ownerCookie=localLogin.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
             HttpResponse<String> me=sendWithCookie(client,port,"GET","/att/api/v1/auth/me",ownerCookie,null,null,null);assertEquals(200,me.statusCode(),me.body());assertFalse(me.body().contains("passwordHash"));String csrf=me.headers().firstValue("X-ATT-CSRF").orElseThrow();
             assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
+            HttpResponse<String> failedPasswordChange=sendWithCookie(client,port,"POST","/att/api/v1/auth/password",ownerCookie,origin,csrf,
+                    "{\"currentPassword\":\"incorrect current password\",\"newPassword\":\"replacement secure password\"}");
+            assertEquals(401,failedPasswordChange.statusCode());
+            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/auth/me",ownerCookie,null,null,null).statusCode(),
+                    "A failed current-password check must preserve the existing session");
             assertHttpsRequired(sendWithCookieViaTrustedProxyScheme(client,port,"/att/api/v1/auth/password",ownerCookie,"http",csrf,
                     "{\"currentPassword\":\"correct horse battery staple\",\"newPassword\":\"replacement secure password\"}"));
             assertHttpsRequired(sendWithCookieViaTrustedProxyScheme(client,port,"/att/api/v1/auth/users",ownerCookie,"http",csrf,
                     "{\"loginId\":\"plaintext-user\",\"displayName\":\"Plaintext User\",\"password\":\"plaintext secure password\",\"role\":\"USER\"}"));
-            assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,"http://attacker.example",csrf,"{}").statusCode(),"Cookie-authenticated state changes also enforce same-origin when an Origin is supplied");
             assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,origin,null,"{}").statusCode());
-            assertEquals(201,sendWithCookie(client,port,"POST","/att/api/v1/auth/users",ownerCookie,origin,csrf,"{\"loginId\":\"viewer\",\"displayName\":\"Read Only\",\"password\":\"viewer secure password\",\"role\":\"USER\"}").statusCode());
+            String viewerBody="{\"loginId\":\"viewer\",\"displayName\":\"Read Only\",\"password\":\"viewer secure password\",\"role\":\"USER\"}";
+            HttpResponse<String> crossOriginWithoutCsrf=sendWithCookie(client,port,"POST","/att/api/v1/auth/users",ownerCookie,"http://attacker.example",null,viewerBody);
+            assertEquals(403,crossOriginWithoutCsrf.statusCode());
+            assertEquals("ATT-AUTH-CSRF-INVALID",ServerRuntime.JSON.readTree(crossOriginWithoutCsrf.body()).path("error").path("code").asText());
+            assertEquals(201,sendWithCookie(client,port,"POST","/att/api/v1/auth/users",ownerCookie,"http://attacker.example",csrf,viewerBody).statusCode(),
+                    "checkCrossOrigin=false relaxes origin equality while retaining local cookie CSRF protection");
             HttpResponse<String> viewerLogin=send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"viewer\",\"password\":\"viewer secure password\"}");assertEquals(200,viewerLogin.statusCode());String viewerCookie=viewerLogin.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
             assertHttpsRequired(sendWithCookieViaTrustedProxyScheme(client,port,"/att/api/v1/auth/users/viewer/password",ownerCookie,"http",csrf,
                     "{\"password\":\"plaintext reset password\"}"));
@@ -243,8 +253,8 @@ class AuthenticationIntegrationTest {
             assertEquals(200,get(port,"/att/api/v1/jobs/"+jobId+"/result",basic));
             assertEquals(415,post(port,basic,"application/x-www-form-urlencoded",null));
             assertEquals(403,post(port,basic,"application/json","https://attacker.example"));
-            HttpResponse<String> rejectedOrigin=send(HttpClient.newHttpClient(),port,"POST","/att/api/v1/jobs/run","https://attacker.example",null,"{}");
-            assertEquals("ATT-SERVER-ORIGIN-MISMATCH",ServerRuntime.JSON.readTree(rejectedOrigin.body()).path("error").path("code").asText());
+            HttpResponse<String> unauthenticatedOrigin=send(HttpClient.newHttpClient(),port,"POST","/att/api/v1/jobs/run","https://attacker.example",null,"{}");
+            assertEquals(401,unauthenticatedOrigin.statusCode(),"Container authentication rejects the request before the API origin policy can return a JSON error");
             assertEquals(400,post(port,basic,"application/json","https://att.example.test",java.util.Map.of(
                     "X-Forwarded-For","203.0.113.10","X-Forwarded-Proto","https",
                     "X-Forwarded-Host","att.example.test","X-Forwarded-Port","443")),
@@ -394,13 +404,15 @@ class AuthenticationIntegrationTest {
         Path packages=Files.createDirectory(temp.resolve("inspection-packages"));Path packageRoot=Files.createDirectory(packages.resolve("debug"));
         Path template=Files.createDirectories(packageRoot.resolve("templates/FORM"));
         Files.createDirectories(packageRoot.resolve("testcase"));Files.createDirectories(packageRoot.resolve("config"));
-        Files.createDirectories(packageRoot.resolve("load"));Files.createDirectories(packageRoot.resolve("testdata"));copySchemas(packageRoot);
+        Files.createDirectories(packageRoot.resolve("load"));Files.createDirectories(packageRoot.resolve("testdata"));Files.createDirectories(packageRoot.resolve("payloads"));copySchemas(packageRoot);
         Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments:\n  SIT:\n    testdata: [testdata/customers.yaml]\n  UAT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         Files.writeString(packageRoot.resolve("testdata/customers.yaml"),"schemaVersion: att-testdata/v1.0\nid: customers\nrecords:\n"
                 +"  - accountId: A-1001\n    status: ACTIVE\n    email: customer@example.test\n  - accountId: A-1002\n    status: CLOSED\n    email: other@example.test\nselection:\n  strategy: sequential\n");
+        Files.writeString(packageRoot.resolve("payloads/request.xml"),"<request><accountId>A-1001</accountId><email>private@example.test</email>"
+                +"<address>12 Main Street</address><password>payload-secret</password></request>");
         Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: ordinary template description\nactions:\n"
-                +"  log:\n    type: log\n    message: 'password=do-not-disclose'\n");
+                +"  log:\n    type: log\n    message: '&{payloads/request.xml}'\n");
         Files.writeString(packageRoot.resolve("load/scenario.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n"
                 +"  - id: smoke\n    target: {type: template, id: FORM}\n    load: {users: 1, duration: 1s}\n");
         Path users=Files.writeString(temp.resolve("inspection-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
@@ -422,7 +434,16 @@ class AuthenticationIntegrationTest {
             assertTrue(source.path("resource").path("sourceAvailable").asBoolean());
             assertFalse(source.path("resource").path("redactionEnabled").asBoolean(true));
             assertTrue(source.path("text").asText().contains("ordinary template description"));
-            assertFalse(source.path("text").asText().contains("do-not-disclose"));
+            assertEquals(1,source.path("fileReferences").size());
+            String referenceId=source.path("fileReferences").get(0).path("referenceId").asText();
+            assertEquals("payloads/request.xml",source.path("fileReferences").get(0).path("logicalPath").asText());
+            assertEquals(401,get(port,resourcePath+"/source-file?referenceId="+referenceId,null));
+            JsonNode referenced=getJson(port,resourcePath+"/source-file?referenceId="+referenceId,basic);
+            assertTrue(referenced.path("available").asBoolean(),referenced.toString());
+            assertTrue(referenced.path("text").asText().contains("A-1001"));
+            assertFalse(referenced.path("text").asText().contains("private@example.test"));
+            assertFalse(referenced.path("text").asText().contains("12 Main Street"));
+            assertFalse(referenced.path("text").asText().contains("payload-secret"));
             JsonNode records=getJson(port,"/att/api/v1/packages/debug/configuration/testdata/customers/records?environment=SIT&offset=0&limit=1",basic);
             assertFalse(records.path("redactionEnabled").asBoolean(true));assertEquals(2,records.path("total").asInt());
             assertEquals(1,records.path("nextOffset").asInt());
@@ -446,6 +467,12 @@ class AuthenticationIntegrationTest {
             String resourceId=resources.path("items").get(0).path("resourceId").asText();
             JsonNode source=getJson(port,"/att/api/v1/packages/debug/resources/template/"+resourceId+"/source",null);
             assertTrue(source.path("available").asBoolean(),source.toString());
+            String referenceId=source.path("fileReferences").get(0).path("referenceId").asText();
+            JsonNode referenced=getJson(port,"/att/api/v1/packages/debug/resources/template/"+resourceId+"/source-file?referenceId="+referenceId,null);
+            assertTrue(referenced.path("available").asBoolean(),referenced.toString());
+            assertFalse(referenced.path("text").asText().contains("private@example.test"));
+            assertFalse(referenced.path("text").asText().contains("12 Main Street"));
+            assertFalse(referenced.path("text").asText().contains("payload-secret"));
             JsonNode records=getJson(port,"/att/api/v1/packages/debug/configuration/testdata/customers/records?environment=SIT&offset=0&limit=1",null);
             assertEquals("A-1001",records.path("records").get(0).path("value").path("accountId").asText());
             assertEquals("[REDACTED]",records.path("records").get(0).path("value").path("email").asText());

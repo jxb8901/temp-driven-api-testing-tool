@@ -40,9 +40,11 @@ public final class PackageConfigurationInspector {
     private static final Pattern ENVIRONMENT = Pattern.compile("[A-Za-z][A-Za-z0-9_-]{0,31}");
     private static final Pattern JAVA_CLASS = Pattern.compile("[A-Za-z_$][A-Za-z0-9_$.]{0,255}");
     private static final Pattern KEY_VALUE_SECRET = Pattern.compile(
-            "(?i)(password|passwd|passphrase|token|secret|authorization|credential|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|refresh[_-]?token)\\s*([:=])\\s*(['\"]?)[^\\s,'\";}]+");
+            "(?i)([\"']?(?:password|passwd|passphrase|token|secret|authorization|credential|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|refresh[_-]?token)[\"']?\\s*(?::|=|\\bis\\b)\\s*[\"']?)([^\\s,'\";}<>]+)");
     private static final Pattern AUTH_SCHEME = Pattern.compile("(?i)\\b(Bearer|Basic)\\s+[A-Za-z0-9+/=_-]+");
-    private static final Pattern URL_CREDENTIALS = Pattern.compile("(?i)(https?://)[^/@\\s:]+:[^/@\\s]+@");
+    private static final Pattern URL_CREDENTIALS = Pattern.compile("(?i)(\\b(?:jdbc:)?[a-z][a-z0-9+.-]*://)[^/@\\s:]+:[^/@\\s]+@");
+    private static final Pattern XML_SECRET = Pattern.compile(
+            "(?is)(<(password|passwd|passphrase|token|secret|authorization|credential|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)(?:\\s+[^>]*)?>)[^<]*(</\\2\\s*>)");
     private static final Pattern PRIVATE_KEY = Pattern.compile("(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----");
     private static final List<String> RESOURCE_LISTS = Arrays.asList(
             "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata");
@@ -165,9 +167,8 @@ public final class PackageConfigurationInspector {
 
     private static boolean alwaysHiddenField(String name) {
         String normalized = name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
-        return normalized.matches(".*(password|passwd|passphrase|secret|token|authorization|credential|apikey|accesskey|privatekey|clientsecret|cookie|username|email|phone|address|ssn|nationalid|passport|dateofbirth|birthdate).*" )
-                || normalized.equals("headers") || normalized.equals("host") || normalized.equals("hostname")
-                || normalized.equals("port") || normalized.equals("url") || normalized.equals("endpoint");
+        return normalized.matches(".*(password|passwd|passphrase|secret|token|authorization|credential|apikey|accesskey|privatekey|clientsecret|cookie|username|email|phone|address|ssn|nationalid|passport|dateofbirth|birthdate|creditcard|cardnumber|cvv|iban|routingnumber).*" )
+                || normalized.equals("headers");
     }
 
     private static boolean freeFormValueField(String name) {
@@ -179,8 +180,9 @@ public final class PackageConfigurationInspector {
     private String scrubTestdataText(String value) {
         String result = value.replace(packageRoot.toString(), "[package]");
         result = AUTH_SCHEME.matcher(result).replaceAll("$1 [REDACTED]");
-        result = KEY_VALUE_SECRET.matcher(result).replaceAll("$1$2[REDACTED]");
+        result = KEY_VALUE_SECRET.matcher(result).replaceAll("$1[REDACTED]");
         result = URL_CREDENTIALS.matcher(result).replaceAll("$1[REDACTED]@");
+        result = XML_SECRET.matcher(result).replaceAll("$1[REDACTED]$3");
         result = PRIVATE_KEY.matcher(result).replaceAll("[REDACTED PRIVATE KEY]");
         return att.core.PathPresentation.displayDiagnosticText(result, packageRoot);
     }
@@ -255,7 +257,8 @@ public final class PackageConfigurationInspector {
         for (String path : paths) {
             Map<String, Object> before = leftFields.get(path);
             Map<String, Object> after = rightFields.get(path);
-            boolean hidden = isSensitivePath(path) || alwaysHiddenField(path.substring(path.lastIndexOf('.') + 1))
+            boolean hidden = redactionEnabled && isSensitivePath(path)
+                    || alwaysHiddenField(path.substring(path.lastIndexOf('.') + 1))
                     || configuredSensitivePath(path)
                     || configuredSensitiveField(path.substring(path.lastIndexOf('.') + 1))
                     || before != null && "hidden".equals(before.get("state"))
@@ -394,7 +397,7 @@ public final class PackageConfigurationInspector {
     private void hideField(Object rawField, String path) {
         if (!(rawField instanceof Map)) return;
         @SuppressWarnings("unchecked") Map<String, Object> field = (Map<String, Object>) rawField;
-        if ("visible".equals(field.get("state")) && (isSensitivePath(path)
+        if ("visible".equals(field.get("state")) && (redactionEnabled && isSensitivePath(path)
                 || alwaysHiddenField(path.substring(path.lastIndexOf('.') + 1))
                 || configuredSensitivePath(path) || configuredSensitiveField(path.substring(path.lastIndexOf('.') + 1)))) {
             field.clear(); field.put("state", "hidden");
@@ -514,7 +517,8 @@ public final class PackageConfigurationInspector {
             visible(fields, "pool.maxSize", Integer.valueOf(helper.poolMaxSize()), source);
             visible(fields, "pool.minIdle", Integer.valueOf(helper.poolMinIdle()), source);
             visible(fields, "pool.connectionTimeoutMs", Long.valueOf(helper.poolConnectionTimeoutMs()), source);
-            for (String hidden : Arrays.asList("url", "username", "password", "properties", "evidence.sql", "evidence.parameters")) hidden(fields, hidden);
+            visible(fields, "url", scrubTestdataText(helper.url()), source);
+            for (String hidden : Arrays.asList("username", "password", "properties", "evidence.sql", "evidence.parameters")) hidden(fields, hidden);
             logicalSource(entry, helper.sourceFile());
             entries.add(entry);
         }
@@ -539,12 +543,24 @@ public final class PackageConfigurationInspector {
             visible(fields, "pool.maxSize", Integer.valueOf(helper.poolMaxSize()), source);
             visible(fields, "pool.minIdle", Integer.valueOf(helper.poolMinIdle()), source);
             visible(fields, "pool.borrowTimeoutMs", Long.valueOf(helper.poolBorrowTimeoutMs()), source);
-            for (String hidden : Arrays.asList("queueManager", "host", "port", "channel", "username", "password", "requestQueue", "replyQueue", "evidencePayload")) hidden(fields, hidden);
+            visible(fields, "queueManager", helper.queueManager(), source);
+            visible(fields, "host", helper.host(), source);
+            visible(fields, "port", Integer.valueOf(helper.port()), source);
+            visible(fields, "channel", helper.channel(), source);
+            visible(fields, "requestQueue", helper.requestQueue(), source);
+            visible(fields, "replyQueue", helper.replyQueue(), source);
+            for (String hidden : Arrays.asList("username", "password", "evidencePayload")) hidden(fields, hidden);
             List<Map<String, Object>> instances = new ArrayList<Map<String, Object>>();
             for (Map.Entry<String, MqHelperConfig> instance : helper.instances().entrySet()) {
                 Map<String, Object> child = entry(instance.getKey(), source);
                 Map<String, Object> childFields = fields(child);
-                for (String hidden : Arrays.asList("queueManager", "host", "port", "channel", "username", "password", "requestQueue", "replyQueue")) hidden(childFields, hidden);
+                visible(childFields, "queueManager", instance.getValue().queueManager(), source);
+                visible(childFields, "host", instance.getValue().host(), source);
+                visible(childFields, "port", Integer.valueOf(instance.getValue().port()), source);
+                visible(childFields, "channel", instance.getValue().channel(), source);
+                visible(childFields, "requestQueue", instance.getValue().requestQueue(), source);
+                visible(childFields, "replyQueue", instance.getValue().replyQueue(), source);
+                for (String hidden : Arrays.asList("username", "password")) hidden(childFields, hidden);
                 instances.add(child);
             }
             entry.put("instances", instances);
@@ -592,7 +608,8 @@ public final class PackageConfigurationInspector {
             visible(fields, "connectionRequestTimeoutMs", Integer.valueOf(helper.connectionRequestTimeoutMs()), source);
             visible(fields, "keepAliveMs", Integer.valueOf(helper.keepAliveMs()), source);
             visible(fields, "idleEvictMs", Integer.valueOf(helper.idleEvictMs()), source);
-            for (String hidden : Arrays.asList("baseUrl", "headers", "username", "password", "token", "trustStore", "trustStorePassword")) hidden(fields, hidden);
+            visible(fields, "baseUrl", scrubTestdataText(helper.baseUrl().toString()), source);
+            for (String hidden : Arrays.asList("headers", "username", "password", "token", "trustStore", "trustStorePassword")) hidden(fields, hidden);
             entries.add(entry);
         }
         return section("httphelpers", "HTTP helpers", source, entries);

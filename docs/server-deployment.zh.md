@@ -144,9 +144,9 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 在 `container` mode 中，Tomcat 驗證請求，ATT 使用 Servlet Principal。現有 BASIC、FORM 及 SSO 部署會保留由 container 管理的登入流程。Health 及 version 維持公開。舊式 `server.authenticationRequired: false` 只適用於 container mode，會讓 UI 及 API 共用匿名存取，只應用於隔離且可信的網絡。所有匿名 caller 共用 drafts、jobs 及 artifacts。啟用時 ATT 會在啟動日誌發出警告。
 
-在 `local` mode 中，未登入的瀏覽器開啟 `/ui/` 時會轉至 ATT 登入頁；REST API 則回傳結構化 JSON `401`。首次管理員帳戶使用 `dataDir/bootstrap-admin.token` 內的隨機一次性 token 建立。請限制 `dataDir` 只供 Server 作業系統帳戶存取，在登入頁輸入 token 完成建立，之後移除對 token 檔案的存取。系統沒有預設帳戶或密碼。除 loopback 開發外，登入及 bootstrap 只接受 HTTPS。本地密碼以每位用戶獨立 salt 的 PBKDF2-HMAC-SHA-256 雜湊保存。首個版本支援 `ADMIN` 及 `USER`；所有已驗證用戶均可使用一般 Server 操作，帳戶管理及 Scheduled Load 管理則要求 `ADMIN`。
+在 `local` mode 中，未登入的瀏覽器開啟 `/ui/` 時會轉至 ATT 登入頁；REST API 則回傳結構化 JSON `401`。首次管理員帳戶使用 `dataDir/bootstrap-admin.token` 內的隨機一次性 token 建立。請限制 `dataDir` 只供 Server 作業系統帳戶存取，在登入頁輸入 token 完成建立，之後移除對 token 檔案的存取。初始化時會先寫入權限受限的暫存檔，再以原子 rename 安裝 token；啟動時只有在尚無帳戶且 bootstrap 未被認領時才會修復無效 token。Bootstrap 一經認領便不會重新開啟。系統沒有預設帳戶或密碼。除 loopback 開發外，所有包含本地密碼的請求（登入、bootstrap、建立帳戶、重設及自行變更密碼）都必須使用 HTTPS。Tomcat 只會透過已設定的可信任 proxy 判斷 proxy 終止的 HTTPS；不可信任的 forwarded header 不會建立 HTTPS 狀態。本地密碼以每位用戶獨立 salt 的 PBKDF2-HMAC-SHA-256 雜湊保存。首個版本支援 `ADMIN` 及 `USER`；所有已驗證用戶均可使用一般 Server 操作，帳戶管理及 Scheduled Load 管理則要求 `ADMIN`。
 
-Local session 使用不透明的 server-side identifier，登入時會輪替，閒置 30 分鐘或累計 12 小時後失效。登出、密碼變更或重設、停用帳戶都會撤銷 session。Server 重啟後，未到期或未撤銷的 session 仍有效。Cookie 設為 HttpOnly、SameSite=Lax，Path 限於部署 context；Tomcat 判斷請求使用 HTTPS 時亦會設 Secure。啟用 TLS termination 前，請先設定可信任的反向代理，讓 Tomcat 識別外部 HTTPS scheme。所有使用 cookie 驗證的狀態變更請求，以及由瀏覽器發出的 Basic-authenticated 狀態變更請求，必須在 `X-ATT-CSRF` 提交 CSRF token；登入及一次性 bootstrap endpoint 則要求 same-origin JSON。同一 login ID 及 client address 在 10 分鐘內失敗 8 次，或同一 client address 以不同 login ID 失敗 32 次後，登入會被限速。Bootstrap 每個 client address 在 10 分鐘內最多可輸入錯誤 token 8 次。這些記憶體限速只適用於單一 Server process；多個 instance 請在共用的 edge 層設定 rate limit。登入回應不會區分不存在、已停用或密碼錯誤的帳戶。登入成功及失敗都會寫入 audit，並不記錄憑證。密碼以 310,000 次 PBKDF2-HMAC-SHA-256 計算雜湊；成功登入時會升級計算次數較低的舊 hash。
+Local session 使用不透明的 server-side identifier，登入時會輪替，閒置 30 分鐘或累計 12 小時後失效。登出、密碼變更或重設、停用帳戶都會撤銷 session。Server 重啟後，未到期或未撤銷的 session 仍有效。Cookie 設為 HttpOnly、SameSite=Lax，Path 限於部署 context；Tomcat 判斷請求使用 HTTPS 時亦會設 Secure。啟用 TLS termination 前，請先設定可信任的反向代理，讓 Tomcat 識別外部 HTTPS scheme。所有使用 cookie 驗證的狀態變更請求，以及由瀏覽器發出的 Basic-authenticated 狀態變更請求，必須在 `X-ATT-CSRF` 提交 CSRF token；登入及一次性 bootstrap endpoint 則要求 same-origin JSON。設為 `security.checkCrossOrigin: false` 只會放寬 Origin 相同來源檢查，不會略過 cookie CSRF token，也不會略過登入/bootstrap 的 same-origin JSON 要求，亦不會啟用 wildcard CORS。同一 login ID 及 client address 在 10 分鐘內失敗 8 次，或同一 client address 以不同 login ID 失敗 32 次後，登入會被限速。Bootstrap 每個 client address 在 10 分鐘內最多可輸入錯誤 token 8 次。自行變更密碼的 current-password 驗證使用相同限速及有界 hash semaphore。這些記憶體限速只適用於單一 Server process；多個 instance 請在共用的 edge 層設定 rate limit。登入回應不會區分不存在、已停用或密碼錯誤的帳戶。登入成功及失敗都會寫入 audit，並不記錄憑證。密碼以 310,000 次 PBKDF2-HMAC-SHA-256 計算雜湊；成功登入時會升級計算次數較低的舊 hash。
 
 `GET /api/v1/auth/me` 回傳安全的目前用戶資料及瀏覽器所需的 CSRF token。`POST /api/v1/auth/login` 及 `/api/v1/auth/logout` 管理 session。使用 local account 的 CLI 及 REST client 亦可透過 HTTPS Basic authentication 存取。管理員可使用 `GET`、`POST /api/v1/auth/users`、`POST /api/v1/auth/users/{loginId}/password`、`POST /api/v1/auth/users/{loginId}/enable` 及 `DELETE /api/v1/auth/users/{loginId}` 管理帳戶。`POST /api/v1/auth/password` 會先核對目前密碼，再變更自己的密碼。API 回應不會包含密碼雜湊、session identifier 或密碼。
 
@@ -210,7 +210,8 @@ Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的
 | `GET` | `/packages`、`/packages/{packageId}` | 讀取設定中的 registry |
 | `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | 列出安全的 Case、Template、Flow 及 Tool 投影 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | 讀取單一資源定義及關聯 |
-| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已遮蔽的 YAML 投影或允許清單內的 Tool script |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已淨化的 YAML 投影或允許清單內的 Tool script，並列出安全引用檔案 |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source-file?referenceId=...` | 透過不透明的資源範圍引用讀取一個合資格文字檔 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/debug-form?environment=SIT` | 讀取目標範圍內的安全 Debug 預設值 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT` | 讀取安全預設值及單 workload Quick Load 預覽 |
 | `GET` | `/packages/{packageId}/load-policy?model=virtualUsers&environment=SIT` | 讀取 Advanced Load 使用的安全 model policy 預設值 |
@@ -270,7 +271,7 @@ API 會回傳 `202 Accepted` 及 job ID。工作狀態依序為 `QUEUED`、`PREP
 
 `GET /jobs` 回傳最近 100 項工作。可加上 `?principal=<text>`，在既有 `principal` property 內作不區分大小寫的文字搜尋；搜尋會在 100 項上限前執行，並採用子字串比對，因此搜尋 `alice` 亦會匹配 `alice(anonym)`。Web UI 及 `att remote jobs --principal <text>` 均使用此篩選。舊紀錄保留原有值，包括先前的 `anonymous` 紀錄。系統不會保存提交 payload，只保存 command 及 package ID 摘要。Engine result 及診斷會作為控制平面 metadata 保存。較大的報告、log 及其他證據會留在工作輸出目錄。
 
-資源探索可用 `case`、`template`、`flow` 或 `tool` 篩選。每頁預設 50 項，最多 100 項；續頁 cursor 會加密並綁定 Server 解析出的身份及查詢。匿名模式下所有 caller 共用同一 cursor 身份。若 package 內容改變，舊 cursor 會以 `409` 拒絕。Explorer 回傳邏輯資源 ID、安全投影、來源資訊、關聯及穩定診斷碼。YAML source 是解析及遮蔽後的投影，並非原始檔案內容。只有 Server 設定明確允許的 package 相對路徑才會提供 Tool script source。探索程序不會執行 Tool，也不提供檔案系統瀏覽器；檢查佇列、Worker heap、逾時及 response 大小均與一般工作執行分開限制。
+資源探索可用 `case`、`template`、`flow` 或 `tool` 篩選。每頁預設 50 項，最多 100 項；續頁 cursor 會加密並綁定 Server 解析出的身份及查詢。匿名模式下所有 caller 共用同一 cursor 身份。若 package 內容改變，舊 cursor 會以 `409` 拒絕。Explorer 回傳邏輯資源 ID、安全投影、來源資訊、關聯及穩定診斷碼。YAML source 是解析及淨化後的投影，並非原始檔案內容。Template/Flow 的安全 `&{...}` 引用文字可透過 `source-file` endpoint 讀取；Server 會確認 canonical path 留在 package root，並檢查副檔名、deny path、文字編碼及大小，再以資源範圍不透明 `referenceId` 取用。Tool script source 只會在 Server 明確允許其 package 相對路徑時提供。憑證、個人資料、原始 config/Testdata、Debug sidecar、binary 及拒絕路徑仍會遮蔽或禁止，不受 display masking 設定影響。探索程序不會執行 Tool，也不提供檔案系統瀏覽器；檢查佇列、Worker heap、逾時及 response 大小均與一般工作執行分開限制。
 
 ### 套件資源探索
 
@@ -308,9 +309,10 @@ GET /api/v1/packages/payments/resources?type=case&query=refund&limit=50
 ```http
 GET /api/v1/packages/payments/resources/template/{resourceId}
 GET /api/v1/packages/payments/resources/template/{resourceId}/source
+GET /api/v1/packages/payments/resources/template/{resourceId}/source-file?referenceId=<opaque>
 ```
 
-詳細回應包含 `resource`、`definition`、`diagnostics` 及 `requestId`。來源回應包含 `resource`、`available`、`format`、`text`、`redacted` 及 `requestId`。來源不可用時，`available` 為 `false`，`reason` 為 `source-unavailable` 或 `size-limit`，而且不會回傳部分內容。找不到目標的關聯會標示 `resolution: "unresolved"`，並附有穩定資源診斷碼。
+詳細回應包含 `resource`、`definition`、`diagnostics` 及 `requestId`。Template/Flow YAML source 回應包含 `resource`、`available`、`format`、`text`、`redacted`、`fileReferences`、`fileReferencesTruncated` 及 `requestId`。每個合資格 `fileReferences` 項目包含 package-relative `logicalPath` 及不透明 `referenceId`；將 ID 傳給 `source-file` 後，Server 會再次執行 canonical containment 及 visibility 檢查並回傳有界文字。Source-file 回應包含 `logicalPath`、已淨化的 `text` 及 `redacted`。此 route 使用與其他 inspection endpoint 相同的身份及授權 mode；匿名模式仍受個別 inspection feature gate 限制。不要由 logical path 建立 filesystem URL。來源不可用時，`available` 為 `false`，會回傳穩定 reason，而且不會回傳部分內容。找不到目標的關聯會標示 `resolution: "unresolved"`，並附有穩定資源診斷碼。
 
 無效清單參數會回傳 `400`；未知 package/resource 使用相同的 `404` 格式。過期 cursor 回傳 `409`，超大回應回傳 `413`，探索佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。錯誤回應使用既有的 `error.code`、`error.summary` 及 `requestId` 格式，不會包含實體路徑或 parser exception 訊息。
 
@@ -431,7 +433,7 @@ GET /api/v1/packages/payments/configuration/testdata/{descriptorId}/records?envi
 
 Declared view 會回傳 schema version、安全的 global 欄位、已設定 profile，以及每個設定 section 的 declared/absent 狀態、項目數量和 profile 繼承或替換狀態。Effective view 使用 `FrameworkConfigLoader` 選擇 environment，並回傳安全的 helper、Tool 及 Testdata descriptor metadata。Root-only package 或使用已設定的預設值時可省略 `environment`。第一個 effective 回應會提供各 section 的數量；按 section ID（`dbhelpers`、`mqhelpers`、`sshhelpers`、`httphelpers`、`tools` 或 `testdata`）要求其項目。Effective section 及 comparison 欄位回應支援 `offset` 與 `limit`（1–100，預設 50），並回傳 `total` 和 `nextOffset` 以供分頁。比較要求必須提供 section ID；Server 會先驗證並篩選兩個 profile，再分頁。檢查過程不會連接 DB、MQ、HTTP 或 SSH 服務，也不會回傳未限制的設定 YAML。只有所選 environment 已設定的 Testdata descriptor 可透過上述 records endpoint 分頁預覽；一般值預設可見，憑證、認證資料及常見個人資料欄位始終遮蔽。啟用 `redaction` 後亦會套用設定的敏感路徑和欄位 pattern。未知或未設定的 descriptor 回傳 `404`。
 
-比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對路徑、憑證、連線 endpoint、網絡拓撲或未限制的 descriptor 內容。
+比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對本機路徑、憑證、Server 自身的秘密或未限制的 descriptor 內容。關閉 masking 時，非憑證 URL、host 及 port 等一般連線設定會顯示；啟用 masking 後，設定的操作欄位及路徑亦會遮蔽。
 
 設定回應包含 `view`、`state`、可用時的 `schemaVersion` 及 `diagnostics`。分頁回應亦包含 `section`、`offset`、`limit`、`total` 及 `nextOffset`。無效設定會以 HTTP 200 回傳 `state: "invalid"` 及穩定診斷碼；格式錯誤的 profile 參數回傳 `400`。未知 package 回傳 `404`，超大回應回傳 `413`，檢查佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。回應大小、佇列和逾時限制與資源探索相同。
 

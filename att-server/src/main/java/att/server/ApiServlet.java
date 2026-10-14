@@ -335,6 +335,7 @@ public final class ApiServlet extends HttpServlet {
             String packageId=parts[2],action,kind=null,resourceId=null;String query=req.getParameter("query"),cursor=req.getParameter("cursor");int limit=parseLimit(req.getParameter("limit"));
             if(parts.length==4)action="list";
             else if(parts.length==7&&"source".equals(parts[6])){action="source";kind=parts[4];resourceId=parts[5];}
+            else if(parts.length==7&&"source-file".equals(parts[6])){action="source-file";kind=parts[4];resourceId=parts[5];query=req.getParameter("referenceId");}
             else if(parts.length==7&&"debug-form".equals(parts[6])){action="debug-form";kind=parts[4];resourceId=parts[5];}
             else if(parts.length==7&&"quick-load-form".equals(parts[6])){action="quick-load-form";kind=parts[4];resourceId=parts[5];}
             else if(parts.length==6){action="detail";kind=parts[4];resourceId=parts[5];}

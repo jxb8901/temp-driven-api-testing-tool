@@ -92,6 +92,43 @@ class PackageConfigurationInspectorTest {
         assertNotNull(comparison.get("nextOffset"));
     }
 
+    @Test void filtersMixedConfigurationSectionsBeforePagingMoreThanFiftyComparedFields() throws Exception {
+        Path root=packageRoot("mixed-section-compare");
+        StringBuilder sitPaths=new StringBuilder();StringBuilder uatPaths=new StringBuilder();
+        for(int i=0;i<8;i++) {
+            String id="orders"+i;
+            String sitPath="config/dbhelpers/sit-"+id+".yaml";
+            String uatPath="config/dbhelpers/uat-"+id+".yaml";
+            write(root.resolve(sitPath),helper("jdbc:postgresql://sit.internal/"+id,"sit-user","sit-secret",false).replace("id: orders","id: "+id));
+            write(root.resolve(uatPath),helper("jdbc:postgresql://uat.internal/"+id,"uat-user","uat-secret",true).replace("id: orders","id: "+id));
+            if(i>0){sitPaths.append(", ");uatPaths.append(", ");}
+            sitPaths.append(sitPath);uatPaths.append(uatPath);
+        }
+        Files.createDirectories(root.resolve("config"));
+        write(root.resolve("config/mqhelper.yaml"),"schemaVersion: att-mqhelper/v1.2\nid: mste\nname: SIT MQ\n"
+                +"description: test MQ\ndefaults:\n  connection: {queueManager: QM1, host: mq.sit.internal, port: 1414, channel: DEV}\n"
+                +"instances: [{id: primary}]\n");
+        String config="schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                +"templates:\n  root: templates\ntestcase:\n  root: testcase\n"
+                +"environments:\n  SIT:\n    dbhelpers: ["+sitPaths+"]\n    mqhelpers: [config/mqhelper.yaml]\n"
+                +"  UAT:\n    dbhelpers: ["+uatPaths+"]\n";
+        write(root.resolve("config/config.yaml"),config);
+
+        PackageConfigurationInspector inspector=inspector(root);
+        Map<String,Object> first=inspector.inspect("compare","SIT","UAT","dbhelpers",0,50);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> firstFields=(List<Map<String,Object>>)first.get("fields");
+        assertEquals(50,firstFields.size());assertEquals(50,first.get("nextOffset"));
+        int total=((Number)first.get("total")).intValue();assertTrue(total>50);
+        for(int offset=0;offset<total;offset+=50) {
+            Map<String,Object> page=inspector.inspect("compare","SIT","UAT","dbhelpers",offset,50);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> fields=(List<Map<String,Object>>)page.get("fields");
+            assertEquals("dbhelpers",page.get("section"));
+            assertTrue(fields.stream().allMatch(field->String.valueOf(field.get("path")).startsWith("dbhelpers.")));
+            if(offset+fields.size()<total)assertEquals(offset+fields.size(),page.get("nextOffset"));
+            else assertNull(page.get("nextOffset"));
+        }
+    }
+
     @Test void pagesAConfigurationWhoseUnpagedResponseExceedsTheResponseLimit() throws Exception {
         Path root=packageRoot("many-helper-config");
         StringBuilder paths=new StringBuilder();
@@ -120,7 +157,9 @@ class PackageConfigurationInspectorTest {
         Path root=packageRoot("testdata-preview");
         Files.createDirectories(root.resolve("testdata"));
         write(root.resolve("testdata/customers.yaml"),"schemaVersion: att-testdata/v1.0\nid: customers\nrecords:\n"
-                +"  - accountId: A-1001\n    status: ACTIVE\n    email: customer@example.test\n    note: 'Bearer abc123; password=inline-secret'\n"
+                +"  - accountId: A-1001\n    status: ACTIVE\n    email: customer@example.test\n    address: '12 Main Street'\n"
+                +"    host: sit.internal\n    port: 1414\n    url: 'https://service.example/api'\n    ordinary: visible-value\n"
+                +"    note: 'Bearer abc123; password=inline-secret'\n"
                 +"  - accountId: A-1002\n    status: CLOSED\n    email: other@example.test\nselection:\n  strategy: sequential\n");
         String configured=baseConfig("config/dbhelpers/sit.yaml","config/dbhelpers/uat.yaml")
                 .replace("  SIT:\n    dbhelpers:","  SIT:\n    testdata: [testdata/customers.yaml]\n    dbhelpers:");
@@ -133,6 +172,9 @@ class PackageConfigurationInspectorTest {
         @SuppressWarnings("unchecked") List<Map<String,Object>> records=(List<Map<String,Object>>)page.get("records");
         @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)records.get(0).get("value");
         assertEquals("A-1001",value.get("accountId"));assertEquals("ACTIVE",value.get("status"));
+        assertEquals("sit.internal",value.get("host"));assertEquals(1414,value.get("port"));
+        assertEquals("https://service.example/api",value.get("url"));assertEquals("visible-value",value.get("ordinary"));
+        assertEquals("[REDACTED]",value.get("address"));
         assertEquals("[REDACTED]",value.get("email"));assertFalse(page.toString().contains("customer@example.test"));
         assertFalse(page.toString().contains("abc123"));assertFalse(page.toString().contains("inline-secret"));
         assertEquals(Boolean.TRUE,records.get(0).get("redacted"));
@@ -146,6 +188,40 @@ class PackageConfigurationInspectorTest {
         assertNull(maskedPage.get("nextOffset"));
         assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
                 ()->visible.inspect("testdata-records","SIT",null,"missing",0,1));
+    }
+
+    @Test void maskingOffShowsOperationalConnectionValuesButKeepsCredentialFieldsHidden() throws Exception {
+        Path root=packageRoot("visible-operational-config");
+        Files.createDirectories(root.resolve("config"));
+        write(root.resolve("config/mqhelper.yaml"),"schemaVersion: att-mqhelper/v1.2\nid: mste\nname: SIT MQ\n"
+                +"description: test MQ\ndefaults:\n  connection: {queueManager: QM1, host: mq.sit.internal, port: 1414, channel: DEV}\n"
+                +"instances: [{id: primary}]\n");
+        write(root.resolve("config/config.yaml"),baseConfig("config/dbhelpers/sit.yaml","config/dbhelpers/uat.yaml")
+                .replace("  SIT:\n    dbhelpers:","  SIT:\n    mqhelpers: [config/mqhelper.yaml]\n    dbhelpers:"));
+        PackageConfigurationInspector visible=new PackageConfigurationInspector(root,Paths.get("config/config.yaml"),262144,
+                false,Collections.emptyList(),Collections.emptyList());
+        Map<String,Object> effective=visible.inspect("effective","SIT",null);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> sections=(List<Map<String,Object>>)effective.get("sections");
+        @SuppressWarnings("unchecked") Map<String,Object> dbSection=sections.stream().filter(s->"dbhelpers".equals(s.get("id"))).findFirst().get();
+        @SuppressWarnings("unchecked") List<Map<String,Object>> dbEntries=(List<Map<String,Object>>)dbSection.get("entries");
+        Map<String,Object> dbEntry=dbEntries.get(0);
+        @SuppressWarnings("unchecked") Map<String,Map<String,Object>> dbFields=(Map<String,Map<String,Object>>)dbEntry.get("fields");
+        assertEquals("visible",dbFields.get("url").get("state"));
+        assertEquals("jdbc:postgresql://sit.internal/orders",dbFields.get("url").get("value"));
+        assertEquals("hidden",dbFields.get("password").get("state"));
+        @SuppressWarnings("unchecked") Map<String,Object> mqSection=sections.stream().filter(s->"mqhelpers".equals(s.get("id"))).findFirst().get();
+        @SuppressWarnings("unchecked") Map<String,Object> mqEntry=((List<Map<String,Object>>)mqSection.get("entries")).get(0);
+        @SuppressWarnings("unchecked") Map<String,Map<String,Object>> mqFields=(Map<String,Map<String,Object>>)mqEntry.get("fields");
+        assertEquals("mq.sit.internal",mqFields.get("host").get("value"));
+        assertEquals(1414,mqFields.get("port").get("value"));
+        assertEquals("hidden",mqFields.get("password").get("state"));
+        Map<String,Object> comparison=visible.inspect("compare","SIT","UAT","dbhelpers",0,100);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> compared=(List<Map<String,Object>>)comparison.get("fields");
+        Map<String,Object> comparedUrl=compared.stream().filter(f->String.valueOf(f.get("path")).endsWith(".url")).findFirst().orElseThrow(AssertionError::new);
+        @SuppressWarnings("unchecked") Map<String,Object> leftUrl=(Map<String,Object>)comparedUrl.get("left");
+        assertEquals("visible",leftUrl.get("state"));assertEquals("jdbc:postgresql://sit.internal/orders",leftUrl.get("value"));
+        Map<String,Object> comparedPassword=compared.stream().filter(f->String.valueOf(f.get("path")).endsWith(".password")).findFirst().orElseThrow(AssertionError::new);
+        assertEquals("hidden",((Map<?,?>)comparedPassword.get("left")).get("state"));
     }
 
     @Test void returnsOnlyStableDiagnosticsForInvalidProfilesAndEscapingDescriptors() throws Exception {

@@ -232,13 +232,14 @@ class ServerRuntimeTest {
             Map<String,Object> comparison=runtime.inspectConfiguration("p","compare","SIT","UAT","dbhelpers",0,50,"alice");
             assertEquals("ready",comparison.get("state"));
             @SuppressWarnings("unchecked") List<Map<String,Object>> fields=(List<Map<String,Object>>)comparison.get("fields");
-            Map<String,Object> hidden=fields.stream().filter(item->"dbhelpers.orders.url".equals(item.get("path"))).findFirst().orElseThrow(AssertionError::new);
-            assertEquals("hidden",hidden.get("change"));
+            Map<String,Object> visibleUrl=fields.stream().filter(item->"dbhelpers.orders.url".equals(item.get("path"))).findFirst().orElseThrow(AssertionError::new);
+            assertEquals("changed",visibleUrl.get("change"));
             Map<String,Object> comparisonPage=runtime.inspectConfiguration("p","compare","SIT","UAT","dbhelpers",0,1,"alice");
             @SuppressWarnings("unchecked") List<Map<String,Object>> firstComparisonPage=(List<Map<String,Object>>)comparisonPage.get("fields");
             assertEquals(1,firstComparisonPage.size());assertTrue(((Number)comparisonPage.get("total")).intValue()>1);
             String publicData=declared+" "+effective+" "+comparison;
-            assertFalse(publicData.contains("sit-db.example.internal"));assertFalse(publicData.contains("uat-db.example.internal"));
+            assertTrue(publicData.contains("jdbc:postgresql://sit-db.example.internal:5432/orders"));
+            assertTrue(publicData.contains("jdbc:postgresql://uat-db.example.internal:5432/orders"));
             assertFalse(publicData.contains("inspection-test-password"));assertFalse(publicData.contains(packageRoot.toString()));
         } finally {runtime.close();}
     }

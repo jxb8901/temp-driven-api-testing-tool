@@ -2,10 +2,11 @@
 
 # ATT 4.1.4 - 2026-10-14
 
-- Add ATT-managed local accounts, one-time administrator bootstrap, password-hashed authentication, revocable sessions, CSRF protection, and Login/Logout UI for ATT Server (#198).
+- Add ATT-managed local accounts, crash-safe one-time administrator bootstrap, bounded password verification, revocable sessions, CSRF protection, secure-transport checks for every password endpoint, and Login/Logout UI for ATT Server (#198).
 - Preserve Tomcat container authentication as the default mode and isolate local users' drafts and jobs.
-- Add safe package-source access, ordinary-value visibility by default with protected account and credential data, bounded Testdata previews, and Engine-compatible Helper reference resolution (#215).
-- Apply anonymous permissions only to enabled Server features, enforce origin policy consistently, and scope configuration comparisons by section before pagination (#215).
+- Add bounded, canonical source access for eligible `&{...}` referenced text while keeping credentials, personal data, and protected package paths redacted or unavailable (#215).
+- Show ordinary configuration and Testdata values by default, retain protected credential and personal-data masking, and add paged Testdata previews and Engine-compatible Helper reference resolution (#215).
+- Apply anonymous permissions only to enabled Server features, keep cookie CSRF checks when origin equality is relaxed, and scope configuration comparisons by section before pagination (#215).
 
 # ATT 4.1.3 - 2026-10-13
 

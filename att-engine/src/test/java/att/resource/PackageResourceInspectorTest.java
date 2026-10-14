@@ -159,28 +159,97 @@ class PackageResourceInspectorTest {
         assertEquals(Boolean.TRUE,items.get(0).get("sourceAvailable"));
     }
 
+    @Test void resolvesBoundedReferencedSourcesThroughOpaqueCanonicalTargets() throws Exception {
+        Path root=packageWithTemplate("referenced-source", "REFS", "description: safe");
+        Path payload=Files.createDirectories(root.resolve("payloads")).resolve("request.xml");
+        writeUtf8(payload,"<request><accountId>A-1001</accountId><email>private@example.test</email>"
+                +"<address>12 Main Street</address><password>payload-secret</password></request>");
+        writeUtf8(root.resolve("payloads/請求.json"),"{\"reference\":\"交易-一\",\"phone\":\"555-0100\"}");
+        writeUtf8(root.resolve("payloads/customers.csv"),"accountId,email,address\nA-1001,private@example.test,12 Main Street\n");
+        writeUtf8(root.resolve("payloads/oversized.txt"),String.join("",Collections.nCopies(65537,"x")));
+        Path outside=writeUtf8(temp.resolve("outside-request.xml"),"<request>outside</request>");
+        try { Files.createSymbolicLink(root.resolve("payloads/escape.xml"),outside); }
+        catch (UnsupportedOperationException | java.io.IOException | SecurityException unsupported) { }
+        writeUtf8(root.resolve("templates/REFS/template.yaml"),"schemaVersion: att-template/v3.6\nname: REFS\ndescription: safe\n"
+                +"actions:\n  send:\n    type: log\n    message: '&{payloads/request.xml}'\n"
+                +"  unicode:\n    type: log\n    message: '&{payloads/請求.json}'\n"
+                +"  csv:\n    type: log\n    message: '&{payloads/customers.csv}'\n"
+                +"  oversized:\n    type: log\n    message: '&{payloads/oversized.txt}'\n"
+                +"  missing:\n    type: log\n    message: '&{payloads/missing.txt}'\n"
+                +"  escaped:\n    type: log\n    message: '&{payloads/escape.xml}'\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        String resourceId=String.valueOf(items.get(0).get("resourceId"));
+        Map<String,Object> source=inspector.inspect("source","template",resourceId,null,0,1);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> files=(List<Map<String,Object>>)source.get("fileReferences");
+        assertEquals(3,files.size());assertEquals("payloads/request.xml",files.get(0).get("logicalPath"));
+        Map<String,Object> unicodeFile=files.stream().filter(file->"payloads/請求.json".equals(file.get("logicalPath"))).findFirst().orElseThrow(AssertionError::new);
+        Map<String,Object> csvFile=files.stream().filter(file->"payloads/customers.csv".equals(file.get("logicalPath"))).findFirst().orElseThrow(AssertionError::new);
+        String referenceId=String.valueOf(files.get(0).get("referenceId"));
+        assertTrue(referenceId.matches("[0-9a-f]{64}"));
+        Map<String,Object> referenced=inspector.inspect("source-file","template",resourceId,referenceId,0,1);
+        assertEquals(Boolean.TRUE,referenced.get("available"));
+        assertEquals("payloads/request.xml",referenced.get("logicalPath"));
+        assertTrue(String.valueOf(referenced.get("text")).contains("A-1001"));
+        assertFalse(String.valueOf(referenced.get("text")).contains("payload-secret"));
+        assertFalse(String.valueOf(referenced.get("text")).contains("private@example.test"),String.valueOf(referenced.get("text")));
+        assertFalse(String.valueOf(referenced.get("text")).contains("12 Main Street"));
+        Map<String,Object> unicodeReference=inspector.inspect("source-file","template",resourceId,String.valueOf(unicodeFile.get("referenceId")),0,1);
+        assertTrue(String.valueOf(unicodeReference.get("text")).contains("交易-一"));
+        assertFalse(String.valueOf(unicodeReference.get("text")).contains("555-0100"));
+        Map<String,Object> csvReference=inspector.inspect("source-file","template",resourceId,String.valueOf(csvFile.get("referenceId")),0,1);
+        assertTrue(String.valueOf(csvReference.get("text")).contains("A-1001"));
+        assertFalse(String.valueOf(csvReference.get("text")).contains("private@example.test"));
+        assertFalse(String.valueOf(csvReference.get("text")).contains("12 Main Street"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspect("source-file","template",resourceId,String.join("",Collections.nCopies(64,"0")),0,1));
+        String revision=String.valueOf(source.get("revisionDigest"));
+        writeUtf8(payload,"<request>changed</request>");
+        assertThrows(PackageResourceInspector.StaleResourceCursorException.class,()->inspector.verifyRevision(revision));
+    }
+
     @Test void resolvesOnlyConfiguredHelperOperationsWithoutCreatingToolTargets() throws Exception {
         Path root=packageWithTemplate("helper-inspection", "HELPERS", "description: safe");
-        writeUtf8(root.resolve("config/mqhelper.yaml"),"schemaVersion: att-mqhelper/v1.2\nid: broker\nname: Broker\n"
+        Files.createDirectories(root.resolve("config/tools"));
+        writeUtf8(root.resolve("config/mqhelper.yaml"),"schemaVersion: att-mqhelper/v1.2\nid: fromeaimqhk\nname: EAI broker\n"
                 +"description: test broker\ndefaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV}\n"
                 +"instances: [{id: primary}]\n");
+        writeUtf8(root.resolve("config/dbhelper.yaml"),"schemaVersion: att-dbhelper/v2.6\nid: fppdb\nname: FPP database\n"
+                +"description: test database\nconnection: {url: 'jdbc:postgresql://localhost/fpp'}\n");
+        writeUtf8(root.resolve("config/tools/fppdb.yaml"),"schemaVersion: att-tool-group/v2.9\nid: fppdb\nname: FPP helpers\n"
+                +"description: Configured helper aliases\ntools:\n  findCtTxnBySrcRefNo:\n    name: Find transaction\n"
+                +"    description: Resolve a transaction by source reference\n"
+                +"    call: \"#{db.fppdb.query(sql='select 1 as TRANSACTION_ID')}\"\n"
+                +"    arguments:\n      sourceRefNo: {name: Source reference, description: Source reference number, required: true}\n");
         writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
-                +"mqhelpers: [config/mqhelper.yaml]\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+                +"dbhelpers: [config/dbhelper.yaml]\nmqhelpers: [config/mqhelper.yaml]\ntoolGroups: [config/tools/fppdb.yaml]\n"
+                +"testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         writeUtf8(root.resolve("templates/HELPERS/template.yaml"),"schemaVersion: att-template/v3.6\nname: HELPERS\ndescription: helper calls\nactions:\n"
-                +"  valid:\n    type: tool\n    call: \"#{mq.broker.request(payload='x')}\"\n"
-                +"  validAgain:\n    type: tool\n    call: \"#{mq.broker.send(queue='Q', payload='y')}\"\n"
-                +"  invalidMethod:\n    type: tool\n    call: \"#{mq.broker.destroy(payload='x')}\"\n"
-                +"  unknownHelper:\n    type: tool\n    call: \"#{mq.unknown.request(payload='x')}\"\n");
+                +"  valid:\n    type: tool\n    call: \"#{mq.fromeaimqhk.request(payload='x')}\"\n"
+                +"  validAgain:\n    type: tool\n    call: \"#{mq.fromeaimqhk.send(queue='Q', payload='y')}\"\n"
+                +"  validConfiguredAlias:\n    type: tool\n    call: \"#{fppdb.findCtTxnBySrcRefNo(sourceRefNo='X')}\"\n"
+                +"  invalidMethod:\n    type: tool\n    call: \"#{mq.fromeaimqhk.destroy(payload='x')}\"\n"
+                +"  unknownHelper:\n    type: tool\n    call: \"#{mq.unknown.request(payload='x')}\"\n"
+                +"  similarAlias:\n    type: tool\n    call: \"#{fppdb.findCtTxnBySrcRefNoExtra(sourceRefNo='X')}\"\n");
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        att.config.FrameworkConfig config=new att.config.FrameworkConfigLoader().load(root.resolve("config/config.yaml"),root,"SIT");
+        assertTrue(PackageResourceInspector.configuredHelperCall("mq.fromeaimqhk.request",config));
+        assertTrue(PackageResourceInspector.configuredHelperCall("fppdb.findCtTxnBySrcRefNo",config));
+        assertFalse(PackageResourceInspector.configuredHelperCall("fppdb.findCtTxnBySrcRefNoExtra",config));
+        assertFalse(PackageResourceInspector.configuredHelperCall("mq.fromeaimqhk.destroy",config));
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
         Map<String,Object> detail=inspector.inspect("detail","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
         @SuppressWarnings("unchecked") List<Map<String,Object>> refs=(List<Map<String,Object>>)((Map<?,?>)detail.get("resource")).get("references");
-        Map<String,Object> valid=refs.stream().filter(ref->"mq.broker.request".equals(ref.get("logicalId"))).findFirst().orElseThrow(AssertionError::new);
+        Map<String,Object> valid=refs.stream().filter(ref->"mq.fromeaimqhk.request".equals(ref.get("logicalId"))).findFirst().orElseThrow(AssertionError::new);
         assertEquals("resolved",valid.get("resolution"));assertEquals("helper",valid.get("targetKind"));assertNull(valid.get("resourceId"));
         @SuppressWarnings("unchecked") Map<String,Object> callSite=(Map<String,Object>)valid.get("callSite");
         assertEquals("valid",callSite.get("actionId"));
-        assertEquals(2L,refs.stream().filter(ref->"mq.broker.request".equals(ref.get("logicalId"))||"mq.broker.send".equals(ref.get("logicalId"))).count());
-        assertEquals(2L,refs.stream().filter(ref->"unresolved".equals(ref.get("resolution"))).count());
+        assertEquals(2L,refs.stream().filter(ref->"mq.fromeaimqhk.request".equals(ref.get("logicalId"))||"mq.fromeaimqhk.send".equals(ref.get("logicalId"))).count());
+        Map<String,Object> alias=refs.stream().filter(ref->"fppdb.findCtTxnBySrcRefNo".equals(ref.get("logicalId"))).findFirst().orElseThrow(AssertionError::new);
+        assertEquals("resolved",alias.get("resolution"));assertNotNull(alias.get("resourceId"));
+        assertEquals(3L,refs.stream().filter(ref->"unresolved".equals(ref.get("resolution"))).count());
         assertTrue(detail.toString().contains("ATT-RESOURCE-REFERENCE-UNRESOLVED"));
     }
 

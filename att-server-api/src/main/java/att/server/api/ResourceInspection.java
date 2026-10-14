@@ -30,7 +30,15 @@ public final class ResourceInspection {
         public String logicalPath;
         public String text;
         public Boolean redacted;
+        public List<SourceReference> fileReferences;
+        public Boolean fileReferencesTruncated;
         public String requestId;
+    }
+
+    public static final class SourceReference {
+        public String referenceId;
+        public String logicalPath;
+        public Boolean available;
     }
 
     public static final class Resource {

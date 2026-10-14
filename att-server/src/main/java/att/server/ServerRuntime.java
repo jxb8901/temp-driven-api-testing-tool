@@ -273,7 +273,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        if(!List.of("list","detail","source").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
+        if(!List.of("list","detail","source","source-file").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
         if(type!=null&&!List.of("case","template","flow","tool").contains(type))throw new IllegalArgumentException("Unsupported resource type");
         String normalizedQuery=query==null?"":query.trim();if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
         int limit=requestedLimit==0?RESOURCE_DEFAULT_PAGE_SIZE:requestedLimit;
