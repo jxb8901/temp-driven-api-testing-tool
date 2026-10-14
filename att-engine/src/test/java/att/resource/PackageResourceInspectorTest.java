@@ -98,7 +98,8 @@ class PackageResourceInspectorTest {
                 Collections.singletonList("tools/binary.sh"),65536,262144,false,true,"safe-package-files",
                 Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
-        Map<String,Object> item=items.stream().filter(value->"binary".equals(value.get("logicalId"))).findFirst().orElseThrow();
+        Map<String,Object> item=items.stream().filter(value->"binary".equals(value.get("logicalId"))).findFirst()
+                .orElseThrow(()->new AssertionError("binary Tool should be indexed"));
         assertEquals(Boolean.FALSE,item.get("sourceAvailable"));assertEquals("binary",item.get("sourceReason"));
         Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(item.get("resourceId")),null,0,1);
         assertEquals(Boolean.FALSE,source.get("available"));assertEquals("binary",source.get("reason"));
