@@ -12,7 +12,6 @@ vi.mock('../code/CodeEditor', () => ({
   }) => <>
     <pre aria-label={label}>{value}</pre>
     {fileReferences?.[0] && <button type="button" onClick={() => onFileReference?.('./refs/child.json', sourcePath, fileReferences[0].referenceId)}>Open linked file</button>}
-    {value.includes('&{') && fileReferences?.length === 0 && <p role="status">Package file reference is unavailable from this safe source projection.</p>}
   </>,
   detectCodeLanguage: () => 'yaml',
 }));
@@ -44,8 +43,7 @@ function Harness({ api, sourceReference }: { api: ExplorerApi; sourceReference?:
 }
 
 describe('ConfigurationWorkspace', () => {
-  it('opens safe configuration source and follows only server-projected package references', async () => {
-    const referenceId = 'c'.repeat(64);
+  it('keeps config-source file references visible but non-navigable without server tokens', async () => {
     const api = {
       listResources: vi.fn(async () => ({ items: [], total: 0 })),
       getResource: vi.fn(async () => ({ resource: { type: 'template', resourceId: 'x' } })),
@@ -60,10 +58,9 @@ describe('ConfigurationWorkspace', () => {
         ],
       })),
       getConfigurationFileSource: vi.fn(async (_packageId: string, path: string) => ({
-        available: true, format: path.endsWith('.json') ? 'json' : 'yaml',
+        available: true, format: 'yaml',
         logicalPath: path,
-        text: path.endsWith('.json') ? '{"ok":true}' : 'name: base\npayload: &{./refs/child.json}',
-        fileReferences: path.endsWith('.json') ? [] : [{ referenceId, logicalPath: 'config/refs/child.json', available: true }],
+        text: 'name: base\npayload: &{./refs/child.json}',
       })),
       getTestdataRecords: vi.fn(async () => ({ descriptorId: 'x', offset: 0, limit: 50, total: 0, records: [] })),
       getDebugForm: vi.fn(), previewDebug: vi.fn(), submitDebug: vi.fn(), runCase: vi.fn(),
@@ -75,12 +72,9 @@ describe('ConfigurationWorkspace', () => {
     await flush();
     expect(api.getConfigurationFileSource).toHaveBeenCalledWith('payments', 'config/main.yaml', undefined, expect.any(AbortSignal));
     expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('name: base\npayload: &{./refs/child.json}');
-
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open linked file')?.click());
-    await flush();
-    expect(api.getConfigurationFileSource).toHaveBeenLastCalledWith('payments', 'config/refs/child.json', 'config/main.yaml', expect.any(AbortSignal));
-    expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('{"ok":true}');
-    expect(host.textContent).not.toContain('Package file reference is unavailable from this safe source projection.');
+    expect(host.textContent).toContain('References in config/ source remain visible but cannot be opened because this endpoint did not return Server-verified reference tokens.');
+    expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Open linked file')).toBe(false);
+    expect(api.getConfigurationFileSource).toHaveBeenCalledTimes(1);
   });
 
   it('uses tree arrow keys to expand, enter children, return to parents, and collapse', async () => {
@@ -150,6 +144,8 @@ describe('ConfigurationWorkspace', () => {
 
     expect(getResourceSourceFile).toHaveBeenCalledWith({ packageId: 'payments', type: 'flow', resourceId: 'checkout-flow' }, referenceId, expect.any(AbortSignal), 'templates/payment/flow.yaml');
     expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('<request>&{./refs/child.json}</request>');
+    expect(host.textContent).not.toContain('This projection includes no Server-verified file-reference token');
+    expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Open linked file')).toBe(true);
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open linked file')?.click());
     await flush();
     expect(getResourceSourceFile).toHaveBeenLastCalledWith({ packageId: 'payments', type: 'flow', resourceId: 'checkout-flow' }, nestedReferenceId, expect.any(AbortSignal), 'templates/payment/payload/request.xml');
