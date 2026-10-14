@@ -13,8 +13,10 @@ interface QuickLoadPageProps {
   environments: string[];
   environmentState: 'loading' | 'ready' | 'error';
   inlineLoadEnabled: boolean;
+  schedulingEnabled?: boolean;
   onEnvironmentChange(environment: string): void;
   onJobAccepted(jobId: string): void;
+  onSchedule?(input: { packageId: string; environment?: string; draftId: string }): void;
   onCancel(): void;
   registerUnsavedChanges(isDirty: boolean, description?: string): () => void;
 }
@@ -75,7 +77,7 @@ function makeScenario(policy: JsonObject, model: LoadModel, id: string, targetTy
   return scenario;
 }
 
-export function QuickLoadPage({ api, packageId, target, environment, environments, environmentState, inlineLoadEnabled, onEnvironmentChange, onJobAccepted, onCancel, registerUnsavedChanges }: QuickLoadPageProps) {
+export function QuickLoadPage({ api, packageId, target, environment, environments, environmentState, inlineLoadEnabled, schedulingEnabled = false, onEnvironmentChange, onJobAccepted, onSchedule, onCancel, registerUnsavedChanges }: QuickLoadPageProps) {
   const targetType = validTarget(target.type) ? target.type : null;
   const [model, setModel] = useState<LoadModel>('virtualUsers');
   const [preset, setPreset] = useState<'package-policy' | 'quick-profile' | 'custom'>('package-policy');
@@ -104,7 +106,10 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   const dirtyRef = useRef(false);
   const templateBusiness = useRef<SidecarObject>({ inputs: {}, vars: {} });
   const policySequence = useRef(0);
+  const pendingModelPolicySelection = useRef(false);
   const sidecarSequence = useRef(0);
+  const validationSequence = useRef(0);
+  const validationController = useRef<AbortController | null>(null);
   const submitLock = useRef(false);
   const scenario = useMemo(() => {
     if (!policy || !targetType) return null;
@@ -112,20 +117,35 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
     catch { return null; }
   }, [policy, model, target.resourceId, targetType, environment, users, tps, maxConcurrent, duration, timing, business, advanced]);
   const rawJson = scenario ? JSON.stringify(scenario, null, 2) : '';
+  const scenarioFingerprint = JSON.stringify([identityKey, environment, model, preset, rawJson]);
+  const scenarioFingerprintRef = useRef(scenarioFingerprint);
+  scenarioFingerprintRef.current = scenarioFingerprint;
+  const [validatedFingerprint, setValidatedFingerprint] = useState<string | null>(null);
+
+  function invalidateDraft() {
+    validationSequence.current++;
+    validationController.current?.abort();
+    validationController.current = null;
+    setDraft(null); setValidatedFingerprint(null); setDraftState('idle'); setError(''); setDiagnostics([]);
+    setMessage('The scenario changed. Validate it again before running or scheduling.');
+  }
 
   useEffect(() => registerUnsavedChanges(dirty, 'Quick Load draft'), [dirty, registerUnsavedChanges]);
+  useEffect(() => () => { validationController.current?.abort(); }, []);
   useEffect(() => {
     const identityChanged = previousIdentity.current !== identityKey;
-    if (identityChanged) { previousIdentity.current = identityKey; dirtyRef.current = false; setDirty(false); setBusiness({ inputs: {}, vars: {} }); setDraft(null); setDraftState('idle'); }
-    const preserveDraft = dirtyRef.current && !identityChanged;
+    if (identityChanged) { previousIdentity.current = identityKey; invalidateDraft(); dirtyRef.current = false; setDirty(false); setBusiness({ inputs: {}, vars: {} }); }
+    const resetForModelSelection = pendingModelPolicySelection.current;
+    const preserveDraft = dirtyRef.current && !identityChanged && !resetForModelSelection;
     const controller = new AbortController(); const request = ++policySequence.current;
     setPolicy(null); setDraft(null); setDraftState('idle'); setError(''); setDiagnostics([]); setPolicyState(inlineLoadEnabled ? 'loading' : 'disabled');
     setPolicyMessage(inlineLoadEnabled ? 'Loading safe policy defaults…' : 'Browser-created Load drafts are disabled by Server configuration.');
     if (!packageId || !targetType || !inlineLoadEnabled) return () => controller.abort();
     api.getLoadPolicy(packageId, model, environment || undefined, controller.signal).then(response => {
       if (controller.signal.aborted || request !== policySequence.current) return;
+      pendingModelPolicySelection.current = false;
       const loaded = asObject(response.policy); setPolicy(loaded); setPolicyState('ready');
-      setPolicyMessage(response.redacted ? 'Safe policy defaults loaded. Sensitive values remain protected.' : 'Server policy defaults loaded. Validation is required before running.');
+      setPolicyMessage(response.redacted ? 'Safe model-specific policy defaults loaded. Sensitive values remain protected.' : 'The selected model’s package policy or Server fallback is loaded. Validate before running.');
       if (!preserveDraft) {
         const load = asObject(loaded.load);
         setPreset('package-policy');
@@ -161,10 +181,11 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
     return () => controller.abort();
   }, [api, packageId, targetType, target.resourceId, identityKey, model, environment, inlineLoadEnabled]);
 
-  function change<T>(setter: (value: T) => void, value: T) { setter(value); setPreset('custom'); dirtyRef.current = true; setDirty(true); setDraft(null); setDraftState('idle'); }
+  function change<T>(setter: (value: T) => void, value: T) { invalidateDraft(); setter(value); setPreset('custom'); dirtyRef.current = true; setDirty(true); }
   function applyPreset(value: 'package-policy' | 'quick-profile' | 'custom') {
+    invalidateDraft();
     setPreset(value);
-    if (value === 'custom') { dirtyRef.current = true; setDirty(true); setDraft(null); setDraftState('idle'); return; }
+    if (value === 'custom') { dirtyRef.current = true; setDirty(true); return; }
     if (!policy) return;
     const load = asObject(policy.load);
     const execution = asObject(policy.execution);
@@ -193,24 +214,35 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
         seed: policy.seed == null ? '' : String(policy.seed),
       });
     }
-    dirtyRef.current = true; setDirty(true); setDraft(null); setDraftState('idle');
+    dirtyRef.current = true; setDirty(true);
   }
   async function validate() {
-    setError(''); setDiagnostics([]); setDraft(null);
+    const request = ++validationSequence.current;
+    validationController.current?.abort();
+    validationController.current = null;
+    const fingerprint = scenarioFingerprint;
+    setError(''); setDiagnostics([]); setDraft(null); setValidatedFingerprint(null);
     if (!inlineLoadEnabled) { setDraftState('error'); setError('Quick Load is disabled by Server policy.'); return; }
     if (!businessValid) { setDraftState('error'); setError('Correct the invalid target inputs before validation.'); return; }
     let nextScenario: JsonObject;
     try { nextScenario = makeScenario(policy || {}, model, target.resourceId, targetType || 'template', users, tps, maxConcurrent, duration, timing, business, advanced); }
     catch (reason) { setDraftState('error'); setError(reason instanceof Error ? reason.message : 'Correct the Quick Load fields.'); return; }
+    const controller = new AbortController();
+    validationController.current = controller;
     setDraftState('validating'); setMessage('Validating the single-target scenario on the Server…');
     try {
-      const result = await api.createLoadDraft({ packageId, ...(environment ? { environment } : {}), scenario: nextScenario });
+      const result = await api.createLoadDraft({ packageId, ...(environment ? { environment } : {}), scenario: nextScenario }, controller.signal);
+      if (controller.signal.aborted || request !== validationSequence.current || fingerprint !== scenarioFingerprintRef.current) return;
       setDraft(result); setDiagnostics(result.diagnostics || []); setDraftState('valid'); dirtyRef.current = false; setDirty(false);
+      setValidatedFingerprint(fingerprint);
       setMessage(result.diagnostics?.length ? 'The Server returned validation diagnostics. Review them before running.' : 'The Server accepted this draft for review.');
-    } catch (reason) { setDraftState('error'); setError(reason instanceof Error ? reason.message : 'Quick Load validation failed.'); setMessage('Correct the fields or retry validation.'); }
+    } catch (reason) {
+      if (controller.signal.aborted || request !== validationSequence.current || fingerprint !== scenarioFingerprintRef.current) return;
+      setDraftState('error'); setError(reason instanceof Error ? reason.message : 'Quick Load validation failed.'); setMessage('Correct the fields or retry validation.');
+    } finally { if (validationController.current === controller) validationController.current = null; }
   }
   async function runNow() {
-    if (!draft || draftState !== 'valid' || submitLock.current) return;
+    if (!draft || draftState !== 'valid' || validatedFingerprint !== scenarioFingerprint || submitLock.current) return;
     const accepted = window.confirm('Run this validated single-target Quick Load now?');
     if (!accepted) return;
     submitLock.current = true; setConfirming(true); setDraftState('submitting'); setError('');
@@ -224,7 +256,10 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
 
   return <div className="att-load-page att-quick-load-page">
     <header className="att-feature-header"><div><p className="att-eyebrow">Single-target workload</p><h1>Quick Load</h1><p>Run a focused load check against one selected resource. Advanced Load supports multi-workload scenarios.</p></div>
-      <div className="att-quick-load-actions"><button type="button" onClick={onCancel}>Back to Explorer</button><button type="button" disabled title="The Server does not yet support immutable inline Quick Load schedule definitions.">Schedule…</button></div>
+      <div className="att-quick-load-actions"><button type="button" onClick={onCancel}>Back to Explorer</button><button type="button"
+        onClick={() => draft?.draftId && onSchedule?.({ packageId, environment: environment || undefined, draftId: draft.draftId })}
+        disabled={!schedulingEnabled || !draft?.draftId || draftState !== 'valid' || validatedFingerprint !== scenarioFingerprint || !onSchedule}
+        title={!schedulingEnabled ? 'Scheduled Load is disabled by Server configuration.' : !draft?.draftId ? 'Validate the scenario before scheduling.' : undefined}>Schedule…</button></div>
     </header>
     {!targetType && <p className="att-inline-error" role="alert">Quick Load supports one Template, Flow, or Tool target. This route has an unsupported target type.</p>}
     {!inlineLoadEnabled && <p className="att-inline-error" role="alert">Browser-created Load drafts are disabled by Server configuration.</p>}
@@ -232,11 +267,11 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
       <div className="att-section-heading"><div><h2 id="quick-load-target">Target</h2><p>The selected resource is fixed for this Quick Load.</p></div><strong>{targetLabel}</strong></div>
       <div className="att-load-grid">
         <label>Load template / preset<select aria-label="Load template or preset" value={preset} onChange={event => applyPreset(event.currentTarget.value as 'package-policy' | 'quick-profile' | 'custom')} disabled={!policy || !inlineLoadEnabled}>
-          <option value="package-policy">Package / Server policy</option><option value="quick-profile">Quick smoke · 2 users · 10s</option>
+          <option value="package-policy">Package / Server policy</option><option value="quick-profile" disabled={model !== 'virtualUsers'}>Quick smoke · 2 users · 10s</option>
           {preset === 'custom' && <option value="custom">Custom edits</option>}
-        </select><small className="att-help">{preset === 'quick-profile' ? 'Based on examples/load/quick-profile.yaml; target inputs stay unchanged.' : 'Selecting a preset only edits this draft. Validate before running.'}</small></label>
-        <label>Load model<select value={model} onChange={event => { setModel(event.currentTarget.value as LoadModel); setPreset('custom'); dirtyRef.current = true; setDirty(true); setDraft(null); setDraftState('idle'); }} disabled={!inlineLoadEnabled}><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select></label>
-        <label>Environment<select value={environment} onChange={event => { onEnvironmentChange(event.currentTarget.value); setPreset('custom'); dirtyRef.current = true; setDirty(true); setDraft(null); }}><option value="">Package default</option>{environments.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+        </select><small className="att-help">{preset === 'quick-profile' ? 'Based on examples/load/quick-profile.yaml; target inputs stay unchanged.' : 'The selected model loads its matching package policy (or Server fallback). Selecting a preset only edits this draft; validate before running.'}</small></label>
+        <label>Load model<select value={model} onChange={event => { invalidateDraft(); pendingModelPolicySelection.current = true; setModel(event.currentTarget.value as LoadModel); setPreset('package-policy'); dirtyRef.current = true; setDirty(true); }} disabled={!inlineLoadEnabled}><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select></label>
+        <label>Environment<select value={environment} onChange={event => { invalidateDraft(); onEnvironmentChange(event.currentTarget.value); setPreset('custom'); dirtyRef.current = true; setDirty(true); }}><option value="">Package default</option>{environments.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
         {model === 'virtualUsers' ? <label>Users<input type="number" min="1" step="1" value={users} onChange={event => change(setUsers, event.currentTarget.value)} /></label>
           : <label>Target TPS<input value={tps} onChange={event => change(setTps, event.currentTarget.value)} placeholder="e.g. 5/s" /></label>}
         {model === 'arrivalRate' && <label>Maximum concurrent<input type="number" min="1" step="1" value={maxConcurrent} onChange={event => change(setMaxConcurrent, event.currentTarget.value)} /></label>}
@@ -247,8 +282,8 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
     </section>
     <section className="att-load-section" aria-labelledby="quick-load-inputs">
       <div className="att-section-heading"><div><h2 id="quick-load-inputs">Inputs and variables</h2><p>Values from the safe debug sidecar stay editable as ATT-authored literals.</p></div>
-        <button type="button" onClick={() => { setBusiness(templateBusiness.current); setResetKey(value => value + 1); setPreset('custom'); dirtyRef.current = true; setDirty(true); setDraft(null); setDraftState('idle'); }}>Reset inputs to sidecar defaults</button></div>
-      <TypedSidecarForm value={business} groups={groups} resetKey={resetKey} onChange={next => { setBusiness(next); setBusinessValid(true); setPreset('custom'); dirtyRef.current = true; setDirty(true); setDraft(null); }} onValidityChange={setBusinessValid} />
+        <button type="button" onClick={() => { invalidateDraft(); setBusiness(templateBusiness.current); setResetKey(value => value + 1); setPreset('custom'); dirtyRef.current = true; setDirty(true); }}>Reset inputs to sidecar defaults</button></div>
+      <TypedSidecarForm value={business} groups={groups} resetKey={resetKey} onChange={next => { invalidateDraft(); setBusiness(next); setBusinessValid(true); setPreset('custom'); dirtyRef.current = true; setDirty(true); }} onValidityChange={setBusinessValid} />
     </section>
     <section className="att-load-section" aria-labelledby="quick-load-advanced">
       <button className="att-quick-load-disclosure" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen(value => !value)}>Advanced Settings {advancedOpen ? '−' : '+'}</button>
@@ -267,7 +302,7 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
     <section className="att-load-section" aria-labelledby="quick-load-review">
       <div className="att-section-heading"><div><h2 id="quick-load-review">Validate and run</h2><p>Changing a preset or model never starts a job.</p></div>
         <div className="att-quick-load-actions"><button type="button" onClick={() => void validate()} disabled={!policy || policyState !== 'ready' || !inlineLoadEnabled || draftState === 'validating' || draftState === 'submitting'}>Validate</button>
-          <button type="button" className="att-primary-action" onClick={() => void runNow()} disabled={!draft || draftState !== 'valid' || confirming}>{confirming ? 'Starting…' : 'Run Now'}</button></div>
+          <button type="button" className="att-primary-action" onClick={() => void runNow()} disabled={!draft || draftState !== 'valid' || validatedFingerprint !== scenarioFingerprint || confirming}>{confirming ? 'Starting…' : 'Run Now'}</button></div>
       </div>
       <div className={`att-validation-state att-state-${draftState}`} role="status" aria-live="polite" aria-busy={draftState === 'validating' || draftState === 'submitting'}><p>{message}</p>{error && <p className="att-inline-error" role="alert">{error}</p>}
         {policyState === 'loading' && <p>Loading Load policy…</p>}{policyState === 'error' && <p className="att-inline-error">{policyMessage}</p>}
@@ -276,6 +311,6 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
       {draft?.previewYaml && <CodeEditor value={draft.previewYaml} language="yaml" label="Server validated Quick Load preview" readOnly />}
       {draft?.expiresAt && <p className="att-help">Validated draft expires {new Date(draft.expiresAt).toLocaleString()}.</p>}
     </section>
-    <details className="att-quick-load-schedule-note"><summary>Scheduling availability</summary><p>Scheduling is unavailable for this inline draft until the Server supports immutable inline Quick Load schedule snapshots. No test is scheduled.</p></details>
+    {draftState === 'valid' && draft?.draftId && <p className="att-help">Scheduling creates a recurring job from this validated immutable scenario snapshot.</p>}
   </div>;
 }

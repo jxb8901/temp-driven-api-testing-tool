@@ -203,7 +203,7 @@ function initialTiming(policy: JsonObject): TimingDraft {
 export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const {
     api, packages, selectedPackage, selectedEnvironment, environments = [], environmentState, inlineLoadEnabled,
-    principal, onPackageChange, onEnvironmentChange, onJobAccepted, confirmStart,
+    schedulingEnabled = false, principal, onPackageChange, onEnvironmentChange, onJobAccepted, onSchedule, confirmStart,
   } = props;
   const [model, setModel] = useState<LoadModel>('virtualUsers');
   const [policy, setPolicy] = useState<JsonObject | null>(null);
@@ -533,14 +533,16 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         {preview && <CodeEditor value={preview} language="yaml" label="Server-validated scenario preview" readOnly />}
         <div className="att-review-actions">
           <button type="button" onClick={() => void validateScenario()} disabled={!policy || !inlineLoadEnabled || draftState === 'validating' || draftState === 'submitting'}>Validate scenario</button>
-          <button type="button" disabled title="The Server does not yet support immutable inline Load schedule definitions.">Schedule…</button>
+          <button type="button" onClick={() => draft?.draftId && onSchedule?.({ packageId: selectedPackage, environment: selectedEnvironment || undefined, draftId: draft.draftId })}
+            disabled={!schedulingEnabled || !draft?.draftId || draftState !== 'valid' || !onSchedule}
+            title={!schedulingEnabled ? 'Scheduled Load is disabled by Server configuration.' : !draft?.draftId ? 'Validate the scenario before scheduling.' : undefined}>Schedule…</button>
           <button type="button" onClick={() => void copyYaml()} disabled={!draft?.previewYaml || Boolean(draft.redacted)}>Copy YAML</button>
           <button type="button" onClick={exportYaml} disabled={!draft?.previewYaml || Boolean(draft.redacted)}>Export YAML</button>
           <button type="button" className="att-primary-action" onClick={() => void startLoad()} disabled={!hasLiveDraft || draftState === 'submitting' || confirmationPending || !inlineLoadEnabled}>
             {confirmationPending ? 'Waiting for confirmation…' : draftState === 'submitting' ? 'Starting…' : 'Review and start Load'}
           </button>
         </div>
-        <p className="att-quick-load-schedule-note">Scheduling is unavailable until the Server can store immutable inline Load snapshots. The current scenario will not be scheduled.</p>
+        {draftState === 'valid' && draft?.draftId && <p className="att-help">Scheduling creates a recurring job from this validated immutable scenario snapshot.</p>}
       </section>
     </div>
   );

@@ -152,10 +152,12 @@ export interface LoadFeatureProps {
   environments?: string[];
   environmentState?: 'loading' | 'ready' | 'error';
   inlineLoadEnabled: boolean;
+  schedulingEnabled?: boolean;
   principal?: string;
   onPackageChange: (packageId: string) => void;
   onEnvironmentChange: (environment: string) => void;
   onJobAccepted: (jobId: string) => void;
+  onSchedule?: (input: { packageId: string; environment?: string; draftId: string }) => void;
   confirmStart?: (message: string) => boolean | Promise<boolean>;
 }
 

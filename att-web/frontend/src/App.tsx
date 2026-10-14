@@ -13,6 +13,7 @@ import type { LoadJobsApi, PackageOption } from './features/load/types';
 import { SettingsPage } from './SettingsPage';
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
 import { QuickLoadPage } from './features/load/QuickLoadPage';
+import type { ValidatedLoadDraftIntent } from './features/schedules/types';
 
 const ScheduledLoadPage = lazy(() => import('./features/schedules/ScheduledLoadPage').then(module => ({ default: module.ScheduledLoadPage })));
 
@@ -59,10 +60,12 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled }: {
   />;
 }
 
-function LoadRouteView({ packageId, inlineLoadEnabled, packages }: {
+function LoadRouteView({ packageId, inlineLoadEnabled, schedulingEnabled, packages, onSchedule }: {
   packageId: string;
   inlineLoadEnabled: boolean;
+  schedulingEnabled: boolean;
   packages: PackageOption[];
+  onSchedule(input: ValidatedLoadDraftIntent): void;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
@@ -105,9 +108,11 @@ function LoadRouteView({ packageId, inlineLoadEnabled, packages }: {
     environments={environments}
     environmentState={environmentState}
     inlineLoadEnabled={inlineLoadEnabled}
+    schedulingEnabled={schedulingEnabled}
     onPackageChange={onPackageChange}
     onEnvironmentChange={workspace.onEnvironmentChange}
     onJobAccepted={onJobAccepted}
+    onSchedule={onSchedule}
   />;
 }
 
@@ -150,9 +155,11 @@ function ConfigurationRouteView({ route, packages }: {
   />;
 }
 
-function QuickLoadRouteView({ route, inlineLoadEnabled }: {
+function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule }: {
   route: Extract<ReturnType<typeof useRouteState>['route'], { kind: 'quick-load' }>;
   inlineLoadEnabled: boolean;
+  schedulingEnabled: boolean;
+  onSchedule(input: ValidatedLoadDraftIntent): void;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
@@ -182,8 +189,10 @@ function QuickLoadRouteView({ route, inlineLoadEnabled }: {
     environments={environments}
     environmentState={environmentState}
     inlineLoadEnabled={inlineLoadEnabled}
+    schedulingEnabled={schedulingEnabled}
     onEnvironmentChange={onEnvironmentChange}
     onJobAccepted={onJobAccepted}
+    onSchedule={onSchedule}
     onCancel={onCancel}
     registerUnsavedChanges={navigation.registerUnsavedChanges}
   />;
@@ -193,6 +202,12 @@ export default function App() {
   const navigation = useRouteState();
   const [state, dispatch] = useReducer(appReducer, initialAppState);
   const [selectedEnvironment, setSelectedEnvironment] = useState('');
+  const [scheduleIntent, setScheduleIntent] = useState<ValidatedLoadDraftIntent | null>(null);
+  const onSchedule = useCallback((intent: ValidatedLoadDraftIntent) => {
+    setScheduleIntent(intent);
+    navigation.navigate({ kind: 'schedules' });
+  }, [navigation.navigate]);
+  const consumeScheduleIntent = useCallback(() => setScheduleIntent(null), []);
   useEffect(() => {
     const routeEnvironment = navigation.route.kind === 'configuration' || navigation.route.kind === 'quick-load' ? navigation.route.environment : undefined;
     if (routeEnvironment !== undefined) setSelectedEnvironment(routeEnvironment);
@@ -273,6 +288,8 @@ export default function App() {
         packages={state.packages}
         enabled={capabilities.loadSchedulingEnabled}
         onOpenJob={onJobChange}
+        initialDraft={scheduleIntent}
+        onInitialDraftConsumed={consumeScheduleIntent}
       />
     </Suspense>;
   } else if (navigation.route.kind === 'settings') {
@@ -283,7 +300,8 @@ export default function App() {
       : [];
     content = <ConfigurationRouteView route={navigation.route} packages={packageOptions} />;
   } else if (navigation.route.kind === 'quick-load') {
-    content = <QuickLoadRouteView route={navigation.route} inlineLoadEnabled={capabilities.inlineLoadEnabled} />;
+    content = <QuickLoadRouteView route={navigation.route} inlineLoadEnabled={capabilities.inlineLoadEnabled}
+      schedulingEnabled={capabilities.loadSchedulingEnabled} onSchedule={onSchedule} />;
   } else if (navigation.route.kind === 'package') {
     content = <ExplorerRouteView
       packageId={navigation.route.packageId}
@@ -295,7 +313,8 @@ export default function App() {
       ? state.packages.data.map(item => ({ packageId: item.packageId, displayName: item.name }))
       : [];
     content = navigation.route.packageId
-      ? <LoadRouteView packageId={navigation.route.packageId} inlineLoadEnabled={capabilities.inlineLoadEnabled} packages={packageOptions} />
+      ? <LoadRouteView packageId={navigation.route.packageId} inlineLoadEnabled={capabilities.inlineLoadEnabled}
+          schedulingEnabled={capabilities.loadSchedulingEnabled} packages={packageOptions} onSchedule={onSchedule} />
       : <LoadLanding state={state.packages} enabled={capabilities.inlineLoadEnabled} onSelectPackage={onLoadPackageChange} />;
   }
 

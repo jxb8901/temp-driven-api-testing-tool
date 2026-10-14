@@ -13,6 +13,9 @@ async function main() {
   let submittedInput;
   let submittedPrincipal;
   let submittedLoadScenario;
+  let submittedScheduleInput;
+  let createdSchedule;
+  const generatedPreviewCalls = [];
   let authorizationHeaderSeen = false;
   try {
     browser = await launchBrowser();
@@ -34,7 +37,21 @@ async function main() {
         return jsonResponse(route, 401, { error: { code: 'UNAUTHORIZED', summary: 'authorization header rejected: canary-401-secret' } });
       }
       if (method === 'GET' && path === 'version') {
-        return jsonResponse(route, 200, { apiVersion: '1', version: '4.2.0', inlineLoadEnabled: true });
+        return jsonResponse(route, 200, { apiVersion: '1', version: '4.2.0', inlineLoadEnabled: true, loadSchedulingEnabled: true });
+      }
+      if (method === 'GET' && path === 'load-schedules') {
+        return jsonResponse(route, 200, { items: createdSchedule ? [createdSchedule] : [], total: createdSchedule ? 1 : 0 });
+      }
+      if (method === 'POST' && path === 'load-schedules/preview') {
+        return jsonResponse(route, 200, { ...request.postDataJSON(), nextRunAt: '2030-01-01T00:00:00.000Z' });
+      }
+      if (method === 'POST' && path === 'load-schedules') {
+        submittedScheduleInput = request.postDataJSON();
+        createdSchedule = {
+          id: 'schedule-inline-99', ...submittedScheduleInput, inlineSnapshot: true,
+          nextRunAt: '2030-01-01T00:00:00.000Z',
+        };
+        return jsonResponse(route, 201, createdSchedule);
       }
       if (method === 'GET' && path === 'packages') {
         return jsonResponse(route, 200, { items: [{ packageId: 'payments', name: 'payments', state: 'ready' }], total: 1 });
@@ -115,11 +132,30 @@ async function main() {
         return jsonResponse(route, 200, {
           state: 'ready', environment: 'staging', section,
           globals: { baseDir: { state: 'visible', value: 'config' } },
-          sections: [{ id: 'testdata', title: 'Testdata', entries }],
+          sections: [{ id: 'testdata', title: 'Testdata', entries: [
+            ...entries,
+            { id: 'generatedAccounts', source: 'config/testdata/generated.yaml', generated: true, fields: {
+              generated: { state: 'visible', value: true },
+              recordCount: { state: 'visible', value: 120 },
+              'selection.strategy': { state: 'visible', value: 'sequential' },
+            } },
+          ] }],
           nextOffset: null,
         });
       }
-      if (method === 'GET' && path === 'packages/payments/configuration/testdata/accounts/records') {
+      const testdataRecordsMatch = path.match(/^packages\/payments\/configuration\/testdata\/(accounts|generatedAccounts)\/records$/);
+      if (method === 'GET' && testdataRecordsMatch) {
+        if (testdataRecordsMatch[1] === 'generatedAccounts') {
+          const previewGenerated = url.searchParams.get('previewGenerated') === 'true';
+          generatedPreviewCalls.push(previewGenerated);
+          return jsonResponse(route, 200, {
+            descriptorId: 'generatedAccounts', environment: 'staging', generated: true,
+            previewGenerated, previewRequired: !previewGenerated, state: previewGenerated ? 'ready' : 'preview-required',
+            offset: 0, limit: 50, total: 120, recordCount: 120, redactionEnabled: true,
+            generation: { generate: { seq: { from: 1000, to: 1119, format: '%06d' } }, record: { id: 'A-%{seq}' } },
+            records: previewGenerated ? [{ index: 0, sequence: 1000, value: { id: 'A-001000' } }] : [],
+          });
+        }
         return jsonResponse(route, 200, {
           descriptorId: 'accounts', environment: 'staging', state: 'ready', offset: 0, limit: 50,
           total: 1, nextOffset: null, redactionEnabled: true,
@@ -262,11 +298,17 @@ async function main() {
     await page.getByRole('tab', { name: 'Testdata' }).click();
     await page.getByRole('table').filter({ hasText: 'account-001' }).waitFor();
     assert.equal(await page.locator('.att-testdata-table-scroll').last().innerText().then(text => text.includes('account-001')), true);
+    await page.getByRole('button', { name: /generatedAccounts/ }).click();
+    await page.getByText('Generated records are not loaded automatically.').waitFor();
+    assert.equal(await page.getByText('A-001000').count(), 0, 'generated records require an explicit bounded preview');
+    await page.getByRole('button', { name: 'Preview first 50 generated records' }).click();
+    await page.getByText('A-001000', { exact: true }).last().waitFor();
+    assert.deepEqual(generatedPreviewCalls, [false, true]);
 
     await page.goto(`${base}#/quick-load/payments/template/checkout`);
     await page.getByRole('heading', { name: 'Quick Load', level: 1 }).waitFor();
-    await page.getByText(/Server policy defaults loaded|Safe policy defaults loaded/).waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), true, 'inline schedules remain unavailable');
+    await page.getByText(/selected model’s package policy or Server fallback is loaded|Safe model-specific policy defaults loaded/).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), true, 'scheduling requires a validated draft');
     await page.getByRole('combobox', { name: 'Load template or preset' }).selectOption('quick-profile');
     await page.getByRole('button', { name: 'Validate' }).click();
     await page.getByText('The Server accepted this draft for review.').waitFor();
@@ -277,6 +319,16 @@ async function main() {
     assert.equal(submittedLoadScenario.load.duration, '10s');
     assert.equal(submittedLoadScenario.execution.thinkTime, '250ms');
     assert.equal(await page.getByRole('button', { name: 'Run Now' }).isDisabled(), false);
+    assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), false, 'validated draft enables scheduling');
+    await page.getByRole('button', { name: 'Schedule…' }).click();
+    await page.getByRole('heading', { name: 'Scheduled Load', level: 1 }).waitFor();
+    await page.getByText('Schedule form loaded from the validated Load draft.').waitFor();
+    assert.equal(await page.locator('#schedule-scenario').inputValue(), 'Validated Load snapshot');
+    await page.getByText(/^Next run:/).waitFor();
+    await page.getByRole('button', { name: 'Save schedule' }).click();
+    await page.getByRole('row', { name: /Validated Load snapshot.*payments.*Validated inline snapshot/ }).waitFor();
+    assert.equal(submittedScheduleInput.draftId, 'LOAD-DRAFT-QUICK-99');
+    assert.equal(Object.hasOwn(submittedScheduleInput, 'scenario'), false, 'inline scheduling submits the validated draft ID, not a scenario path');
     assert.deepEqual(pageErrors, [], 'Configuration and Quick Load should not produce uncaught browser errors');
 
     authFailure = true;
@@ -287,7 +339,7 @@ async function main() {
     await page.getByText('Your session has expired. Sign in again, then refresh safe source.').waitFor();
     assert.equal(await page.locator('body').innerText().then(text => text.includes('canary-401-secret')), false, 'auth errors must not expose response bodies');
     assert.deepEqual(pageErrors, [], 'Explorer interactions should not produce uncaught browser errors');
-    console.log('ATT Explorer Playwright smoke passed: resource source/redaction, Configuration files and Testdata records, Quick Load preset validation, dirty navigation, anonymous job, and 401 handling.');
+    console.log('ATT Explorer Playwright smoke passed: resource source/redaction, Configuration files and literal/generated Testdata, Quick Load preset validation, immutable draft scheduling, dirty navigation, anonymous job, and 401 handling.');
   } finally {
     if (browser) await browser.close();
     await stopFixture(fixture);

@@ -56,6 +56,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
   const [left, setLeft] = useState('');
   const [right, setRight] = useState('');
   const [compareSection, setCompareSection] = useState('');
+  const [includeInherited, setIncludeInherited] = useState(false);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const requestSequence = useRef(0);
@@ -123,14 +124,18 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
     finally { if (sequence === requestSequence.current) setLoadingMore(false); }
   };
 
-  const compare = async (leftProfile = left, rightProfile = right, requestedSection = compareSection || 'globals') => {
+  const compare = async (leftProfile = left, rightProfile = right,
+                        requestedSection = compareSection || 'globals', requestedIncludeInherited = includeInherited) => {
     if (!leftProfile || !rightProfile || leftProfile === rightProfile) { setError('Choose two different active environments to compare.'); return; }
     setError(''); setStatus(`Comparing ${leftProfile} with ${rightProfile}…`);
     setMode('compare');
     setData(null); setNextOffset(null);
     const { controller, sequence } = startRequest();
     try {
-      const response = await api.compareConfiguration(packageId, { left: leftProfile, right: rightProfile, section: requestedSection || 'globals', offset: 0, limit: 50 }, controller.signal);
+      const response = await api.compareConfiguration(packageId, {
+        left: leftProfile, right: rightProfile, section: requestedSection || 'globals',
+        includeInherited: requestedIncludeInherited, offset: 0, limit: 50,
+      }, controller.signal);
       if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setData(response); setMode('compare'); onViewChange?.('compare'); setNextOffset(response.nextOffset == null ? null : Number(response.nextOffset));
       setStatus(`Configuration comparison: ${response.state || 'ready'}.`);
@@ -157,7 +162,10 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
     const requestedLeft = left, requestedRight = right, requestedSection = compareSection || 'globals', offset = nextOffset;
     const { controller, sequence } = startRequest();
     try {
-      const incoming = await api.compareConfiguration(packageId, { left: requestedLeft, right: requestedRight, section: requestedSection, offset, limit: 50 }, controller.signal);
+      const incoming = await api.compareConfiguration(packageId, {
+        left: requestedLeft, right: requestedRight, section: requestedSection,
+        includeInherited, offset, limit: 50,
+      }, controller.signal);
       if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setData(previous => previous ? { ...incoming, fields: [...(previous.fields || []), ...(incoming.fields || [])], offset: 0 } : incoming);
       setNextOffset(incoming.nextOffset == null ? null : Number(incoming.nextOffset));
@@ -229,7 +237,8 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
       {mode === 'compare' && <label>Compare section<select aria-label="Configuration section to compare" value={compareSection || 'globals'} onChange={event => changeCompareSection(event.currentTarget.value)}>
         <option value="globals">Global fields (optional)</option>{(declaredData?.sections || []).filter(item => item.id !== 'globals').map(item => <option key={item.id} value={item.id}>{item.title || item.id}</option>)}
       </select></label>}
-      <button type="button" onClick={() => { onViewChange?.('compare'); void compare(left, right, compareSection || 'globals'); }} disabled={!left || !right || left === right}>Compare</button>
+      {mode === 'compare' && <label className="att-config-include-inherited"><input type="checkbox" checked={includeInherited} onChange={event => { const checked = event.currentTarget.checked; setIncludeInherited(checked); void compare(left, right, compareSection || 'globals', checked); }} /> Include inherited/global fields</label>}
+      <button type="button" onClick={() => { onViewChange?.('compare'); void compare(); }} disabled={!left || !right || left === right}>Compare</button>
       <label>Filter fields <input type="search" value={query} maxLength={200} onChange={event => setQuery(event.currentTarget.value)} /></label>
     </div>
     <p role="status" aria-live="polite">{status}</p>

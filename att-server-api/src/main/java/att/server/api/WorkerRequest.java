@@ -42,6 +42,7 @@ public class WorkerRequest {
     public String inspectionEnvironment;
     public String inspectionOtherEnvironment;
     public String inspectionSection;
+    public Boolean inspectionIncludeInherited;
     public String inspectionPath;
     public String inspectionOrigin;
     public String inspectionResourceId;

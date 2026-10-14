@@ -77,7 +77,7 @@ describe('ConfigurationWorkspace', () => {
     expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('{"ok":true}');
   });
 
-  it('keeps safe descriptor metadata visible when #215 record preview is unavailable on #214', async () => {
+  it('keeps safe descriptor metadata visible when a Server does not expose the records endpoint', async () => {
     const api = {
       listResources: vi.fn(async () => ({ items: [], total: 0 })),
       getResource: vi.fn(async () => ({ resource: { type: 'template', resourceId: 'checkout' } })),
@@ -114,5 +114,49 @@ describe('ConfigurationWorkspace', () => {
     expect(host.textContent).toContain('accounts');
     expect(host.textContent).toContain('3');
     expect(host.textContent).toContain('Testdata record preview is not available from this Server version');
+  });
+
+  it('requires an explicit request before showing a bounded generated-record preview', async () => {
+    const api = {
+      listResources: vi.fn(async () => ({ items: [], total: 0 })),
+      getResource: vi.fn(async () => ({ resource: { type: 'template', resourceId: 'checkout' } })),
+      getSafeSource: vi.fn(async () => ({ available: false })),
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'dev', state: 'active', default: true }] })),
+      getEffectiveConfiguration: vi.fn(async () => ({
+        state: 'ready', environment: 'dev',
+        sections: [{ id: 'testdata', entries: [{ id: 'generatedAccounts', source: 'config/testdata/generated.yaml', fields: {
+          generated: { state: 'visible' as const, value: true },
+          recordCount: { state: 'visible' as const, value: 120 },
+          'selection.strategy': { state: 'visible' as const, value: 'sequential' },
+        } }] }],
+      })),
+      compareConfiguration: vi.fn(async () => ({ fields: [] })),
+      listConfigurationFiles: vi.fn(async () => ({ items: [], total: 0 })),
+      getConfigurationFileSource: vi.fn(async () => ({ available: false })),
+      getTestdataRecords: vi.fn(async (_packageId: string, _descriptorId: string, query: { previewGenerated?: boolean }) => query.previewGenerated
+        ? ({ descriptorId: 'generatedAccounts', generated: true, previewGenerated: true, previewRequired: false, offset: 0, limit: 50, total: 120, recordCount: 120,
+            generation: { generate: { seq: { from: 1000, to: 1119, format: '%06d' } }, record: { id: 'A-%{seq}' } },
+            records: [{ index: 0, sequence: 1000, value: { id: 'A-001000' } }] })
+        : ({ descriptorId: 'generatedAccounts', generated: true, previewGenerated: false, previewRequired: true, offset: 0, limit: 50, total: 120, recordCount: 120,
+            generation: { generate: { seq: { from: 1000, to: 1119, format: '%06d' } }, record: { id: 'A-%{seq}' } }, records: [] })),
+      getDebugForm: vi.fn(), previewDebug: vi.fn(), submitDebug: vi.fn(), runCase: vi.fn(),
+    } as unknown as ExplorerApi;
+
+    await act(async () => root.render(<Harness api={api} />));
+    await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent === 'Testdata')?.click());
+    await flush();
+    expect(host.textContent).toContain('120');
+    expect(host.textContent).toContain('Choose');
+    expect(host.textContent).not.toContain('A-001000');
+    expect(api.getTestdataRecords).toHaveBeenCalledWith('payments', 'generatedAccounts',
+      { environment: undefined, offset: 0, limit: 50, previewGenerated: false }, expect.any(AbortSignal));
+
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Preview first 50 generated records')?.click());
+    await flush();
+    expect(api.getTestdataRecords).toHaveBeenLastCalledWith('payments', 'generatedAccounts',
+      { environment: undefined, offset: 0, limit: 50, previewGenerated: true }, expect.any(AbortSignal));
+    expect(host.textContent).toContain('A-001000');
+    expect(host.textContent).toContain('seq 1000');
   });
 });

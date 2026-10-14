@@ -76,7 +76,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   return body as T;
 }
 
-function queryString(values: Record<string, string | number | undefined>): string {
+function queryString(values: Record<string, string | number | boolean | undefined>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(values)) {
     if (value !== undefined && String(value).length > 0) params.set(key, String(value));
@@ -240,6 +240,7 @@ export const api = {
       left: query.left,
       right: query.right,
       section: query.section,
+      includeInherited: query.includeInherited,
       offset: query.offset,
       limit: query.limit,
     }), { signal });
@@ -250,7 +251,7 @@ export const api = {
   getConfigurationFileSource(packageId: string, path: string, origin?: string, signal?: AbortSignal): Promise<SourceProjection> {
     return request<SourceProjection>('packages/' + encodeURIComponent(packageId) + '/configuration/source' + queryString({ path, origin }), { signal });
   },
-  getTestdataRecords(packageId: string, descriptorId: string, query: { environment?: string; offset?: number; limit?: number }, signal?: AbortSignal): Promise<TestdataRecordsResponse> {
+  getTestdataRecords(packageId: string, descriptorId: string, query: { environment?: string; offset?: number; limit?: number; previewGenerated?: boolean }, signal?: AbortSignal): Promise<TestdataRecordsResponse> {
     return request<TestdataRecordsResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/testdata/' + encodeURIComponent(descriptorId) + '/records' + queryString(query), { signal });
   },
   getDebugForm(identity: ResourceIdentity, environment?: string, signal?: AbortSignal): Promise<DebugFormResponse> {

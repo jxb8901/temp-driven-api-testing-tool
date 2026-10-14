@@ -132,8 +132,14 @@ export interface TestdataRecord {
 
 export interface TestdataRecordsResponse {
   descriptorId: string;
+  source?: string;
   environment?: string;
   state?: string;
+  generated?: boolean;
+  previewRequired?: boolean;
+  previewGenerated?: boolean;
+  recordCount?: number;
+  generation?: JsonValue;
   offset: number;
   limit: number;
   total: number;
@@ -209,6 +215,7 @@ export interface ConfigurationComparisonQuery {
   left: string;
   right: string;
   section: string;
+  includeInherited?: boolean;
   offset?: number;
   limit?: number;
 }
@@ -223,7 +230,7 @@ export interface ExplorerApi {
   compareConfiguration(packageId: string, query: ConfigurationComparisonQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
   listConfigurationFiles?(packageId: string, path?: string, query?: string, offset?: number, signal?: AbortSignal): Promise<ConfigurationFilePage>;
   getConfigurationFileSource?(packageId: string, path: string, origin?: string, signal?: AbortSignal): Promise<SourceProjection>;
-  getTestdataRecords?(packageId: string, descriptorId: string, query: { environment?: string; offset?: number; limit?: number }, signal?: AbortSignal): Promise<TestdataRecordsResponse>;
+  getTestdataRecords?(packageId: string, descriptorId: string, query: { environment?: string; offset?: number; limit?: number; previewGenerated?: boolean }, signal?: AbortSignal): Promise<TestdataRecordsResponse>;
   getDebugForm(identity: ResourceIdentity, environment?: string, signal?: AbortSignal): Promise<DebugFormResponse>;
   previewDebug(input: DebugDraftRequest, signal?: AbortSignal): Promise<DraftResponse>;
   submitDebug(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob>;

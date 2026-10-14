@@ -166,7 +166,8 @@ class ServerWarUiIT {
         Path javaBin = Path.of(System.getProperty("java.home"), "bin", System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
         Path config = Files.writeString(temp.resolve("scheduled-war-server.yaml"),
                 "server:\n  dataDir: " + yaml(temp.resolve("scheduled-war-data")) + "\n  javaExecutable: " + yaml(javaBin)
-                        + "\n  authenticationRequired: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
+                        + "\n  authenticationRequired: true\n  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
+                        + "\n    safeTextSources:\n      payments:\n        - templates/SCHEDULED/payload/request.txt"
                         + "\n  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n    minimumIntervalMinutes: 1\n    pollIntervalSeconds: 5\n    maxConcurrentRuns: 1"
                         + "\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - " + yaml(packages)
                         + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
@@ -180,6 +181,7 @@ class ServerWarUiIT {
         String api = "/tools/att/api/v1";
         String firstScheduleId;
         String secondScheduleId;
+        String inlineScheduleId;
         String jobId;
         try {
             tomcat = startScheduledWar(war, users);
@@ -188,6 +190,52 @@ class ServerWarUiIT {
             assertEquals(401, get(port, api + "/load-schedules", null));
             assertEquals(403, get(port, api + "/load-schedules", ordinary));
             assertEquals(200, get(port, api + "/load-schedules", admin));
+            String recordsPath = api + "/packages/payments/configuration/testdata/generatedAccounts/records?environment=SIT&limit=5";
+            assertEquals(401, get(port, recordsPath, null), "Testdata records remain behind the Tomcat authentication boundary.");
+            JsonNode generatedMetadata = getJson(port, recordsPath, ordinary);
+            assertEquals("preview-required", generatedMetadata.path("state").asText());
+            assertEquals(121, generatedMetadata.path("recordCount").asInt());
+            assertEquals(0, generatedMetadata.path("records").size(), "Generated rows must stay unloaded until explicitly requested.");
+            JsonNode generatedPreview = getJson(port, recordsPath + "&previewGenerated=true", ordinary);
+            assertEquals("ready", generatedPreview.path("state").asText());
+            assertEquals(5, generatedPreview.path("records").size());
+            assertEquals(1000, generatedPreview.path("records").get(0).path("sequence").asInt());
+
+            String referencedSourcePath = api + "/packages/payments/configuration/source?path="
+                    + java.net.URLEncoder.encode("templates/SCHEDULED/payload/request.txt", java.nio.charset.StandardCharsets.UTF_8)
+                    + "&origin=" + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8);
+            assertEquals(401, get(port, referencedSourcePath, null), "Referenced package files retain the Server authentication boundary.");
+            JsonNode referencedSource = getJson(port, referencedSourcePath, ordinary);
+            assertTrue(referencedSource.path("available").asBoolean());
+            assertEquals("templates/SCHEDULED/payload/request.txt", referencedSource.path("logicalPath").asText());
+            assertEquals("text", referencedSource.path("format").asText());
+            assertTrue(referencedSource.path("text").asText().contains("request: payload"));
+            assertFalse(referencedSource.path("text").asText().contains("template-secret"),
+                    "Safe source projection must scrub classified-looking password values before the UI receives them.");
+            assertTrue(referencedSource.path("redacted").asBoolean());
+            String deniedSourcePath = api + "/packages/payments/configuration/source?path="
+                    + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8)
+                    + "&origin=" + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8);
+            JsonNode deniedSource = getJson(port, deniedSourcePath, ordinary);
+            assertFalse(deniedSource.path("available").asBoolean());
+            assertEquals("visibility-policy", deniedSource.path("reason").asText());
+
+            Map<String, Object> inlineScenario = Map.of(
+                    "schemaVersion", "att-load/v1.6",
+                    "workloads", List.of(Map.of("id", "scheduled-snapshot", "target", Map.of("type", "template", "id", "SCHEDULED"),
+                            "load", Map.of("users", 1, "duration", "1s"))));
+            JsonNode inlineDraft = apiJson(port, "POST", api + "/drafts/load", admin, origin,
+                    Map.of("packageId", "payments", "environment", "SIT", "scenario", inlineScenario), 201);
+            Map<String, Object> inlineScheduleInput = new java.util.LinkedHashMap<>();
+            inlineScheduleInput.put("name", "Validated UI snapshot");inlineScheduleInput.put("packageId", "payments");
+            inlineScheduleInput.put("draftId", inlineDraft.path("draftId").asText());inlineScheduleInput.put("environment", "SIT");
+            inlineScheduleInput.put("timezone", "UTC");inlineScheduleInput.put("cron", "0 2 * * *");
+            inlineScheduleInput.put("maxConcurrentRuns", 1);inlineScheduleInput.put("enabled", false);
+            JsonNode inlineSchedule = apiJson(port, "POST", api + "/load-schedules", admin, origin, inlineScheduleInput, 201);
+            inlineScheduleId = inlineSchedule.path("id").asText();
+            assertTrue(inlineSchedule.path("inlineSnapshot").asBoolean());
+            assertFalse(inlineSchedule.has("inlineScenario"), "Validated scenario contents must not be returned in schedule API views.");
+            assertTrue(inlineSchedule.path("scenario").isNull());
 
             JsonNode preview = apiJson(port, "POST", api + "/load-schedules/preview", admin, origin,
                     Map.of("timezone", "UTC", "cron", "0 2 * * *"), 200);
@@ -245,7 +293,11 @@ class ServerWarUiIT {
             port = tomcat.getConnector().getLocalPort();
             origin = "http://127.0.0.1:" + port;
             JsonNode restored = getJson(port, api + "/load-schedules", admin);
-            assertEquals(2, restored.path("items").size(), "Schedules must persist across a Tomcat restart.");
+            assertEquals(3, restored.path("items").size(), "Path-based schedules and the validated snapshot must persist across a Tomcat restart.");
+            JsonNode restoredInlineSchedule = getJson(port, api + "/load-schedules/" + inlineScheduleId, admin);
+            assertTrue(restoredInlineSchedule.path("inlineSnapshot").asBoolean());
+            assertTrue(restoredInlineSchedule.path("scenario").isNull());
+            assertFalse(restoredInlineSchedule.has("inlineScenario"));
             assertTrue(getJson(port, api + "/load-schedules/" + firstScheduleId, admin).path("enabled").asBoolean(),
                     "The resumed schedule state must persist across restart.");
             assertEquals(jobId, getJson(port, api + "/load-schedules/" + firstScheduleId + "/executions", admin)
@@ -257,6 +309,7 @@ class ServerWarUiIT {
                     .path("items").get(0).path("reason").asText(), "Deleting a schedule must retain its occurrence history.");
             assertEquals(200, apiStatus(port, "DELETE", api + "/load-schedules/" + firstScheduleId, admin, origin, null));
             assertEquals(404, get(port, api + "/load-schedules/" + firstScheduleId, admin));
+            assertEquals(200, apiStatus(port, "DELETE", api + "/load-schedules/" + inlineScheduleId, admin, origin, null));
         } finally {
             if (tomcat != null) {
                 try { tomcat.stop(); } finally { tomcat.destroy(); }
@@ -305,11 +358,17 @@ class ServerWarUiIT {
         Files.createDirectories(packageRoot.resolve("config"));
         copySchemas(packageRoot);
         Files.writeString(packageRoot.resolve("config/config.yaml"),
-                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [config/testdata/generated.yaml]\n"
                         + "testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        Path testdata = Files.createDirectories(packageRoot.resolve("config/testdata"));
+        Files.writeString(testdata.resolve("generated.yaml"),
+                "schemaVersion: att-testdata/v1.0\nid: generatedAccounts\nrecords:\n  generate:\n    seq:\n      from: 1000\n      to: 1120\n      format: '%06d'\n  record:\n    id: 'A-%{seq}'\n"
+                        + "selection:\n  strategy: sequential\n  exhaustion: stop\n");
         Files.writeString(templates.resolve("template.yaml"),
                 "schemaVersion: att-template/v3.6\nname: SCHEDULED\ndescription: stock Tomcat scheduler test\nactions:\n"
                         + "  message:\n    type: log\n    message: scheduled Load integration\n");
+        Path payload = Files.createDirectories(templates.resolve("payload"));
+        Files.writeString(payload.resolve("request.txt"), "request: payload\npassword: template-secret\n");
         Files.writeString(loads.resolve("scenario.yaml"),
                 "schemaVersion: att-load/v1.6\nworkloads:\n  - id: scheduled-long-run\n    target:\n      type: template\n      id: SCHEDULED\n"
                         + "    load:\n      users: 1\n      duration: 30s\n    execution:\n      thinkTime: 1s\n");

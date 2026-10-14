@@ -81,17 +81,29 @@ public final class PackageConfigurationInspector {
 
     public Map<String, Object> inspect(String action, String environment, String otherEnvironment,
                                        String section, int offset, int limit) throws Exception {
+        return inspect(action, environment, otherEnvironment, section, offset, limit, false);
+    }
+
+    public Map<String, Object> inspect(String action, String environment, String otherEnvironment,
+                                       String section, int offset, int limit, boolean includeInherited) throws Exception {
+        return inspect(action, environment, otherEnvironment, section, offset, limit, includeInherited, false);
+    }
+
+    public Map<String, Object> inspect(String action, String environment, String otherEnvironment,
+                                       String section, int offset, int limit, boolean includeInherited,
+                                       boolean previewGenerated) throws Exception {
         if (offset < 0) throw new IllegalArgumentException("offset must be non-negative");
         if (limit < 0 || limit > 100) throw new IllegalArgumentException("limit must be between 1 and 100");
         if ("declared".equals(action)) return bounded(declared());
         if ("effective".equals(action)) return bounded(effective(environment, section, offset, limit));
-        if ("compare".equals(action)) return bounded(compare(environment, otherEnvironment, section, offset, limit));
-        if ("testdata-records".equals(action)) return bounded(testdataRecords(environment, section, offset, limit));
+        if ("compare".equals(action)) return bounded(compare(environment, otherEnvironment, section, offset, limit, includeInherited));
+        if ("testdata-records".equals(action)) return bounded(testdataRecords(environment, section, offset, limit, previewGenerated));
         throw new IllegalArgumentException("Unsupported configuration inspection action");
     }
 
-    private Map<String,Object> testdataRecords(String environment, String descriptorId, int offset, int limit) throws Exception {
-        if (descriptorId == null || !descriptorId.matches("[A-Za-z][A-Za-z0-9_-]*"))
+    private Map<String,Object> testdataRecords(String environment, String descriptorId, int offset, int limit,
+                                               boolean previewGenerated) throws Exception {
+        if (descriptorId == null || !descriptorId.matches("[A-Za-z][A-Za-z0-9_-]{0,127}"))
             throw new PackageResourceInspector.ResourceNotFoundException();
         if (limit < 1 || limit > 100) throw new IllegalArgumentException("limit must be between 1 and 100");
         String safeEnvironment = normalizedEnvironment(environment);
@@ -99,16 +111,23 @@ public final class PackageConfigurationInspector {
         validateReferencedFiles(raw, safeEnvironment);
         FrameworkConfig config = new FrameworkConfigLoader().load(configFile(), packageRoot, safeEnvironment);
         TestdataDescriptor selected = null;
+        String selectedSource = null;
         for (Path path : config.testdataDescriptors()) {
             PackageResourceResolver.PackageResource resolved = resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE);
             if (Files.size(resolved.canonicalPath()) > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException();
             TestdataDescriptor candidate = new TestdataDescriptorLoader(packageRoot).load(resolved.canonicalPath());
-            if (descriptorId.equals(candidate.id())) selected = candidate;
+            if (descriptorId.equals(candidate.id())) {
+                if (selected != null) throw new IllegalArgumentException("Testdata descriptor id is ambiguous in the effective registry");
+                selected = candidate;
+                selectedSource = resolved.logicalName();
+            }
         }
         if (selected == null) throw new PackageResourceInspector.ResourceNotFoundException();
         if (offset > selected.count()) throw new IllegalArgumentException("offset exceeds the current Testdata descriptor");
         int start = offset;
-        int end = (int)Math.min(selected.count(), (long)start + limit);
+        boolean generated = selected.generated();
+        boolean previewRequired = generated && !previewGenerated;
+        int end = previewRequired ? start : (int)Math.min(selected.count(), (long)start + limit);
         List<Map<String,Object>> records = new ArrayList<Map<String,Object>>();
         for (int index = start; index < end; index++) {
             Object authored = selected.record(index);
@@ -122,13 +141,24 @@ public final class PackageConfigurationInspector {
             record.put("redacted", Boolean.valueOf(redacted[0]));
             records.add(record);
         }
-        Map<String,Object> result = base("testdata-records", "ready", att.Version.TESTDATA_SCHEMA);
+        Map<String,Object> result = base("testdata-records", previewRequired ? "preview-required" : "ready", att.Version.TESTDATA_SCHEMA);
         result.put("descriptorId", selected.id());
+        result.put("source", selectedSource);
         result.put("environment", config.environment());
+        result.put("generated", Boolean.valueOf(generated));
+        result.put("previewRequired", Boolean.valueOf(previewRequired));
+        result.put("recordCount", Long.valueOf(selected.count()));
+        result.put("previewGenerated", Boolean.valueOf(generated && previewGenerated));
+        if (generated) {
+            boolean[] generationRedacted = new boolean[]{false};
+            result.put("generation", projectTestdataValue(selected.generatorDefinition(),
+                    "testdata." + descriptorId + ".generation", null, generationRedacted));
+            result.put("generationRedacted", Boolean.valueOf(generationRedacted[0]));
+        }
         result.put("offset", Integer.valueOf(start));
         result.put("limit", Integer.valueOf(limit));
         result.put("total", Long.valueOf(selected.count()));
-        result.put("nextOffset", end < selected.count() ? Integer.valueOf(end) : null);
+        result.put("nextOffset", !previewRequired && end < selected.count() ? Integer.valueOf(end) : null);
         result.put("records", records);
         result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
         result.put("diagnostics", Collections.emptyList());
@@ -221,9 +251,12 @@ public final class PackageConfigurationInspector {
         }
     }
 
-    private Map<String, Object> compare(String leftEnvironment, String rightEnvironment, String selectedSection, int offset, int limit) {
+    private Map<String, Object> compare(String leftEnvironment, String rightEnvironment, String selectedSection,
+                                        int offset, int limit, boolean includeInherited) {
         if (selectedSection == null || selectedSection.trim().isEmpty())
             throw new IllegalArgumentException("section is required for configuration comparison");
+        if (!"globals".equals(selectedSection) && !ALL_SECTIONS.contains(selectedSection))
+            throw new IllegalArgumentException("Unknown configuration section");
         String leftName = normalizedEnvironment(leftEnvironment);
         String rightName = normalizedEnvironment(rightEnvironment);
         if (leftName == null || rightName == null) throw new IllegalArgumentException("left and right environments must be valid profile names");
@@ -235,6 +268,7 @@ public final class PackageConfigurationInspector {
         result.put("rightEnvironment", rightName);
         result.put("section", selectedSection);
         result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
+        result.put("includeInherited", Boolean.valueOf(includeInherited));
         List<Map<String, Object>> diagnostics = new ArrayList<Map<String, Object>>();
         if (!"ready".equals(left.get("state"))) diagnostics.addAll(diagnostics(left));
         if (!"ready".equals(right.get("state"))) diagnostics.addAll(diagnostics(right));
@@ -257,6 +291,7 @@ public final class PackageConfigurationInspector {
         for (String path : paths) {
             Map<String, Object> before = leftFields.get(path);
             Map<String, Object> after = rightFields.get(path);
+            if (!includeInherited && !profileScoped(path, before, after, leftFields, rightFields)) continue;
             boolean hidden = redactionEnabled && isSensitivePath(path)
                     || alwaysHiddenField(path.substring(path.lastIndexOf('.') + 1))
                     || configuredSensitivePath(path)
@@ -293,6 +328,20 @@ public final class PackageConfigurationInspector {
         } else result.put("fields", fields);
         result.put("diagnostics", diagnostics);
         return result;
+    }
+
+    private static boolean profileScoped(String path, Map<String,Object> left, Map<String,Object> right,
+                                         Map<String,Map<String,Object>> leftFields,
+                                         Map<String,Map<String,Object>> rightFields) {
+        if ("profile".equals(left == null ? null : left.get("origin"))
+                || "profile".equals(right == null ? null : right.get("origin"))) return true;
+        int first = path.indexOf('.');
+        int second = first < 0 ? -1 : path.indexOf('.', first + 1);
+        if (first < 0 || second < 0 || "globals".equals(path.substring(0, first))) return false;
+        String entryMarker = path.substring(0, second) + ".$entry";
+        Map<String,Object> leftEntry=leftFields.get(entryMarker),rightEntry=rightFields.get(entryMarker);
+        return "profile".equals(leftEntry==null?null:leftEntry.get("origin"))
+                ||"profile".equals(rightEntry==null?null:rightEntry.get("origin"));
     }
 
     private Map<String, Object> snapshot(Map<?, ?> raw, FrameworkConfig config, String view,
@@ -657,6 +706,7 @@ public final class PackageConfigurationInspector {
             Map<String, Object> fields = fields(entry);
             visible(fields, "schemaVersion", att.Version.TESTDATA_SCHEMA, source);
             visible(fields, "generated", Boolean.valueOf(descriptor.generated()), source);
+            visible(fields, "recordCount", Long.valueOf(descriptor.count()), source);
             if (descriptor.selection() != null) {
                 visible(fields, "selection.strategy", descriptor.selection().strategy(), source);
                 visible(fields, "selection.exhaustion", descriptor.selection().exhaustion(), source);

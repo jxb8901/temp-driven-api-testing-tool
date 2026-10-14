@@ -37,29 +37,47 @@ export function CodeEditor({ value, language, label, readOnly = true, onChange, 
   const onChangeRef = useRef(onChange);
   const syncingValue = useRef(false);
   const onFileRef = useRef(onFileReference);
+  const latestValue = useRef(value.length > maxCharacters ? value.slice(0, maxCharacters) : value);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('Loading code viewer…');
   const [fullscreen, setFullscreen] = useState(false);
   const [line, setLine] = useState('');
+  const [readyKey, setReadyKey] = useState('');
   const bounded = value.length > maxCharacters ? value.slice(0, maxCharacters) : value;
+  latestValue.current = bounded;
+  const suggestionsKey = suggestions.join('\u0000');
+  const editorKey = JSON.stringify([language, readOnly, sourcePath, suggestionsKey]);
   useEffect(() => { onChangeRef.current = onChange; onFileRef.current = onFileReference; }, [onChange, onFileReference]);
 
   useEffect(() => {
     let cancelled = false;
     let created: EditorView | null = null;
-    setError(''); setStatus('Loading syntax-aware viewer…');
-    import('./codemirrorRuntime').then(runtime => runtime.createEditor(host.current!, {
-      value: bounded, language, readOnly,
-      onChange: next => { if (!syncingValue.current) onChangeRef.current?.(next); },
+    const editorHost = host.current;
+    setReadyKey(''); setError(''); setStatus('Loading syntax-aware viewer…');
+    if (!editorHost) return;
+    import('./codemirrorRuntime').then(runtime => {
+      if (cancelled || host.current !== editorHost) return null;
+      return runtime.createEditor(editorHost, {
+      value: latestValue.current, language, readOnly,
+      onChange: next => { latestValue.current = next; if (!syncingValue.current) onChangeRef.current?.(next); },
       onFileReference: (path, origin) => onFileRef.current?.(path, origin),
       sourcePath,
       suggestions,
-    })).then(instance => {
+    });
+    }).then(instance => {
+      if (!instance) return;
       if (cancelled) { instance.destroy(); return; }
+      const currentValue = latestValue.current;
+      if (instance.state.doc.toString() !== currentValue) {
+        syncingValue.current = true;
+        try { instance.dispatch({ changes: { from: 0, to: instance.state.doc.length, insert: currentValue } }); }
+        finally { syncingValue.current = false; }
+      }
       created = instance; view.current = instance; setStatus('Code viewer ready.');
+      setReadyKey(editorKey);
     }).catch(() => { if (!cancelled) { setError('The code viewer could not be loaded.'); setStatus('Code viewer unavailable.'); } });
     return () => { cancelled = true; created?.destroy(); if (view.current === created) view.current = null; };
-  }, [language, readOnly, sourcePath]);
+  }, [language, readOnly, sourcePath, suggestionsKey, editorKey]);
 
   useEffect(() => {
     const current = view.current;
@@ -94,7 +112,7 @@ export function CodeEditor({ value, language, label, readOnly = true, onChange, 
         const current = view.current;
         if (!current) return;
         import('./codemirrorRuntime').then(runtime => { if (view.current === current) runtime.focusSearch(current); });
-      }} disabled={!view.current}>Find</button>
+      }} disabled={readyKey !== editorKey || !view.current}>Find</button>
       <label className="att-code-goto">Go to line <input type="number" min="1" value={line} onChange={event => setLine(event.currentTarget.value)} onKeyDown={event => { if (event.key === 'Enter') goToLine(); }} /></label>
       <button type="button" onClick={goToLine} disabled={!line}>Go</button>
       {!readOnly && (language === 'json' || language === 'yaml') && <button type="button" onClick={() => void format()}>Format</button>}
