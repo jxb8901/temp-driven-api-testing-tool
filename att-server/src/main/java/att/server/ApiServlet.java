@@ -97,7 +97,7 @@ public final class ApiServlet extends HttpServlet {
         if(!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try {
             if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
-            if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+            if(!checkOrigin(req,res,requestId,false))return;
             byte[] body=req.getInputStream().readNBytes(runtime.config.maxRequestBytes+1);
             if(body.length>runtime.config.maxRequestBytes){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Request body exceeds the configured size limit",requestId);return;}
             JsonNode input;
@@ -134,7 +134,7 @@ public final class ApiServlet extends HttpServlet {
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){scheduleDelete(req,res,path,requestId,principal);return;}
         if(!path.matches("/jobs/[^/]+")){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
-        if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+        if(!checkOrigin(req,res,requestId,false))return;
         try{String id=segment(path,2);String status=runtime.cancel(id,principal);json(res,200,Map.of("jobId",id,"status",status,"requestId",requestId));}
         catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
         catch(Exception e){error(res,500,"ATT-SERVER-CANCEL-FAILED","The job could not be cancelled",requestId);}
@@ -157,7 +157,7 @@ public final class ApiServlet extends HttpServlet {
             if(!runtime.auth.local(runtime.config)){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
             if(containsPasswordSubmission(path)&&!secureLocalAuthTransport(req)){error(res,403,"ATT-AUTH-HTTPS-REQUIRED","Local credentials require HTTPS outside loopback development",requestId);return;}
             if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
-            if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+            if(!checkOrigin(req,res,requestId,"/auth/login".equals(path)||"/auth/bootstrap".equals(path)))return;
             JsonNode body=authBody(req);if(body==null||!body.isObject())throw new IllegalArgumentException("A JSON object is required");
             if("/auth/bootstrap".equals(path)) {Map<String,Object> user=runtime.auth.bootstrap(text(body,"token"),text(body,"loginId"),text(body,"displayName"),text(body,"password"),req.getRemoteAddr());runtime.store.audit((String)user.get("loginId"),"BOOTSTRAP",null,null,"SUCCESS");json(res,201,Map.of("user",user,"requestId",requestId));return;}
             if("/auth/login".equals(path)) {runtime.auth.logout(req);Map<String,Object> session=runtime.auth.login(text(body,"loginId"),text(body,"password"),req.getRemoteAddr());String token=(String)session.get("token");setSessionCookie(res,req,token,AuthService.ABSOLUTE_MILLIS/1000);runtime.store.audit((String)((Map<?,?>)session.get("user")).get("loginId"),"LOGIN",null,null,"SUCCESS");json(res,200,Map.of("user",session.get("user"),"requestId",requestId));return;}
@@ -174,6 +174,7 @@ public final class ApiServlet extends HttpServlet {
     private void authDelete(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
         if(!runtime.auth.local(runtime.config)){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
         if(!path.matches("/auth/users/[^/]+")){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
+        if(!checkOrigin(req,res,requestId,false))return;
         if(!requireAdmin(req,res,requestId))return;
         try{String target=path.substring("/auth/users/".length());runtime.auth.disable(target);runtime.store.audit(principal(req),"USER_DISABLE",null,null,target);json(res,200,Map.of("disabled",true,"requestId",requestId));}
         catch(AuthService.AuthFailure e){error(res,e.status,e.code,"Authentication request could not be completed",requestId);}
@@ -216,7 +217,7 @@ public final class ApiServlet extends HttpServlet {
 
     private void schedulePost(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
         if(!scheduleAdmin(req,res,requestId))return;
-        if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+        if(!checkOrigin(req,res,requestId,false))return;
         String[] parts=path.split("/");
         try {
             if(parts.length==2){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;LoadSchedule item=runtime.createLoadSchedule(body,principal);res.setHeader("Location",req.getContextPath()+"/api/v1/load-schedules/"+item.id);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,201,view);return;}
@@ -240,7 +241,7 @@ public final class ApiServlet extends HttpServlet {
         if(!loadSchedulePath(path)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(!scheduleAdmin(req,res,requestId))return;
-        if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+        if(!checkOrigin(req,res,requestId,false))return;
         String[] parts=path.split("/");if(parts.length!=3){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;
         try{LoadSchedule item=runtime.updateLoadSchedule(parts[2],body,principal);Map<String,Object> view=ServerRuntime.JSON.convertValue(item,Map.class);view.put("requestId",requestId);json(res,200,view);}
@@ -256,7 +257,7 @@ public final class ApiServlet extends HttpServlet {
 
     private void scheduleDelete(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
         if(!scheduleAdmin(req,res,requestId))return;
-        if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
+        if(!checkOrigin(req,res,requestId,false))return;
         String[] parts=path.split("/");if(parts.length!=3){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try{runtime.deleteLoadSchedule(parts[2],principal);json(res,200,Map.of("scheduleId",parts[2],"status","DELETED","requestId",requestId));}
         catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
@@ -378,10 +379,11 @@ public final class ApiServlet extends HttpServlet {
                 action="declared";
             } else if(parts.length==5&&"effective".equals(parts[4])) action="effective";
             else if(parts.length==5&&"compare".equals(parts[4])) action="compare";
+            else if(parts.length==7&&"testdata".equals(parts[4])&&"records".equals(parts[6])) action="testdata-records";
             else throw new ServerRuntime.NotFoundException();
-            String environment="effective".equals(action)?req.getParameter("environment"):"compare".equals(action)?req.getParameter("left"):null;
+            String environment="effective".equals(action)||"testdata-records".equals(action)?req.getParameter("environment"):"compare".equals(action)?req.getParameter("left"):null;
             String otherEnvironment="compare".equals(action)?req.getParameter("right"):null;
-            String section="effective".equals(action)?req.getParameter("section"):null;
+            String section="effective".equals(action)||"compare".equals(action)?req.getParameter("section"):"testdata-records".equals(action)?parts[5]:null;
             int offset=parseOffset(req.getParameter("offset"));
             int limit="declared".equals(action)?0:parseConfigurationLimit(req.getParameter("limit"));
             Map<String,Object> result=runtime.inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,principal);
@@ -419,6 +421,12 @@ public final class ApiServlet extends HttpServlet {
     private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/configuration(?:/.*)?");}
     private static boolean loadPolicyPath(String path){return path.matches("/packages/[^/]+/load-policy");}
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}
+    private boolean checkOrigin(HttpServletRequest req,HttpServletResponse res,String requestId,boolean force)throws IOException {
+        if(!force&&!runtime.config.security.checkCrossOrigin)return true;
+        if(sameOrigin(req))return true;
+        error(res,403,"ATT-SERVER-ORIGIN-MISMATCH","Request Origin does not match the server origin",requestId);
+        return false;
+    }
     private static boolean sameOrigin(HttpServletRequest req){String origin=req.getHeader("Origin");if(origin==null)return true;if("null".equalsIgnoreCase(origin.trim()))return false;try{java.net.URI parsed=java.net.URI.create(origin);if(parsed.getHost()==null||parsed.getUserInfo()!=null||parsed.getRawPath()!=null&&!parsed.getRawPath().isEmpty()||parsed.getRawQuery()!=null||parsed.getFragment()!=null)return false;String scheme=req.getScheme().toLowerCase(java.util.Locale.ROOT),originScheme=parsed.getScheme().toLowerCase(java.util.Locale.ROOT);int requestPort=req.getServerPort(),originPort=parsed.getPort()<0?("https".equals(originScheme)?443:80):parsed.getPort();int effectiveRequest=requestPort<0?("https".equals(scheme)?443:80):requestPort;return scheme.equals(originScheme)&&req.getServerName().equalsIgnoreCase(parsed.getHost())&&effectiveRequest==originPort;}catch(Exception invalid){return false;}}
     private static String path(HttpServletRequest r){String p=r.getPathInfo();return p==null||p.isEmpty()?"/":p;}
     private static String segment(String path,int index){String[] parts=path.split("/");return parts.length>index?parts[index]:"";}

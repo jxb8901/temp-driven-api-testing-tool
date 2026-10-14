@@ -52,4 +52,10 @@ public class WorkerRequest {
     public List<String> safeTextSources;
     public Integer maxSourceBytes;
     public Integer maxResponseBytes;
+    public Boolean sourceBrowsingEnabled;
+    public String sourceBrowsingPolicy;
+    public List<String> sourceDenyGlobs;
+    public Boolean redactionEnabled;
+    public List<String> sensitivePaths;
+    public List<String> sensitiveFieldPatterns;
 }

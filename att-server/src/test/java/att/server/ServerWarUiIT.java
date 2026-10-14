@@ -45,7 +45,7 @@ class ServerWarUiIT {
         Path packages = Files.createDirectories(temp.resolve("packages"));
         Path dummyPackage = Files.createDirectories(packages.resolve("dummy"));
         Path config = Files.writeString(temp.resolve("server.yaml"),
-                "server:\n  dataDir: " + temp.resolve("data") + "\n  authenticationRequired: true\n"
+                "server:\n  dataDir: " + temp.resolve("data") + "\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n"
                         + "  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n"
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"
                         + "packages:\n  allowedRoots:\n    - " + packages + "\n  entries:\n    dummy: " + dummyPackage + "\n");

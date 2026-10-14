@@ -15,6 +15,7 @@ import att.template.StageTemplateLoader;
 import att.template.TemplateAction;
 import att.template.ToolCallParser;
 import att.template.EvidenceCollector;
+import att.template.HelperCallOperations;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -2104,10 +2105,7 @@ public final class PackageValidator {
     private void validateHttpCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
         validateStaticArgumentContracts(parsed, null);
         String[] parts = parsed.name().split("\\.", -1);
-        if (parts.length != 3 || parts[1].isEmpty() || !("request".equals(parts[2])
-                || "get".equals(parts[2]) || "post".equals(parts[2]) || "put".equals(parts[2])
-                || "patch".equals(parts[2]) || "delete".equals(parts[2]) || "head".equals(parts[2])
-                || "options".equals(parts[2])))
+        if (parts.length != 3 || parts[1].isEmpty() || !HelperCallOperations.supports("http", parts[2]))
             throw new IllegalArgumentException("HTTP call must be http.<helper>.request|get|post|put|patch|delete|head|options");
         if (config.httpHelper(parts[1]) == null) throw new IllegalArgumentException("Unknown HTTP helper: " + parts[1]);
         Set<String> supplied = new LinkedHashSet<String>();
@@ -2153,6 +2151,8 @@ public final class PackageValidator {
             throw new IllegalArgumentException("Unknown mqhelper instance '" + parts[1] + "'");
         }
         String operation = parts[2];
+        if (!HelperCallOperations.supports("mq", operation))
+            throw new IllegalArgumentException("Unknown MQ operation '" + operation + "'; use send, receive, or request");
         Set<String> allowed = new LinkedHashSet<String>();
         Set<String> required = new LinkedHashSet<String>();
         if ("send".equals(operation)) {
@@ -2219,7 +2219,8 @@ public final class PackageValidator {
     private void validateSshCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
         validateStaticArgumentContracts(parsed, null);
         String[] parts = parsed.name().split("\\.", -1);
-        if (parts.length != 3 || !"ssh".equals(parts[0]) || parts[1].isEmpty())
+        if (parts.length != 3 || !"ssh".equals(parts[0]) || parts[1].isEmpty()
+                || !HelperCallOperations.supports("ssh", parts[2]))
             throw new IllegalArgumentException("SSH call must be ssh.<helper>.execute|upload|stat|mkdirs|move|delete: " + parsed.name());
         att.config.SshHelperConfig helper = config.sshHelper(parts[1]);
         if (helper == null) throw new IllegalArgumentException("Unknown sshhelper instance '" + parts[1] + "'");
@@ -2320,7 +2321,7 @@ public final class PackageValidator {
     private void validateDbToolCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || !"db".equals(parts[0]) || parts[1].isEmpty()
-                || !("query".equals(parts[2]) || "scalar".equals(parts[2]) || "update".equals(parts[2]))) {
+                || !HelperCallOperations.supports("db", parts[2])) {
             throw new IllegalArgumentException("DB Tool call must be db.<instance>.query|scalar|update(...): " + parsed.name());
         }
         att.config.DbHelperConfig helper = config.dbHelper(parts[1]);
@@ -2459,7 +2460,7 @@ public final class PackageValidator {
     private void validateDbExpressionCall(ToolCallParser.ParsedCall parsed, FrameworkConfig config) {
         String[] parts = parsed.name().split("\\.", -1);
         if (parts.length != 3 || !"db".equals(parts[0]) || parts[1].isEmpty()
-                || !("query".equals(parts[2]) || "scalar".equals(parts[2]))) {
+                || !HelperCallOperations.supports("db", parts[2]) || "update".equals(parts[2])) {
             throw new IllegalArgumentException("DB expression must be db.<instance>.query(...) or db.<instance>.scalar(...): " + parsed.name());
         }
         if (config.dbHelper(parts[1]) == null) throw new IllegalArgumentException("Unknown dbhelper instance '" + parts[1] + "'");

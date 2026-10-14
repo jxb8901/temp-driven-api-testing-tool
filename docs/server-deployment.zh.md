@@ -40,11 +40,15 @@ att/                              # ATT_HOME
 
 ## 設定
 
-`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。`server.inspection` 以有界的常駐 Worker pool 獨立限制唯讀資源探索。Worker pool 的程序數不會超過 `maxConcurrent`，每個程序會依次處理請求，並快取最多兩個 package index；package 檔案變更事件會令快取失效。資源探索另設佇列、逾時、heap、source 及 response 上限。除非 package 的 `server.inspection.safeTextSources` 明確列出相對路徑，否則不會提供 Tool script 文字。
+`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。`server.inspection` 以有界的常駐 Worker pool 獨立限制唯讀資源探索。Worker pool 的程序數不會超過 `maxConcurrent`，每個程序會依次處理請求，並快取最多兩個 package index；package 檔案變更事件會令快取失效。資源探索另設佇列、逾時、heap、source 及 response 上限。`sourceBrowsing.policy: safe-package-files` 預設允許受大小限制的 Template/Flow YAML 安全投影，無須逐檔 allowlist；設定檔、Testdata descriptor、Debug sidecar、secret 命名檔、binary、package root 以外的檔案及超大檔案不會透過 Source endpoint 提供。Tool script 文字仍須在 `server.inspection.safeTextSources` 以完全相同的 package-relative path 明確 allowlist。
+
+`server.inspection.redaction.enabled` 預設為 `false`，會在安全 projection 中顯示一般 package 值。即使關閉遮蔽或匿名存取，憑證、認證資料、private key 及常見個人資料欄位仍會保護；啟用遮蔽後亦會套用設定的敏感路徑、欄位 pattern 及自由文字預設值。遮蔽關閉時 Server 會記錄啟動警告，UI 會顯示目前設定。共享或正式資料建議啟用遮蔽並要求登入；未遮蔽值只應用於隔離的 SIT 網絡。
+
+`server.security.checkCrossOrigin` 預設為 `false`，只控制 state-changing API 的 Origin 相等檢查；設為 `true` 時，不匹配會回傳 `ATT-SERVER-ORIGIN-MISMATCH`。關閉此檢查不會略過 local cookie authentication 的 CSRF 驗證或 login/bootstrap 的 Origin 檢查，也不會啟用 CORS 或 wildcard header。反向代理應以可信來源設定 Tomcat `RemoteIpValve`，讓 Servlet request 提供外部 scheme、host 及 port；應用程式不會信任任意 forwarded header。Origin 檢查關閉時 Server 會記錄啟動警告。
 
 瀏覽器建立的 Quick Load 及 Advanced Load draft 另有獨立 opt-in：`server.inlineLoad.enabled` 預設為 `false`。啟用後，Server 會在 Engine 驗證後及進入佇列前，再次檢查 workload 數、target 數、Virtual User 總數、Arrival Rate 總和、每個 workload 及整體並行數上限，以及完整時間窗口上限。以下範例設定保守預設值。時間窗口上限為 warmup、ramp-up、duration、ramp-down 的總和；target 數包含固定 target 及每個 VU mix entry。功能停用時回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出設定上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。這些限制適用於瀏覽器建立的 draft；既有 path-based Load request 維持相容行為，並繼續受 `workers.maxConcurrentLoad` 限制。
 
-週期性 package-backed Load 排程另有獨立 opt-in：`server.scheduling.enabled` 預設為 `false`。啟用前請先選定管理員角色並檢視排程上限。已驗證部署需要 Servlet container role `server.scheduling.adminRole`（預設 `ATT_ADMIN`）；請在 Tomcat 將此 role 對應至可信操作人員。若關閉驗證，必須同時設定 `server.scheduling.allowAnonymousManagement: true` 才能啟動排程；所有匿名 caller 會共享排程管理權限，Server 亦會記錄啟動警告。此功能需要有界 package inspection。排程定義及執行歷史保存在 `server.dataDir` 的 H2 資料庫；請在同一 dataDir 只執行一個 Server 程序。每個排程預設保留最新 10,000 筆 terminal occurrence（`maxExecutionsPerSchedule` 可設為 100–100,000）；執行中及處理中的 occurrence 會保留。本 scheduler 不提供多節點 leader election。
+週期性 package-backed Load 排程另有獨立 opt-in：`server.scheduling.enabled` 預設為 `false`。啟用前請先選定管理員角色並檢視排程上限。已驗證部署需要 Servlet container role `server.scheduling.adminRole`（預設 `ATT_ADMIN`）；請在 Tomcat 將此 role 對應至可信操作人員。只有在 `authenticationRequired: false` 且排程已啟用時，`allowAnonymousManagement` 才預設為 `true`；設為 `false` 可保留 role 限制。匿名 caller 會共享排程管理權限，Server 會記錄明顯啟動警告；這只適用刻意隔離的測試部署，不建議用於共享或正式環境。此功能需要有界 package inspection。排程定義及執行歷史保存在 `server.dataDir` 的 H2 資料庫；請在同一 dataDir 只執行一個 Server 程序。每個排程預設保留最新 10,000 筆 terminal occurrence（`maxExecutionsPerSchedule` 可設為 100–100,000）；執行中及處理中的 occurrence 會保留。本 scheduler 不提供多節點 leader election。
 
 排程以 package ID 及 package-relative Load scenario 檔案為輸入。建立/編輯及每次 occurrence 前，有界 Inspector 會驗證和正規化完整 scenario 及 target closure；即使瀏覽器建立的 Load draft 停用，Server 的 Load users、rate、duration、workload 及 target 上限仍然適用。每個工作都使用檢查所得的 immutable scenario 及 package revision，再經標準 Worker 和 Server Load admission 路徑提交；既有 Load concurrency 及 queue 上限仍然適用。排程 API 只接受 scenario、選填 config/environment 及現有的字串型 Load options；options 會在儲存和提交前以 Server 上限及 Engine 驗證。不接受輸出路徑、package root、Worker 設定、憑證或 caller 提供的 principal。工作使用 Server 建立的 `load-schedule:<id>` principal。提交失敗會記錄且不重試。已接納工作的狀態與 evidence 維持標準 job 生命週期，與 schedule occurrence 分開。
 
@@ -67,10 +71,20 @@ server:
     heapMaxMb: 512
     maxResponseBytes: 262144
     maxSourceBytes: 65536
+    sourceBrowsing:
+      enabled: true
+      policy: safe-package-files
+      denyGlobs: []
+    redaction:
+      enabled: false
+      sensitivePaths: []
+      sensitiveFieldPatterns: []
     # 選填 Tool script source allowlist；路徑相對於 package。
     # safeTextSources:
     #   payments:
     #     - tools/payment-check.sh
+  security:
+    checkCrossOrigin: false
   inlineLoad:
     enabled: false
     maxWorkloads: 10
@@ -410,11 +424,12 @@ Server 會驗證完整 scenario 並 resolve 所有 target，不會排程流量�
 GET /api/v1/packages/payments/configuration?view=declared
 GET /api/v1/packages/payments/configuration/effective?environment=SIT
 GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&offset=0&limit=50
-GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT
-GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&offset=0&limit=50
+GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&section=dbhelpers
+GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&section=dbhelpers&offset=0&limit=50
+GET /api/v1/packages/payments/configuration/testdata/{descriptorId}/records?environment=SIT&offset=0&limit=50
 ```
 
-Declared view 會回傳 schema version、安全的 global 欄位、已設定 profile，以及每個設定 section 的 declared/absent 狀態、項目數量和 profile 繼承或替換狀態。Effective view 使用 `FrameworkConfigLoader` 選擇 environment，並回傳安全的 helper、Tool 及 Testdata descriptor metadata。Root-only package 或使用已設定的預設值時可省略 `environment`。第一個 effective 回應會提供各 section 的數量；按 section ID（`dbhelpers`、`mqhelpers`、`sshhelpers`、`httphelpers`、`tools` 或 `testdata`）要求其項目。Effective section 及 comparison 欄位回應支援 `offset` 與 `limit`（1–100，預設 50），並回傳 `total` 和 `nextOffset` 以供分頁。檢查過程不會連接 DB、MQ、HTTP 或 SSH 服務，也不會回傳未限制的設定 YAML 或 Testdata records。
+Declared view 會回傳 schema version、安全的 global 欄位、已設定 profile，以及每個設定 section 的 declared/absent 狀態、項目數量和 profile 繼承或替換狀態。Effective view 使用 `FrameworkConfigLoader` 選擇 environment，並回傳安全的 helper、Tool 及 Testdata descriptor metadata。Root-only package 或使用已設定的預設值時可省略 `environment`。第一個 effective 回應會提供各 section 的數量；按 section ID（`dbhelpers`、`mqhelpers`、`sshhelpers`、`httphelpers`、`tools` 或 `testdata`）要求其項目。Effective section 及 comparison 欄位回應支援 `offset` 與 `limit`（1–100，預設 50），並回傳 `total` 和 `nextOffset` 以供分頁。比較要求必須提供 section ID；Server 會先驗證並篩選兩個 profile，再分頁。檢查過程不會連接 DB、MQ、HTTP 或 SSH 服務，也不會回傳未限制的設定 YAML。只有所選 environment 已設定的 Testdata descriptor 可透過上述 records endpoint 分頁預覽；一般值預設可見，憑證、認證資料及常見個人資料欄位始終遮蔽。啟用 `redaction` 後亦會套用設定的敏感路徑和欄位 pattern。未知或未設定的 descriptor 回傳 `404`。
 
 比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對路徑、憑證、連線 endpoint、網絡拓撲或未限制的 descriptor 內容。
 

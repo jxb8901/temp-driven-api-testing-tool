@@ -42,6 +42,8 @@ public final class ResourceInspection {
         public List<String> tags;
         public String state;
         public Boolean sourceAvailable;
+        public String sourceReason;
+        public Boolean redactionEnabled;
         public Map<String, Object> provenance;
         public List<Reference> references;
         public List<Reference> referencedBy;
@@ -53,7 +55,9 @@ public final class ResourceInspection {
         public String resourceId;
         public String logicalId;
         public String name;
+        public String targetKind;
         public String resolution;
+        public Map<String, Object> callSite;
     }
 
     public static final class Diagnostic {

@@ -6,6 +6,7 @@ import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.Context;
 import org.apache.catalina.valves.RemoteIpValve;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.net.HttpURLConnection;
@@ -34,10 +35,13 @@ import static org.junit.jupiter.api.Assertions.*;
 class AuthenticationIntegrationTest {
     @TempDir Path temp;
     private String previousAttHome;
+    private String previousServerConfig;
 
+    @BeforeEach void captureServerConfig() {previousServerConfig=System.getProperty("att.server.config");}
     @AfterEach void restoreAttHome() {
         if (previousAttHome == null) System.clearProperty("att.home");
         else System.setProperty("att.home", previousAttHome);
+        restore(previousServerConfig);
     }
 
     @Test void localAuthenticationBootstrapsLogsInEnforcesCsrfAndSupportsAdminUserManagement() throws Exception {
@@ -53,6 +57,9 @@ class AuthenticationIntegrationTest {
             assertEquals(200,send(client,port,"GET","/att/ui/login.html",null,null,null).statusCode());
             assertEquals(200,send(client,port,"GET","/att/api/v1/auth/bootstrap/status",null,null,null).statusCode());
             String token=Files.readString(data.resolve("bootstrap-admin.token")).strip();
+            HttpResponse<String> crossOriginBootstrap=send(client,port,"POST","/att/api/v1/auth/bootstrap","https://attacker.example",null,"{\"token\":\""+token+"\",\"loginId\":\"owner\",\"displayName\":\"ATT Owner\",\"password\":\"correct horse battery staple\"}");
+            assertEquals(403,crossOriginBootstrap.statusCode());
+            assertEquals("ATT-SERVER-ORIGIN-MISMATCH",ServerRuntime.JSON.readTree(crossOriginBootstrap.body()).path("error").path("code").asText());
             assertEquals(403,sendViaTrustedProxyScheme(client,port,"POST","/att/api/v1/auth/bootstrap","http","{\"token\":\""+token+"\",\"loginId\":\"owner\",\"displayName\":\"ATT Owner\",\"password\":\"correct horse battery staple\"}").statusCode(),"Bootstrap credentials must not be accepted over non-loopback HTTP");
             assertEquals(403,sendViaTrustedProxyScheme(client,port,"POST","/att/api/v1/auth/login","http","{\"loginId\":\"owner\",\"password\":\"correct horse battery staple\"}").statusCode(),"Login credentials must not be accepted over non-loopback HTTP");
             HttpResponse<String> setup=send(client,port,"POST","/att/api/v1/auth/bootstrap",origin,null,"{\"token\":\""+token+"\",\"loginId\":\"owner\",\"displayName\":\"ATT Owner\",\"password\":\"correct horse battery staple\"}");assertEquals(201,setup.statusCode(),setup.body());
@@ -152,7 +159,7 @@ class AuthenticationIntegrationTest {
         Files.writeString(template.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs:\n  value: safe\n"
                 +"  payload: {account: 'customer account 123456789', secret: 'temporary credential violet-123'}\n");
         Path users=Files.writeString(temp.resolve("tomcat-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"OTHER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"other\" password=\"secret\" roles=\"OTHER\"/></tomcat-users>");
-        Path config=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\nworkers:\n  maxConcurrent: 2\n  queuedLimit: 2\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");
+        Path config=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\nworkers:\n  maxConcurrent: 2\n  queuedLimit: 2\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");
         String old=System.getProperty("att.server.config");System.setProperty("att.server.config",config.toString());
         Tomcat tomcat=start(users,appDirectory("authenticated"),true);
         try {
@@ -236,6 +243,8 @@ class AuthenticationIntegrationTest {
             assertEquals(200,get(port,"/att/api/v1/jobs/"+jobId+"/result",basic));
             assertEquals(415,post(port,basic,"application/x-www-form-urlencoded",null));
             assertEquals(403,post(port,basic,"application/json","https://attacker.example"));
+            HttpResponse<String> rejectedOrigin=send(HttpClient.newHttpClient(),port,"POST","/att/api/v1/jobs/run","https://attacker.example",null,"{}");
+            assertEquals("ATT-SERVER-ORIGIN-MISMATCH",ServerRuntime.JSON.readTree(rejectedOrigin.body()).path("error").path("code").asText());
             assertEquals(400,post(port,basic,"application/json","https://att.example.test",java.util.Map.of(
                     "X-Forwarded-For","203.0.113.10","X-Forwarded-Proto","https",
                     "X-Forwarded-Host","att.example.test","X-Forwarded-Port","443")),
@@ -347,10 +356,10 @@ class AuthenticationIntegrationTest {
             assertRetainedSseEvent(port,null,remoteJobId);
             assertEquals(200,cancelJob(port,null,remoteJobId));
             assertEquals(200,get(port,"/att/api/v1/jobs/"+remoteJobId+"/result",null));
-            assertEquals(403,post(port,null,"application/json","https://attacker.example",Map.of(
+            assertEquals(400,post(port,null,"application/json","https://attacker.example",Map.of(
                     "X-Forwarded-For","203.0.113.10","X-Forwarded-Proto","https",
                     "X-Forwarded-Host","att.example.test","X-Forwarded-Port","443")),
-                    "Anonymous mode must keep same-origin protection for browser POSTs");
+                    "Anonymous mode defaults to origin-check relaxation; request validation still applies");
             JsonNode unlabelledAccepted=postJson(port,"/att/api/v1/jobs/run",null,
                     ServerRuntime.JSON.valueToTree(Map.of("packageId","p","all",true)),202);
             JsonNode unlabelledJob=waitForTerminalJob(port,unlabelledAccepted.path("jobId").asText());
@@ -377,6 +386,84 @@ class AuthenticationIntegrationTest {
             assertEquals(401,get(port,path,null),"Enabling authentication on restart must protect the former anonymous draft");
             assertEquals(404,get(port,path,basic),"Anonymous drafts are discarded on restart and never transferred to authenticated users");
         } finally {restarted.stop();restarted.destroy();restore(old);}
+    }
+
+    @Test void inspectorDisclosureAndAnonymousSchedulePoliciesWorkThroughTomcat() throws Exception {
+        previousAttHome=System.getProperty("att.home");Path localHome=createLocalRuntime();System.setProperty("att.home",localHome.toString());
+        String oldConfig=System.getProperty("att.server.config");
+        Path packages=Files.createDirectory(temp.resolve("inspection-packages"));Path packageRoot=Files.createDirectory(packages.resolve("debug"));
+        Path template=Files.createDirectories(packageRoot.resolve("templates/FORM"));
+        Files.createDirectories(packageRoot.resolve("testcase"));Files.createDirectories(packageRoot.resolve("config"));
+        Files.createDirectories(packageRoot.resolve("load"));Files.createDirectories(packageRoot.resolve("testdata"));copySchemas(packageRoot);
+        Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                +"environments:\n  SIT:\n    testdata: [testdata/customers.yaml]\n  UAT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        Files.writeString(packageRoot.resolve("testdata/customers.yaml"),"schemaVersion: att-testdata/v1.0\nid: customers\nrecords:\n"
+                +"  - accountId: A-1001\n    status: ACTIVE\n    email: customer@example.test\n  - accountId: A-1002\n    status: CLOSED\n    email: other@example.test\nselection:\n  strategy: sequential\n");
+        Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: ordinary template description\nactions:\n"
+                +"  log:\n    type: log\n    message: 'password=do-not-disclose'\n");
+        Files.writeString(packageRoot.resolve("load/scenario.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n"
+                +"  - id: smoke\n    target: {type: template, id: FORM}\n    load: {users: 1, duration: 1s}\n");
+        Path users=Files.writeString(temp.resolve("inspection-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
+        Path authenticatedConfig=Files.writeString(temp.resolve("inspection-authenticated.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("inspection-authenticated-data"))
+                +"\n  authenticationRequired: true\n  inspection:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    debug: "+yaml(packageRoot)+"\n");
+        Tomcat authenticated=null,anonymous=null;
+        try {
+            System.setProperty("att.server.config",authenticatedConfig.toString());
+            authenticated=start(users,appDirectory("inspection-authenticated"),true);
+            int port=authenticated.getConnector().getLocalPort();
+            String basic="Basic "+Base64.getEncoder().encodeToString("att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",basic);
+            String resourceId=resources.path("items").get(0).path("resourceId").asText();
+            String resourcePath="/att/api/v1/packages/debug/resources/template/"+resourceId;
+            assertEquals(401,get(port,resourcePath+"/source",null));
+            assertEquals(401,get(port,"/att/api/v1/packages/debug/configuration/testdata/customers/records?environment=SIT",null));
+            JsonNode source=getJson(port,resourcePath+"/source",basic);
+            assertTrue(source.path("available").asBoolean(),source.toString());
+            assertTrue(source.path("resource").path("sourceAvailable").asBoolean());
+            assertFalse(source.path("resource").path("redactionEnabled").asBoolean(true));
+            assertTrue(source.path("text").asText().contains("ordinary template description"));
+            assertFalse(source.path("text").asText().contains("do-not-disclose"));
+            JsonNode records=getJson(port,"/att/api/v1/packages/debug/configuration/testdata/customers/records?environment=SIT&offset=0&limit=1",basic);
+            assertFalse(records.path("redactionEnabled").asBoolean(true));assertEquals(2,records.path("total").asInt());
+            assertEquals(1,records.path("nextOffset").asInt());
+            assertEquals("A-1001",records.path("records").get(0).path("value").path("accountId").asText());
+            assertEquals("[REDACTED]",records.path("records").get(0).path("value").path("email").asText());
+            assertFalse(records.toString().contains("customer@example.test"));
+            JsonNode compare=getJson(port,"/att/api/v1/packages/debug/configuration/compare?left=SIT&right=UAT&section=globals&offset=0&limit=50",basic);
+            assertEquals("globals",compare.path("section").asText());
+            assertTrue(compare.path("fields").size()>0);
+            for(JsonNode field:compare.path("fields"))assertTrue(field.path("path").asText().startsWith("globals."));
+            assertEquals(404,get(port,"/att/api/v1/load-schedules",basic),"The scheduling feature gate remains independent of authentication");
+        } finally {if(authenticated!=null){authenticated.stop();authenticated.destroy();}}
+
+        Path anonymousConfig=Files.writeString(temp.resolve("inspection-anonymous.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("inspection-anonymous-data"))
+                +"\n  authenticationRequired: false\n  inspection:\n    enabled: true\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    debug: "+yaml(packageRoot)+"\n");
+        try {
+            System.setProperty("att.server.config",anonymousConfig.toString());
+            anonymous=start(users,appDirectory("inspection-anonymous"),true);
+            int port=anonymous.getConnector().getLocalPort();
+            JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",null);
+            String resourceId=resources.path("items").get(0).path("resourceId").asText();
+            JsonNode source=getJson(port,"/att/api/v1/packages/debug/resources/template/"+resourceId+"/source",null);
+            assertTrue(source.path("available").asBoolean(),source.toString());
+            JsonNode records=getJson(port,"/att/api/v1/packages/debug/configuration/testdata/customers/records?environment=SIT&offset=0&limit=1",null);
+            assertEquals("A-1001",records.path("records").get(0).path("value").path("accountId").asText());
+            assertEquals("[REDACTED]",records.path("records").get(0).path("value").path("email").asText());
+            HttpClient client=HttpClient.newHttpClient();
+            HttpResponse<String> relaxedOrigin=send(client,port,"POST","/att/api/v1/load-schedules/preview","https://attacker.example",null,
+                    "{\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}");
+            assertEquals(200,relaxedOrigin.statusCode(),relaxedOrigin.body());
+            JsonNode schedule=postJsonViaTrustedProxy(port,"/att/api/v1/load-schedules",null,
+                    ServerRuntime.JSON.valueToTree(Map.of("name","Anonymous SIT","packageId","debug","scenario","load/scenario.yaml",
+                            "environment","SIT","timezone","UTC","cron","0 2 * * *","enabled",false)),201);
+            String scheduleId=schedule.path("id").asText();assertFalse(scheduleId.isBlank());
+            assertEquals(scheduleId,getJson(port,"/att/api/v1/load-schedules",null).path("items").get(0).path("id").asText());
+            assertEquals(scheduleId,getJson(port,"/att/api/v1/load-schedules/"+scheduleId,null).path("id").asText());
+            assertEquals(200,send(client,port,"DELETE","/att/api/v1/load-schedules/"+scheduleId,"https://att.example.test",null,"{}").statusCode());
+        } finally {
+            if(anonymous!=null){anonymous.stop();anonymous.destroy();}
+            restore(oldConfig);
+        }
     }
 
     private Path createLocalRuntime() throws Exception {

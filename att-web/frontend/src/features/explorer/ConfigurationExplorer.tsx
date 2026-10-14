@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ConfigurationField, ConfigurationResponse, ExplorerApi } from './types';
 
 type ConfigMode = 'declared' | 'effective' | 'compare';
@@ -54,11 +54,28 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
   const [right, setRight] = useState('');
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const requestSequence = useRef(0);
+  const activeController = useRef<AbortController | null>(null);
+
+  const cancelPending = () => {
+    requestSequence.current += 1;
+    activeController.current?.abort();
+    activeController.current = null;
+    setLoadingMore(false);
+  };
+  const startRequest = () => {
+    activeController.current?.abort();
+    const controller = new AbortController();
+    activeController.current = controller;
+    const sequence = ++requestSequence.current;
+    return { controller, sequence };
+  };
 
   useEffect(() => {
-    const controller = new AbortController();
+    const { controller, sequence } = startRequest();
     setMode('declared'); setData(null); setDeclaredData(null); setError(''); setStatus('Loading declared configuration…');
     api.getDeclaredConfiguration(packageId, controller.signal).then(response => {
+      if (sequence !== requestSequence.current) return;
       setData(response); setDeclaredData(response); setStatus(`Declared configuration: ${response.state || 'ready'}.`);
       const environments = (response.environments || []).filter(item => item.state === 'active' && item.name);
       const defaultName = environments.find(item => item.default)?.name || environments[0]?.name || '';
@@ -66,9 +83,9 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
       setRight(environments.find(item => item.name !== defaultName)?.name || '');
       if (!environment && defaultName) onEnvironmentChange(defaultName);
     }).catch(reason => {
-      if (!controller.signal.aborted) { setError(errorText(reason)); setStatus('Declared configuration could not be loaded.'); }
+      if (!controller.signal.aborted && sequence === requestSequence.current) { setError(errorText(reason)); setStatus('Declared configuration could not be loaded.'); }
     });
-    return () => controller.abort();
+    return () => { controller.abort(); if (sequence === requestSequence.current) requestSequence.current += 1; };
   }, [api, packageId]);
 
   const profiles = useMemo(() => (declaredData?.environments || []).filter(item => item.state === 'active' && item.name), [declaredData]);
@@ -76,11 +93,14 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
   const loadEffective = async (requestedSection = 'globals', append = false) => {
     const offset = append ? Number(nextOffset || 0) : 0;
     setError(''); setStatus(`Loading effective configuration for ${environment || 'package default'}…`);
+    setMode('effective');
     if (append) setLoadingMore(true);
-    const controller = new AbortController();
+    else { setData(null); setNextOffset(null); }
+    const { controller, sequence } = startRequest();
     try {
       const response = await api.getEffectiveConfiguration(packageId,
-        { environment: environment || undefined, section: requestedSection === 'globals' ? undefined : requestedSection, offset, limit: 50 }, controller.signal);
+        { environment: environment || undefined, section: requestedSection, offset, limit: 50 }, controller.signal);
+      if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setData(previous => {
         if (!append || !previous) return response;
         if (requestedSection === 'globals') return { ...response, globals: { ...previous.globals, ...response.globals } };
@@ -92,19 +112,22 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
       setNextOffset(response.nextOffset == null ? null : Number(response.nextOffset));
       setMode('effective'); setSection(response.section || requestedSection);
       setStatus(`Effective configuration for ${response.environment || environment || 'package default'}: ${response.state || 'ready'}.`);
-    } catch (reason) { setError(errorText(reason)); setStatus('Effective configuration could not be loaded.'); }
-    finally { if (append) setLoadingMore(false); }
+    } catch (reason) { if (!controller.signal.aborted && sequence === requestSequence.current) { setError(errorText(reason)); setStatus('Effective configuration could not be loaded.'); } }
+    finally { if (sequence === requestSequence.current) setLoadingMore(false); }
   };
 
-  const compare = async () => {
-    if (!left || !right || left === right) { setError('Choose two different active environments to compare.'); return; }
-    setError(''); setStatus(`Comparing ${left} with ${right}…`);
-    const controller = new AbortController();
+  const compare = async (leftProfile = left, rightProfile = right, requestedSection = section) => {
+    if (!leftProfile || !rightProfile || leftProfile === rightProfile) { setError('Choose two different active environments to compare.'); return; }
+    setError(''); setStatus(`Comparing ${leftProfile} with ${rightProfile}…`);
+    setMode('compare');
+    setData(null); setNextOffset(null);
+    const { controller, sequence } = startRequest();
     try {
-      const response = await api.compareConfiguration(packageId, { left, right, offset: 0, limit: 50 }, controller.signal);
+      const response = await api.compareConfiguration(packageId, { left: leftProfile, right: rightProfile, section: requestedSection, offset: 0, limit: 50 }, controller.signal);
+      if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setData(response); setMode('compare'); setNextOffset(response.nextOffset == null ? null : Number(response.nextOffset));
       setStatus(`Configuration comparison: ${response.state || 'ready'}.`);
-    } catch (reason) { setError(errorText(reason)); setStatus('Configuration comparison could not be loaded.'); }
+    } catch (reason) { if (!controller.signal.aborted && sequence === requestSequence.current) { setError(errorText(reason)); setStatus('Configuration comparison could not be loaded.'); } }
   };
 
   const loadMore = async () => {
@@ -112,13 +135,34 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
     if (mode === 'effective') return loadEffective(section, true);
     if (mode !== 'compare') return;
     setLoadingMore(true); setError('');
+    const requestedLeft = left, requestedRight = right, requestedSection = section, offset = nextOffset;
+    const { controller, sequence } = startRequest();
     try {
-      const incoming = await api.compareConfiguration(packageId, { left, right, offset: nextOffset, limit: 50 });
+      const incoming = await api.compareConfiguration(packageId, { left: requestedLeft, right: requestedRight, section: requestedSection, offset, limit: 50 }, controller.signal);
+      if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setData(previous => previous ? { ...incoming, fields: [...(previous.fields || []), ...(incoming.fields || [])], offset: 0 } : incoming);
       setNextOffset(incoming.nextOffset == null ? null : Number(incoming.nextOffset));
       setStatus(`Configuration comparison: ${incoming.state || 'ready'}.`);
-    } catch (reason) { setError(errorText(reason)); }
-    finally { setLoadingMore(false); }
+    } catch (reason) { if (!controller.signal.aborted && sequence === requestSequence.current) setError(errorText(reason)); }
+    finally { if (sequence === requestSequence.current) setLoadingMore(false); }
+  };
+
+  useEffect(() => {
+    if (mode === 'effective') { cancelPending(); setData(null); setNextOffset(null); void loadEffective(section); }
+  }, [environment]);
+
+  const changeSection = (value: string) => {
+    cancelPending(); setSection(value); setData(null); setNextOffset(null);
+    if (mode === 'effective') void loadEffective(value);
+    else if (mode === 'compare') void compare(left, right, value);
+  };
+  const changeLeft = (value: string) => {
+    cancelPending(); setLeft(value); setData(null); setNextOffset(null);
+    if (mode === 'compare') void compare(value, right, section);
+  };
+  const changeRight = (value: string) => {
+    cancelPending(); setRight(value); setData(null); setNextOffset(null);
+    if (mode === 'compare') void compare(left, value, section);
   };
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -131,7 +175,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
   }) : [];
 
   return <section className="att-config-explorer" aria-labelledby="att-config-title">
-    <div className="att-config-heading"><div><h2 id="att-config-title">Configuration</h2><p>Values are shown only when the Server marks a field visible.</p></div>
+    <div className="att-config-heading"><div><h2 id="att-config-title">Configuration</h2><p>Values are shown only when the Server marks a field visible. {data?.redactionEnabled ? 'Sensitive-field masking is enabled; classified secrets stay hidden.' : 'Redaction is off; classified secrets stay hidden.'}</p></div>
       <label>Run, Debug, and Load environment
         <select value={environment} onChange={event => onEnvironmentChange(event.currentTarget.value)}>
           <option value="">Package default</option>
@@ -141,26 +185,26 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
     </div>
     <div className="att-config-toolbar" role="group" aria-label="Configuration views">
       <button type="button" aria-pressed={mode === 'declared'} onClick={() => {
-        setMode('declared'); setData(declaredData); setError(''); setStatus(`Declared configuration: ${declaredData?.state || 'ready'}.`);
+        cancelPending(); setMode('declared'); setData(declaredData); setNextOffset(null); setError(''); setStatus(`Declared configuration: ${declaredData?.state || 'ready'}.`);
       }}>Declared</button>
       <button type="button" aria-pressed={mode === 'effective'} onClick={() => void loadEffective('globals')}>Effective</button>
       <label>Section
-        <select value={section} onChange={event => { setSection(event.currentTarget.value); if (mode === 'effective') void loadEffective(event.currentTarget.value); }}>
+        <select value={section} onChange={event => changeSection(event.currentTarget.value)}>
           <option value="globals">Global fields</option>
           {(declaredData?.sections || []).map(item => <option key={item.id} value={item.id}>{item.id}</option>)}
         </select>
       </label>
       <label>Compare
-        <select aria-label="Left environment" value={left} onChange={event => setLeft(event.currentTarget.value)}>
+        <select aria-label="Left environment" value={left} onChange={event => changeLeft(event.currentTarget.value)}>
           {profiles.map(profile => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
         </select>
       </label>
       <span aria-hidden="true">with</span>
       <label className="att-visually-hidden" htmlFor="att-config-right">Right environment</label>
-      <select id="att-config-right" aria-label="Right environment" value={right} onChange={event => setRight(event.currentTarget.value)}>
+      <select id="att-config-right" aria-label="Right environment" value={right} onChange={event => changeRight(event.currentTarget.value)}>
         {profiles.map(profile => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
       </select>
-      <button type="button" onClick={() => void compare()} disabled={!left || !right || left === right}>Compare</button>
+      <button type="button" onClick={() => void compare(left, right, section)} disabled={!left || !right || left === right}>Compare</button>
       <label>Filter fields <input type="search" value={query} maxLength={200} onChange={event => setQuery(event.currentTarget.value)} /></label>
     </div>
     <p role="status" aria-live="polite">{status}</p>

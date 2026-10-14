@@ -229,12 +229,12 @@ class ServerRuntimeTest {
             assertEquals("ready",effective.get("state"));assertEquals("SIT",effective.get("environment"));
             Map<String,Object> defaultEffective=runtime.inspectConfiguration("p","effective",null,null,"globals",0,50,"alice");
             assertEquals("ready",defaultEffective.get("state"));assertEquals("SIT",defaultEffective.get("environment"));
-            Map<String,Object> comparison=runtime.inspectConfiguration("p","compare","SIT","UAT","alice");
+            Map<String,Object> comparison=runtime.inspectConfiguration("p","compare","SIT","UAT","dbhelpers",0,50,"alice");
             assertEquals("ready",comparison.get("state"));
             @SuppressWarnings("unchecked") List<Map<String,Object>> fields=(List<Map<String,Object>>)comparison.get("fields");
             Map<String,Object> hidden=fields.stream().filter(item->"dbhelpers.orders.url".equals(item.get("path"))).findFirst().orElseThrow(AssertionError::new);
             assertEquals("hidden",hidden.get("change"));
-            Map<String,Object> comparisonPage=runtime.inspectConfiguration("p","compare","SIT","UAT",null,0,1,"alice");
+            Map<String,Object> comparisonPage=runtime.inspectConfiguration("p","compare","SIT","UAT","dbhelpers",0,1,"alice");
             @SuppressWarnings("unchecked") List<Map<String,Object>> firstComparisonPage=(List<Map<String,Object>>)comparisonPage.get("fields");
             assertEquals(1,firstComparisonPage.size());assertTrue(((Number)comparisonPage.get("total")).intValue()>1);
             String publicData=declared+" "+effective+" "+comparison;
@@ -369,7 +369,7 @@ class ServerRuntimeTest {
             try { advancedDraft=runtime.createAdvancedLoadDraft(advancedBody,"alice"); }
             catch(ServerRuntime.DraftValidationException invalid) { throw new AssertionError(invalid.diagnostics.toString(),invalid); }
             String advancedDraftId=String.valueOf(advancedDraft.get("draftId"));
-            assertEquals(Boolean.TRUE,advancedDraft.get("redacted"));assertFalse(advancedDraft.toString().contains("CORR-176"));assertFalse(advancedDraft.toString().contains("ARG-176"));
+            assertEquals(Boolean.FALSE,advancedDraft.get("redacted"));assertTrue(advancedDraft.toString().contains("CORR-176"));assertTrue(advancedDraft.toString().contains("ARG-176"));
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getAdvancedLoadDraft(advancedDraftId,"bob"));
             assertArrayEquals(originalToolSidecar,Files.readAllBytes(toolSidecar),"Advanced Load validation must leave Tool sidecars unchanged");
             Map<String,Object> advancedAccepted=runtime.submitAdvancedLoadDraft(ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"draftId\":\""+advancedDraftId+"\"}"),"alice");
