@@ -98,7 +98,6 @@ public final class ApiServlet extends HttpServlet {
         try {
             if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
             if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
-            if(("/auth/login".equals(path)||"/auth/bootstrap".equals(path))&&!secureLocalAuthTransport(req)){error(res,403,"ATT-AUTH-HTTPS-REQUIRED","Local credentials require HTTPS outside loopback development",requestId);return;}
             byte[] body=req.getInputStream().readNBytes(runtime.config.maxRequestBytes+1);
             if(body.length>runtime.config.maxRequestBytes){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Request body exceeds the configured size limit",requestId);return;}
             JsonNode input;
@@ -156,10 +155,11 @@ public final class ApiServlet extends HttpServlet {
     private void authPost(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
         try {
             if(!runtime.auth.local(runtime.config)){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
+            if(("/auth/login".equals(path)||"/auth/bootstrap".equals(path))&&!secureLocalAuthTransport(req)){error(res,403,"ATT-AUTH-HTTPS-REQUIRED","Local credentials require HTTPS outside loopback development",requestId);return;}
             if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
             if(!sameOrigin(req)){error(res,403,"ATT-SERVER-CROSS-ORIGIN-REQUEST","State-changing requests must use the same origin",requestId);return;}
             JsonNode body=authBody(req);if(body==null||!body.isObject())throw new IllegalArgumentException("A JSON object is required");
-            if("/auth/bootstrap".equals(path)) {Map<String,Object> user=runtime.auth.bootstrap(text(body,"token"),text(body,"loginId"),text(body,"displayName"),text(body,"password"));runtime.store.audit((String)user.get("loginId"),"BOOTSTRAP",null,null,"SUCCESS");json(res,201,Map.of("user",user,"requestId",requestId));return;}
+            if("/auth/bootstrap".equals(path)) {Map<String,Object> user=runtime.auth.bootstrap(text(body,"token"),text(body,"loginId"),text(body,"displayName"),text(body,"password"),req.getRemoteAddr());runtime.store.audit((String)user.get("loginId"),"BOOTSTRAP",null,null,"SUCCESS");json(res,201,Map.of("user",user,"requestId",requestId));return;}
             if("/auth/login".equals(path)) {runtime.auth.logout(req);Map<String,Object> session=runtime.auth.login(text(body,"loginId"),text(body,"password"),req.getRemoteAddr());String token=(String)session.get("token");setSessionCookie(res,req,token,AuthService.ABSOLUTE_MILLIS/1000);runtime.store.audit((String)((Map<?,?>)session.get("user")).get("loginId"),"LOGIN",null,null,"SUCCESS");json(res,200,Map.of("user",session.get("user"),"requestId",requestId));return;}
             if("/auth/logout".equals(path)){String user=principal(req);runtime.auth.logout(req);expireSessionCookie(res,req);if(user!=null)runtime.store.audit(user,"LOGOUT",null,null,"SUCCESS");json(res,200,Map.of("loggedOut",true,"requestId",requestId));return;}
             if("/auth/password".equals(path)){String user=principal(req);runtime.auth.changePassword(user,text(body,"currentPassword"),text(body,"newPassword"));expireSessionCookie(res,req);runtime.store.audit(user,"PASSWORD_CHANGE",null,null,"SUCCESS");json(res,200,Map.of("updated",true,"requestId",requestId));return;}

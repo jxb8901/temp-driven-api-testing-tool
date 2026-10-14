@@ -26,7 +26,7 @@ class RemoteCommandAutoAuthTest {
         server.createContext("/att/api/v1/",exchange->{
             requests.add(exchange.getRequestURI().getPath());
             String body=exchange.getRequestURI().getPath().endsWith("/version")
-                    ?"{\"version\":\"4.1.3\",\"apiVersion\":\"1\"}":"{\"items\":[]}";
+                    ?"{\"version\":\"4.1.4\",\"apiVersion\":\"1\"}":"{\"items\":[]}";
             byte[] bytes=body.getBytes(StandardCharsets.UTF_8);exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(200,bytes.length);exchange.getResponseBody().write(bytes);exchange.close();
         });
         server.start();
@@ -43,7 +43,7 @@ class RemoteCommandAutoAuthTest {
         server.createContext("/att/api/v1/",exchange->{
             String path=exchange.getRequestURI().getPath();requests.add(path);
             if(path.endsWith("/version")) {
-                byte[] bytes="{\"version\":\"4.1.3\",\"apiVersion\":\"1\"}".getBytes(StandardCharsets.UTF_8);
+                byte[] bytes="{\"version\":\"4.1.4\",\"apiVersion\":\"1\"}".getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(200,bytes.length);exchange.getResponseBody().write(bytes);
             } else if(path.endsWith("/health")) {
                 byte[] bytes="{\"status\":\"UP\"}".getBytes(StandardCharsets.UTF_8);
@@ -107,7 +107,7 @@ class RemoteCommandAutoAuthTest {
             @Override public JsonNode get(String path)throws RemoteException {
                 state.requests.add("GET "+path);
                 if("/packages".equals(path)&&provider!=null)state.credentials=provider.credentials();
-                if("/version".equals(path))return JSON.createObjectNode().put("version","4.1.3").put("apiVersion","1");
+                if("/version".equals(path))return JSON.createObjectNode().put("version","4.1.4").put("apiVersion","1");
                 if("/health".equals(path))return JSON.createObjectNode().put("status","UP");
                 if("/packages".equals(path))return JSON.createObjectNode().putArray("items");
                 return JSON.createObjectNode();

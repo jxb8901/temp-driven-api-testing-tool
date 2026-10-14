@@ -33,7 +33,7 @@ async function main() {
         return jsonResponse(route, 401, { error: { code: 'UNAUTHORIZED', summary: 'authorization header rejected: canary-401-secret' } });
       }
       if (method === 'GET' && path === 'version') {
-        return jsonResponse(route, 200, { apiVersion: '1', version: '4.1.3', inlineLoadEnabled: true });
+        return jsonResponse(route, 200, { apiVersion: '1', version: '4.1.4', inlineLoadEnabled: true });
       }
       if (method === 'GET' && path === 'packages') {
         return jsonResponse(route, 200, { items: [{ packageId: 'payments', name: 'payments', state: 'ready' }], total: 1 });

@@ -34,6 +34,7 @@ final class JobStore implements AutoCloseable {
             s.execute("CREATE TABLE IF NOT EXISTS auth_users (login_id VARCHAR(120) PRIMARY KEY, display_name VARCHAR(120) NOT NULL, password_hash VARCHAR(512) NOT NULL, role VARCHAR(16) NOT NULL, active BOOLEAN NOT NULL, updated_at VARCHAR(40) NOT NULL)");
             s.execute("ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS csrf_token VARCHAR(64)");
             s.execute("CREATE TABLE IF NOT EXISTS auth_sessions (token_hash VARCHAR(64) PRIMARY KEY, login_id VARCHAR(120) NOT NULL, csrf_token VARCHAR(64) NOT NULL, created_at BIGINT NOT NULL, last_seen BIGINT NOT NULL, absolute_expiry BIGINT NOT NULL)");
+            s.execute("CREATE TABLE IF NOT EXISTS auth_bootstrap_claim (claim_id INT PRIMARY KEY, claimed_at VARCHAR(40) NOT NULL)");
             s.execute("CREATE INDEX IF NOT EXISTS load_schedule_execution_history_idx ON load_schedule_executions(schedule_id,scheduled_for)");
         }
     }
@@ -242,6 +243,7 @@ final class JobStore implements AutoCloseable {
         if(latest>0&&latest%256==0)try(Connection c=connect();Statement s=c.createStatement()){s.execute("DELETE FROM audit WHERE audit_id NOT IN (SELECT audit_id FROM audit ORDER BY audit_id DESC LIMIT 100000)");}
     }
     synchronized int authUserCount() throws Exception {try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM auth_users")){r.next();return r.getInt(1);}}
+    synchronized boolean bootstrapClaimed() throws Exception {try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM auth_bootstrap_claim WHERE claim_id=1")){r.next();return r.getInt(1)>0;}}
     synchronized Map<String,Object> authUser(String login) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT login_id,display_name,password_hash,role,active,csrf_token FROM auth_users WHERE login_id=?")){p.setString(1,login);try(ResultSet r=p.executeQuery()){if(!r.next())return null;Map<String,Object> m=new LinkedHashMap<>();m.put("loginId",r.getString(1));m.put("displayName",r.getString(2));m.put("passwordHash",r.getString(3));m.put("role",r.getString(4));m.put("active",r.getBoolean(5));m.put("csrfToken",r.getString(6));return m;}}
     }
@@ -256,6 +258,21 @@ final class JobStore implements AutoCloseable {
         List<Map<String,Object>> out=new ArrayList<>();try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code FROM jobs WHERE principal=?"+ownerPredicate+" ORDER BY created_at DESC LIMIT ?")){int index=1;p.setString(index++,login);for(String owner:scheduleOwners)p.setString(index++,owner);p.setInt(index,limit);try(ResultSet r=p.executeQuery()){while(r.next()){Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));out.add(m);}}}return out;
     }
     synchronized void createAuthUser(String login,String display,String hash,String role,String csrf) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO auth_users(login_id,display_name,password_hash,role,active,updated_at,csrf_token) VALUES(?,?,?,?,TRUE,?,?)")){p.setString(1,login);p.setString(2,display);p.setString(3,hash);p.setString(4,role);p.setString(5,Instant.now().toString());p.setString(6,csrf);p.executeUpdate();}}
+    void createBootstrapAdmin(String login,String display,String hash,String csrf) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                try(Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM auth_users")){r.next();if(r.getLong(1)>0)throw new AuthService.AuthFailure(409,"ATT-AUTH-BOOTSTRAP-CLOSED");}
+                try(PreparedStatement claim=c.prepareStatement("INSERT INTO auth_bootstrap_claim(claim_id,claimed_at) VALUES(1,?)")){claim.setString(1,Instant.now().toString());claim.executeUpdate();}
+                try(PreparedStatement user=c.prepareStatement("INSERT INTO auth_users(login_id,display_name,password_hash,role,active,updated_at,csrf_token) VALUES(?,?,?,'ADMIN',TRUE,?,?)")){user.setString(1,login);user.setString(2,display);user.setString(3,hash);user.setString(4,Instant.now().toString());user.setString(5,csrf);user.executeUpdate();}
+                c.commit();
+            } catch(Exception failure) {
+                c.rollback();
+                if(failure instanceof java.sql.SQLException sql&&"23505".equals(sql.getSQLState()))throw new AuthService.AuthFailure(409,"ATT-AUTH-BOOTSTRAP-CLOSED");
+                throw failure;
+            }
+        }
+    }
     synchronized void updateAuthPassword(String login,String hash,String csrf) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE auth_users SET password_hash=?,csrf_token=?,updated_at=? WHERE login_id=? AND active=TRUE")){p.setString(1,hash);p.setString(2,csrf);p.setString(3,Instant.now().toString());p.setString(4,login);if(p.executeUpdate()==0)throw new AuthService.AuthFailure(404,"ATT-AUTH-USER-NOT-FOUND");}revokeAuthSessions(login);}
     synchronized void setAuthActive(String login,boolean active) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE auth_users SET active=?,updated_at=? WHERE login_id=?")){p.setBoolean(1,active);p.setString(2,Instant.now().toString());p.setString(3,login);if(p.executeUpdate()==0)throw new IllegalArgumentException("Unknown user");}if(!active)revokeAuthSessions(login);}
     synchronized void saveAuthSession(String tokenHash,String login,String csrf,long now,long expiry) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO auth_sessions(token_hash,login_id,csrf_token,created_at,last_seen,absolute_expiry) VALUES(?,?,?,?,?,?)")){p.setString(1,tokenHash);p.setString(2,login);p.setString(3,csrf);p.setLong(4,now);p.setLong(5,now);p.setLong(6,expiry);p.executeUpdate();}}

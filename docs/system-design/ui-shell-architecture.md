@@ -1,6 +1,6 @@
 # ATT Web UI shell architecture decision
 
-**Status:** Accepted for ATT 4.1.3 Phase 1
+**Status:** Accepted; Phase 1 implementation is in place
 
 **Date:** 2026-10-13
 

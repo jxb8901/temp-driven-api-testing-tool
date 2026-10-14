@@ -29,21 +29,22 @@ public final class AuthenticationFilter implements Filter {
             try {session=runtime.auth.session(req);}catch(Exception failure){throw new ServletException("Unable to resolve ATT session",failure);}
             if(session==null&&req.getHeader("Authorization")!=null) {
                 if(!req.isSecure()){jsonAuthError(res,400,"ATT-AUTH-HTTPS-REQUIRED","Basic credentials require HTTPS");return;}
+                java.util.Map<String,Object> user;
                 try {
-                    java.util.Map<String,Object> user=runtime.auth.verifyCredentials(basicUsername(req.getHeader("Authorization")),basicPassword(req.getHeader("Authorization")),req.getRemoteAddr());
-                    String csrf=(String)user.get("csrfToken");
-                    if(!"GET".equalsIgnoreCase(req.getMethod())&&!"HEAD".equalsIgnoreCase(req.getMethod())&&!"OPTIONS".equalsIgnoreCase(req.getMethod())&&req.getHeader("Origin")!=null) {
-                        String supplied=req.getHeader("X-ATT-CSRF");
-                        if(!sameOrigin(req)||supplied==null||!java.security.MessageDigest.isEqual(csrf.getBytes(java.nio.charset.StandardCharsets.US_ASCII),supplied.getBytes(java.nio.charset.StandardCharsets.US_ASCII))){jsonForbidden(res);return;}
-                    }
-                    req.setAttribute(AuthService.IDENTITY,user.get("loginId"));req.setAttribute(AuthService.BASIC_CSRF,csrf);res.setHeader("X-ATT-CSRF",csrf);
-                    try{runtime.store.audit((String)user.get("loginId"),"BASIC_AUTH",null,null,"SUCCESS");}catch(Exception ignored){}
-                    chain.doFilter(request,response);return;
+                    user=runtime.auth.verifyCredentials(basicUsername(req.getHeader("Authorization")),basicPassword(req.getHeader("Authorization")),req.getRemoteAddr());
                 } catch(Exception rejected) {
                     String code=rejected instanceof AuthService.AuthFailure failure?failure.code:"ATT-AUTH-INVALID-CREDENTIALS";
                     try{runtime.store.audit("anonymous","BASIC_AUTH",null,null,code);}catch(Exception ignored){}
                     jsonAuthError(res,rejected instanceof AuthService.AuthFailure failure?failure.status:401,code,"Authentication request could not be completed");return;
                 }
+                String csrf=(String)user.get("csrfToken");
+                if(!"GET".equalsIgnoreCase(req.getMethod())&& !"HEAD".equalsIgnoreCase(req.getMethod())&& !"OPTIONS".equalsIgnoreCase(req.getMethod())&&req.getHeader("Origin")!=null) {
+                    String supplied=req.getHeader("X-ATT-CSRF");
+                    if(!sameOrigin(req)||supplied==null||!java.security.MessageDigest.isEqual(csrf.getBytes(java.nio.charset.StandardCharsets.US_ASCII),supplied.getBytes(java.nio.charset.StandardCharsets.US_ASCII))){jsonForbidden(res);return;}
+                }
+                req.setAttribute(AuthService.IDENTITY,user.get("loginId"));req.setAttribute(AuthService.BASIC_CSRF,csrf);res.setHeader("X-ATT-CSRF",csrf);
+                try{runtime.store.audit((String)user.get("loginId"),"BASIC_AUTH",null,null,"SUCCESS");}catch(Exception ignored){}
+                chain.doFilter(request,response);return;
             }
             if(session==null) {
                 if(uiPath.startsWith("/ui/")) {String target=uiPath+(req.getQueryString()==null?"":"?"+req.getQueryString());res.sendRedirect(contextPath+"/ui/login.html?returnTo="+java.net.URLEncoder.encode(target,java.nio.charset.StandardCharsets.UTF_8));return;}
@@ -52,7 +53,7 @@ public final class AuthenticationFilter implements Filter {
             String csrf=session.get("csrfToken");
             if(!"GET".equalsIgnoreCase(req.getMethod())&&!"HEAD".equalsIgnoreCase(req.getMethod())&&!"OPTIONS".equalsIgnoreCase(req.getMethod())) {
                 String supplied=req.getHeader("X-ATT-CSRF");
-                if(supplied==null||!java.security.MessageDigest.isEqual(csrf.getBytes(java.nio.charset.StandardCharsets.US_ASCII),supplied.getBytes(java.nio.charset.StandardCharsets.US_ASCII))){jsonForbidden(res);return;}
+                if(req.getHeader("Origin")!=null&&!sameOrigin(req)||supplied==null||!java.security.MessageDigest.isEqual(csrf.getBytes(java.nio.charset.StandardCharsets.US_ASCII),supplied.getBytes(java.nio.charset.StandardCharsets.US_ASCII))){jsonForbidden(res);return;}
             }
             req.setAttribute(AuthService.IDENTITY,session.get("loginId"));req.setAttribute(AuthService.SESSION,session);res.setHeader("X-ATT-CSRF",csrf);
             chain.doFilter(request,response);return;

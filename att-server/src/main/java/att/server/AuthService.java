@@ -12,6 +12,7 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 
@@ -29,25 +30,37 @@ final class AuthService {
     private final JobStore store;
     private final Path bootstrapFile;
     private final ConcurrentHashMap<String, Attempt> attempts = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Attempt> clientAttempts = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Attempt> bootstrapAttempts = new ConcurrentHashMap<>();
+    private final Semaphore passwordChecks = new Semaphore(Math.max(2,Math.min(8,Runtime.getRuntime().availableProcessors())),true);
 
     AuthService(ServerConfig config, JobStore store) throws Exception {
         this.store = store;
         bootstrapFile = config.dataDir.resolve("bootstrap-admin.token");
         if (store.authUserCount() == 0 && !Files.exists(bootstrapFile)) {
             byte[] token = new byte[32]; RANDOM.nextBytes(token);
-            Files.createFile(bootstrapFile);
-            secureFile(bootstrapFile);
-            Files.writeString(bootstrapFile,Base64.getUrlEncoder().withoutPadding().encodeToString(token),StandardCharsets.US_ASCII,java.nio.file.StandardOpenOption.WRITE);
+            try {
+                Files.createFile(bootstrapFile);
+                secureFile(bootstrapFile);
+                Files.writeString(bootstrapFile,Base64.getUrlEncoder().withoutPadding().encodeToString(token),StandardCharsets.US_ASCII,java.nio.file.StandardOpenOption.WRITE);
+            } catch(java.nio.file.FileAlreadyExistsException concurrentStartup) {
+                // Another Server runtime sharing dataDir created the one-time token.
+            }
         }
     }
 
     boolean local(ServerConfig config) { return "local".equals(config.authMode); }
-    boolean bootstrapRequired() throws Exception { return store.authUserCount() == 0 && Files.isRegularFile(bootstrapFile); }
-    Map<String,Object> bootstrap(String token,String login,String display,String password) throws Exception {
+    boolean bootstrapRequired() throws Exception { return store.authUserCount() == 0 && !store.bootstrapClaimed() && Files.isRegularFile(bootstrapFile); }
+    Map<String,Object> bootstrap(String token,String login,String display,String password,String client) throws Exception {
+        String clientKey=clientKey(client);long now=System.currentTimeMillis();Attempt attempt=attempt(bootstrapAttempts,clientKey,now,10_000);
+        if(attempt.failures>=8)throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");
         if (!bootstrapRequired()) throw new AuthFailure(409, "ATT-AUTH-BOOTSTRAP-CLOSED");
-        String expected=Files.readString(bootstrapFile,StandardCharsets.US_ASCII).strip();
-        if(token==null||!MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII),token.getBytes(StandardCharsets.US_ASCII)))throw new AuthFailure(401,"ATT-AUTH-INVALID-CREDENTIALS");
-        createUser(login,display,password,"ADMIN");Files.deleteIfExists(bootstrapFile);return safeUser(store.authUser(normalize(login)));
+        String expected;try{expected=Files.readString(bootstrapFile,StandardCharsets.US_ASCII).strip();}catch(java.nio.file.NoSuchFileException consumed){throw new AuthFailure(409,"ATT-AUTH-BOOTSTRAP-CLOSED");}
+        boolean tokenMatches=token!=null&&token.length()==43&&MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII),token.getBytes(StandardCharsets.US_ASCII));
+        if(!tokenMatches){increment(bootstrapAttempts,clientKey,now);throw new AuthFailure(401,"ATT-AUTH-INVALID-CREDENTIALS");}
+        String normalized=normalize(login),safeDisplay=displayName(normalized,display),passwordHash=hash(password);
+        store.createBootstrapAdmin(normalized,safeDisplay,passwordHash,randomToken());
+        Files.deleteIfExists(bootstrapFile);bootstrapAttempts.remove(clientKey);return safeUser(store.authUser(normalized));
     }
     Map<String,Object> login(String login,String password,String client) throws Exception {
         Map<String,Object> user=verifyCredentials(login,password,client);String normalized=(String)user.get("loginId");long now=System.currentTimeMillis();
@@ -55,14 +68,15 @@ final class AuthService {
         return Map.of("token",session,"csrfToken",csrf,"user",safeUser(user));
     }
     Map<String,Object> verifyCredentials(String login,String password,String client) throws Exception {
-        String normalized=normalize(login);String key=normalized+"\u0000"+(client==null?"":client);long now=System.currentTimeMillis();
-        if(attempts.size()>=10_000&&!attempts.containsKey(key)){attempts.entrySet().removeIf(entry->now-entry.getValue().window>600_000);if(attempts.size()>=10_000)throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");}
-        Attempt a=attempts.compute(key,(k,v)->v==null||now-v.window>600_000?new Attempt(now,0):v);
-        if(a.failures>=8)throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");
+        String normalized=normalize(login),clientKey=clientKey(client),key=normalized+"\u0000"+clientKey;long now=System.currentTimeMillis();
+        Attempt userAttempt=attempt(attempts,key,now,10_000),ipAttempt=attempt(clientAttempts,clientKey,now,10_000);
+        if(userAttempt.failures>=8||ipAttempt.failures>=32)throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");
         Map<String,Object> user=store.authUser(normalized);
-        String storedHash=user==null?DUMMY_HASH:(String)user.get("passwordHash");boolean matches=verify(password,storedHash);
+        String storedHash=user==null?DUMMY_HASH:(String)user.get("passwordHash");boolean supportedPassword=validPasswordInput(password),matches;
+        if(!passwordChecks.tryAcquire())throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");
+        try {matches=supportedPassword?verify(password,storedHash):verify("invalid-password-input",DUMMY_HASH);} finally {passwordChecks.release();}
         boolean valid=user!=null&&Boolean.TRUE.equals(user.get("active"))&&matches;
-        if(!valid){attempts.compute(key,(k,v)->new Attempt(v.window,v.failures+1));throw new AuthFailure(401,"ATT-AUTH-INVALID-CREDENTIALS");}
+        if(!valid){increment(attempts,key,now);increment(clientAttempts,clientKey,now);throw new AuthFailure(401,"ATT-AUTH-INVALID-CREDENTIALS");}
         attempts.remove(key);
         if(needsUpgrade(storedHash)){String newCsrf=randomToken();store.updateAuthPassword(normalized,hash(password),newCsrf);user.put("csrfToken",newCsrf);}
         return user;
@@ -79,16 +93,19 @@ final class AuthService {
     void disable(String login) throws Exception {Map<String,Object> user=store.authUser(normalize(login));if(user==null)throw new IllegalArgumentException("Unknown user");if(Boolean.TRUE.equals(user.get("active"))&&"ADMIN".equals(user.get("role"))&&store.activeAdminCount()<=1)throw new AuthFailure(409,"ATT-AUTH-LAST-ADMIN");store.setAuthActive((String)user.get("loginId"),false);}
     void enable(String login) throws Exception {store.setAuthActive(normalize(login),true);}
     void createUser(String login,String display,String password,String role) throws Exception {
-        String normalized=normalize(login);String safeDisplay=display==null?normalized:Normalizer.normalize(display.strip(),Normalizer.Form.NFC);
-        if(safeDisplay.isBlank()||safeDisplay.length()>120||safeDisplay.codePoints().anyMatch(Character::isISOControl))throw new IllegalArgumentException("displayName must be 1-120 printable characters");
+        String normalized=normalize(login),safeDisplay=displayName(normalized,display);
         if(!"ADMIN".equals(role)&&!"USER".equals(role))throw new IllegalArgumentException("role must be ADMIN or USER");
         if(store.authUser(normalized)!=null)throw new AuthFailure(409,"ATT-AUTH-LOGIN-ID-TAKEN");
         store.createAuthUser(normalized,safeDisplay,hash(password),role,randomToken());
     }
     static String normalize(String value) {
-        if(value==null)throw new IllegalArgumentException("loginId is required");String v=Normalizer.normalize(value.strip(),Normalizer.Form.NFKC).toLowerCase(java.util.Locale.ROOT);
+        if(value==null)throw new IllegalArgumentException("loginId is required");if(value.length()>120)throw new IllegalArgumentException("loginId must be 3-120 lowercase letters, numbers, dots, underscores, or hyphens");String v=Normalizer.normalize(value.strip(),Normalizer.Form.NFKC).toLowerCase(java.util.Locale.ROOT);
         if(!v.matches("[a-z0-9][a-z0-9._-]{2,119}"))throw new IllegalArgumentException("loginId must be 3-120 lowercase letters, numbers, dots, underscores, or hyphens");return v;
     }
+    private static String displayName(String login,String display){String value=display==null?login:Normalizer.normalize(display.strip(),Normalizer.Form.NFC);if(value.isBlank()||value.length()>120||value.codePoints().anyMatch(Character::isISOControl))throw new IllegalArgumentException("displayName must be 1-120 printable characters");return value;}
+    private static String clientKey(String client){return client==null||client.isBlank()?"unknown":client;}
+    private static synchronized Attempt attempt(ConcurrentHashMap<String,Attempt> map,String key,long now,int maximum){if(map.size()>=maximum&&!map.containsKey(key)){map.entrySet().removeIf(entry->now-entry.getValue().window>600_000);if(map.size()>=maximum)throw new AuthFailure(429,"ATT-AUTH-RATE-LIMITED");}return map.compute(key,(k,v)->v==null||now-v.window>600_000?new Attempt(now,0):v);}
+    private static void increment(ConcurrentHashMap<String,Attempt> map,String key,long now){map.compute(key,(k,v)->v==null||now-v.window>600_000?new Attempt(now,1):new Attempt(v.window,v.failures+1));}
     static Map<String,Object> safeUser(Map<String,Object> user) {if(user==null)return Map.of();return Map.of("loginId",user.get("loginId"),"displayName",user.get("displayName"),"role",user.get("role"));}
     private static String hash(String password) throws Exception {
         validatePassword(password);byte[] salt=new byte[16];RANDOM.nextBytes(salt);PBEKeySpec spec=new PBEKeySpec(password.toCharArray(),salt,ITERATIONS,256);
@@ -100,7 +117,8 @@ final class AuthService {
         try{return MessageDigest.isEqual(expected,SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).getEncoded());}finally{spec.clearPassword();}
     }
     private static boolean needsUpgrade(String encoded){String[] parts=encoded.split("\\$",-1);return parts.length==4&&"pbkdf2-sha256".equals(parts[0])&&Integer.parseInt(parts[1])<ITERATIONS;}
-    private static void validatePassword(String password) {if(password==null||password.length()<12||password.length()>1024||password.codePoints().anyMatch(Character::isISOControl))throw new IllegalArgumentException("password must be 12-1024 characters without control characters");}
+    private static boolean validPasswordInput(String password){return password!=null&&password.length()>=12&&password.length()<=1024&&password.codePoints().noneMatch(Character::isISOControl);}
+    private static void validatePassword(String password) {if(!validPasswordInput(password))throw new IllegalArgumentException("password must be 12-1024 characters without control characters");}
     private static String randomToken(){byte[] bytes=new byte[32];RANDOM.nextBytes(bytes);return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);}
     private static String sha256(String token) throws Exception{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.US_ASCII)));}
     private static void secureFile(Path file){try{Files.setPosixFilePermissions(file,PosixFilePermissions.fromString("rw-------"));}catch(UnsupportedOperationException unsupported){try{var view=Files.getFileAttributeView(file,java.nio.file.attribute.AclFileAttributeView.class);if(view==null)throw new IllegalStateException("Filesystem does not support private bootstrap-token permissions");var owner=Files.getOwner(file);var entry=java.nio.file.attribute.AclEntry.newBuilder().setType(java.nio.file.attribute.AclEntryType.ALLOW).setPrincipal(owner).setPermissions(java.util.EnumSet.allOf(java.nio.file.attribute.AclEntryPermission.class)).build();view.setAcl(java.util.List.of(entry));}catch(Exception e){throw new IllegalStateException("Unable to secure local authentication bootstrap token",e);}}catch(Exception e){throw new IllegalStateException("Unable to secure local authentication bootstrap token",e);}}

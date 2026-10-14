@@ -37,7 +37,7 @@ describe('AppShell', () => {
       <AppShell
         route={navigation.route}
         navigation={navigation}
-        serverVersion={{ status: 'ready', data: { apiVersion: '1', version: '4.1.3', inlineLoadEnabled: true } }}
+        serverVersion={{ status: 'ready', data: { apiVersion: '1', version: '4.1.4', inlineLoadEnabled: true } }}
         selectedPackage="payments"
         selectedEnvironment=""
         onPackageChange={vi.fn()}
