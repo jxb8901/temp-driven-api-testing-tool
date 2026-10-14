@@ -148,7 +148,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         if (locator == null || locator.length() > 1024) throw new IllegalArgumentException("Package file locator is invalid");
         PackageResourceResolver.ResourceOrigin origin = resources.origin(packageRoot);
         try {
-            if (originPath != null && !originPath.isBlank()) {
+            if (originPath != null && !originPath.codePoints().allMatch(Character::isWhitespace)) {
                 PackageResourceResolver.PackageResource sourceFile = resources.resolvePackageRelative(
                         originPath, PackageResourceResolver.Kind.FILE);
                 origin = resources.origin(sourceFile.canonicalPath().getParent());

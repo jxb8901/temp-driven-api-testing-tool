@@ -95,7 +95,8 @@ public final class PackageConfigurationFileInspector {
     }
 
     private Path resolveDirectory(Path configRoot, String requestedPath) {
-        if (requestedPath == null || requestedPath.isBlank() || "config".equals(requestedPath) || "config/".equals(requestedPath)) return configRoot;
+        if (requestedPath == null || requestedPath.codePoints().allMatch(Character::isWhitespace)
+                || "config".equals(requestedPath) || "config/".equals(requestedPath)) return configRoot;
         if (requestedPath.length() > 1024 || hasControl(requestedPath) || requestedPath.startsWith("/")
                 || requestedPath.endsWith("/") || requestedPath.contains("//") || requestedPath.indexOf('\\') >= 0)
             throw new IllegalArgumentException("Configuration path is invalid");
