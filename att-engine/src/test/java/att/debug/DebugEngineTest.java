@@ -58,25 +58,41 @@ class DebugEngineTest {
                 Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
         DebugEngine engine = new DebugEngine(temp, config, new att.exec.IbmMqClientFactory(), false,
                 Collections.<String>emptyList(), Collections.<String>emptyList());
-        Map<String, Object> ordinary = Map.of("workloads", List.of(Map.of("inputs", Map.of("currency", "HKD"),
-                "load", Map.of("users", 10, "duration", "10s"))));
-        Map<String, Object> classified = Map.of("workloads", List.of(Map.of("inputs", Map.of("paymentToken", "private-value"))));
-        Map<String, Object> embeddedCredential = Map.of("notes", "authorization: Bearer private-value");
+        Map<String, Object> ordinaryWorkload = new LinkedHashMap<String, Object>();
+        ordinaryWorkload.put("inputs", Collections.<String, Object>singletonMap("currency", "HKD"));
+        Map<String, Object> ordinaryLoad = new LinkedHashMap<String, Object>();
+        ordinaryLoad.put("users", Integer.valueOf(10)); ordinaryLoad.put("duration", "10s");
+        ordinaryWorkload.put("load", ordinaryLoad);
+        Map<String, Object> ordinary = new LinkedHashMap<String, Object>();
+        ordinary.put("workloads", Collections.singletonList(ordinaryWorkload));
+        Map<String, Object> classifiedWorkload = new LinkedHashMap<String, Object>();
+        classifiedWorkload.put("inputs", Collections.<String, Object>singletonMap("paymentToken", "private-value"));
+        Map<String, Object> classified = new LinkedHashMap<String, Object>();
+        classified.put("workloads", Collections.singletonList(classifiedWorkload));
+        Map<String, Object> embeddedCredential = Collections.<String, Object>singletonMap("notes", "authorization: Bearer private-value");
 
         assertFalse(engine.containsSensitiveValue(ordinary));
         assertTrue(engine.containsSensitiveValue(classified));
         assertTrue(engine.containsSensitiveValue(embeddedCredential));
 
         DebugEngine configured = new DebugEngine(temp, config, new att.exec.IbmMqClientFactory(), true,
-                List.of("/workloads/0/inputs/cardNumber"), Collections.<String>emptyList());
-        Map<String, Object> configuredSensitive = Map.of("workloads", List.of(Map.of("inputs", Map.of("cardNumber", "4111111111111111"))));
+                Collections.singletonList("/workloads/0/inputs/cardNumber"), Collections.<String>emptyList());
+        Map<String, Object> configuredInputs = Collections.<String, Object>singletonMap("cardNumber", "4111111111111111");
+        Map<String, Object> configuredWorkload = new LinkedHashMap<String, Object>();
+        configuredWorkload.put("inputs", configuredInputs);
+        Map<String, Object> configuredSensitive = new LinkedHashMap<String, Object>();
+        configuredSensitive.put("workloads", Collections.singletonList(configuredWorkload));
         assertTrue(configured.containsSensitiveValue(configuredSensitive));
 
         DebugEngine configuredWithoutMasking = new DebugEngine(temp, config, new att.exec.IbmMqClientFactory(), false,
-                List.of("/workloads/0/inputs/cardNumber"), List.of("customerRef"));
+                Collections.singletonList("/workloads/0/inputs/cardNumber"), Collections.singletonList("customerRef"));
         assertTrue(configuredWithoutMasking.containsSensitiveValue(configuredSensitive));
-        assertTrue(configuredWithoutMasking.containsSensitiveValue(
-                Map.of("workloads", List.of(Map.of("inputs", Map.of("customerRef", "customer-123"))))));
+        Map<String, Object> configuredFieldInputs = Collections.<String, Object>singletonMap("customerRef", "customer-123");
+        Map<String, Object> configuredFieldWorkload = new LinkedHashMap<String, Object>();
+        configuredFieldWorkload.put("inputs", configuredFieldInputs);
+        Map<String, Object> configuredField = new LinkedHashMap<String, Object>();
+        configuredField.put("workloads", Collections.singletonList(configuredFieldWorkload));
+        assertTrue(configuredWithoutMasking.containsSensitiveValue(configuredField));
     }
 
     @Test void hidesPackageAuthoredDebugValuesAndRestoresOnlyPathBoundMarkers() throws Exception {
