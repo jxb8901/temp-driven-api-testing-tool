@@ -57,6 +57,7 @@ class DebugEngineTest {
         Path project = fixtureWithoutSidecars();
         Files.write(project.resolve("templates/SIMPLE/debug.yaml"), ("schemaVersion: att-debug/v1.2\n"
                 + "inputs:\n  value: safe\n  payload:\n    account: 'customer account 123456789'\n"
+                + "    email: customer@example.test\n"
                 + "    details:\n      message: 'temporary credential is violet-123'\n"
                 + "  values: ['array secret one', '[REDACTED]']\n  overrideValue: original\n"
                 + "vars: {orderId: ORD-PRIVATE-123}\n").getBytes(StandardCharsets.UTF_8));
@@ -117,6 +118,15 @@ class DebugEngineTest {
         assertFalse(toolForm.get("input").toString().contains("tool argument secret"));
         @SuppressWarnings("unchecked") Map<String, Object> toolInput = (Map<String, Object>) toolForm.get("input");
         assertEquals("/arguments/value", ((Map<?, ?>) ((Map<?, ?>) toolInput.get("arguments")).get("value")).get("$attDebugKeepDefault"));
+
+        DebugEngine visibleEngine = new DebugEngine(project, config, new att.exec.IbmMqClientFactory(), false,
+                Collections.<String>emptyList(), Collections.<String>emptyList());
+        Map<String, Object> visibleForm = visibleEngine.projectDiscoverableInput("template", "SIMPLE");
+        String visibleInput = visibleForm.get("input").toString();
+        assertTrue(visibleInput.contains("safe"));
+        assertFalse(visibleInput.contains("123456789"));
+        assertFalse(visibleInput.contains("customer@example.test"));
+        assertFalse(visibleInput.contains("violet-123"));
     }
 
     @Test void configuredDebugIdentityIsUsedAndCollisionsFail() throws Exception {

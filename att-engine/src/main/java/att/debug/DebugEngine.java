@@ -264,7 +264,7 @@ public final class DebugEngine {
     private String scrub(String value) {
         String result = value.replace(projectRoot.toString(), "[package]");
         result = result.replaceAll("(?i)(authorization\\s*[:=]\\s*(?:basic|bearer)\\s+)[^\\s,;]+", "$1[REDACTED]");
-        result = result.replaceAll("(?i)(password|passwd|token|secret|api[_-]?key|access[_-]?key)\\s*[:=]\\s*([^\\s,;]+)", "$1=[REDACTED]");
+        result = result.replaceAll("(?i)(password|passwd|token|secret|credential|api[_-]?key|access[_-]?key)(?:\\s*[:=]\\s*|\\s+(?:is\\s+)?)(\"[^\"]*\"|'[^']*'|[^\\s,;]+)", "$1=[REDACTED]");
         result = result.replaceAll("(://)[^/@\\s:]+:[^/@\\s]+@", "$1[REDACTED]@");
         result = result.replaceAll("-----BEGIN [^-]+PRIVATE KEY-----[\\s\\S]*?-----END [^-]+PRIVATE KEY-----", "[REDACTED PRIVATE KEY]");
         return result;
@@ -290,7 +290,8 @@ public final class DebugEngine {
                 || normalized.equals("jdbcurl") || normalized.contains("cookie") || normalized.equals("headers")
                 || normalized.equals("header") || normalized.equals("url") || normalized.equals("host")
                 || normalized.equals("hostname") || normalized.equals("port") || normalized.equals("endpoint")
-                || normalized.equals("queue") || normalized.equals("channel") || normalized.equals("address");
+                || normalized.equals("queue") || normalized.equals("channel") || normalized.equals("address")
+                || normalized.matches(".*(account(number|id|no|code)?|email|phone|mobile|ssn|nationalid|passport|dateofbirth|birthdate|taxid|creditcard|cardnumber|cvv|iban|routingnumber).*");
     }
 
     /** Returns the exact optional sidecar path used by Debug auto-discovery. */
