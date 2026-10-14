@@ -58,19 +58,18 @@ class PackageConfigurationInspectorTest {
 
     @Test void compareDefaultsToProfileScopedFieldsAndCanIncludeInheritedGlobalValues() throws Exception {
         Path root=packageRoot("compare-profile-scope");
-        Map<String,Object> scoped=inspector(root).inspect("compare","SIT","UAT",null,0,0,false);
-        @SuppressWarnings("unchecked") List<Map<String,Object>> scopedFields=(List<Map<String,Object>>)scoped.get("fields");
-        assertTrue(scopedFields.stream().anyMatch(item->"dbhelpers.orders.readOnly".equals(item.get("path"))));
-        assertFalse(scopedFields.stream().anyMatch(item->"globals.timeoutMs".equals(item.get("path"))));
+        Map<String,Object> helperScoped=inspector(root).inspect("compare","SIT","UAT","dbhelpers",0,0,false);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> helperFields=(List<Map<String,Object>>)helperScoped.get("fields");
+        assertTrue(helperFields.stream().anyMatch(item->"dbhelpers.orders.readOnly".equals(item.get("path"))));
+        assertTrue(helperFields.stream().allMatch(item->String.valueOf(item.get("path")).startsWith("dbhelpers.")));
 
-        Map<String,Object> expanded=inspector(root).inspect("compare","SIT","UAT",null,0,0,true);
+        Map<String,Object> globalScoped=inspector(root).inspect("compare","SIT","UAT","globals",0,0,false);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> scopedGlobals=(List<Map<String,Object>>)globalScoped.get("fields");
+        assertFalse(scopedGlobals.stream().anyMatch(item->"globals.timeoutMs".equals(item.get("path"))));
+
+        Map<String,Object> expanded=inspector(root).inspect("compare","SIT","UAT","globals",0,0,true);
         @SuppressWarnings("unchecked") List<Map<String,Object>> expandedFields=(List<Map<String,Object>>)expanded.get("fields");
         assertTrue(expandedFields.stream().anyMatch(item->"globals.timeoutMs".equals(item.get("path"))));
-
-        Map<String,Object> helpersOnly=inspector(root).inspect("compare","SIT","UAT","dbhelpers",0,0,false);
-        @SuppressWarnings("unchecked") List<Map<String,Object>> helperFields=(List<Map<String,Object>>)helpersOnly.get("fields");
-        assertTrue(helperFields.size()>0);
-        assertTrue(helperFields.stream().allMatch(item->String.valueOf(item.get("path")).startsWith("dbhelpers.")));
     }
 
     @Test void supportsRootOnlyEffectiveConfigurationAndReportsSelectedProfileOrigin() throws Exception {
