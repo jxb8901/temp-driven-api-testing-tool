@@ -5,6 +5,15 @@ function jsonResponse(route, status, body) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
+async function assertAxe(page, message) {
+  const audit = await page.evaluate(async () => window.axe.run(document, {
+    runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+  }));
+  assert.deepEqual(audit.violations.map(({ id, impact, help, nodes }) => ({
+    id, impact, help, selectors: nodes.map(node => node.target),
+  })), [], message);
+}
+
 async function main() {
   const fixture = await startFixture();
   let browser;
@@ -180,7 +189,7 @@ async function main() {
         submittedLoadScenario = request.postDataJSON().scenario;
         return jsonResponse(route, 201, {
           draftId: 'LOAD-DRAFT-QUICK-99', packageId: 'payments',
-          preview: { status: 'PASS' }, previewYaml: 'schemaVersion: att-load/v1.6\n',
+          preview: { status: 'PASS' }, previewYaml: 'schemaVersion: att-load/v1.6\nload:\n  users: 1\n  duration: 10s\nexecution:\n  thinkTime: 250ms\nevidence:\n  mode: failures\nworkloads:\n  - id: quick-load\n    load:\n      users: 2\n    target:\n      type: template\n      id: checkout\n    inputs:\n      account: A-1\n',
           redacted: false, diagnostics: [], expiresAt: new Date(Date.now() + 60_000).toISOString(),
         });
       }
@@ -320,15 +329,37 @@ async function main() {
     assert.equal(submittedLoadScenario.execution.thinkTime, '250ms');
     assert.equal(await page.getByRole('button', { name: 'Run Now' }).isDisabled(), false);
     assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), false, 'validated draft enables scheduling');
+    const quickLoadUrl = page.url();
     await page.getByRole('button', { name: 'Schedule…' }).click();
-    await page.getByRole('heading', { name: 'Scheduled Load', level: 1 }).waitFor();
+    let scheduleDialog = page.getByRole('dialog');
+    await scheduleDialog.getByRole('heading', { name: 'Create schedule', level: 2 }).waitFor();
     await page.getByText('Schedule form loaded from the validated Load draft.').waitFor();
+    assert.equal(page.url(), quickLoadUrl, 'Schedule should open without leaving the Quick Load route');
     assert.equal(await page.locator('#schedule-scenario').inputValue(), 'Validated Load snapshot');
+    await scheduleDialog.getByText('Review the validated Load scenario snapshot').click();
+    const scheduledSnapshot = await scheduleDialog.locator('.att-schedule-snapshot-review pre').textContent();
+    assert.ok(scheduledSnapshot.includes('account: A-1') && scheduledSnapshot.includes('users: 2'), 'the dialog should show the validated target inputs and load values');
+    await page.route(`${fixture.origin}/att/axe-core.js`, route => route.fulfill({
+      status: 200, contentType: 'text/javascript', path: require.resolve('axe-core/axe.min.js'),
+    }));
+    await page.addScriptTag({ url: `${fixture.origin}/att/axe-core.js` });
+    await assertAxe(page, 'The Load schedule dialog should pass WCAG 2.2 AA checks');
+    await scheduleDialog.getByRole('button', { name: 'Cancel and return to Load' }).click();
+    await scheduleDialog.waitFor({ state: 'detached' });
+    assert.equal(page.url(), quickLoadUrl, 'Cancel should return to the same Quick Load route');
+    assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), false, 'the validated Load draft should remain available after cancel');
+
+    await page.getByRole('button', { name: 'Schedule…' }).click();
+    scheduleDialog = page.getByRole('dialog');
+    await scheduleDialog.getByRole('heading', { name: 'Create schedule', level: 2 }).waitFor();
     await page.getByText(/^Next run:/).waitFor();
     await page.getByRole('button', { name: 'Save schedule' }).click();
-    await page.getByRole('row', { name: /Validated Load snapshot.*payments.*Validated inline snapshot/ }).waitFor();
+    await page.getByText(/Saved Validated Load snapshot\. Next run:/).waitFor();
     assert.equal(submittedScheduleInput.draftId, 'LOAD-DRAFT-QUICK-99');
     assert.equal(Object.hasOwn(submittedScheduleInput, 'scenario'), false, 'inline scheduling submits the validated draft ID, not a scenario path');
+    await scheduleDialog.getByRole('button', { name: 'Return to Load', exact: true }).click();
+    await scheduleDialog.waitFor({ state: 'detached' });
+    assert.equal(page.url(), quickLoadUrl, 'Saving should leave the user on the originating Quick Load route');
     assert.deepEqual(pageErrors, [], 'Configuration and Quick Load should not produce uncaught browser errors');
 
     authFailure = true;

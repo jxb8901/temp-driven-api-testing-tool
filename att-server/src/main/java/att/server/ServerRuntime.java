@@ -59,8 +59,8 @@ final class ServerRuntime implements AutoCloseable {
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
     private static final class ValidatedScheduledScenario {
-        final Map<String,Object> scenario;final String revisionDigest,model;
-        ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;}
+        final Map<String,Object> scenario;final String revisionDigest,model;final boolean containsSensitiveValues;
+        ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model,boolean containsSensitiveValues){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;this.containsSensitiveValues=containsSensitiveValues;}
     }
     final ServerConfig config;
     final JobStore store;
@@ -434,6 +434,7 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction="load-scenario";request.inlineLoadScenario=scenarioInput;
         Map<String,Object> inspected=executeInspection(root,request);
         Object rawScenario=inspected.remove("normalizedScenario"),rawDigest=inspected.remove("revisionDigest");
+        inspected.remove("containsSensitiveValues");
         Object rawModel=inspected.get("model");
         if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
                 ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel))
@@ -1100,6 +1101,8 @@ final class ServerRuntime implements AutoCloseable {
             Map<String,Object> overridden=withScheduledLoadOptions(validated.scenario,schedule.load);
             validated=validateScheduledScenario(root,schedule,overridden);
         }
+        if(schedule.inlineScenario!=null&&validated.containsSensitiveValues)
+            throw new IllegalArgumentException("An inline schedule cannot store credentials, private values, or other classified sensitive fields. Remove them from the Load draft or keep them in package-managed configuration.");
         validateScheduledLoadLimits(config.inlineLoad,validated.scenario);schedule.loadModel=validated.model;return validated;
     }
 
@@ -1120,12 +1123,12 @@ final class ServerRuntime implements AutoCloseable {
         if(schedule.config!=null){request.config=safeRelative(schedule.config,"config");validatePackagePath(root,request.config,"config");}
         request.inspectionAction="load-scenario";request.inlineLoadScenario=scenario;
         Map<String,Object> inspected=executeInspection(root,request);
-        Object rawScenario=inspected.get("normalizedScenario"),rawDigest=inspected.get("revisionDigest"),rawModel=inspected.get("model");
+        Object rawScenario=inspected.get("normalizedScenario"),rawDigest=inspected.get("revisionDigest"),rawModel=inspected.get("model"),rawSensitive=inspected.get("containsSensitiveValues");
         if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
-                ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel))
+                ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel)||!(rawSensitive instanceof Boolean))
             throw new IllegalStateException("Load validation Worker returned an invalid response");
         @SuppressWarnings("unchecked") Map<String,Object> normalized=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
-        return new ValidatedScheduledScenario(normalized,(String)rawDigest,(String)rawModel);
+        return new ValidatedScheduledScenario(normalized,(String)rawDigest,(String)rawModel,((Boolean)rawSensitive).booleanValue());
     }
 
     private static Map<String,Object> withScheduledLoadOptions(Map<String,Object> source,Map<String,String> options) {

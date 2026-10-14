@@ -157,7 +157,7 @@ export interface LoadFeatureProps {
   onPackageChange: (packageId: string) => void;
   onEnvironmentChange: (environment: string) => void;
   onJobAccepted: (jobId: string) => void;
-  onSchedule?: (input: { packageId: string; environment?: string; draftId: string }) => void;
+  onSchedule?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string }) => void;
   confirmStart?: (message: string) => boolean | Promise<boolean>;
 }
 

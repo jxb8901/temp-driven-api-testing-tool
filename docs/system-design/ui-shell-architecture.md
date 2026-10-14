@@ -47,6 +47,8 @@ The cross-browser job runs on `ubuntu-latest` and compares against the `linux` b
 
 Scheduled Load is a lazily loaded React route. The shell advertises it only when `/api/v1/version` reports `loadSchedulingEnabled`; direct navigation still shows the server-disabled state. The page calls the typed `load-schedules` API methods, requires a current server preview before saving, starts new schedules paused, and asks before Run Now or deletion. Occurrence history includes skipped and failed submissions as well as linked jobs. The server remains authoritative for cron validation, timezone and DST behavior, minimum intervals, overlap limits, and authorization.
 
+Quick and Advanced Load can open schedule creation as a dialog over the current editor. Cancel returns to the validated Load draft, and the Server rejects inline snapshots containing classified sensitive values before persistence.
+
 The shell follows `prefers-color-scheme` until a user selects a theme. The Settings route offers System, Light, and Dark preferences; explicit choices are stored in this browser, while System removes the override. `/` and `Ctrl K`/`⌘ K` open the page palette, `?` opens shortcut help, and Escape closes dialogs and mobile navigation. On Advanced Load, `Ctrl Enter`/`⌘ Enter` invokes the existing confirmation for a live validated draft.
 
 ## Phase screenshots

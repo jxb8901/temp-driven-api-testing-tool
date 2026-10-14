@@ -47,6 +47,8 @@ Cross-browser job 於 `ubuntu-latest` 執行，並比對 `linux` baseline；本�
 
 Scheduled Load 使用 lazy-loaded React route。只有 `/api/v1/version` 回報 `loadSchedulingEnabled` 時，Shell 才會顯示入口；直接導覽時仍會顯示 server-disabled 狀態。頁面呼叫 typed `load-schedules` API，儲存前要求有效的 Server preview，新排程預設暫停，Run Now 或刪除前要求確認。Occurrence history 同時顯示 skipped、failed submissions 及連結工作。Cron 驗證、timezone 和 DST 行為、最短間隔、並行上限及授權仍由 Server 決定。
 
+Quick 和 Advanced Load 可在目前編輯器上以 dialog 開啟排程建立表單。取消後會返回已驗證的 Load draft；Server 會在儲存前拒絕含已分類敏感值的 inline snapshot。
+
 Shell 會跟隨 `prefers-color-scheme`，直到使用者選擇主題。Settings 頁提供 System、Light 和 Dark 選項；明確選擇會保存在此 browser，System 則移除 override。按 `/` 或 `Ctrl K`/`⌘ K` 開啟頁面 palette，按 `?` 開啟快捷鍵說明，Escape 關閉對話框及手機導覽。在 Advanced Load 頁面，`Ctrl Enter`/`⌘ Enter` 會對有效且已驗證的 draft 呼叫既有確認流程。
 
 ## 各 Phase 截圖

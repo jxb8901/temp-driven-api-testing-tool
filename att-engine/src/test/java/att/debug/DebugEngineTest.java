@@ -53,6 +53,32 @@ class DebugEngineTest {
         assertTrue(new String(Files.readAllBytes(tool.logPath()), StandardCharsets.UTF_8).contains("hello-tool"));
     }
 
+    @Test void classifiesSensitiveValuesForSafeSchedulePersistenceWithoutMaskingOrdinaryLoadData() {
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+        DebugEngine engine = new DebugEngine(temp, config, new att.exec.IbmMqClientFactory(), false,
+                Collections.<String>emptyList(), Collections.<String>emptyList());
+        Map<String, Object> ordinary = Map.of("workloads", List.of(Map.of("inputs", Map.of("currency", "HKD"),
+                "load", Map.of("users", 10, "duration", "10s"))));
+        Map<String, Object> classified = Map.of("workloads", List.of(Map.of("inputs", Map.of("paymentToken", "private-value"))));
+        Map<String, Object> embeddedCredential = Map.of("notes", "authorization: Bearer private-value");
+
+        assertFalse(engine.containsSensitiveValue(ordinary));
+        assertTrue(engine.containsSensitiveValue(classified));
+        assertTrue(engine.containsSensitiveValue(embeddedCredential));
+
+        DebugEngine configured = new DebugEngine(temp, config, new att.exec.IbmMqClientFactory(), true,
+                List.of("/workloads/0/inputs/cardNumber"), Collections.<String>emptyList());
+        Map<String, Object> configuredSensitive = Map.of("workloads", List.of(Map.of("inputs", Map.of("cardNumber", "4111111111111111"))));
+        assertTrue(configured.containsSensitiveValue(configuredSensitive));
+
+        DebugEngine configuredWithoutMasking = new DebugEngine(temp, config, new att.exec.IbmMqClientFactory(), false,
+                List.of("/workloads/0/inputs/cardNumber"), List.of("customerRef"));
+        assertTrue(configuredWithoutMasking.containsSensitiveValue(configuredSensitive));
+        assertTrue(configuredWithoutMasking.containsSensitiveValue(
+                Map.of("workloads", List.of(Map.of("inputs", Map.of("customerRef", "customer-123"))))));
+    }
+
     @Test void hidesPackageAuthoredDebugValuesAndRestoresOnlyPathBoundMarkers() throws Exception {
         Path project = fixtureWithoutSidecars();
         Files.write(project.resolve("templates/SIMPLE/debug.yaml"), ("schemaVersion: att-debug/v1.2\n"

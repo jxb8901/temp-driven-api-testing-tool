@@ -26,6 +26,8 @@ async function main() {
         wait: async page => {
           await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
           await page.getByRole('heading', { name: 'checkout' }).waitFor();
+          await page.locator('.att-code-editor[aria-label="Safe resource definition"] .cm-line')
+            .filter({ hasText: '"name"' }).waitFor();
         },
       },
       {
@@ -35,6 +37,7 @@ async function main() {
           await page.getByRole('heading', { name: 'Configuration', exact: true }).waitFor();
           await page.getByText('Safe read-only source').waitFor();
           await page.getByText('environment: dev', { exact: false }).waitFor();
+          await page.locator('.att-config-source-view .cm-line').filter({ hasText: 'environment:' }).waitFor();
         },
       },
       {
@@ -42,7 +45,7 @@ async function main() {
         route: '#/quick-load/payments/template/checkout',
         wait: async page => {
           await page.getByRole('heading', { name: 'Quick Load', exact: true }).waitFor();
-          await page.getByText(/Server policy defaults loaded|Safe policy defaults loaded/).waitFor();
+          await page.getByText(/package policy or Server fallback is loaded/i).waitFor();
           await page.getByText('template · checkout', { exact: true }).waitFor();
         },
       },

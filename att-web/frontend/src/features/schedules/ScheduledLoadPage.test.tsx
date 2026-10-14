@@ -47,6 +47,8 @@ const navigation: NavigationGuardApi = {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.mocked(navigation.navigate).mockClear();
+  vi.mocked(navigation.registerUnsavedChanges).mockClear();
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(function (this: HTMLDialogElement) { this.setAttribute('open', ''); });
   vi.spyOn(HTMLDialogElement.prototype, 'close').mockImplementation(function (this: HTMLDialogElement) { this.removeAttribute('open'); });
@@ -127,6 +129,29 @@ describe('ScheduledLoadPage', () => {
     expect(api.previewLoadSchedule).toHaveBeenCalled();
     expect(vi.mocked(api.previewLoadSchedule).mock.calls.at(-1)?.[0]).toEqual({ timezone: expect.any(String), cron: '0 2 * * *' });
     expect(navigation.registerUnsavedChanges).toHaveBeenCalledWith(true, 'Scheduled Load changes');
+  });
+
+  it('opens a validated Load snapshot in a dialog and returns to the still-mounted Load editor on cancel', async () => {
+    const api = makeApi();
+    const onClose = vi.fn();
+    await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} modal onClose={onClose}
+        initialDraft={{ packageId: 'payments', environment: 'SIT', draftId: 'A0123456789ABCDEF0123456789ABCDEF',
+          previewYaml: 'schemaVersion: att-load/v1.6\nworkloads: []\n' }} />
+    </NavigationGuardContext.Provider>));
+    await advance(300);
+
+    const dialog = host.querySelector<HTMLDialogElement>('.att-schedule-create-dialog');
+    expect(dialog?.open).toBe(true);
+    expect(host.querySelector('#schedule-list-heading')).toBeNull();
+    expect(host.querySelector('.att-schedule-snapshot-review pre')?.textContent).toBe('schemaVersion: att-load/v1.6\nworkloads: []\n');
+    expect((host.querySelector('#schedule-environment') as HTMLInputElement).value).toBe('SIT');
+    expect(navigation.navigate).not.toHaveBeenCalled();
+    expect(navigation.registerUnsavedChanges).not.toHaveBeenCalledWith(expect.any(Boolean), 'Scheduled Load changes');
+
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Cancel and return to Load')!);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(navigation.navigate).not.toHaveBeenCalled();
   });
 
   it('keeps Run Now and delete behind explicit confirmation', async () => {

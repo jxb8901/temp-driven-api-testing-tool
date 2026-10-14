@@ -108,7 +108,7 @@ class ServerRuntimeTest {
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path data=temp.resolve("scheduled-load-data");Path configFile=temp.resolve("scheduled-load-server.yaml");
         Files.writeString(configFile,"server:\n  dataDir: "+yaml(data)+"\n  javaExecutable: "+yaml(javaBin)
-                +"\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    maxConcurrentRuns: 1\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
+                +"\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    maxConcurrentRuns: 1\n  inlineLoad:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("scheduled-load-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
         addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
@@ -121,6 +121,24 @@ class ServerRuntimeTest {
         ServerRuntime setupRuntime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
         String scheduleId;
         try {
+            Map<String,Object> sensitiveWorkload=new java.util.LinkedHashMap<>();
+            sensitiveWorkload.put("id","sensitive-snapshot");
+            sensitiveWorkload.put("target",Map.of("type","template","id","SCHEDULED"));
+            sensitiveWorkload.put("load",Map.of("users",1,"duration","1s"));
+            sensitiveWorkload.put("inputs",Map.of("password","inline-secret"));
+            Map<String,Object> sensitiveScenario=Map.of("schemaVersion","att-load/v1.6","workloads",List.of(sensitiveWorkload));
+            com.fasterxml.jackson.databind.node.ObjectNode sensitiveDraftRequest=ServerRuntime.JSON.createObjectNode();
+            sensitiveDraftRequest.put("packageId","p");sensitiveDraftRequest.set("scenario",ServerRuntime.JSON.valueToTree(sensitiveScenario));
+            Map<String,Object> sensitiveDraft=setupRuntime.createAdvancedLoadDraft(sensitiveDraftRequest,"alice");
+            assertFalse(sensitiveDraft.toString().contains("inline-secret"),"The validated draft preview must not disclose the classified input.");
+            assertFalse(sensitiveDraft.containsKey("containsSensitiveValues"),"Internal classification metadata must not become part of the public draft API.");
+            JsonNode sensitiveScheduleRequest=ServerRuntime.JSON.readTree("{\"name\":\"Sensitive draft\",\"packageId\":\"p\",\"draftId\":\""
+                    +sensitiveDraft.get("draftId")+"\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}");
+            IllegalArgumentException sensitiveScheduleError=assertThrows(IllegalArgumentException.class,
+                    ()->setupRuntime.createLoadSchedule(sensitiveScheduleRequest,"alice"));
+            assertTrue(sensitiveScheduleError.getMessage().contains("cannot store credentials"));
+            assertTrue(setupRuntime.loadSchedules().isEmpty(),"Sensitive inline values must be rejected before the schedule definition is persisted.");
+
             Map<String,Object> preview=setupRuntime.previewLoadSchedule(ServerRuntime.JSON.readTree("{\"timezone\":\"Asia/Hong_Kong\",\"cron\":\"0 2 * * *\"}"));
             assertEquals("Asia/Hong_Kong",preview.get("timezone"));assertEquals("2026-10-12T18:00:00Z",preview.get("nextRunAt"));
             ServerRuntime.DraftValidationException invalid=assertThrows(ServerRuntime.DraftValidationException.class,()->setupRuntime.createLoadSchedule(

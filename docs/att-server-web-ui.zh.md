@@ -24,6 +24,8 @@ Quick Load 是第一層路由，可對單一選定的 Template、Flow 或 Tool �
 
 當 `/api/v1/version` 回傳 `loadSchedulingEnabled: true` 且 caller 具備設定的排程管理 role（預設 `ATT_ADMIN`）時，可在 React 主控台的 `#/load-schedules` 使用 Scheduled Load。可從已驗證的 Quick/Advanced Load draft 建立排程，亦可沿用 package-relative Load scenario。Draft-based 排程會保留 Server 正規化後的 immutable scenario snapshot；API view 只顯示 `inlineSnapshot`，不會回傳 scenario 內容。Server 會在每次 occurrence 前重新驗證 snapshot 及 package revision。頁面支援 descriptions、tags、IANA timezone 的 next-run preview，以及 daily、weekly 或五欄位 cron。新排程預設暫停，只有選取 **Enable after saving** 才會啟用。Run Now 和刪除都需要確認。Occurrence history 會說明略過及提交失敗，並將已提交工作連結至一般 job 頁面、結果、事件與 artifacts。排程和歷史在 Server 重啟後仍保留；編輯或刪除排程不會取消已接納工作。
 
+在 Quick 或 Advanced Load 按 **Schedule…** 會於目前編輯器上開啟排程表單，並顯示安全的驗證預覽。取消後會返回同一個 draft。若 inline snapshot 含有 credentials 或其他已分類敏感值，Server 會在儲存排程前拒絕；請將這些值保留在 package-managed configuration。
+
 共用 React shell 會跟隨作業系統的淺色或深色偏好，直到你自行選擇主題；選擇會保存在瀏覽器儲存空間。按 `/` 或 `Ctrl K`/`⌘ K` 搜尋頁面，按 `?` 開啟快捷鍵清單，按 `Esc` 關閉對話框或手機導覽。在 Advanced Load 頁面，按 `Ctrl Enter`/`⌘ Enter` 只會啟動仍有效且已驗證的 draft，並保留既有確認步驟。主控台和 Scheduled Load 編輯器會適應平板及手機寬度，保留清晰的鍵盤焦點，尊重減少動態效果設定，並以文字標籤配合狀態顏色。
 
 第一層 Configuration 工作區位於 `#/configuration/{packageId}`，結合有界限的 `config/` 檔案樹，以及 Source、Declared、Effective、Compare 和 Testdata 檢視。工作區為唯讀；從 Explorer、Testdata metadata 或關聯資源開啟的 source 連結會保留 package-relative 路徑及 origin。檔案樹套用深度、結果數量及分頁上限；source preview 使用已驗證的 Server projection，並受 `server.inspection.safeTextSources` 限制。開啟 `config/` 以外的檔案參照不會把它加入檔案樹，也不會繞過 source policy。Testdata catalog 會顯示 effective descriptor metadata 及結構化分頁 records table。Generated descriptor 先顯示設定規則和筆數，不會自動生成 sample data；使用者明確要求後才回傳有界的 generated preview。未提供 records endpoint 的舊版 Server 會顯示清楚的 unavailable 狀態。

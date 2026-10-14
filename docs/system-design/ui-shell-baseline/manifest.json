@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-10-14T14:56:24.815Z",
+  "generatedAt": "2026-10-14T17:48:11.151Z",
   "repositoryVersion": "4.2.0",
   "browser": "155.0.8059.41",
   "playwright": "1.62.1",
-  "fixtureOrigin": "http://127.0.0.1:62555",
+  "fixtureOrigin": "http://127.0.0.1:55100",
   "captures": [
     {
       "file": "dashboard-1440-light.png",

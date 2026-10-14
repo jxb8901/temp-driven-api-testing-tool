@@ -72,6 +72,14 @@
 .att-schedule-confirm > p { color: var(--att-color-muted); font-size: 0.9rem; line-height: 1.55; }
 .att-schedule-confirm-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--att-space-2); margin-top: var(--att-space-5); }
 .att-schedule-page-error { color: var(--att-color-danger); }
+.att-schedule-create-dialog { width: min(96vw, 1100px); max-width: none; max-height: calc(100vh - 2rem); overflow: auto; margin: auto; padding: 0; border: 0; background: transparent; color: var(--att-color-text); }
+.att-schedule-create-dialog::backdrop { background: rgba(8, 14, 25, 0.58); backdrop-filter: blur(2px); }
+.att-schedule-modal-panel { width: 100%; max-width: none; margin: 0; padding: var(--att-space-5); box-shadow: 0 24px 80px rgba(10, 20, 40, 0.25); }
+.att-schedule-snapshot-review { margin: 0 0 var(--att-space-4); padding: var(--att-space-3) var(--att-space-4); border: 1px solid var(--att-color-border); border-radius: var(--att-radius-control); background: var(--att-color-canvas); }
+.att-schedule-snapshot-review summary { cursor: pointer; font-weight: 700; }
+.att-schedule-snapshot-review pre { max-height: 18rem; overflow: auto; margin: var(--att-space-3) 0 0; padding: var(--att-space-3); border-radius: var(--att-radius-control); background: var(--att-color-surface); font: 0.78rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
+.att-schedule-disabled-modal { position: fixed; z-index: 1000; inset: 0; display: grid; align-content: center; justify-items: center; gap: var(--att-space-4); padding: var(--att-space-5); background: rgba(8, 14, 25, 0.58); color: var(--att-color-text); }
+.att-schedule-disabled-modal .att-schedule-callout { max-width: 42rem; }
 
 @media (max-width: 900px) {
   .att-schedule-filters { grid-template-columns: minmax(0, 1.5fr) minmax(125px, 1fr); }

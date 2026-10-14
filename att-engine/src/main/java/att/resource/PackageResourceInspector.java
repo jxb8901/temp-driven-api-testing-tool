@@ -688,6 +688,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("preview", safeScenario);
         result.put("previewYaml", new Yaml(options).dump(safeScenario));
         result.put("redacted", Boolean.valueOf(Boolean.TRUE.equals(projection.get("redacted"))));
+        result.put("containsSensitiveValues", Boolean.valueOf(engine.containsSensitiveValue(scenarioMap)));
         result.put("normalizedScenario", scenarioMap);
         result.put("revisionDigest", index.revisionDigest);
         return bounded(result);

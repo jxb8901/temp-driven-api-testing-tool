@@ -16,7 +16,7 @@ interface QuickLoadPageProps {
   schedulingEnabled?: boolean;
   onEnvironmentChange(environment: string): void;
   onJobAccepted(jobId: string): void;
-  onSchedule?(input: { packageId: string; environment?: string; draftId: string }): void;
+  onSchedule?(input: { packageId: string; environment?: string; draftId: string; previewYaml?: string }): void;
   onCancel(): void;
   registerUnsavedChanges(isDirty: boolean, description?: string): () => void;
 }
@@ -257,7 +257,7 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   return <div className="att-load-page att-quick-load-page">
     <header className="att-feature-header"><div><p className="att-eyebrow">Single-target workload</p><h1>Quick Load</h1><p>Run a focused load check against one selected resource. Advanced Load supports multi-workload scenarios.</p></div>
       <div className="att-quick-load-actions"><button type="button" onClick={onCancel}>Back to Explorer</button><button type="button"
-        onClick={() => draft?.draftId && onSchedule?.({ packageId, environment: environment || undefined, draftId: draft.draftId })}
+        onClick={() => draft?.draftId && onSchedule?.({ packageId, environment: environment || undefined, draftId: draft.draftId, previewYaml: draft.previewYaml })}
         disabled={!schedulingEnabled || !draft?.draftId || draftState !== 'valid' || validatedFingerprint !== scenarioFingerprint || !onSchedule}
         title={!schedulingEnabled ? 'Scheduled Load is disabled by Server configuration.' : !draft?.draftId ? 'Validate the scenario before scheduling.' : undefined}>Schedule…</button></div>
     </header>

@@ -169,6 +169,45 @@ public final class DebugEngine {
         return projection;
     }
 
+    /** Reports whether persisting this value would retain a classified secret or private value. */
+    public boolean containsSensitiveValue(Object value) {
+        return containsSensitiveValue(value, null, "");
+    }
+
+    private boolean containsSensitiveValue(Object value, String key, String path) {
+        if (key != null && (sensitiveFormKey(key) || matchesConfiguredSensitivePath(path) || matchesConfiguredSensitiveField(key))
+                && hasValue(value)) return true;
+        if (value instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                String childKey = String.valueOf(entry.getKey());
+                if (containsSensitiveValue(entry.getValue(), childKey, pointer(path, childKey))) return true;
+            }
+            return false;
+        }
+        if (value instanceof Iterable) {
+            int index = 0;
+            for (Object item : (Iterable<?>) value) {
+                if (containsSensitiveValue(item, null, pointer(path, String.valueOf(index++)))) return true;
+            }
+            return false;
+        }
+        return value instanceof String && !scrub((String) value).equals(value);
+    }
+
+    private static boolean hasValue(Object value) {
+        if (value == null) return false;
+        if (value instanceof CharSequence) return ((CharSequence) value).length() > 0;
+        if (value instanceof Map) {
+            for (Object child : ((Map<?, ?>) value).values()) if (hasValue(child)) return true;
+            return false;
+        }
+        if (value instanceof Iterable) {
+            for (Object child : (Iterable<?>) value) if (hasValue(child)) return true;
+            return false;
+        }
+        return true;
+    }
+
     private void validateTargetInput(String type, String id, DebugInput input) throws Exception {
         ResolvedTarget resolved = resolveTarget(type, id, input);
         StageCaseData stage = input.stage(resolved.template.name());
@@ -239,7 +278,10 @@ public final class DebugEngine {
     }
 
     private boolean configuredSensitivePath(String path) {
-        if (!redactionEnabled) return false;
+        return redactionEnabled && matchesConfiguredSensitivePath(path);
+    }
+
+    private boolean matchesConfiguredSensitivePath(String path) {
         String normalized = path.toLowerCase(java.util.Locale.ROOT);
         for (String configured : sensitivePaths) {
             String candidate = configured.toLowerCase(java.util.Locale.ROOT);
@@ -253,7 +295,10 @@ public final class DebugEngine {
     }
 
     private boolean configuredSensitiveField(String key) {
-        if (!redactionEnabled) return false;
+        return redactionEnabled && matchesConfiguredSensitiveField(key);
+    }
+
+    private boolean matchesConfiguredSensitiveField(String key) {
         for (String expression : sensitiveFieldPatterns) {
             try { if (java.util.regex.Pattern.compile(expression, java.util.regex.Pattern.CASE_INSENSITIVE).matcher(key).matches()) return true; }
             catch (RuntimeException ignored) { /* Configuration parsing validates patterns. */ }

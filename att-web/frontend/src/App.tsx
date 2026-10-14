@@ -204,11 +204,16 @@ export default function App() {
   const [state, dispatch] = useReducer(appReducer, initialAppState);
   const [selectedEnvironment, setSelectedEnvironment] = useState('');
   const [scheduleIntent, setScheduleIntent] = useState<ValidatedLoadDraftIntent | null>(null);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const onSchedule = useCallback((intent: ValidatedLoadDraftIntent) => {
     setScheduleIntent(intent);
-    navigation.navigate({ kind: 'schedules' });
-  }, [navigation.navigate]);
+    setScheduleDialogOpen(true);
+  }, []);
   const consumeScheduleIntent = useCallback(() => setScheduleIntent(null), []);
+  const closeScheduleDialog = useCallback(() => {
+    setScheduleDialogOpen(false);
+    setScheduleIntent(null);
+  }, []);
   useEffect(() => {
     const routeEnvironment = navigation.route.kind === 'configuration' || navigation.route.kind === 'quick-load' ? navigation.route.environment : undefined;
     if (routeEnvironment !== undefined) setSelectedEnvironment(routeEnvironment);
@@ -289,8 +294,6 @@ export default function App() {
         packages={state.packages}
         enabled={capabilities.loadSchedulingEnabled}
         onOpenJob={onJobChange}
-        initialDraft={scheduleIntent}
-        onInitialDraftConsumed={consumeScheduleIntent}
       />
     </Suspense>;
   } else if (navigation.route.kind === 'settings') {
@@ -332,6 +335,18 @@ export default function App() {
       onJobAccepted={onJobAccepted}
     >
       {content}
+      {scheduleDialogOpen && <Suspense fallback={<div className="att-schedule-modal-backdrop" role="status" aria-busy="true">Loading schedule form…</div>}>
+        <ScheduledLoadPage
+          api={api}
+          packages={state.packages}
+          enabled={capabilities.loadSchedulingEnabled}
+          onOpenJob={onJobChange}
+          initialDraft={scheduleIntent}
+          onInitialDraftConsumed={consumeScheduleIntent}
+          modal
+          onClose={closeScheduleDialog}
+        />
+      </Suspense>}
     </AppShell>
   );
 }

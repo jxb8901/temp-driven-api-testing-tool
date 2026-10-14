@@ -50,6 +50,7 @@ export interface ValidatedLoadDraftIntent {
   packageId: string;
   environment?: string;
   draftId: string;
+  previewYaml?: string;
 }
 
 export interface ScheduleOccurrence {
