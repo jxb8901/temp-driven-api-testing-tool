@@ -410,7 +410,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             Object safe = sourceYamlProjection(yamlMapping(authored), "");
             SourceFileReference selected = null;
             Map<String, SourceFileReference> references;
-            if (sourceOriginPath == null || sourceOriginPath.isBlank()
+            if (sourceOriginPath == null || whitespaceOnly(sourceOriginPath)
                     || resources.fromInternalPath(resource.yamlSource, PackageResourceResolver.Kind.FILE).logicalName().equals(sourceOriginPath)) {
                 references = resolveSourceFileReferences(resource, safe);
             } else {
@@ -2004,6 +2004,14 @@ public final class PackageResourceInspector implements AutoCloseable {
     private static String decodeUtf8(byte[] bytes) throws CharacterCodingException {
         return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+    }
+    private static boolean whitespaceOnly(String value) {
+        for (int offset = 0; offset < value.length();) {
+            int codePoint = value.codePointAt(offset);
+            if (!Character.isWhitespace(codePoint)) return false;
+            offset += Character.charCount(codePoint);
+        }
+        return true;
     }
     private static String hex(byte[] bytes) {
         StringBuilder result = new StringBuilder(bytes.length * 2);
