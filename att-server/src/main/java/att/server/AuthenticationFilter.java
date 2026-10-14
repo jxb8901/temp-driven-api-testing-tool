@@ -17,7 +17,8 @@ public final class AuthenticationFilter implements Filter {
     @Override public void doFilter(ServletRequest request,ServletResponse response,FilterChain chain) throws IOException,ServletException {
         HttpServletRequest req=(HttpServletRequest)request;HttpServletResponse res=(HttpServletResponse)response;
         String path=req.getPathInfo();boolean publicRead="GET".equals(req.getMethod())&&("/health".equals(path)||"/version".equals(path));
-        String uiPath=req.getRequestURI().substring(req.getContextPath().length());
+        String contextPath=req.getContextPath()==null?"":req.getContextPath();String requestUri=req.getRequestURI();
+        String uiPath=requestUri==null?"":requestUri.substring(Math.min(contextPath.length(),requestUri.length()));
         Object runtimeValue=req.getServletContext().getAttribute(ServerBootstrap.RUNTIME);ServerRuntime runtime=runtimeValue instanceof ServerRuntime?(ServerRuntime)runtimeValue:null;
         if(runtime!=null&&runtime.auth.local(runtime.config)) {
             res.setHeader("Cache-Control","no-store");
@@ -45,7 +46,7 @@ public final class AuthenticationFilter implements Filter {
                 }
             }
             if(session==null) {
-                if(uiPath.startsWith("/ui/")) {String target=uiPath+(req.getQueryString()==null?"":"?"+req.getQueryString());res.sendRedirect(req.getContextPath()+"/ui/login.html?returnTo="+java.net.URLEncoder.encode(target,java.nio.charset.StandardCharsets.UTF_8));return;}
+                if(uiPath.startsWith("/ui/")) {String target=uiPath+(req.getQueryString()==null?"":"?"+req.getQueryString());res.sendRedirect(contextPath+"/ui/login.html?returnTo="+java.net.URLEncoder.encode(target,java.nio.charset.StandardCharsets.UTF_8));return;}
                 jsonUnauthorized(res);return;
             }
             String csrf=session.get("csrfToken");

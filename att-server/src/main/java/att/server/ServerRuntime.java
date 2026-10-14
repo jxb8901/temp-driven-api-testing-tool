@@ -254,7 +254,10 @@ final class ServerRuntime implements AutoCloseable {
             else {terminateTree(p);try{if(!p.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS)){forceTree(p);p.waitFor();}}catch(InterruptedException e){Thread.currentThread().interrupt();forceTree(p);}finish(j,"CANCELLED",143);}}
         store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");return j.status;
     }
-    void requireJobOwner(String id,String principal) throws Exception {if(!JOB_ID.matcher(id).matches()||!store.ownsJob(id,principal))throw new NotFoundException();}
+    void requireJobOwner(String id,String principal) throws Exception {
+        if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
+        if("local".equals(config.authMode)&&!store.ownsJob(id,principal))throw new NotFoundException();
+    }
     List<Map<String,Object>> jobsFor(String principal,String search) throws Exception {
         if("local".equals(config.authMode)){List<Map<String,Object>> owned=store.listOwned(100,principal);if(search==null||search.isBlank())return owned;String q=search.toLowerCase(java.util.Locale.ROOT);return owned.stream().filter(row->String.valueOf(row.get("principal")).toLowerCase(java.util.Locale.ROOT).contains(q)).toList();}
         return store.list(100,search);
