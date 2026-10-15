@@ -433,7 +433,7 @@ async function main() {
     }));
     await page.addScriptTag({ url: `${fixture.origin}/att/axe-core.js` });
     await assertAxe(page, 'The Load schedule dialog should pass WCAG 2.2 AA checks');
-    await scheduleDialog.getByRole('button', { name: 'Cancel and return to Load' }).click();
+    await scheduleDialog.getByRole('button', { name: 'Cancel and return to editor' }).click();
     await scheduleDialog.waitFor({ state: 'detached' });
     assert.equal(page.url(), quickLoadUrl, 'Cancel should return to the same Quick Load route');
     assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), false, 'the validated Load draft should remain available after cancel');
