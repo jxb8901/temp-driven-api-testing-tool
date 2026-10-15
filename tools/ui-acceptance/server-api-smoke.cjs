@@ -55,6 +55,11 @@ async function main() {
     assert.ok(editorState.text.includes('&{templates/SCHEDULED/payload/request.xml}'), 'CodeMirror must show the source text under the production CSP');
     assert.ok(editorState.height > 0, 'CodeMirror must have visible layout under the production CSP');
     assert.ok(editorState.generatedStyles.length > 0 && editorState.generatedStyles.every(nonce => nonce === pageNonce), 'generated editor styles must carry the page nonce');
+    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+    assert.ok(await editor.evaluate(element => getComputedStyle(element).height !== '0px'), 'the editor must remain laid out in the dark theme');
+    await page.getByRole('button', { name: 'Switch to light theme' }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
     const fileLink = page.locator('.att-explorer-source [data-att-reference]');
     await fileLink.waitFor();
     assert.equal(await fileLink.getAttribute('data-att-file'), 'templates/SCHEDULED/payload/request.xml');
@@ -79,10 +84,6 @@ async function main() {
     await page.getByText('<request>safe payload</request>').waitFor();
     assert.equal(await page.locator('.att-code-language').last().textContent(), 'XML');
     assert.equal(await page.getByText('template-secret').count(), 0, 'classified source values must remain redacted');
-    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
-    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
-    assert.ok(await editor.evaluate(element => getComputedStyle(element).height !== '0px'), 'the editor must remain laid out in the dark theme');
-    await page.getByRole('button', { name: 'Switch to light theme' }).click();
 
     await page.goBack();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
