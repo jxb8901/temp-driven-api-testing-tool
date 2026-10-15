@@ -149,8 +149,12 @@ public final class LoadEvidenceStore implements LoadEventListener {
         Map<String,Object> result=new LinkedHashMap<String,Object>();
         result.put("retainedSuccessCount",retainedSuccessCount);result.put("retainedFailureCount",retainedFailureCount);
         result.put("reservedSuccessCount",successReservations.size());result.put("reservedFailureCount",failureReservations.size());
-        result.put("successQuotaExceeded",policy.splitQuotas()&&policy.success()!=LoadEvidencePolicy.Success.NONE&&retainedSuccessCount>=policy.maxSuccessSamples());
-        boolean failureExhausted=policy.splitQuotas()&&policy.retainFailure()&&retainedFailureCount>=policy.maxFailureSamples();
+        // A rejected claim is still a real loss of evidence even when in-flight
+        // reservations later release capacity before the report is written.
+        result.put("successQuotaExceeded",policy.splitQuotas()&&policy.success()!=LoadEvidencePolicy.Success.NONE
+                &&(retainedSuccessCount>=policy.maxSuccessSamples()||skippedSuccessQuotaCount>0));
+        boolean failureExhausted=policy.splitQuotas()&&policy.retainFailure()
+                &&(retainedFailureCount>=policy.maxFailureSamples()||skippedFailureQuotaCount>0);
         result.put("failureQuotaExceeded",failureExhausted);
         result.put("skippedSuccessQuotaCount",skippedSuccessQuotaCount);result.put("skippedFailureQuotaCount",skippedFailureQuotaCount);
         result.put("skippedMissingEvidenceCount",skippedMissingEvidenceCount);
