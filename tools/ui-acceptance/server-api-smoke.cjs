@@ -64,8 +64,9 @@ async function main() {
     await page.getByText('# Safe configuration helper source').waitFor();
 
     await page.getByRole('treeitem', { name: /config\.yaml/ }).click();
-    await page.getByText('Source is not available').waitFor();
-    await page.getByText('visibility-policy', { exact: true }).waitFor();
+    const configSource = page.locator('.att-config-source-view .att-code-editor .cm-content');
+    await configSource.getByText('testcase:', { exact: false }).waitFor();
+    await page.getByText('Safe read-only source', { exact: true }).waitFor();
 
     await page.getByRole('tab', { name: 'Testdata' }).click();
     await page.getByRole('heading', { name: 'Testdata' }).waitFor();
