@@ -217,7 +217,7 @@ Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的
 | `GET` | `/packages`、`/packages/{packageId}` | 讀取設定中的 registry |
 | `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | 列出安全的 Case、Template、Flow 及 Tool 投影 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | 讀取單一資源定義及關聯 |
-| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已淨化的 YAML 投影或允許清單內的 Tool script，並列出安全引用檔案 |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已淨化 YAML 投影或合資格的 package-local Tool 文字；檔案引用須使用 Server 授權的不透明 ID |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source-file?referenceId=...` | 透過不透明的資源範圍引用讀取一個合資格文字檔 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/debug-form?environment=SIT` | 讀取目標範圍內的安全 Debug 預設值 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT` | 讀取安全預設值及單 workload Quick Load 預覽 |
@@ -280,7 +280,7 @@ API 會回傳 `202 Accepted` 及 job ID。工作狀態依序為 `QUEUED`、`PREP
 
 `GET /jobs` 回傳最近 100 項工作。可加上 `?principal=<text>`，在既有 `principal` property 內作不區分大小寫的文字搜尋；搜尋會在 100 項上限前執行，並採用子字串比對，因此搜尋 `alice` 亦會匹配 `alice(anonym)`。Web UI 及 `att remote jobs --principal <text>` 均使用此篩選。舊紀錄保留原有值，包括先前的 `anonymous` 紀錄。系統不會保存提交 payload，只保存 command 及 package ID 摘要。Engine result 及診斷會作為控制平面 metadata 保存。較大的報告、log 及其他證據會留在工作輸出目錄。
 
-資源探索可用 `case`、`template`、`flow` 或 `tool` 篩選。每頁預設 50 項，最多 100 項；續頁 cursor 會加密並綁定 Server 解析出的身份及查詢。匿名模式下所有 caller 共用同一 cursor 身份。若 package 內容改變，舊 cursor 會以 `409` 拒絕。Explorer 回傳邏輯資源 ID、安全投影、來源資訊、關聯及穩定診斷碼。YAML source 是解析及淨化後的投影，並非原始檔案內容。Template/Flow 的安全 `&{...}` 引用文字可透過 `source-file` endpoint 讀取；Server 會確認 canonical path 留在 package root，並檢查副檔名、deny path、文字編碼及大小，再以資源範圍不透明 `referenceId` 取用。Tool script source 只會在 Server 明確允許其 package 相對路徑時提供。憑證、個人資料、原始 config/Testdata、Debug sidecar、binary 及拒絕路徑仍會遮蔽或禁止，不受 display masking 設定影響。探索程序不會執行 Tool，也不提供檔案系統瀏覽器；檢查佇列、Worker heap、逾時及 response 大小均與一般工作執行分開限制。
+資源探索可用 `case`、`template`、`flow` 或 `tool` 篩選。每頁預設 50 項，最多 100 項；續頁 cursor 會加密並綁定 Server 解析出的身份及查詢。匿名模式下所有 caller 共用同一 cursor 身份。若 package 內容改變，舊 cursor 會以 `409` 拒絕。Explorer 回傳邏輯資源 ID、安全投影、來源資訊、關聯及穩定診斷碼。YAML source 是解析及淨化後的投影，並非原始檔案內容。預設 `safe-package-files` policy 會在無須逐檔 allowlist 的情況下提供合資格、有界的 package-local Tool 文字；`allowlist-only` 則要求 `server.inspection.safeTextSources` 內完全相同的 package-relative 路徑。External scripts 必須位於已設定的 external root，並列入該 package 的 canonical 精確 allowlist；回應不會返回其 filesystem path。Template/Flow 或 Configuration source 內安全的 `&{...}` 引用可透過有界 source route 讀取合資格的 package-local 文字；Server 會確認 canonical path 留在 package root，檢查副檔名、deny path、文字編碼、大小及 visibility rules，並使用綁定 package 和 origin 的 Server 不透明 `referenceId`。獨立 Configuration source route 會對 `config/` 下的合資格文字套用相同 visibility policy，並不會提供通用檔案系統瀏覽器。Resource source route 不會提供原始 config、Testdata descriptor 或 Debug sidecar；合資格且非敏感的 configuration 和 Testdata 文字可透過 Configuration route 讀取。憑證及個人資料值一律受保護。探索程序不會執行 Tool，也不會暴露檔案系統瀏覽器；檢查佇列、Worker heap、逾時及 response 大小均與一般工作執行分開限制。
 
 ### 套件資源探索
 
