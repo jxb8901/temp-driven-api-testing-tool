@@ -161,6 +161,40 @@ class PackageResourceInspectorTest {
         assertEquals(Boolean.FALSE,missing.get("available"));assertEquals("missing",missing.get("reason"));
     }
 
+    @Test void appliesDenyGlobsToCanonicalExternalRootRelativePathsBeforeAliasing() throws Exception {
+        Path root=packageWithTemplate("external-source-deny-globs","FORM","description: safe");
+        Path externalRoot=Files.createDirectories(temp.resolve("external-source-deny-root"));
+        Path privateScript=Files.createDirectories(externalRoot.resolve("private")).resolve("check.sh");
+        Path allowedScript=Files.createDirectories(externalRoot.resolve("mq")).resolve("check-queue.sh");
+        writeUtf8(privateScript,"#!/bin/sh\\necho private\\n");
+        writeUtf8(allowedScript,"#!/bin/sh\\necho allowed\\n");
+        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\\nenvironment: SIT\\nenvironments:\\n  SIT: {}\\n"
+                +"testcase:\\n  root: testcase\\ntemplates:\\n  root: templates\\ntools:\\n"
+                +"  privateCheck:\\n    name: Private external script\\n    description: Deny glob regression\\n    command: [bash, '"+privateScript.toString()+"']\\n    stdoutFormat: text\\n    arguments: {}\\n"
+                +"  mqCheck:\\n    name: Allowed external script\\n    description: Deny glob regression\\n    command: [bash, '"+allowedScript.toString()+"']\\n    stdoutFormat: text\\n    arguments: {}\\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),java.util.Arrays.asList(privateScript.toRealPath().toString(),allowedScript.toRealPath().toString()),
+                Collections.singletonList(externalRoot.toRealPath().toString()),65536,262144,false,true,"safe-package-files",
+                Collections.singletonList("**/private/**"),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
+        Map<String,Object> denied=items.stream().filter(item->"Private external script".equals(item.get("name"))).findFirst().get();
+        assertEquals(Boolean.FALSE,denied.get("sourceAvailable"),denied.toString());
+        assertEquals("forbidden",denied.get("sourceReason"),denied.toString());
+        Map<String,Object> deniedSource=inspector.inspect("source","tool",String.valueOf(denied.get("resourceId")),null,0,1);
+        assertEquals(Boolean.FALSE,deniedSource.get("available"),deniedSource.toString());
+        assertEquals("forbidden",deniedSource.get("reason"),deniedSource.toString());
+        assertFalse(denied.toString().contains(externalRoot.toString()));
+        assertFalse(deniedSource.toString().contains(externalRoot.toString()));
+
+        Map<String,Object> allowed=items.stream().filter(item->"Allowed external script".equals(item.get("name"))).findFirst().get();
+        assertEquals(Boolean.TRUE,allowed.get("sourceAvailable"),allowed.toString());
+        Map<String,Object> allowedSource=inspector.inspect("source","tool",String.valueOf(allowed.get("resourceId")),null,0,1);
+        assertEquals(Boolean.TRUE,allowedSource.get("available"),allowedSource.toString());
+        assertTrue(String.valueOf(allowedSource.get("logicalPath")).matches("external/[0-9a-f]{64}\\\\.sh"));
+        assertTrue(String.valueOf(allowedSource.get("text")).contains("echo allowed"));
+        assertFalse(allowedSource.toString().contains(externalRoot.toString()));
+    }
+
     @Test void rejectsPackageAndExternalSymlinkEscapesForToolSource() throws Exception {
         Path root=packageWithTemplate("tool-source-symlink-escape","FORM","description: safe");
         Path external=Files.createDirectories(temp.resolve("symlink-external"));Path secret=writeUtf8(external.resolve("private.sh"),"echo private\n");

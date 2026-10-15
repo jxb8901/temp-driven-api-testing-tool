@@ -1566,12 +1566,22 @@ public final class PackageResourceInspector implements AutoCloseable {
         if(!Files.isRegularFile(canonical,LinkOption.NOFOLLOW_LINKS)||!Files.isReadable(canonical))
             return new ExternalSourceCheck(canonical,false,"forbidden");
         if(sensitiveSourcePath(canonical.toString()))return new ExternalSourceCheck(canonical,false,"sensitive-path");
-        if(sourceGlobDenied(externalAlias(canonical)))return new ExternalSourceCheck(canonical,false,"forbidden");
+        String denyPath=externalSourceDenyPath(canonical);
+        if(denyPath==null||sourceGlobDenied(denyPath))return new ExternalSourceCheck(canonical,false,"forbidden");
         try {
             if(Files.size(canonical)>maxSourceBytes)return new ExternalSourceCheck(canonical,false,"size-limit");
             if(!isUtf8Text(canonical))return new ExternalSourceCheck(canonical,false,"binary-file");
         } catch(Exception ignored) { return new ExternalSourceCheck(canonical,false,"missing"); }
         return new ExternalSourceCheck(canonical,true,null);
+    }
+
+    private String externalSourceDenyPath(Path canonical) {
+        Path matchingRoot=null;
+        for(Path root:externalSourceRoots) {
+            if(canonical.startsWith(root)&&(matchingRoot==null||root.getNameCount()>matchingRoot.getNameCount()))
+                matchingRoot=root;
+        }
+        return matchingRoot==null?null:matchingRoot.relativize(canonical).toString().replace('\\\\','/');
     }
 
     private static Path canonicalMissingCandidate(Path normalized) throws Exception {
