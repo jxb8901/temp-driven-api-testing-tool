@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavigationGuardContext, type NavigationGuardApi } from '../../router';
-import type { AsyncState, PackageSummary } from '../../types';
+import { ApiError, type AsyncState, type PackageSummary } from '../../types';
 import { ScheduledLoadPage } from './ScheduledLoadPage';
 import type { LoadSchedule, ScheduleOccurrence, ScheduledLoadApi } from './types';
 
@@ -135,6 +135,34 @@ describe('ScheduledLoadPage', () => {
     expect(api.previewLoadSchedule).toHaveBeenCalled();
     expect(vi.mocked(api.previewLoadSchedule).mock.calls.at(-1)?.[0]).toEqual({ timezone: expect.any(String), cron: '0 2 * * *' });
     expect(navigation.registerUnsavedChanges).toHaveBeenCalledWith(true, 'Scheduled Load changes');
+  });
+
+  it('shows safe Worker validation diagnostics, package context, target, and request ID after a rejected save', async () => {
+    const api = makeApi({ createLoadSchedule: vi.fn(async () => {
+      throw new ApiError('Load options must include a positive duration.', {
+        status: 400, code: 'ATT-SERVER-INVALID-REQUEST', requestId: 'schedule-request-42',
+        diagnostics: [{ code: 'WORKER_REQUEST_INVALID', summary: 'Load options must include a positive duration.',
+          field: 'workloads[0].load.duration', file: 'load/nightly.yaml', line: 8, packageId: 'payments', environment: 'SIT',
+          targets: [{ type: 'template', id: 'CHECKOUT' }] }],
+      });
+    }) });
+    await render(api);
+    await change(host.querySelector('#schedule-timezone') as HTMLInputElement, 'Asia/Hong_Kong');
+    await advance(300);
+    await change(host.querySelector('#schedule-name') as HTMLInputElement, 'Nightly payments');
+    await change(host.querySelector('#schedule-package') as HTMLSelectElement, 'payments');
+    await change(host.querySelector('#schedule-scenario') as HTMLInputElement, 'load/nightly.yaml');
+    await click(host.querySelector('.att-schedule-form-actions button[type="submit"]')!);
+    await advance(0);
+
+    const alert = host.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('WORKER_REQUEST_INVALID');
+    expect(alert?.textContent).toContain('Load options must include a positive duration.');
+    expect(alert?.textContent).toContain('workloads[0].load.duration');
+    expect(alert?.textContent).toContain('load/nightly.yaml:8');
+    expect(alert?.textContent).toContain('payments · SIT');
+    expect(alert?.textContent).toContain('template · CHECKOUT');
+    expect(alert?.textContent).toContain('schedule-request-42');
   });
 
   it('opens a validated Load snapshot in a dialog and returns to the still-mounted Load editor on cancel', async () => {

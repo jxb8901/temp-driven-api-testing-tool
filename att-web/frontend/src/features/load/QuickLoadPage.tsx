@@ -3,6 +3,7 @@ import { TypedSidecarForm } from '../explorer/TypedSidecarForm';
 import type { JsonObject as SidecarObject, JsonValue } from '../explorer/types';
 import { CodeEditor } from '../code/CodeEditor';
 import type { LoadDraftResponse, LoadJobsApi, LoadModel, LoadPolicyTemplate, LoadTargetType, ServerDiagnostic } from './types';
+import { ApiError } from '../../types';
 import './load.css';
 
 interface QuickLoadPageProps {
@@ -21,6 +22,15 @@ interface QuickLoadPageProps {
   registerUnsavedChanges(isDirty: boolean, description?: string): () => void;
 }
 type JsonObject = Record<string, unknown>;
+function safeDiagnosticField(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 1000 || /[\u0000-\u001f\u007f]/.test(value)) return undefined;
+  return value.trim() || undefined;
+}
+function safeDiagnosticPath(value: unknown): string | undefined {
+  const path = safeDiagnosticField(value);
+  if (!path || path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')) return undefined;
+  return path;
+}
 function asObject(value: unknown): JsonObject { return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : {}; }
 function validTarget(type: string): type is LoadTargetType { return type === 'template' || type === 'flow' || type === 'tool'; }
 function jsonObject(raw: string, label: string): JsonObject {
@@ -102,6 +112,8 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   const [message, setMessage] = useState('Validate this single target before running it.');
   const [error, setError] = useState('');
   const [diagnostics, setDiagnostics] = useState<ServerDiagnostic[]>([]);
+  const [requestId, setRequestId] = useState('');
+  const [logicalTargetId, setLogicalTargetId] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const identityKey = `${packageId}:${target.type}:${target.resourceId}`;
@@ -118,9 +130,9 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   const submitLock = useRef(false);
   const scenario = useMemo(() => {
     if (!policy || !targetType) return null;
-    try { return makeScenario(policy, model, target.resourceId, targetType, users, tps, maxConcurrent, duration, timing, business, advanced); }
+    try { return logicalTargetId ? makeScenario(policy, model, logicalTargetId, targetType, users, tps, maxConcurrent, duration, timing, business, advanced) : null; }
     catch { return null; }
-  }, [policy, model, target.resourceId, targetType, environment, users, tps, maxConcurrent, duration, timing, business, advanced]);
+  }, [policy, model, logicalTargetId, targetType, environment, users, tps, maxConcurrent, duration, timing, business, advanced]);
   const rawJson = scenario ? JSON.stringify(scenario, null, 2) : '';
   const scenarioFingerprint = JSON.stringify([identityKey, environment, model, templateId, preset, rawJson]);
   const scenarioFingerprintRef = useRef(scenarioFingerprint);
@@ -131,7 +143,7 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
     validationSequence.current++;
     validationController.current?.abort();
     validationController.current = null;
-    setDraft(null); setValidatedFingerprint(null); setDraftState('idle'); setError(''); setDiagnostics([]);
+    setDraft(null); setValidatedFingerprint(null); setDraftState('idle'); setError(''); setDiagnostics([]); setRequestId('');
     setMessage('The scenario changed. Validate it again before running or scheduling.');
   }
 
@@ -139,7 +151,7 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   useEffect(() => () => { validationController.current?.abort(); }, []);
   useEffect(() => {
     const identityChanged = previousIdentity.current !== identityKey;
-    if (identityChanged) { previousIdentity.current = identityKey; invalidateDraft(); dirtyRef.current = false; setDirty(false); setBusiness({ inputs: {}, vars: {} }); }
+    if (identityChanged) { previousIdentity.current = identityKey; invalidateDraft(); dirtyRef.current = false; setDirty(false); setBusiness({ inputs: {}, vars: {} }); setLogicalTargetId(''); }
     const resetForPolicySelection = pendingModelPolicySelection.current || pendingTemplatePolicySelection.current;
     const preserveDraft = dirtyRef.current && !identityChanged && !resetForPolicySelection;
     const controller = new AbortController(); const request = ++policySequence.current;
@@ -179,6 +191,9 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
     const controller = new AbortController(); const request = ++sidecarSequence.current;
     api.getTargetLoadForm(packageId, targetType, target.resourceId, model, environment || undefined, controller.signal).then(form => {
       if (controller.signal.aborted || request !== sidecarSequence.current) return;
+      const resolvedId = typeof form.target?.id === 'string' ? form.target.id : '';
+      if (!resolvedId) throw new Error('The Server did not return a logical target ID.');
+      setLogicalTargetId(resolvedId);
       const defaults = sidecarInput(form.input || {}, targetType);
       templateBusiness.current = defaults;
       if (!dirtyRef.current) setBusiness(defaults);
@@ -216,11 +231,14 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
     validationController.current?.abort();
     validationController.current = null;
     const fingerprint = scenarioFingerprint;
-    setError(''); setDiagnostics([]); setDraft(null); setValidatedFingerprint(null);
+    setError(''); setDiagnostics([]); setRequestId(''); setDraft(null); setValidatedFingerprint(null);
     if (!inlineLoadEnabled) { setDraftState('error'); setError('Quick Load is disabled by Server policy.'); return; }
     if (!businessValid) { setDraftState('error'); setError('Correct the invalid target inputs before validation.'); return; }
     let nextScenario: JsonObject;
-    try { nextScenario = makeScenario(policy || {}, model, target.resourceId, targetType || 'template', users, tps, maxConcurrent, duration, timing, business, advanced); }
+    try {
+      if (!logicalTargetId) throw new Error('Wait for the Server to resolve this resource before validating.');
+      nextScenario = makeScenario(policy || {}, model, logicalTargetId, targetType || 'template', users, tps, maxConcurrent, duration, timing, business, advanced);
+    }
     catch (reason) { setDraftState('error'); setError(reason instanceof Error ? reason.message : 'Correct the Quick Load fields.'); return; }
     const controller = new AbortController();
     validationController.current = controller;
@@ -229,11 +247,22 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
       const result = await api.createLoadDraft({ packageId, ...(environment ? { environment } : {}), scenario: nextScenario }, controller.signal);
       if (controller.signal.aborted || request !== validationSequence.current || fingerprint !== scenarioFingerprintRef.current) return;
       setDraft(result); setDiagnostics(result.diagnostics || []); setDraftState('valid'); dirtyRef.current = false; setDirty(false);
+      setRequestId(result.requestId || '');
       setValidatedFingerprint(fingerprint);
       setMessage(result.diagnostics?.length ? 'The Server returned validation diagnostics. Review them before running.' : 'The Server accepted this draft for review.');
     } catch (reason) {
       if (controller.signal.aborted || request !== validationSequence.current || fingerprint !== scenarioFingerprintRef.current) return;
-      setDraftState('error'); setError(reason instanceof Error ? reason.message : 'Quick Load validation failed.'); setMessage('Correct the fields or retry validation.');
+      setDraftState('error'); setError(reason instanceof Error ? reason.message : 'Quick Load validation failed.');
+      if (reason instanceof ApiError) {
+        setRequestId(reason.requestId || '');
+        const raw = reason.diagnostics;
+        setDiagnostics(Array.isArray(raw) ? raw.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item))).map(item => ({
+          severity: safeDiagnosticField(item.severity), code: safeDiagnosticField(item.code),
+          reason: safeDiagnosticField(item.reason), field: safeDiagnosticField(item.field), path: safeDiagnosticPath(item.path),
+          message: safeDiagnosticField(item.message), summary: safeDiagnosticField(item.summary),
+        })) : []);
+      }
+      setMessage('Correct the fields or retry validation.');
     } finally { if (validationController.current === controller) validationController.current = null; }
   }
   async function runNow() {
@@ -247,7 +276,29 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   }
   const updateAdvanced = (key: keyof typeof advanced, value: string) => change(setAdvanced, { ...advanced, [key]: value });
   const groups = targetType === 'tool' ? [{ key: 'inputs', label: 'Inputs' }, { key: 'arguments', label: 'Tool arguments' }] : [{ key: 'inputs', label: 'Inputs' }, { key: 'vars', label: 'Variables' }];
-  const targetLabel = targetType ? `${targetType} · ${target.resourceId}` : `Unsupported target · ${target.type}`;
+  const targetLabel = targetType ? `${targetType} · ${logicalTargetId || 'Resolving…'}` : `Unsupported target · ${target.type}`;
+
+  function reviewDiagnostic(item: ServerDiagnostic) {
+    const heading = document.getElementById('quick-load-review');
+    const page = heading?.closest('.att-quick-load-page');
+    const raw = item.path || item.field;
+    if (raw && page) {
+      const keys = raw.toLocaleLowerCase().replace(/\[\d+\]/g, '').split(/[./: ]+/).filter(Boolean).reverse();
+      const controls = [...page.querySelectorAll<HTMLElement>('input, select, textarea, [contenteditable="true"], .cm-content')];
+      for (const key of keys) {
+        if (key.length <= 2) continue;
+        const normalizedKey = key.replace(/[^a-z0-9]/g, '');
+        const match = controls.find(control => {
+          const label = control.closest('label')?.textContent || '';
+          const searchable = [label, control.getAttribute('aria-label'), control.getAttribute('name'), control.id]
+            .filter(Boolean).join(' ').toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
+          return searchable.includes(normalizedKey);
+        });
+        if (match) { match.focus(); return; }
+      }
+    }
+    heading?.focus();
+  }
 
   return <div className="att-load-page att-quick-load-page">
     <header className="att-feature-header"><div><p className="att-eyebrow">Single-target workload</p><h1>Quick Load</h1><p>Run a focused load check against one selected resource. Advanced Load supports multi-workload scenarios.</p></div>
@@ -295,13 +346,17 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
       </div>}
     </section>
     <section className="att-load-section" aria-labelledby="quick-load-review">
-      <div className="att-section-heading"><div><h2 id="quick-load-review">Validate and run</h2><p>Changing a preset or model never starts a job.</p></div>
+      <div className="att-section-heading"><div><h2 id="quick-load-review" tabIndex={-1}>Validate and run</h2><p>Changing a preset or model never starts a job.</p></div>
         <div className="att-quick-load-actions"><button type="button" onClick={() => void validate()} disabled={!policy || policyState !== 'ready' || !inlineLoadEnabled || draftState === 'validating' || draftState === 'submitting'}>Validate</button>
           <button type="button" className="att-primary-action" onClick={() => void runNow()} disabled={!draft || draftState !== 'valid' || validatedFingerprint !== scenarioFingerprint || confirming}>{confirming ? 'Starting…' : 'Run Now'}</button></div>
       </div>
       <div className={`att-validation-state att-state-${draftState}`} role="status" aria-live="polite" aria-busy={draftState === 'validating' || draftState === 'submitting'}><p>{message}</p>{error && <p className="att-inline-error" role="alert">{error}</p>}
         {policyState === 'loading' && <p>Loading Load policy…</p>}{policyState === 'error' && <p className="att-inline-error">{policyMessage}</p>}
-        {diagnostics.length > 0 && <ul>{diagnostics.map((item, index) => <li key={`${item.code || item.path || 'diagnostic'}-${index}`}>{[item.severity, item.path, item.code].filter(Boolean).join(' · ')}{item.message || item.summary ? `: ${item.message || item.summary}` : ''}</li>)}</ul>}
+        {requestId && <p className="att-help">Request ID: <code>{requestId}</code></p>}
+        {diagnostics.length > 0 && <ul>{diagnostics.map((item, index) => <li key={`${item.code || item.path || 'diagnostic'}-${index}`}>
+          {[item.severity, item.code, item.reason, item.field, item.path].filter(Boolean).join(' · ')}{item.message || item.summary ? `: ${item.message || item.summary}` : ''}
+          {(item.field || item.path) && <button type="button" className="button button-quiet" onClick={() => reviewDiagnostic(item)}>Review field</button>}
+        </li>)}</ul>}
       </div>
       {draft?.previewYaml && <CodeEditor value={draft.previewYaml} language="yaml" label="Server validated Quick Load preview" readOnly />}
       {draft?.expiresAt && <p className="att-help">Validated draft expires {new Date(draft.expiresAt).toLocaleString()}.</p>}

@@ -66,6 +66,14 @@
 .att-schedule-notice, .att-schedule-error { padding: var(--att-space-3) var(--att-space-4); border-radius: var(--att-radius-control); font-size: 0.84rem; line-height: 1.5; }
 .att-schedule-notice { border: 1px solid var(--att-color-border); background: var(--att-color-canvas); }
 .att-schedule-error { border: 1px solid color-mix(in srgb, var(--att-color-danger) 45%, var(--att-color-border)); background: color-mix(in srgb, var(--att-color-danger) 8%, var(--att-color-surface)); color: var(--att-color-danger); }
+.att-schedule-error > p { margin: 0; }
+.att-schedule-error > p + section, .att-schedule-error > section + p { margin-top: var(--att-space-3); }
+.att-schedule-error section h3 { margin: 0 0 var(--att-space-2); font-size: 0.9rem; }
+.att-schedule-diagnostics { display: grid; gap: var(--att-space-3); margin: 0; padding-left: 1.25rem; }
+.att-schedule-diagnostics li { padding-left: var(--att-space-1); }
+.att-schedule-diagnostics li p { margin: 0.2rem 0; overflow-wrap: anywhere; }
+.att-schedule-diagnostics li code { overflow-wrap: anywhere; }
+.att-schedule-diagnostics .button { margin-top: var(--att-space-2); }
 .att-schedule-confirm { width: min(92vw, 500px); max-width: 500px; padding: var(--att-space-6); border: 1px solid var(--att-color-border); border-radius: var(--att-radius-card); background: var(--att-color-surface); color: var(--att-color-text); box-shadow: 0 24px 80px rgba(10, 20, 40, 0.25); }
 .att-schedule-confirm::backdrop { background: rgba(8, 14, 25, 0.55); backdrop-filter: blur(2px); }
 .att-schedule-confirm h2 { font-size: 1.3rem; }

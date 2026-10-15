@@ -22,6 +22,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PackageResourceInspectorTest {
     @TempDir Path temp;
+
+    @org.junit.jupiter.api.BeforeEach void enableServerPathPresentation() { att.core.PathPresentation.configure(true, true); }
+    @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
+
     private PackageResourceInspector inspector() throws Exception {
         Path root=Paths.get("").toRealPath();
         assertTrue(Files.isRegularFile(root.resolve("config/config.yaml")),"Tests run from the repository root");
@@ -307,6 +311,28 @@ class PackageResourceInspectorTest {
                 ()->inspector.inspectPackageFileSource("../../../outside.yaml",origin));
     }
 
+    @Test void configSourceKeepsHelperConnectionAndEvidenceValuesProtectedWhenDisplayMaskingIsOff() throws Exception {
+        Path root = Files.createDirectories(temp.resolve("protected-config-source"));
+        Files.createDirectories(root.resolve("config"));
+        String yaml = "schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                + "mqhelpers:\n  broker:\n    evidencePayload: 'Authorization: Bearer mq-secret'\n    username: mq-user\n"
+                + "sshhelpers:\n  backup:\n    instances:\n      primary:\n        host: worker.internal\n        user: att-user\n        port: 2222\n        identityFile: /home/att/.ssh/id_rsa\n"
+                + "httphelpers:\n  api:\n    headers:\n      Authorization: 'Bearer http-secret'\n      Content-Type: application/json\n";
+        writeUtf8(root.resolve("config/config.yaml"), yaml);
+        PackageResourceInspector inspector = new PackageResourceInspector(root, Paths.get("config/config.yaml"), "SIT",
+                Collections.singletonList("config/config.yaml"), 65536, 262144, false, true,
+                "safe-package-files", Collections.<String>emptyList(), false,
+                Collections.<String>emptyList(), Collections.<String>emptyList());
+
+        Map<String,Object> source = inspector.inspectPackageFileSource("config/config.yaml", null);
+        assertEquals(Boolean.TRUE, source.get("available"), source.toString());
+        assertEquals(Boolean.TRUE, source.get("redacted"), source.toString());
+        String text = String.valueOf(source.get("text"));
+        for (String protectedValue : java.util.Arrays.asList("mq-secret", "mq-user", "worker.internal", "att-user", "2222",
+                "/home/att/.ssh/id_rsa", "http-secret")) assertFalse(text.contains(protectedValue), text);
+        assertTrue(text.contains("[REDACTED]"), text);
+    }
+
     @Test void redactsSecretsAndExternalPathsFromProjectedTemplateSource() throws Exception {
         Path root=Files.createDirectories(temp.resolve("package"));
         Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates/SECRET"));Files.createDirectories(root.resolve("testcase"));
@@ -328,6 +354,8 @@ class PackageResourceInspectorTest {
         assertFalse(text.contains("/outside/private"));assertFalse(text.contains(root.toString()));
         assertFalse(text.contains("123456789"));assertFalse(text.contains("violet-123"));
         Map<String,Object> detail=inspector.inspect("detail","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
+        assertTrue(String.valueOf(items.get(0).get("description")).contains("Bearer [REDACTED]"));
+        assertFalse(String.valueOf(items.get(0).get("description")).contains("top-secret"));
         assertFalse(detail.toString().contains("123456789"));assertFalse(detail.toString().contains("violet-123"));
     }
 

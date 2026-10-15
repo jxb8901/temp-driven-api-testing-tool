@@ -11,6 +11,7 @@ interface ConfigurationExplorerProps {
   initialMode?: ConfigMode;
   showEnvironmentSelector?: boolean;
   onViewChange?: (mode: ConfigMode) => void;
+  includeAllFields?: boolean;
 }
 
 function errorText(error: unknown): string {
@@ -53,7 +54,7 @@ function flattenEntries(response: ConfigurationResponse, section: string): Array
   return rows;
 }
 
-export function ConfigurationExplorer({ api, packageId, environment, onEnvironmentChange, initialMode, showEnvironmentSelector = true, onViewChange }: ConfigurationExplorerProps) {
+export function ConfigurationExplorer({ api, packageId, environment, onEnvironmentChange, initialMode, showEnvironmentSelector = true, onViewChange, includeAllFields = false }: ConfigurationExplorerProps) {
   const [mode, setMode] = useState<ConfigMode>(initialMode || 'declared');
   const [data, setData] = useState<ConfigurationResponse | null>(null);
   const [declaredData, setDeclaredData] = useState<ConfigurationResponse | null>(null);
@@ -115,7 +116,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
     const { controller, sequence } = startRequest();
     try {
       const response = await api.getEffectiveConfiguration(packageId,
-        { environment: environment || undefined, section: requestedSection, offset, limit: 50 }, controller.signal);
+        { environment: environment || undefined, section: requestedSection, offset, limit: 50, includeAllFields }, controller.signal);
       if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setData(previous => {
         if (!append || !previous) return response;
@@ -142,7 +143,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
     try {
       const response = await api.compareConfiguration(packageId, {
         left: leftProfile, right: rightProfile, section: requestedSection || 'globals',
-        includeInherited: requestedIncludeInherited, offset: 0, limit: 50,
+        includeInherited: requestedIncludeInherited, offset: 0, limit: 50, includeAllFields,
       }, controller.signal);
       if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setData(response); setMode('compare'); onViewChange?.('compare'); setNextOffset(response.nextOffset == null ? null : Number(response.nextOffset));
@@ -172,7 +173,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
     try {
       const incoming = await api.compareConfiguration(packageId, {
         left: requestedLeft, right: requestedRight, section: requestedSection,
-        includeInherited, offset, limit: 50,
+        includeInherited, offset, limit: 50, includeAllFields,
       }, controller.signal);
       if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setData(previous => previous ? { ...incoming, fields: [...(previous.fields || []), ...(incoming.fields || [])], offset: 0 } : incoming);

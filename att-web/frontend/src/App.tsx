@@ -3,7 +3,7 @@ import { api } from './api';
 import { AppShell, useAppShellContext } from './AppShell';
 import { DashboardPage, LoadLanding } from './DashboardPage';
 import { useNavigationGuard, useRouteState } from './router';
-import { appReducer, initialAppState, serverCapabilities } from './state';
+import { appReducer, initialAppState, latestServerJobWindow, serverCapabilities } from './state';
 import { ExplorerPage } from './features/explorer/ExplorerPage';
 import './features/explorer/explorer.css';
 import type { ExplorerPageProps, ResourceSourceReference } from './features/explorer/types';
@@ -154,6 +154,7 @@ function ConfigurationRouteView({ route, packages }: {
     fileOrigin={route.fileOrigin}
     sourceReference={route.sourceReference}
     configurationReferenceId={route.configurationReferenceId}
+    canRevealAdminFields={workspace.canRevealConfigurationFields}
     tab={route.tab || (route.filePath ? 'source' : 'declared')}
     onPackageChange={onPackageChange}
     onEnvironmentChange={onEnvironmentChange}
@@ -209,6 +210,10 @@ function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSch
 export default function App() {
   const navigation = useRouteState();
   const [state, dispatch] = useReducer(appReducer, initialAppState);
+  const [jobsRefreshing, setJobsRefreshing] = useState(false);
+  const [jobsUpdatedAt, setJobsUpdatedAt] = useState<string | null>(null);
+  const jobsRefreshCount = useRef(0);
+  const jobsRequestSequence = useRef(0);
   const [selectedEnvironment, setSelectedEnvironment] = useState('');
   const [scheduleIntent, setScheduleIntent] = useState<ValidatedLoadDraftIntent | null>(null);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
@@ -237,12 +242,21 @@ export default function App() {
   }, []);
 
   const loadJobs = useCallback(async (signal?: AbortSignal) => {
+    const requestSequence = ++jobsRequestSequence.current;
+    jobsRefreshCount.current++;
+    setJobsRefreshing(true);
     dispatch({ type: 'jobs/loading' });
     try {
       const response = await api.getJobs(signal);
-      dispatch({ type: 'jobs/ready', data: Array.isArray(response.items) ? response.items : [] });
+      if (!signal?.aborted && requestSequence === jobsRequestSequence.current) {
+        dispatch({ type: 'jobs/ready', data: latestServerJobWindow(Array.isArray(response.items) ? response.items : []) });
+        setJobsUpdatedAt(new Date().toISOString());
+      }
     } catch (error) {
-      if (!signal?.aborted) dispatch({ type: 'jobs/error', error: asError(error) });
+      if (!signal?.aborted && requestSequence === jobsRequestSequence.current) dispatch({ type: 'jobs/error', error: asError(error) });
+    } finally {
+      jobsRefreshCount.current = Math.max(0, jobsRefreshCount.current - 1);
+      if (jobsRefreshCount.current === 0) setJobsRefreshing(false);
     }
   }, []);
 
@@ -265,6 +279,20 @@ export default function App() {
     return () => controller.abort();
   }, [loadJobs, loadPackages]);
 
+  const previousRouteKind = useRef(navigation.route.kind);
+  useEffect(() => {
+    const previous = previousRouteKind.current;
+    previousRouteKind.current = navigation.route.kind;
+    if (navigation.route.kind === 'dashboard' && previous !== 'dashboard') void loadJobs();
+  }, [navigation.route.kind, loadJobs]);
+  const hasActiveDashboardJobs = state.jobs.status === 'ready' && state.jobs.data.some(job =>
+    ['QUEUED', 'PREPARING', 'RUNNING', 'CANCEL_REQUESTED'].includes(String(job.status).toUpperCase()));
+  useEffect(() => {
+    if (navigation.route.kind !== 'dashboard' || !hasActiveDashboardJobs) return;
+    const timer = window.setInterval(() => void loadJobs(), 5000);
+    return () => window.clearInterval(timer);
+  }, [navigation.route.kind, hasActiveDashboardJobs, loadJobs]);
+
   const onPackageChange = useCallback((packageId: string) => {
     navigation.navigate({ kind: 'package', packageId });
   }, [navigation.navigate]);
@@ -276,7 +304,8 @@ export default function App() {
   }, [navigation.navigate]);
   const onJobAccepted = useCallback((job: { jobId: string; packageId?: string }) => {
     navigation.navigate({ kind: 'jobs', jobId: job.jobId });
-  }, [navigation.navigate]);
+    void loadJobs();
+  }, [navigation.navigate, loadJobs]);
   const capabilities = serverCapabilities(state);
   const currentRoute = navigation.route;
   const selectedPackage = currentRoute.kind === 'package' || currentRoute.kind === 'load' || currentRoute.kind === 'configuration' || currentRoute.kind === 'quick-load'
@@ -287,9 +316,9 @@ export default function App() {
 
   let content;
   if (navigation.route.kind === 'dashboard') {
-    content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} />;
+    content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'packages') {
-    content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} />;
+    content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {
     content = <JobsPage api={loadJobsApi} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} />;
   } else if (navigation.route.kind === 'jobs') {

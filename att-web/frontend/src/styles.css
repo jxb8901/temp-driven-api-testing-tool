@@ -131,9 +131,14 @@ h2 { margin: 0; font-size: 1.05rem; letter-spacing: -0.02em; }
 .summary-value { font-size: 1.8rem; font-weight: 760; letter-spacing: -0.04em; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .summary-value-text { font-size: 1.2rem; }
 .summary-detail { color: var(--att-color-muted); font-size: 0.74rem; }
+.summary-outcome-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--att-space-2); }
+.summary-outcome-count { display: flex; align-items: baseline; gap: var(--att-space-1); min-width: 0; }
+.summary-outcome-count strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.summary-outcome-count span { color: var(--att-color-muted); font-size: 0.76rem; }
 .dashboard-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--att-space-5); }
 .panel { min-width: 0; padding: var(--att-space-5); }
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--att-space-3); }
+.job-refresh-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--att-space-2); }
 .section-description { margin: var(--att-space-2) 0 0; color: var(--att-color-muted); font-size: 0.82rem; line-height: 1.5; }
 .section-state { min-height: 1.5rem; margin: var(--att-space-4) 0 0; color: var(--att-color-muted); font-size: 0.84rem; line-height: 1.5; }
 .state-error { color: var(--att-color-danger); }

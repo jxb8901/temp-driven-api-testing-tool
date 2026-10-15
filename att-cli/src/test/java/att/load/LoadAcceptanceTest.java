@@ -61,7 +61,7 @@ class LoadAcceptanceTest {
 
         String jsonRun = "review-mix-json-" + suffix;
         Path jsonOutput = root.resolve("target").resolve("review-mix-json-" + suffix);
-        CliOutput jsonCli = executeCli(root, scenario, jsonOutput, jsonRun, "json");
+        CliOutput jsonCli = executeCli(root, scenario, jsonOutput, jsonRun, "json", "--substitute-package-root");
         assertEquals(0, jsonCli.exitCode, jsonCli.stderr + "\n" + jsonCli.stdout);
         @SuppressWarnings("unchecked") Map<String, Object> json = JsonSupport.mapper().readValue(jsonCli.stdout, Map.class);
         assertEquals("PASS", json.get("status"));
@@ -72,7 +72,7 @@ class LoadAcceptanceTest {
 
         String humanRun = "review-mix-human-" + suffix;
         Path humanOutput = root.resolve("target").resolve("review-mix-human-" + suffix);
-        CliOutput humanCli = executeCli(root, scenario, humanOutput, humanRun, "human", "--quiet");
+        CliOutput humanCli = executeCli(root, scenario, humanOutput, humanRun, "human", "--quiet", "--substitute-package-root");
         assertEquals(0, humanCli.exitCode, humanCli.stderr + "\n" + humanCli.stdout);
         assertTrue(humanCli.stdout.contains("Report: $ATT_PACKAGE_ROOT/target/review-mix-human-" + suffix
                 + "/load/" + humanRun + "/report/index.html"), humanCli.stdout);
@@ -82,7 +82,7 @@ class LoadAcceptanceTest {
         String duplicateRun = "review-mix-diagnostic-" + suffix;
         Path diagnosticOutput = root.resolve("target").resolve("review-mix-diagnostic-" + suffix);
         Files.createDirectories(diagnosticOutput.resolve("load").resolve(duplicateRun));
-        CliOutput diagnosticCli = executeCli(root, scenario, diagnosticOutput, duplicateRun, "json");
+        CliOutput diagnosticCli = executeCli(root, scenario, diagnosticOutput, duplicateRun, "json", "--substitute-package-root");
         assertEquals(2, diagnosticCli.exitCode, diagnosticCli.stderr + "\n" + diagnosticCli.stdout);
         assertFalse(diagnosticCli.stderr.contains(root.toString()), diagnosticCli.stderr);
         assertTrue(diagnosticCli.stderr.contains("$ATT_PACKAGE_ROOT/target/review-mix-diagnostic-" + suffix

@@ -84,7 +84,8 @@ public final class PackageResourceInspector implements AutoCloseable {
     private static final Pattern XML_SECRET = Pattern.compile(
             "(?is)(<(password|passwd|passphrase|token|secret|authorization|credential|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)(?:\\s+[^>]*)?>)[^<]*(</\\2\\s*>)");
     private static final Pattern SOURCE_PII_VALUE = Pattern.compile(
-            "(?i)([\\\"']?(?:e-?mail|phone(?:number)?|mobile(?:number)?|address|ssn|socialsecuritynumber|nationalid|passport|dateofbirth|birthdate|taxid|creditcard|cardnumber|cvv|iban|routingnumber)[\\\"']?\\s*(?::|=)\\s*)(?:\\\"[^\\\"]*\\\"|'[^']*'|[^,\\r\\n}]+)");
+            "(?i)([\\\"']?(?:e-?mail|phone(?:number)?|mobile(?:number)?|address|account(?:number|id)?|ssn|socialsecuritynumber|nationalid|passport|dateofbirth|birthdate|taxid|creditcard|cardnumber|cvv|iban|routingnumber)[\\\"']?\\s*(?::|=)\\s*)(?:\\\"[^\\\"]*\\\"|'[^']*'|[^,\\r\\n}]+)");
+    private static final Pattern ACCOUNT_IDENTIFIER = Pattern.compile("(?i)(\\baccount(?:\\s+(?:number|id))?\\s+)([A-Za-z0-9][A-Za-z0-9-]{5,})");
     private static final Pattern XML_CLOSE_TAG = Pattern.compile("</[A-Za-z][A-Za-z0-9:_.-]*\\s*>");
     private static final Pattern XML_PII = Pattern.compile(
             "(?is)(<(email|e-?mail|phone(?:number)?|mobile(?:number)?|address|ssn|socialsecuritynumber|nationalid|passport|dateofbirth|birthdate|taxid|creditcard|cardnumber|cvv|iban|routingnumber)(?:\\s+[^>]*)?>)[^<]*(</\\2\\s*>)");
@@ -211,7 +212,19 @@ public final class PackageResourceInspector implements AutoCloseable {
                 result.put("reason", "binary-file");
                 return bounded(result);
             }
-            String safe = scrubSourceText(text, logicalPath);
+            boolean yamlConfiguration = logicalPath.startsWith("config/")
+                    && (logicalPath.toLowerCase(Locale.ROOT).endsWith(".yaml") || logicalPath.toLowerCase(Locale.ROOT).endsWith(".yml"));
+            String safe;
+            boolean redacted;
+            if (yamlConfiguration) {
+                Object authored = loadYaml(file.canonicalPath(), maxSourceBytes);
+                Object projected = sourceYamlProjection(authored, "", logicalPath);
+                safe = dumpYaml(projected);
+                redacted = !deepEquals(authored, projected);
+            } else {
+                safe = scrubSourceText(text, logicalPath);
+                redacted = !safe.equals(text);
+            }
             if (utf8(safe).length > maxSourceBytes) {
                 result.put("reason", "size-limit");
                 return bounded(result);
@@ -220,7 +233,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             result.put("logicalPath", logicalPath);
             result.put("format", sourceFormat(logicalPath));
             result.put("text", safe);
-            result.put("redacted", Boolean.valueOf(!safe.equals(text)));
+            result.put("redacted", Boolean.valueOf(redacted));
             SourceFileReferences references = packageFileSourceReferences(file.canonicalPath(), logicalPath, safe);
             result.put("fileReferences", references.items);
             result.put("fileReferencesTruncated", Boolean.valueOf(references.truncated));
@@ -896,6 +909,22 @@ public final class PackageResourceInspector implements AutoCloseable {
         Map<String, Object> composed = new att.load.LoadScenarioBuilder(new att.load.LoadScenarioLoader(packageRoot))
                 .composeScenario(policy, workloads);
         att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(packageRoot).loadInline(composed);
+        return validatedLoadScenario(index, config, engine, scenario);
+    }
+
+    /** Validates a package-backed Load scenario while retaining source locations from its YAML file. */
+    public Map<String, Object> validateLoadScenarioFile(String relativePath) throws Exception {
+        if (relativePath == null || relativePath.trim().isEmpty()) throw new IllegalArgumentException("Load scenario path is required");
+        Index index = index();
+        FrameworkConfig config = frameworkConfig();
+        DebugEngine engine = debugEngine(config);
+        PackageResourceResolver.PackageResource source = resources.resolvePackageRelative(relativePath, PackageResourceResolver.Kind.FILE);
+        att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(packageRoot).load(source.canonicalPath());
+        return validatedLoadScenario(index, config, engine, scenario);
+    }
+
+    private Map<String, Object> validatedLoadScenario(Index index, FrameworkConfig config, DebugEngine engine,
+                                                       att.load.LoadScenario scenario) throws Exception {
         att.load.LoadRunCoordinator.resolveAndValidateTargets(packageRoot, config, scenario);
         Map<String, Object> scenarioMap = scenario.toMap();
         Map<String, Object> projection = projectSafeLoadScenario(scenarioMap, engine);
@@ -1459,7 +1488,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("type", resource.type);
         result.put("logicalId", scrub(resource.logicalId));
         result.put("name", scrub(resource.name));
-        result.put("description", resource.description == null || resource.description.isEmpty() ? "" : "[HIDDEN]");
+        result.put("description", resource.description == null ? "" : scrubDescription(resource.description));
         result.put("tags", new ArrayList<String>(resource.tags));
         result.put("state", resource.state);
         result.put("sourceAvailable", Boolean.valueOf(sourceAvailable(resource)));
@@ -1484,7 +1513,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("toolId", tool.key());
         result.put("groupId", tool.groupId());
         result.put("name", tool.name());
-        result.put("description", scrub(tool.description()));
+        result.put("description", scrubDescription(tool.description()));
         result.put("executionKind", tool.commandBacked() ? "command" : "call");
         result.put("timeoutMs", tool.timeoutMs());
         Map<String, Object> arguments = new LinkedHashMap<String, Object>();
@@ -1492,7 +1521,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             ToolArgumentConfig argument = entry.getValue();
             Map<String, Object> field = new LinkedHashMap<String, Object>();
             field.put("name", argument.name());
-            field.put("description", scrub(argument.description()));
+            field.put("description", scrubDescription(argument.description()));
             field.put("required", Boolean.valueOf(argument.required()));
             field.put("type", argument.type());
             field.put("enum", argument.enumValues());
@@ -1841,7 +1870,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
                 String key = String.valueOf(entry.getKey());
                 String childPath = path.isEmpty() ? key : path + "." + key;
-                if (sensitiveKey(key) || configuredSensitivePath(childPath) || configuredSensitiveField(key)
+                if (sensitiveKey(key) || protectedSshConnectionField(childPath) || configuredSensitivePath(childPath) || configuredSensitiveField(key)
                         || redactionEnabled && (freeFormKey(key) || isSensitivePath(childPath))) result.put(key, "[REDACTED]");
                 else result.put(key, sourceYamlProjection(entry.getValue(), childPath,sourceLogicalPath));
             }
@@ -1910,11 +1939,22 @@ public final class PackageResourceInspector implements AutoCloseable {
                 || normalized.contains("secret") || normalized.contains("credential") || normalized.equals("authorization")
                 || normalized.contains("apikey") || normalized.contains("accesskey") || normalized.contains("clientid")
                 || normalized.contains("username") || normalized.contains("privatekey") || normalized.contains("identityfile")
+                || normalized.equals("evidencepayload")
                 || normalized.contains("cookie") || normalized.equals("headers") || normalized.equals("header")
                 || normalized.equals("email") || normalized.contains("phone") || normalized.equals("address")
                 || normalized.equals("ssn") || normalized.equals("nationalid") || normalized.equals("passport")
                 || normalized.equals("dateofbirth") || normalized.equals("birthdate")) return true;
         return false;
+    }
+
+    private static boolean protectedSshConnectionField(String path) {
+        String lower = path.toLowerCase(Locale.ROOT);
+        int section = lower.lastIndexOf("sshhelpers.");
+        if (section < 0) return false;
+        String[] parts = lower.substring(section + "sshhelpers.".length()).split("\\.");
+        if (parts.length < 2) return false;
+        String field = parts[parts.length - 1];
+        return "host".equals(field) || "hostname".equals(field) || "port".equals(field) || "user".equals(field);
     }
 
     private static boolean isSensitivePath(String path) {
@@ -1928,6 +1968,14 @@ public final class PackageResourceInspector implements AutoCloseable {
     private String scrub(String value) {
         if (value == null) return null;
         return att.core.PathPresentation.displayDiagnosticText(scrubSensitiveValues(value), packageRoot);
+    }
+
+    private String scrubDescription(String value) {
+        if (value == null) return null;
+        String result = scrub(value);
+        result = SOURCE_PII_VALUE.matcher(result).replaceAll("$1[REDACTED]");
+        result = XML_PII.matcher(result).replaceAll("$1[REDACTED]$3");
+        return ACCOUNT_IDENTIFIER.matcher(result).replaceAll("$1[REDACTED]");
     }
 
     private String scrubSensitiveValues(String value) {

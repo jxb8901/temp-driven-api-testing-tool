@@ -56,6 +56,7 @@ public final class PackageConfigurationInspector {
     private final PackageResourceResolver resources;
     private final int maxResponseBytes;
     private final boolean redactionEnabled;
+    private final boolean includeAllFields;
     private final List<String> sensitivePaths, sensitiveFieldPatterns;
 
     public PackageConfigurationInspector(Path packageRoot, Path configPath, int maxResponseBytes) {
@@ -65,12 +66,19 @@ public final class PackageConfigurationInspector {
     public PackageConfigurationInspector(Path packageRoot, Path configPath, int maxResponseBytes,
                                          boolean redactionEnabled, List<String> sensitivePaths,
                                          List<String> sensitiveFieldPatterns) {
+        this(packageRoot, configPath, maxResponseBytes, redactionEnabled, sensitivePaths, sensitiveFieldPatterns, false);
+    }
+
+    public PackageConfigurationInspector(Path packageRoot, Path configPath, int maxResponseBytes,
+                                         boolean redactionEnabled, List<String> sensitivePaths,
+                                         List<String> sensitiveFieldPatterns, boolean includeAllFields) {
         this.resources = new PackageResourceResolver(packageRoot);
         this.packageRoot = resources.packageRoot();
         this.configPath = configPath == null ? Paths.get("config/config.yaml") : configPath;
         if (maxResponseBytes < 1024) throw new IllegalArgumentException("maxResponseBytes must be at least 1024");
         this.maxResponseBytes = maxResponseBytes;
         this.redactionEnabled = redactionEnabled;
+        this.includeAllFields = includeAllFields;
         this.sensitivePaths = sensitivePaths == null ? Collections.<String>emptyList() : new ArrayList<String>(sensitivePaths);
         this.sensitiveFieldPatterns = sensitiveFieldPatterns == null ? Collections.<String>emptyList() : new ArrayList<String>(sensitiveFieldPatterns);
     }
@@ -307,7 +315,7 @@ public final class PackageConfigurationInspector {
             String sharedSource = sharedSourceForPath(path, leftFields, rightFields);
             if (!includeInherited && sharedSource != null && sameVisibleField(before, after)) continue;
             if (!includeInherited && !profileScoped(path, before, after, leftFields, rightFields)) continue;
-            boolean hidden = redactionEnabled && isSensitivePath(path)
+            boolean hidden = hidesForDisplayPolicy(path)
                     || alwaysHiddenField(path.substring(path.lastIndexOf('.') + 1))
                     || configuredSensitivePath(path)
                     || configuredSensitiveField(path.substring(path.lastIndexOf('.') + 1))
@@ -507,11 +515,15 @@ public final class PackageConfigurationInspector {
     private void hideField(Object rawField, String path) {
         if (!(rawField instanceof Map)) return;
         @SuppressWarnings("unchecked") Map<String, Object> field = (Map<String, Object>) rawField;
-        if ("visible".equals(field.get("state")) && (redactionEnabled && isSensitivePath(path)
+        if ("visible".equals(field.get("state")) && (hidesForDisplayPolicy(path)
                 || alwaysHiddenField(path.substring(path.lastIndexOf('.') + 1))
                 || configuredSensitivePath(path) || configuredSensitiveField(path.substring(path.lastIndexOf('.') + 1)))) {
             field.clear(); field.put("state", "hidden");
         }
+    }
+
+    private boolean hidesForDisplayPolicy(String path) {
+        return redactionEnabled && isSensitivePath(path) && !includeAllFields;
     }
 
     private boolean configuredSensitivePath(String path) {
@@ -628,7 +640,21 @@ public final class PackageConfigurationInspector {
             visible(fields, "pool.minIdle", Integer.valueOf(helper.poolMinIdle()), source);
             visible(fields, "pool.connectionTimeoutMs", Long.valueOf(helper.poolConnectionTimeoutMs()), source);
             visible(fields, "url", scrubTestdataText(helper.url()), source);
-            for (String hidden : Arrays.asList("username", "password", "properties", "evidence.sql", "evidence.parameters")) hidden(fields, hidden);
+            if (includeAllFields) {
+                Map<String,Object> safeProperties = new LinkedHashMap<String,Object>();
+                for (Map.Entry<String,String> property : helper.properties().entrySet()) {
+                    String propertyPath = "dbhelpers." + helper.id() + ".properties." + property.getKey();
+                    safeProperties.put(property.getKey(), alwaysHiddenField(property.getKey())
+                            || configuredSensitivePath(propertyPath) || configuredSensitiveField(property.getKey())
+                            ? "[REDACTED]" : scrubTestdataText(property.getValue()));
+                }
+                visible(fields, "properties", safeProperties, source);
+                visible(fields, "evidence.sql", scrubTestdataText(helper.evidenceSql()), source);
+                visible(fields, "evidence.parameters", scrubTestdataText(helper.evidenceParameters()), source);
+            } else {
+                for (String hidden : Arrays.asList("properties", "evidence.sql", "evidence.parameters")) hidden(fields, hidden);
+            }
+            for (String hidden : Arrays.asList("username", "password")) hidden(fields, hidden);
             logicalSource(entry, helper.sourceFile());
             entries.add(entry);
         }

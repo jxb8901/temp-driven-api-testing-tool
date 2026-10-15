@@ -1,5 +1,5 @@
 import { useAppShellContext, type ThemePreference } from './AppShell';
-import { authUiLocale, authUiText } from './authUiText';
+import { authUiText } from './authUiText';
 import { UserManagementPanel } from './UserManagement';
 import './SettingsPage.css';
 
@@ -10,8 +10,8 @@ const themeOptions: Array<{ value: ThemePreference; label: string; description: 
 ];
 
 export function SettingsPage() {
-  const { themePreference, onThemePreferenceChange } = useAppShellContext();
-  const locale = authUiLocale();
+  const { themePreference, onThemePreferenceChange, uiLocale, uiLocalePreference, onUiLocaleChange } = useAppShellContext();
+  const locale = uiLocale;
 
   return (
     <section className="page-content att-settings-page" aria-labelledby="settings-title">
@@ -52,6 +52,41 @@ export function SettingsPage() {
           ))}
         </fieldset>
         <p className="att-settings-storage-note">The selected preference is stored in this browser. Selecting System removes the saved override.</p>
+      </section>
+
+      <section className="panel att-settings-section" aria-labelledby="language-title">
+        <div className="att-settings-section-heading">
+          <div>
+            <h2 id="language-title">Language</h2>
+            <p className="att-settings-help">Choose the language used throughout ATT Studio.</p>
+          </div>
+          <span className="att-settings-current" role="status" aria-live="polite">
+            {locale === 'zh-Hant' ? '目前語言：繁體中文。' : 'Current language: English.'}
+          </span>
+        </div>
+        <fieldset className="att-settings-options">
+          <legend className="sr-only">Studio language preference</legend>
+          {([
+            { value: 'browser' as const, label: 'Browser default', description: 'Follow this browser’s language unless you choose a language below.' },
+            { value: 'en' as const, label: 'English', description: 'Use English throughout ATT Studio.' },
+            { value: 'zh-Hant' as const, label: 'Traditional Chinese', description: 'Use Traditional Chinese throughout ATT Studio.' },
+          ]).map(option => (
+            <label className="att-settings-option" key={option.value}>
+              <input
+                type="radio"
+                name="ui-language"
+                value={option.value}
+                checked={uiLocalePreference === option.value}
+                onChange={() => onUiLocaleChange(option.value)}
+              />
+              <span className="att-settings-option-copy">
+                <strong>{option.label}</strong>
+                <small>{option.description}</small>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <p className="att-settings-storage-note">Your choice is stored in this browser and updates the Studio immediately.</p>
       </section>
 
       <section className="panel att-settings-section" aria-labelledby="keyboard-settings-title">

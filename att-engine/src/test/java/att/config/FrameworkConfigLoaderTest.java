@@ -9,7 +9,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class FrameworkConfigLoaderTest {
     @TempDir Path tempDir;
 
-    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception {
+        att.TestSchemas.install(tempDir);
+        att.core.PathPresentation.configure(true, true);
+    }
+    @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
     @Test void loadsRunAndDebugIdentityFormatsFromCurrentConfigSchema() throws Exception {
         Path config = write("identity-formats.yaml", "schemaVersion: att-config/v2.12\n"

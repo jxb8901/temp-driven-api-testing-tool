@@ -32,7 +32,7 @@ async function flush() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
-function Harness({ api, sourceReference }: { api: ExplorerApi; sourceReference?: ResourceSourceReference }) {
+function Harness({ api, sourceReference, canRevealAdminFields = false }: { api: ExplorerApi; sourceReference?: ResourceSourceReference; canRevealAdminFields?: boolean }) {
   const [filePath, setFilePath] = useState<string | undefined>(sourceReference ? 'templates/payment/payload/request.xml' : undefined);
   const [fileOrigin, setFileOrigin] = useState<string | undefined>(sourceReference ? 'templates/payment/flow.yaml' : undefined);
   const [activeSourceReference, setActiveSourceReference] = useState(sourceReference);
@@ -40,10 +40,43 @@ function Harness({ api, sourceReference }: { api: ExplorerApi; sourceReference?:
   const [tab, setTab] = useState<'source' | 'declared' | 'effective' | 'compare' | 'testdata'>('source');
   return <ConfigurationWorkspace api={api} packages={[{ packageId: 'payments' }]} packageId="payments" environment=""
     filePath={filePath} fileOrigin={fileOrigin} sourceReference={activeSourceReference} configurationReferenceId={configurationReferenceId} tab={tab} onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()}
-    onFileChange={(path, origin, reference, configurationReference) => { setFilePath(path); setFileOrigin(origin); setActiveSourceReference(reference); setConfigurationReferenceId(configurationReference); }} onTabChange={setTab} onOpenResource={vi.fn()} />;
+    onFileChange={(path, origin, reference, configurationReference) => { setFilePath(path); setFileOrigin(origin); setActiveSourceReference(reference); setConfigurationReferenceId(configurationReference); }} onTabChange={setTab} onOpenResource={vi.fn()} canRevealAdminFields={canRevealAdminFields} />;
 }
 
 describe('ConfigurationWorkspace', () => {
+  it('limits the additional DB fields option to Effective and Compare and explains protected views', async () => {
+    const api = {
+      listResources: vi.fn(async () => ({ items: [], total: 0 })),
+      getResource: vi.fn(async () => ({ resource: { type: 'template', resourceId: 'x' } })),
+      getSafeSource: vi.fn(async () => ({ available: false })),
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [], sections: [] })),
+      getEffectiveConfiguration: vi.fn(async () => ({ sections: [] })),
+      compareConfiguration: vi.fn(async () => ({ fields: [] })),
+      listConfigurationFiles: vi.fn(async () => ({ items: [], total: 0 })),
+      getConfigurationFileSource: vi.fn(async () => ({ available: false })),
+      getTestdataRecords: vi.fn(async () => ({ descriptorId: 'x', offset: 0, limit: 50, total: 0, records: [] })),
+      getDebugForm: vi.fn(), previewDebug: vi.fn(), submitDebug: vi.fn(), runCase: vi.fn(),
+    } as unknown as ExplorerApi;
+    const showTab = async (name: string) => {
+      await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+        .find(button => button.textContent === name)?.click());
+      await flush();
+    };
+
+    await act(async () => root.render(<Harness api={api} canRevealAdminFields />));
+    await flush();
+    expect(host.textContent).not.toContain('Show more DB fields (sensitive values stay hidden)');
+    await showTab('Declared');
+    expect(host.textContent).not.toContain('Show more DB fields (sensitive values stay hidden)');
+    await showTab('Effective');
+    expect(host.textContent).toContain('Show more DB fields (sensitive values stay hidden)');
+    expect(api.getDeclaredConfiguration).toHaveBeenCalledWith('payments', expect.any(AbortSignal));
+    await showTab('Compare');
+    expect(host.textContent).toContain('Show more DB fields (sensitive values stay hidden)');
+    await showTab('Source');
+    expect(host.textContent).not.toContain('Show more DB fields (sensitive values stay hidden)');
+  });
+
   it('shows a generic unavailable state when the Server withholds config-source references', async () => {
     const api = {
       listResources: vi.fn(async () => ({ items: [], total: 0 })),

@@ -30,6 +30,7 @@ public final class FrameworkRunner {
             if (remoteExit != 0) System.exit(remoteExit);
             return;
         }
+        att.core.PathPresentation.configure(false, false);
         CliOptions options = null;
         long argumentParseNanos = 0L;
         Path root = Paths.get("").toAbsolutePath();
@@ -37,6 +38,7 @@ public final class FrameworkRunner {
             long argumentParseStartedNanos = System.nanoTime();
             try {
                 options = CliOptions.parse(args);
+                att.core.PathPresentation.configure(options.substitutePackageRoot(), options.substituteExternalBasename());
                 argumentParseNanos = System.nanoTime() - argumentParseStartedNanos;
             }
             catch (IllegalArgumentException e) {
@@ -452,6 +454,7 @@ public final class FrameworkRunner {
         System.out.println("Load: ./att.sh load [<scenario.yaml> | --debug template|flow|tool <id>] [--input <debug.yaml>] [--set <input|arg|vars>.<path>=<yaml-value>] [--config <file>] [--env <name>] [--run-id <id>] [--users <n>|--arrival-rate <n/s>] [--duration <duration>] [--max-concurrent <n>] [--format human|json]");
         System.out.println("Load discovery: ./att.sh load [--format human|json] lists valid scenarios; load/load.yaml supplies the optional Quick Load policy.");
         System.out.println("--set namespaces: input.* -> EXEC.INPUT; arg.* -> Tool arguments; vars.* -> Template/Flow EXEC.VARS. Values use safe YAML types.");
+        System.out.println("Path display: absolute paths are shown by default; --substitute-package-root and --substitute-external-basename independently enable $ATT_PACKAGE_ROOT and $EXTERNAL/<basename> aliases.");
         System.out.println("Load options: --warmup <duration> --ramp-up <duration> --ramp-down <duration> --think-time <duration> --overload-policy drop --output-dir <dir> --profile --quiet|--verbose");
         System.out.println("Load output: <output-dir>/load/<runId>/load-summary.json|yaml and report/index.html; exit codes PASS=0, threshold FAIL=1, validation=2, runtime=3");
         System.out.println("Environment profiles: use --env <name> with run, validate, debug, or load; --config selects the common config.");

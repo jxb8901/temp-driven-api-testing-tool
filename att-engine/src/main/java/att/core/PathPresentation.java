@@ -14,6 +14,8 @@ import java.util.Map;
 
 /** Formats local paths at human-readable diagnostic boundaries. */
 public final class PathPresentation {
+    private static volatile boolean substitutePackageRoot;
+    private static volatile boolean substituteExternalBasename;
     private static final Pattern QUOTED_ABSOLUTE_PATH = Pattern.compile("(['\"])((?:/[^\\r\\n'\"]+)|(?:[A-Za-z]:[\\\\/][^\\r\\n'\"]+)|(?:\\\\\\\\[^\\r\\n'\"]+))\\1");
     private static final Pattern ABSOLUTE_PATH_TOKEN = Pattern.compile("(?<![A-Za-z0-9_/:])(?:[A-Za-z]:[\\\\/]|//|\\\\\\\\|/)");
     private static final String[] DIAGNOSTIC_PROSE_BOUNDARIES = {
@@ -25,6 +27,15 @@ public final class PathPresentation {
 
     private PathPresentation() { }
 
+    /** Configures presentation aliases for the current process. Both aliases are disabled by default. */
+    public static void configure(boolean packageRoot, boolean externalBasename) {
+        substitutePackageRoot = packageRoot;
+        substituteExternalBasename = externalBasename;
+    }
+
+    public static boolean substitutesPackageRoot() { return substitutePackageRoot; }
+    public static boolean substitutesExternalBasename() { return substituteExternalBasename; }
+
     public static String displayPath(Path value, Path projectRoot) {
         if (value == null) return "";
         String portable = displayPortableAbsolute(value.toString(), projectRoot);
@@ -34,16 +45,21 @@ public final class PathPresentation {
         if (root != null) {
             Path canonicalRoot = canonicalIfPresent(root);
             Path candidate = canonicalIfPresent(path);
-            if (path.equals(root) || candidate.equals(canonicalRoot)) return "$ATT_PACKAGE_ROOT";
-            if (path.startsWith(root) && containedForDisplay(path, candidate, canonicalRoot)) {
-                String relative = root.relativize(path).toString().replace('\\', '/');
-                return relative.isEmpty() ? "$ATT_PACKAGE_ROOT" : "$ATT_PACKAGE_ROOT/" + relative;
-            }
-            if (candidate.startsWith(canonicalRoot)) {
+            boolean inside = path.equals(root) || candidate.equals(canonicalRoot)
+                    || path.startsWith(root) && containedForDisplay(path, candidate, canonicalRoot)
+                    || candidate.startsWith(canonicalRoot);
+            if (inside) {
+                if (!substitutePackageRoot) return path.toString();
+                if (path.equals(root) || candidate.equals(canonicalRoot)) return "$ATT_PACKAGE_ROOT";
+                if (path.startsWith(root) && containedForDisplay(path, candidate, canonicalRoot)) {
+                    String relative = root.relativize(path).toString().replace('\\', '/');
+                    return relative.isEmpty() ? "$ATT_PACKAGE_ROOT" : "$ATT_PACKAGE_ROOT/" + relative;
+                }
                 String relative = canonicalRoot.relativize(candidate).toString().replace('\\', '/');
                 return relative.isEmpty() ? "$ATT_PACKAGE_ROOT" : "$ATT_PACKAGE_ROOT/" + relative;
             }
         }
+        if (!substituteExternalBasename) return path.toString();
         Path name = path.getFileName();
         return name == null ? "$EXTERNAL" : "$EXTERNAL/" + name.toString();
     }
@@ -57,7 +73,7 @@ public final class PathPresentation {
     static String displayText(String text, Path projectRoot, boolean preserveText) {
         if (text == null || preserveText) return text;
         String value = text;
-        if (projectRoot != null) {
+        if (substitutePackageRoot && projectRoot != null) {
             Path root = projectRoot.toAbsolutePath().normalize();
             Path canonicalRoot = canonicalIfPresent(root);
             String[] spellings = new String[]{root.toString(), root.toString().replace('\\', '/'), root.toString().replace('/', '\\'),
@@ -193,15 +209,16 @@ public final class PathPresentation {
                 String path = slashForm(value);
                 String root = slashForm(projectRoot.toString());
                 while (root.length() > 2 && root.endsWith("/")) root = root.substring(0, root.length() - 1);
-                if (path.equals(root)) return "$ATT_PACKAGE_ROOT";
-                if (path.startsWith(root + "/")) return "$ATT_PACKAGE_ROOT/" + path.substring(root.length() + 1);
+                if (path.equals(root)) return substitutePackageRoot ? "$ATT_PACKAGE_ROOT" : null;
+                if (path.startsWith(root + "/"))
+                    return substitutePackageRoot ? "$ATT_PACKAGE_ROOT/" + path.substring(root.length() + 1) : null;
             }
-            return externalBasename(value);
+            return substituteExternalBasename ? externalBasename(value) : null;
         }
         if (isDriveAbsolute(value)) {
             try { if (java.nio.file.Paths.get(value).isAbsolute()) return null; }
             catch (RuntimeException ignored) { }
-            return externalBasename(value);
+            return substituteExternalBasename ? externalBasename(value) : null;
         }
         return null;
     }

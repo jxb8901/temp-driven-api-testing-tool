@@ -111,6 +111,7 @@ describe('AppShell', () => {
 
   it('offers Change Password from the authenticated local user menu for a USER role', async () => {
     vi.spyOn(api,'getCurrentUser').mockResolvedValue({loginId:'jane',displayName:'Jane Tester',role:'USER'});
+    vi.spyOn(api,'getAuthCapabilities').mockResolvedValue({configurationAdmin:false});
     localStorage.setItem('att-ui-theme','light');
     host=document.createElement('div');document.body.append(host);root=createRoot(host);
     const navigation:RouteState={route:{kind:'settings'},pendingNavigation:null,pendingDescription:'',isDirty:false,
@@ -120,6 +121,8 @@ describe('AppShell', () => {
       selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
       <p>Settings</p></AppShell>);await Promise.resolve();});
     expect(host.textContent).toContain('Jane Tester');
+    expect(host.querySelector('.context-identity')?.textContent).toContain('Jane Tester');
+    expect(host.querySelector('.context-identity')?.textContent).toContain('jane · USER');
     const menu=host.querySelector('.att-current-user-menu') as HTMLDetailsElement;
     act(()=>{menu.open=true;});
     const change=[...host.querySelectorAll('.att-user-menu-panel button')].find(button=>button.textContent==='Change password') as HTMLButtonElement|undefined;

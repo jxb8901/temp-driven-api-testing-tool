@@ -43,6 +43,7 @@ public class WorkerRequest {
     public String inspectionOtherEnvironment;
     public String inspectionSection;
     public Boolean inspectionIncludeInherited;
+    public Boolean inspectionIncludeAllFields;
     public String inspectionPath;
     public String inspectionOrigin;
     /** Server-issued token for a Configuration-source file reference. */

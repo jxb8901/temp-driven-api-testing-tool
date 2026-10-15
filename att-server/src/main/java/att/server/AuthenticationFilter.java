@@ -24,7 +24,8 @@ public final class AuthenticationFilter implements Filter {
             res.setHeader("Cache-Control","no-store");
             boolean publicAuthRoute="/auth/login".equals(path)||"/auth/bootstrap".equals(path)||"/auth/bootstrap/status".equals(path);
             boolean loginAsset=uiPath.equals("/ui/login.html")||uiPath.equals("/ui/login.js")||uiPath.equals("/ui/login.css");
-            if(publicRead||publicAuthRoute||loginAsset){chain.doFilter(request,response);return;}
+            boolean publicUiRead=("GET".equals(req.getMethod())||"HEAD".equals(req.getMethod()))&&uiPath.startsWith("/ui/");
+            if(publicRead||publicAuthRoute||loginAsset||publicUiRead){chain.doFilter(request,response);return;}
             java.util.Map<String,String> session;
             try {session=runtime.auth.session(req);}catch(Exception failure){throw new ServletException("Unable to resolve ATT session",failure);}
             if(session==null&&req.getHeader("Authorization")!=null) {

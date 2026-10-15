@@ -29,6 +29,12 @@ Vite emits static files to `att-web/frontend/dist`. Maven copies those files int
 - Dashboard summaries and lists use only `/version`, `/packages`, and `/jobs` responses. Counts describe returned rows; an API error is not displayed as zero.
 - External CSS and scripts preserve the existing self-only Content Security Policy. All requests remain same-origin.
 
+## Browser language and CSP
+
+`uiLocale.ts` translates rendered text and accessibility attributes between English and Traditional Chinese. The preference is browser-managed by default, follows `navigator.language` changes, or stores an explicit choice in browser local storage. The login page reads that same preference for its standalone messages. The language change does not alter API payloads, resource identifiers, source text, or code examples.
+
+`SecurityHeadersFilter` issues a per-response nonce for the Studio document and replaces the matching marker in the packaged Vite HTML. CodeMirror receives nonce-authorized style elements and the Studio document alone permits inline style attributes for editor geometry. API, login, download, and other responses keep inline styles disabled; scripts and network connections remain same-origin. The filter also redirects the context root to `/ui/` when the servlet container passes that request through to the application.
+
 ## Build and size budget
 
 The frontend dependency versions are pinned in `package.json` and `package-lock.json`. `npm ci`, type checks, component tests, and Vite production builds run in development and CI. The Java 17 CI job provisions pinned Node.js 22.22.2; the Java 8 compatibility job does not require Node. The initial JavaScript and CSS gzip budget is 150 KiB and is checked against Vite output.

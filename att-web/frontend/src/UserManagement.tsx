@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { api } from './api';
 import { useAppShellContext } from './AppShell';
 import { AuthPasswordField } from './AuthPasswordField';
-import { authUiLocale, authUiText, type AuthUiLocale } from './authUiText';
+import { authUiText, type AuthUiLocale } from './authUiText';
 import { ApiError, type LocalAuthUser } from './types';
 
 type UserDialog =
@@ -39,8 +39,8 @@ function redirectToLogin(message: string) {
 }
 
 export function UserManagementPanel() {
-  const { authMode, currentUser } = useAppShellContext();
-  const locale: AuthUiLocale = useMemo(authUiLocale,[]);
+  const { authMode, currentUser, uiLocale } = useAppShellContext();
+  const locale: AuthUiLocale = uiLocale;
   const t = (key: Parameters<typeof authUiText>[0]) => text(locale,key);
   const isAdmin = authMode === 'local' && currentUser?.role === 'ADMIN';
   const [users,setUsers] = useState<LocalAuthUser[]>([]);

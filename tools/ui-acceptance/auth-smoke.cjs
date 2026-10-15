@@ -24,6 +24,27 @@ async function main() {
     const base = `${fixture.origin}/att/ui/`;
 
     await selectFixture(context, fixture.origin, 'auth-admin');
+    const returnToLogin = page => page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.route(`${fixture.origin}/att/api/v1/auth/login`, route => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify({ authenticated: true }),
+    }));
+    const deepLink = '/ui/#/jobs/JOB-9?view=events';
+    await page.goto(`${base}login.html?returnTo=${encodeURIComponent(deepLink)}`);
+    await page.getByLabel('Login ID', { exact: true }).fill('admin');
+    await page.getByLabel('Password', { exact: true }).fill('fixture-password');
+    await returnToLogin(page);
+    await page.waitForURL(url => url.pathname === '/att/ui/' && url.hash === '#/jobs/JOB-9?view=events');
+    await page.goto(`${base}login.html?returnTo=${encodeURIComponent('//attacker.example/path')}`);
+    await page.getByLabel('Login ID', { exact: true }).fill('admin');
+    await page.getByLabel('Password', { exact: true }).fill('fixture-password');
+    await returnToLogin(page);
+    await page.waitForURL(url => url.pathname === '/att/ui/' && !url.hash);
+    await page.goto(`${base}login.html?returnTo=${encodeURIComponent('/ui/%252e%252e/admin/')}`);
+    await page.getByLabel('Login ID', { exact: true }).fill('admin');
+    await page.getByLabel('Password', { exact: true }).fill('fixture-password');
+    await returnToLogin(page);
+    await page.waitForURL(url => url.pathname === '/att/ui/' && !url.hash);
+    await page.unroute(`${fixture.origin}/att/api/v1/auth/login`);
     await page.goto(`${base}#/settings`);
     await page.getByRole('heading', { name: 'User Management', exact: true }).waitFor();
     await page.getByRole('row', { name: /jane Jane Tester USER Active/ }).waitFor();

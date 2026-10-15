@@ -71,6 +71,8 @@ class ServerWarUiIT {
             tomcat.start();
             int port = tomcat.getConnector().getLocalPort();
             String origin = "http://127.0.0.1:" + port;
+            assertContextRootRedirect(port, "/tools/att", "/tools/att/");
+            assertContextRootRedirect(port, "/tools/att/", "/tools/att/ui/");
             assertEquals(401, get(port, "/tools/att/ui/index.html", null));
             String auth = "Basic " + Base64.getEncoder().encodeToString(
                     "att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -319,11 +321,28 @@ class ServerWarUiIT {
             assertEquals("UTC", preview.path("timezone").asText());
             assertTrue(preview.path("nextRunAt").isTextual(), "The real Server preview must return its next occurrence.");
 
-            Map<String, Object> invalid = scheduleRequest("Invalid scenario", "load/invalid.yaml");
+            Map<String, Object> invalid = new java.util.LinkedHashMap<>(scheduleRequest("Invalid scenario", "load/invalid.yaml"));
+            invalid.put("environment", "SIT");
             assertEquals(401, apiStatus(port, "POST", api + "/load-schedules", null, origin, invalid));
             assertEquals(403, apiStatus(port, "POST", api + "/load-schedules", ordinary, origin, invalid));
-            assertEquals(400, apiStatus(port, "POST", api + "/load-schedules", admin, origin, invalid),
-                    "Saving must validate the full package scenario even though preview only checks timezone and cron.");
+            JsonNode invalidSchedule = apiJsonResponse(port, "POST", api + "/load-schedules", admin, origin, invalid, 400);
+            JsonNode invalidDiagnostic = invalidSchedule.path("diagnostics").path(0);
+            assertEquals("ATT-LOAD-001", invalidDiagnostic.path("code").asText());
+            assertTrue(invalidDiagnostic.path("summary").asText().length() > 0);
+            assertNotEquals("Load or Debug input failed schema or target validation",
+                    invalidDiagnostic.path("summary").asText());
+            assertEquals("load/invalid.yaml", invalidDiagnostic.path("file").asText());
+            assertEquals("load/invalid.yaml", invalidDiagnostic.path("sourceFile").asText());
+            assertTrue(invalidDiagnostic.path("line").asInt() > 0, invalidDiagnostic.toString());
+            assertTrue(invalidDiagnostic.path("sourceColumn").asInt() > 0, invalidDiagnostic.toString());
+            assertFalse(invalidDiagnostic.toString().contains(packageRoot.toString()), invalidDiagnostic.toString());
+            assertFalse(invalidDiagnostic.toString().contains("$EXTERNAL"), invalidDiagnostic.toString());
+            assertEquals("payments", invalidDiagnostic.path("packageId").asText());
+            assertEquals("SIT", invalidDiagnostic.path("environment").asText());
+            assertEquals("SCHEDULED", invalidDiagnostic.path("targets").path(0).path("id").asText());
+            assertTrue(invalidSchedule.path("requestId").isTextual());
+            assertEquals(invalidSchedule.path("requestId").asText(),
+                    invalidDiagnostic.path("requestId").asText());
 
             JsonNode first = apiJson(port, "POST", api + "/load-schedules", admin, origin,
                     scheduleRequest("Nightly payments", "load/scenario.yaml"), 201);
@@ -464,7 +483,9 @@ class ServerWarUiIT {
         Files.writeString(loads.resolve("scenario.yaml"),
                 "schemaVersion: att-load/v1.6\nworkloads:\n  - id: scheduled-long-run\n    target:\n      type: template\n      id: SCHEDULED\n"
                         + "    load:\n      users: 1\n      duration: 30s\n    execution:\n      thinkTime: 1s\n");
-        Files.writeString(loads.resolve("invalid.yaml"), "schemaVersion: att-load/invalid\nworkloads: []\n");
+        Files.writeString(loads.resolve("invalid.yaml"), "schemaVersion: att-load/invalid\nworkloads:\n"
+                + "  - id: invalid-snapshot\n    target:\n      type: template\n      id: SCHEDULED\n"
+                + "    load:\n      users: 1\n      duration: 1s\n");
     }
 
     private static void writeReferenceFlowSource(Path packageRoot) throws Exception {
@@ -536,6 +557,30 @@ class ServerWarUiIT {
         } finally {
             connection.disconnect();
         }
+    }
+
+    private static JsonNode apiJsonResponse(int port, String method, String path, String authorization, String origin,
+                                            Object body, int expectedStatus) throws Exception {
+        HttpURLConnection connection = open(port, path, authorization);
+        connection.setConnectTimeout(5000);
+        connection.setReadTimeout(30000);
+        connection.setRequestMethod(method);
+        if (origin != null) connection.setRequestProperty("Origin", origin);
+        if (body != null) {
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+            try (var output = connection.getOutputStream()) {
+                output.write(ServerRuntime.JSON.writeValueAsBytes(body));
+            }
+        }
+        try {
+            int status = connection.getResponseCode();
+            assertEquals(expectedStatus, status, method + " " + path);
+            try (var stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream()) {
+                assertNotNull(stream, "Expected a JSON response body");
+                return ServerRuntime.JSON.readTree(stream);
+            }
+        } finally { connection.disconnect(); }
     }
 
     private static int apiStatus(int port, String method, String path, String authorization, String origin, Object body) throws Exception {
@@ -668,6 +713,17 @@ class ServerWarUiIT {
         HttpURLConnection connection = open(port, path, authorization);
         try { return connection.getResponseCode(); }
         finally { connection.disconnect(); }
+    }
+
+    private static void assertContextRootRedirect(int port, String path, String expectedLocation) throws Exception {
+        HttpURLConnection connection = open(port, path, null);
+        connection.setInstanceFollowRedirects(false);
+        try {
+            assertEquals(302, connection.getResponseCode(), path);
+            assertEquals(expectedLocation, connection.getHeaderField("Location"), path);
+        } finally {
+            connection.disconnect();
+        }
     }
 
     private static String getText(int port, String path, String authorization) throws Exception {

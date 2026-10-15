@@ -3,7 +3,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickLoadPage } from './QuickLoadPage';
-import type { LoadJobsApi } from './types';
+import type { LoadJobsApi, LoadTargetType } from './types';
+import { ApiError } from '../../types';
 
 vi.mock('../code/CodeEditor', () => ({
   CodeEditor: ({ value, label }: { value: string; label: string }) => <pre aria-label={label}>{value}</pre>,
@@ -27,6 +28,35 @@ async function flush() {
 }
 
 describe('QuickLoadPage', () => {
+  it('shows server diagnostics and focuses the matching field from the review action', async () => {
+    const api = {
+      getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
+      getTargetLoadForm: vi.fn(async () => ({ target: { type: 'template' as const, id: 'checkout' }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
+      createLoadDraft: vi.fn(async () => { throw new ApiError('Duration is not supported.', {
+        status: 400, code: 'LOAD_VALIDATION_FAILED', requestId: 'req-quick-123',
+        diagnostics: [{ severity: 'ERROR', code: 'DURATION_INVALID', path: 'scenario.load.duration', summary: 'Use a supported duration.' }],
+      }); }),
+      submitLoadDraft: vi.fn(async () => ({ jobId: 'JOB-QUICK' })),
+    } as unknown as LoadJobsApi;
+    await act(async () => root.render(<QuickLoadPage
+      api={api} packageId="payments" target={{ type: 'template', resourceId: 'checkout' }}
+      environment="" environments={[]} environmentState="ready" inlineLoadEnabled
+      onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} onCancel={vi.fn()}
+      registerUnsavedChanges={() => () => {}}
+    />));
+    await flush();
+
+    const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!;
+    await act(async () => validate.click());
+    await flush();
+    expect(host.textContent).toContain('DURATION_INVALID');
+    expect(host.textContent).toContain('Use a supported duration.');
+    expect(host.textContent).toContain('req-quick-123');
+    const review = [...host.querySelectorAll('button')].find(button => button.textContent === 'Review field')!;
+    await act(async () => review.click());
+    expect(document.activeElement).toBe(host.querySelector('input[placeholder="e.g. 30s or 5m"]'));
+  });
+
   it('loads the selected bundled Quick Smoke policy without submitting and validates its preview', async () => {
     const api = {
       getLoadPolicy: vi.fn(async (_packageId: string, model: 'virtualUsers' | 'arrivalRate', _environment?: string, _signal?: AbortSignal, templateId?: string) => ({
@@ -36,7 +66,7 @@ describe('QuickLoadPage', () => {
           : { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } },
         templates: [{ id: 'bundled:quick-smoke', name: 'Quick Smoke · 2 users · 10s', model: 'virtualUsers' as const, bundled: true }],
       })),
-      getTargetLoadForm: vi.fn(async () => ({ model: 'virtualUsers' as const, input: { inputs: { account: 'A-1' }, vars: {} } })),
+      getTargetLoadForm: vi.fn(async () => ({ target: { type: 'template' as const, id: 'checkout' }, model: 'virtualUsers' as const, input: { inputs: { account: 'A-1' }, vars: {} } })),
       createLoadDraft: vi.fn(async () => ({
         draftId: 'L0123456789ABCDEF0123456789ABCDEF', packageId: 'payments', model: 'virtualUsers' as const,
         previewYaml: 'schemaVersion: att-load/v1.6\n', expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -45,7 +75,7 @@ describe('QuickLoadPage', () => {
     } as unknown as LoadJobsApi;
     const onJobAccepted = vi.fn();
     await act(async () => root.render(<QuickLoadPage
-      api={api} packageId="payments" target={{ type: 'template', resourceId: 'checkout' }}
+      api={api} packageId="payments" target={{ type: 'template', resourceId: 'opaque:r_4f%2F' }}
       environment="" environments={['staging']} environmentState="ready" inlineLoadEnabled
       onEnvironmentChange={vi.fn()} onJobAccepted={onJobAccepted} onCancel={vi.fn()}
       registerUnsavedChanges={() => () => {}}
@@ -69,6 +99,7 @@ describe('QuickLoadPage', () => {
     const input = vi.mocked(api.createLoadDraft).mock.calls[0][0];
     const scenario = input.scenario as Record<string, unknown>;
     const workload = (scenario.workloads as Array<Record<string, unknown>>)[0];
+    expect(api.getTargetLoadForm).toHaveBeenCalledWith('payments', 'template', 'opaque:r_4f%2F', 'virtualUsers', undefined, expect.any(AbortSignal));
     expect(workload.target).toEqual({ type: 'template', id: 'checkout' });
     expect(workload.load).toEqual({ users: 2 });
     expect((scenario.load as Record<string, unknown>).duration).toBe('10s');
@@ -89,7 +120,7 @@ describe('QuickLoadPage', () => {
     }) => void> = [];
     const api = {
       getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
-      getTargetLoadForm: vi.fn(async () => ({ model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
+      getTargetLoadForm: vi.fn(async (_packageId: string, type: LoadTargetType, resourceId: string) => ({ target: { type, id: resourceId }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
       createLoadDraft: vi.fn(() => new Promise(resolve => pending.push(resolve))),
       submitLoadDraft: vi.fn(async () => ({ jobId: 'JOB-QUICK' })),
     } as unknown as LoadJobsApi;
@@ -161,7 +192,7 @@ describe('QuickLoadPage', () => {
           ? { schemaVersion: 'att-load/v1.6', load: { users: 3, duration: '20s' }, thresholds: { p95: '<= 250ms' } }
           : { schemaVersion: 'att-load/v1.6', load: { arrivalRate: '12/s', maxConcurrent: 4, duration: '2m' }, thresholds: { achievedArrivalRate: '>= 90%' } },
       })),
-      getTargetLoadForm: vi.fn(async () => ({ model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
+      getTargetLoadForm: vi.fn(async (_packageId: string, type: LoadTargetType, resourceId: string) => ({ target: { type, id: resourceId }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
       createLoadDraft: vi.fn(async () => ({
         draftId: 'L0123456789ABCDEF0123456789ABCDEF', packageId: 'payments', model: 'virtualUsers' as const,
         previewYaml: 'schemaVersion: att-load/v1.6\n', expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -213,7 +244,7 @@ describe('QuickLoadPage', () => {
           ? { schemaVersion: 'att-load/v1.6', load: { arrivalRate: '7/s', maxConcurrent: 5, duration: '45s', warmup: '5s' }, execution: { thinkTime: '80ms', customExecutionOption: 'preserve-me' }, thresholds: { p95: '<= 400ms', customThreshold: { mode: 'strict' } }, evidence: { mode: 'failures' }, customRootField: { enabled: true } }
           : { schemaVersion: 'att-load/v1.6', load: { users: 2, duration: '20s' } },
       })),
-      getTargetLoadForm: vi.fn(async () => ({ model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
+      getTargetLoadForm: vi.fn(async (_packageId: string, type: LoadTargetType, resourceId: string) => ({ target: { type, id: resourceId }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
       createLoadDraft: vi.fn(async () => ({ draftId: 'draft', packageId: 'payments', model: 'arrivalRate' as const, previewYaml: 'validated' })),
       submitLoadDraft: vi.fn(async () => ({ jobId: 'JOB-QUICK' })),
     } as unknown as LoadJobsApi;

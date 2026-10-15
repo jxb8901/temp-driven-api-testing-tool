@@ -1,6 +1,7 @@
 import { autocompletion, type CompletionContext } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { foldGutter, foldKeymap, indentOnInput, bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { foldGutter, foldKeymap, indentOnInput, bracketMatching, defaultHighlightStyle, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { tags } from '@lezer/highlight';
 import { searchKeymap, openSearchPanel } from '@codemirror/search';
 import { EditorState, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, ViewPlugin, type DecorationSet } from '@codemirror/view';
@@ -17,6 +18,18 @@ export interface EditorOptions {
   fileReferences?: Array<{ referenceId: string; logicalPath: string }>;
   suggestions?: string[];
 }
+
+const attHighlightStyle = HighlightStyle.define([
+  { tag: tags.meta, class: 'att-token-meta' },
+  { tag: [tags.comment, tags.lineComment, tags.blockComment], class: 'att-token-comment' },
+  { tag: [tags.propertyName, tags.definition(tags.propertyName)], class: 'att-token-property' },
+  { tag: [tags.string, tags.special(tags.string)], class: 'att-token-string' },
+  { tag: [tags.number, tags.bool, tags.atom, tags.literal], class: 'att-token-literal' },
+  { tag: [tags.keyword, tags.operator, tags.punctuation, tags.separator], class: 'att-token-keyword' },
+  { tag: [tags.typeName, tags.namespace, tags.className], class: 'att-token-type' },
+  { tag: [tags.variableName, tags.labelName], class: 'att-token-variable' },
+  { tag: tags.invalid, class: 'att-token-invalid' },
+]);
 
 interface AttToken { from: number; to: number; kind: 'context' | 'expression' | 'testdata' | 'file'; path?: string; referenceId?: string; safe: boolean; available: boolean }
 function safeFileLocator(path: string, sourcePath?: string): boolean {
@@ -119,6 +132,10 @@ function testdataCompletionSource(suggestions: string[]) {
   };
 }
 
+function pageCspNonce(): string {
+  return document.querySelector<HTMLScriptElement>('script[nonce]')?.nonce || '';
+}
+
 async function languageExtension(language: CodeLanguage): Promise<Extension> {
   switch (language) {
     case 'yaml': return (await import('@codemirror/lang-yaml')).yaml();
@@ -140,7 +157,7 @@ export async function createEditor(host: HTMLElement, options: EditorOptions): P
   const language = await languageExtension(options.language);
   const extensions: Extension[] = [
     lineNumbers(), foldGutter(), highlightActiveLineGutter(), highlightActiveLine(), drawSelection(),
-    history(), indentOnInput(), bracketMatching(), syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    history(), indentOnInput(), bracketMatching(), syntaxHighlighting(defaultHighlightStyle), syntaxHighlighting(attHighlightStyle),
     expressionDecorations(options.sourcePath, options.fileReferences),
     EditorView.updateListener.of(update => { if (update.docChanged && !options.readOnly) options.onChange(update.state.doc.toString()); }),
     EditorView.domEventHandlers({
@@ -166,6 +183,7 @@ export async function createEditor(host: HTMLElement, options: EditorOptions): P
       },
     }),
     keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, ...searchKeymap, indentWithTab]),
+    EditorView.cspNonce.of(pageCspNonce()),
     EditorState.readOnly.of(options.readOnly),
     EditorView.editable.of(!options.readOnly),
     language,
@@ -179,6 +197,11 @@ export async function createEditor(host: HTMLElement, options: EditorOptions): P
       '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--att-color-primary, #0866c6) 7%, transparent)' },
       '.cm-activeLineGutter': { backgroundColor: 'color-mix(in srgb, var(--att-color-primary, #0866c6) 10%, transparent)' },
       '.cm-foldGutter': { width: '1.2rem' },
+      '.att-token-meta, .att-token-comment': { color: 'var(--att-color-muted, #637087)' },
+      '.att-token-property, .att-token-variable, .att-token-type': { color: 'var(--att-color-primary, #3157c8)' },
+      '.att-token-string': { color: 'var(--att-color-success, #15734a)' },
+      '.att-token-literal, .att-token-keyword': { color: 'var(--att-color-warning, #8a5b00)' },
+      '.att-token-invalid': { color: 'var(--att-color-danger, #b3343d)', textDecoration: 'underline wavy' },
       '&.cm-focused': { outline: '2px solid var(--att-color-focus, #3b82f6)', outlineOffset: '-2px' },
     }),
   ];

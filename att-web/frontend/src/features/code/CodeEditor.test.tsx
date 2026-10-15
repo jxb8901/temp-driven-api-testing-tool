@@ -8,10 +8,12 @@ const editor = vi.hoisted(() => ({
   text: '',
   emit: null as null | ((value: string) => void),
   creationDelay: null as Promise<void> | null,
+  fail: false,
 }));
 
 vi.mock('./codemirrorRuntime', () => ({
   createEditor: async (_host: HTMLElement, options: { value: string; onChange(value: string): void }) => {
+    if (editor.fail) throw new Error('CodeMirror unavailable');
     if (editor.creationDelay) await editor.creationDelay;
     editor.text = options.value;
     editor.emit = value => { editor.text = value; options.onChange(value); };
@@ -39,6 +41,7 @@ beforeEach(() => {
   editor.text = '';
   editor.emit = null;
   editor.creationDelay = null;
+  editor.fail = false;
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -66,6 +69,13 @@ describe('CodeEditor', () => {
 
     await act(async () => editor.emit?.('{"from":"editor"}'));
     expect(onChange).toHaveBeenCalledWith('{"from":"editor"}');
+  });
+
+  it('shows readable source when CodeMirror cannot initialize', async () => {
+    editor.fail = true;
+    await act(async () => root.render(<CodeEditor value={'name: payment\nactions: []'} language="yaml" label="Flow source" readOnly />));
+    await flush();
+    expect(host.querySelector('.att-code-fallback')?.textContent).toBe('name: payment\nactions: []');
   });
 
   it('uses the latest value after delayed editor initialization and enables Find only when ready', async () => {

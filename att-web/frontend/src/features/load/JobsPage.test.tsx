@@ -72,7 +72,7 @@ describe('JobsPage React feature', () => {
     await act(async () => { await Promise.resolve(); });
 
     const tabs = [
-      ['Overview', 'overview'], ['Live logs', 'live'], ['Events', 'events'],
+      ['Overview', 'overview'], ['Live events', 'live'], ['Events', 'events'],
       ['Results', 'results'], ['Artifacts', 'artifacts'], ['Metrics', 'metrics'],
     ];
     expect([...host.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual(tabs.map(([label]) => label));
@@ -173,5 +173,45 @@ describe('JobsPage React feature', () => {
     expect(panel.textContent).toContain('No Load metrics summary was returned. No chart or derived metric is shown.');
     expect(panel.querySelector('[aria-label="Returned Load time-series buckets"]')).toBeNull();
     expect(panel.querySelector('canvas, svg')).toBeNull();
+  });
+
+  it('shows all event types in chronological order and filters without reconnecting or dropping new events', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
+    await act(async () => {
+      handlers?.onEvent({ id: '5', type: 'result', data: { status: 'PASS' } });
+      handlers?.onEvent({ id: '3', type: 'log', data: { message: 'worker log' } });
+      handlers?.onEvent({ id: '1', type: 'status', data: { status: 'RUNNING' } });
+      handlers?.onEvent({ id: '4', type: 'diagnostic', data: { code: 'ATT-EXAMPLE', summary: 'safe warning' } });
+      handlers?.onEvent({ id: '2', type: 'progress', data: { message: 'half complete' } });
+    });
+    await click(host.querySelector('#job-tab-live')!);
+    const panel = host.querySelector('#job-panel-live')!;
+    const labels = [...panel.querySelectorAll('.att-job-events li strong')].map(item => item.textContent);
+    expect(labels).toEqual(['status', 'progress', 'log', 'diagnostic', 'result']);
+    expect(panel.querySelector('.att-job-events time')?.getAttribute('datetime')).toBeTruthy();
+
+    const eventType = (type: string) => panel.querySelector<HTMLInputElement>(`input[aria-label="${type}"]`)!;
+    for (const type of ['log', 'diagnostic', 'result']) await click(eventType(type));
+    expect(panel.querySelectorAll('.att-job-events li')).toHaveLength(2);
+    await act(async () => handlers?.onEvent({ id: '6', type: 'progress', data: { message: 'still connected' } }));
+    expect(panel.querySelectorAll('.att-job-events li')).toHaveLength(3);
+    await click(panel.querySelector<HTMLInputElement>('[aria-label="All Events"]')!);
+    expect(panel.querySelectorAll('.att-job-events li')).toHaveLength(6);
+    expect(api.subscribeJob).toHaveBeenCalledTimes(1);
+    expect(panel.querySelector('[aria-label="Search events"]')).not.toBeNull();
+    expect([...panel.querySelectorAll('button')].some(button => button.textContent === 'Copy visible events')).toBe(true);
+  });
+
+  it('distinguishes an open stream with no events from reconnecting', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
+    await click(host.querySelector('#job-tab-live')!);
+    await act(async () => handlers?.onOpen());
+    expect(host.querySelector('#job-panel-live')?.textContent).toContain('Connected; no events have been emitted yet.');
+    await act(async () => handlers?.onError());
+    expect(host.querySelector('#job-panel-live')?.textContent).toContain('Reconnecting to live events; no recent events are available.');
   });
 });

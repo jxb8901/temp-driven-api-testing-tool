@@ -13,21 +13,95 @@ async function main() {
     httpCredentials: { username, password, send: 'always' },
     viewport: { width: 1440, height: 1000 },
   });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
   const page = await context.newPage();
   const pageErrors = [];
+  const consoleErrors = [];
   const navigationEvents = [];
   page.on('pageerror', error => pageErrors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigationEvents.push(frame.url()); });
+  await page.addInitScript(() => {
+    localStorage.setItem('att-ui-theme', 'light');
+    window.__attCspViolations = [];
+    document.addEventListener('securitypolicyviolation', event => {
+      window.__attCspViolations.push(`${event.violatedDirective}: ${event.blockedURI}`);
+    });
+  });
 
   try {
-    await page.goto(`${origin}/tools/att/ui/index.html#/packages/payments`);
+    const entryResponse = await page.goto(`${origin}/tools/att/ui/index.html#/packages/payments`);
+    assert.ok(entryResponse, 'Studio entry response should be available');
+    const entryHeaders = entryResponse.headers();
+    const entryHtml = await entryResponse.text();
+    const csp = entryHeaders['content-security-policy'] || '';
+    const pageNonce = entryHtml.match(/<script[^>]+nonce="([^"]+)"/)?.[1];
+    assert.ok(pageNonce && pageNonce !== '__ATT_CSP_NONCE__', 'the packaged entry must receive a runtime CSP nonce');
+    assert.ok(csp.includes(`style-src 'self' 'nonce-${pageNonce}'`), 'the page nonce must match the CSP style nonce');
+    assert.ok(csp.includes("style-src-attr 'unsafe-inline'"), 'CodeMirror geometry styles must be permitted for the Studio document');
+    assert.ok(!csp.includes("script-src 'self' 'unsafe-inline'"), 'Studio scripts must not receive an unsafe-inline exception');
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
     await page.getByRole('button', { name: 'Reference Flow' }).waitFor();
     await page.getByRole('button', { name: 'Reference Flow' }).click();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
 
+    const definitionEditor = page.locator('#att-explorer-panel-definition .cm-editor');
+    await definitionEditor.waitFor();
+    const inspectEditor = (locator, tokenSelector) => locator.evaluate((element, selector) => {
+      const content = element.querySelector('.cm-content');
+      const token = content?.querySelector(selector);
+      return {
+        text: Array.from(content?.querySelectorAll('.cm-line') || []).map(line => line.textContent || '').join('\n'),
+        height: element.getBoundingClientRect().height,
+        tokenText: token?.textContent || '',
+        tokenColor: token ? getComputedStyle(token).color : '',
+        editorColor: content ? getComputedStyle(content).color : '',
+      };
+    }, tokenSelector);
+    const jsonLight = await inspectEditor(definitionEditor, '.att-token-string');
+    assert.ok(jsonLight.text.includes('reference.flow.v1'), 'the JSON Definition source must be visible under the production CSP');
+    assert.ok(jsonLight.height > 0, 'the JSON Definition editor must have visible layout under the production CSP');
+    assert.ok(jsonLight.tokenText && jsonLight.tokenColor !== jsonLight.editorColor,
+      `JSON string tokens must have visible syntax color in the light theme: ${JSON.stringify(jsonLight)}`);
+    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+    const jsonDark = await inspectEditor(definitionEditor, '.att-token-string');
+    assert.ok(jsonDark.text.includes('reference.flow.v1') && jsonDark.height > 0, 'JSON Definition text and layout must remain visible in the dark theme');
+    assert.ok(jsonDark.tokenColor && jsonDark.tokenColor !== jsonDark.editorColor, 'JSON string tokens must have visible syntax color in the dark theme');
+    await page.getByRole('button', { name: 'Switch to light theme' }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+
     await page.getByRole('tab', { name: 'Source' }).click();
     await page.getByRole('tabpanel', { name: 'Source' }).getByText('Code viewer ready.').waitFor();
+    const editor = page.locator('.att-explorer-source .cm-editor');
+    await editor.waitFor();
+    const editorState = await editor.evaluate(element => {
+      const content = element.querySelector('.cm-content');
+      const keyToken = content?.querySelector('.att-token-property');
+      return {
+        text: Array.from(content?.querySelectorAll('.cm-line') || []).map(line => line.textContent || '').join('\n'),
+        height: element.getBoundingClientRect().height,
+        generatedStyles: Array.from(document.querySelectorAll('style[nonce]')).map(style => style.nonce),
+        keyText: keyToken?.textContent || '',
+        keyColor: keyToken ? getComputedStyle(keyToken).color : '',
+        editorColor: content ? getComputedStyle(content).color : '',
+      };
+    });
+    assert.ok(editorState.text.includes('&{templates/SCHEDULED/payload/request.xml}'), 'CodeMirror must show the source text under the production CSP');
+    assert.ok(editorState.height > 0, 'CodeMirror must have visible layout under the production CSP');
+    assert.ok(editorState.generatedStyles.length > 0 && editorState.generatedStyles.every(nonce => nonce === pageNonce), 'generated editor styles must carry the page nonce');
+    assert.ok(editorState.keyText && editorState.keyColor !== editorState.editorColor,
+      `YAML keys must have visible syntax color in the light theme: ${JSON.stringify(editorState)}`);
+    await editor.locator('xpath=ancestor::section[contains(@class,"att-code-editor")]').getByRole('button', { name: 'Copy' }).click();
+    await page.getByText('Copied displayed code.').waitFor();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), editorState.text, 'Copy must match the visible YAML source under the production CSP');
+    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+    const yamlDark = await inspectEditor(editor, '.att-token-property');
+    assert.ok(yamlDark.text.includes('&{templates/SCHEDULED/payload/request.xml}') && yamlDark.height > 0, 'YAML Source text and layout must remain visible in the dark theme');
+    assert.ok(yamlDark.tokenText && yamlDark.tokenColor !== yamlDark.editorColor, 'YAML keys must have visible syntax color in the dark theme');
+    await page.getByRole('button', { name: 'Switch to light theme' }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
     const fileLink = page.locator('.att-explorer-source [data-att-reference]');
     await fileLink.waitFor();
     assert.equal(await fileLink.getAttribute('data-att-file'), 'templates/SCHEDULED/payload/request.xml');
@@ -87,7 +161,10 @@ async function main() {
     assert.match(await quickLoadTarget.textContent(), /^flow · /, 'Quick Load should retain the selected Flow target');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     assert.equal(overflow, false, 'the live Configuration and Quick Load UI must fit a tablet viewport');
+    const cspViolations = await page.evaluate(() => window.__attCspViolations);
+    assert.deepEqual(cspViolations, [], `the live Studio must not violate its CSP: ${JSON.stringify(cspViolations)}`);
     assert.deepEqual(pageErrors, [], 'the live ATT Studio UI must not throw browser errors');
+    assert.deepEqual(consoleErrors.filter(message => /content security policy|refused to apply inline style/i.test(message)), [], 'the live Studio must not produce CSP console errors');
     process.stdout.write('Packaged-WAR Playwright API smoke passed under /tools/att; source references, Configuration, Testdata, and Quick Load used the real Server API.\n');
   } finally {
     await context.close();

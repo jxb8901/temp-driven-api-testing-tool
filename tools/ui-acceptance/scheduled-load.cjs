@@ -10,6 +10,13 @@ async function assertAxe(page, message) {
   })), [], message);
 }
 
+async function waitForScheduleList(page) {
+  await page.waitForFunction(() => {
+    const status = document.querySelector('.att-schedule-status');
+    return status !== null && status.getAttribute('aria-busy') === 'false';
+  });
+}
+
 async function main() {
   const fixture = await startFixture();
   let browser;
@@ -118,11 +125,11 @@ async function main() {
 
     await selectFixture(context, fixture.origin, 'schedule-forbidden');
     await page.reload();
-    await page.waitForFunction(() => document.querySelector('.att-schedule-status')?.getAttribute('aria-busy') !== 'true');
+    await waitForScheduleList(page);
     assert.match(await page.locator('#main-content').innerText(), /administrator role/);
     await selectFixture(context, fixture.origin, 'schedule-unauthenticated');
     await page.reload();
-    await page.waitForFunction(() => document.querySelector('.att-schedule-status')?.getAttribute('aria-busy') !== 'true');
+    await waitForScheduleList(page);
     assert.match(await page.locator('#main-content').innerText(), /authenticated/);
     await selectFixture(context, fixture.origin, 'schedule-disabled');
     await page.reload();

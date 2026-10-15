@@ -231,6 +231,7 @@ export interface EffectiveConfigurationQuery {
   query?: string;
   offset?: number;
   limit?: number;
+  includeAllFields?: boolean;
 }
 
 export interface ConfigurationComparisonQuery {
@@ -240,6 +241,7 @@ export interface ConfigurationComparisonQuery {
   includeInherited?: boolean;
   offset?: number;
   limit?: number;
+  includeAllFields?: boolean;
 }
 
 /** Operation-level facade implemented by the shared same-origin API module. */

@@ -27,6 +27,9 @@ import static org.junit.jupiter.api.Assertions.*;
 class DebugEngineTest {
     @TempDir Path temp;
 
+    @org.junit.jupiter.api.BeforeEach void enableLegacyPathPresentation() { att.core.PathPresentation.configure(true, true); }
+    @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
+
     @Test void autoDiscoversTemplateFlowAndToolSidecarsAndPreservesCaseIdentity() throws Exception {
         Path project = fixture();
         java.util.Map<String, ToolArgumentConfig> echoArguments = Collections.singletonMap("value",

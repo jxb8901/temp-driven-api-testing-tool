@@ -3,6 +3,7 @@
 .att-configuration-page-heading h1 { margin:.15rem 0; font-size:clamp(1.6rem,2.5vw,2.2rem); }
 .att-configuration-page-heading p { margin:.3rem 0; color:var(--att-color-muted,#667085); }
 .att-configuration-context { display:flex; flex-wrap:wrap; align-items:end; gap:.6rem; }
+.att-config-all-fields-toggle { display:inline-flex !important; align-items:center; gap:.4rem; max-width:18rem; color:var(--att-color-muted,#667085); font-size:.76rem !important; }
 .att-configuration-context label { display:grid; gap:.25rem; font-size:.8rem; color:var(--att-color-muted,#667085); }
 .att-configuration-context select,.att-config-search input { min-width:10rem; padding:.45rem .55rem; border:1px solid var(--att-color-border,#cbd5e1); border-radius:.4rem; background:var(--att-color-surface,#fff); color:var(--att-color-text,#172033); }
 .att-configuration-context button,.att-configuration-page button { font:inherit; }

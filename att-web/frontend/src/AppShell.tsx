@@ -4,6 +4,8 @@ import { formatRoute, type AppRoute, type RouteState } from './router';
 import { NavigationGuardContext } from './router';
 import { api } from './api';
 import { authUiText } from './authUiText';
+import { contextRelativeReturnTo } from './contextPaths';
+import { applyUiLocale, detectUiLocale, readUiLocale, readUiLocalePreference, saveUiLocalePreference, type UiLocale, type UiLocalePreference } from './uiLocale';
 import { ChangePasswordDialog } from './ChangePasswordDialog';
 import type { LocalAuthUser } from './types';
 
@@ -26,11 +28,15 @@ export interface AppShellContextValue {
   selectedPackage: string;
   selectedEnvironment: string;
   themePreference: ThemePreference;
+  uiLocale: UiLocale;
+  uiLocalePreference: UiLocalePreference;
   authMode?: 'container' | 'local';
   currentUser: Pick<LocalAuthUser,'loginId'|'displayName'|'role'> | null;
+  canRevealConfigurationFields: boolean;
   onPackageChange(packageId: string): void;
   onEnvironmentChange(environment: string): void;
   onThemePreferenceChange(preference: ThemePreference): void;
+  onUiLocaleChange(locale: UiLocalePreference): void;
   onJobAccepted(job: { jobId: string; packageId?: string }): void;
 }
 
@@ -204,11 +210,14 @@ export function AppShell({
       return 'system';
     }
   });
+  const [uiLocale, setUiLocale] = useState<UiLocale>(() => readUiLocale());
+  const [uiLocalePreference, setUiLocalePreference] = useState<UiLocalePreference>(() => readUiLocalePreference());
   const [collapsed, setCollapsed] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [mobileViewport, setMobileViewport] = useState(() => window.matchMedia?.('(max-width: 820px)').matches || false);
   const [keyboardMode, setKeyboardMode] = useState<'palette' | 'shortcuts' | null>(null);
   const [currentUser, setCurrentUser] = useState<Pick<LocalAuthUser,'loginId'|'displayName'|'role'>|null>(null);
+  const [canRevealConfigurationFields, setCanRevealConfigurationFields] = useState(false);
   const [changePasswordOpen,setChangePasswordOpen]=useState(false);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -219,14 +228,19 @@ export function AppShell({
     : serverVersion.status === 'error' ? 'Unavailable' : 'Connecting…';
   const versionData = serverVersion.status === 'ready' ? serverVersion.data : null;
   useEffect(() => {
-    if (versionData?.authMode !== 'local') { setCurrentUser(null); return; }
+    if (!versionData) { setCurrentUser(null); setCanRevealConfigurationFields(false); return; }
     const controller = new AbortController();
-    api.getCurrentUser(controller.signal).then(setCurrentUser).catch(() => {
-      const returnTo = location.pathname + location.search + location.hash;
-      location.assign(new URL('login.html?returnTo=' + encodeURIComponent(returnTo), document.baseURI).toString());
-    });
+    if (versionData.authMode === 'local') api.getCurrentUser(controller.signal).then(setCurrentUser).catch(() => {
+        if (controller.signal.aborted) return;
+        const returnTo = contextRelativeReturnTo(location.pathname, location.search, location.hash);
+        location.assign(new URL('login.html?returnTo=' + encodeURIComponent(returnTo), document.baseURI).toString());
+      });
+    else setCurrentUser(null);
+    api.getAuthCapabilities(controller.signal).then(result => {
+      if (!controller.signal.aborted) setCanRevealConfigurationFields(result.configurationAdmin === true);
+    }).catch(() => { if (!controller.signal.aborted) setCanRevealConfigurationFields(false); });
     return () => controller.abort();
-  }, [versionData?.authMode]);
+  }, [versionData?.authMode, versionData?.apiVersion]);
   async function signOut() {
     try { await api.logout(); } finally {
       const login = new URL('login.html', document.baseURI);
@@ -248,6 +262,17 @@ export function AppShell({
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    applyUiLocale(uiLocale);
+  }, [uiLocale]);
+
+  useEffect(() => {
+    if (uiLocalePreference !== 'browser') return;
+    const update = () => setUiLocale(detectUiLocale());
+    window.addEventListener('languagechange', update);
+    return () => window.removeEventListener('languagechange', update);
+  }, [uiLocalePreference]);
 
   useEffect(() => {
     const media = window.matchMedia?.('(prefers-color-scheme: dark)');
@@ -335,10 +360,15 @@ export function AppShell({
     try { localStorage.setItem('att-ui-theme', preference); } catch { /* Storage can be unavailable in private browsing. */ }
   };
   const changeTheme = () => changeThemePreference(theme === 'dark' ? 'light' : 'dark');
+  const changeUiLocale = (preference: UiLocalePreference) => {
+    saveUiLocalePreference(preference);
+    setUiLocalePreference(preference);
+    setUiLocale(preference === 'browser' ? detectUiLocale() : preference);
+  };
 
   return (
     <NavigationGuardContext.Provider value={navigation}>
-      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, authMode: versionData?.authMode, currentUser, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onJobAccepted }}>
+      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, currentUser, canRevealConfigurationFields, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
       <div className={'app-layout' + (collapsed ? ' is-collapsed' : '') + (mobileNavigationOpen ? ' mobile-nav-open' : '')} data-page={currentPage}>
         <a className="skip-link" href="#main-content">Skip to main content</a>
         <button className="sidebar-backdrop" type="button" aria-label="Close navigation" aria-hidden={!mobileNavigationOpen} onClick={() => setMobileNavigationOpen(false)} tabIndex={-1} />
@@ -442,7 +472,11 @@ export function AppShell({
             <div className="context-toolbar" role="group" aria-label="Workspace context and actions">
               <div className="context-chip"><span>Package</span><strong>{selectedPackage || 'All packages'}</strong></div>
               <div className="context-chip"><span>Environment</span><strong>{selectedEnvironment || 'Per run'}</strong></div>
-              <div className="context-chip context-identity"><span>Identity</span><strong>Server managed</strong><small>not exposed by API</small></div>
+              <div className="context-chip context-identity"><span>Identity</span>
+                {versionData?.authMode === 'local'
+                  ? <><strong>{currentUser?.displayName || currentUser?.loginId || 'Loading identity…'}</strong><small>{currentUser ? `${currentUser.loginId} · ${currentUser.role}` : 'Loading authenticated identity'}</small></>
+                  : <><strong>Server managed</strong><small>not exposed by API</small></>}
+              </div>
               <a className="button button-primary context-action" href={action.target} hidden={action.hidden} onClick={link(action.target)}>{action.label}</a>
             </div>
           </div>
@@ -451,7 +485,7 @@ export function AppShell({
           <footer className="page-footer"><span>ATT Server</span><span>API v{versionData?.apiVersion || '1'}</span></footer>
         </div>
         <DiscardChangesDialog navigation={navigation} />
-        <ChangePasswordDialog open={changePasswordOpen} onClose={()=>setChangePasswordOpen(false)} />
+        <ChangePasswordDialog open={changePasswordOpen} locale={uiLocale} onClose={()=>setChangePasswordOpen(false)} />
         <KeyboardDialog open={keyboardMode !== null} mode={keyboardMode || 'palette'} showScheduledLoad={showScheduledLoad} selectedPackage={selectedPackage}
           onClose={() => setKeyboardMode(null)} onNavigate={target => { navigate(target); setKeyboardMode(null); setMobileNavigationOpen(false); }} />
       </div>
