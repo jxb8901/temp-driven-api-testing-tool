@@ -12,7 +12,7 @@ public final class SecretProtection {
     private static final String NAMES = "password|passwd|passphrase|token|secret|api[-_]?key|authorization|credential|private[-_]?key|cookie|set-cookie|access[-_]?key|identityfile|truststorepassword|client[-_]?secret";
     private static final Pattern MARKER = Pattern.compile("\\[REDACTED(?:_SECRET)?\\]");
     private static final Pattern ASSIGNMENT = Pattern.compile("(?i)((?<![A-Za-z0-9])(?:" + NAMES + ")\\b[\\\"']?\\s*[=:]\\s*)(\\\"[^\\\"]*\\\"|'[^']*'|[^\\s,;&<>}]+)");
-    private static final Pattern SENSITIVE_BLOCK = Pattern.compile("(?is)((?<![A-Za-z0-9])(?:" + NAMES + ")\\b[\"']?[ \\t]*[=:][ \\t]*+)(?!\\[REDACTED(?:_SECRET)?\\])(?:[\\[{]|\\r?\\n[ \\t]+).*" );
+    private static final Pattern SENSITIVE_BLOCK_KEY = Pattern.compile("(?i)((?<![A-Za-z0-9])(?:" + NAMES + ")\\b[\\\"\']?[ \\t]*[=:][ \\t]*+)");
     private static final Pattern HEADER = Pattern.compile("(?i)(\\b(?:proxy-authorization|authorization|set-cookie|cookie)\\b[ \\t]*[:=][ \\t]*+)(?![\"'])[^\\r\\n]*");
     private static final Pattern AUTH = Pattern.compile("(?i)\\b(Bearer|Basic)\\s+[A-Za-z0-9+/_.~=-]+");
     private static final Pattern URL_AUTH = Pattern.compile("(://)[^\\s/@<>]+:[^\\s/@<>]+@");
@@ -45,7 +45,7 @@ public final class SecretProtection {
         result = AUTH.matcher(result).replaceAll("$1 " + REDACTED);
         result = URL_AUTH.matcher(result).replaceAll("$1" + REDACTED + "@");
         result = replace(XML, result, 1, 3);
-        result = replace(SENSITIVE_BLOCK, result, 1, 0);
+        result = redactSensitiveBlocks(result);
         result = replace(ASSIGNMENT, result, 1, 0);
         result = TAGGED.matcher(result).replaceAll("$1" + REDACTED);
         return csv(result);
@@ -76,6 +76,97 @@ public final class SecretProtection {
             m.appendReplacement(out, Matcher.quoteReplacement(m.group(prefix) + marker + (suffix == 0 ? "" : m.group(suffix))));
         }
         m.appendTail(out); return out.toString();
+    }
+
+    /** Mask only the sensitive nested value, retaining later sibling fields and diagnostics. */
+    private static String redactSensitiveBlocks(String value) {
+        Matcher matcher = SENSITIVE_BLOCK_KEY.matcher(value);
+        StringBuilder result = new StringBuilder(value.length());
+        int copiedThrough = 0;
+        int searchFrom = 0;
+        while (matcher.find(searchFrom)) {
+            int start = matcher.end();
+            int end = -1;
+            if (start < value.length()) {
+                char first = value.charAt(start);
+                if (first == '{' || first == '[') {
+                    end = containerEnd(value, start);
+                } else if (first == '\n' || first == '\r') {
+                    end = indentedBlockEnd(value, matcher.start(), start);
+                } else if (first == '|' || first == '>') {
+                    int lineEnd = lineEnd(value, start);
+                    end = lineEnd == value.length() ? lineEnd : indentedBlockEnd(value, matcher.start(), lineEnd);
+                    if (end < 0) end = lineEnd;
+                }
+            }
+            if (end <= start) {
+                searchFrom = matcher.end();
+                continue;
+            }
+            result.append(value, copiedThrough, matcher.start()).append(matcher.group(1)).append(REDACTED);
+            copiedThrough = end;
+            searchFrom = end;
+        }
+        return result.append(value, copiedThrough, value.length()).toString();
+    }
+
+    /** A truncated or malformed nested collection is entirely sensitive: fail closed. */
+    private static int containerEnd(String value, int start) {
+        Deque<Character> closings = new ArrayDeque<Character>();
+        char quote = 0;
+        boolean escaped = false;
+        for (int i = start; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (quote != 0) {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == quote) quote = 0;
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            } else if (c == '{' || c == '[') {
+                closings.push(c == '{' ? '}' : ']');
+            } else if (c == '}' || c == ']') {
+                if (closings.isEmpty() || closings.pop() != c) return value.length();
+                if (closings.isEmpty()) return i + 1;
+            }
+        }
+        return value.length();
+    }
+
+    private static int lineEnd(String value, int from) {
+        int i = from;
+        while (i < value.length() && value.charAt(i) != '\n' && value.charAt(i) != '\r') i++;
+        return i;
+    }
+
+    /** Consume only YAML continuation lines indented beyond the sensitive field. */
+    private static int indentedBlockEnd(String value, int keyStart, int newline) {
+        int lineStart = value.lastIndexOf('\n', Math.max(0, keyStart - 1)) + 1;
+        int parentIndent = 0;
+        for (int i = lineStart; i < keyStart; i++) {
+            char c = value.charAt(i);
+            if (c != ' ' && c != '\t') { parentIndent = 0; break; }
+            parentIndent++;
+        }
+        int cursor = newline;
+        int lastEnd = -1;
+        while (cursor < value.length()) {
+            if (value.charAt(cursor) == '\r') cursor++;
+            if (cursor < value.length() && value.charAt(cursor) == '\n') cursor++;
+            else break;
+            int nextEnd = lineEnd(value, cursor);
+            int indentation = 0;
+            while (cursor + indentation < nextEnd) {
+                char c = value.charAt(cursor + indentation);
+                if (c != ' ' && c != '\t') break;
+                indentation++;
+            }
+            boolean blank = cursor + indentation == nextEnd;
+            if (!blank && indentation <= parentIndent) break;
+            lastEnd = nextEnd;
+            cursor = nextEnd;
+        }
+        return lastEnd;
     }
 
     /** Preserve CSV layout while protecting columns declared by a secret header. */
