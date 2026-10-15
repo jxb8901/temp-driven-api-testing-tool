@@ -17,6 +17,22 @@ class SecretProtectionTest {
         assertEquals("x [REDACTED_SECRET]",protectedMarker);
         assertEquals(protectedMarker,SecretProtection.text(protectedMarker,Arrays.asList("SECRET","REDACTED")));
     }
+    @Test void multilineSecretBlocksDoNotRemoveFollowingDiagnostics() {
+        for (String source : Arrays.asList(
+                "password:\n  nested:\n    value: canary\n  other: canary\nmessage: ordinary\n",
+                "password: {nested: {value: canary}}\nmessage: ordinary\n",
+                "password: {\n  \"nested\": \"canary\"\n}\nmessage: ordinary\n",
+                "password: |\n  canary\nmessage: ordinary\n",
+                "  password:\n    value: canary\n  status: ordinary\n",
+                "password:\nmessage: ordinary\n")) {
+            String safe=SecretProtection.text(source);
+            assertFalse(safe.contains("canary"), source + "\n" + safe);
+            assertTrue(safe.contains("ordinary"), source + "\n" + safe);
+            assertTrue(safe.contains("[REDACTED_SECRET]") || source.equals("password:\nmessage: ordinary\n"), safe);
+            assertEquals(safe, SecretProtection.text(safe), source);
+        }
+    }
+
     @Test void ordinaryFieldsRemainVisibleAndUnknownSensitiveStructuresFailClosed() {
         Map<String,Object> map=new LinkedHashMap<String,Object>();
         map.put("host","host.example");map.put("username","alice");map.put("clientId","application");
