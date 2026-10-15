@@ -68,7 +68,7 @@ Debug draft creation validates the typed request and selected target closure. It
 
 A draft captures normalized values and an internal content digest for the target, sidecars, config, referenced resource closure, and, for Quick Load, the selected model policy. The digest never leaves the Server. The Server checks the package revision when the draft is submitted and immediately before Worker start; the Worker verifies it again before Engine execution. A change detected during submission returns HTTP 409 and `ATT-SERVER-DRAFT-STALE`; a change detected after job acceptance marks the job `INVALID` with that diagnostic. The submitted Worker input is the same immutable typed value validated for preview.
 
-P3 Debug and P4 Quick Load submission accept `packageId` and `draftId`; neither accepts an arbitrary file path or client-supplied digest. Advanced Load submits a complete `att-load/v1.6` object to `/drafts/load`, then uses the same draft-only `/jobs/load` contract. The draft ID prefix distinguishes Quick (`L`) from Advanced (`A`) Load internally, while both share capacity, principal binding, expiry, stale-revision checks, and the job pipeline. Existing path-based `debugInput` and `scenario` submissions remain available to compatible clients.
+P3 Debug and P4 Quick Load submission accept `packageId` and `draftId`; neither accepts an arbitrary file path or client-supplied digest. Advanced Load submits a complete `att-load/v1.7` object to `/drafts/load`, then uses the same draft-only `/jobs/load` contract. The draft ID prefix distinguishes Quick (`L`) from Advanced (`A`) Load internally, while both share capacity, principal binding, expiry, stale-revision checks, and the job pipeline. Existing path-based `debugInput` and `scenario` submissions remain available to compatible clients.
 
 Example Debug draft request:
 
@@ -122,7 +122,7 @@ authenticated browser
   -> Engine executes through the existing service and scheduler
 ```
 
-The Server alone supplies the package root, output directory, Worker executable, and classpath. Public DTOs cannot set them. P3 adds an explicit typed inline Debug field; P4 and P5 pass typed Load scenarios through the Worker protocol. None accepts arbitrary external paths. Engine input objects are immutable copies. Debug defaults use the existing `DebugEngine` sidecar rules, with blank typed defaults when a sidecar is absent. Load scenarios use the current `att-load/v1.6` schema and `LoadScenarioLoader` semantic checks, composed through the shared `LoadScenarioBuilder`.
+The Server alone supplies the package root, output directory, Worker executable, and classpath. Public DTOs cannot set them. P3 adds an explicit typed inline Debug field; P4 and P5 pass typed Load scenarios through the Worker protocol. None accepts arbitrary external paths. Engine input objects are immutable copies. Debug defaults use the existing `DebugEngine` sidecar rules, with blank typed defaults when a sidecar is absent. Load scenarios use the current `att-load/v1.7` schema and `LoadScenarioLoader` semantic checks, composed through the shared `LoadScenarioBuilder`.
 
 Job metadata continues to store the command and package ID summary, not the submitted input or draft contents. Drafts are not persisted. Temporary values exist only in Server and Worker memory and are cleared on expiry, cancellation, terminal completion, or Server shutdown.
 

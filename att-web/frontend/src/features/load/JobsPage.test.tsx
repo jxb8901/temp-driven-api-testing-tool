@@ -15,7 +15,7 @@ const earlyBucket = Date.parse('2026-10-13T09:42:01.000Z');
 const lateBucket = Date.parse('2026-10-13T09:42:02.000Z');
 const sampleResult: JobResultResponse = {
   job: sampleJob,
-  result: { status: 'PASS', metrics: { completedThroughput: 4.25, p95Ms: 81, buckets: {
+  result: { status: 'PASS', evidence: { policy: { quotaMode: 'independent', maxSuccessSamples: 3, maxFailureSamples: 5 }, retainedSuccessCount: 3, retainedFailureCount: 5, failureQuotaExceeded: true, warning: 'Failure evidence quota reached; aggregate metrics remain complete.' }, metrics: { completedThroughput: 4.25, p95Ms: 81, buckets: {
     [String(lateBucket)]: { bucketStartEpochMs: lateBucket, bucketStart: new Date(lateBucket).toISOString(), completedTps: 5, p95Ms: 81, p99Ms: 98 },
     [String(earlyBucket)]: { bucketStartEpochMs: earlyBucket, bucketStart: new Date(earlyBucket).toISOString(), completedTps: 4, p95Ms: 72, p99Ms: 91 },
   } } },
@@ -82,6 +82,8 @@ describe('JobsPage React feature', () => {
     }
     expect(host.querySelector('#job-panel-overview')?.textContent).toContain('RUNNING');
     expect(host.querySelector('#job-panel-results')?.textContent).toContain('Raw result payload');
+    expect(host.querySelector('[aria-label="Retained evidence quotas"]')?.textContent).toContain('Failure samples retained5');
+    expect(host.querySelector('[aria-label="Retained evidence quotas"] [role="alert"]')?.textContent).toContain('Failure evidence quota reached');
     expect(host.querySelector('#job-panel-artifacts')?.textContent).toContain('load-summary.json');
     const metricsPanel = host.querySelector('#job-panel-metrics')!;
     expect(metricsPanel.textContent).toContain('p95Ms');

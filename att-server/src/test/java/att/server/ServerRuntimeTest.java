@@ -79,7 +79,7 @@ class ServerRuntimeTest {
         Path configFile=temp.resolve("server.yaml");Files.writeString(configFile,"server:\n  dataDir: "+temp.resolve("data")+"\n  javaExecutable: "+javaBin+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
-        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
@@ -115,7 +115,7 @@ class ServerRuntimeTest {
                 +"\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\n    redaction:\n      enabled: true\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    maxConcurrentRuns: 1\n  inlineLoad:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("scheduled-load-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
-        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
         addWorkerClasspathJars(libs);
         MutableClock clock=new MutableClock(Instant.parse("2026-10-12T17:50:00Z"));
         JsonNode request=ServerRuntime.JSON.readTree("""
@@ -249,7 +249,7 @@ class ServerRuntimeTest {
         Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("inspection-runtime-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("inspection-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
-        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
@@ -287,7 +287,7 @@ class ServerRuntimeTest {
         Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("configuration-inspection-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(packageRoot)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("configuration-inspection-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
-        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
@@ -338,7 +338,7 @@ class ServerRuntimeTest {
                 +"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         Path libs=Files.createDirectory(temp.resolve("debug-draft-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
-        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")
@@ -405,7 +405,7 @@ class ServerRuntimeTest {
                 +"\n  inlineLoad:\n    enabled: true\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         Path libs=Files.createDirectory(temp.resolve("quick-load-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
-        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")
@@ -555,9 +555,31 @@ class ServerRuntimeTest {
         ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("redact-libs")).toString());
         try {
             String id="JABCDEF0123456789";Path output=runtime.config.dataDir.resolve("jobs").resolve(id).resolve("output");Files.createDirectories(output);
-            Job job=new Job(id,"run","p","test",new att.server.api.WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));job.resultJson=ServerRuntime.JSON.writeValueAsString(Map.of("summary",pkg.toRealPath().resolve("case.json").toString(),"artifact",output.resolve("report.xlsx").toString()));
-            runtime.store.insert(job,"{}");runtime.jobs.put(id,job);runtime.finish(job,"PASS",0);var response=ServerRuntime.JSON.valueToTree(runtime.resultRecord(id));String encoded=response.toString();
+            Job job=new Job(id,"run","p","test",new att.server.api.WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+            runtime.store.insert(job,"{}");runtime.jobs.put(id,job);
+            job.resultJson=ServerRuntime.JSON.writeValueAsString(Map.of("summary",pkg.toRealPath().resolve("case.json").toString(),"artifact",output.resolve("report.xlsx").toString()));
+            job.diagnosticJson=ServerRuntime.JSON.writeValueAsString(Map.of("code","ATT-TEST","message","active worker diagnostic"));job.status="INVALID";
+            var activeResponse=ServerRuntime.JSON.valueToTree(runtime.resultRecord(id));
+            assertTrue(activeResponse.path("result").path("summary").asText().endsWith("case.json"),activeResponse.toString());
+            assertEquals("active worker diagnostic",activeResponse.path("diagnostic").path("message").asText());
+            runtime.finish(job,"PASS",0);var response=ServerRuntime.JSON.valueToTree(runtime.resultRecord(id));String encoded=response.toString();
             assertFalse(encoded.contains(pkg.toString()));assertFalse(encoded.contains(output.toString()));assertTrue(encoded.contains("package:case.json"));assertTrue(encoded.contains("artifact:report.xlsx"));
+            String original="payload='&{./Pacs008.xml}' <a></a>\nfile="+pkg.resolve("flows/bad.yaml")+" line=7 column=3\nexternal=/private/host/hidden.txt\npassword=artifact-canary\n";
+            Path artifact=Files.writeString(output.resolve("case.log"),original);
+            String projected=new String(runtime.publicArtifact(id,artifact),java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(projected.contains("payload='&{./Pacs008.xml}' <a></a>"),projected);
+            assertTrue(projected.contains("flows/bad.yaml line=7 column=3"),projected);
+            assertFalse(projected.contains(pkg.toString()));assertFalse(projected.contains("/private/host"));
+            assertFalse(projected.contains("artifact-canary"));assertEquals(original,Files.readString(artifact));
+            Object event=runtime.publicEventData(Map.of("message",original,"headers",Map.of("Authorization","Bearer event-canary","Content-Type","application/xml")),output,pkg);
+            String publicEvent=ServerRuntime.JSON.writeValueAsString(event);
+            assertFalse(publicEvent.contains("event-canary"));assertFalse(publicEvent.contains("artifact-canary"));
+            assertFalse(publicEvent.contains("/private/host"));assertTrue(publicEvent.contains("application/xml"));
+            Path binary=Files.write(output.resolve("binary.bin"),new byte[]{0,1,2});
+            assertThrows(IllegalArgumentException.class,()->runtime.publicArtifact(id,binary));
+            Path oversized=output.resolve("large.log");try(var stream=Files.newOutputStream(oversized)){stream.write(new byte[16*1024*1024+1]);}
+            assertThrows(IllegalArgumentException.class,()->runtime.publicArtifact(id,oversized));
+
         } finally {runtime.close();}
     }
 

@@ -47,6 +47,9 @@ server:
   # Origin equality checking is disabled by default; local cookie auth still requires CSRF.
   security:
     checkCrossOrigin: false
+    # Exact HTTPS browser Origins; does not replace trusted proxy setup, CSRF, or CORS.
+    # Login/bootstrap always require same or trusted Origin, even with the flag off.
+    trustedOrigins: []
   # Browser-submitted Quick and Advanced Load are disabled unless explicitly enabled.
   inlineLoad:
     enabled: false

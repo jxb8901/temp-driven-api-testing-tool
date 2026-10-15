@@ -10,6 +10,20 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerConfigTest {
     @TempDir Path temp;
 
+    @Test void validatesTrustedOriginsAtStartup() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("origins/packages"));
+        Path pkg=Files.createDirectory(packages.resolve("p"));
+        Path config=temp.resolve("origins/server.yaml");
+        String base="server:\n  dataDir: "+yaml(temp.resolve("origins/data"))+"\n  security:\n    trustedOrigins: ";
+        String tail="\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries:\n    p: "+yaml(pkg)+"\n";
+        Files.writeString(config,base+"['https://gateway.example']"+tail);
+        assertEquals(List.of("https://gateway.example"),ServerConfig.load(config).security.trustedOrigins);
+        for(String entry:List.of("['http://public.example']","['https://gateway.example/path']","['https://gateway.example', 'https://GATEWAY.example:443/']","'*'","[42]")) {
+            Files.writeString(config,base+entry+tail);
+            assertThrows(IllegalArgumentException.class,()->ServerConfig.load(config),entry);
+        }
+    }
+
     @Test void discoversServerConfigInDocumentedPrecedenceOrder() {
         Path systemConfig=temp.resolve("system.yaml");
         Path environmentConfig=temp.resolve("environment.yaml");

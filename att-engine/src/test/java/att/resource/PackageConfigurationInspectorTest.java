@@ -63,7 +63,7 @@ class PackageConfigurationInspectorTest {
         assertEquals("visible", fieldState(expandedFields.get("evidence.sql")));
         assertEquals("visible", fieldState(expandedFields.get("evidence.parameters")));
         assertFalse(expanded.toString().contains("property-secret"));
-        assertEquals("hidden", fieldState(expandedFields.get("username")));
+        assertEquals("visible", fieldState(expandedFields.get("username")));
         assertEquals("hidden", fieldState(expandedFields.get("password")));
 
         Map<String,Object> comparison=admin.inspect("compare","SIT","UAT","dbhelpers",0,100);
@@ -72,8 +72,8 @@ class PackageConfigurationInspectorTest {
         assertEquals("visible",fieldState(evidence.get("left")),comparison.toString());
         assertEquals("visible",fieldState(evidence.get("right")),comparison.toString());
         Map<String,Object> username=compared.stream().filter(item->"dbhelpers.orders.username".equals(item.get("path"))).findFirst().orElseThrow(AssertionError::new);
-        assertEquals("hidden",username.get("change"),comparison.toString());
-        assertFalse(username.toString().contains("sit-user"));
+        assertEquals("changed",username.get("change"),comparison.toString());
+        assertTrue(username.toString().contains("sit-user"));
     }
 
     @SuppressWarnings("unchecked")
@@ -95,7 +95,8 @@ class PackageConfigurationInspectorTest {
         assertEquals("changed", visible.get("change"));
         Map<String, Object> hidden = fields.stream().filter(item -> "dbhelpers.orders.url".equals(item.get("path"))).findFirst().orElseThrow(AssertionError::new);
         assertEquals("hidden", hidden.get("change"));
-        assertFalse(hidden.toString().contains("value"));
+        assertTrue(hidden.toString().contains("[HIDDEN]"));
+        assertTrue(hidden.toString().contains("UNAVAILABLE_BY_POLICY"));
         String serialized = comparison.toString();
         assertFalse(serialized.contains("jdbc:postgresql"));
         assertFalse(serialized.contains("sit-secret"));
@@ -229,7 +230,7 @@ class PackageConfigurationInspectorTest {
             if(i>0)paths.append(", ");paths.append(path);
         }
         write(root.resolve("config/config.yaml"),baseConfig(paths.toString(),"config/dbhelpers/uat.yaml"));
-        PackageConfigurationInspector bounded=new PackageConfigurationInspector(root,Paths.get("config/config.yaml"),8192);
+        PackageConfigurationInspector bounded=new PackageConfigurationInspector(root,Paths.get("config/config.yaml"),16384);
         assertThrows(PackageConfigurationInspector.ResponseTooLargeException.class,
                 ()->bounded.inspect("effective","SIT",null));
         Map<String,Object> page=bounded.inspect("effective","SIT",null,"dbhelpers",0,5);
@@ -265,8 +266,8 @@ class PackageConfigurationInspectorTest {
         assertEquals("A-1001",value.get("accountId"));assertEquals("ACTIVE",value.get("status"));
         assertEquals("sit.internal",value.get("host"));assertEquals(1414,value.get("port"));
         assertEquals("https://service.example/api",value.get("url"));assertEquals("visible-value",value.get("ordinary"));
-        assertEquals("[REDACTED]",value.get("address"));
-        assertEquals("[REDACTED]",value.get("email"));assertFalse(page.toString().contains("customer@example.test"));
+        assertEquals("12 Main Street",value.get("address"));
+        assertEquals("customer@example.test",value.get("email"));
         assertFalse(page.toString().contains("abc123"));assertFalse(page.toString().contains("inline-secret"));
         assertEquals(Boolean.TRUE,records.get(0).get("redacted"));
 

@@ -13,7 +13,7 @@ ATT-specific rules take precedence where the external guide conflicts with produ
 - In Traditional Chinese prose, keep canonical ATT technical terms in English as defined by the terminology policy below.
 - Reference source modules are standalone pages composed in the order declared by `docs/reference-manifest.txt`; the generator rebases their headings when building the combined manual.
 
-The documentation release gate checks editable English Markdown for standalone-page H1 count, numbered sequence headings, `e.g.`, `and/or`, and selected positional cross-references. It also checks that each current Reference source is a standalone page with one H1 and a continuous heading hierarchy. It ignores fenced and inline code, Markdown link destinations, generated Reference Markdown/HTML, and historical documentation. Generated Reference outputs remain freshness-checked against their source modules. Keep EN/ZH structure checks and the ATT-specific contract checks in force.
+The documentation release gate checks editable English Markdown for standalone-page H1 count, numbered sequence headings, `e.g.`, `and/or`, and selected positional cross-references. It also checks that each current Reference source is a standalone page with one H1 and a continuous heading hierarchy. It ignores fenced and inline code, Markdown link destinations, generated Reference Markdown, and historical documentation. Generated Reference Markdown outputs remain freshness-checked against their source modules. Keep EN/ZH structure checks and the ATT-specific contract checks in force.
 
 Reference is the normative source of truth for ATT public behavior. README, Quick Start and examples explain narrower tasks and link to the owning Reference section.
 
@@ -53,4 +53,4 @@ python3 tools/build_reference_manual.py
 python3 tools/verify_documentation.py
 ```
 
-The release gate checks generated Markdown/HTML freshness, chapter/appendix order, EN/ZH structure, active schema matrices, stale version/schema claims throughout current documentation and examples, manifest integrity, canonical ZH terminology, local links and selected high-risk Context/CLI facts. Regression tests demonstrate rejection of stale examples, duplicate numbering, misplaced historical exemptions and invalid manifests.
+The release gate checks generated Markdown freshness, chapter/appendix order, EN/ZH structure, active schema matrices, stale version/schema claims throughout current documentation and examples, manifest integrity, canonical ZH terminology, local links and selected high-risk Context/CLI facts. Regression tests demonstrate rejection of stale examples, duplicate numbering, misplaced historical exemptions and invalid manifests.

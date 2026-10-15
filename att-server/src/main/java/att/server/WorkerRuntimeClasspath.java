@@ -35,7 +35,7 @@ final class WorkerRuntimeClasspath {
             String runtimeVersion=properties.getProperty("att.version","").trim();
             if(!ServerBuildInfo.PRODUCT.equals(runtimeVersion))
                 throw new IllegalStateException("ATT Server "+ServerBuildInfo.PRODUCT+" requires matching ATT Local Worker runtime; "+bundle+" reports version "+(runtimeVersion.isEmpty()?"unknown":runtimeVersion));
-            for(String required:new String[]{"att/worker/WorkerMain.class","att/server/api/WorkerRequest.class","att/server/api/internal/DiagnosticSanitizer.class"})
+            for(String required:new String[]{"att/security/SecretProtection.class","att/worker/WorkerMain.class","att/server/api/WorkerRequest.class","att/server/api/internal/DiagnosticSanitizer.class"})
                 if(jar.getJarEntry(required)==null)throw new IllegalStateException("ATT Worker runtime is incomplete (missing "+required+"): "+bundle);
         } catch(IllegalStateException failure) {
             throw failure;

@@ -119,6 +119,7 @@ class ServerWarUiIT {
                 }
             }
             String api = "/tools/att/api/v1";
+            assertCliAndTomcatDiagnosticFidelity(port, api, auth, origin, packageRoot, localHome);
             JsonNode flowResources = getJson(port, api + "/packages/payments/resources?type=flow", scheduleAdminAuth);
             JsonNode referenceFlow = null;
             for (JsonNode item : flowResources.path("items")) {
@@ -429,7 +430,7 @@ class ServerWarUiIT {
         Path lib = Files.createDirectories(home.resolve("lib"));
         Set<String> added = new HashSet<>();
         try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(lib.resolve("att-local-" + ServerBuildInfo.PRODUCT + ".jar")))) {
-            for (String module : List.of("att-cli", "att-engine", "att-remote", "att-server-api", "att-worker")) {
+            for (String module : List.of("att-security", "att-cli", "att-engine", "att-remote", "att-server-api", "att-worker")) {
                 Path classes = Path.of(module, "target/classes");
                 try (var paths = Files.walk(classes)) {
                     for (Path source : (Iterable<Path>) paths.filter(Files::isRegularFile)::iterator) {
@@ -488,9 +489,51 @@ class ServerWarUiIT {
                 + "    load:\n      users: 1\n      duration: 1s\n");
     }
 
+    private void assertCliAndTomcatDiagnosticFidelity(int port, String api, String auth, String origin,
+                                                     Path packageRoot, Path localHome) throws Exception {
+        String expression="&{./Pacs008.xml}";
+        ProcessBuilder builder=new ProcessBuilder(Path.of(System.getProperty("java.home"),"bin","java").toString(),
+                "-Datt.home="+localHome,"-cp",localHome.resolve("lib").toString()+"/*","att.FrameworkRunner",
+                "debug","flow","diagnostic.fidelity.v1","--config",packageRoot.resolve("config/config.yaml").toString(),
+                "--output-dir",temp.resolve("cli-diagnostic-output").toString(),"--format","json");
+        builder.directory(packageRoot.toFile());
+        builder.environment().put("ATT_PACKAGE_ROOT",packageRoot.toString());
+        Path cliOutput=temp.resolve("cli-diagnostic.txt");builder.redirectErrorStream(true).redirectOutput(cliOutput.toFile());
+        Process cli=builder.start();assertTrue(cli.waitFor(30,TimeUnit.SECONDS));
+        assertNotEquals(0,cli.exitValue());String cliText=Files.readString(cliOutput);
+        assertTrue(cliText.contains(expression),cliText);assertFalse(cliText.contains("&{.$EXTERNAL"),cliText);
+        JsonNode submitted=apiJsonResponse(port,"POST",api+"/jobs/debug",auth,origin,
+                Map.of("packageId","payments","target",Map.of("type","flow","id","diagnostic.fidelity.v1")),202);
+        String jobId=submitted.path("jobId").asText();JsonNode job=null;
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(40);
+        do { job=getJson(port,api+"/jobs/"+jobId,auth);
+            if (Set.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(job.path("status").asText())) break;
+            Thread.sleep(30);
+        } while(System.nanoTime()<deadline);
+        assertTrue(Set.of("ERROR","INVALID").contains(job.path("status").asText()),job.toString());
+        JsonNode result=getJson(port,api+"/jobs/"+jobId+"/result",auth);String publicText=result.toString();
+        assertTrue(publicText.contains(expression),publicText);assertFalse(publicText.contains("&{.$EXTERNAL"),publicText);
+        assertFalse(publicText.contains(packageRoot.toString()),publicText);
+        assertTrue(publicText.contains("flow.yaml"),publicText);
+        assertTrue(publicText.contains("line") || publicText.contains("sourceColumn"),publicText);
+        JsonNode artifacts=getJson(port,api+"/jobs/"+jobId+"/artifacts",auth);
+        boolean checked=false;
+        for(JsonNode item:artifacts.path("items")) if(item.path("path").asText().endsWith("case.log")) {
+            String path=item.path("path").asText();
+            String log=getText(port,api+"/jobs/"+jobId+"/artifacts/"+path,auth);
+            assertTrue(log.contains(expression),log);assertFalse(log.contains(packageRoot.toString()),log);checked=true;
+        }
+        assertTrue(checked,"Failed Debug must retain its diagnostic Case Log");
+    }
+
     private static void writeReferenceFlowSource(Path packageRoot) throws Exception {
         Path payload = Files.createDirectories(packageRoot.resolve("templates/SCHEDULED/payload"));
         Path referenceFlow = Files.createDirectories(packageRoot.resolve("templates/flows/reference"));
+        Path diagnosticFlow=Files.createDirectories(packageRoot.resolve("templates/flows/diagnostic"));
+        Files.writeString(diagnosticFlow.resolve("debug.yaml"), "schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        Files.writeString(diagnosticFlow.resolve("flow.yaml"),
+                "schemaVersion: att-flow/v3.6\nid: diagnostic.fidelity.v1\nname: Diagnostic fidelity\ndescription: Missing payload regression\nactions:\n"
+                +"  payload:\n    type: log\n    message: \"&{./Pacs008.xml}\"\n");
         Files.writeString(payload.resolve("request.xml"), "<request>safe payload</request>\n");
         Files.writeString(referenceFlow.resolve("flow.yaml"),
                 "schemaVersion: att-flow/v3.6\nid: reference.flow.v1\nname: Reference Flow\n"

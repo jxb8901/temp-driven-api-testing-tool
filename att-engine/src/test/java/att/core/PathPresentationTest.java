@@ -20,6 +20,19 @@ class PathPresentationTest {
     @BeforeEach void enableAliasesForLegacyFormattingCases() { PathPresentation.configure(true, true); }
     @AfterEach void restoreDefaultAliases() { PathPresentation.configure(false, false); }
 
+    @Test void preservesAuthoredRelativeExpressionsUrlsAndXmlInDiagnostics() throws Exception {
+        Path root=Files.createDirectories(temp.resolve("expression-package"));
+        String[] excerpts={"payload='&{./Pacs008.xml}'", "payload='&{../request.xml}'", "./file.yaml", "../file.yaml",
+                "payload='&{./付款 request.xml}'", "${INPUT.value}", "#{http.send(payload='&{./付款.xml}')}",
+                "#{helper(value=\"${INPUT.value}\", path='/srv/remote/request.xml')}",
+                "<request><value>hello</value></request>", "https://example.test/path/file.yaml",
+                "scp user@host:/srv/remote/request.xml", "${'/private/secret/file.yaml'}"};
+        for(String excerpt:excerpts) {
+            assertEquals(excerpt,PathPresentation.displayDiagnosticText(excerpt,root),excerpt);
+            assertEquals(excerpt,PathPresentation.displayDiagnosticText(PathPresentation.displayDiagnosticText(excerpt,root),root),excerpt);
+        }
+    }
+
     @Test void showsRawPathsByDefaultAndEnablesTheTwoAliasesIndependently() throws Exception {
         PathPresentation.configure(false, false);
         Path root = Files.createDirectories(temp.resolve("raw-project"));

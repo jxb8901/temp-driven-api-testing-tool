@@ -145,8 +145,16 @@ class LoadMqPoolingTest {
         Files.write(flowDirectory.resolve("flow.yaml"), (
                 "schemaVersion: att-flow/v3.4\n"
                 + "id: load.mq.request.v1\nname: Load MQ request\ndescription: scheduler MQ flow\nactions:\n"
-                + "  request:\n    type: tool\n    call: \"#{mq.broker.request(payload=&{./request.xml}, requestQueue='REQUEST.Q', replyQueue='REPLY.Q', waitMs=1000)}\"\n").getBytes("UTF-8"));
-        FrameworkConfig config = config(2, 0, 1000L);
+                + "  request:\n    type: tool\n    call: \"#{mq.broker.request(payload=&{./request.xml}, waitMs=1000)}\"\n").getBytes("UTF-8"));
+        FrameworkConfig base = config(2, 0, 1000L);
+        Files.write(project.resolve("mq-routing.yaml"),("schemaVersion: att-mqhelper/v1.3\nid: broker\nname: Broker\ndescription: Queue routing\n"
+                +"defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: CH}\n"
+                +"  message: {requestQueues: [REQUEST.A, REQUEST.B], requestQueueSelection: {strategy: roundRobin}, replyQueue: REPLY.Q}\n"
+                +"instances: [{id: primary}]\n").getBytes("UTF-8"));
+        Map<String,MqHelperConfig> routed = new att.config.MqHelperConfigLoader().load(Collections.singletonList("mq-routing.yaml"),project);
+        FrameworkConfig config = new FrameworkConfig(base.outputDirectory(),base.reportDirectory(),base.logDirectory(),base.environment(),
+                base.timeoutMs(),base.templatesRoot(),base.testcasesRoot(),base.tools(),base.dbHelpers(),routed,null,null,
+                null,"","",null,null,1,"ignore","",false,ProcessOutputConfig.defaults());
         Path metricsScenarioFile = project.resolve("mq-metrics.yaml");
         LoadTestSupport.writeScenario(metricsScenarioFile, "schemaVersion: att-load/v1.3\n"
                 + "workloads:\n  - id: mq\n    target: {type: flow, id: load.mq.request.v1}\n"
@@ -168,6 +176,7 @@ class LoadMqPoolingTest {
             }, LoadSchedulerTiming.system(), metricsEvidence, outputRoot, null);
             scheduler.run();
             assertTrue(metricEvents.stream().anyMatch(LoadEvent::completed));
+            assertTrue(metricsFactory.putQueues.contains("REQUEST.A"));assertTrue(metricsFactory.putQueues.contains("REQUEST.B"));
             assertTrue(metricEvents.stream().filter(LoadEvent::completed).allMatch(event -> event.status() == ResultStatus.PASS));
             assertFalse(Files.exists(outputRoot.resolve("load/mq-metrics/iterations")),
                     "metrics mode must keep successful Flow iterations workspace-free");
@@ -254,6 +263,7 @@ class LoadMqPoolingTest {
         final AtomicInteger disconnects = new AtomicInteger();
         final AtomicInteger queueCloses = new AtomicInteger();
         final AtomicInteger putCalls = new AtomicInteger();
+        final List<String> putQueues = new java.util.concurrent.CopyOnWriteArrayList<String>();
         final AtomicInteger getCalls = new AtomicInteger();
         final AtomicInteger activeGets = new AtomicInteger();
         final AtomicInteger maxConcurrentGets = new AtomicInteger();
@@ -268,7 +278,7 @@ class LoadMqPoolingTest {
                 @Override public MqTransport.Queue open(String queue, boolean input, boolean output) {
                     return new MqTransport.Queue() {
                         @Override public MqTransport.Message put(byte[] payload, MqTransport.PutRequest request) {
-                            putCalls.incrementAndGet();
+                            putCalls.incrementAndGet();putQueues.add(queue);
                             return new MqTransport.Message(new byte[]{1}, null, payload);
                         }
 

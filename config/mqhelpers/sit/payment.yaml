@@ -1,4 +1,4 @@
-schemaVersion: att-mqhelper/v1.2
+schemaVersion: att-mqhelper/v1.3
 id: payment
 name: Payment MQ
 description: SIT payment request and reply queues

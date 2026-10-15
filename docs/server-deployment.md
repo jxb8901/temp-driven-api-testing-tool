@@ -48,6 +48,29 @@ The optional `server.inspection.configurationAdminRole` (default `ATT_ADMIN`) co
 
 `server.security.checkCrossOrigin` defaults to `false` and controls the Origin-equality check on state-changing API requests. Setting it to `true` rejects mismatched Origins with `ATT-SERVER-ORIGIN-MISMATCH`. Disabling this check does not disable CSRF validation for local cookie-authenticated mutations, relax local login/bootstrap origin checks, enable CORS, or add wildcard headers. Behind a reverse proxy, configure Tomcat `RemoteIpValve` with trusted proxy addresses so the Servlet request exposes the external scheme, host, and port; the application does not trust arbitrary forwarded headers. The Server warns at startup when origin checking is disabled.
 
+`server.security.trustedOrigins` is an optional exact allowlist for known browser gateways. It accepts at most 100 origins; an empty or omitted list preserves existing behavior. Configure trusted Tomcat proxy addresses and the external HTTPS scheme/host/port first. The allowlist handles a deliberate difference between the browser Origin and the Servlet origin; it cannot make an HTTP request secure.
+
+```yaml
+server:
+  security:
+    checkCrossOrigin: true
+    trustedOrigins:
+      - https://att.example.com
+      - https://att-gateway.example.com:8443
+```
+
+Origins compare by scheme, case-insensitive hostname/IP, and effective port (`https` defaults to 443). Configuration may have a trailing `/`; request Origins must have no path. Startup rejects paths, queries, fragments, userinfo, wildcards, malformed ports, `null`, duplicate equivalent origins, and public HTTP origins. HTTP is allowed only for `localhost`, `127.0.0.1`, or IPv6 loopback development. No DNS lookup, prefix matching, suffix matching, or automatic forwarded-header trust occurs.
+
+| Browser Origin | Ordinary mutation, check enabled | Ordinary mutation, check disabled | Login/bootstrap, either setting |
+| --- | --- | --- | --- |
+| Same Servlet origin or exact trusted entry | Passes Origin policy | Passes Origin policy | Passes Origin policy |
+| Different unlisted origin | Rejected | Origin check skipped | Rejected |
+| `null`, malformed, or multiple Origins | Rejected | Origin check skipped | Rejected |
+| Missing Origin (REST/CLI compatibility) | Passes Origin policy | Passes Origin policy | Passes Origin policy |
+
+The shared policy applies to local and container authentication wherever Origin equality is checked. Rejection uses `ATT-SERVER-ORIGIN-MISMATCH` and an `ORIGIN_REJECT` audit record without raw Origin or credentials. Passing Origin policy grants no permissions: local cookie and Basic mutations still require `X-ATT-CSRF`; authentication, roles, HTTPS credential transport, rate limits, Secure/HttpOnly/SameSite cookies, and package/job ownership remain enforced. This does not configure CORS, send `Access-Control-Allow-Origin`, or enable cross-site cookies. True cross-site browser API access requires a separate CORS design.
+
+
 Browser-created Quick and Advanced Load drafts have a separate opt-in: `server.inlineLoad.enabled` defaults to `false`. When enabled, the Server enforces the configured workload, target, total Virtual User, aggregate Arrival Rate, per-workload and aggregate concurrency, and total timing-envelope caps after Engine validation and again before queue admission. The [Server configuration example](#configuration) sets conservative defaults. The duration cap is the sum of warmup, ramp-up, measured duration, and ramp-down; target count includes each fixed target and each VU mix entry. A disabled feature returns `403 ATT-SERVER-INLINE-LOAD-DISABLED`. An over-limit draft returns `400 ATT-SERVER-INLINE-LOAD-LIMIT` with a summary naming the exceeded setting. These limits apply to browser-created drafts; existing path-based Load submissions retain their compatibility behavior and continue to use `workers.maxConcurrentLoad` admission.
 
 Recurring package-backed Load schedules use a separate opt-in: `server.scheduling.enabled` defaults to `false`. Enable it only after choosing an administrator role and reviewing the schedule caps. Authenticated management requires the Servlet container role named by `server.scheduling.adminRole` (default `ATT_ADMIN`); map that role to trusted operators in Tomcat. When authentication is disabled and scheduling is enabled, `allowAnonymousManagement` defaults to `true`; set it to `false` to keep schedule management restricted to the configured role. Anonymous schedule access grants every caller shared management rights and logs a startup warning. The feature requires bounded package inspection and stores schedule definitions and execution history in H2 under `server.dataDir`; keep one Server process on that data directory. The latest 10,000 terminal occurrences per schedule are retained by default (`maxExecutionsPerSchedule` can be set from 100 to 100,000); active and in-progress occurrences are preserved. This scheduler does not claim multi-instance leader election.
@@ -156,7 +179,7 @@ In `container` mode, Tomcat authenticates requests and ATT uses the Servlet Prin
 
 In `local` mode, `/ui/` redirects unauthenticated browsers to ATT's login page. The REST API returns structured JSON `401` responses. The first administrator is created once using the random token in `dataDir/bootstrap-admin.token`; keep `dataDir` restricted to the Server operating-system account, enter the token on the login page, and remove access to the token file after bootstrap. Token initialization uses a private temporary file and atomic rename; on startup an invalid token is repaired only while no account exists and bootstrap has not been claimed. A claimed bootstrap is never reopened. No default account or password exists. Every request that carries a local password—including login, bootstrap, user creation, password reset, and self-service change—requires HTTPS except for loopback development. Tomcat recognizes proxy-terminated HTTPS only through its configured trusted proxy handling; forwarded headers from untrusted clients do not establish HTTPS. Local passwords are stored as salted PBKDF2-HMAC-SHA-256 hashes. The first release supports `ADMIN` and `USER`; all authenticated users can use normal Server operations, while account administration and scheduled-load administration require `ADMIN`.
 
-Local sessions use opaque server-side identifiers, rotate at login, expire after 30 minutes of inactivity or 12 hours, and are revoked at logout, password change/reset, or account disable. Sessions persist across Server restarts until expiry or revocation. Cookies are HttpOnly, SameSite=Lax, scoped to the deployed context, and marked Secure when Tomcat recognizes the request as HTTPS. Configure the trusted reverse proxy before enabling TLS termination so Tomcat sees the external HTTPS scheme. State-changing cookie-authenticated requests require the session CSRF token in `X-ATT-CSRF`; browser-originated Basic-authenticated mutations also require it. Setting `security.checkCrossOrigin: false` relaxes origin-equality rejection only: it does not bypass cookie CSRF checks or the same-origin JSON requirement for login/bootstrap, and it does not enable wildcard CORS. Eight failed attempts for the same normalized login and client address, or 32 failed attempts from one client address across usernames, are throttled within ten minutes. Bootstrap also allows eight failed token attempts per client address in ten minutes. Self-service current-password verification uses these same attempt limits and the bounded password-check semaphore. These in-memory limits are local to each Server process; use a shared edge rate limit when running multiple instances. Login responses do not distinguish unknown, disabled, and incorrectly authenticated accounts. Successful and failed login attempts are audited without credentials. Password hashes use 310,000 PBKDF2-HMAC-SHA-256 iterations and are upgraded at successful login when a stored hash uses fewer iterations.
+Local sessions use opaque server-side identifiers, rotate at login, expire after 30 minutes of inactivity or 12 hours, and are revoked at logout, password change/reset, or account disable. Sessions persist across Server restarts until expiry or revocation. Cookies are HttpOnly, SameSite=Lax, scoped to the deployed context, and marked Secure when Tomcat recognizes the request as HTTPS. Configure the trusted reverse proxy before enabling TLS termination so Tomcat sees the external HTTPS scheme. State-changing cookie-authenticated requests require the session CSRF token in `X-ATT-CSRF`; browser-originated Basic-authenticated mutations also require it. Setting `security.checkCrossOrigin: false` relaxes origin-equality rejection only: it does not bypass cookie CSRF checks or the same-or-trusted-origin JSON requirement for login/bootstrap, and it does not enable wildcard CORS. Eight failed attempts for the same normalized login and client address, or 32 failed attempts from one client address across usernames, are throttled within ten minutes. Bootstrap also allows eight failed token attempts per client address in ten minutes. Self-service current-password verification uses these same attempt limits and the bounded password-check semaphore. These in-memory limits are local to each Server process; use a shared edge rate limit when running multiple instances. Login responses do not distinguish unknown, disabled, and incorrectly authenticated accounts. Successful and failed login attempts are audited without credentials. Password hashes use 310,000 PBKDF2-HMAC-SHA-256 iterations and are upgraded at successful login when a stored hash uses fewer iterations.
 
 `GET /api/v1/auth/me` returns the safe current-user profile and the CSRF token needed by browser clients. `POST /api/v1/auth/login` and `/api/v1/auth/logout` manage sessions. HTTPS Basic authentication is also supported for CLI and REST clients using local accounts. `GET` and `POST /api/v1/auth/users`, `POST /api/v1/auth/users/{loginId}/password`, `POST /api/v1/auth/users/{loginId}/enable`, and `DELETE /api/v1/auth/users/{loginId}` provide administrator account management. `POST /api/v1/auth/password` changes the current user's password after validating the current password. Password hashes, session identifiers, and passwords are never returned in API responses.
 
@@ -227,7 +250,7 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 | `GET` | `/packages/{packageId}/load-policy?model=virtualUsers&environment=SIT` | Read safe model-specific Load policy defaults for Advanced Load |
 | `POST` | `/drafts/debug` | Validate a fixed-target Debug input and create an in-memory draft |
 | `POST` | `/drafts/quick-load` | Validate a fixed-target Quick Load and create an in-memory draft |
-| `POST` | `/drafts/load` | Validate an `att-load/v1.6` scenario and create an in-memory draft |
+| `POST` | `/drafts/load` | Validate an `att-load/v1.7` scenario and create an in-memory draft |
 | `GET` | `/drafts/{draftId}` | Read the safe preview for an owned Debug, Quick Load, or Advanced Load draft |
 | `POST` | `/jobs/debug`, `/jobs/load` | Submit an owned Debug, Quick Load, or Advanced Load draft |
 | `POST` | `/jobs/run`, `/jobs/load`, `/jobs/validate` | Submit one path-based job |
@@ -364,7 +387,7 @@ The Server rechecks the package revision at submission and before Worker start. 
 
 ### Target-scoped Quick Load
 
-Quick Load is available from a selected Template, Flow, or Tool when `server.inlineLoad.enabled` is true. It uses one fixed target and creates one Workload. The model is `virtualUsers` or `arrivalRate`; the Server composes the matching current `att-load/v1.6` policy and validates the target through the existing Load pipeline. When disabled, both Quick Load form/policy reads and draft creation return `403 ATT-SERVER-INLINE-LOAD-DISABLED`.
+Quick Load is available from a selected Template, Flow, or Tool when `server.inlineLoad.enabled` is true. It uses one fixed target and creates one Workload. The model is `virtualUsers` or `arrivalRate`; the Server composes the matching current `att-load/v1.7` policy and validates the target through the existing Load pipeline. When disabled, both Quick Load form/policy reads and draft creation return `403 ATT-SERVER-INLINE-LOAD-DISABLED`.
 
 ```http
 GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT
@@ -372,7 +395,7 @@ GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=
 
 The form response includes safe `inputs` and `vars` defaults for Template/Flow targets, or `inputs` and `arguments` for a Tool, plus a redacted one-workload preview. It reads only the business fields from the optional target `debug.yaml`; Debug-only `case`, `stage`, and local `testdata` are not copied. When a sidecar has Debug-local Testdata, the form reports that those imports were omitted. Supply any needed package-relative descriptors in the separate Load-level `testdata` array; these paths are validated as part of the effective Load scenario.
 
-The Server reads `load/load.visualuser.yaml` for `virtualUsers` and `load/load.arrivalrate.yaml` for `arrivalRate`. These are policy-only `att-load/v1.6` descriptors; the selected policy must match the chosen model. If a model-specific file is absent, a bundled low-intensity fallback is used: one Virtual User for 10 seconds, or 1 arrival per second for 10 seconds with `maxConcurrent: 1` and `overloadPolicy: drop`. Existing CLI `load/load.yaml` behavior is unchanged.
+The Server reads `load/load.visualuser.yaml` for `virtualUsers` and `load/load.arrivalrate.yaml` for `arrivalRate`. These are policy-only `att-load/v1.7` descriptors; the selected policy must match the chosen model. If a model-specific file is absent, a bundled low-intensity fallback is used: one Virtual User for 10 seconds, or 1 arrival per second for 10 seconds with `maxConcurrent: 1` and `overloadPolicy: drop`. Existing CLI `load/load.yaml` behavior is unchanged.
 
 Validate business values and pacing overrides to create an owned draft:
 
@@ -398,7 +421,7 @@ The Server checks the package revision at draft submission, before Worker start,
 
 ### Advanced Load builder
 
-Advanced Load creates a full `att-load/v1.6` scenario with one or more workloads when `server.inlineLoad.enabled` is true. The selected `model` must be `virtualUsers` or `arrivalRate` for every workload. Virtual Users workloads can use one fixed target or a weighted `mix`; Arrival Rate workloads use one fixed target each. The Engine validates the shared timing envelope, workload intensity, thresholds, Testdata policies, and every target before the Server creates a draft. The Server then enforces its configured inline Load caps before returning the preview. Exceeding a cap returns `400 ATT-SERVER-INLINE-LOAD-LIMIT` with a safe summary; the Server does not schedule the scenario.
+Advanced Load creates a full `att-load/v1.7` scenario with one or more workloads when `server.inlineLoad.enabled` is true. The selected `model` must be `virtualUsers` or `arrivalRate` for every workload. Virtual Users workloads can use one fixed target or a weighted `mix`; Arrival Rate workloads use one fixed target each. The Engine validates the shared timing envelope, workload intensity, thresholds, Testdata policies, and every target before the Server creates a draft. The Server then enforces its configured inline Load caps before returning the preview. Exceeding a cap returns `400 ATT-SERVER-INLINE-LOAD-LIMIT` with a safe summary; the Server does not schedule the scenario.
 
 Read safe model policy defaults with:
 
@@ -418,7 +441,7 @@ Content-Type: application/json
   "packageId": "payments",
   "environment": "SIT",
   "scenario": {
-    "schemaVersion": "att-load/v1.6",
+    "schemaVersion": "att-load/v1.7",
     "load": {"users": 1, "duration": "30s"},
     "workloads": [
       {"id": "browse", "target": {"type": "flow", "id": "PAYMENT.browse"}, "load": {"users": 4}},

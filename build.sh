@@ -3,10 +3,29 @@
 set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 if [ "${1:-}" = "clean" ]; then
-  rm -rf "$ROOT_DIR/target" "$ROOT_DIR/dist" "$ROOT_DIR/att-engine/target" "$ROOT_DIR/att-cli/target" "$ROOT_DIR/att-worker/target" "$ROOT_DIR/att-web/target" "$ROOT_DIR/att-server/target" "$ROOT_DIR/att-dist/target"
+  rm -rf "$ROOT_DIR/target" "$ROOT_DIR/dist" "$ROOT_DIR/att-security/target" "$ROOT_DIR/att-engine/target" "$ROOT_DIR/att-cli/target" "$ROOT_DIR/att-worker/target" "$ROOT_DIR/att-web/target" "$ROOT_DIR/att-server/target" "$ROOT_DIR/att-dist/target"
   exit 0
 fi
-for required in pom.xml att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-web/pom.xml att-web/frontend/index.html att-server/pom.xml att-dist/pom.xml att-dist/src/assembly/local.xml att-dist/src/assembly/server.xml att-server/src/assembly/server-app.xml att-dist/src/release/local/RELEASE_MANIFEST.txt att-dist/src/release/server/RELEASE_MANIFEST.txt config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md docs/server-deployment.md docs/server-deployment.zh.md docs/att-server-web-ui.md docs/att-server-web-ui.zh.md; do
+
+# Portable phase timings, including the phase that fails under set -e.
+# Report to stderr so stdout remains only the release archive paths.
+BUILD_STARTED_AT="$(date +%s)"
+BUILD_PHASE_STARTED_AT="$BUILD_STARTED_AT"
+BUILD_PHASE_NAME="Preflight"
+build_timer_next() {
+  now="$(date +%s)"
+  printf '[ATT BUILD TIME] %s: %ss\n' "$BUILD_PHASE_NAME" "$((now - BUILD_PHASE_STARTED_AT))" >&2
+  BUILD_PHASE_NAME="$1"
+  BUILD_PHASE_STARTED_AT="$now"
+}
+build_timer_finish() {
+  status=$?
+  now="$(date +%s)"
+  printf '[ATT BUILD TIME] %s: %ss%s\n' "$BUILD_PHASE_NAME" "$((now - BUILD_PHASE_STARTED_AT))" "$([ "$status" -eq 0 ] && printf '' || printf ' (FAILED)')" >&2
+  printf '[ATT BUILD TIME] Total: %ss (exit %s)\n' "$((now - BUILD_STARTED_AT))" "$status" >&2
+}
+trap 'build_timer_finish' 0
+for required in pom.xml att-security/pom.xml att-security/src/main/java att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-web/pom.xml att-web/frontend/index.html att-server/pom.xml att-dist/pom.xml att-dist/src/assembly/local.xml att-dist/src/assembly/server.xml att-server/src/assembly/server-app.xml att-dist/src/release/local/RELEASE_MANIFEST.txt att-dist/src/release/server/RELEASE_MANIFEST.txt config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md docs/server-deployment.md docs/server-deployment.zh.md docs/att-server-web-ui.md docs/att-server-web-ui.zh.md; do
   if [ ! -e "$ROOT_DIR/$required" ]; then echo "Missing required package path: $ROOT_DIR/$required" >&2; exit 2; fi
 done
 VERSION="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' "$ROOT_DIR/pom.xml" | head -n 1)"
@@ -21,14 +40,23 @@ LOCAL_ARCHIVE="$ROOT_DIR/att-dist/target/$LOCAL_PACKAGE_NAME.tar.gz"
 SERVER_ARCHIVE="$ROOT_DIR/att-dist/target/$SERVER_PACKAGE_NAME.tar.gz"
 SOURCE_ARCHIVE="$ROOT_DIR/att-dist/target/$SOURCE_PACKAGE_NAME.tar.gz"
 MAX_BINARY_PACKAGE_BYTES=25000000
-for command in mvn python3 pandoc tar; do
+for command in mvn python3 tar; do
   if ! command -v "$command" >/dev/null 2>&1; then echo "$command is required to execute the ATT release gate" >&2; exit 2; fi
 done
 GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+build_timer_next "Reference manual"
 (cd "$ROOT_DIR" && python3 tools/build_reference_manual.py)
-(cd "$ROOT_DIR" && mvn -B -ntp -Datt.gitCommit="$GIT_COMMIT" clean verify)
+set -- "-Datt.gitCommit=$GIT_COMMIT"
+if [ "${ATT_CI_SKIP_COVERED_TESTS:-false}" = true ]; then
+  set -- "$@" -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true
+fi
+build_timer_next "Maven clean verify"
+(cd "$ROOT_DIR" && mvn -B -ntp -T 1C "$@" clean verify)
+build_timer_next "Source launcher checks"
 (cd "$ROOT_DIR" && ./scripts/verify-source-launcher.sh)
+build_timer_next "Source package validation"
 (cd "$ROOT_DIR" && ATT_HOME="$ROOT_DIR" ATT_PACKAGE_ROOT="$ROOT_DIR" ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}" ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-build-placeholder}" PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-build-placeholder}" PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-build-placeholder}" ./att.sh validate --package)
+build_timer_next "Archive checks, repack and smoke tests"
 for archive in "$LOCAL_ARCHIVE" "$SERVER_ARCHIVE" "$SOURCE_ARCHIVE"; do
   if [ ! -f "$archive" ]; then echo "Maven distribution assembly did not produce: $archive" >&2; exit 2; fi
 done
@@ -121,6 +149,7 @@ for archive in "$LOCAL_ARCHIVE" "$SERVER_ARCHIVE"; do
   echo "Verified package size: $archive ($archive_size bytes)"
 done
 
+build_timer_next "Release publication"
 cp "$LOCAL_ARCHIVE" "$DIST_DIR/$LOCAL_PACKAGE_NAME.tar.gz"
 cp "$SERVER_ARCHIVE" "$DIST_DIR/$SERVER_PACKAGE_NAME.tar.gz"
 cp "$SOURCE_ARCHIVE" "$DIST_DIR/$SOURCE_PACKAGE_NAME.tar.gz"

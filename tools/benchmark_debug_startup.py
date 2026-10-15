@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
-MODULE_CLASSES = ("att-cli", "att-engine", "att-remote", "att-server-api")
+MODULE_CLASSES = ("att-security", "att-cli", "att-engine", "att-remote", "att-server-api")
 
 
 class ReadyHandler(BaseHTTPRequestHandler):

@@ -5,6 +5,7 @@ Issue #162 established ATT's Maven reactor. Issue #164 separates reusable execut
 ```text
 template-driven-api-testing-tool/
 |-- pom.xml        parent / Maven reactor
+|-- att-security/ shared Java 8 mandatory Secret Protection, without runtime dependencies
 |-- att-engine/   reusable execution/domain implementation and typed API
 |-- att-server-api/ public Java 8 REST/SSE wire contract
 |-- att-remote/   Java 8 REST/SSE client adapter
@@ -13,6 +14,8 @@ template-driven-api-testing-tool/
 |-- att-server/    Java 17+ Jakarta Servlet control plane WAR
 `-- att-dist/      binary/source distribution assembly
 ```
+
+`att-security` is the common mandatory secret policy used by Engine and Server API. It has no dependency on execution or Servlet APIs; both Local and Server application JARs include it.
 
 `att-engine` owns Run, Debug, Load, validation, snapshots, reports, resource helpers, Template/Flow execution, and the command-neutral `att.api.AttService` request/result contracts. Existing Java package names remain unchanged. The engine depends on neither adapter nor on `att-server`, and its execution entry points do not call `System.exit()`.
 
@@ -36,6 +39,30 @@ Root runtime assets remain unchanged: `config/`, `templates/`, `tools/`, `testca
 
 ## Developer and release flow
 
-Run `mvn clean verify` from the repository root. The reactor tests `att-engine`, `att-server-api`, `att-remote`, `att-cli`, `att-worker`, and `att-server`, packages the Server WAR, and executes both binary assemblies plus the source assembly. `build.sh` regenerates documentation, runs the reactor gate, validates the source-tree launcher, smoke-tests the extracted local package with `version`, `help`, `debug`, `load`, `validate --package`, and `remote help`, checks that both binary archives are below 25 MB, and copies all three release archives to `dist/releases/`.
+Run `mvn clean verify` from the repository root. The reactor tests `att-security`, `att-engine`, `att-server-api`, `att-remote`, `att-cli`, `att-worker`, and `att-server`, packages the Server WAR, and executes both binary assemblies plus the source assembly. `build.sh` regenerates documentation, runs the reactor gate, validates the source-tree launcher, smoke-tests the extracted local package with `version`, `help`, `debug`, `load`, `validate --package`, and `remote help`, checks that both binary archives are below 25 MB, and copies all three release archives to `dist/releases/`.
 
 Source-tree launchers still execute from the repository root and include the CLI, Engine, Remote, and Server API module outputs on the classpath.
+
+
+## CI build-time gates
+
+The pull-request CI splits the Java 17 Server unit tests from the WAR/release
+build to reduce the critical path without dropping tests. The independent
+`Java 17 / Server unit and authentication tests` job runs the complete
+Server Surefire suite, including authentication, scheduler, and runtime tests.
+Its Surefire process uses two separate JVM forks with `reuseForks=false`:
+test classes have isolated system properties, Tomcat state, and H2 data,
+while tests within a class remain sequential.
+
+The separate release job runs `ATT_CI_SKIP_COVERED_TESTS=true ./build.sh`
+and skips only the suites already executed by the Java 8, frontend, and
+Server-unit jobs. It **still runs** the packaged WAR Failsafe tests
+(`ServerWarUiIT`), launcher checks, package validation, and archive smoke
+tests. All jobs must pass before merge.
+
+A normal local `./build.sh` still runs **all** tests. Both local and CI
+builds print `[ATT BUILD TIME]` wall-clock seconds to stderr for preflight,
+reference generation, Maven, launcher verification, package validation,
+archive/smoke checks, publication, and total runtime (including failed
+builds). Compare the resulting CI timings instead of assuming the previous
+7m30s Maven baseline applies to new commits.

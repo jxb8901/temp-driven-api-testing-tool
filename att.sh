@@ -43,12 +43,14 @@ CLI_DIR="$ROOT_DIR/att-cli"
 ENGINE_DIR="$ROOT_DIR/att-engine"
 REMOTE_DIR="$ROOT_DIR/att-remote"
 API_DIR="$ROOT_DIR/att-server-api"
+SECURITY_DIR="$ROOT_DIR/att-security"
 MISSING_CLASSES=""
 for required_class in \
   "$CLI_DIR/target/classes/att/FrameworkRunner.class" \
   "$ENGINE_DIR/target/classes/att/Version.class" \
   "$REMOTE_DIR/target/classes/att/remote/RemoteCommand.class" \
-  "$API_DIR/target/classes/att/server/api/ServerApi.class"; do
+  "$API_DIR/target/classes/att/server/api/ServerApi.class" \
+  "$SECURITY_DIR/target/classes/att/security/SecretProtection.class"; do
   if [ ! -f "$required_class" ]; then MISSING_CLASSES="$MISSING_CLASSES
   $required_class"; fi
 done
@@ -58,7 +60,7 @@ if [ -n "$MISSING_CLASSES" ]; then
   echo "Or use the local package produced by the release build." >&2
   exit 2
 fi
-CP="$CLI_DIR/target/classes:$ENGINE_DIR/target/classes:$REMOTE_DIR/target/classes:$API_DIR/target/classes"
+CP="$CLI_DIR/target/classes:$ENGINE_DIR/target/classes:$REMOTE_DIR/target/classes:$API_DIR/target/classes:$SECURITY_DIR/target/classes"
 for jar in \
   "$HOME"/.m2/repository/commons-io/commons-io/2.16.1/commons-io-2.16.1.jar \
   "$HOME"/.m2/repository/org/apache/httpcomponents/httpclient/4.5.13/httpclient-4.5.13.jar \

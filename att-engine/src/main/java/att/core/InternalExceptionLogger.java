@@ -2,21 +2,14 @@ package att.core;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.lang.reflect.InvocationTargetException;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /** Writes bounded, secret-safe Java diagnostics for unexpected ATT failures. */
 public final class InternalExceptionLogger {
     private static final int MAX_CHARS = 16000;
     private static final int MAX_LINES = 180;
-    private static final Pattern SENSITIVE_ASSIGNMENT = Pattern.compile(
-            "(?i)(\\b(?:password|passwd|token|secret|api[-_]?key|authorization|identityfile|truststorepassword)\\b\\s*[=:]\\s*)(\\\"[^\\\"]*\\\"|'[^']*'|[^\\s,;]+)");
 
     private InternalExceptionLogger() { }
 
@@ -92,19 +85,7 @@ public final class InternalExceptionLogger {
 
     /** Applies configured-secret replacement and conservative key/value masking. */
     public static String sanitize(String value, List<String> secrets) {
-        String sanitized = value == null ? "" : value;
-        List<String> ordered = new ArrayList<String>();
-        if (secrets != null) for (String secret : secrets) if (secret != null && !secret.isEmpty()) ordered.add(secret);
-        Collections.sort(ordered, new Comparator<String>() {
-            @Override public int compare(String left, String right) { return Integer.compare(right.length(), left.length()); }
-        });
-        for (String secret : ordered) sanitized = sanitized.replace(secret, "[REDACTED_SECRET]");
-        Matcher matcher = SENSITIVE_ASSIGNMENT.matcher(sanitized);
-        StringBuffer output = new StringBuffer();
-        while (matcher.find()) matcher.appendReplacement(output,
-                Matcher.quoteReplacement(matcher.group(1) + "[REDACTED_SECRET]"));
-        matcher.appendTail(output);
-        return output.toString();
+        return att.security.SecretProtection.text(value, secrets);
     }
 
     private static String safePhase(String phase) {

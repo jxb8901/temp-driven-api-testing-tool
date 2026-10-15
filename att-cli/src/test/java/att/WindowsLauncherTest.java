@@ -260,6 +260,7 @@ class WindowsLauncherTest {
     private static void createApplicationJar(Path jarPath) throws Exception {
         Path[] classDirectories = {
                 Paths.get("att-cli/target/classes"),
+                Paths.get("att-security/target/classes"),
                 Paths.get("att-engine/target/classes"),
                 Paths.get("att-remote/target/classes"),
                 Paths.get("att-server-api/target/classes")

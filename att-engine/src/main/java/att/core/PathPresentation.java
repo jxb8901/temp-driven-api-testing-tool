@@ -17,7 +17,7 @@ public final class PathPresentation {
     private static volatile boolean substitutePackageRoot;
     private static volatile boolean substituteExternalBasename;
     private static final Pattern QUOTED_ABSOLUTE_PATH = Pattern.compile("(['\"])((?:/[^\\r\\n'\"]+)|(?:[A-Za-z]:[\\\\/][^\\r\\n'\"]+)|(?:\\\\\\\\[^\\r\\n'\"]+))\\1");
-    private static final Pattern ABSOLUTE_PATH_TOKEN = Pattern.compile("(?<![A-Za-z0-9_/:])(?:[A-Za-z]:[\\\\/]|//|\\\\\\\\|/)");
+    private static final Pattern ABSOLUTE_PATH_TOKEN = Pattern.compile("(?<![A-Za-z0-9_/:.$<\\\\])(?:[A-Za-z]:[\\\\/]|//|\\\\\\\\|/)");
     private static final String[] DIAGNOSTIC_PROSE_BOUNDARIES = {
             " to ", " from ", " because ", " while ", " when ", " after ", " before ",
             " during ", " and ", " or ", " then ", " but ", " (Permission denied)",
@@ -95,7 +95,7 @@ public final class PathPresentation {
     static String displayDiagnosticText(String text, Path projectRoot, Set<String> preservedPaths) {
         if (text == null) return null;
         List<String> tokens = new ArrayList<String>();
-        String masked = text;
+        String masked = protectExpressions(text, tokens);
         if (preservedPaths != null && !preservedPaths.isEmpty()) {
             List<String> ordered = new ArrayList<String>(preservedPaths);
             ordered.sort((left, right) -> Integer.compare(right == null ? 0 : right.length(), left == null ? 0 : left.length()));
@@ -112,6 +112,32 @@ public final class PathPresentation {
         for (int index = 0; index < tokens.size(); index++)
             value = value.replace("\u0001ATT_REMOTE_PATH_" + index + "\u0002", tokens.get(index));
         return value;
+    }
+
+    /** Authored ATT expressions are content, never host-path tokens. */
+    private static String protectExpressions(String text, List<String> tokens) {
+        StringBuilder result = new StringBuilder(text.length());
+        int cursor = 0;
+        for (int start = 0; start + 1 < text.length(); start++) {
+            char marker = text.charAt(start);
+            if ((marker != '$' && marker != '#' && marker != '&') || text.charAt(start + 1) != '{') continue;
+            int depth = 1, end = start + 2;
+            char quote = 0;
+            for (; end < text.length(); end++) {
+                char c = text.charAt(end);
+                if (c == '\\' && quote != 0 && end + 1 < text.length()) { end++; continue; }
+                if (quote != 0) { if (c == quote) quote = 0; continue; }
+                if (c == '\'' || c == '"') { quote = c; continue; }
+                if (c == '{') depth++;
+                if (c == '}' && --depth == 0) break;
+            }
+            // A malformed expression is still authored diagnostic content; preserve its tail.
+            int limit = end < text.length() ? end + 1 : text.length();
+            result.append(text, cursor, start).append("\u0001ATT_REMOTE_PATH_").append(tokens.size()).append("\u0002");
+            tokens.add(text.substring(start, limit));
+            cursor = limit; start = limit - 1;
+        }
+        return result.append(text, cursor, text.length()).toString();
     }
 
     /** Returns a detached, presentation-safe copy for structured evidence. */

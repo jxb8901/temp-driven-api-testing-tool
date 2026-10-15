@@ -44,8 +44,8 @@ class MultiEnvironmentConfigurationTest {
 
         validateDescriptor(sit, "dbhelpers", "schemas/att-dbhelper-v2.6.schema.json");
         validateDescriptor(uat, "dbhelpers", "schemas/att-dbhelper-v2.6.schema.json");
-        validateDescriptor(sit, "mqhelpers", "schemas/att-mqhelper-v1.2.schema.json");
-        validateDescriptor(uat, "mqhelpers", "schemas/att-mqhelper-v1.2.schema.json");
+        validateDescriptor(sit, "mqhelpers", "schemas/att-mqhelper-v1.3.schema.json");
+        validateDescriptor(uat, "mqhelpers", "schemas/att-mqhelper-v1.3.schema.json");
 
         Map<?, ?> sitDb = yaml(root.resolve("config/dbhelpers/sit/orders.yaml"));
         Map<?, ?> uatDb = yaml(root.resolve("config/dbhelpers/uat/orders.yaml"));

@@ -37,6 +37,7 @@ public final class MqHelperExecutor {
     private final FrameworkConfig config;
     private final MqTransport.Factory factory;
     private final Map<String, AtomicLong> roundRobinCounters = new ConcurrentHashMap<String, AtomicLong>();
+    private final Map<String, AtomicLong> queueRoundRobinCounters = new ConcurrentHashMap<String, AtomicLong>();
 
     public MqHelperExecutor(Path projectRoot, FrameworkConfig config) {
         this(projectRoot, config, new IbmMqClientFactory());
@@ -128,10 +129,12 @@ public final class MqHelperExecutor {
         try {
             if ("send".equals(operation) || "request".equals(operation)) {
                 byte[] payload = payloadBytes(args.get("payload"), args.get("requestFormat"), helper);
-                String queue = "send".equals(operation)
-                        ? effectiveQueue(args.get("queue"), helper.requestQueue(),
-                                "mq." + logical.logicalId() + ".send queue (or message.requestQueue)")
-                        : effectiveQueue(args.get("requestQueue"), helper.requestQueue(), "requestQueue");
+                String overrideKey = "send".equals(operation) ? "queue" : "requestQueue";
+                boolean explicitQueue = args.containsKey(overrideKey);
+                String queue = explicitQueue ? effectiveQueue(args.get(overrideKey), "", overrideKey) : selectRequestQueue(helper);
+                String queueStrategy = explicitQueue ? "explicit" : helper.requestQueueSelectionStrategy();
+                result.put("requestQueue", queue); evidence.put("requestQueue", queue);
+                result.put("requestQueueSelectionStrategy", queueStrategy); evidence.put("requestQueueSelectionStrategy", queueStrategy);
                 result.put("queue", queue); result.put("bytes", payload.length);
                 evidence.put("queue", queue); evidence.put("bytes", payload.length);
                 phase = "mq.connect";
@@ -302,6 +305,16 @@ public final class MqHelperExecutor {
         return candidates.get((int) Math.floorMod(counter.getAndIncrement(), (long) candidates.size()));
     }
 
+    /** One selection per call, scoped to this Executor and physical helper; never retries PUT. */
+    private String selectRequestQueue(MqHelperConfig helper) {
+        List<String> queues = helper.requestQueues();
+        if (queues.isEmpty()) throw new IllegalArgumentException("MQ request queue is required");
+        if ("random".equals(helper.requestQueueSelectionStrategy())) return queues.get(ThreadLocalRandom.current().nextInt(queues.size()));
+        if (!"roundRobin".equals(helper.requestQueueSelectionStrategy())) return queues.get(0);
+        AtomicLong counter = queueRoundRobinCounters.computeIfAbsent(helper.poolKey(), key -> new AtomicLong());
+        return queues.get((int)Math.floorMod(counter.getAndIncrement(), (long)queues.size()));
+    }
+
     private void validateArguments(String instance, String operation, Map<String, Object> args,
                                    MqHelperConfig helper) {
         if (!("send".equals(operation) || "receive".equals(operation) || "request".equals(operation))) throw new IllegalArgumentException("Unknown MQ operation: " + operation);
@@ -309,9 +322,9 @@ public final class MqHelperExecutor {
         if (("send".equals(operation) || "request".equals(operation)) && args.get("payload") == null) throw new IllegalArgumentException("mq." + instance + "." + operation + " requires payload");
         if (args.containsKey("requestFormat") && args.get("payload") == null) throw new IllegalArgumentException("requestFormat requires a Map/List payload");
         if (args.containsKey("payload")) validateRequestPayload(args.get("payload"), args.get("requestFormat"));
-        if ("request".equals(operation) && args.get("requestQueue") == null && helper.requestQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires requestQueue or configured message.requestQueue on the selected instance");
+        if ("request".equals(operation) && args.get("requestQueue") == null && helper.requestQueues().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires requestQueue or configured message.requestQueue/requestQueues on the selected instance");
         if ("request".equals(operation) && args.get("replyQueue") == null && helper.replyQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".request requires replyQueue or configured message.replyQueue on the selected instance");
-        if ("send".equals(operation) && args.get("queue") == null && helper.requestQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".send requires queue or configured message.requestQueue on the selected instance");
+        if ("send".equals(operation) && args.get("queue") == null && helper.requestQueues().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".send requires queue or configured message.requestQueue/requestQueues on the selected instance");
         if ("receive".equals(operation) && args.get("queue") == null && helper.replyQueue().isEmpty()) throw new IllegalArgumentException("mq." + instance + ".receive requires queue or configured message.replyQueue on the selected instance");
         for (String key : new String[]{"queue", "requestQueue", "replyQueue"}) if (args.containsKey(key)) validQueue(string(args.get(key), key));
         if (args.containsKey("waitMs")) integer(args.get("waitMs"), "waitMs", 0, 3600000);

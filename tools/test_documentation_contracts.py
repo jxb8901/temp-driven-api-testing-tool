@@ -1,7 +1,7 @@
 """Regression tests for the documentation gate, independent of checked-in text."""
 import unittest
 from pathlib import Path
-from documentation_contracts import (active_schemas, stale_claims, current_html,
+from documentation_contracts import (active_schemas, stale_claims,
                                      manifest_errors, structure_errors, overview_resource_errors,
                                      chapter_label_errors, editorial_errors,
                                      chapter_reference_errors,
@@ -42,8 +42,6 @@ class DocumentationContractsTest(unittest.TestCase):
         paths = (
             root / "docs/reference/test-authoring.md",
             root / "docs/reference.zh/test-authoring.md",
-            root / "docs/reference.html",
-            root / "docs/reference.zh.html",
         )
         for path in paths:
             with self.subTest(path=path):
@@ -84,8 +82,6 @@ class DocumentationContractsTest(unittest.TestCase):
             root / "docs/reference.zh/test-authoring.md",
             root / "docs/reference.md",
             root / "docs/reference.zh.md",
-            root / "docs/reference.html",
-            root / "docs/reference.zh.html",
         )
         for path in paths:
             with self.subTest(path=path):
@@ -109,28 +105,6 @@ class DocumentationContractsTest(unittest.TestCase):
         text = ("## Appendix C — Migration Notes\natt-load/v1.2\n"
                 "## Appendix D — Limits\natt-load/v1.2")
         self.assertEqual(1, len(stale_claims(text, self.active, VERSION)))
-
-    def test_generated_html_migration_scope_uses_visible_headings(self):
-        text = ("<h2>Appendix C — 遷移</h2><p>att-load/v1.2</p>"
-                "<h2>Appendix D — 限制</h2><p>att-load/v1.2</p>")
-        self.assertEqual(1, len(stale_claims(current_html(text), self.active, VERSION)))
-
-
-    def test_html_historical_markers_outside_appendices_are_preserved(self):
-        # Compact HTML reproduces both stripping and boundary-loss failures.
-        text = ("<h2>05 Expressions</h2>"
-                "<!-- att-docs:historical --><p>att-load/v1.2; ATT 3.6.0</p>"
-                "<!-- /att-docs:historical --><p>att-load/v1.6</p>")
-        self.assertEqual([], stale_claims(current_html(text), self.active, VERSION))
-        # Identical stale text following the closing marker remains an error.
-        outside = text + "<p>att-load/v1.2</p>"
-        self.assertEqual(1, len(stale_claims(current_html(outside), self.active, VERSION)))
-
-    def test_html_historical_markers_must_be_balanced(self):
-        for text in ("<!-- att-docs:historical --><p>att-load/v1.2</p>",
-                     "<!-- /att-docs:historical --><p>att-load/v1.2</p>"):
-            with self.subTest(text=text), self.assertRaises(ValueError):
-                stale_claims(current_html(text), self.active, VERSION)
 
     def test_overview_requires_five_peers_in_definition_text_and_diagram(self):
         names = "Tool, DBHelper, MQHelper, HTTPHelper and SSHHelper"
@@ -274,7 +248,6 @@ class DocumentationContractsTest(unittest.TestCase):
         rels = {path.relative_to(root).as_posix() for path in files}
         self.assertIn("docs/reference/runtime-context.md", rels)
         self.assertNotIn("docs/reference.md", rels)
-        self.assertNotIn("docs/reference.html", rels)
         self.assertNotIn("docs/history/09_Reference_Manual_V3.md", rels)
         self.assertFalse(standalone_markdown(root / "docs/reference/runtime-context.md", root))
         self.assertEqual([], editorial_errors("## 04 Runtime and Context Model\n",

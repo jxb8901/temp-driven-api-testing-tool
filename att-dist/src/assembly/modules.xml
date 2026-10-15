@@ -7,7 +7,7 @@
             <outputDirectory>/</outputDirectory>
             <includes>
                 <include>att:att-cli</include>
-                <include>att:att-engine</include>
+                <include>att:att-security</include><include>att:att-engine</include>
                 <include>att:att-remote</include>
                 <include>att:att-server-api</include>
                 <include>att:att-worker</include>

@@ -57,7 +57,7 @@
                         <id>test-typed-ui-components</id>
                         <phase>test</phase>
                         <goals><goal>npm</goal></goals>
-                        <configuration><arguments>test</arguments></configuration>
+                        <configuration><arguments>test</arguments><skip>${att.skipFrontendUnitTests}</skip></configuration>
                     </execution>
                 </executions>
             </plugin>

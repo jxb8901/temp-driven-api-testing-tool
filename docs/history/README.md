@@ -6,10 +6,10 @@ This directory contains superseded, version-specific, compatibility, migration, 
 
 | Historical document | Classification | Current guidance |
 |---|---|---|
-| `02_System_Design_v1.0.md` through `02_System_Design_V2.6.2.md` | superseded version-specific system design | Use [current System Design](../system-design/) and the [Reference](../reference.html) |
+| `02_System_Design_v1.0.md` through `02_System_Design_V2.6.2.md` | superseded version-specific system design | Use [current System Design](../system-design/) and the [Reference](../reference.md) |
 | [`02_System_Design_V3.md`](02_System_Design_V3.md) | former compatibility entry point | Use [current System Design](../system-design/) |
 | [`08_Quick_Start_V3.md`](08_Quick_Start_V3.md) | former compatibility entry point | Use [current Quick Start](../quick-start.md) |
-| `09_Reference_Manual_V3*` | archived generated/versioned Reference compatibility artifacts | Use the current generated [English](../reference.html) or [繁體中文](../reference.zh.html) Reference |
+| `09_Reference_Manual_V3*.md` | archived generated/versioned Reference compatibility artifacts | Use the current generated [English](../reference.md) or [繁體中文](../reference.zh.md) Reference |
 | [`03_Roadmap_V4.md`](03_Roadmap_V4.md) | retained V4 proposal | Use current GitHub issues and [CHANGELOG](../../CHANGELOG.md) for active direction |
 | [`10_Diagnostics_V3.3_Plan.md`](10_Diagnostics_V3.3_Plan.md) | completed release plan | Use [Validation and Diagnostics](../reference/validation-diagnostics.md) for supported behavior |
 | [`documentation-architecture.md`](documentation-architecture.md) | completed documentation-architecture migration/design record | Use [`../README.md`](../README.md) for the current documentation layout |

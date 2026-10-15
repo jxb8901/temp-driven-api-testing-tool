@@ -17,7 +17,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/** Loads the explicit list of active att-mqhelper/v1.2 descriptor files. */
+/** Loads the explicit list of active att-mqhelper/v1.3 and compatible v1.2 descriptor files. */
 public final class MqHelperConfigLoader {
     public Map<String, MqHelperConfig> load(Object configured, Path projectRoot) throws Exception {
         if (configured == null) return Collections.emptyMap();
@@ -46,10 +46,10 @@ public final class MqHelperConfigLoader {
             try {
                 Map<?, ?> map = yaml(file);
                 String currentVersion = Version.MQHELPER_SCHEMA_CURRENT;
-                if (!currentVersion.equals(map.get("schemaVersion"))) {
+                if (!currentVersion.equals(map.get("schemaVersion")) && !Version.MQHELPER_SCHEMA_V1_2.equals(map.get("schemaVersion"))) {
                     String declaredVersion = String.valueOf(map.get("schemaVersion"));
                     Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, declaredVersion);
-                    Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-mqhelper-v1.2.schema.json");
+                    Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-mqhelper-v1.3.schema.json");
                     att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, map,
                             declaredVersion, currentVersion);
                     throw new IllegalArgumentException("Unsupported MQ helper schemaVersion '" + map.get("schemaVersion")
@@ -87,7 +87,7 @@ public final class MqHelperConfigLoader {
     }
 
     private MqHelperConfig parse(Map<?, ?> map, Path file) {
-        SchemaSupport.requireVersion(map, Version.MQHELPER_SCHEMA_CURRENT, "mqhelper");
+        requireSupportedVersion(map);
         return parseV11(map, file).withEvidenceOutput(map.get("evidence"));
     }
 
@@ -112,7 +112,7 @@ public final class MqHelperConfigLoader {
         String password = environment(connection.get("password"), "mqhelper.connection.password");
 
         Map<?, ?> message = optionalMap(map.get("message"), "mqhelper.message");
-        SchemaSupport.rejectUnknown(message, "mqhelper.message", "charset", "ccsid", "encoding", "format", "persistence", "expiry", "requestQueue", "replyQueue");
+        validateMessageFields(message, "mqhelper.message");
         Integer charsetValue = optionalInteger(message.get("charset"), 1, 65535, "mqhelper.message.charset");
         Integer ccsidValue = optionalInteger(message.get("ccsid"), 1, 65535, "mqhelper.message.ccsid");
         if (charsetValue != null && ccsidValue != null && !charsetValue.equals(ccsidValue)) {
@@ -145,7 +145,7 @@ public final class MqHelperConfigLoader {
     }
 
     private MqHelperConfig parseV11(Map<?, ?> map, Path file) {
-        SchemaSupport.requireVersion(map, Version.MQHELPER_SCHEMA_CURRENT, "mqhelper");
+        requireSupportedVersion(map);
         SchemaSupport.rejectUnknown(map, "mqhelper", "schemaVersion", "id", "name", "description", "defaults", "instances", "selection", "evidence");
         String id = SchemaSupport.string(map.get("id"), "mqhelper.id", true);
         if (!id.matches("[A-Za-z_][A-Za-z0-9_-]*")) throw new IllegalArgumentException("mqhelper.id must match [A-Za-z_][A-Za-z0-9_-]*: " + id);
@@ -195,7 +195,7 @@ public final class MqHelperConfigLoader {
             validateRequestReplyFields(instanceRequestReply, "mqhelper.instances[].requestReply");
             validatePoolFields(instancePool, "mqhelper.instances[].pool");
             Map<?, ?> connection = merge(defaultConnection, instanceConnection);
-            Map<?, ?> message = merge(defaultMessage, instanceMessage);
+            Map<?, ?> message = mergeMessage(defaultMessage, instanceMessage);
             Map<?, ?> requestReply = merge(defaultRequestReply, instanceRequestReply);
             Map<?, ?> pool = merge(defaultPool, instancePool);
             MqHelperConfig physical = parseV11Instance(id, name, description, instanceId, connection, message, requestReply, pool, payload, file);
@@ -245,7 +245,49 @@ public final class MqHelperConfigLoader {
         MqHelperConfig flat = new MqHelperConfig(instanceId, name, description, queueManager, host, port, channel,
                 username, password, charset, encoding, expiry, format, persistence, requestQueue, replyQueue,
                 transport, waitMs, responseFormat, payload, poolMaxSize, poolMinIdle, borrowTimeout, maxResponseBytes, file);
-        return MqHelperConfig.physical(flat, logicalId, instanceId);
+        List<String> queues = requestQueues(message, "mqhelper.instances[" + instanceId + "].message");
+        Map<?, ?> routing = optionalMap(message.get("requestQueueSelection"), "message.requestQueueSelection");
+        String queueStrategy = choice(routing.get("strategy"), "single", "message.requestQueueSelection.strategy", "single", "roundRobin", "random");
+        return MqHelperConfig.physical(flat.withRequestQueueRouting(queues, queueStrategy), logicalId, instanceId);
+    }
+
+    private void requireSupportedVersion(Map<?, ?> map) {
+        Object declared=map.get("schemaVersion");
+        if(!Version.MQHELPER_SCHEMA_CURRENT.equals(declared) && !Version.MQHELPER_SCHEMA_V1_2.equals(declared))
+            throw new IllegalArgumentException("Unsupported MQ helper schemaVersion: " + declared);
+    }
+
+    private Map<?, ?> mergeMessage(Map<?, ?> inherited, Map<?, ?> override) {
+        Map<Object,Object> result=new LinkedHashMap<Object,Object>();
+        result.putAll(inherited);
+        if(override.containsKey("requestQueue")) {
+            result.remove("requestQueues"); result.remove("requestQueueSelection");
+        } else if(override.containsKey("requestQueues")) {
+            result.remove("requestQueue"); result.remove("requestQueueSelection");
+        }
+        result.putAll(override);
+        if(result.containsKey("requestQueueSelection") && !result.containsKey("requestQueues"))
+            throw new IllegalArgumentException("message.requestQueueSelection requires effective requestQueues");
+        return result;
+    }
+
+    private List<String> requestQueues(Map<?, ?> message, String owner) {
+        if(!message.containsKey("requestQueues")) {
+            String scalar=queue(message.get("requestQueue"),owner+".requestQueue");
+            return scalar.isEmpty()?Collections.<String>emptyList():Collections.singletonList(scalar);
+        }
+        Object value=message.get("requestQueues");
+        if(!(value instanceof List))throw new IllegalArgumentException(owner+".requestQueues must be a list");
+        List<?> values=(List<?>)value;
+        if(values.isEmpty() || values.size()>256)throw new IllegalArgumentException(owner+".requestQueues requires 1 to 256 queues");
+        List<String> result=new ArrayList<String>();Set<String> unique=new LinkedHashSet<String>();
+        for(Object item:values) {
+            if(item==null)throw new IllegalArgumentException(owner+".requestQueues entries must be nonblank queue names");
+            String name=queue(item,owner+".requestQueues[]");
+            if(!unique.add(name))throw new IllegalArgumentException(owner+".requestQueues contains duplicate queue names");
+            result.add(name);
+        }
+        return result;
     }
 
     private Map<?, ?> section(Map<?, ?> owner, String key, String path) {
@@ -276,7 +318,15 @@ public final class MqHelperConfigLoader {
     }
 
     private void validateMessageFields(Map<?, ?> message, String owner) {
-        SchemaSupport.rejectUnknown(message, owner, "charset", "ccsid", "encoding", "format", "persistence", "expiry", "requestQueue", "replyQueue");
+        SchemaSupport.rejectUnknown(message, owner, "charset", "ccsid", "encoding", "format", "persistence", "expiry", "requestQueue", "requestQueues", "requestQueueSelection", "replyQueue");
+        if(message.containsKey("requestQueue") && message.containsKey("requestQueues"))
+            throw new IllegalArgumentException(owner + " cannot contain both requestQueue and requestQueues");
+        if(message.containsKey("requestQueues")) requestQueues(message, owner);
+        if(message.containsKey("requestQueueSelection")) {
+            Map<?, ?> routing = SchemaSupport.map(message.get("requestQueueSelection"), owner + ".requestQueueSelection");
+            SchemaSupport.rejectUnknown(routing, owner + ".requestQueueSelection", "strategy");
+            choice(routing.get("strategy"), "single", owner + ".requestQueueSelection.strategy", "single", "roundRobin", "random");
+        }
     }
 
     private void validateRequestReplyFields(Map<?, ?> requestReply, String owner) {

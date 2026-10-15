@@ -1,15 +1,36 @@
 # Load mode
 
-ATT accepts att-load/v1.6 scenarios. A scenario has one or more workloads; each workload uses either one fixed Template, Flow or Tool target, or a closed-user weighted mix of targets. Workloads own their inputs, testdata policy, bootstrap vars and pacing policy. Root defaults may be shared by all workloads, while workload-local fields override them. ATT validates and pre-resolves every configured target before a scheduler starts.
+ATT accepts att-load/v1.7 scenarios. A scenario has one or more workloads; each workload uses either one fixed Template, Flow or Tool target, or a closed-user weighted mix of targets. Workloads own their inputs, testdata policy, bootstrap vars and pacing policy. Root defaults may be shared by all workloads, while workload-local fields override them. ATT validates and pre-resolves every configured target before a scheduler starts.
 
 Descriptors using the previous workload schema remain compatible and are normalized to the current schema when loaded.
 
 Run `./att.sh load` with no scenario to discover valid full Load descriptors under `load/`. Only YAML declaring `schemaVersion: att-load/*` is considered; unrelated YAML is ignored, while invalid declared descriptors are shown with their diagnostics. Discovery resolves and validates targets without starting a scheduler or making resource calls.
 
+## Independent evidence quotas
+
+`att-load/v1.7` adds finite success/failure quotas. Scenarios without either new key retain the exact legacy combined `maxSamples` behavior, including `metrics`, `failures`, `samples`, and uncapped-by-default `all`. Existing v1.6 scenarios remain accepted and normalize to v1.7 without changing their evidence policy.
+
+~~~yaml
+evidence:
+  mode: samples
+  success: sample
+  failure: full
+  sampleRate: 0.01
+  maxSuccessSamples: 500
+  maxFailureSamples: 2000
+~~~
+
+An explicit `maxFailureSamples` enables independent quotas; both new values are integers from 0 to 1,000,000. The success cap is `maxSuccessSamples`, else an explicit `maxSamples`, else **1,000**, even with `mode: all`. `maxSuccessSamples` requires `maxFailureSamples`; supplying both `maxSamples` and `maxSuccessSamples` is rejected. Keeping `maxSamples: 500` and adding `maxFailureSamples: 2000` migrates the old cap into a success-only cap. Zero disables retention for that category. `sampleRate` applies only to sampled PASS iterations; FAIL/ERROR (including operational TIMEOUT) use the failure quota without sampling. `failure: full` is bounded by its quota and does not guarantee that every failure is retained.
+
+The shared run evidence store accounts for reserved and retained success/failure slots separately across workloads and both scheduler models. A preselected success that fails releases its success reservation and must claim a failure slot. Unsampled failures may claim failure capacity. Success exhaustion never suppresses failure log capture; failure exhaustion never suppresses success sampling. Dropped/unstarted arrivals and incomplete iterations create no normal evidence. Cancelled/rejected admissions and missing workspaces release reservations. Failure log capture keeps the existing 65,536-character tail, mandatory secret protection and deferred resource formatting.
+
+`load-summary.json` / YAML, the HTML report, and Studio job results expose the resolved `evidence.policy`, `retainedSuccessCount`, `retainedFailureCount`, category exhaustion flags and skipped quota/missing-evidence counters. The report and Studio warn when the failure quota is reached; aggregate metrics, thresholds and failure events continue. Retained links remain under `samples/` and `failures/` with EXEC.ID, case.log and case.yaml. Studio Evidence settings labels the legacy combined cap separately and synchronizes independent quotas with advanced JSON. See [the bounded example](../../../examples/load/independent-evidence.yaml).
+
+
 ## Define a Load scenario
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 testdata: [examples/testdata/generated-account.yaml]
 workloads:
   - id: payment
@@ -49,7 +70,7 @@ execution:
 A workload can declare `mix` instead of `target` to distribute each closed user's next iteration across pre-resolved targets. Every entry has a unique `id`, a positive integer `weight`, and a Template, Flow or Tool `target`. The selector uses the run seed, workload ID, stable VU ID and that VU's iteration number; changing targets does not reset the VU or its think-time stream. Weights express selection probability, not a promise that a short run will match the exact ratio.
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 seed: 73
 workloads:
   - id: checkout
@@ -185,12 +206,12 @@ For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, 
 
 Repeatable `--set` accepts `input.path=value`, Tool-only `arg.name=value`, or Template/Flow-only `vars.path=value`. Values use safe YAML parsing and remain typed; nested maps and numeric list indexes are supported where practical, for example `input.customer.ids[0]=42`. Duplicate assignments apply in order (last wins). ATT expressions are not evaluated during option parsing. Unqualified overrides are rejected for multi-workload scenarios.
 
-`load/load.yaml` is an optional current `att-load/v1.6` policy-only descriptor with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence`, `seed` and Load-local `testdata` imports. Explicit CLI pacing values override the policy. `load --debug template|flow|tool <id>` promotes the selected sidecar's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no policy, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
+`load/load.yaml` is an optional current `att-load/v1.7` policy-only descriptor with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence`, `seed` and Load-local `testdata` imports. Explicit CLI pacing values override the policy. `load --debug template|flow|tool <id>` promotes the selected sidecar's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no policy, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
 
 Example policy descriptor (copy to `load/load.yaml`):
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -214,7 +235,7 @@ Copyable examples and field descriptions are maintained in [examples/load/README
 
 The outer Load directory uses the same `execution.runIdFormat` policy as Run when `--run-id` is absent. `--run-id` remains an exact literal override for the outer Load identity. This policy is separate from `execution.execIdFormat`, which continues to generate each started iteration's `EXEC.ID`.
 
-Load uses schema att-load/v1.6. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
+Load uses schema att-load/v1.7. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
 
 Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT, EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only EXEC.LOAD.USER_ID and the already curated META.SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID determines the workspace. No Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are absent.
 

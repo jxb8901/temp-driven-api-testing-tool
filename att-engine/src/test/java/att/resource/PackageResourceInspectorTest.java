@@ -328,9 +328,10 @@ class PackageResourceInspectorTest {
         assertEquals(Boolean.TRUE, source.get("available"), source.toString());
         assertEquals(Boolean.TRUE, source.get("redacted"), source.toString());
         String text = String.valueOf(source.get("text"));
-        for (String protectedValue : java.util.Arrays.asList("mq-secret", "mq-user", "worker.internal", "att-user", "2222",
+        for (String protectedValue : java.util.Arrays.asList("mq-secret",
                 "/home/att/.ssh/id_rsa", "http-secret")) assertFalse(text.contains(protectedValue), text);
         assertTrue(text.contains("[REDACTED]"), text);
+        for (String visible : java.util.Arrays.asList("mq-user", "worker.internal", "att-user", "2222", "application/json")) assertTrue(text.contains(visible), text);
     }
 
     @Test void redactsSecretsAndExternalPathsFromProjectedTemplateSource() throws Exception {
@@ -426,8 +427,8 @@ class PackageResourceInspectorTest {
         assertEquals("payloads/request.xml",referenced.get("logicalPath"));
         assertTrue(String.valueOf(referenced.get("text")).contains("A-1001"));
         assertFalse(String.valueOf(referenced.get("text")).contains("payload-secret"));
-        assertFalse(String.valueOf(referenced.get("text")).contains("private@example.test"),String.valueOf(referenced.get("text")));
-        assertFalse(String.valueOf(referenced.get("text")).contains("12 Main Street"));
+        assertTrue(String.valueOf(referenced.get("text")).contains("private@example.test"),String.valueOf(referenced.get("text")));
+        assertTrue(String.valueOf(referenced.get("text")).contains("12 Main Street"));
         @SuppressWarnings("unchecked") List<Map<String,Object>> nestedReferences=(List<Map<String,Object>>)referenced.get("fileReferences");
         Map<String,Object> childReference=nestedReferences.stream().filter(file->"nested/child.json".equals(file.get("logicalPath"))).findFirst().orElseThrow(AssertionError::new);
         Map<String,Object> child=inspector.inspect("source-file","template",resourceId,String.valueOf(childReference.get("referenceId")),0,1,null,"payloads/request.xml");
@@ -441,11 +442,11 @@ class PackageResourceInspectorTest {
                 ()->inspector.inspect("source-file","template",resourceId,String.valueOf(leafReference.get("referenceId")),0,1,null,"config/config.yaml"));
         Map<String,Object> unicodeReference=inspector.inspect("source-file","template",resourceId,String.valueOf(unicodeFile.get("referenceId")),0,1);
         assertTrue(String.valueOf(unicodeReference.get("text")).contains("交易-一"));
-        assertFalse(String.valueOf(unicodeReference.get("text")).contains("555-0100"));
+        assertTrue(String.valueOf(unicodeReference.get("text")).contains("555-0100"));
         Map<String,Object> csvReference=inspector.inspect("source-file","template",resourceId,String.valueOf(csvFile.get("referenceId")),0,1);
         assertTrue(String.valueOf(csvReference.get("text")).contains("A-1001"));
-        assertFalse(String.valueOf(csvReference.get("text")).contains("private@example.test"));
-        assertFalse(String.valueOf(csvReference.get("text")).contains("12 Main Street"));
+        assertTrue(String.valueOf(csvReference.get("text")).contains("private@example.test"));
+        assertTrue(String.valueOf(csvReference.get("text")).contains("12 Main Street"));
         assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
                 ()->inspector.inspect("source-file","template",resourceId,String.join("",Collections.nCopies(64,"0")),0,1));
         String revision=String.valueOf(source.get("revisionDigest"));

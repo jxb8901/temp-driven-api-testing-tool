@@ -149,7 +149,7 @@ Remote-only option 包括 `--server <profile|url>`、`--no-auth`、`--principal 
 
 `--set` 可重複使用，並且只接受一個 namespace：`input`、`arg` 或 `vars`。值使用安全 YAML 解析，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可使用 map key 和數字 list index，例如 `input.customer.ids[0]=42`。重複賦值按順序套用，最後一個值生效。解析 override 時不會評估 ATT expression；若 shell 可能展開類似 expression 的值，請加上引號。`arg.*` 僅適用於 Tool，`vars.*` 僅適用於 Template/Flow。多 workload Load scenario 不接受未限定的 override。
 
-`load/load.yaml` 是可選的 policy-only `att-load/v1.6` 檔案，可包含 `load`、`execution`、`thresholds`、`evidence` 和 `seed`，但不包含 target 或 business inputs。`load --debug` 會將 sidecar `inputs` 提升為 `EXEC.INPUT`、Template/Flow `vars` 提升為 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，然後使用一般 Load validator、scheduler 和 evidence pipeline 執行。若 sidecar 含 Debug-local `testdata` imports，`load --debug` 會拒絕；請把 imports 宣告於 Load scenario。明確的 CLI pacing fields 會覆蓋 policy；沒有 policy 時，請直接在 CLI 指定完整 policy。
+`load/load.yaml` 是可選的 policy-only `att-load/v1.7` 檔案，可包含 `load`、`execution`、`thresholds`、`evidence` 和 `seed`，但不包含 target 或 business inputs。`load --debug` 會將 sidecar `inputs` 提升為 `EXEC.INPUT`、Template/Flow `vars` 提升為 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，然後使用一般 Load validator、scheduler 和 evidence pipeline 執行。若 sidecar 含 Debug-local `testdata` imports，`load --debug` 會拒絕；請把 imports 宣告於 Load scenario。明確的 CLI pacing fields 會覆蓋 policy；沒有 policy 時，請直接在 CLI 指定完整 policy。
 
 ## Debug input 與 output
 
@@ -190,10 +190,10 @@ Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應
 
 `--set` 可重複使用，namespace 只能是 `input`、`arg` 或 `vars`。值使用 safe YAML 解析並保留型別，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可用 map key 及數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效。解析時不會執行 ATT expression；shell 可能展開的值要加引號。`arg.*` 僅適用 Tool，`vars.*` 僅適用 Template/Flow。多 workload Load scenario 會拒絕未限定的 override。
 
-可選的 `load/load.yaml` 使用現行 policy-only `att-load/v1.6`，不能包含 target 或 business inputs。它可設定 `load`，以及可選的 `execution`、`thresholds`、`evidence` 和 `seed`。`load --debug` 會將 sidecar `inputs` promotion 到 `EXEC.INPUT`、Template/Flow `vars` promotion 到 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，之後使用正常 Load validator、scheduler 和 evidence pipeline；不會先執行 Debug。明確的 CLI pacing 會覆蓋 policy。沒有 policy 時，請在命令列提供完整 policy：
+可選的 `load/load.yaml` 使用現行 policy-only `att-load/v1.7`，不能包含 target 或 business inputs。它可設定 `load`，以及可選的 `execution`、`thresholds`、`evidence` 和 `seed`。`load --debug` 會將 sidecar `inputs` promotion 到 `EXEC.INPUT`、Template/Flow `vars` promotion 到 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，之後使用正常 Load validator、scheduler 和 evidence pipeline；不會先執行 Debug。明確的 CLI pacing 會覆蓋 policy。沒有 policy 時，請在命令列提供完整 policy：
 
 ```yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -215,3 +215,35 @@ evidence: {mode: failures}
 ```
 
 完整 workload override 為 `--users`、`--arrival-rate`、`--warmup`、`--ramp-up`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`；`--think-time` 只適用 closed-VU。其餘 selection/output 選項仍受各 command 約束：`--suite`、`--suite-dir`、`--case`/`--case-id`、`--tag`、`--exclude-tag`、`--all`、`--run-id`（Run/Load identity）、`--debug-id`（standalone Debug identity）、`--output-dir`、`--format`、`--quiet`、`--verbose`、`--ci-output`、`--dry-run`、`--fail-fast`、`--rerun-failed`、`--update-snapshot`、`--package`、`--selected`、`--input`、`--set`、`--queue`、`--parallel`、`--allow-parallel-runs`、`--profile`、`--config`、`--env` 和 `--help` 只在對應 command contract 允許時有效。
+
+### 診斷信任邊界與必要機密保護
+
+`att-security` 為 Engine、Worker、Server 與檢視器提供共同且不能關閉的 Secret
+Protection。password/passphrase、secret/token/credential、authorization、cookie、
+API/access/private key 與 identity-file 欄位屬保留分類，整個值（包括未知巢狀結構）
+均受保護。文字中的 Bearer/Basic、URL 憑證、PEM 私鑰、`!secret`、CSV 機密欄及
+XML/JSON/YAML 機密值同樣受保護。Resource adapter登記的機密字串在 Case Log 中持續遮蔽；
+`includeAllFields` 不會解除必要保護。未知物件、循環或過深結構採 fail-closed。
+
+| 輸出邊界 | 路徑政策 | 機密政策 |
+| --- | --- | --- |
+| CLI console | 兩種別名預設關閉；兩個選項可獨立啟用 | 必要保護持續啟用 |
+| CLI `case.log` | typed 路徑及完整絕對路徑診斷依選項顯示；命令、相對表達式、URL 及遠端路徑保留原文 | 必要保護與已登記機密 |
+| Server Worker `case.log` | 別名關閉，受信任本機證據保留原始診斷路徑 | 相同必要保護 |
+| Run/Debug/Load `case.yaml` 與失敗證據 | typed 本機路徑依程序政策呈現，相對表達式保留 | 結構化機密欄位與已登記機密受保護 |
+| Worker JSON Lines | 受信任程序通道保留位置資訊供 Server 使用 | 每個 event/result 套用共同必要保護 |
+| Server API、SSE、Job Result | 使用固定 `package:` / `artifact:` 或外部 basename；用戶不能關閉 | 每次公開投影均受必要保護 |
+| Source/Configuration | package-relative 位置，Server 隱藏外部主機路徑 | 必要保護與獨立可選欄位/PII 遮蔽 |
+| 公開 artifact 下載 | 最多 16 MiB 的 UTF-8 文字安全投影，磁碟原檔不變；二進位、無效 UTF-8 或過大檔案須經受信任檔案系統存取 | 下載前套用必要機密保護 |
+
+`&{./Pacs008.xml}`、`&{../request.xml}`、`${...}`、`#{...}`、XML 結束標籤、
+Unicode、URL 與 SSH 遠端路徑保持原文；另以 `file`、`line`、`column`/`sourceColumn`
+提供導覽。公開投影可重複套用而不持續改寫內容，下載內容因此是原始證據的安全檢視。
+
+`server.inspection.redaction.enabled: false` 時，獲授權使用者可查看普通 host/port/user、
+client ID、queue/channel、Content-Type、非機密 DB properties/evidence 設定及 email/address
+等可選 PII。`includeAllFields` 可顯示原本因展示政策隱藏的普通欄位，權限由 Server 的
+configuration-admin 角色驗證。必要機密永不解除：欄位回傳 `state: hidden`、
+`value: '[REDACTED]'`、`reasonCode: MANDATORY_SECRET`；政策不可用欄位使用 `[HIDDEN]`
+及 `UNAVAILABLE_BY_POLICY` 或 `OPTIONAL_FIELD_POLICY`。Source traversal、symlink、
+deny-glob、敏感檔名與大小限制維持啟用。

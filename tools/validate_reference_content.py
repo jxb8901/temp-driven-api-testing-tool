@@ -11,10 +11,10 @@ REQUIRED = {
     "runtime-context.md": ["EXEC.INPUT", "EXEC.VARS", "EXEC.ACTIONS", "EXEC.LOAD", "META", "EXEC.ACTIONS.<id>.output", "META.HTTPHELPER"],
     "execution-modes/run.md": ["run", "Testcase", "Stage", "latest-run.yaml", "exit"],
     "execution-modes/debug.md": ["att-debug/v1.2", "vars", "EXEC.VARS", "template", "flow", "tool", "debug.yaml", "--input", "--env", "output/debug", "exit"],
-    "execution-modes/load.md": ["att-load/v1.6", "testdata", "scope", "selection", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
+    "execution-modes/load.md": ["att-load/v1.7", "testdata", "scope", "selection", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
     "resources/tools.md": ["command-backed", "call-backed", "output.result", "stdoutFormat", "evidence"],
     "resources/dbhelper.md": ["att-dbhelper/v2.6", "query", "update", "transaction", "JDBC", "evidence"],
-    "resources/mqhelper.md": ["att-mqhelper/v1.2", "send", "receive", "request", "IBM MQ", "String", "evidence"],
+    "resources/mqhelper.md": ["att-mqhelper/v1.3", "send", "receive", "request", "IBM MQ", "String", "evidence"],
     "resources/operation-result.md": ["output.result", "evidence", "diagnostic", "attempts", "String", "responseFormat"],
     "actions.md": ["output.result", "String", "stdoutFormat", "responseFormat", "evidence.output"],
     "configuration.md": ["--env", "dbhelpers", "mqhelpers", "ENV", "logical", "run", "validate", "debug", "load"],
@@ -108,12 +108,11 @@ def main():
                 fail(errors, "system-design/runtime-execution.md still contains stale architecture text: %s" % stale)
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8") if (ROOT / "README.md").is_file() else ""
-    for link in ("docs/README.md", "docs/quick-start.md", "docs/reference.html", "docs/system-design/"):
+    for link in ("docs/README.md", "docs/quick-start.md", "docs/reference.md", "docs/system-design/"):
         if link not in readme:
             fail(errors, "README missing current documentation entry point: %s" % link)
 
-    for output in (DOCS / "reference.md", DOCS / "reference.html",
-                   DOCS / "reference.zh.md", DOCS / "reference.zh.html"):
+    for output in (DOCS / "reference.md", DOCS / "reference.zh.md"):
         if not output.is_file():
             fail(errors, "missing generated Reference output: %s" % output.relative_to(ROOT))
 

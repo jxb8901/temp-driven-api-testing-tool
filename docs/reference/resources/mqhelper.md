@@ -1,9 +1,9 @@
 # MQHelper
 
-MQHelper is a logical IBM MQ resource with one or more physical instances. Current descriptors use att-mqhelper/v1.2. Connection settings, credentials, queue defaults and pool limits belong to the resource and are not exposed through META.
+MQHelper is a logical IBM MQ resource with one or more physical instances. Current descriptors use att-mqhelper/v1.3. Connection settings, credentials, queue defaults and pool limits belong to the resource and are not exposed through META.
 
 ~~~yaml
-schemaVersion: att-mqhelper/v1.2
+schemaVersion: att-mqhelper/v1.3
 id: payment
 name: Payment MQ
 description: Payment request/reply queues
@@ -32,6 +32,35 @@ evidence:
 ~~~
 
 A Tool Action calls mq.<id>.send, mq.<id>.receive or mq.<id>.request as its primary operation. MQ reply bytes are decoded using received CCSID metadata when available, then parsed by responseFormat (text/json/yaml/xml). The parsed typed value is output.result. responseFormat owns ingress parsing; Log.format and evidence.output.format only control presentation.
+
+## Request queue routing
+
+<!-- att-docs:historical -->
+`att-mqhelper/v1.3` adds `message.requestQueues` and `message.requestQueueSelection.strategy`. Existing `att-mqhelper/v1.2` scalar descriptors remain accepted and keep their original behavior; the new keys require v1.3.
+<!-- /att-docs:historical -->
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.3
+id: payment
+name: Payment MQ
+description: Payment request queue routing
+defaults:
+  connection: {queueManager: QM1, host: mq.example.internal, port: 1414, channel: APP.SVRCONN}
+  message:
+    requestQueues: [PAYMENT.REQUEST.01, PAYMENT.REQUEST.02, PAYMENT.REQUEST.03]
+    requestQueueSelection: {strategy: roundRobin}
+    replyQueue: PAYMENT.REPLY
+instances:
+  - id: primary
+~~~
+
+A list contains 1–256 unique, nonblank queue names, each at most 48 characters from `[A-Za-z0-9_.%/-]`. `single` (default) chooses the first entry; `roundRobin` rotates in list order; `random` chooses only configured entries. Scalar `requestQueue` and list `requestQueues` cannot coexist in one message object. An instance's scalar replaces an inherited list and its selection policy; an instance's list replaces an inherited scalar/list and resets selection to `single` unless it supplies its own policy. An instance that only overrides `requestQueueSelection` keeps the inherited list. Selection policy requires an effective list. Reply defaults continue to inherit separately and remain one optional scalar `replyQueue`.
+
+Runtime first selects the physical instance using `instance=` or physical `selection.strategy`. Then `send(queue=...)` or `request(requestQueue=...)` overrides automatic queue routing. Blank/invalid explicit queues fail with `MQ_ARGUMENT` before MQ I/O; they never fall back to a configured destination. Without an explicit queue, the selected instance supplies its scalar or list. Missing required effective queues also fail before connecting. `receive` uses its explicit `queue` or the single reply default. Each request queue belongs to the selected instance's queue manager; this does not route across queue managers.
+
+Queue round-robin counters are thread-safe and scoped to one `MqHelperExecutor`, logical helper, and physical instance. Run/Debug/Load calls sharing that executor share counters; separate executors and Worker JVMs start their own counters. There is no Server-wide or cross-worker fairness guarantee. Explicit overrides and receive calls do not advance queue counters. Automatic selection occurs once after argument/payload validation and before connecting; connection/open/PUT failures still advance it. A request never reselects or automatically fails over after PUT, including a correlated reply timeout. Explicit Action retry remains governed by the replay policy below.
+
+Action evidence and output metadata include `requestQueue`, `queue`, `requestQueueSelectionStrategy` (`single`, `roundRobin`, `random`, or `explicit`), the selected physical instance and queue manager, and the effective `replyQueue` for requests. ReplyToQ/ReplyToQMgr and sent MsgId → reply CorrelId matching remain unchanged. These bounded routing fields accompany retained Run/Debug/Load evidence; credentials remain protected.
 
 ## Sending file-content strings and abstract values
 
@@ -76,7 +105,7 @@ See [Actions and Typed Values](../actions.md) for the shared typed-result contra
 
 Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
 
-The machine-readable field constraints remain in [the active MQ schema](../../../schemas/att-mqhelper-v1.2.schema.json).
+The machine-readable field constraints remain in [the active MQ schema](../../../schemas/att-mqhelper-v1.3.schema.json).
 
 DB/MQ/HTTP share the optional `evidence.output: {format: json, maxChars: 10000}` presentation policy. Supported formats are `text`, `json`, `yaml`, `xml`, and `sqlplus`; `sqlplus` requires a DB query/update result. `maxChars` defaults to 10000 and accepts 1–1000000. Credentials are redacted before deterministic character truncation; snapshots contain `format`, `text`, and `truncated`. Formatting failure adds only a bounded `outputError` and changes neither typed `output.result` nor operation status. Normal Run/Debug invocations automatically include the snapshot in Action evidence and the Case log, without an extra Log Action; SQL, parameters, MQ payload metadata, and HTTP status/header diagnostics keep their own contracts. Load defers formatting until an iteration is retained, then materializes `resource-output.yaml`; `evidence.resources.output: none` skips it entirely. Presentation never introduces credential values into evidence.
 

@@ -1,15 +1,36 @@
 # Load 模式
 
-ATT 接受 att-load/v1.6 scenario。Scenario 有一個或多個 workload；每個 workload 使用單一固定 Template、Flow 或 Tool target，或使用 closed-user weighted target mix。Workload 配置 inputs、testdata policy、bootstrap vars 與 pacing。Root defaults 可供多個 workload 共用，workload-local 欄位會覆蓋它們。Scheduler 啟動前會驗證並預先 resolve 所有 target。
+ATT 接受 att-load/v1.7 scenario。Scenario 有一個或多個 workload；每個 workload 使用單一固定 Template、Flow 或 Tool target，或使用 closed-user weighted target mix。Workload 配置 inputs、testdata policy、bootstrap vars 與 pacing。Root defaults 可供多個 workload 共用，workload-local 欄位會覆蓋它們。Scheduler 啟動前會驗證並預先 resolve 所有 target。
 
 使用上一版 workload schema 的 descriptor 仍相容，載入時會 normalize 至現行 schema。
 
 不帶 scenario 執行 `./att.sh load`，會發現 `load/` 下有效的完整 Load descriptor。只考慮宣告 `schemaVersion: att-load/*` 的 YAML；其他 YAML 會忽略，無效的已宣告 descriptor 則附 diagnostic 顯示。Discovery 會 resolve 並驗證 target，但不啟動 scheduler 或呼叫 resource。
 
+## 獨立 evidence 配額
+
+`att-load/v1.7` 新增有限的 success/failure 配額。沒有新欄位時，完整保留既有共用 `maxSamples` 行為，包括 `metrics`、`failures`、`samples` 及預設不設上限的 `all`。既有 v1.6 scenario 仍可載入，normalize 至 v1.7 時不會改變 evidence policy。
+
+~~~yaml
+evidence:
+  mode: samples
+  success: sample
+  failure: full
+  sampleRate: 0.01
+  maxSuccessSamples: 500
+  maxFailureSamples: 2000
+~~~
+
+明確設定 `maxFailureSamples` 才會啟用獨立配額；兩個新欄位均為 0–1,000,000 的整數。Success 上限依次取 `maxSuccessSamples`、明確 `maxSamples`、或 **1,000**，即使 `mode: all` 亦同。`maxSuccessSamples` 必須配合 `maxFailureSamples`；同時提供 `maxSamples` 與 `maxSuccessSamples` 會被拒絕。保留 `maxSamples: 500` 再新增 `maxFailureSamples: 2000`，會把舊上限轉為 success-only 上限。0 表示不保留該類 evidence。`sampleRate` 只用於抽樣 PASS；FAIL/ERROR（包括操作層 TIMEOUT）直接使用 failure 配額。`failure: full` 受配額限制，不保證每個失敗都會保留。
+
+共用的 run evidence store 分開計算 success/failure 已預留及已保留 slot，適用於多 workload 及兩種 scheduler。預選 success 後失敗的 iteration 會釋放 success slot，再申請 failure slot；未抽樣的失敗亦可申請 failure 容量。Success 用盡不會停止 failure log capture；failure 用盡不會停止 success sampling。Dropped／未開始 arrival 及未完成 iteration 不會建立一般 evidence。取消／拒絕 admission 或 workspace 缺失會釋放預留。Failure log 維持 65,536 字元 tail、強制 secret protection 及延後 resource formatting。
+
+`load-summary.json`／YAML、HTML report 及 Studio job result 會顯示有效 `evidence.policy`、`retainedSuccessCount`、`retainedFailureCount`、各類配額用盡旗標，以及因配額／缺失 evidence 而略過的計數。Failure 配額達上限時，report 與 Studio 會警告；aggregate metrics、thresholds 及 failure events 繼續完整統計。保留連結仍使用 `samples/`、`failures/`，並保留 EXEC.ID、case.log、case.yaml。Studio Evidence settings 會分別標示舊共用上限，獨立配額與 advanced JSON 同步。見[有界範例](../../../examples/load/independent-evidence.yaml)。
+
+
 ## 定義 Load scenario
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 testdata: [examples/testdata/generated-account.yaml]
 workloads:
   - id: payment
@@ -49,7 +70,7 @@ execution:
 Workload 可用 `mix` 代替 `target`，讓每位 closed user 的下一次 iteration 在預先 resolve 的 targets 之間選擇。每個 entry 包含唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool `target`。Selector 由 run seed、workload ID、穩定 VU ID 和該 VU 的 iteration number 決定；切換 target 不會重設 VU 或 think-time random stream。Weight 表示選擇機率，短時間 run 不保證精確符合比例。
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 seed: 73
 workloads:
   - id: checkout
@@ -185,12 +206,12 @@ Load workload 啟動前，ATT 會為每個可達的 Render payload glob 解析�
 
 重複的 `--set` 可用 `input.path=value`、僅限 Tool 的 `arg.name=value`，或僅限 Template/Flow 的 `vars.path=value`。值使用 safe YAML 解析並保留型別；實用時支援巢狀 map 與數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效；解析 override 時不會評估 ATT expression。多 workload scenario 會拒絕未限定的 override。
 
-可選的 `load/load.yaml` 使用現行 `att-load/v1.6` policy-only descriptor，不含 target、inputs 或 Tool arguments。它提供預設 `load` policy，並可選擇包含 `execution`、`thresholds`、`evidence`、`seed` 及 Load-local `testdata` imports。明確 CLI pacing 會覆蓋 policy。`load --debug template|flow|tool <id>` 會將 sidecar 的 `inputs`、`vars` 或 Tool `arguments` promotion 成暫時的單一 workload scenario，然後使用正常 Load validation、scheduler 和 evidence pipeline；不會先執行 Debug。沒有 policy 時，請在 CLI 提供完整 policy，例如 `--users 2 --duration 10s`（arrival-rate 還需要 `--max-concurrent` 和 `--overload-policy`）。
+可選的 `load/load.yaml` 使用現行 `att-load/v1.7` policy-only descriptor，不含 target、inputs 或 Tool arguments。它提供預設 `load` policy，並可選擇包含 `execution`、`thresholds`、`evidence`、`seed` 及 Load-local `testdata` imports。明確 CLI pacing 會覆蓋 policy。`load --debug template|flow|tool <id>` 會將 sidecar 的 `inputs`、`vars` 或 Tool `arguments` promotion 成暫時的單一 workload scenario，然後使用正常 Load validation、scheduler 和 evidence pipeline；不會先執行 Debug。沒有 policy 時，請在 CLI 提供完整 policy，例如 `--users 2 --duration 10s`（arrival-rate 還需要 `--max-concurrent` 和 `--overload-policy`）。
 
 Policy descriptor 範例（複製到 `load/load.yaml`）：
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -214,7 +235,7 @@ evidence: {mode: failures}
 
 沒有 `--run-id` 時，Load 外層目錄使用與 Run 相同的 `execution.runIdFormat`。`--run-id` 仍是外層 Load identity 的 literal override。此 policy 與 `execution.execIdFormat` 分開；後者仍只產生每個 started iteration 的 `EXEC.ID`。
 
-Load 使用 att-load/v1.6。設定 execution.execIdFormat 時，ATT 在每個 iteration initialization 使用一般 ${...} / #{...} engine 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及 output path 發布後評估。
+Load 使用 att-load/v1.7。設定 execution.execIdFormat 時，ATT 在每個 iteration initialization 使用一般 ${...} / #{...} engine 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及 output path 發布後評估。
 
 可用值有 EXEC.RUN_ID、timestamps、EXEC.INPUT、EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE、closed-only EXEC.LOAD.USER_ID，以及已建立的 META.SOURCE/TARGET/TEMPLATE。EXEC.ID 和 EXEC.OUTPUT_DIR 尚未可用，因為生成的 ID 決定 workspace。還沒有 Action 執行，所以 EXEC.ACTIONS 與 Flow/Tool/helper invocation META 缺席。
 

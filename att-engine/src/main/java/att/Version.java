@@ -44,7 +44,8 @@ public final class Version {
     public static final String CI_SUMMARY_SCHEMA = "att-ci-summary/v2.1";
     public static final String MQHELPER_SCHEMA_V1_0 = "att-mqhelper/v1.0";
     public static final String MQHELPER_SCHEMA_V1_1 = "att-mqhelper/v1.1";
-    public static final String MQHELPER_SCHEMA = "att-mqhelper/v1.2";
+    public static final String MQHELPER_SCHEMA_V1_2 = "att-mqhelper/v1.2";
+    public static final String MQHELPER_SCHEMA = "att-mqhelper/v1.3";
     public static final String MQHELPER_SCHEMA_CURRENT = MQHELPER_SCHEMA;
     public static final String OLDER_DEBUG_SCHEMA = "att-debug/v1.0";
     public static final String PREVIOUS_DEBUG_SCHEMA = "att-debug/v1.1";
@@ -55,8 +56,9 @@ public final class Version {
     public static final String LOAD_SCHEMA_V1_3 = "att-load/v1.3";
     public static final String LOAD_SCHEMA_V1_4 = "att-load/v1.4";
     public static final String LOAD_SCHEMA_V1_5 = "att-load/v1.5";
-    public static final String PREVIOUS_LOAD_SCHEMA = LOAD_SCHEMA_V1_5;
-    public static final String LOAD_SCHEMA = "att-load/v1.6";
+    public static final String LOAD_SCHEMA_V1_6 = "att-load/v1.6";
+    public static final String PREVIOUS_LOAD_SCHEMA = LOAD_SCHEMA_V1_6;
+    public static final String LOAD_SCHEMA = "att-load/v1.7";
     public static final String LOAD_SCHEMA_CURRENT = LOAD_SCHEMA;
     public static final String LOAD_SUMMARY_SCHEMA = "att-load-summary/v1.1";
 

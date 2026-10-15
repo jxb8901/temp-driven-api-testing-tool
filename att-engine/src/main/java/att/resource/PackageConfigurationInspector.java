@@ -183,7 +183,7 @@ public final class PackageConfigurationInspector {
     }
 
     private Object projectTestdataValue(Object value, String path, String key, boolean[] redacted) {
-        if (key != null && (alwaysHiddenField(key) || configuredSensitivePath(path)
+        if (key != null && (alwaysHiddenField(key) || redactionEnabled && personalField(key) || configuredSensitivePath(path)
                 || configuredSensitiveField(key) || redactionEnabled && freeFormValueField(key))) {
             redacted[0] = true;
             return "[REDACTED]";
@@ -213,9 +213,11 @@ public final class PackageConfigurationInspector {
     }
 
     private static boolean alwaysHiddenField(String name) {
-        String normalized = name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
-        return normalized.matches(".*(password|passwd|passphrase|secret|token|authorization|credential|apikey|accesskey|privatekey|clientsecret|cookie|username|email|phone|address|ssn|nationalid|passport|dateofbirth|birthdate|creditcard|cardnumber|cvv|iban|routingnumber).*" )
-                || normalized.equals("headers");
+        return att.security.SecretProtection.sensitiveName(name);
+    }
+
+    private static boolean personalField(String name) {
+        return name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "").matches("username|email|phone|address|ssn|nationalid|passport|dateofbirth|birthdate|creditcard|cardnumber|cvv|iban|routingnumber");
     }
 
     private static boolean freeFormValueField(String name) {
@@ -226,11 +228,7 @@ public final class PackageConfigurationInspector {
 
     private String scrubTestdataText(String value) {
         String result = value.replace(packageRoot.toString(), "[package]");
-        result = AUTH_SCHEME.matcher(result).replaceAll("$1 [REDACTED]");
-        result = KEY_VALUE_SECRET.matcher(result).replaceAll("$1[REDACTED]");
-        result = URL_CREDENTIALS.matcher(result).replaceAll("$1[REDACTED]@");
-        result = XML_SECRET.matcher(result).replaceAll("$1[REDACTED]$3");
-        result = PRIVATE_KEY.matcher(result).replaceAll("[REDACTED PRIVATE KEY]");
+        result = att.security.SecretProtection.text(result).replace(att.security.SecretProtection.REDACTED, "[REDACTED]");
         return att.core.PathPresentation.displayDiagnosticText(result, packageRoot);
     }
 
@@ -325,8 +323,11 @@ public final class PackageConfigurationInspector {
             item.put("path", path);
             if (sharedSource != null) item.put("source", sharedSource);
             if (hidden) {
-                item.put("left", field("hidden", null, null, null));
-                item.put("right", field("hidden", null, null, null));
+                Map<String,Object> protectedFields = new LinkedHashMap<String,Object>();
+                hidden(protectedFields, path.substring(path.lastIndexOf('.')+1));
+                Object protectedField = protectedFields.values().iterator().next();
+                item.put("left", protectedField);
+                item.put("right", protectedField);
                 item.put("change", "hidden");
             } else {
                 item.put("left", before == null ? field("missing", null, null, null) : before);
@@ -501,6 +502,13 @@ public final class PackageConfigurationInspector {
                 Object rawFields = entry.get("fields");
                 if (rawFields instanceof Map) for (Map.Entry<?, ?> field : ((Map<?, ?>) rawFields).entrySet())
                     hideField(field.getValue(), prefix + "." + field.getKey());
+                Object instances = entry.get("instances");
+                if (instances instanceof Iterable) for (Object rawInstance : (Iterable<?>)instances) {
+                    Map<?,?> instance = object(rawInstance);
+                    Object instanceFields = instance.get("fields");
+                    if (instanceFields instanceof Map) for (Map.Entry<?,?> field : ((Map<?,?>)instanceFields).entrySet())
+                        hideField(field.getValue(), prefix + ".instances." + instance.get("id") + "." + field.getKey());
+                }
                 Object rawArguments = entry.get("arguments");
                 if (rawArguments instanceof Iterable) for (Object rawArgument : (Iterable<?>) rawArguments) {
                     Map<?, ?> argument = object(rawArgument);
@@ -518,12 +526,15 @@ public final class PackageConfigurationInspector {
         if ("visible".equals(field.get("state")) && (hidesForDisplayPolicy(path)
                 || alwaysHiddenField(path.substring(path.lastIndexOf('.') + 1))
                 || configuredSensitivePath(path) || configuredSensitiveField(path.substring(path.lastIndexOf('.') + 1)))) {
+            boolean mandatory = alwaysHiddenField(path.substring(path.lastIndexOf('.') + 1));
             field.clear(); field.put("state", "hidden");
+            field.put("value", mandatory ? "[REDACTED]" : "[HIDDEN]");
+            field.put("reasonCode", mandatory ? "MANDATORY_SECRET" : "OPTIONAL_FIELD_POLICY");
         }
     }
 
     private boolean hidesForDisplayPolicy(String path) {
-        return redactionEnabled && isSensitivePath(path) && !includeAllFields;
+        return redactionEnabled && (isSensitivePath(path) || personalField(path.substring(path.lastIndexOf('.') + 1))) && !includeAllFields;
     }
 
     private boolean configuredSensitivePath(String path) {
@@ -640,7 +651,7 @@ public final class PackageConfigurationInspector {
             visible(fields, "pool.minIdle", Integer.valueOf(helper.poolMinIdle()), source);
             visible(fields, "pool.connectionTimeoutMs", Long.valueOf(helper.poolConnectionTimeoutMs()), source);
             visible(fields, "url", scrubTestdataText(helper.url()), source);
-            if (includeAllFields) {
+            if (includeAllFields || !redactionEnabled) {
                 Map<String,Object> safeProperties = new LinkedHashMap<String,Object>();
                 for (Map.Entry<String,String> property : helper.properties().entrySet()) {
                     String propertyPath = "dbhelpers." + helper.id() + ".properties." + property.getKey();
@@ -654,7 +665,8 @@ public final class PackageConfigurationInspector {
             } else {
                 for (String hidden : Arrays.asList("properties", "evidence.sql", "evidence.parameters")) hidden(fields, hidden);
             }
-            for (String hidden : Arrays.asList("username", "password")) hidden(fields, hidden);
+            visible(fields, "username", helper.username(), source);
+            hidden(fields, "password");
             logicalSource(entry, helper.sourceFile());
             entries.add(entry);
         }
@@ -684,8 +696,13 @@ public final class PackageConfigurationInspector {
             visible(fields, "port", Integer.valueOf(helper.port()), source);
             visible(fields, "channel", helper.channel(), source);
             visible(fields, "requestQueue", helper.requestQueue(), source);
+            visible(fields, "requestQueues", helper.requestQueues(), source);
+            visible(fields, "requestQueueSelectionStrategy", helper.requestQueueSelectionStrategy(), source);
             visible(fields, "replyQueue", helper.replyQueue(), source);
-            for (String hidden : Arrays.asList("username", "password", "evidencePayload")) hidden(fields, hidden);
+            visible(fields, "username", helper.username(), source);
+            hidden(fields, "password");
+            if (redactionEnabled && !includeAllFields) hidden(fields, "evidencePayload");
+            else visible(fields, "evidencePayload", helper.evidencePayload(), source);
             List<Map<String, Object>> instances = new ArrayList<Map<String, Object>>();
             for (Map.Entry<String, MqHelperConfig> instance : helper.instances().entrySet()) {
                 Map<String, Object> child = entry(instance.getKey(), source);
@@ -695,8 +712,11 @@ public final class PackageConfigurationInspector {
                 visible(childFields, "port", Integer.valueOf(instance.getValue().port()), source);
                 visible(childFields, "channel", instance.getValue().channel(), source);
                 visible(childFields, "requestQueue", instance.getValue().requestQueue(), source);
+                visible(childFields, "requestQueues", instance.getValue().requestQueues(), source);
+                visible(childFields, "requestQueueSelectionStrategy", instance.getValue().requestQueueSelectionStrategy(), source);
                 visible(childFields, "replyQueue", instance.getValue().replyQueue(), source);
-                for (String hidden : Arrays.asList("username", "password")) hidden(childFields, hidden);
+                visible(childFields, "username", instance.getValue().username(), source);
+                hidden(childFields, "password");
                 instances.add(child);
             }
             entry.put("instances", instances);
@@ -719,7 +739,10 @@ public final class PackageConfigurationInspector {
             for (Map.Entry<String, SshConfig> instance : helper.instances().entrySet()) {
                 Map<String, Object> child = entry(instance.getKey(), source);
                 Map<String, Object> childFields = fields(child);
-                for (String hidden : Arrays.asList("host", "user", "port", "identityFile")) hidden(childFields, hidden);
+                visible(childFields, "host", instance.getValue().host(), source);
+                visible(childFields, "user", instance.getValue().user(), source);
+                visible(childFields, "port", Integer.valueOf(instance.getValue().port()), source);
+                hidden(childFields, "identityFile");
                 instances.add(child);
             }
             entry.put("instances", instances);
@@ -745,7 +768,9 @@ public final class PackageConfigurationInspector {
             visible(fields, "keepAliveMs", Integer.valueOf(helper.keepAliveMs()), source);
             visible(fields, "idleEvictMs", Integer.valueOf(helper.idleEvictMs()), source);
             visible(fields, "baseUrl", scrubTestdataText(helper.baseUrl().toString()), source);
-            for (String hidden : Arrays.asList("headers", "username", "password", "token", "trustStore", "trustStorePassword")) hidden(fields, hidden);
+            visible(fields, "headers", att.security.SecretProtection.value(helper.headers()), source);
+            visible(fields, "username", helper.username(), source);
+            for (String hidden : Arrays.asList("password", "token", "trustStore", "trustStorePassword")) hidden(fields, hidden);
             entries.add(entry);
         }
         return section("httphelpers", "HTTP helpers", source, entries);
@@ -1002,13 +1027,19 @@ public final class PackageConfigurationInspector {
         fields.put(key, field("missing", null, origin, null));
     }
 
-    private static void hidden(Map<String, Object> fields, String key) { fields.put(key, field("hidden", null, null, null)); }
+    private static void hidden(Map<String, Object> fields, String key) {
+        Map<String,Object> item = field("hidden", null, null, null);
+        boolean mandatory = alwaysHiddenField(key);
+        item.put("value", mandatory ? "[REDACTED]" : "[HIDDEN]");
+        item.put("reasonCode", mandatory ? "MANDATORY_SECRET" : "UNAVAILABLE_BY_POLICY");
+        fields.put(key, item);
+    }
 
     private static void putVisible(Map<String, Object> fields, String key, Object value, String origin) {
         fields.put(key, field("visible", value, origin, null));
     }
 
-    private static void putHidden(Map<String, Object> fields, String key) { fields.put(key, field("hidden", null, null, null)); }
+    private static void putHidden(Map<String, Object> fields, String key) { hidden(fields,key); }
 
     private static Map<String, Object> field(String state, Object value, Object origin, String change) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();

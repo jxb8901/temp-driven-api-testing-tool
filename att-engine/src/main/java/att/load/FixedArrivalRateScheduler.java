@@ -191,6 +191,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                         LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "arrivalRate", phase, id, null,
                                 sequenceValue, dueAt, iterationStarted, completedAt, status, errorType, evidence)));
                     } finally {
+                        if(evidenceStore!=null)evidenceStore.releaseEvidence(id);
                         inFlight.decrementAndGet();
                         admittedTasks.remove(id, taskHandle);
                         schedulerWakeups.offer(Boolean.TRUE);

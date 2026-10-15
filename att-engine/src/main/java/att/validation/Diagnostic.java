@@ -42,9 +42,9 @@ public final class Diagnostic implements Comparable<Diagnostic> {
                        String summary, String detail, SourceLocation source, DiagnosticContext context,
                        java.util.List<java.util.Map<String, Object>> schemaViolations,
                        int occurrences, java.util.List<java.util.Map<String, Object>> affectedCases) {
-        this.code = code; this.severity = severity; this.message = message; this.file = file;
+        this.code = code; this.severity = severity; this.message = message == null ? null : att.security.SecretProtection.text(message); this.file = file;
         this.field = field; this.sheet = sheet; this.row = row; this.column = column; this.template = template; this.action = action; this.suggestion = suggestion;
-        this.summary = summary; this.detail = detail; this.source = source;
+        this.summary = summary == null ? null : att.security.SecretProtection.text(summary); this.detail = detail == null ? null : att.security.SecretProtection.text(detail); this.source = source;
         this.context = context == null ? DiagnosticContext.EMPTY : context;
         java.util.List<java.util.Map<String, Object>> copied = new java.util.ArrayList<java.util.Map<String, Object>>();
         if (schemaViolations != null) for (java.util.Map<String, Object> violation : schemaViolations)

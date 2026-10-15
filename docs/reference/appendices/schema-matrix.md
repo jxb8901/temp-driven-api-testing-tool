@@ -7,7 +7,7 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Global configuration | att-config/v2.12 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
-| MQHelper | att-mqhelper/v1.2 |
+| MQHelper | att-mqhelper/v1.3 |
 | HTTPHelper | att-httphelper/v1.1 |
 | SSHHelper | att-sshhelper/v1.0 |
 | Tool group | att-tool-group/v2.9 |
@@ -16,7 +16,7 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Template | att-template/v3.6 |
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.2 |
-| Load scenario | att-load/v1.6 |
+| Load scenario | att-load/v1.7 |
 | Load summary | att-load-summary/v1.1 |
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |
@@ -24,3 +24,7 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | JUnit XML | att-junit/v2.1 |
 
 For the changed resource/configuration schemas, older versions are historical definitions under schemas/history; they are not active execution contracts. Unsupported versions fail validation with migration guidance. The repository catalog at schemas/catalog.yaml is authoritative. Package validation checks the registered schema resources themselves; it does not enable runtime compatibility for archived versions.
+
+<!-- att-docs:historical -->
+Load v1.6 and MQHelper v1.2 are compatible historical schemas supported by their loaders; their existing scalar routing and legacy evidence policies remain unchanged. New routing/quota fields require the active schema.
+<!-- /att-docs:historical -->

@@ -1332,7 +1332,10 @@
       ],
       "properties": {
         "schemaVersion": {
-          "const": "att-load/v1.6"
+          "enum": [
+            "att-load/v1.6",
+            "att-load/v1.7"
+          ]
         },
         "seed": {
           "type": "integer"

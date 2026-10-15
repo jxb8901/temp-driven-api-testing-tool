@@ -6,7 +6,7 @@ Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
 
-> Compatibility path only: use the [canonical current Reference Manual](generated/reference.html) or the [documentation landing page](README.md).
+> Compatibility path only: use the [canonical current Reference Manual](../reference.md) or the [documentation landing page](../README.md).
 > This generated file is retained for existing versioned links and is not a separate documentation source.
 ## 01 Overview and Concepts
 

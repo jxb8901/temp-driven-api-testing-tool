@@ -275,7 +275,7 @@ public class FrameworkEngine {
             ResultStatus finalStatus = options.dryRun() ? ResultStatus.SKIPPED : status;
             context.put("CASE.status", finalStatus.name());
             context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
-            writeCaseTree(caseOutputDir, context);
+            writeCaseTree(caseOutputDir, context, caseLog);
             return new TestResult(testCase.caseId(), testCase.caseName(), finalStatus,
                     Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations), caseLogPath, validations,
                     testCase.workbookId(), testCase.groupId(), testCase.tags(), null, validatedCaseId);
@@ -292,7 +292,7 @@ public class FrameworkEngine {
             context.put("CASE.error", errorMessage);
             if (typed != null) context.put("CASE.errorDiagnostic", typed.toDiagnostic().toMap());
             context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
-            try { writeCaseTree(caseOutputDir, context); }
+            try { writeCaseTree(caseOutputDir, context, caseLog); }
             catch (Exception treeError) {
                 errorMessage += "; Case evidence write failed: " + message(treeError);
                 // Keep the persisted CASE.error in sync with the final error text
@@ -578,8 +578,8 @@ public class FrameworkEngine {
     private String sha256(Path file) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); try (java.io.InputStream input = Files.newInputStream(file)) { byte[] buffer = new byte[65536]; int count; while ((count = input.read(buffer)) >= 0) digest.update(buffer, 0, count); } byte[] hash = digest.digest(); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }
     private String sha256Bytes(byte[] bytes) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); byte[] hash = digest.digest(bytes); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }
 
-    private void writeCaseTree(Path caseDirectory, CaseRuntimeContext context) throws Exception {
-        Files.write(caseDirectory.resolve("case.yaml"), new Yaml().dump(PathPresentation.displayStructure(context.caseTree(), projectRoot)).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    private void writeCaseTree(Path caseDirectory, CaseRuntimeContext context, CaseExecutionLog caseLog) throws Exception {
+        Files.write(caseDirectory.resolve("case.yaml"), caseLog.protectSnapshotText(new Yaml().dump(att.security.SecretProtection.value(PathPresentation.displayStructure(context.caseTree(), projectRoot)))).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private void appendEvent(Path runDirectory, String runId, TestResult result) throws Exception {

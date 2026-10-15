@@ -165,10 +165,10 @@ Local CLI output shows absolute paths by default. Add `--substitute-package-root
 
 `--set` is repeatable and accepts exactly one namespace: `input`, `arg`, or `vars`. Values use safe YAML parsing (for example `42`, `true`, `null`, `[a, b]`, or `{id: 7}`), and nested paths may use map keys and numeric list indexes such as `input.customer.ids[0]=42`. Duplicate assignments are applied in order, so the last value wins. ATT expressions are not evaluated while parsing an override; quote expression-looking values when a shell could expand them. `arg.*` is Tool-only; `vars.*` is Template/Flow-only. Unqualified overrides are rejected for multi-workload Load scenarios.
 
-`load/load.yaml` is an optional, policy-only `att-load/v1.6` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. It rejects sidecars with Debug-local `testdata` imports; declare those imports on a Load scenario. Explicit CLI pacing fields override the policy. Without a policy, provide a complete policy on the command line; for example:
+`load/load.yaml` is an optional, policy-only `att-load/v1.7` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. It rejects sidecars with Debug-local `testdata` imports; declare those imports on a Load scenario. Explicit CLI pacing fields override the policy. Without a policy, provide a complete policy on the command line; for example:
 
 ```yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -218,3 +218,42 @@ Repeatable `--set <input|arg|vars>.<path>=<yaml-value>` applies safe-YAML typed 
 ```
 
 The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id` (outer Run/Load identity), `--debug-id` (standalone Debug identity), `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--set`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them. Both identity options are literal overrides.
+
+### Diagnostic trust boundaries and secret protection
+
+`att-security` supplies the mandatory Secret Protection policy shared by Engine, Worker,
+Server and the inspectors. Password/passphrase, secret/token/credential, authorization,
+cookie, API/access/private key and identity-file fields are reserved; a sensitive field
+protects its whole value, including an unknown nested object. Bearer/Basic credentials,
+URL credentials, PEM private keys, `!secret` values, secret CSV columns and XML/JSON/YAML
+secret values are protected in text. Resource adapters also register concrete secret
+spellings with the Case Log; those spellings remain protected wherever they occur.
+There is no client flag or privileged `includeAllFields` bypass for these classes.
+Unknown objects and cyclic/deep sensitive structures fail closed.
+
+| Boundary | Path policy | Secret policy |
+| --- | --- | --- |
+| CLI console | Both aliases off by default; each alias flag works independently | Mandatory protection always applies |
+| CLI `case.log` | Typed local path fields and diagnostic absolute path tokens follow selected aliases; authored commands, relative expressions, URLs and remote paths retain their text | Mandatory protection and registered resource secrets |
+| Server Worker `case.log` | Both aliases off; trusted local diagnostic evidence retains original paths | Same mandatory protection |
+| Run/Debug/Load `case.yaml` and retained failure evidence | Local typed presentation follows the process policy; authored relative expressions remain intact | Structured secret fields and registered Case Log secrets are protected |
+| Worker JSON Lines | Internal trusted process channel; original locations remain available to the Server | Shared mandatory protection on every event/result |
+| Server API, SSE and Job Result | Server applies deterministic `package:` / `artifact:` locators and external basename labels; clients cannot disable this policy | Shared mandatory protection on every public projection |
+| Source/Configuration inspectors | Package-relative locations; external host paths are hidden at the Server boundary | Mandatory protection plus independently configured optional field/PII redaction |
+| Public artifact download | UTF-8 text projection, up to 16 MiB; original on-disk file remains unchanged. Binary, invalid UTF-8 and oversized artifacts require trusted filesystem access | Mandatory secret projection before download |
+
+Diagnostic excerpts preserve `&{./Pacs008.xml}`, `&{../request.xml}`, `${...}`, `#{...}`,
+XML closing tags, Unicode, URLs and SSH remote paths. Structured `file`, `line` and
+`column`/`sourceColumn` fields provide navigation separately from authored excerpts.
+Public projection is idempotent. An API download is therefore a safe view of an
+artifact, rather than a byte-for-byte export of trusted local evidence.
+
+With `server.inspection.redaction.enabled: false`, ordinary host/port/user, client ID,
+queue/channel, Content-Type and non-secret DB properties/evidence settings are visible
+to authorized users. Optional PII fields such as email/address are also visible.
+`includeAllFields` additionally exposes ordinary fields normally hidden by display
+policy and remains authorized server-side through the configured configuration-admin
+role. Secret values remain protected in both modes. Field records use `state: hidden`,
+`value: '[REDACTED]'`, `reasonCode: MANDATORY_SECRET` for protected values; unavailable
+fields use `[HIDDEN]` and `UNAVAILABLE_BY_POLICY` or `OPTIONAL_FIELD_POLICY`.
+Source traversal, symlink, deny-glob, sensitive-file and size restrictions remain active.
