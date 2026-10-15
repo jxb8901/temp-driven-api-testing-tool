@@ -143,7 +143,7 @@ class DebugEngineTest {
         assertFalse(safeForm.contains("123456789"));
         assertFalse(safeForm.contains("violet-123"));
         assertFalse(safeForm.contains("array secret one"));
-        assertTrue(safeForm.contains("ORD-PRIVATE-123"), "Ordinary scalar defaults remain editable instead of being hidden wholesale.");
+        assertFalse(safeForm.contains("ORD-PRIVATE-123"));
         @SuppressWarnings("unchecked") Map<String, Object> safeInput = (Map<String, Object>) form.get("input");
         @SuppressWarnings("unchecked") Map<String, Object> safeInputs = (Map<String, Object>) safeInput.get("inputs");
         @SuppressWarnings("unchecked") Map<String, Object> safePayload = (Map<String, Object>) safeInputs.get("payload");
@@ -164,7 +164,7 @@ class DebugEngineTest {
         editedInputs.put("newLiteral", "[REDACTED]");
         editedInputs.put("value", "visible override");
         submitted.put("inputs", editedInputs);
-        submitted.put("vars", Collections.singletonMap("orderId", ((Map<?, ?>) safeInput.get("vars")).get("orderId")));
+        submitted.put("vars", Collections.singletonMap("orderId", ((Map<?, ?>) ((Map<?, ?>) safeInput.get("vars")).get("orderId"))));
 
         Map<String, Object> validated = engine.validateInlineInput("template", "SIMPLE", submitted);
         @SuppressWarnings("unchecked") Map<String, Object> normalized = (Map<String, Object>) validated.get("normalizedInput");

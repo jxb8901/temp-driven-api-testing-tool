@@ -278,10 +278,15 @@ public final class DebugEngine {
         if (value instanceof String) {
             if ("/schemaVersion".equals(path) || ((String) value).isEmpty()) return value;
             String safe = scrub((String) value);
-            return safe.equals(value) ? value : keepDefault(path, redacted);
+            if (!safe.equals(value)) return keepDefault(path, redacted);
+            return redactionEnabled && !isAttExpression((String) value) ? keepDefault(path, redacted) : value;
         }
-        if (value != null) return value;
+        if (value != null) return redactionEnabled ? keepDefault(path, redacted) : value;
         return value;
+    }
+
+    private static boolean isAttExpression(String value) {
+        return value.matches("(?:\\$\\{[^{}]+}|#\\{[^{}]+}|@\\{[^{}]+}|&\\{[^{}]+})");
     }
 
     private boolean configuredSensitivePath(String path) {
@@ -783,6 +788,9 @@ public final class DebugEngine {
     private boolean redactedByPolicy(Object value, String key, String path) {
         if (key != null && sensitiveFormKey(key)) return true;
         if (key != null && (configuredSensitivePath(path) || configuredSensitiveField(key))) return true;
+        if (value == null || "/schemaVersion".equals(path)) return false;
+        if (redactionEnabled && !(value instanceof String
+                && (((String) value).isEmpty() || isAttExpression((String) value)))) return true;
         return value instanceof String && !scrub((String) value).equals(value);
     }
 
