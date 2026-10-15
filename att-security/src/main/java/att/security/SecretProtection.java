@@ -11,7 +11,7 @@ public final class SecretProtection {
     public static final String REDACTED = "[REDACTED_SECRET]";
     private static final String NAMES = "password|passwd|passphrase|token|secret|api[-_]?key|authorization|credential|private[-_]?key|cookie|set-cookie|access[-_]?key|identityfile|truststorepassword|client[-_]?secret";
     private static final Pattern MARKER = Pattern.compile("\\[REDACTED(?:_SECRET)?\\]");
-    private static final Pattern ASSIGNMENT = Pattern.compile("(?i)((?<![A-Za-z0-9])(?:" + NAMES + ")\\b[\\\"']?\\s*[=:]\\s*)(\\\"[^\\\"]*\\\"|'[^']*'|[^\\s,;&<>}]+)");
+    private static final Pattern ASSIGNMENT = Pattern.compile("(?i)((?<![A-Za-z0-9])(?:" + NAMES + ")\\b[\\\"']?[ \\t]*[=:][ \\t]*)(\\\"[^\\\"]*\\\"|'[^']*'|[^\\s,;&<>}]+)");
     private static final Pattern SENSITIVE_BLOCK_KEY = Pattern.compile("(?i)((?<![A-Za-z0-9])(?:" + NAMES + ")\\b[\\\"\']?[ \\t]*[=:][ \\t]*+)");
     private static final Pattern HEADER = Pattern.compile("(?i)(\\b(?:proxy-authorization|authorization|set-cookie|cookie)\\b[ \\t]*[:=][ \\t]*+)(?![\"'])[^\\r\\n]*");
     private static final Pattern AUTH = Pattern.compile("(?i)\\b(Bearer|Basic)\\s+[A-Za-z0-9+/_.~=-]+");
