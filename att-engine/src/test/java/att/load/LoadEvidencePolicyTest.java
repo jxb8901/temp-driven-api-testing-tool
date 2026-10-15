@@ -59,6 +59,26 @@ class LoadEvidencePolicyTest {
         assertEquals(1,failuresOnly.events().size());
     }
 
+    @Test void quotaWarningSurvivesAnInFlightReservationThatWasLaterReleased() {
+        LoadEvidenceStore store=new LoadEvidenceStore(policy(
+                "mode","samples","sampleRate",1.0,"maxSuccessSamples",1,"maxFailureSamples",1));
+        assertTrue(store.reserveSuccessEvidence("success-in-flight"));
+        assertFalse(store.reserveSuccessEvidence("success-skipped"));
+        assertTrue(store.claimFailureEvidence("failure-in-flight"));
+        assertFalse(store.claimFailureEvidence("failure-skipped"));
+        // Neither in-flight item yielded an evidence artifact, but both quota denials happened.
+        store.releaseEvidence("success-in-flight");
+        store.releaseEvidence("failure-in-flight");
+        Map<String,Object> report=store.statistics();
+        assertEquals(0,report.get("retainedSuccessCount"));
+        assertEquals(0,report.get("retainedFailureCount"));
+        assertEquals(true,report.get("successQuotaExceeded"));
+        assertEquals(true,report.get("failureQuotaExceeded"));
+        assertEquals(1L,report.get("skippedSuccessQuotaCount"));
+        assertEquals(1L,report.get("skippedFailureQuotaCount"));
+        assertTrue(report.containsKey("warning"));
+    }
+
     @Test void validatesFiniteSplitQuotasAndDeterministicMigration() {
         LoadEvidencePolicy migrated=policy("mode","all","maxSamples",7,"maxFailureSamples",3);
         assertTrue(migrated.splitQuotas());assertEquals(7,migrated.maxSuccessSamples());assertEquals(3,migrated.maxFailureSamples());
