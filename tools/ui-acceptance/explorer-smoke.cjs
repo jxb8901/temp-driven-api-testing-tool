@@ -345,7 +345,7 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('.att-sidecar-advanced .cm-content')?.textContent?.includes('submitted-override'));
     await page.getByLabel('Anonymous job label (optional)').fill('anonymous-e2e');
     page.once('dialog', dialogEvent => dialogEvent.accept());
-    await page.getByRole('button', { name: 'Start Debug' }).click();
+    await page.getByRole('button', { name: 'Run Now' }).click();
     await page.getByRole('heading', { name: 'Job job-debug-99' }).waitFor();
     assert.deepEqual(submittedInput, { inputs: { credential: 'submitted-override' }, vars: { retries: 2 } });
     assert.equal(submittedPrincipal, 'anonymous-e2e');
