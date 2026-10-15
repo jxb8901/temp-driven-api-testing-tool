@@ -108,11 +108,9 @@ describe('ScheduledLoadPage', () => {
 
   it('requires a server preview before creating a disabled schedule by default', async () => {
     const api = makeApi();
-    const resolvedOptions = new Intl.DateTimeFormat().resolvedOptions();
-    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
-      ...resolvedOptions, timeZone: 'Asia/Hong_Kong',
-    });
     await render(api);
+    await change(host.querySelector('#schedule-timezone') as HTMLInputElement, 'Asia/Hong_Kong');
+    await advance(300);
     expect(host.textContent).toContain('No schedules have been created');
     expect(host.textContent).toContain('This preview calculates the next five occurrence times from timezone and cron. It does not validate the package or test snapshot.');
     expect(host.textContent).toContain('Oct 20, 2026');
