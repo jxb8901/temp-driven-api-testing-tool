@@ -50,6 +50,29 @@ att/                              # ATT_HOME
 
 `server.security.checkCrossOrigin` 預設為 `false`，只控制 state-changing API 的 Origin 相等檢查；設為 `true` 時，不匹配會回傳 `ATT-SERVER-ORIGIN-MISMATCH`。關閉此檢查不會略過 local cookie authentication 的 CSRF 驗證或 login/bootstrap 的 Origin 檢查，也不會啟用 CORS 或 wildcard header。反向代理應以可信來源設定 Tomcat `RemoteIpValve`，讓 Servlet request 提供外部 scheme、host 及 port；應用程式不會信任任意 forwarded header。Origin 檢查關閉時 Server 會記錄啟動警告。
 
+`server.security.trustedOrigins` 是可選的瀏覽器 gateway Origin 精確允許清單，最多 100 項；省略或空清單會保留原有行為。應先設定 Tomcat 可信代理位址及外部 HTTPS scheme、host、port。清單只處理瀏覽器 Origin 與 Servlet origin 的已知差異，不能把 HTTP 連線變成安全連線。
+
+```yaml
+server:
+  security:
+    checkCrossOrigin: true
+    trustedOrigins:
+      - https://att.example.com
+      - https://att-gateway.example.com:8443
+```
+
+Origin 以 scheme、忽略大小寫的 hostname/IP 及有效 port 精確比較（HTTPS 預設 443）。設定項目可有結尾 `/`，但請求 Origin 不可含 path。啟動時會拒絕 path、query、fragment、userinfo、wildcard、無效 port、`null`、等價重複項目及公開 HTTP Origin。HTTP 僅容許 `localhost`、`127.0.0.1` 或 IPv6 loopback 開發用途。不會進行 DNS 查詢、前綴／後綴比對，亦不會自動信任 forwarded header。
+
+| 瀏覽器 Origin | 一般狀態變更，啟用檢查 | 一般狀態變更，關閉檢查 | Login/bootstrap，兩種設定 |
+| --- | --- | --- | --- |
+| 與 Servlet 相同或精確符合清單 | 通過 Origin 規則 | 通過 Origin 規則 | 通過 Origin 規則 |
+| 不同且不在清單 | 拒絕 | 略過 Origin 檢查 | 拒絕 |
+| `null`、格式無效或多個 Origin | 拒絕 | 略過 Origin 檢查 | 拒絕 |
+| 缺少 Origin（REST/CLI 相容性） | 通過 Origin 規則 | 通過 Origin 規則 | 通過 Origin 規則 |
+
+此共用規則適用於 local/container authentication 中所有需要 Origin 相等檢查的位置。拒絕時回傳 `ATT-SERVER-ORIGIN-MISMATCH`，並寫入不含原始 Origin 或憑證的 `ORIGIN_REJECT` audit。通過 Origin 規則不會授予權限：local cookie 及 Basic 狀態變更仍須提交 `X-ATT-CSRF`，authentication、role、憑證 HTTPS 傳輸、限速、Secure/HttpOnly/SameSite cookie，以及 package/job ownership 規則均維持。此設定不會設定 CORS、發送 `Access-Control-Allow-Origin` 或啟用跨站 cookie；真正跨站的瀏覽器 API 存取須另行設計 CORS。
+
+
 瀏覽器建立的 Quick Load 及 Advanced Load draft 另有獨立 opt-in：`server.inlineLoad.enabled` 預設為 `false`。啟用後，Server 會在 Engine 驗證後及進入佇列前，再次檢查 workload 數、target 數、Virtual User 總數、Arrival Rate 總和、每個 workload 及整體並行數上限，以及完整時間窗口上限。以下範例設定保守預設值。時間窗口上限為 warmup、ramp-up、duration、ramp-down 的總和；target 數包含固定 target 及每個 VU mix entry。功能停用時回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出設定上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。這些限制適用於瀏覽器建立的 draft；既有 path-based Load request 維持相容行為，並繼續受 `workers.maxConcurrentLoad` 限制。
 
 週期性 package-backed Load 排程另有獨立 opt-in：`server.scheduling.enabled` 預設為 `false`。啟用前請先選定管理員角色並檢視排程上限。已驗證部署需要 Servlet container role `server.scheduling.adminRole`（預設 `ATT_ADMIN`）；請在 Tomcat 將此 role 對應至可信操作人員。只有在 `authenticationRequired: false` 且排程已啟用時，`allowAnonymousManagement` 才預設為 `true`；設為 `false` 可保留 role 限制。匿名 caller 會共享排程管理權限，Server 會記錄明顯啟動警告；這只適用刻意隔離的測試部署，不建議用於共享或正式環境。此功能需要有界 package inspection。排程定義及執行歷史保存在 `server.dataDir` 的 H2 資料庫；請在同一 dataDir 只執行一個 Server 程序。每個排程預設保留最新 10,000 筆 terminal occurrence（`maxExecutionsPerSchedule` 可設為 100–100,000）；執行中及處理中的 occurrence 會保留。本 scheduler 不提供多節點 leader election。
@@ -158,7 +181,7 @@ Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` �
 
 在 `local` mode 中，未登入的瀏覽器開啟 `/ui/` 時會轉至 ATT 登入頁；REST API 則回傳結構化 JSON `401`。首次管理員帳戶使用 `dataDir/bootstrap-admin.token` 內的隨機一次性 token 建立。請限制 `dataDir` 只供 Server 作業系統帳戶存取，在登入頁輸入 token 完成建立，之後移除對 token 檔案的存取。初始化時會先寫入權限受限的暫存檔，再以原子 rename 安裝 token；啟動時只有在尚無帳戶且 bootstrap 未被認領時才會修復無效 token。Bootstrap 一經認領便不會重新開啟。系統沒有預設帳戶或密碼。除 loopback 開發外，所有包含本地密碼的請求（登入、bootstrap、建立帳戶、重設及自行變更密碼）都必須使用 HTTPS。Tomcat 只會透過已設定的可信任 proxy 判斷 proxy 終止的 HTTPS；不可信任的 forwarded header 不會建立 HTTPS 狀態。本地密碼以每位用戶獨立 salt 的 PBKDF2-HMAC-SHA-256 雜湊保存。首個版本支援 `ADMIN` 及 `USER`；所有已驗證用戶均可使用一般 Server 操作，帳戶管理及 Scheduled Load 管理則要求 `ADMIN`。
 
-Local session 使用不透明的 server-side identifier，登入時會輪替，閒置 30 分鐘或累計 12 小時後失效。登出、密碼變更或重設、停用帳戶都會撤銷 session。Server 重啟後，未到期或未撤銷的 session 仍有效。Cookie 設為 HttpOnly、SameSite=Lax，Path 限於部署 context；Tomcat 判斷請求使用 HTTPS 時亦會設 Secure。啟用 TLS termination 前，請先設定可信任的反向代理，讓 Tomcat 識別外部 HTTPS scheme。所有使用 cookie 驗證的狀態變更請求，以及由瀏覽器發出的 Basic-authenticated 狀態變更請求，必須在 `X-ATT-CSRF` 提交 CSRF token；登入及一次性 bootstrap endpoint 則要求 same-origin JSON。設為 `security.checkCrossOrigin: false` 只會放寬 Origin 相同來源檢查，不會略過 cookie CSRF token，也不會略過登入/bootstrap 的 same-origin JSON 要求，亦不會啟用 wildcard CORS。同一 login ID 及 client address 在 10 分鐘內失敗 8 次，或同一 client address 以不同 login ID 失敗 32 次後，登入會被限速。Bootstrap 每個 client address 在 10 分鐘內最多可輸入錯誤 token 8 次。自行變更密碼的 current-password 驗證使用相同限速及有界 hash semaphore。這些記憶體限速只適用於單一 Server process；多個 instance 請在共用的 edge 層設定 rate limit。登入回應不會區分不存在、已停用或密碼錯誤的帳戶。登入成功及失敗都會寫入 audit，並不記錄憑證。密碼以 310,000 次 PBKDF2-HMAC-SHA-256 計算雜湊；成功登入時會升級計算次數較低的舊 hash。
+Local session 使用不透明的 server-side identifier，登入時會輪替，閒置 30 分鐘或累計 12 小時後失效。登出、密碼變更或重設、停用帳戶都會撤銷 session。Server 重啟後，未到期或未撤銷的 session 仍有效。Cookie 設為 HttpOnly、SameSite=Lax，Path 限於部署 context；Tomcat 判斷請求使用 HTTPS 時亦會設 Secure。啟用 TLS termination 前，請先設定可信任的反向代理，讓 Tomcat 識別外部 HTTPS scheme。所有使用 cookie 驗證的狀態變更請求，以及由瀏覽器發出的 Basic-authenticated 狀態變更請求，必須在 `X-ATT-CSRF` 提交 CSRF token；登入及一次性 bootstrap endpoint 則要求 same-or-trusted-origin JSON。設為 `security.checkCrossOrigin: false` 只會放寬 Origin 相同來源檢查，不會略過 cookie CSRF token，也不會略過登入/bootstrap 的 same-or-trusted-origin JSON 要求，亦不會啟用 wildcard CORS。同一 login ID 及 client address 在 10 分鐘內失敗 8 次，或同一 client address 以不同 login ID 失敗 32 次後，登入會被限速。Bootstrap 每個 client address 在 10 分鐘內最多可輸入錯誤 token 8 次。自行變更密碼的 current-password 驗證使用相同限速及有界 hash semaphore。這些記憶體限速只適用於單一 Server process；多個 instance 請在共用的 edge 層設定 rate limit。登入回應不會區分不存在、已停用或密碼錯誤的帳戶。登入成功及失敗都會寫入 audit，並不記錄憑證。密碼以 310,000 次 PBKDF2-HMAC-SHA-256 計算雜湊；成功登入時會升級計算次數較低的舊 hash。
 
 `GET /api/v1/auth/me` 回傳安全的目前用戶資料及瀏覽器所需的 CSRF token。`POST /api/v1/auth/login` 及 `/api/v1/auth/logout` 管理 session。使用 local account 的 CLI 及 REST client 亦可透過 HTTPS Basic authentication 存取。管理員可使用 `GET`、`POST /api/v1/auth/users`、`POST /api/v1/auth/users/{loginId}/password`、`POST /api/v1/auth/users/{loginId}/enable` 及 `DELETE /api/v1/auth/users/{loginId}` 管理帳戶。`POST /api/v1/auth/password` 會先核對目前密碼，再變更自己的密碼。API 回應不會包含密碼雜湊、session identifier 或密碼。
 
@@ -229,7 +252,7 @@ Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的
 | `GET` | `/packages/{packageId}/load-policy?model=virtualUsers&environment=SIT` | 讀取 Advanced Load 使用的安全 model policy 預設值 |
 | `POST` | `/drafts/debug` | 驗證固定目標的 Debug 輸入並建立記憶體 draft |
 | `POST` | `/drafts/quick-load` | 驗證固定目標的 Quick Load 並建立記憶體 draft |
-| `POST` | `/drafts/load` | 驗證 `att-load/v1.6` scenario 並建立記憶體 draft |
+| `POST` | `/drafts/load` | 驗證 `att-load/v1.7` scenario 並建立記憶體 draft |
 | `GET` | `/drafts/{draftId}` | 讀取所屬 Debug、Quick Load 或 Advanced Load draft 的安全預覽 |
 | `POST` | `/jobs/debug`、`/jobs/load` | 提交所屬 Debug、Quick Load 或 Advanced Load draft |
 | `POST` | `/jobs/run`、`/jobs/load`、`/jobs/validate` | 提交 path-based 工作 |
@@ -366,7 +389,7 @@ Server 會在提交時及 Worker 啟動前重新檢查 package revision。若在
 
 ### 目標範圍內的 Quick Load
 
-設定 `server.inlineLoad.enabled: true` 後，Quick Load 才可從已選取的 Template、Flow 或 Tool 開啟；它固定使用該目標並組成一個 Workload。Model 可選 `virtualUsers` 或 `arrivalRate`；Server 會組成相符的現行 `att-load/v1.6` policy，並使用現有 Load pipeline 驗證目標。功能停用時，Quick Load form、policy 及 draft endpoint 都會回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`。
+設定 `server.inlineLoad.enabled: true` 後，Quick Load 才可從已選取的 Template、Flow 或 Tool 開啟；它固定使用該目標並組成一個 Workload。Model 可選 `virtualUsers` 或 `arrivalRate`；Server 會組成相符的現行 `att-load/v1.7` policy，並使用現有 Load pipeline 驗證目標。功能停用時，Quick Load form、policy 及 draft endpoint 都會回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`。
 
 ```http
 GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT
@@ -374,7 +397,7 @@ GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=
 
 表單回應會為 Template/Flow 提供安全的 `inputs`、`vars` 預設值，或為 Tool 提供 `inputs`、`arguments`，並附上已遮蔽的單 workload 預覽。它只讀取目標選填 `debug.yaml` 內的 business 欄位；不會複製 Debug 專用的 `case`、`stage` 及 local `testdata`。若 sidecar 包含 Debug-local Testdata，表單會明確提示這些 imports 已略過。需要的 package-relative descriptor 可另外放入 Load-level `testdata` array，並會按 effective Load scenario 驗證。
 
-Server 會為 `virtualUsers` 讀取 `load/load.visualuser.yaml`，為 `arrivalRate` 讀取 `load/load.arrivalrate.yaml`。這些是 policy-only 的 `att-load/v1.6` descriptor，必須與所選 model 相符。若 model 專用檔案不存在，會使用內建低強度 fallback：一個 Virtual User 執行 10 秒，或每秒 1 次 arrival、執行 10 秒，並設定 `maxConcurrent: 1` 及 `overloadPolicy: drop`。既有 CLI `load/load.yaml` 行為不變。
+Server 會為 `virtualUsers` 讀取 `load/load.visualuser.yaml`，為 `arrivalRate` 讀取 `load/load.arrivalrate.yaml`。這些是 policy-only 的 `att-load/v1.7` descriptor，必須與所選 model 相符。若 model 專用檔案不存在，會使用內建低強度 fallback：一個 Virtual User 執行 10 秒，或每秒 1 次 arrival、執行 10 秒，並設定 `maxConcurrent: 1` 及 `overloadPolicy: drop`。既有 CLI `load/load.yaml` 行為不變。
 
 提交 business values 及 pacing overrides 以建立所屬 draft：
 
@@ -400,7 +423,7 @@ Server 會在 draft 提交時、Worker 啟動前及 Worker 內重新檢查 packa
 
 ### Advanced Load builder
 
-設定 `server.inlineLoad.enabled: true` 後，Advanced Load 才會建立包含一個或多個 workload 的完整 `att-load/v1.6` scenario。所有 workload 必須使用同一 `virtualUsers` 或 `arrivalRate` model。Virtual Users workload 可使用單一固定 target 或 weighted `mix`；每個 Arrival Rate workload 使用一個固定 target。Engine 會在 Server 建立 draft 前驗證共用時間窗口、workload intensity、thresholds、Testdata policy 及所有 target，Server 隨後會檢查管理員設定的 inline Load 上限。若超出任何上限，回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT` 及安全摘要，且不會排程 scenario。
+設定 `server.inlineLoad.enabled: true` 後，Advanced Load 才會建立包含一個或多個 workload 的完整 `att-load/v1.7` scenario。所有 workload 必須使用同一 `virtualUsers` 或 `arrivalRate` model。Virtual Users workload 可使用單一固定 target 或 weighted `mix`；每個 Arrival Rate workload 使用一個固定 target。Engine 會在 Server 建立 draft 前驗證共用時間窗口、workload intensity、thresholds、Testdata policy 及所有 target，Server 隨後會檢查管理員設定的 inline Load 上限。若超出任何上限，回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT` 及安全摘要，且不會排程 scenario。
 
 讀取安全的 model policy 預設值：
 
@@ -420,7 +443,7 @@ Content-Type: application/json
   "packageId": "payments",
   "environment": "SIT",
   "scenario": {
-    "schemaVersion": "att-load/v1.6",
+    "schemaVersion": "att-load/v1.7",
     "load": {"users": 1, "duration": "30s"},
     "workloads": [
       {"id": "browse", "target": {"type": "flow", "id": "PAYMENT.browse"}, "load": {"users": 4}},

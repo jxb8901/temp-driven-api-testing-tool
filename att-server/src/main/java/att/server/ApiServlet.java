@@ -70,7 +70,7 @@ public final class ApiServlet extends HttpServlet {
             if("/jobs".equals(path)){json(res,200,Map.of("items",runtime.jobsFor(principal,principalSearch(req)),"requestId",requestId));return;}
             if(path.startsWith("/jobs/"))runtime.requireJobOwner(segment(path,2),principal);
             if(path.matches("/jobs/[^/]+/events")){sse(req,res,segment(path,2));return;}
-            if(path.startsWith("/jobs/")&&path.contains("/artifacts/")){String prefix=path.substring(0,path.indexOf("/artifacts/"));String id=segment(prefix,2);String relative=path.substring(path.indexOf("/artifacts/")+11);sendArtifact(res,runtime.artifact(id,relative));return;}
+            if(path.startsWith("/jobs/")&&path.contains("/artifacts/")){String prefix=path.substring(0,path.indexOf("/artifacts/"));String id=segment(prefix,2);String relative=path.substring(path.indexOf("/artifacts/")+11);sendArtifact(res,id,runtime.artifact(id,relative));return;}
             if(path.matches("/jobs/[^/]+/artifacts")){String id=segment(path,2);json(res,200,Map.of("items",artifacts(id),"requestId",requestId));return;}
             if(path.matches("/jobs/[^/]+/result")){Map<String,Object> result=runtime.resultRecord(segment(path,2));result.put("requestId",requestId);json(res,200,result);return;}
             if(path.matches("/jobs/[^/]+")){Map<String,Object> view=runtime.jobRecord(segment(path,2));view.put("requestId",requestId);json(res,200,view);return;}
@@ -339,8 +339,12 @@ public final class ApiServlet extends HttpServlet {
         try(var paths=Files.walk(root)){paths.filter(Files::isRegularFile).filter(p->!Files.isSymbolicLink(p)).limit(runtime.config.maxArtifacts+1L).forEach(p->{if(items.size()<runtime.config.maxArtifacts){Map<String,Object> m=new LinkedHashMap<>();m.put("path",root.relativize(p).toString().replace('\\','/'));try{m.put("size",Files.size(p));}catch(IOException ignored){}items.add(m);}});}
         return items;
     }
-    private void sendArtifact(HttpServletResponse response,Path file)throws IOException {
-        String name=file.getFileName().toString().replaceAll("[\r\n\"]","_");response.setContentType("application/octet-stream");response.setHeader("X-Content-Type-Options","nosniff");response.setHeader("Content-Disposition","attachment; filename=\""+name+"\"");response.setContentLengthLong(Files.size(file));Files.copy(file,response.getOutputStream());
+    private void sendArtifact(HttpServletResponse response,String jobId,Path file)throws Exception {
+        byte[] safe=runtime.publicArtifact(jobId,file);
+        String name=file.getFileName().toString().replaceAll("[\r\n\"]","_");
+        response.setContentType("application/octet-stream");response.setHeader("X-Content-Type-Options","nosniff");
+        response.setHeader("Content-Disposition","attachment; filename=\""+name+"\"");
+        response.setContentLengthLong(safe.length);response.getOutputStream().write(safe);
     }
     private void resourceGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
         String[] parts=path.split("/");
@@ -486,11 +490,11 @@ public final class ApiServlet extends HttpServlet {
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}
     private boolean checkOrigin(HttpServletRequest req,HttpServletResponse res,String requestId,boolean force)throws IOException {
         if(!force&&!runtime.config.security.checkCrossOrigin)return true;
-        if(sameOrigin(req))return true;
+        if(runtime.config.security.originPolicy.allows(req))return true;
+        try{runtime.store.audit(principal(req),"ORIGIN_REJECT",null,null,"ATT-SERVER-ORIGIN-MISMATCH");}catch(Exception ignored){}
         error(res,403,"ATT-SERVER-ORIGIN-MISMATCH","Request Origin does not match the server origin",requestId);
         return false;
     }
-    private static boolean sameOrigin(HttpServletRequest req){String origin=req.getHeader("Origin");if(origin==null)return true;if("null".equalsIgnoreCase(origin.trim()))return false;try{java.net.URI parsed=java.net.URI.create(origin);if(parsed.getHost()==null||parsed.getUserInfo()!=null||parsed.getRawPath()!=null&&!parsed.getRawPath().isEmpty()||parsed.getRawQuery()!=null||parsed.getFragment()!=null)return false;String scheme=req.getScheme().toLowerCase(java.util.Locale.ROOT),originScheme=parsed.getScheme().toLowerCase(java.util.Locale.ROOT);int requestPort=req.getServerPort(),originPort=parsed.getPort()<0?("https".equals(originScheme)?443:80):parsed.getPort();int effectiveRequest=requestPort<0?("https".equals(scheme)?443:80):requestPort;return scheme.equals(originScheme)&&req.getServerName().equalsIgnoreCase(parsed.getHost())&&effectiveRequest==originPort;}catch(Exception invalid){return false;}}
     private static String path(HttpServletRequest r){String p=r.getPathInfo();return p==null||p.isEmpty()?"/":p;}
     private static String segment(String path,int index){String[] parts=path.split("/");return parts.length>index?parts[index]:"";}
     static String principal(HttpServletRequest req){Object value=req.getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(value instanceof ServerRuntime runtime&&"local".equals(runtime.config.authMode)){Object identity=req.getAttribute(AuthService.IDENTITY);return identity instanceof String?(String)identity:null;}if(value instanceof ServerRuntime runtime&&!runtime.config.authenticationRequired)return RequestIdentity.ANONYMOUS;Principal p=req.getUserPrincipal();if(p==null)return null;String name=p.getName();if(name==null||name.isBlank()||name.length()>256)return null;for(int i=0;i<name.length();i++)if(Character.isISOControl(name.charAt(i)))return null;return name.trim();}

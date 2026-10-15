@@ -109,7 +109,7 @@ function makeScenario(
   workloads: WorkloadDraft[],
   advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string },
 ): JsonObject {
-  const scenario: JsonObject = { ...policy, schemaVersion: String(policy.schemaVersion || 'att-load/v1.6') };
+  const scenario: JsonObject = { ...policy, schemaVersion: String(policy.schemaVersion || 'att-load/v1.7') };
   const rootLoad = { ...asObject(policy.load) };
   for (const field of ['warmup', 'rampUp', 'duration', 'rampDown'] as const) {
     const value = timing[field].trim();
@@ -182,6 +182,7 @@ function makeScenario(
   if (testdata.length) scenario.testdata = testdata; else delete scenario.testdata;
   if (Object.keys(thresholds).length) scenario.thresholds = thresholds; else delete scenario.thresholds;
   if (Object.keys(evidence).length) scenario.evidence = evidence; else delete scenario.evidence;
+  if (evidence.maxFailureSamples != null || evidence.maxSuccessSamples != null) scenario.schemaVersion = 'att-load/v1.7';
   if (advanced.seed.trim()) {
     const seed = Number(advanced.seed);
     if (!Number.isSafeInteger(seed)) throw new Error('Seed must be a safe integer.');

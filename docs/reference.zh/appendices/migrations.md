@@ -1,5 +1,15 @@
 # Appendix C — migration notes
 
+## Load 獨立 evidence 配額
+
+`evidence.maxFailureSamples` 及 `maxSuccessSamples` 須使用 `att-load/v1.7`。舊 scenario 沒有新欄位時，normalize 後仍保留共用上限。明確有限 failure cap 會啟用 split mode；success cap 預設 1,000，亦可用舊 `maxSamples` 作 migration alias，但不可同時提供 `maxSuccessSamples`。限制、並行 accounting 及配額警告見 [Load](../execution-modes/load.md#獨立-evidence-配額)。
+
+
+## MQ request queue 路由
+
+`att-mqhelper/v1.2` scalar descriptor 仍受支援。使用 `message.requestQueues` 或 `requestQueueSelection` 時，須改為 `att-mqhelper/v1.3`，並以 1–256 項不重複 queue 清單取代 scalar `requestQueue`；`replyQueue` 維持單一可選 scalar。Instance 路由覆寫會取代繼承的 scalar／清單，未明確指定 strategy 時重設 queue strategy。Queue selection、counter 範圍、evidence 及 replay 行為見 [MQHelper](../resources/mqhelper.md#request-queue-路由)。
+
+
 ## File arguments 與 case log paths
 
 HTTPHelper call 不再接受 `file`；請直接將 `&{package-relative-file}` 傳入 `body`。MQHelper `send` 和 `request` 不再接受 `file`；請將 expression 傳入 `payload`。SSHHelper `upload` 現在要求 `payload` content，並拒絕 `localPath`；請直接傳入 `&{...}`。SSHHelper 不再支援 `download`，因為它需要 local destination path。若工作必須從主機取回檔案，請明確配置 command-backed Tool。這些變更移除 Resource API 原生的任意 binary local-file input；`&{...}` 提供 UTF-8 text。

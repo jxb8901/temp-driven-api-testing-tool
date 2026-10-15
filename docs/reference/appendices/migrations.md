@@ -1,5 +1,15 @@
 # Appendix C — migration notes
 
+## Independent Load evidence quotas
+
+Use `att-load/v1.7` for `evidence.maxFailureSamples` and `maxSuccessSamples`. Older scenarios without these keys preserve their legacy combined cap after normalization. An explicit finite failure cap activates split mode; the success cap defaults to 1,000 or uses the old `maxSamples` as a migration alias. Do not combine that alias with `maxSuccessSamples`. See [Load](../execution-modes/load.md#independent-evidence-quotas) for limits, concurrency and exhaustion warnings.
+
+
+## MQ request queue routing
+
+`att-mqhelper/v1.2` scalar descriptors remain supported. To use `message.requestQueues` or `requestQueueSelection`, change the descriptor to `att-mqhelper/v1.3` and replace the scalar `requestQueue` with a 1–256-item unique queue list. Keep one optional scalar `replyQueue`. Instance routing overrides replace inherited scalar/list keys and reset the queue strategy unless explicitly configured. See [MQHelper](../resources/mqhelper.md#request-queue-routing) for queue selection, counter scope, evidence and replay behavior.
+
+
 ## File arguments and case-log paths
 
 HTTPHelper calls no longer accept `file`; pass `&{package-relative-file}` directly as `body`. MQHelper `send` and `request` no longer accept `file`; pass the expression as `payload`. SSHHelper `upload` now requires content in `payload` and rejects `localPath`; pass `&{...}` directly. SSHHelper no longer supports `download`, because it requires a local destination path. Use a deliberately configured command-backed Tool for workflows that must retrieve files from a host. These changes remove native arbitrary-binary local-file input from these Resource APIs; `&{...}` supplies UTF-8 text.

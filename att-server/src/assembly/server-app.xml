@@ -10,7 +10,7 @@
         <dependencySet>
             <useProjectArtifact>false</useProjectArtifact>
             <outputDirectory>/</outputDirectory>
-            <includes><include>att:att-server-api</include><include>att:att-web</include></includes>
+            <includes><include>att:att-security</include><include>att:att-server-api</include><include>att:att-web</include></includes>
             <useTransitiveDependencies>false</useTransitiveDependencies>
             <unpack>true</unpack>
         </dependencySet>

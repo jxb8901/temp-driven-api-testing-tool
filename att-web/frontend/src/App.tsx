@@ -8,7 +8,7 @@ import { ExplorerPage } from './features/explorer/ExplorerPage';
 import './features/explorer/explorer.css';
 import type { ExplorerPageProps, ResourceSourceReference } from './features/explorer/types';
 import { LoadPage } from './features/load/LoadPage';
-import { JobsPage } from './features/load/JobsPage';
+const JobsPage = lazy(() => import('./features/load/JobsPage').then(module => ({ default: module.JobsPage })));
 import type { LoadJobsApi, PackageOption } from './features/load/types';
 import { SettingsPage } from './SettingsPage';
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
@@ -320,9 +320,9 @@ export default function App() {
   } else if (navigation.route.kind === 'packages') {
     content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {
-    content = <JobsPage api={loadJobsApi} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} />;
+    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage api={loadJobsApi} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} /></Suspense>;
   } else if (navigation.route.kind === 'jobs') {
-    content = <JobsPage api={loadJobsApi} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} />;
+    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage api={loadJobsApi} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} /></Suspense>;
   } else if (navigation.route.kind === 'schedules') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Scheduled Load…</div>}>
       <ScheduledLoadPage

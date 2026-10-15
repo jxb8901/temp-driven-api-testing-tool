@@ -226,7 +226,7 @@ public final class IterationExecutor implements LoadIterationRunner {
                 context.materializeResourceOutputs(executionWorkspace);
                 Path resourceOutput = executionWorkspace.resolve("resource-output.yaml");
                 if (Files.isRegularFile(resourceOutput)) linkOrCopy(resourceOutput, evidenceDirectory.resolve("resource-output.yaml"));
-                byte[] caseYaml = new org.yaml.snakeyaml.Yaml().dump(att.core.PathPresentation.displayStructure(context.caseTree(), projectRoot)).getBytes(StandardCharsets.UTF_8);
+                byte[] caseYaml = log.protectSnapshotText(new org.yaml.snakeyaml.Yaml().dump(att.security.SecretProtection.value(att.core.PathPresentation.displayStructure(context.caseTree(), projectRoot)))).getBytes(StandardCharsets.UTF_8);
                 Path evidenceCase = evidenceDirectory.resolve("case.yaml");
                 Files.write(evidenceCase, caseYaml);
                 linkOrCopy(evidenceCase, executionWorkspace.resolve("case.yaml"));

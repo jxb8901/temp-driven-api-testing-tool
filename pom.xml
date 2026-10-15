@@ -9,6 +9,7 @@
     <packaging>pom</packaging>
     <name>ATT Parent</name>
     <modules>
+        <module>att-security</module>
         <module>att-engine</module>
         <module>att-server-api</module>
         <module>att-web</module>

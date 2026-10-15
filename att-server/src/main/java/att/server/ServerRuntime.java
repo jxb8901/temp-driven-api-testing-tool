@@ -267,7 +267,15 @@ final class ServerRuntime implements AutoCloseable {
     }
     Job job(String id){if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Job j=jobs.get(id);if(j==null)throw new NotFoundException();return j;}
     Map<String,Object> jobRecord(String id) throws Exception {Job j=jobs.get(id);if(j!=null)return j.view();if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();record.remove("resultJson");record.remove("diagnosticJson");String performance=(String)record.remove("performanceJson");if(performance!=null&&!performance.isBlank())record.put("performance",JSON.readValue(performance,Map.class));return record;}
-    Map<String,Object> resultRecord(String id) throws Exception {Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();Map<String,Object> out=new LinkedHashMap<>();out.put("job",jobRecord(id));out.put("result",record.get("resultJson")==null?null:publicJson(id,(String)record.get("resultJson")));out.put("diagnostic",record.get("diagnosticJson")==null?null:publicJson(id,(String)record.get("diagnosticJson")));return out;}
+    Map<String,Object> resultRecord(String id) throws Exception {
+        Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
+        Job active=jobs.get(id);
+        String resultJson=active==null?(String)record.get("resultJson"):active.resultJson;
+        String diagnosticJson=active==null?(String)record.get("diagnosticJson"):active.diagnosticJson;
+        Map<String,Object> out=new LinkedHashMap<>();out.put("job",jobRecord(id));
+        out.put("result",resultJson==null?null:publicJson(id,resultJson));
+        out.put("diagnostic",diagnosticJson==null?null:publicJson(id,diagnosticJson));return out;
+    }
     List<Map<String,Object>> packages(){List<Map<String,Object>> out=new ArrayList<>();config.packages.forEach((id,path)->out.add(Map.of("packageId",id,"name",path.getFileName().toString())));return out;}
     Map<String,Object> packageView(String id){Path root=config.packages.get(id);if(root==null)throw new NotFoundException();return Map.of("packageId",id,"name",root.getFileName().toString());}
     Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String principal) throws Exception {
@@ -918,7 +926,7 @@ final class ServerRuntime implements AutoCloseable {
                         safe.put(key,text);
                     }
                 }
-                for(String key:List.of("line","sourceColumn"))if(value.get(key) instanceof Number)safe.put(key,value.get(key));
+                for(String key:List.of("line","column","sourceColumn"))if(value.get(key) instanceof Number)safe.put(key,value.get(key));
                 if(!safe.isEmpty())diagnostics.add(safe);
             }
             if(diagnostics.isEmpty()) {
@@ -945,8 +953,16 @@ final class ServerRuntime implements AutoCloseable {
         if("ATT-RESOURCE-LIMIT".equals(workerError))throw new InspectionCapacityException();
         if(workerError!=null)throw new IllegalStateException("Package inspection Worker failed: "+workerError);
         Object raw=envelope.get("inspection");if(!(raw instanceof Map))throw new IllegalStateException("Package inspection Worker returned an invalid response");
-        @SuppressWarnings("unchecked") Map<String,Object> result=new LinkedHashMap<>((Map<String,Object>)raw);
+        JsonNode safe=projectInspectionPaths(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),root,"");
+        @SuppressWarnings("unchecked") Map<String,Object> result=JSON.convertValue(safe,Map.class);
         return result;
+    }
+    private JsonNode projectInspectionPaths(JsonNode value,Path root,String field) {
+        if(value.isTextual() && "$attDebugKeepDefault".equals(field))return value;
+        if(value.isTextual())return JSON.getNodeFactory().textNode(semanticLocation(field)?value.asText():att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(value.asText(),root));
+        if(value.isObject()){var copy=JSON.createObjectNode();value.fields().forEachRemaining(e->copy.set(e.getKey(),projectInspectionPaths(e.getValue(),root,semanticLocation(field)?field:e.getKey())));return copy;}
+        if(value.isArray()){var copy=JSON.createArrayNode();for(JsonNode item:value)copy.add(projectInspectionPaths(item,root,field));return copy;}
+        return value;
     }
     private String configuredPackageId(Path root) {
         if(root==null)return null;
@@ -1046,7 +1062,7 @@ final class ServerRuntime implements AutoCloseable {
                             Object value=workerDiagnostic.get(key);
                             if(value instanceof String)diagnostic.put(key,value);
                         }
-                        for(String key:List.of("line","sourceColumn"))if(workerDiagnostic.get(key) instanceof Number)diagnostic.put(key,workerDiagnostic.get(key));
+                        for(String key:List.of("line","column","sourceColumn"))if(workerDiagnostic.get(key) instanceof Number)diagnostic.put(key,workerDiagnostic.get(key));
                         Object summary=diagnostic.get("summary");
                         if(!(summary instanceof String)||((String)summary).isBlank()) {
                             Object message=workerDiagnostic.get("message");
@@ -1530,11 +1546,16 @@ final class ServerRuntime implements AutoCloseable {
         JsonNode node=JSON.readTree(json);Object safe=att.server.api.internal.DiagnosticSanitizer.sanitizeValue(JSON.convertValue(node,Object.class));node=JSON.valueToTree(safe);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
         return sanitize(node,output,packageRootForJob(id));
     }
-    private JsonNode sanitize(JsonNode node,Path output,Path packageRoot) {
+    private static boolean semanticLocation(String field) {
+        return Set.of("queue","requestQueue","requestQueues","requestQueueDefault","replyQueue","replyQueueDefault",
+                "channel","queueManager","replyQueueManager","remotePath","remoteDirectory","remoteFile","host","hostname","url","baseUrl").contains(field);
+    }
+    private JsonNode sanitize(JsonNode node,Path output,Path packageRoot) {return sanitize(node,output,packageRoot,"");}
+    private JsonNode sanitize(JsonNode node,Path output,Path packageRoot,String field) {
         if(node==null)return null;
-        if(node.isTextual()) {String value=node.asText();String outputPrefix=output.toString();value=replacePathPrefix(value,outputPrefix,"artifact");if(packageRoot!=null)value=replacePathPrefix(value,packageRoot.toString(),"package");return JSON.getNodeFactory().textNode(value);}
-        if(node.isObject()){com.fasterxml.jackson.databind.node.ObjectNode copy=JSON.createObjectNode();node.fields().forEachRemaining(e->copy.set(e.getKey(),sanitize(e.getValue(),output,packageRoot)));return copy;}
-        if(node.isArray()){com.fasterxml.jackson.databind.node.ArrayNode copy=JSON.createArrayNode();for(JsonNode item:node)copy.add(sanitize(item,output,packageRoot));return copy;}
+        if(node.isTextual()) {if("$attDebugKeepDefault".equals(field) || semanticLocation(field))return node;String value=node.asText();String outputPrefix=output.toString();value=replacePathPrefix(value,outputPrefix,"artifact");if(packageRoot!=null)value=replacePathPrefix(value,packageRoot.toString(),"package");return JSON.getNodeFactory().textNode(att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(value,packageRoot));}
+        if(node.isObject()){com.fasterxml.jackson.databind.node.ObjectNode copy=JSON.createObjectNode();node.fields().forEachRemaining(e->copy.set(e.getKey(),sanitize(e.getValue(),output,packageRoot,semanticLocation(field)?field:e.getKey())));return copy;}
+        if(node.isArray()){com.fasterxml.jackson.databind.node.ArrayNode copy=JSON.createArrayNode();for(JsonNode item:node)copy.add(sanitize(item,output,packageRoot,field));return copy;}
         return node.deepCopy();
     }
     private static String replacePathPrefix(String value,String prefix,String logical){if(value.equals(prefix))return logical+":";String separator=java.io.File.separator;value=value.replace(prefix+separator,logical+":");if("\\".equals(separator))value=value.replace(prefix+"/",logical+":");else value=value.replace(prefix+"\\",logical+":");return value;}
@@ -1542,6 +1563,22 @@ final class ServerRuntime implements AutoCloseable {
     private static String readBoundedLine(BufferedReader reader,int limit) throws java.io.IOException {StringBuilder line=new StringBuilder();boolean oversized=false;int c;while((c=reader.read())!=-1){if(c=='\n')break;if(c=='\r')continue;if(line.length()<limit)line.append((char)c);else oversized=true;}if(c==-1&&line.isEmpty()&&!oversized)return null;return oversized?"\u0000OVERSIZED":line.toString();}
     JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob):active.events;}
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
+    /** Downloads are projections; raw trusted evidence stays on disk. Binary disclosure has no public policy. */
+    byte[] publicArtifact(String id, Path file) throws Exception {
+        final int limit=16*1024*1024;
+        byte[] bytes;
+        try(var input=Files.newInputStream(file)){bytes=input.readNBytes(limit+1);}
+        if(bytes.length>limit)throw new IllegalArgumentException("Artifact exceeds the safe text download limit (16 MiB)");
+        String text;
+        try { text=java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString(); }
+        catch(java.nio.charset.CharacterCodingException invalid){throw new IllegalArgumentException("Binary artifacts require trusted filesystem access");}
+        if(text.indexOf('\0')>=0)throw new IllegalArgumentException("Binary artifacts require trusted filesystem access");
+        text=att.server.api.internal.DiagnosticSanitizer.redactText(text);
+        text=replacePathPrefix(text,outputDirectoryForJob(id).toString(),"artifact");
+        text=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,packageRootForJob(id));
+        return text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
     Path artifact(String id,String requested) throws Exception {Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();Job j=jobs.get(id);if(j!=null)return artifact(j,requested);Path base=config.dataDir.resolve("jobs").resolve(id).resolve("output").toRealPath();Path relative=Paths.get(requested);if(relative.isAbsolute())throw new IllegalArgumentException("Artifact path must be relative to job output");Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base)||!Files.exists(candidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new NotFoundException();Path walk=base;for(Path part:base.relativize(candidate)){walk=walk.resolve(part);if(Files.isSymbolicLink(walk))throw new NotFoundException();}Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;}
     void cleanupExpiredJobs() throws Exception {
         Instant cutoff=Instant.now().minus(java.time.Duration.ofDays(config.jobRetentionDays));

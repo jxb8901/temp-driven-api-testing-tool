@@ -76,6 +76,23 @@ describe('ThresholdEvidenceEditor', () => {
     expect(view.onAggregateChange).toHaveBeenCalledWith('{}');
   });
 
+  it('keeps independent quotas synchronized between the form and advanced JSON', async () => {
+    const view = renderEditor('virtualUsers', { evidence: '{"mode":"samples","maxSuccessSamples":7,"maxFailureSamples":11}' });
+    await act(async () => root.render(view.element));
+    expect(host.textContent).toContain('successes are capped at 7; failures are capped at 11');
+    const failure = [...host.querySelectorAll<HTMLInputElement>('.att-evidence-form input')]
+      .find(input => input.closest('label')?.textContent?.includes('Independent failure quota'))!;
+    expect(failure.value).toBe('11');
+    await setInput(failure, '13');
+    expect(view.onEvidenceChange).toHaveBeenCalledWith(JSON.stringify({ mode: 'samples', maxSuccessSamples: 7, maxFailureSamples: 13 }, null, 2));
+    await setTextArea('Evidence settings advanced JSON', '{"maxSuccessSamples":1}');
+    expect(view.onValidityChange).toHaveBeenCalledWith('evidence', expect.stringContaining('finite failure quota'));
+    await setTextArea('Evidence settings advanced JSON', '{"maxSuccessSamples":1,"maxFailureSamples":2,"maxSamples":3}');
+    expect(view.onValidityChange).toHaveBeenCalledWith('evidence', expect.stringContaining('not both'));
+    await setTextArea('Evidence settings advanced JSON', '{"maxFailureSamples":1000001}');
+    expect(view.onValidityChange).toHaveBeenCalledWith('evidence', expect.stringContaining('1,000,000'));
+  });
+
   it('rejects invalid evidence values without replacing the last valid settings', async () => {
     const view = renderEditor('virtualUsers');
     await act(async () => root.render(view.element));

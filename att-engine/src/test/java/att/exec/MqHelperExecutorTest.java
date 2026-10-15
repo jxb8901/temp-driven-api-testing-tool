@@ -36,6 +36,109 @@ import static org.junit.jupiter.api.Assertions.*;
 class MqHelperExecutorTest {
     @TempDir Path tempDir;
 
+    @Test void requestQueueRoundRobinIsIndependentConcurrentAndOverridesDoNotAdvanceIt() throws Exception {
+        FrameworkConfig configured=routingConfig("roundRobin");FakeFactory factory=new FakeFactory();
+        MqHelperExecutor executor=new MqHelperExecutor(tempDir,configured,factory);
+        Path caseDir=Files.createDirectories(tempDir.resolve("queue-routing"));
+        MqInvocationResult first=executor.execute("routing","send",map("payload","hello"),context(caseDir),null,"first");
+        assertTrue(first.success());assertEquals("REQUEST.A",first.result().get("queue"));
+        assertEquals("roundRobin",first.evidence().get("requestQueueSelectionStrategy"));
+        MqInvocationResult explicit=executor.execute("routing","send",map("queue","OVERRIDE","payload","hello"),context(caseDir),null,"explicit");
+        assertEquals("OVERRIDE",explicit.result().get("queue"));assertEquals("explicit",explicit.result().get("requestQueueSelectionStrategy"));
+        assertEquals("REQUEST.B",executor.execute("routing","send",map("payload","hello"),context(caseDir),null,"second").result().get("queue"));
+        ExecutorService workers=Executors.newFixedThreadPool(8);List<Future<MqInvocationResult>> calls=new ArrayList<Future<MqInvocationResult>>();
+        try {
+            for(int i=0;i<256;i++){final int n=i;calls.add(workers.submit(()->executor.execute("routing","send",map("payload","hello"),context(caseDir),null,"concurrent-queue-"+n)));}
+            int a=0,b=0;
+            for(Future<MqInvocationResult> call:calls){MqInvocationResult result=call.get(10,TimeUnit.SECONDS);assertTrue(result.success());
+                if("REQUEST.A".equals(result.result().get("queue")))a++;else if("REQUEST.B".equals(result.result().get("queue")))b++;else fail(result.result().toString());}
+            assertEquals(128,a);assertEquals(128,b);
+        } finally {workers.shutdownNow();}
+        int connects=factory.connectedInstances.size();
+        for(String invalid:new String[]{"","bad queue","!"}) {
+            MqInvocationResult rejected=executor.execute("routing","send",map("queue",invalid,"payload","hello"),context(caseDir),null,"invalid");
+            assertEquals("MQ_ARGUMENT",((Map<?,?>)rejected.result().get("error")).get("type"));
+        }
+        assertEquals(connects,factory.connectedInstances.size(),"Invalid explicit overrides fail before connecting");
+    }
+
+    @Test void physicalSelectionHappensBeforeIndependentQueueRoundRobin() throws Exception {
+        MqHelperExecutor executor=new MqHelperExecutor(tempDir,routingConfig("roundRobin", "[{id: a}, {id: b, connection: {queueManager: QM2}}]"),new FakeFactory());
+        Path caseDir=Files.createDirectories(tempDir.resolve("two-instance-routing"));
+        String[] instances={"a","b","a","b"};String[] queues={"REQUEST.A","REQUEST.A","REQUEST.B","REQUEST.B"};
+        for(int i=0;i<4;i++) {
+            MqInvocationResult result=executor.execute("routing","send",map("payload","hello"),context(caseDir),null,"two-instance-"+i);
+            assertTrue(result.success());assertEquals(instances[i],result.result().get("instance"));assertEquals(queues[i],result.result().get("queue"));
+            assertEquals(i%2==0?"QM1":"QM2",result.result().get("queueManager"));
+        }
+    }
+
+    @Test void configuredQueueRequestKeepsOneReplyQueueAndNeverRetriesAfterPutTimeout() throws Exception {
+        FakeFactory factory=new FakeFactory();factory.noMessage=true;
+        MqHelperExecutor executor=new MqHelperExecutor(tempDir,routingConfig("roundRobin"),factory);
+        Path caseDir=Files.createDirectories(tempDir.resolve("routing-timeout"));
+        MqInvocationResult result=executor.execute("routing","request",map("payload","hello","waitMs",0),context(caseDir),null,"request");
+        assertFalse(result.success());assertEquals(1,factory.putCalls);assertEquals(1,factory.getCalls);
+        assertEquals("REQUEST.A",result.result().get("queue"));assertEquals("REPLY",result.result().get("replyQueue"));
+        assertEquals("REPLY",factory.putRequest.replyQueue());
+        assertArrayEquals(new byte[]{1,2},factory.getRequest.correlationId());
+        assertFalse(result.evidence().toString().contains("routing-password"));
+        assertEquals("REQUEST.B",executor.execute("routing","send",map("payload","hello"),context(caseDir),null,"next").result().get("queue"));
+    }
+
+    @Test void randomQueueRoutingSelectsOnlyConfiguredQueuesAndSingleUsesFirst() throws Exception {
+        Path caseDir=Files.createDirectories(tempDir.resolve("random-queue"));
+        for(String strategy:new String[]{"random","single"}) {
+            MqHelperExecutor executor=new MqHelperExecutor(tempDir,routingConfig(strategy),new FakeFactory());
+            for(int i=0;i<128;i++) {
+                MqInvocationResult result=executor.execute("routing","send",map("payload","hello"),context(caseDir),null,"random-queue-"+i);
+                assertTrue(result.success());Object queue=result.result().get("queue");
+                assertTrue("REQUEST.A".equals(queue)||"REQUEST.B".equals(queue));
+                if("single".equals(strategy))assertEquals("REQUEST.A",queue);
+            }
+        }
+    }
+
+    @Test void runDebugAndLoadStagesUseTheSameRequestQueuePolicyAndSafeEvidence() throws Exception {
+        FrameworkConfig configured=routingConfig("roundRobin");
+        for(String mode:new String[]{"testcase","debug","load"}) {
+            Path directory=Files.createDirectories(tempDir.resolve("routed-"+mode));
+            CaseRuntimeContext runtime=new CaseRuntimeContext(new TestCase(1,"g","s","C",Collections.emptyList(),
+                    Collections.emptyMap(),Collections.emptyMap(),null),directory,"E","R",tempDir,directory.resolve("case.log"),
+                    mode,"2026-01-01T00:00:00Z","2026-01-01T00:00:00Z");
+            runtime.beginStage(new StageCaseData("invoke","ROUTING",Collections.emptyMap()),"ROUTING",tempDir);
+            List<TemplateAction> actions=new ArrayList<TemplateAction>();
+            actions.add(new TemplateAction("first",map("type","tool","call","#{mq.routing.send(payload='hello')}")));
+            actions.add(new TemplateAction("second",map("type","tool","call","#{mq.routing.request(payload='hello')}")));
+            FakeFactory factory=new FakeFactory();
+            try(CaseExecutionLog log=new CaseExecutionLog(directory.resolve("case.log"))) {
+                List<att.core.ValidationResult> results=new StageTemplateRunner(new UnifiedTemplateEngine(new ToolInvoker(tempDir,configured),
+                        null,new MqHelperExecutor(tempDir,configured,factory),new att.template.DefaultBuiltInProvider()))
+                        .execute("invoke",new StageTemplate("ROUTING",tempDir,actions),runtime,log);
+                assertTrue(results.stream().allMatch(result->result.status()==ResultStatus.PASS),results.toString());
+            }
+            assertEquals("REQUEST.A",runtime.resolve("ACTIONS.first.output.evidence.mq.invocations[0].queue"));
+            assertEquals("REQUEST.B",runtime.resolve("ACTIONS.second.output.evidence.mq.invocations[0].queue"));
+            String log=new String(Files.readAllBytes(directory.resolve("case.log")),"UTF-8");
+            assertTrue(log.contains("REQUEST.A"));assertTrue(log.contains("REQUEST.B"));
+            assertFalse(log.contains("routing-password"));
+        }
+    }
+
+    private FrameworkConfig routingConfig(String strategy) throws Exception {
+        return routingConfig(strategy,"[{id: primary}]");
+    }
+    private FrameworkConfig routingConfig(String strategy,String instances) throws Exception {
+        att.TestSchemas.install(tempDir);
+        Files.write(tempDir.resolve("routing.yaml"),("schemaVersion: att-mqhelper/v1.3\nid: routing\nname: Routing\ndescription: Routing\n"
+                +"defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: CH, password: routing-password}\n"
+                +"  message: {requestQueues: [REQUEST.A, REQUEST.B], requestQueueSelection: {strategy: "+strategy+"}, replyQueue: REPLY}\n"
+                +"selection: {strategy: roundRobin}\ninstances: "+instances+"\n").getBytes("UTF-8"));
+        Map<String,MqHelperConfig> helpers=new att.config.MqHelperConfigLoader().load(Collections.singletonList("routing.yaml"),tempDir);
+        return new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tempDir,
+                Collections.emptyMap(),Collections.emptyMap(),helpers,null,null,null,"","",null,null,1,"ignore","",false,ProcessOutputConfig.defaults());
+    }
+
     @Test void mqSharesCredentialSafePresentationAndLoadDeferral() throws Exception {
         att.TestSchemas.install(tempDir);
         Files.write(tempDir.resolve("mq.yaml"), ("schemaVersion: att-mqhelper/v1.2\n"

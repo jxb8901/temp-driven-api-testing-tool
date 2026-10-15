@@ -234,6 +234,18 @@ public final class LoadReportWriter {
     @SuppressWarnings("unchecked")
     private void appendEvidenceTable(StringBuilder html, Path runDirectory, Map<String, Object> evidence) {
         html.append("<section class=\"panel\"><h2>Retained evidence</h2>");
+        if(evidence!=null && evidence.get("policy") instanceof Map) {
+            Map<?,?> policy=(Map<?,?>)evidence.get("policy");
+            html.append("<p>Evidence quota mode: ").append(escape(String.valueOf(policy.get("quotaMode")))).append(". ");
+            if("independent".equals(policy.get("quotaMode"))) {
+                html.append("Success retained: ").append(escape(String.valueOf(evidence.get("retainedSuccessCount"))))
+                        .append(" / ").append(escape(String.valueOf(policy.get("maxSuccessSamples"))))
+                        .append("; failure retained: ").append(escape(String.valueOf(evidence.get("retainedFailureCount"))))
+                        .append(" / ").append(escape(String.valueOf(policy.get("maxFailureSamples"))));
+            } else html.append("Legacy combined cap: ").append(escape(String.valueOf(policy.get("maxSamples"))));
+            html.append(".</p>");
+            if(evidence.get("warning")!=null)html.append("<p class=\"warning\" role=\"alert\">").append(escape(String.valueOf(evidence.get("warning")))).append("</p>");
+        }
         Object itemsValue = evidence == null ? null : evidence.get("items");
         if (!(itemsValue instanceof List) || ((List<?>) itemsValue).isEmpty()) { html.append("<p class=\"empty\">No failure or sampled-success evidence was retained.</p></section>"); return; }
         html.append("<div class=\"scroll\"><table><thead><tr><th>Workload</th><th>EXEC.ID</th><th>Iteration</th><th>Kind</th><th>Case Log</th><th>Evidence</th></tr></thead><tbody>");

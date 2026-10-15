@@ -22,6 +22,73 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadEvidencePolicyTest {
     @TempDir Path temp;
 
+    @Test void splitQuotasRemainIndependentAndReclassifyPreselectedFailures() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",1,"maxFailureSamples",2));
+        assertTrue(store.reserveSuccessEvidence("preselected-failure"));
+        store.onEvent(LoadEvent.started("run","closed","STEADY","preselected-failure","VU-1",1,0,0));
+        assertTrue(store.claimFailureEvidence("preselected-failure"));
+        store.onEvent(event("preselected-failure",ResultStatus.FAIL));
+        assertTrue(store.reserveSuccessEvidence("success"),"Failure released its success reservation");
+        store.onEvent(event("success",ResultStatus.PASS));
+        assertFalse(store.reserveSuccessEvidence("exhausted-success"));
+        assertTrue(store.retainsFailureEvidence(),"Success quota does not consume failure capacity");
+        assertTrue(store.claimFailureEvidence("non-sampled-failure"));
+        store.onEvent(event("non-sampled-failure",ResultStatus.ERROR));
+        assertFalse(store.claimFailureEvidence("extra-failure"));
+        assertEquals(3,store.events().size());
+        assertEquals(1,store.statistics().get("retainedSuccessCount"));assertEquals(2,store.statistics().get("retainedFailureCount"));
+        assertEquals(0,store.statistics().get("reservedSuccessCount"));assertEquals(0,store.statistics().get("reservedFailureCount"));
+        assertEquals(true,store.statistics().get("failureQuotaExceeded"));assertTrue(store.statistics().containsKey("warning"));
+    }
+
+    @Test void exhaustedFailureQuotaDoesNotSuppressSuccessAndMissingEvidenceReleasesSlots() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",1,"maxFailureSamples",0));
+        assertFalse(store.claimFailureEvidence("failure"));assertFalse(store.retainsFailureEvidence());
+        assertTrue(store.reserveSuccessEvidence("missing"));
+        store.onEvent(LoadEvent.completed("run","closed","STEADY","missing","VU-1",1,0,0,1,ResultStatus.PASS,null));
+        assertTrue(store.reserveSuccessEvidence("missing-log"));
+        store.onEvent(LoadEvent.completed("run","closed","STEADY","missing-log","VU-1",1,0,0,1,ResultStatus.PASS,
+                new EvidenceRef(Files.createDirectories(temp.resolve("missing-log")),null,null)));
+        assertTrue(store.reserveSuccessEvidence("dropped"));
+        store.onEvent(LoadEvent.dropped("run","arrivalRate","STEADY","dropped",1,0,1));
+        assertTrue(store.reserveSuccessEvidence("success"));store.onEvent(event("success",ResultStatus.PASS));
+        assertEquals(1,store.events().size());assertEquals(2L,store.statistics().get("skippedMissingEvidenceCount"));
+        LoadEvidenceStore failuresOnly=new LoadEvidenceStore(policy("mode","samples","sampleRate",0.0,"maxSuccessSamples",0,"maxFailureSamples",1));
+        assertFalse(failuresOnly.reserveSuccessEvidence("not-sampled"));
+        assertTrue(failuresOnly.claimFailureEvidence("failed"));failuresOnly.onEvent(event("failed",ResultStatus.ERROR));
+        assertEquals(1,failuresOnly.events().size());
+    }
+
+    @Test void validatesFiniteSplitQuotasAndDeterministicMigration() {
+        LoadEvidencePolicy migrated=policy("mode","all","maxSamples",7,"maxFailureSamples",3);
+        assertTrue(migrated.splitQuotas());assertEquals(7,migrated.maxSuccessSamples());assertEquals(3,migrated.maxFailureSamples());
+        assertEquals(1000,policy("mode","all","maxFailureSamples",3).maxSuccessSamples(),"Split mode never inherits unbounded all-mode success retention");
+        assertThrows(IllegalArgumentException.class,()->policy("maxSuccessSamples",1));
+        assertThrows(IllegalArgumentException.class,()->policy("maxSamples",1,"maxSuccessSamples",1,"maxFailureSamples",1));
+        for(Object invalid:new Object[]{-1,1.5,1000001,"1",Double.NaN,Double.POSITIVE_INFINITY})
+            assertThrows(IllegalArgumentException.class,()->policy("maxFailureSamples",invalid));
+    }
+
+    @Test void splitConcurrentReservationsRespectBothLimitsAndReleaseReclassifiedSlots() throws Exception {
+        final LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",7,"maxFailureSamples",11));
+        ExecutorService workers=Executors.newFixedThreadPool(12);List<Future<?>> tasks=new ArrayList<Future<?>>();
+        try {
+            for(int i=0;i<500;i++) {
+                final int n=i;
+                tasks.add(workers.submit(()->{
+                    String id="split-"+n;boolean selected=store.reserveSuccessEvidence(id);
+                    boolean failure=n%2==0;
+                    boolean admitted=failure?store.claimFailureEvidence(id):selected;
+                    if(admitted)try{store.onEvent(event(id,failure?ResultStatus.ERROR:ResultStatus.PASS));}catch(Exception error){throw new RuntimeException(error);}
+                    else store.releaseEvidence(id);
+                }));
+            }
+            for(Future<?> task:tasks)task.get();
+        } finally {workers.shutdownNow();}
+        assertEquals(7,store.statistics().get("retainedSuccessCount"));assertEquals(11,store.statistics().get("retainedFailureCount"));
+        assertEquals(0,store.statistics().get("reservedSuccessCount"));assertEquals(0,store.statistics().get("reservedFailureCount"));
+    }
+
     @Test void publicModesResolveToDistinctPolicies() {
         LoadEvidencePolicy metrics = policy("mode", "metrics");
         assertEquals(LoadEvidencePolicy.Success.NONE, metrics.success());

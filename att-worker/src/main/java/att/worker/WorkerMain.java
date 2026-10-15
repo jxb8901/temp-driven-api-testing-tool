@@ -32,9 +32,9 @@ public final class WorkerMain {
     private boolean inspectionDaemon;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
-        // Server Workers always use path aliases so absolute paths outside the authorized
-        // package view are never returned to API/UI clients.
-        att.core.PathPresentation.configure(true, true);
+        // Trusted evidence retains original diagnostics. Protocol secrets are protected
+        // in emit(); Server projects host paths with the package context.
+        att.core.PathPresentation.configure(false, false);
         PrintStream protocol=System.out;
         System.setOut(System.err);
         WorkerMain worker=new WorkerMain(protocol);
@@ -349,7 +349,7 @@ public final class WorkerMain {
                 ? WorkerEvent.Type.PROGRESS : WorkerEvent.Type.LOG;
         try { emit(type,data); } catch(Exception error) { throw new IllegalStateException(error); }
     }
-    private void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception { resourceTelemetry.sample();protocol.println(mapper.writeValueAsString(new WorkerEvent(type,jobId,data).toMap())); protocol.flush(); }
+    private void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception { resourceTelemetry.sample();protocol.println(mapper.writeValueAsString(new WorkerEvent(type,jobId,DiagnosticSanitizer.sanitize(data)).toMap())); protocol.flush(); }
     private void emitResult(Map<String,Object> payload) throws Exception {payload.put("workerMetrics",resourceTelemetry.snapshot());emit(WorkerEvent.Type.RESULT,payload);}
     private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message)); emitResult(fields("status","INVALID","exitCode",2,"result",fields("executionId",null,"status","INVALID","exitCode",2))); return 2; }
     private static Map<String,Object> fields(Object... values) { Map<String,Object> map=new LinkedHashMap<String,Object>(); for(int i=0;i+1<values.length;i+=2)map.put(String.valueOf(values[i]),values[i+1]); return map; }

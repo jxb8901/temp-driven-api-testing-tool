@@ -214,6 +214,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "closed", phase, iterationId, userId,
                         sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence), iterationRequest));
             } finally {
+                if(evidenceStore!=null)evidenceStore.releaseEvidence(iterationId);
                 completions.offer(new VuCompletion(user, completedAt));
                 admittedTasks.remove(iterationId, taskHandle);
             }
@@ -221,11 +222,12 @@ public final class ClosedVuScheduler implements LoadScheduler {
         });
         taskHandle.future = task;
         synchronized (admissionLock) {
-            if (cancelled.get()) return false;
+            if (cancelled.get()) {if(evidenceStore!=null)evidenceStore.releaseEvidence(iterationId);return false;}
             admittedTasks.put(iterationId, taskHandle);
             try { workers.execute(task); }
             catch (RuntimeException failure) {
                 admittedTasks.remove(iterationId);
+                if(evidenceStore!=null)evidenceStore.releaseEvidence(iterationId);
                 if (cancelled.get()) return false;
                 throw failure;
             }
@@ -293,7 +295,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
         Thread control = controlThread;
         if (control != null) control.interrupt();
         synchronized (admissionLock) {
-            for (TaskHandle task : admittedTasks.values()) task.cancel();
+            for (Map.Entry<String,TaskHandle> entry : admittedTasks.entrySet())
+                if(entry.getValue().cancel() && evidenceStore!=null)evidenceStore.releaseEvidence(entry.getKey());
         }
         if (ownsWorkers) shutdown();
     }
@@ -322,9 +325,10 @@ public final class ClosedVuScheduler implements LoadScheduler {
         private boolean started;
         private boolean cancelledBeforeStart;
         synchronized boolean begin() { started = true; return cancelledBeforeStart; }
-        synchronized void cancel() {
+        synchronized boolean cancel() {
             if (started) future.cancel(true);
             else cancelledBeforeStart = true;
+            return !started;
         }
     }
     private static final class VuCompletion {

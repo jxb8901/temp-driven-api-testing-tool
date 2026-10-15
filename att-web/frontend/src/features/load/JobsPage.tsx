@@ -82,6 +82,33 @@ function resultMetrics(payload: JobResultResponse | null): Record<string, unknow
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+function EvidenceQuotaSummary({ payload }: { payload: JobResultResponse | null }) {
+  const value = payload?.result?.evidence;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const evidence = value as Record<string, unknown>;
+  const rawPolicy = evidence.policy;
+  if (!rawPolicy || typeof rawPolicy !== 'object' || Array.isArray(rawPolicy)) return null;
+  const policy = rawPolicy as Record<string, unknown>;
+  const labels: Record<string, string> = {
+    maxSamples: 'Combined limit', maxSuccessSamples: 'Success limit', maxFailureSamples: 'Failure limit',
+    retainedSuccessCount: 'Success samples retained', retainedFailureCount: 'Failure samples retained',
+    successQuotaExceeded: 'Success limit reached', failureQuotaExceeded: 'Failure limit reached',
+    skippedSuccessQuotaCount: 'Success samples skipped at limit', skippedFailureQuotaCount: 'Failure samples skipped at limit',
+    skippedMissingEvidenceCount: 'Unavailable evidence skipped',
+  };
+  return <section aria-label="Retained evidence quotas">
+    <h3>Retained evidence quotas</h3>
+    <p>{policy.quotaMode === 'independent' ? 'Independent success and failure quotas' : 'Legacy combined cap'}</p>
+    <dl>
+      {['maxSamples', 'maxSuccessSamples', 'maxFailureSamples'].filter(key => policy[key] != null)
+        .map(key => <div key={key}><dt>{labels[key]}</dt><dd>{displayValue(policy[key])}</dd></div>)}
+      {['retainedSuccessCount', 'retainedFailureCount', 'successQuotaExceeded', 'failureQuotaExceeded', 'skippedSuccessQuotaCount', 'skippedFailureQuotaCount', 'skippedMissingEvidenceCount']
+        .filter(key => evidence[key] != null).map(key => <div key={key}><dt>{labels[key]}</dt><dd>{displayValue(evidence[key])}</dd></div>)}
+    </dl>
+    {typeof evidence.warning === 'string' && <p role="alert">{evidence.warning}</p>}
+  </section>;
+}
+
 type MetricBucket = { key: string; values: Record<string, unknown>; epochMs: number | null };
 type MetricSeries = {
   field: string;
@@ -511,6 +538,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
       {resultError && <p role="alert" className="att-inline-error">{resultError}</p>}
       {result && <><p>{result.result ? 'Server result returned.' : 'The Server has not returned a result payload.'}</p>
         {result.diagnostic && <details><summary>Server diagnostic</summary><pre>{displayValue(result.diagnostic)}</pre></details>}
+        <EvidenceQuotaSummary payload={result} />
         {result.result && <details open><summary>Raw result payload</summary><pre className="att-raw-result">{displayValue(result.result)}</pre></details>}
       </>}
     </section>

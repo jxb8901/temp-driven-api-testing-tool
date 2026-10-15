@@ -72,4 +72,24 @@ class PublicContractTest {
         assertFalse(safe.contains(packageRoot.toString()),safe);
         assertFalse(safe.contains(external.toString()),safe);
     }
+    @Test void publicProjectionPreservesRelativeTokensAndXmlAndIsIdempotent() throws Exception {
+        for (String original : java.util.Arrays.asList("payload='&{./Pacs008.xml}'", "&{../request.xml}",
+                "${map['../請求.xml']} #{tool('./a.xml')}", "./file.yaml ../file.yaml",
+                "<request><child>ok</child></request>", "https://host/a/b", "user@host:/remote/file")) {
+            String safe=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(original,temp);
+            assertEquals(original,safe);
+            assertEquals(safe,att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(safe,temp));
+        }
+        assertEquals("folder with spaces/bad.yaml", att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(
+                temp.resolve("folder with spaces/bad.yaml").toString(),temp));
+        assertEquals("$EXTERNAL/bad.yaml", att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(
+                "/outside/private folder/bad.yaml",temp));
+        String source="file='"+temp.resolve("folder with spaces/bad.yaml")+"' line=12 column=3 external=C:\\host\\private\\file.yaml";
+        String safe=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(source,temp);
+        assertTrue(safe.contains("folder with spaces/bad.yaml"),safe);
+        assertTrue(safe.contains("line=12 column=3"),safe);
+        assertFalse(safe.contains("C:\\host"),safe);
+        assertEquals(safe,att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(safe,temp));
+    }
+
 }

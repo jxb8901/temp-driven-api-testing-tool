@@ -36,6 +36,59 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadScenarioTest {
     @TempDir Path temp;
 
+    @Test void splitQuotaSchemaAndSemanticValidationRejectsConflictsBeforeExecution() throws Exception {
+        Path project=project();
+        String base="schemaVersion: att-load/v1.7\nworkloads:\n  - id: quota\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 1, duration: 1s}\nevidence: ";
+        for(String evidence:new String[]{"{maxSuccessSamples: 1}","{maxSamples: 1, maxSuccessSamples: 1, maxFailureSamples: 1}",
+                "{maxFailureSamples: -1}","{maxFailureSamples: 1.5}","{maxFailureSamples: 1000001}","{maxFailureSamples: '1'}"}) {
+            Path file=write(project,"invalid-split.yaml",base+evidence+"\n");
+            DiagnosticException invalid=assertThrows(DiagnosticException.class,()->new LoadScenarioLoader(project).load(file),evidence);
+            assertTrue(invalid.getMessage().contains("evidence")||invalid.detail().contains("evidence"),invalid.getMessage());
+        }
+        Path valid=write(project,"valid-split.yaml",base+"{mode: all, maxSamples: 2, maxFailureSamples: 3}\n");
+        LoadEvidencePolicy policy=LoadEvidencePolicy.from(new LoadScenarioLoader(project).load(valid));
+        assertEquals(2,policy.maxSuccessSamples());assertEquals(3,policy.maxFailureSamples());
+    }
+
+    @Test void independentQuotasBoundRealEvidenceUnderBothConcurrentSchedulers() throws Exception {
+        for(boolean arrival:new boolean[]{false,true}) {
+            Path project=project();
+            Files.createDirectories(project.resolve("templates/SPLIT_QUOTA"));
+            write(project,"templates/SPLIT_QUOTA/template.yaml","schemaVersion: att-template/v3.6\nname: SPLIT_QUOTA\ndescription: mixed quota stress\nactions:\n"
+                    +"  check: {type: assert, assert: \"(${EXEC.LOAD.ITERATION?} is null) or (${EXEC.LOAD.ITERATION?} <= 10)\", expected: 'true', actual: \"${EXEC.LOAD.ITERATION?}\"}\n");
+            String load=arrival?"arrivalRate: 200/s, maxConcurrent: 8, overloadPolicy: drop":"users: 8";
+            Path file=write(project,"split-"+arrival+".yaml","schemaVersion: att-load/v1.7\nworkloads:\n  - id: quota\n"
+                    +"    target: {type: template, id: SPLIT_QUOTA}\n    load: {"+load+", duration: 1s}\n"
+                    +"evidence: {mode: samples, sampleRate: 1, maxSuccessSamples: 3, maxFailureSamples: 5}\n");
+            LoadScenario scenario=new LoadScenarioLoader(project).load(file);
+            FrameworkConfig config=new FrameworkConfig(Paths.get("output"),Paths.get("report"),Paths.get("logs"),"SIT",10000,Paths.get("templates"),Collections.emptyMap(),null,null);
+            LoadTarget target=new LoadTargetResolver(project,config).resolve(scenario);
+            Path output=temp.resolve("split-scheduler-"+arrival);
+            AtomicInteger completed=new AtomicInteger();
+            LoadEvidenceStore store=new LoadEvidenceStore(LoadEvidencePolicy.from(scenario),event->{if(event.completed())completed.incrementAndGet();});
+            LoadRunResult run;
+            try(LoadRunResources resources=new LoadRunResources(project,config)) {
+                IterationExecutor executor=new IterationExecutor(project,config,target,resources,output);
+                if(arrival)try(FixedArrivalRateScheduler scheduler=new FixedArrivalRateScheduler(scenario,executor,"split-arrival",store,output)){run=scheduler.run();}
+                else try(ClosedVuScheduler scheduler=new ClosedVuScheduler(scenario,executor,"split-closed",store,output)){run=scheduler.run();}
+            }
+            assertEquals(3,store.statistics().get("retainedSuccessCount"),store.statistics().toString());
+            assertEquals(5,store.statistics().get("retainedFailureCount"),store.statistics().toString());
+            assertEquals(0,store.statistics().get("reservedSuccessCount"));assertEquals(0,store.statistics().get("reservedFailureCount"));
+            assertTrue(completed.get()>8,"Events/metrics continue after both quotas fill");
+            for(LoadEvent event:store.events()) {
+                assertTrue(Files.isRegularFile(event.evidence().caseLog()));
+                assertTrue(Files.isRegularFile(event.evidence().workspace().resolve("case.yaml")));
+            }
+            Map<String,Object> summary=store.write(output.resolve("summary"));
+            assertEquals(8,summary.get("count"));assertEquals(true,summary.get("failureQuotaExceeded"));
+            assertTrue(summary.containsKey("warning"));
+            Path report=new LoadReportWriter().write(output,run.withEvidence(summary));
+            String html=new String(Files.readAllBytes(report),StandardCharsets.UTF_8);
+            assertTrue(html.contains("Failure evidence quota reached"));assertTrue(html.contains("Success retained: 3 / 3; failure retained: 5 / 5"));
+        }
+    }
+
     @Test void xPrefixDisablesLoadConfigurationFieldsButPreservesUserMaps() throws Exception {
         Path project = project();
         Path file = write(project, "x-prefix.yaml", "schemaVersion: att-load/v1.4\n"
@@ -79,7 +132,7 @@ class LoadScenarioTest {
         Path prior = write(project, "prior-v12.yaml", "schemaVersion: att-load/v1.2\nworkloads:\n"
                 + "  - id: default\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 1, duration: 1s}\n");
         DiagnosticException oldCurrent = assertThrows(DiagnosticException.class, () -> new LoadScenarioLoader(project).load(prior));
-        assertTrue(oldCurrent.getMessage().contains("att-load/v1.6"), oldCurrent.getMessage());
+        assertTrue(oldCurrent.getMessage().contains(att.Version.LOAD_SCHEMA_CURRENT), oldCurrent.getMessage());
     }
 
     @Test void currentWorkloadVarsRemainDefinitionsAndCliOverridesAreAppliedBeforeEvaluation() throws Exception {
@@ -257,7 +310,7 @@ class LoadScenarioTest {
 
         Map<String, Object> policy = new LoadScenarioLoader(project).loadDefaultPolicy();
 
-        assertEquals("att-load/v1.6", policy.get("schemaVersion"));
+        assertEquals(att.Version.LOAD_SCHEMA_CURRENT, policy.get("schemaVersion"));
         assertFalse(policy.containsKey("workloads"));
         assertEquals(2, ((Number) ((Map<?, ?>) policy.get("load")).get("users")).intValue());
     }

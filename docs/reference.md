@@ -124,6 +124,8 @@ Status: Normative end-user documentation; generated from modular sources
 - [Appendix A — schema and version matrix](#appendix-a-schema-and-version-matrix)
 - [Appendix B — compatibility and deprecated aliases](#appendix-b-compatibility-and-deprecated-aliases)
 - [Appendix C — migration notes](#appendix-c-migration-notes)
+  - [Independent Load evidence quotas](#independent-load-evidence-quotas)
+  - [MQ request queue routing](#mq-request-queue-routing)
   - [File arguments and case-log paths](#file-arguments-and-case-log-paths)
   - [Previous release Testdata migration](#previous-release-testdata-migration)
   - [Execution identity format migration](#execution-identity-format-migration)
@@ -162,7 +164,7 @@ Run, Debug and Load adapt different inputs into the same execution-neutral Conte
 |---|---|---|
 | Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ/HTTP/SSH |
 | Debug | `att-debug/v1.2` sidecar or `--input` | one Template, Flow or Tool target |
-| Load | `att-load/v1.6` scenario | one or more Template, Flow or Tool workloads repeatedly |
+| Load | `att-load/v1.7` scenario | one or more Template, Flow or Tool workloads repeatedly |
 
 Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
 
@@ -1162,16 +1164,37 @@ For `validate --format json`, stdout contains exactly one JSON document; progres
 
 ### Load mode
 
-ATT accepts att-load/v1.6 scenarios. A scenario has one or more workloads; each workload uses either one fixed Template, Flow or Tool target, or a closed-user weighted mix of targets. Workloads own their inputs, testdata policy, bootstrap vars and pacing policy. Root defaults may be shared by all workloads, while workload-local fields override them. ATT validates and pre-resolves every configured target before a scheduler starts.
+ATT accepts att-load/v1.7 scenarios. A scenario has one or more workloads; each workload uses either one fixed Template, Flow or Tool target, or a closed-user weighted mix of targets. Workloads own their inputs, testdata policy, bootstrap vars and pacing policy. Root defaults may be shared by all workloads, while workload-local fields override them. ATT validates and pre-resolves every configured target before a scheduler starts.
 
 Descriptors using the previous workload schema remain compatible and are normalized to the current schema when loaded.
 
 Run `./att.sh load` with no scenario to discover valid full Load descriptors under `load/`. Only YAML declaring `schemaVersion: att-load/*` is considered; unrelated YAML is ignored, while invalid declared descriptors are shown with their diagnostics. Discovery resolves and validates targets without starting a scheduler or making resource calls.
 
+#### Independent evidence quotas
+
+`att-load/v1.7` adds finite success/failure quotas. Scenarios without either new key retain the exact legacy combined `maxSamples` behavior, including `metrics`, `failures`, `samples`, and uncapped-by-default `all`. Existing v1.6 scenarios remain accepted and normalize to v1.7 without changing their evidence policy.
+
+~~~yaml
+evidence:
+  mode: samples
+  success: sample
+  failure: full
+  sampleRate: 0.01
+  maxSuccessSamples: 500
+  maxFailureSamples: 2000
+~~~
+
+An explicit `maxFailureSamples` enables independent quotas; both new values are integers from 0 to 1,000,000. The success cap is `maxSuccessSamples`, else an explicit `maxSamples`, else **1,000**, even with `mode: all`. `maxSuccessSamples` requires `maxFailureSamples`; supplying both `maxSamples` and `maxSuccessSamples` is rejected. Keeping `maxSamples: 500` and adding `maxFailureSamples: 2000` migrates the old cap into a success-only cap. Zero disables retention for that category. `sampleRate` applies only to sampled PASS iterations; FAIL/ERROR (including operational TIMEOUT) use the failure quota without sampling. `failure: full` is bounded by its quota and does not guarantee that every failure is retained.
+
+The shared run evidence store accounts for reserved and retained success/failure slots separately across workloads and both scheduler models. A preselected success that fails releases its success reservation and must claim a failure slot. Unsampled failures may claim failure capacity. Success exhaustion never suppresses failure log capture; failure exhaustion never suppresses success sampling. Dropped/unstarted arrivals and incomplete iterations create no normal evidence. Cancelled/rejected admissions and missing workspaces release reservations. Failure log capture keeps the existing 65,536-character tail, mandatory secret protection and deferred resource formatting.
+
+`load-summary.json` / YAML, the HTML report, and Studio job results expose the resolved `evidence.policy`, `retainedSuccessCount`, `retainedFailureCount`, category exhaustion flags and skipped quota/missing-evidence counters. The report and Studio warn when the failure quota is reached; aggregate metrics, thresholds and failure events continue. Retained links remain under `samples/` and `failures/` with EXEC.ID, case.log and case.yaml. Studio Evidence settings labels the legacy combined cap separately and synchronizes independent quotas with advanced JSON. See [the bounded example](../examples/load/independent-evidence.yaml).
+
+
 #### Define a Load scenario
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 testdata: [examples/testdata/generated-account.yaml]
 workloads:
   - id: payment
@@ -1211,7 +1234,7 @@ execution:
 A workload can declare `mix` instead of `target` to distribute each closed user's next iteration across pre-resolved targets. Every entry has a unique `id`, a positive integer `weight`, and a Template, Flow or Tool `target`. The selector uses the run seed, workload ID, stable VU ID and that VU's iteration number; changing targets does not reset the VU or its think-time stream. Weights express selection probability, not a promise that a short run will match the exact ratio.
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 seed: 73
 workloads:
   - id: checkout
@@ -1347,12 +1370,12 @@ For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, 
 
 Repeatable `--set` accepts `input.path=value`, Tool-only `arg.name=value`, or Template/Flow-only `vars.path=value`. Values use safe YAML parsing and remain typed; nested maps and numeric list indexes are supported where practical, for example `input.customer.ids[0]=42`. Duplicate assignments apply in order (last wins). ATT expressions are not evaluated during option parsing. Unqualified overrides are rejected for multi-workload scenarios.
 
-`load/load.yaml` is an optional current `att-load/v1.6` policy-only descriptor with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence`, `seed` and Load-local `testdata` imports. Explicit CLI pacing values override the policy. `load --debug template|flow|tool <id>` promotes the selected sidecar's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no policy, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
+`load/load.yaml` is an optional current `att-load/v1.7` policy-only descriptor with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence`, `seed` and Load-local `testdata` imports. Explicit CLI pacing values override the policy. `load --debug template|flow|tool <id>` promotes the selected sidecar's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no policy, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
 
 Example policy descriptor (copy to `load/load.yaml`):
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -1376,7 +1399,7 @@ Copyable examples and field descriptions are maintained in [examples/load/README
 
 The outer Load directory uses the same `execution.runIdFormat` policy as Run when `--run-id` is absent. `--run-id` remains an exact literal override for the outer Load identity. This policy is separate from `execution.execIdFormat`, which continues to generate each started iteration's `EXEC.ID`.
 
-Load uses schema att-load/v1.6. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
+Load uses schema att-load/v1.7. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
 
 Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT, EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only EXEC.LOAD.USER_ID and the already curated META.SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID determines the workspace. No Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are absent.
 
@@ -1752,10 +1775,10 @@ evidence:
 
 ### MQHelper
 
-MQHelper is a logical IBM MQ resource with one or more physical instances. Current descriptors use att-mqhelper/v1.2. Connection settings, credentials, queue defaults and pool limits belong to the resource and are not exposed through META.
+MQHelper is a logical IBM MQ resource with one or more physical instances. Current descriptors use att-mqhelper/v1.3. Connection settings, credentials, queue defaults and pool limits belong to the resource and are not exposed through META.
 
 ~~~yaml
-schemaVersion: att-mqhelper/v1.2
+schemaVersion: att-mqhelper/v1.3
 id: payment
 name: Payment MQ
 description: Payment request/reply queues
@@ -1784,6 +1807,35 @@ evidence:
 ~~~
 
 A Tool Action calls mq.<id>.send, mq.<id>.receive or mq.<id>.request as its primary operation. MQ reply bytes are decoded using received CCSID metadata when available, then parsed by responseFormat (text/json/yaml/xml). The parsed typed value is output.result. responseFormat owns ingress parsing; Log.format and evidence.output.format only control presentation.
+
+#### Request queue routing
+
+<!-- att-docs:historical -->
+`att-mqhelper/v1.3` adds `message.requestQueues` and `message.requestQueueSelection.strategy`. Existing `att-mqhelper/v1.2` scalar descriptors remain accepted and keep their original behavior; the new keys require v1.3.
+<!-- /att-docs:historical -->
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.3
+id: payment
+name: Payment MQ
+description: Payment request queue routing
+defaults:
+  connection: {queueManager: QM1, host: mq.example.internal, port: 1414, channel: APP.SVRCONN}
+  message:
+    requestQueues: [PAYMENT.REQUEST.01, PAYMENT.REQUEST.02, PAYMENT.REQUEST.03]
+    requestQueueSelection: {strategy: roundRobin}
+    replyQueue: PAYMENT.REPLY
+instances:
+  - id: primary
+~~~
+
+A list contains 1–256 unique, nonblank queue names, each at most 48 characters from `[A-Za-z0-9_.%/-]`. `single` (default) chooses the first entry; `roundRobin` rotates in list order; `random` chooses only configured entries. Scalar `requestQueue` and list `requestQueues` cannot coexist in one message object. An instance's scalar replaces an inherited list and its selection policy; an instance's list replaces an inherited scalar/list and resets selection to `single` unless it supplies its own policy. An instance that only overrides `requestQueueSelection` keeps the inherited list. Selection policy requires an effective list. Reply defaults continue to inherit separately and remain one optional scalar `replyQueue`.
+
+Runtime first selects the physical instance using `instance=` or physical `selection.strategy`. Then `send(queue=...)` or `request(requestQueue=...)` overrides automatic queue routing. Blank/invalid explicit queues fail with `MQ_ARGUMENT` before MQ I/O; they never fall back to a configured destination. Without an explicit queue, the selected instance supplies its scalar or list. Missing required effective queues also fail before connecting. `receive` uses its explicit `queue` or the single reply default. Each request queue belongs to the selected instance's queue manager; this does not route across queue managers.
+
+Queue round-robin counters are thread-safe and scoped to one `MqHelperExecutor`, logical helper, and physical instance. Run/Debug/Load calls sharing that executor share counters; separate executors and Worker JVMs start their own counters. There is no Server-wide or cross-worker fairness guarantee. Explicit overrides and receive calls do not advance queue counters. Automatic selection occurs once after argument/payload validation and before connecting; connection/open/PUT failures still advance it. A request never reselects or automatically fails over after PUT, including a correlated reply timeout. Explicit Action retry remains governed by the replay policy below.
+
+Action evidence and output metadata include `requestQueue`, `queue`, `requestQueueSelectionStrategy` (`single`, `roundRobin`, `random`, or `explicit`), the selected physical instance and queue manager, and the effective `replyQueue` for requests. ReplyToQ/ReplyToQMgr and sent MsgId → reply CorrelId matching remain unchanged. These bounded routing fields accompany retained Run/Debug/Load evidence; credentials remain protected.
 
 #### Sending file-content strings and abstract values
 
@@ -1828,7 +1880,7 @@ See [Actions and Typed Values](reference/actions.md) for the shared typed-result
 
 Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
 
-The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.2.schema.json).
+The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.3.schema.json).
 
 DB/MQ/HTTP share the optional `evidence.output: {format: json, maxChars: 10000}` presentation policy. Supported formats are `text`, `json`, `yaml`, `xml`, and `sqlplus`; `sqlplus` requires a DB query/update result. `maxChars` defaults to 10000 and accepts 1–1000000. Credentials are redacted before deterministic character truncation; snapshots contain `format`, `text`, and `truncated`. Formatting failure adds only a bounded `outputError` and changes neither typed `output.result` nor operation status. Normal Run/Debug invocations automatically include the snapshot in Action evidence and the Case log, without an extra Log Action; SQL, parameters, MQ payload metadata, and HTTP status/header diagnostics keep their own contracts. Load defers formatting until an iteration is retained, then materializes `resource-output.yaml`; `evidence.resources.output: none` skips it entirely. Presentation never introduces credential values into evidence.
 
@@ -2384,7 +2436,7 @@ Run and Load accept `--run-id <id>` as a literal override. Standalone Debug acce
 |---|---|---|
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.6` YAML paths; normalized duplicates are rejected |
-| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.2` YAML paths; normalized duplicates are rejected |
+| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.3` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
 | `environments` | absent | Non-empty map of profile names; profiles may contain configured resource and testdata descriptor lists |
@@ -2667,10 +2719,10 @@ Local CLI output shows absolute paths by default. Add `--substitute-package-root
 
 `--set` is repeatable and accepts exactly one namespace: `input`, `arg`, or `vars`. Values use safe YAML parsing (for example `42`, `true`, `null`, `[a, b]`, or `{id: 7}`), and nested paths may use map keys and numeric list indexes such as `input.customer.ids[0]=42`. Duplicate assignments are applied in order, so the last value wins. ATT expressions are not evaluated while parsing an override; quote expression-looking values when a shell could expand them. `arg.*` is Tool-only; `vars.*` is Template/Flow-only. Unqualified overrides are rejected for multi-workload Load scenarios.
 
-`load/load.yaml` is an optional, policy-only `att-load/v1.6` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. It rejects sidecars with Debug-local `testdata` imports; declare those imports on a Load scenario. Explicit CLI pacing fields override the policy. Without a policy, provide a complete policy on the command line; for example:
+`load/load.yaml` is an optional, policy-only `att-load/v1.7` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. It rejects sidecars with Debug-local `testdata` imports; declare those imports on a Load scenario. Explicit CLI pacing fields override the policy. Without a policy, provide a complete policy on the command line; for example:
 
 ```yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -2720,6 +2772,45 @@ Repeatable `--set <input|arg|vars>.<path>=<yaml-value>` applies safe-YAML typed 
 ```
 
 The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id` (outer Run/Load identity), `--debug-id` (standalone Debug identity), `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--set`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them. Both identity options are literal overrides.
+
+#### Diagnostic trust boundaries and secret protection
+
+`att-security` supplies the mandatory Secret Protection policy shared by Engine, Worker,
+Server and the inspectors. Password/passphrase, secret/token/credential, authorization,
+cookie, API/access/private key and identity-file fields are reserved; a sensitive field
+protects its whole value, including an unknown nested object. Bearer/Basic credentials,
+URL credentials, PEM private keys, `!secret` values, secret CSV columns and XML/JSON/YAML
+secret values are protected in text. Resource adapters also register concrete secret
+spellings with the Case Log; those spellings remain protected wherever they occur.
+There is no client flag or privileged `includeAllFields` bypass for these classes.
+Unknown objects and cyclic/deep sensitive structures fail closed.
+
+| Boundary | Path policy | Secret policy |
+| --- | --- | --- |
+| CLI console | Both aliases off by default; each alias flag works independently | Mandatory protection always applies |
+| CLI `case.log` | Typed local path fields and diagnostic absolute path tokens follow selected aliases; authored commands, relative expressions, URLs and remote paths retain their text | Mandatory protection and registered resource secrets |
+| Server Worker `case.log` | Both aliases off; trusted local diagnostic evidence retains original paths | Same mandatory protection |
+| Run/Debug/Load `case.yaml` and retained failure evidence | Local typed presentation follows the process policy; authored relative expressions remain intact | Structured secret fields and registered Case Log secrets are protected |
+| Worker JSON Lines | Internal trusted process channel; original locations remain available to the Server | Shared mandatory protection on every event/result |
+| Server API, SSE and Job Result | Server applies deterministic `package:` / `artifact:` locators and external basename labels; clients cannot disable this policy | Shared mandatory protection on every public projection |
+| Source/Configuration inspectors | Package-relative locations; external host paths are hidden at the Server boundary | Mandatory protection plus independently configured optional field/PII redaction |
+| Public artifact download | UTF-8 text projection, up to 16 MiB; original on-disk file remains unchanged. Binary, invalid UTF-8 and oversized artifacts require trusted filesystem access | Mandatory secret projection before download |
+
+Diagnostic excerpts preserve `&{./Pacs008.xml}`, `&{../request.xml}`, `${...}`, `#{...}`,
+XML closing tags, Unicode, URLs and SSH remote paths. Structured `file`, `line` and
+`column`/`sourceColumn` fields provide navigation separately from authored excerpts.
+Public projection is idempotent. An API download is therefore a safe view of an
+artifact, rather than a byte-for-byte export of trusted local evidence.
+
+With `server.inspection.redaction.enabled: false`, ordinary host/port/user, client ID,
+queue/channel, Content-Type and non-secret DB properties/evidence settings are visible
+to authorized users. Optional PII fields such as email/address are also visible.
+`includeAllFields` additionally exposes ordinary fields normally hidden by display
+policy and remains authorized server-side through the configured configuration-admin
+role. Secret values remain protected in both modes. Field records use `state: hidden`,
+`value: '[REDACTED]'`, `reasonCode: MANDATORY_SECRET` for protected values; unavailable
+fields use `[HIDDEN]` and `UNAVAILABLE_BY_POLICY` or `OPTIONAL_FIELD_POLICY`.
+Source traversal, symlink, deny-glob, sensitive-file and size restrictions remain active.
 
 ## Results, reports, and evidence
 
@@ -3000,7 +3091,7 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Global configuration | att-config/v2.12 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
-| MQHelper | att-mqhelper/v1.2 |
+| MQHelper | att-mqhelper/v1.3 |
 | HTTPHelper | att-httphelper/v1.1 |
 | SSHHelper | att-sshhelper/v1.0 |
 | Tool group | att-tool-group/v2.9 |
@@ -3009,7 +3100,7 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | Template | att-template/v3.6 |
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.2 |
-| Load scenario | att-load/v1.6 |
+| Load scenario | att-load/v1.7 |
 | Load summary | att-load-summary/v1.1 |
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |
@@ -3018,6 +3109,10 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 
 For the changed resource/configuration schemas, older versions are historical definitions under schemas/history; they are not active execution contracts. Unsupported versions fail validation with migration guidance. The repository catalog at schemas/catalog.yaml is authoritative. Package validation checks the registered schema resources themselves; it does not enable runtime compatibility for archived versions.
 
+<!-- att-docs:historical -->
+Load v1.6 and MQHelper v1.2 are compatible historical schemas supported by their loaders; their existing scalar routing and legacy evidence policies remain unchanged. New routing/quota fields require the active schema.
+<!-- /att-docs:historical -->
+
 ## Appendix B — compatibility and deprecated aliases
 
 Compatibility exists to read established packages without creating a second current model. New authoring uses canonical `EXEC`, `META`, Action-local `output`, current schema versions, `--env`, and current Tool/DB/MQ contracts.
@@ -3025,6 +3120,16 @@ Compatibility exists to read established packages without creating a second curr
 Deterministic legacy aliases may remain readable with migration warnings. Aliases are not created where old semantics conflict with scope isolation or the common result/evidence contract. Deprecated CLI/authoring forms remain documented on their owning page or in CHANGELOG only when users still need a migration path.
 
 ## Appendix C — migration notes
+
+### Independent Load evidence quotas
+
+Use `att-load/v1.7` for `evidence.maxFailureSamples` and `maxSuccessSamples`. Older scenarios without these keys preserve their legacy combined cap after normalization. An explicit finite failure cap activates split mode; the success cap defaults to 1,000 or uses the old `maxSamples` as a migration alias. Do not combine that alias with `maxSuccessSamples`. See [Load](reference/execution-modes/load.md#independent-evidence-quotas) for limits, concurrency and exhaustion warnings.
+
+
+### MQ request queue routing
+
+`att-mqhelper/v1.2` scalar descriptors remain supported. To use `message.requestQueues` or `requestQueueSelection`, change the descriptor to `att-mqhelper/v1.3` and replace the scalar `requestQueue` with a 1–256-item unique queue list. Keep one optional scalar `replyQueue`. Instance routing overrides replace inherited scalar/list keys and reset the queue strategy unless explicitly configured. See [MQHelper](reference/resources/mqhelper.md#request-queue-routing) for queue selection, counter scope, evidence and replay behavior.
+
 
 ### File arguments and case-log paths
 

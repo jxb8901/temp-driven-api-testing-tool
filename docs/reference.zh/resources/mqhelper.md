@@ -1,9 +1,9 @@
 # MQHelper
 
-MQHelper 是由多個 physical instances 組成的 IBM MQ logical resource。現行 descriptor 使用 att-mqhelper/v1.2。Connection settings、credentials、queue defaults 與 pool limits 屬於 resource，不會公開至 META。
+MQHelper 是由多個 physical instances 組成的 IBM MQ logical resource。現行 descriptor 使用 att-mqhelper/v1.3。Connection settings、credentials、queue defaults 與 pool limits 屬於 resource，不會公開至 META。
 
 ~~~yaml
-schemaVersion: att-mqhelper/v1.2
+schemaVersion: att-mqhelper/v1.3
 id: payment
 name: Payment MQ
 description: Payment request/reply queues
@@ -32,6 +32,35 @@ evidence:
 ~~~
 
 Tool Action 以 primary operation 呼叫 mq.<id>.send、mq.<id>.receive 或 mq.<id>.request。MQ reply bytes 在收到 CCSID metadata 時優先按該編碼解碼，再依 responseFormat（text/json/yaml/xml）解析。Typed value 發布於 output.result。responseFormat 負責 ingress parsing；Log.format 和 evidence.output.format 只控制 presentation。
+
+## Request queue 路由
+
+<!-- att-docs:historical -->
+`att-mqhelper/v1.3` 新增 `message.requestQueues` 及 `message.requestQueueSelection.strategy`。既有 `att-mqhelper/v1.2` scalar descriptor 仍可使用，並保留原有行為；新欄位須使用 v1.3。
+<!-- /att-docs:historical -->
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.3
+id: payment
+name: Payment MQ
+description: Payment request queue routing
+defaults:
+  connection: {queueManager: QM1, host: mq.example.internal, port: 1414, channel: APP.SVRCONN}
+  message:
+    requestQueues: [PAYMENT.REQUEST.01, PAYMENT.REQUEST.02, PAYMENT.REQUEST.03]
+    requestQueueSelection: {strategy: roundRobin}
+    replyQueue: PAYMENT.REPLY
+instances:
+  - id: primary
+~~~
+
+清單須有 1–256 個不重複、非空白的 queue name，每項最多 48 個 `[A-Za-z0-9_.%/-]` 字元。`single`（預設）選第一項；`roundRobin` 依清單順序輪替；`random` 只會選已設定項目。同一 message object 不可同時宣告 scalar `requestQueue` 及清單 `requestQueues`。Instance 的 scalar 會取代繼承的清單及其 selection policy；instance 的清單會取代繼承的 scalar／清單，並在沒有自行宣告 policy 時重設為 `single`。只覆寫 `requestQueueSelection` 會保留繼承的清單；selection policy 必須有有效清單。Reply default 獨立繼承，仍是單一可選的 scalar `replyQueue`。
+
+Runtime 先以 `instance=` 或 physical `selection.strategy` 選擇 physical instance，再處理 request queue。`send(queue=...)` 或 `request(requestQueue=...)` 優先於自動路由。明確傳入空白／無效 queue 會在 MQ I/O 前回報 `MQ_ARGUMENT`，不會改用預設目的地。沒有明確 queue 時，使用已選 instance 的 scalar 或清單；缺少必要有效 queue 亦會在連線前失敗。`receive` 繼續使用明確 `queue` 或單一 reply default。每個 request queue 都屬於已選 instance 的 Queue Manager，不會跨 Queue Manager 路由。
+
+Queue round-robin counter 支援並行存取，範圍是單一 `MqHelperExecutor`、logical helper 及 physical instance。共用 executor 的 Run/Debug/Load 呼叫會共用 counter；不同 executor 或 Worker JVM 各自從頭開始，不保證 Server-wide 或跨 Worker 公平性。明確 queue override 及 receive 不會推進 counter。自動選擇只在 argument／payload 驗證後、連線前執行一次；其後 connection/open/PUT 失敗仍會推進 counter。成功 PUT 後（包括 correlated reply timeout）不會重新選擇或自動 failover；明確 Action retry 仍按下述 replay policy 處理。
+
+Action evidence 及 output metadata 包含 `requestQueue`、`queue`、`requestQueueSelectionStrategy`（`single`、`roundRobin`、`random` 或 `explicit`）、已選 physical instance、Queue Manager，以及 request 的有效 `replyQueue`。ReplyToQ/ReplyToQMgr 及已送 MsgId → reply CorrelId matching 維持。這些有界路由欄位會隨保留的 Run/Debug/Load evidence 提供，憑證仍受保護。
 
 ## 傳送 File-content string 或抽象值
 
@@ -76,7 +105,7 @@ MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive
 
 Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
 
-The machine-readable field constraints remain in [the active MQ schema](../../../schemas/att-mqhelper-v1.2.schema.json).
+The machine-readable field constraints remain in [the active MQ schema](../../../schemas/att-mqhelper-v1.3.schema.json).
 
 DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
 

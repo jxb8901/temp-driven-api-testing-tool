@@ -14,6 +14,42 @@ class MqHelperConfigLoaderTest {
 
     @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
 
+    @Test void resolvesV13QueueRoutingWithReplaceOverridesAndScalarCompatibility() throws Exception {
+        MqHelperConfig group=loadRouting("{requestQueues: [REQUEST.A, REQUEST.B], requestQueueSelection: {strategy: roundRobin}, replyQueue: REPLY}",
+                "[{id: primary}, {id: scalar, message: {requestQueue: SCALAR}}, {id: replacement, message: {requestQueues: [REPLACEMENT]}}]");
+        assertEquals(java.util.Arrays.asList("REQUEST.A","REQUEST.B"),group.instance("primary").requestQueues());
+        assertEquals("roundRobin",group.instance("primary").requestQueueSelectionStrategy());
+        assertEquals(java.util.Collections.singletonList("SCALAR"),group.instance("scalar").requestQueues());
+        assertEquals("single",group.instance("scalar").requestQueueSelectionStrategy());
+        assertEquals("REPLY",group.instance("scalar").replyQueue());
+        assertEquals(java.util.Collections.singletonList("REPLACEMENT"),group.instance("replacement").requestQueues());
+        assertEquals("single",group.instance("replacement").requestQueueSelectionStrategy());
+        MqHelperConfig replacement=loadRouting("{requestQueue: SCALAR, replyQueue: REPLY}",
+                "[{id: primary, message: {requestQueues: [LIST.A, LIST.B], requestQueueSelection: {strategy: random}}}]").instance("primary");
+        assertEquals("",replacement.requestQueue());assertEquals("random",replacement.requestQueueSelectionStrategy());
+        assertEquals(java.util.Arrays.asList("LIST.A","LIST.B"),replacement.metadata().get("requestQueues"));
+        assertThrows(UnsupportedOperationException.class,()->replacement.requestQueues().add("OTHER"));
+    }
+
+    @Test void rejectsInvalidQueueListsConflictsAndStrategies() throws Exception {
+        for(String message:new String[]{"{requestQueues: []}","{requestQueues: [A, A]}","{requestQueues: ['']}",
+                "{requestQueues: [null]}","{requestQueues: ['contains space']}","{requestQueues: ['ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXY']}",
+                "{requestQueue: A, requestQueues: [B]}","{requestQueues: [A], requestQueueSelection: {strategy: failover}}",
+                "{requestQueue: A, requestQueueSelection: {strategy: roundRobin}}"})
+            assertThrows(Exception.class,()->loadRouting(message,"[{id: primary}]"),message);
+        StringBuilder oversized=new StringBuilder("{requestQueues: [");
+        for(int i=0;i<257;i++){if(i>0)oversized.append(',');oversized.append("Q").append(i);}oversized.append("]}");
+        assertThrows(Exception.class,()->loadRouting(oversized.toString(),"[{id: primary}]"));
+    }
+
+    private MqHelperConfig loadRouting(String message,String instances) throws Exception {
+        Path helper=tempDir.resolve("routing.yaml");
+        Files.write(helper,("schemaVersion: att-mqhelper/v1.3\nid: routing\nname: Routing\ndescription: Routing\n"
+                +"defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: CH}\n  message: "+message
+                +"\nselection: {strategy: roundRobin}\ninstances: "+instances+"\n").getBytes("UTF-8"));
+        return new MqHelperConfigLoader().load(java.util.Collections.singletonList("routing.yaml"),tempDir).get("routing");
+    }
+
     @Test void ignoresExtensionFieldsAcrossMqDescriptorObjects() throws Exception {
         Path helper = tempDir.resolve("config/mqhelpers/extensions.yaml");
         Files.createDirectories(helper.getParent());
@@ -216,7 +252,7 @@ class MqHelperConfigLoaderTest {
         att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class,
                 () -> new FrameworkConfigLoader().load(config));
         assertTrue(error.detail().contains("att-mqhelper/v1.0"));
-        assertTrue(error.detail().contains("att-mqhelper/v1.2"));
+        assertTrue(error.detail().contains("att-mqhelper/v1.3"));
         assertTrue(error.detail().contains("selection"));
         assertFalse(error.schemaViolations().isEmpty());
     }

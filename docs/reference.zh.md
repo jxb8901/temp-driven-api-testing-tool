@@ -124,6 +124,8 @@ Status: 規範性使用者文件；由模組化來源自動生成
 - [Appendix A — schema 與 version matrix](#appendix-a-schema-與-version-matrix)
 - [Appendix B — compatibility 與 deprecated aliases](#appendix-b-compatibility-與-deprecated-aliases)
 - [Appendix C — migration notes](#appendix-c-migration-notes)
+  - [Load 獨立 evidence 配額](#load-獨立-evidence-配額)
+  - [MQ request queue 路由](#mq-request-queue-路由)
   - [File arguments 與 case log paths](#file-arguments-與-case-log-paths)
   - [Previous release Testdata migration](#previous-release-testdata-migration)
   - [Execution identity format migration](#execution-identity-format-migration)
@@ -162,7 +164,7 @@ Run、Debug、Load 把不同輸入適配到同一 execution-neutral Context 和�
 |---|---|---|
 | Run | workbook Testcase 與 Stage selector | Template、Flow、Tool、DB/MQ/HTTP/SSH |
 | Debug | `att-debug/v1.2` sidecar 或 `--input` | 單一 Template、Flow 或 Tool target |
-| Load | `att-load/v1.6` scenario | 重複執行一個或多個 Template、Flow 或 Tool workload |
+| Load | `att-load/v1.7` scenario | 重複執行一個或多個 Template、Flow 或 Tool workload |
 
 可重用 Template/Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
 
@@ -1169,16 +1171,37 @@ case:
 
 ### Load 模式
 
-ATT 接受 att-load/v1.6 scenario。Scenario 有一個或多個 workload；每個 workload 使用單一固定 Template、Flow 或 Tool target，或使用 closed-user weighted target mix。Workload 配置 inputs、testdata policy、bootstrap vars 與 pacing。Root defaults 可供多個 workload 共用，workload-local 欄位會覆蓋它們。Scheduler 啟動前會驗證並預先 resolve 所有 target。
+ATT 接受 att-load/v1.7 scenario。Scenario 有一個或多個 workload；每個 workload 使用單一固定 Template、Flow 或 Tool target，或使用 closed-user weighted target mix。Workload 配置 inputs、testdata policy、bootstrap vars 與 pacing。Root defaults 可供多個 workload 共用，workload-local 欄位會覆蓋它們。Scheduler 啟動前會驗證並預先 resolve 所有 target。
 
 使用上一版 workload schema 的 descriptor 仍相容，載入時會 normalize 至現行 schema。
 
 不帶 scenario 執行 `./att.sh load`，會發現 `load/` 下有效的完整 Load descriptor。只考慮宣告 `schemaVersion: att-load/*` 的 YAML；其他 YAML 會忽略，無效的已宣告 descriptor 則附 diagnostic 顯示。Discovery 會 resolve 並驗證 target，但不啟動 scheduler 或呼叫 resource。
 
+#### 獨立 evidence 配額
+
+`att-load/v1.7` 新增有限的 success/failure 配額。沒有新欄位時，完整保留既有共用 `maxSamples` 行為，包括 `metrics`、`failures`、`samples` 及預設不設上限的 `all`。既有 v1.6 scenario 仍可載入，normalize 至 v1.7 時不會改變 evidence policy。
+
+~~~yaml
+evidence:
+  mode: samples
+  success: sample
+  failure: full
+  sampleRate: 0.01
+  maxSuccessSamples: 500
+  maxFailureSamples: 2000
+~~~
+
+明確設定 `maxFailureSamples` 才會啟用獨立配額；兩個新欄位均為 0–1,000,000 的整數。Success 上限依次取 `maxSuccessSamples`、明確 `maxSamples`、或 **1,000**，即使 `mode: all` 亦同。`maxSuccessSamples` 必須配合 `maxFailureSamples`；同時提供 `maxSamples` 與 `maxSuccessSamples` 會被拒絕。保留 `maxSamples: 500` 再新增 `maxFailureSamples: 2000`，會把舊上限轉為 success-only 上限。0 表示不保留該類 evidence。`sampleRate` 只用於抽樣 PASS；FAIL/ERROR（包括操作層 TIMEOUT）直接使用 failure 配額。`failure: full` 受配額限制，不保證每個失敗都會保留。
+
+共用的 run evidence store 分開計算 success/failure 已預留及已保留 slot，適用於多 workload 及兩種 scheduler。預選 success 後失敗的 iteration 會釋放 success slot，再申請 failure slot；未抽樣的失敗亦可申請 failure 容量。Success 用盡不會停止 failure log capture；failure 用盡不會停止 success sampling。Dropped／未開始 arrival 及未完成 iteration 不會建立一般 evidence。取消／拒絕 admission 或 workspace 缺失會釋放預留。Failure log 維持 65,536 字元 tail、強制 secret protection 及延後 resource formatting。
+
+`load-summary.json`／YAML、HTML report 及 Studio job result 會顯示有效 `evidence.policy`、`retainedSuccessCount`、`retainedFailureCount`、各類配額用盡旗標，以及因配額／缺失 evidence 而略過的計數。Failure 配額達上限時，report 與 Studio 會警告；aggregate metrics、thresholds 及 failure events 繼續完整統計。保留連結仍使用 `samples/`、`failures/`，並保留 EXEC.ID、case.log、case.yaml。Studio Evidence settings 會分別標示舊共用上限，獨立配額與 advanced JSON 同步。見[有界範例](../examples/load/independent-evidence.yaml)。
+
+
 #### 定義 Load scenario
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 testdata: [examples/testdata/generated-account.yaml]
 workloads:
   - id: payment
@@ -1218,7 +1241,7 @@ execution:
 Workload 可用 `mix` 代替 `target`，讓每位 closed user 的下一次 iteration 在預先 resolve 的 targets 之間選擇。每個 entry 包含唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool `target`。Selector 由 run seed、workload ID、穩定 VU ID 和該 VU 的 iteration number 決定；切換 target 不會重設 VU 或 think-time random stream。Weight 表示選擇機率，短時間 run 不保證精確符合比例。
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 seed: 73
 workloads:
   - id: checkout
@@ -1354,12 +1377,12 @@ Load workload 啟動前，ATT 會為每個可達的 Render payload glob 解析�
 
 重複的 `--set` 可用 `input.path=value`、僅限 Tool 的 `arg.name=value`，或僅限 Template/Flow 的 `vars.path=value`。值使用 safe YAML 解析並保留型別；實用時支援巢狀 map 與數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效；解析 override 時不會評估 ATT expression。多 workload scenario 會拒絕未限定的 override。
 
-可選的 `load/load.yaml` 使用現行 `att-load/v1.6` policy-only descriptor，不含 target、inputs 或 Tool arguments。它提供預設 `load` policy，並可選擇包含 `execution`、`thresholds`、`evidence`、`seed` 及 Load-local `testdata` imports。明確 CLI pacing 會覆蓋 policy。`load --debug template|flow|tool <id>` 會將 sidecar 的 `inputs`、`vars` 或 Tool `arguments` promotion 成暫時的單一 workload scenario，然後使用正常 Load validation、scheduler 和 evidence pipeline；不會先執行 Debug。沒有 policy 時，請在 CLI 提供完整 policy，例如 `--users 2 --duration 10s`（arrival-rate 還需要 `--max-concurrent` 和 `--overload-policy`）。
+可選的 `load/load.yaml` 使用現行 `att-load/v1.7` policy-only descriptor，不含 target、inputs 或 Tool arguments。它提供預設 `load` policy，並可選擇包含 `execution`、`thresholds`、`evidence`、`seed` 及 Load-local `testdata` imports。明確 CLI pacing 會覆蓋 policy。`load --debug template|flow|tool <id>` 會將 sidecar 的 `inputs`、`vars` 或 Tool `arguments` promotion 成暫時的單一 workload scenario，然後使用正常 Load validation、scheduler 和 evidence pipeline；不會先執行 Debug。沒有 policy 時，請在 CLI 提供完整 policy，例如 `--users 2 --duration 10s`（arrival-rate 還需要 `--max-concurrent` 和 `--overload-policy`）。
 
 Policy descriptor 範例（複製到 `load/load.yaml`）：
 
 ~~~yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -1383,7 +1406,7 @@ evidence: {mode: failures}
 
 沒有 `--run-id` 時，Load 外層目錄使用與 Run 相同的 `execution.runIdFormat`。`--run-id` 仍是外層 Load identity 的 literal override。此 policy 與 `execution.execIdFormat` 分開；後者仍只產生每個 started iteration 的 `EXEC.ID`。
 
-Load 使用 att-load/v1.6。設定 execution.execIdFormat 時，ATT 在每個 iteration initialization 使用一般 ${...} / #{...} engine 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及 output path 發布後評估。
+Load 使用 att-load/v1.7。設定 execution.execIdFormat 時，ATT 在每個 iteration initialization 使用一般 ${...} / #{...} engine 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及 output path 發布後評估。
 
 可用值有 EXEC.RUN_ID、timestamps、EXEC.INPUT、EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE、closed-only EXEC.LOAD.USER_ID，以及已建立的 META.SOURCE/TARGET/TEMPLATE。EXEC.ID 和 EXEC.OUTPUT_DIR 尚未可用，因為生成的 ID 決定 workspace。還沒有 Action 執行，所以 EXEC.ACTIONS 與 Flow/Tool/helper invocation META 缺席。
 
@@ -1707,10 +1730,10 @@ evidence:
 
 ### MQHelper
 
-MQHelper 是由多個 physical instances 組成的 IBM MQ logical resource。現行 descriptor 使用 att-mqhelper/v1.2。Connection settings、credentials、queue defaults 與 pool limits 屬於 resource，不會公開至 META。
+MQHelper 是由多個 physical instances 組成的 IBM MQ logical resource。現行 descriptor 使用 att-mqhelper/v1.3。Connection settings、credentials、queue defaults 與 pool limits 屬於 resource，不會公開至 META。
 
 ~~~yaml
-schemaVersion: att-mqhelper/v1.2
+schemaVersion: att-mqhelper/v1.3
 id: payment
 name: Payment MQ
 description: Payment request/reply queues
@@ -1739,6 +1762,35 @@ evidence:
 ~~~
 
 Tool Action 以 primary operation 呼叫 mq.<id>.send、mq.<id>.receive 或 mq.<id>.request。MQ reply bytes 在收到 CCSID metadata 時優先按該編碼解碼，再依 responseFormat（text/json/yaml/xml）解析。Typed value 發布於 output.result。responseFormat 負責 ingress parsing；Log.format 和 evidence.output.format 只控制 presentation。
+
+#### Request queue 路由
+
+<!-- att-docs:historical -->
+`att-mqhelper/v1.3` 新增 `message.requestQueues` 及 `message.requestQueueSelection.strategy`。既有 `att-mqhelper/v1.2` scalar descriptor 仍可使用，並保留原有行為；新欄位須使用 v1.3。
+<!-- /att-docs:historical -->
+
+~~~yaml
+schemaVersion: att-mqhelper/v1.3
+id: payment
+name: Payment MQ
+description: Payment request queue routing
+defaults:
+  connection: {queueManager: QM1, host: mq.example.internal, port: 1414, channel: APP.SVRCONN}
+  message:
+    requestQueues: [PAYMENT.REQUEST.01, PAYMENT.REQUEST.02, PAYMENT.REQUEST.03]
+    requestQueueSelection: {strategy: roundRobin}
+    replyQueue: PAYMENT.REPLY
+instances:
+  - id: primary
+~~~
+
+清單須有 1–256 個不重複、非空白的 queue name，每項最多 48 個 `[A-Za-z0-9_.%/-]` 字元。`single`（預設）選第一項；`roundRobin` 依清單順序輪替；`random` 只會選已設定項目。同一 message object 不可同時宣告 scalar `requestQueue` 及清單 `requestQueues`。Instance 的 scalar 會取代繼承的清單及其 selection policy；instance 的清單會取代繼承的 scalar／清單，並在沒有自行宣告 policy 時重設為 `single`。只覆寫 `requestQueueSelection` 會保留繼承的清單；selection policy 必須有有效清單。Reply default 獨立繼承，仍是單一可選的 scalar `replyQueue`。
+
+Runtime 先以 `instance=` 或 physical `selection.strategy` 選擇 physical instance，再處理 request queue。`send(queue=...)` 或 `request(requestQueue=...)` 優先於自動路由。明確傳入空白／無效 queue 會在 MQ I/O 前回報 `MQ_ARGUMENT`，不會改用預設目的地。沒有明確 queue 時，使用已選 instance 的 scalar 或清單；缺少必要有效 queue 亦會在連線前失敗。`receive` 繼續使用明確 `queue` 或單一 reply default。每個 request queue 都屬於已選 instance 的 Queue Manager，不會跨 Queue Manager 路由。
+
+Queue round-robin counter 支援並行存取，範圍是單一 `MqHelperExecutor`、logical helper 及 physical instance。共用 executor 的 Run/Debug/Load 呼叫會共用 counter；不同 executor 或 Worker JVM 各自從頭開始，不保證 Server-wide 或跨 Worker 公平性。明確 queue override 及 receive 不會推進 counter。自動選擇只在 argument／payload 驗證後、連線前執行一次；其後 connection/open/PUT 失敗仍會推進 counter。成功 PUT 後（包括 correlated reply timeout）不會重新選擇或自動 failover；明確 Action retry 仍按下述 replay policy 處理。
+
+Action evidence 及 output metadata 包含 `requestQueue`、`queue`、`requestQueueSelectionStrategy`（`single`、`roundRobin`、`random` 或 `explicit`）、已選 physical instance、Queue Manager，以及 request 的有效 `replyQueue`。ReplyToQ/ReplyToQMgr 及已送 MsgId → reply CorrelId matching 維持。這些有界路由欄位會隨保留的 Run/Debug/Load evidence 提供，憑證仍受保護。
 
 #### 傳送 File-content string 或抽象值
 
@@ -1783,7 +1835,7 @@ MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive
 
 Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
 
-The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.2.schema.json).
+The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.3.schema.json).
 
 DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
 
@@ -2338,7 +2390,7 @@ Run 和 Load 的 `--run-id <id>`，以及 standalone Debug 的 `--debug-id <id>`
 |---|---|---|
 | `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.6` YAML paths; normalized duplicates are rejected |
-| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.2` YAML paths; normalized duplicates are rejected |
+| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.3` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
 | `environments` | absent | Non-empty map of profile names; profiles may contain configured resource and testdata descriptor lists |
@@ -2585,7 +2637,7 @@ Remote-only option 包括 `--server <profile|url>`、`--no-auth`、`--principal 
 
 `--set` 可重複使用，並且只接受一個 namespace：`input`、`arg` 或 `vars`。值使用安全 YAML 解析，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可使用 map key 和數字 list index，例如 `input.customer.ids[0]=42`。重複賦值按順序套用，最後一個值生效。解析 override 時不會評估 ATT expression；若 shell 可能展開類似 expression 的值，請加上引號。`arg.*` 僅適用於 Tool，`vars.*` 僅適用於 Template/Flow。多 workload Load scenario 不接受未限定的 override。
 
-`load/load.yaml` 是可選的 policy-only `att-load/v1.6` 檔案，可包含 `load`、`execution`、`thresholds`、`evidence` 和 `seed`，但不包含 target 或 business inputs。`load --debug` 會將 sidecar `inputs` 提升為 `EXEC.INPUT`、Template/Flow `vars` 提升為 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，然後使用一般 Load validator、scheduler 和 evidence pipeline 執行。若 sidecar 含 Debug-local `testdata` imports，`load --debug` 會拒絕；請把 imports 宣告於 Load scenario。明確的 CLI pacing fields 會覆蓋 policy；沒有 policy 時，請直接在 CLI 指定完整 policy。
+`load/load.yaml` 是可選的 policy-only `att-load/v1.7` 檔案，可包含 `load`、`execution`、`thresholds`、`evidence` 和 `seed`，但不包含 target 或 business inputs。`load --debug` 會將 sidecar `inputs` 提升為 `EXEC.INPUT`、Template/Flow `vars` 提升為 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，然後使用一般 Load validator、scheduler 和 evidence pipeline 執行。若 sidecar 含 Debug-local `testdata` imports，`load --debug` 會拒絕；請把 imports 宣告於 Load scenario。明確的 CLI pacing fields 會覆蓋 policy；沒有 policy 時，請直接在 CLI 指定完整 policy。
 
 ### Debug input 與 output
 
@@ -2626,10 +2678,10 @@ Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應
 
 `--set` 可重複使用，namespace 只能是 `input`、`arg` 或 `vars`。值使用 safe YAML 解析並保留型別，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可用 map key 及數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效。解析時不會執行 ATT expression；shell 可能展開的值要加引號。`arg.*` 僅適用 Tool，`vars.*` 僅適用 Template/Flow。多 workload Load scenario 會拒絕未限定的 override。
 
-可選的 `load/load.yaml` 使用現行 policy-only `att-load/v1.6`，不能包含 target 或 business inputs。它可設定 `load`，以及可選的 `execution`、`thresholds`、`evidence` 和 `seed`。`load --debug` 會將 sidecar `inputs` promotion 到 `EXEC.INPUT`、Template/Flow `vars` promotion 到 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，之後使用正常 Load validator、scheduler 和 evidence pipeline；不會先執行 Debug。明確的 CLI pacing 會覆蓋 policy。沒有 policy 時，請在命令列提供完整 policy：
+可選的 `load/load.yaml` 使用現行 policy-only `att-load/v1.7`，不能包含 target 或 business inputs。它可設定 `load`，以及可選的 `execution`、`thresholds`、`evidence` 和 `seed`。`load --debug` 會將 sidecar `inputs` promotion 到 `EXEC.INPUT`、Template/Flow `vars` promotion 到 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，之後使用正常 Load validator、scheduler 和 evidence pipeline；不會先執行 Debug。明確的 CLI pacing 會覆蓋 policy。沒有 policy 時，請在命令列提供完整 policy：
 
 ```yaml
-schemaVersion: att-load/v1.6
+schemaVersion: att-load/v1.7
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -2651,6 +2703,38 @@ evidence: {mode: failures}
 ```
 
 完整 workload override 為 `--users`、`--arrival-rate`、`--warmup`、`--ramp-up`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`；`--think-time` 只適用 closed-VU。其餘 selection/output 選項仍受各 command 約束：`--suite`、`--suite-dir`、`--case`/`--case-id`、`--tag`、`--exclude-tag`、`--all`、`--run-id`（Run/Load identity）、`--debug-id`（standalone Debug identity）、`--output-dir`、`--format`、`--quiet`、`--verbose`、`--ci-output`、`--dry-run`、`--fail-fast`、`--rerun-failed`、`--update-snapshot`、`--package`、`--selected`、`--input`、`--set`、`--queue`、`--parallel`、`--allow-parallel-runs`、`--profile`、`--config`、`--env` 和 `--help` 只在對應 command contract 允許時有效。
+
+#### 診斷信任邊界與必要機密保護
+
+`att-security` 為 Engine、Worker、Server 與檢視器提供共同且不能關閉的 Secret
+Protection。password/passphrase、secret/token/credential、authorization、cookie、
+API/access/private key 與 identity-file 欄位屬保留分類，整個值（包括未知巢狀結構）
+均受保護。文字中的 Bearer/Basic、URL 憑證、PEM 私鑰、`!secret`、CSV 機密欄及
+XML/JSON/YAML 機密值同樣受保護。Resource adapter登記的機密字串在 Case Log 中持續遮蔽；
+`includeAllFields` 不會解除必要保護。未知物件、循環或過深結構採 fail-closed。
+
+| 輸出邊界 | 路徑政策 | 機密政策 |
+| --- | --- | --- |
+| CLI console | 兩種別名預設關閉；兩個選項可獨立啟用 | 必要保護持續啟用 |
+| CLI `case.log` | typed 路徑及完整絕對路徑診斷依選項顯示；命令、相對表達式、URL 及遠端路徑保留原文 | 必要保護與已登記機密 |
+| Server Worker `case.log` | 別名關閉，受信任本機證據保留原始診斷路徑 | 相同必要保護 |
+| Run/Debug/Load `case.yaml` 與失敗證據 | typed 本機路徑依程序政策呈現，相對表達式保留 | 結構化機密欄位與已登記機密受保護 |
+| Worker JSON Lines | 受信任程序通道保留位置資訊供 Server 使用 | 每個 event/result 套用共同必要保護 |
+| Server API、SSE、Job Result | 使用固定 `package:` / `artifact:` 或外部 basename；用戶不能關閉 | 每次公開投影均受必要保護 |
+| Source/Configuration | package-relative 位置，Server 隱藏外部主機路徑 | 必要保護與獨立可選欄位/PII 遮蔽 |
+| 公開 artifact 下載 | 最多 16 MiB 的 UTF-8 文字安全投影，磁碟原檔不變；二進位、無效 UTF-8 或過大檔案須經受信任檔案系統存取 | 下載前套用必要機密保護 |
+
+`&{./Pacs008.xml}`、`&{../request.xml}`、`${...}`、`#{...}`、XML 結束標籤、
+Unicode、URL 與 SSH 遠端路徑保持原文；另以 `file`、`line`、`column`/`sourceColumn`
+提供導覽。公開投影可重複套用而不持續改寫內容，下載內容因此是原始證據的安全檢視。
+
+`server.inspection.redaction.enabled: false` 時，獲授權使用者可查看普通 host/port/user、
+client ID、queue/channel、Content-Type、非機密 DB properties/evidence 設定及 email/address
+等可選 PII。`includeAllFields` 可顯示原本因展示政策隱藏的普通欄位，權限由 Server 的
+configuration-admin 角色驗證。必要機密永不解除：欄位回傳 `state: hidden`、
+`value: '[REDACTED]'`、`reasonCode: MANDATORY_SECRET`；政策不可用欄位使用 `[HIDDEN]`
+及 `UNAVAILABLE_BY_POLICY` 或 `OPTIONAL_FIELD_POLICY`。Source traversal、symlink、
+deny-glob、敏感檔名與大小限制維持啟用。
 
 ## 結果、報告與 evidence
 
@@ -2921,7 +3005,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Global configuration | att-config/v2.12 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
-| MQHelper | att-mqhelper/v1.2 |
+| MQHelper | att-mqhelper/v1.3 |
 | HTTPHelper | att-httphelper/v1.1 |
 | SSHHelper | att-sshhelper/v1.0 |
 | Tool group | att-tool-group/v2.9 |
@@ -2930,7 +3014,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Template | att-template/v3.6 |
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.2 |
-| Load scenario | att-load/v1.6 |
+| Load scenario | att-load/v1.7 |
 | Load summary | att-load-summary/v1.1 |
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |
@@ -2939,6 +3023,10 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 
 本次調整的 resource/config schema 舊版本已移至 schemas/history，僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。schemas/catalog.yaml 是 repository authoritative catalog。Package validation 會驗證已註冊的 schema resource 本身；封存不代表舊版本仍有 runtime compatibility。
 
+<!-- att-docs:historical -->
+Load v1.6 及 MQHelper v1.2 是 loader 支援的相容歷史 schema；既有 scalar routing 及 legacy evidence policy 維持。新路由／配額欄位須使用 active schema。
+<!-- /att-docs:historical -->
+
 ## Appendix B — compatibility 與 deprecated aliases
 
 Compatibility 的目的，是讓既有 package 可讀，而不是維持第二套 current model。新 authoring 使用 canonical `EXEC`、`META`、Action-local `output`、current schema、`--env` 與目前 Tool/DB/MQ contract。
@@ -2946,6 +3034,16 @@ Compatibility 的目的，是讓既有 package 可讀，而不是維持第二套
 Deterministic legacy alias 在可一對一映射時可以保留並產生 migration warning；若舊語義與 scope isolation 或 common result/evidence contract 衝突，就不建立 alias。Deprecated CLI/authoring form 只有在使用者仍需要 migration path 時才保留在其 owner page 或 CHANGELOG。
 
 ## Appendix C — migration notes
+
+### Load 獨立 evidence 配額
+
+`evidence.maxFailureSamples` 及 `maxSuccessSamples` 須使用 `att-load/v1.7`。舊 scenario 沒有新欄位時，normalize 後仍保留共用上限。明確有限 failure cap 會啟用 split mode；success cap 預設 1,000，亦可用舊 `maxSamples` 作 migration alias，但不可同時提供 `maxSuccessSamples`。限制、並行 accounting 及配額警告見 [Load](reference.zh/execution-modes/load.md#獨立-evidence-配額)。
+
+
+### MQ request queue 路由
+
+`att-mqhelper/v1.2` scalar descriptor 仍受支援。使用 `message.requestQueues` 或 `requestQueueSelection` 時，須改為 `att-mqhelper/v1.3`，並以 1–256 項不重複 queue 清單取代 scalar `requestQueue`；`replyQueue` 維持單一可選 scalar。Instance 路由覆寫會取代繼承的 scalar／清單，未明確指定 strategy 時重設 queue strategy。Queue selection、counter 範圍、evidence 及 replay 行為見 [MQHelper](reference.zh/resources/mqhelper.md#request-queue-路由)。
+
 
 ### File arguments 與 case log paths
 

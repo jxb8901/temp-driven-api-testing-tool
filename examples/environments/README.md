@@ -49,7 +49,7 @@ evidence: {sql: full, parameters: masked}
 
 ```yaml
 # config/mqhelpers/sit/payment.yaml
-schemaVersion: att-mqhelper/v1.2
+schemaVersion: att-mqhelper/v1.3
 id: payment
 name: Payment MQ
 description: SIT payment queues

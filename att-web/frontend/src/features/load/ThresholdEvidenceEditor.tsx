@@ -73,6 +73,13 @@ function evidenceError(object: JsonObject): string {
     if (object[field] != null && !choices.includes(String(object[field]))) return 'Evidence ' + field + ' must be one of ' + choices.join(', ') + '.';
   if (object.maxSamples != null && (!Number.isInteger(Number(object.maxSamples)) || Number(object.maxSamples) < 0))
     return 'Maximum retained samples must be a non-negative integer.';
+  if (object.maxSuccessSamples != null && object.maxFailureSamples == null)
+    return 'Independent success quota requires an explicit finite failure quota.';
+  if (object.maxSamples != null && object.maxSuccessSamples != null)
+    return 'Use the legacy cap or the independent success quota, not both.';
+  for (const key of ['maxSuccessSamples', 'maxFailureSamples', ...(object.maxFailureSamples == null ? [] : ['maxSamples'])])
+    if (object[key] != null && (typeof object[key] !== 'number' || !Number.isInteger(object[key]) || Number(object[key]) < 0 || Number(object[key]) > 1_000_000))
+      return key + ' must be an integer from 0 to 1,000,000.';
   if (object.sampleRate != null && (!Number.isFinite(Number(object.sampleRate)) || Number(object.sampleRate) < 0 || Number(object.sampleRate) > 1))
     return 'Success sample rate must be between 0 and 1.';
   const resources = parseObject(JSON.stringify(object.resources ?? {})) || {};
@@ -213,13 +220,16 @@ function EvidenceEditor({ raw, onChange, onValidityChange }: { raw: string; onCh
       <label>Failed iterations<select value={failure} onChange={event => update('failure', event.currentTarget.value)}>
         <option value="">Use mode default</option><option value="none">None</option><option value="full">Full</option>
       </select></label>
-      <label>Maximum retained samples<input type="number" min="0" step="1" value={object.maxSamples == null ? '' : String(object.maxSamples)} placeholder="Server default (1,000)" onChange={event => update('maxSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
+      <label>{draftObject.maxFailureSamples == null ? 'Legacy combined cap' : 'Success cap (legacy key)'}<input type="number" min="0" step="1" value={draftObject.maxSamples == null ? '' : String(draftObject.maxSamples)} placeholder="Server default (1,000)" onChange={event => update('maxSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
+      <label>Independent success quota<input type="number" min="0" max="1000000" step="1" value={draftObject.maxSuccessSamples == null ? '' : String(draftObject.maxSuccessSamples)} placeholder="Split default (1,000)" onChange={event => update('maxSuccessSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
+      <label>Independent failure quota<input type="number" min="0" max="1000000" step="1" value={draftObject.maxFailureSamples == null ? '' : String(draftObject.maxFailureSamples)} placeholder="Unset: use legacy combined cap" onChange={event => update('maxFailureSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
       {samplingActive && <label>Success sample rate<input type="number" min="0" max="1" step="0.01" value={object.sampleRate == null ? '' : String(object.sampleRate)} placeholder="Server default (0.01)" onChange={event => update('sampleRate', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>}
       <label>Resource output<select value={String(resources.output ?? '')} onChange={event => update('output', event.currentTarget.value, true)}>
         <option value="">Inherit default</option><option value="inherit">Include when evidence is retained</option><option value="none">Skip resource-output snapshots</option>
       </select></label>
     </div>
-    {fullCapture && <p className="att-evidence-impact" role="note">Full capture can increase disk use and report size. Set Maximum retained samples to a finite limit for bounded storage.</p>}
+    {fullCapture && <p className="att-evidence-impact" role="note">Full capture can increase disk use and report size. Set a finite legacy combined cap or independent quotas for bounded storage.</p>}
+    {draftObject.maxFailureSamples != null && <p className="att-help">Independent quotas: successes are capped at {String(draftObject.maxSuccessSamples ?? draftObject.maxSamples ?? 1000)}; failures are capped at {String(draftObject.maxFailureSamples)}. Failure full capture stops retaining iteration evidence when its quota is reached; aggregate metrics remain complete.</p>}
     {samplingActive && <p className="att-help">Sampling retains selected successful iterations; failures follow the selected failure policy. Dropped arrivals do not create iteration evidence.</p>}
     </fieldset>
     {validationMessage && <p className="att-inline-error" role="alert">{validationMessage} Correct the value in the form or Advanced JSON before submitting.</p>}

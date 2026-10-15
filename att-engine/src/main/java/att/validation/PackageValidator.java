@@ -2196,8 +2196,8 @@ public final class PackageValidator {
         if (("send".equals(operation) || "request".equals(operation)) && !supplied.contains("payload"))
             throw new IllegalArgumentException("MQ send/request requires payload; resolve package files with &{...}");
         if ("send".equals(operation) && !supplied.contains("queue")) {
-            boolean hasDefault = selected != null ? !selected.requestQueue().isEmpty() : allInstancesHaveRequestQueue(helper, true);
-            if (!hasDefault) throw new IllegalArgumentException("Missing effective send queue: provide queue or configure message.requestQueue on every selectable instance");
+            boolean hasDefault = selected != null ? !selected.requestQueues().isEmpty() : allInstancesHaveRequestQueue(helper, true);
+            if (!hasDefault) throw new IllegalArgumentException("Missing effective send queue: provide queue or configure message.requestQueue/requestQueues on every selectable instance");
         }
         if ("receive".equals(operation) && !supplied.contains("queue")) {
             boolean hasDefault = selected != null ? !selected.replyQueue().isEmpty() : allInstancesHaveRequestQueue(helper, false);
@@ -2205,10 +2205,10 @@ public final class PackageValidator {
         }
         for (String name : required) if (!supplied.contains(name)) throw new IllegalArgumentException("Missing required MQ argument '" + name + "' for " + parsed.name());
         if ("request".equals(operation)) {
-            boolean hasRequestDefault = selected != null ? !selected.requestQueue().isEmpty() : allInstancesHaveRequestQueue(helper, true);
+            boolean hasRequestDefault = selected != null ? !selected.requestQueues().isEmpty() : allInstancesHaveRequestQueue(helper, true);
             boolean hasReplyDefault = selected != null ? !selected.replyQueue().isEmpty() : allInstancesHaveRequestQueue(helper, false);
             if (!supplied.contains("requestQueue") && !hasRequestDefault) {
-                throw new IllegalArgumentException("Missing requestQueue: supply it in the call or mqhelper.message.requestQueue");
+                throw new IllegalArgumentException("Missing requestQueue: supply it in the call or mqhelper.message.requestQueue/requestQueues");
             }
             if (!supplied.contains("replyQueue") && !hasReplyDefault) {
                 throw new IllegalArgumentException("Missing replyQueue: supply it in the call or mqhelper.message.replyQueue");
@@ -2279,7 +2279,7 @@ public final class PackageValidator {
 
     private boolean allInstancesHaveRequestQueue(att.config.MqHelperConfig helper, boolean request) {
         for (att.config.MqHelperConfig instance : helper.instances().values()) {
-            if (request ? instance.requestQueue().isEmpty() : instance.replyQueue().isEmpty()) return false;
+            if (request ? instance.requestQueues().isEmpty() : instance.replyQueue().isEmpty()) return false;
         }
         return true;
     }

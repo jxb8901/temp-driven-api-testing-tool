@@ -19,6 +19,25 @@ class CaseExecutionLogTest {
     @org.junit.jupiter.api.BeforeEach void enableLegacyPathPresentation() { PathPresentation.configure(true, true); }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { PathPresentation.configure(false, false); }
 
+    @Test void trustedWorkerEvidencePreservesAuthoredTokensAndAlwaysProtectsSecrets() throws Exception {
+        att.core.PathPresentation.configure(false,false);
+        Path root=Files.createDirectories(tempDir.resolve("trusted-package"));
+        Path destination=tempDir.resolve("trusted-case.log");
+        String excerpt="payload='&{./Pacs008.xml}' ${nested['../請求.xml']} <a></a> user@host:/remote";
+        try(CaseExecutionLog log=new CaseExecutionLog(destination)) {
+            log.setProjectRoot(root);log.registerSecretRedactions(Collections.singletonList("registered-canary"));
+            log.appendRaw("ERROR",excerpt+" file="+root.resolve("flows/bad.yaml")+" line=7 column=3");
+            Map<String,Object> fields=new LinkedHashMap<String,Object>();
+            fields.put("command",excerpt);fields.put("password",Collections.singletonMap("unknown","nested-canary"));
+            fields.put("message","registered-canary Authorization: Bearer bearer-canary");log.append("INPUT",fields);
+            String snapshot=log.protectSnapshotText("password: snapshot-canary\nmessage: registered-canary\n");
+            assertFalse(snapshot.contains("snapshot-canary"));assertFalse(snapshot.contains("registered-canary"));
+        }
+        String text=new String(Files.readAllBytes(destination),"UTF-8");
+        assertTrue(text.contains(excerpt),text);assertTrue(text.contains(root.resolve("flows/bad.yaml").toString()),text);
+        for(String secret:new String[]{"registered-canary","nested-canary","bearer-canary"})assertFalse(text.contains(secret),text);
+    }
+
     @Test void appendsUtf8StructuredEntries() throws Exception {
         Path file=tempDir.resolve("case.log"); new CaseExecutionLog(file).append("階段","完成");
         String text=new String(Files.readAllBytes(file),"UTF-8"); assertTrue(text.contains("階段")); assertTrue(text.contains("完成"));
@@ -230,6 +249,20 @@ class CaseExecutionLogTest {
         String text = new String(Files.readAllBytes(file), "UTF-8");
         assertTrue(text.contains("token=[REDACTED_SECRET]"), text);
         assertFalse(text.contains("top-secret-value"), text);
+    }
+
+    @Test void rawFilePreservesExistingMarkersAcrossReaderChunks() throws Exception {
+        Path source = tempDir.resolve("marker-output.txt");
+        String content = String.join("", Collections.nCopies(8190, "x")) + "[REDACTED_SECRET] SECRET\n";
+        Files.write(source, content.getBytes("UTF-8"));
+        Path file = tempDir.resolve("marker-output.log");
+        try (CaseExecutionLog log = new CaseExecutionLog(file)) {
+            log.registerSecretRedactions(Collections.singletonList("SECRET"));
+            log.appendRawFile("TOOL STDOUT", source, false, Files.size(source));
+        }
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertTrue(text.contains("[REDACTED_SECRET] [REDACTED_SECRET]"), text);
+        assertFalse(text.contains("[REDACTED_["), text);
     }
 
     @Test void presentsProjectPathsPortablyAndBoundsExternalPathFields() throws Exception {

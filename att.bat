@@ -16,6 +16,7 @@ if not exist "%ROOT_DIR%att-cli\target\classes\att\FrameworkRunner.class" set "M
 if not exist "%ROOT_DIR%att-engine\target\classes\att\Version.class" set "MISSING_CLASSES=%MISSING_CLASSES% att-engine/target/classes/att/Version.class"
 if not exist "%ROOT_DIR%att-remote\target\classes\att\remote\RemoteCommand.class" set "MISSING_CLASSES=%MISSING_CLASSES% att-remote/target/classes/att/remote/RemoteCommand.class"
 if not exist "%ROOT_DIR%att-server-api\target\classes\att\server\api\ServerApi.class" set "MISSING_CLASSES=%MISSING_CLASSES% att-server-api/target/classes/att/server/api/ServerApi.class"
+if not exist "%ROOT_DIR%att-security\target\classes\att\security\SecretProtection.class" set "MISSING_CLASSES=%MISSING_CLASSES% att-security/target/classes/att/security/SecretProtection.class"
 if defined MISSING_CLASSES (
   echo ATT source checkout is missing required prebuilt classes:%MISSING_CLASSES% 1>&2
   echo Build explicitly with: mvn -DskipTests -pl att-cli -am compile 1>&2
@@ -24,7 +25,7 @@ if defined MISSING_CLASSES (
 )
 if not defined M2_REPO set "M2_REPO=%USERPROFILE%\.m2\repository"
 set "CP=%ROOT_DIR%att-cli\target\classes;%ROOT_DIR%att-engine\target\classes"
-set "CP=%CP%;%ROOT_DIR%att-remote\target\classes;%ROOT_DIR%att-server-api\target\classes"
+set "CP=%CP%;%ROOT_DIR%att-remote\target\classes;%ROOT_DIR%att-server-api\target\classes;%ROOT_DIR%att-security\target\classes"
 set "CP=%CP%;%M2_REPO%\commons-io\commons-io\2.16.1\commons-io-2.16.1.jar"
 set "CP=%CP%;%M2_REPO%\org\apache\httpcomponents\httpclient\4.5.13\httpclient-4.5.13.jar"
 set "CP=%CP%;%M2_REPO%\org\apache\httpcomponents\httpcore\4.4.13\httpcore-4.4.13.jar"

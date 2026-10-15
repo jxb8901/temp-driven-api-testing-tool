@@ -44,6 +44,56 @@ class AuthenticationIntegrationTest {
         restore(previousServerConfig);
     }
 
+    @Test void trustedGatewayOriginsPreserveLocalAuthenticationAndCsrfForBothOriginModes() throws Exception {
+        previousAttHome=System.getProperty("att.home");
+        System.setProperty("att.home",createLocalRuntime().toString());
+        for(boolean strict:List.of(false,true)) {
+            Path base=Files.createDirectories(temp.resolve("trusted-origin-"+strict));
+            Path packages=Files.createDirectories(base.resolve("packages"));Path pkg=Files.createDirectory(packages.resolve("p"));
+            Path data=base.resolve("data");
+            Path config=Files.writeString(base.resolve("server.yaml"),"server:\n  dataDir: "+data
+                    +"\n  auth:\n    mode: local\n  security:\n    checkCrossOrigin: "+strict
+                    +"\n    trustedOrigins: ['https://gateway.example:443/']\nworkers: {}\npackages:\n  allowedRoots: ["+packages+"]\n  entries:\n    p: "+pkg+"\n");
+            System.setProperty("att.server.config",config.toString());
+            Path users=Files.writeString(base.resolve("users.xml"),"<tomcat-users></tomcat-users>");
+            Tomcat tomcat=start(users,appDirectory("trusted-origin-app-"+strict),true);
+            try {
+                int port=tomcat.getConnector().getLocalPort();HttpClient client=HttpClient.newHttpClient();
+                String gateway="https://gateway.example";
+                String password="origin policy secure password";
+                String credentials="{\"loginId\":\"owner\",\"password\":\""+password+"\"}";
+                String bootstrap="{\"token\":\""+Files.readString(data.resolve("bootstrap-admin.token")).strip()
+                        +"\",\"loginId\":\"owner\",\"displayName\":\"Owner\",\"password\":\""+password+"\"}";
+                assertEquals(403,sendViaTrustedProxy(client,port,"POST","/att/api/v1/auth/bootstrap","https://gateway.example.evil.test",bootstrap).statusCode());
+                assertEquals(201,sendViaTrustedProxy(client,port,"POST","/att/api/v1/auth/bootstrap",gateway,bootstrap).statusCode());
+                for(String origin:List.of("null","https://gateway.example.evil.test","https://gateway.example:8443"))
+                    assertEquals(403,sendViaTrustedProxy(client,port,"POST","/att/api/v1/auth/login",origin,credentials).statusCode(),origin);
+                HttpResponse<String> login=sendViaTrustedProxy(client,port,"POST","/att/api/v1/auth/login",gateway,credentials);
+                assertEquals(200,login.statusCode(),login.body());
+                String setCookie=login.headers().firstValue("Set-Cookie").orElseThrow();
+                assertTrue(setCookie.contains("; Secure"));assertTrue(setCookie.contains("Path=/att/"));assertTrue(setCookie.contains("SameSite=Lax"));
+                String cookie=setCookie.split(";",2)[0];
+                String csrf=sendWithCookie(client,port,"GET","/att/api/v1/auth/me",cookie,null,null,null).headers().firstValue("X-ATT-CSRF").orElseThrow();
+                for(String token:List.of("","invalid"))
+                    assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",cookie,gateway,token,"{}").statusCode());
+                if(strict)assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",cookie,"https://attacker.example",csrf,"{}").statusCode());
+                String basic="Basic "+Base64.getEncoder().encodeToString(("owner:"+password).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                String basicCsrf=sendBasicViaTrustedProxy(client,port,"GET","/att/api/v1/auth/me",gateway,null,basic,null).headers().firstValue("X-ATT-CSRF").orElseThrow();
+                String newUser="{\"loginId\":\"viewer\",\"displayName\":\"Viewer\",\"password\":\"viewer secure password\",\"role\":\"USER\"}";
+                assertEquals(403,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users",gateway,newUser,basic,null).statusCode());
+                assertEquals(403,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users",gateway,newUser,basic,"invalid").statusCode());
+                if(strict)assertEquals(403,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users","https://attacker.example",newUser,basic,basicCsrf).statusCode());
+                assertEquals(201,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users",gateway,newUser,basic,basicCsrf).statusCode());
+                assertEquals(401,send(client,port,"GET","/att/api/v1/packages",gateway,null,null).statusCode());
+                HttpRequest insecure=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/att/api/v1/auth/login"))
+                        .header("Origin",gateway).header("X-Forwarded-For","203.0.113.9").header("X-Forwarded-Proto","http")
+                        .header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(credentials)).build();
+                assertHttpsRequired(client.send(insecure,HttpResponse.BodyHandlers.ofString()));
+                assertEquals(200,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",cookie,gateway,csrf,"{}").statusCode());
+            } finally {try{tomcat.stop();}finally{tomcat.destroy();}}
+        }
+    }
+
     @Test void localAuthenticationBootstrapsLogsInEnforcesCsrfAndSupportsAdminUserManagement() throws Exception {
         previousAttHome=System.getProperty("att.home");Path localHome=createLocalRuntime();System.setProperty("att.home",localHome.toString());
         Path packages=Files.createDirectory(temp.resolve("local-auth-packages"));Path pkg=Files.createDirectory(packages.resolve("p"));
@@ -461,15 +511,15 @@ class AuthenticationIntegrationTest {
             JsonNode referenced=getJson(port,resourcePath+"/source-file?referenceId="+referenceId,basic);
             assertTrue(referenced.path("available").asBoolean(),referenced.toString());
             assertTrue(referenced.path("text").asText().contains("A-1001"));
-            assertFalse(referenced.path("text").asText().contains("private@example.test"));
-            assertFalse(referenced.path("text").asText().contains("12 Main Street"));
+            assertTrue(referenced.path("text").asText().contains("private@example.test"));
+            assertTrue(referenced.path("text").asText().contains("12 Main Street"));
             assertFalse(referenced.path("text").asText().contains("payload-secret"));
             JsonNode records=getJson(port,"/att/api/v1/packages/debug/configuration/testdata/customers/records?environment=SIT&offset=0&limit=1",basic);
             assertFalse(records.path("redactionEnabled").asBoolean(true));assertEquals(2,records.path("total").asInt());
             assertEquals(1,records.path("nextOffset").asInt());
             assertEquals("A-1001",records.path("records").get(0).path("value").path("accountId").asText());
-            assertEquals("[REDACTED]",records.path("records").get(0).path("value").path("email").asText());
-            assertFalse(records.toString().contains("customer@example.test"));
+            assertEquals("customer@example.test",records.path("records").get(0).path("value").path("email").asText());
+            assertTrue(records.toString().contains("customer@example.test"));
             JsonNode compare=getJson(port,"/att/api/v1/packages/debug/configuration/compare?left=SIT&right=UAT&section=globals&offset=0&limit=50",basic);
             assertEquals("globals",compare.path("section").asText());
             assertTrue(compare.path("fields").size()>0);
@@ -490,12 +540,12 @@ class AuthenticationIntegrationTest {
             String referenceId=source.path("fileReferences").get(0).path("referenceId").asText();
             JsonNode referenced=getJson(port,"/att/api/v1/packages/debug/resources/template/"+resourceId+"/source-file?referenceId="+referenceId,null);
             assertTrue(referenced.path("available").asBoolean(),referenced.toString());
-            assertFalse(referenced.path("text").asText().contains("private@example.test"));
-            assertFalse(referenced.path("text").asText().contains("12 Main Street"));
+            assertTrue(referenced.path("text").asText().contains("private@example.test"));
+            assertTrue(referenced.path("text").asText().contains("12 Main Street"));
             assertFalse(referenced.path("text").asText().contains("payload-secret"));
             JsonNode records=getJson(port,"/att/api/v1/packages/debug/configuration/testdata/customers/records?environment=SIT&offset=0&limit=1",null);
             assertEquals("A-1001",records.path("records").get(0).path("value").path("accountId").asText());
-            assertEquals("[REDACTED]",records.path("records").get(0).path("value").path("email").asText());
+            assertEquals("customer@example.test",records.path("records").get(0).path("value").path("email").asText());
             HttpClient client=HttpClient.newHttpClient();
             HttpResponse<String> relaxedOrigin=send(client,port,"POST","/att/api/v1/load-schedules/preview","https://attacker.example",null,
                     "{\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}");
@@ -518,7 +568,7 @@ class AuthenticationIntegrationTest {
         Path lib=Files.createDirectories(home.resolve("lib"));
         Set<String> added=new HashSet<>();
         try(JarOutputStream jar=new JarOutputStream(Files.newOutputStream(lib.resolve("att-local-"+ServerBuildInfo.PRODUCT+".jar")))) {
-            for(String module:List.of("att-cli","att-engine","att-remote","att-server-api","att-worker")) {
+            for(String module:List.of("att-security","att-cli","att-engine","att-remote","att-server-api","att-worker")) {
                 Path classes=Path.of(module,"target/classes");
                 try(var paths=Files.walk(classes)) {
                     for(Path source:(Iterable<Path>)paths.filter(Files::isRegularFile)::iterator) {

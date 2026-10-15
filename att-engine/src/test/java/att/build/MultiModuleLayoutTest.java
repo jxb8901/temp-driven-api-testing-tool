@@ -21,7 +21,7 @@ class MultiModuleLayoutTest {
 
     @Test void repositoryKeepsEngineCliWorkerServerAndDistributionBoundaries() throws Exception {
         Path root = Paths.get("").toAbsolutePath().normalize();
-        for (String module : Arrays.asList("att-engine", "att-server-api", "att-remote", "att-cli", "att-worker", "att-server", "att-dist"))
+        for (String module : Arrays.asList("att-security", "att-engine", "att-server-api", "att-remote", "att-cli", "att-worker", "att-server", "att-dist"))
             assertTrue(Files.isRegularFile(root.resolve(module + "/pom.xml")), module);
         assertTrue(Files.isRegularFile(root.resolve("att-cli/src/main/java/att/FrameworkRunner.java")));
         assertTrue(Files.isRegularFile(root.resolve("att-engine/src/main/java/att/api/AttService.java")));
@@ -29,7 +29,7 @@ class MultiModuleLayoutTest {
         assertFalse(Files.exists(root.resolve("src/main/java/att/FrameworkRunner.java")));
 
         String parent = read(root.resolve("pom.xml"));
-        for (String module : Arrays.asList("att-engine", "att-server-api", "att-remote", "att-cli", "att-worker", "att-server", "att-dist"))
+        for (String module : Arrays.asList("att-security", "att-engine", "att-server-api", "att-remote", "att-cli", "att-worker", "att-server", "att-dist"))
             assertTrue(parent.contains("<module>" + module + "</module>"), parent);
         assertTrue(parent.contains("<att.cli.java>8</att.cli.java>"), parent);
         assertFalse(parent.contains("<maven.compiler.source>"), parent);
@@ -78,14 +78,14 @@ class MultiModuleLayoutTest {
         assertTrue(local.contains("att-${project.version}-modules.jar"), local);
         assertTrue(local.contains("<destName>att-local-${project.version}.jar</destName>"), local);
         assertTrue(local.contains("<unpack>false</unpack>"), local);
-        for (String module : Arrays.asList("att-cli", "att-engine", "att-remote", "att-server-api", "att-worker"))
+        for (String module : Arrays.asList("att-security", "att-cli", "att-engine", "att-remote", "att-server-api", "att-worker"))
             assertTrue(local.contains("<exclude>att:" + module + "</exclude>"), local);
         assertFalse(local.contains("att-server-${project.version}.war"), local);
 
         String modules = read(root.resolve("att-dist/src/assembly/modules.xml"));
         assertTrue(modules.contains("<format>jar</format>"), modules);
         assertTrue(modules.contains("<unpack>true</unpack>"), modules);
-        for (String module : Arrays.asList("att-cli", "att-engine", "att-remote", "att-server-api", "att-worker"))
+        for (String module : Arrays.asList("att-security", "att-cli", "att-engine", "att-remote", "att-server-api", "att-worker"))
             assertTrue(modules.contains("<include>att:" + module + "</include>"), modules);
 
         String serverAssembly = read(root.resolve("att-dist/src/assembly/server.xml"));
@@ -118,7 +118,7 @@ class MultiModuleLayoutTest {
     }
 
     @Test void cleanCannotDeleteAnyModuleSourceTree() throws Exception {
-        for (String module : Arrays.asList("att-engine", "att-server-api", "att-remote", "att-cli", "att-worker", "att-server", "att-dist")) {
+        for (String module : Arrays.asList("att-security", "att-engine", "att-server-api", "att-remote", "att-cli", "att-worker", "att-server", "att-dist")) {
             Path root = temp.resolve(module + "-project");
             Files.createDirectories(root.resolve(module));
             FrameworkConfig config = new FrameworkConfig(Paths.get(module), Paths.get("report"), Paths.get("logs"), "SIT", 30,

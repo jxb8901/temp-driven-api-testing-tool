@@ -5,6 +5,8 @@ import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
 
 /** Immutable invocation-scoped IBM MQ client configuration. */
 public final class MqHelperConfig {
@@ -30,6 +32,8 @@ public final class MqHelperConfig {
     private final String format;
     private final String persistence;
     private final String requestQueue;
+    private final List<String> requestQueues;
+    private final String requestQueueSelectionStrategy;
     private final String replyQueue;
     private final int requestReplyWaitMs;
     private final String responseFormat;
@@ -104,6 +108,8 @@ public final class MqHelperConfig {
         this.format = format == null ? "MQSTR" : format;
         this.persistence = persistence == null ? "asQueue" : persistence;
         this.requestQueue = requestQueue == null ? "" : requestQueue;
+        this.requestQueues = this.requestQueue.isEmpty() ? Collections.<String>emptyList() : Collections.singletonList(this.requestQueue);
+        this.requestQueueSelectionStrategy = "single";
         this.replyQueue = replyQueue == null ? "" : replyQueue;
         this.requestReplyWaitMs = requestReplyWaitMs;
         this.responseFormat = responseFormat == null ? "text" : responseFormat;
@@ -127,7 +133,7 @@ public final class MqHelperConfig {
                            String responseFormat,
                            String evidencePayload, int poolMaxSize, int poolMinIdle, long poolBorrowTimeoutMs,
                            int maxResponseBytes, Path sourceFile, String logicalId, String instanceId, String selectionStrategy,
-                           boolean group, Map<String, MqHelperConfig> instances) {
+                           boolean group, Map<String, MqHelperConfig> instances, List<String> requestQueues, String requestQueueSelectionStrategy) {
         this.id = id;
         this.name = name;
         this.description = description;
@@ -144,6 +150,8 @@ public final class MqHelperConfig {
         this.format = format == null ? "MQSTR" : format;
         this.persistence = persistence == null ? "asQueue" : persistence;
         this.requestQueue = requestQueue == null ? "" : requestQueue;
+        this.requestQueues = Collections.unmodifiableList(new ArrayList<String>(requestQueues));
+        this.requestQueueSelectionStrategy = requestQueueSelectionStrategy;
         this.replyQueue = replyQueue == null ? "" : replyQueue;
         this.requestReplyWaitMs = requestReplyWaitMs;
         this.responseFormat = responseFormat == null ? "text" : responseFormat;
@@ -161,6 +169,14 @@ public final class MqHelperConfig {
                 : Collections.unmodifiableMap(new LinkedHashMap<String, MqHelperConfig>(instances));
     }
 
+    /** Loader-only immutable copy after validated queue routing has been resolved. */
+    MqHelperConfig withRequestQueueRouting(List<String> queues, String strategy) {
+        return new MqHelperConfig(id, name, description, queueManager, host, port, channel, username, password,
+                charset, encoding, expiry, format, persistence, requestQueue, replyQueue, transport,
+                requestReplyWaitMs, responseFormat, evidencePayload, poolMaxSize, poolMinIdle, poolBorrowTimeoutMs,
+                maxResponseBytes, sourceFile, logicalId, instanceId, selectionStrategy, group, instances, queues, strategy);
+    }
+
     /** Creates a physical immutable configuration with a logical helper identity. */
     public static MqHelperConfig physical(MqHelperConfig base, String logicalId, String instanceId) {
         if (base == null) throw new IllegalArgumentException("MQ helper configuration is required");
@@ -169,7 +185,7 @@ public final class MqHelperConfig {
                 base.format(), base.persistence(), base.requestQueue(), base.replyQueue(), base.transport(),
                 base.requestReplyWaitMs(), base.responseFormat(),
                 base.evidencePayload(), base.poolMaxSize(), base.poolMinIdle(), base.poolBorrowTimeoutMs(), base.maxResponseBytes(), base.sourceFile(),
-                logicalId, instanceId, "single", false, Collections.<String, MqHelperConfig>emptyMap());
+                logicalId, instanceId, "single", false, Collections.<String, MqHelperConfig>emptyMap(), base.requestQueues(), base.requestQueueSelectionStrategy());
     }
 
     /** Creates a logical v1.1 group whose instances are already fully materialized. */
@@ -181,7 +197,7 @@ public final class MqHelperConfig {
                 "", "", first.charset(), first.encoding(), first.expiry(), first.format(), first.persistence(),
                 first.requestQueue(), first.replyQueue(), first.transport(), first.requestReplyWaitMs(), first.responseFormat(), evidencePayload,
                 first.poolMaxSize(), first.poolMinIdle(), first.poolBorrowTimeoutMs(), first.maxResponseBytes(), sourceFile,
-                id, "", strategy, true, instances);
+                id, "", strategy, true, instances, first.requestQueues(), first.requestQueueSelectionStrategy());
     }
 
     public String id() { return id; }
@@ -227,6 +243,8 @@ public final class MqHelperConfig {
     public String format() { return format; }
     public String persistence() { return persistence; }
     public String requestQueue() { return requestQueue; }
+    public List<String> requestQueues() { return requestQueues; }
+    public String requestQueueSelectionStrategy() { return requestQueueSelectionStrategy; }
     public String replyQueue() { return replyQueue; }
     public int requestReplyWaitMs() { return requestReplyWaitMs; }
     public String responseFormat() { return responseFormat; }
@@ -257,6 +275,8 @@ public final class MqHelperConfig {
         result.put("persistence", persistence);
         result.put("responseFormat", responseFormat);
         if (!requestQueue.isEmpty()) result.put("requestQueue", requestQueue);
+        result.put("requestQueues", requestQueues);
+        result.put("requestQueueSelectionStrategy", requestQueueSelectionStrategy);
         if (!replyQueue.isEmpty()) result.put("replyQueue", replyQueue);
         return Collections.unmodifiableMap(result);
     }

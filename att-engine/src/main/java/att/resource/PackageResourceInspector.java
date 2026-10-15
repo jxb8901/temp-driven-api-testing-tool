@@ -1716,7 +1716,7 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     /** Recursively keep descriptor structure while excluding arbitrary authored scalar payloads. */
     private Object safeProjection(Object value, String key, Set<String> allowed) {
-        if (key != null && (sensitiveKey(key) || configuredSensitiveField(key))) return "[REDACTED]";
+        if (key != null && (sensitiveKey(key) || redactionEnabled && personalField(key) || configuredSensitiveField(key))) return "[REDACTED]";
         if (key != null && redactionEnabled && freeFormKey(key)) return "[HIDDEN]";
         if (value instanceof Map) {
             Map<String, Object> result = new LinkedHashMap<String, Object>();
@@ -1870,7 +1870,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
                 String key = String.valueOf(entry.getKey());
                 String childPath = path.isEmpty() ? key : path + "." + key;
-                if (sensitiveKey(key) || protectedSshConnectionField(childPath) || configuredSensitivePath(childPath) || configuredSensitiveField(key)
+                if (sensitiveKey(key) || redactionEnabled && (personalField(key) || protectedSshConnectionField(childPath)) || configuredSensitivePath(childPath) || configuredSensitiveField(key)
                         || redactionEnabled && (freeFormKey(key) || isSensitivePath(childPath))) result.put(key, "[REDACTED]");
                 else result.put(key, sourceYamlProjection(entry.getValue(), childPath,sourceLogicalPath));
             }
@@ -1915,7 +1915,7 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private Object sanitize(Object value, String key) {
-        if (key != null && sensitiveKey(key)) return "[REDACTED]";
+        if (key != null && (sensitiveKey(key) || redactionEnabled && personalField(key))) return "[REDACTED]";
         if (value instanceof Map) {
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
@@ -1934,17 +1934,11 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private static boolean sensitiveKey(String key) {
-        String normalized = key.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
-        if (normalized.contains("password") || normalized.contains("passwd") || normalized.contains("token")
-                || normalized.contains("secret") || normalized.contains("credential") || normalized.equals("authorization")
-                || normalized.contains("apikey") || normalized.contains("accesskey") || normalized.contains("clientid")
-                || normalized.contains("username") || normalized.contains("privatekey") || normalized.contains("identityfile")
-                || normalized.equals("evidencepayload")
-                || normalized.contains("cookie") || normalized.equals("headers") || normalized.equals("header")
-                || normalized.equals("email") || normalized.contains("phone") || normalized.equals("address")
-                || normalized.equals("ssn") || normalized.equals("nationalid") || normalized.equals("passport")
-                || normalized.equals("dateofbirth") || normalized.equals("birthdate")) return true;
-        return false;
+        return att.security.SecretProtection.sensitiveName(key);
+    }
+
+    private static boolean personalField(String key) {
+        return key.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "").matches("username|email|phone|address|ssn|nationalid|passport|dateofbirth|birthdate|creditcard|cardnumber|cvv|iban|routingnumber");
     }
 
     private static boolean protectedSshConnectionField(String path) {
@@ -1973,31 +1967,27 @@ public final class PackageResourceInspector implements AutoCloseable {
     private String scrubDescription(String value) {
         if (value == null) return null;
         String result = scrub(value);
-        result = SOURCE_PII_VALUE.matcher(result).replaceAll("$1[REDACTED]");
-        result = XML_PII.matcher(result).replaceAll("$1[REDACTED]$3");
-        return ACCOUNT_IDENTIFIER.matcher(result).replaceAll("$1[REDACTED]");
+        if (redactionEnabled) result = SOURCE_PII_VALUE.matcher(result).replaceAll("$1[REDACTED]");
+        if (redactionEnabled) result = XML_PII.matcher(result).replaceAll("$1[REDACTED]$3");
+        return redactionEnabled ? ACCOUNT_IDENTIFIER.matcher(result).replaceAll("$1[REDACTED]") : result;
     }
 
     private String scrubSensitiveValues(String value) {
         String result = value.replace(packageRoot.toString(), "[package]");
-        result = AUTH_SCHEME.matcher(result).replaceAll("$1 [REDACTED]");
-        result = KEY_VALUE_SECRET.matcher(result).replaceAll("$1[REDACTED]");
-        result = URL_CREDENTIALS.matcher(result).replaceAll("$1[REDACTED]@");
-        result = XML_SECRET.matcher(result).replaceAll("$1[REDACTED]$3");
-        result = PRIVATE_KEY.matcher(result).replaceAll("[REDACTED PRIVATE KEY]");
+        result = att.security.SecretProtection.text(result).replace(att.security.SecretProtection.REDACTED, "[REDACTED]");
         return result;
     }
 
     private String scrubSourceText(String value, String logicalPath) {
         if (value == null) return null;
         String result = sourcePathSafe(scrubSensitiveValues(value), safeFileExpressionTokens(value, logicalPath));
-        result = SOURCE_PII_VALUE.matcher(result).replaceAll("$1[REDACTED]");
-        result = XML_PII.matcher(result).replaceAll("$1[REDACTED]$3");
+        if (redactionEnabled) result = SOURCE_PII_VALUE.matcher(result).replaceAll("$1[REDACTED]");
+        if (redactionEnabled) result = XML_PII.matcher(result).replaceAll("$1[REDACTED]$3");
         if (logicalPath != null && logicalPath.toLowerCase(Locale.ROOT).endsWith(".csv")) result = scrubCsvPersonalData(result);
         return result;
     }
 
-    private static String scrubCsvPersonalData(String text) {
+    private String scrubCsvPersonalData(String text) {
         List<List<int[]>> rows = new ArrayList<List<int[]>>();
         List<int[]> row = new ArrayList<int[]>();
         int start = 0; boolean quoted = false;
@@ -2020,7 +2010,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         Set<Integer> protectedColumns = new LinkedHashSet<Integer>();
         List<int[]> header = rows.get(0);
         for (int column = 0; column < header.size(); column++)
-            if (sensitiveKey(csvCell(text, header.get(column)))) protectedColumns.add(Integer.valueOf(column));
+            if (sensitiveKey(csvCell(text, header.get(column))) || redactionEnabled && personalField(csvCell(text, header.get(column)))) protectedColumns.add(Integer.valueOf(column));
         if (protectedColumns.isEmpty()) return text;
         StringBuilder safe = new StringBuilder(text);
         for (int record = rows.size() - 1; record >= 1; record--) {

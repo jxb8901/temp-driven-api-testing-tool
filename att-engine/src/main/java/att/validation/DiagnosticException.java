@@ -32,10 +32,10 @@ public class DiagnosticException extends IllegalArgumentException {
                                 String sheet, Integer row, Integer column, String template, String action,
                                 String suggestion, Throwable cause, SourceLocation source, DiagnosticContext context,
                                 java.util.List<java.util.Map<String, Object>> schemaViolations) {
-        super(summary, cause);
+        super(att.security.SecretProtection.text(summary), cause);
         this.code = required(code, "diagnostic code");
-        this.summary = required(summary, "diagnostic summary");
-        this.detail = blankToNull(detail);
+        this.summary = att.security.SecretProtection.text(required(summary, "diagnostic summary"));
+        this.detail = detail == null ? null : blankToNull(att.security.SecretProtection.text(detail));
         this.file = blankToNull(file);
         this.field = blankToNull(field);
         this.sheet = blankToNull(sheet);

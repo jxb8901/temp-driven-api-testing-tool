@@ -270,8 +270,11 @@ public final class ServerConfig {
 
     private static Security security(Object raw) {
         Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.security");
-        for(Object key:values.keySet())if(!(key instanceof String)||!Set.of("checkCrossOrigin").contains(key))throw new IllegalArgumentException("server.security contains an unknown setting");
-        return new Security(boolValue(values,"checkCrossOrigin",false));
+        for(Object key:values.keySet())if(!(key instanceof String)||!Set.of("checkCrossOrigin","trustedOrigins").contains(key))throw new IllegalArgumentException("server.security contains an unknown setting");
+        java.util.ArrayList<String> origins=new java.util.ArrayList<>();
+        if(values.get("trustedOrigins")!=null)for(Object value:list(values.get("trustedOrigins"),"server.security.trustedOrigins"))
+            origins.add(string(value,"server.security.trustedOrigins entry"));
+        return new Security(boolValue(values,"checkCrossOrigin",false),origins);
     }
 
     private static List<String> checkedGlobs(Object raw,String field) {
@@ -382,7 +385,12 @@ public final class ServerConfig {
 
     public static final class Security {
         public final boolean checkCrossOrigin;
-        private Security(boolean checkCrossOrigin){this.checkCrossOrigin=checkCrossOrigin;}
+        public final List<String> trustedOrigins;
+        final OriginPolicy originPolicy;
+        private Security(boolean checkCrossOrigin,List<String> trustedOrigins){
+            this.checkCrossOrigin=checkCrossOrigin;this.trustedOrigins=List.copyOf(trustedOrigins);
+            this.originPolicy=new OriginPolicy(this.trustedOrigins);
+        }
     }
 
     public static final class Inspection {

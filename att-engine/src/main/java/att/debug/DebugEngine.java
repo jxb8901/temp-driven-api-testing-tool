@@ -572,7 +572,7 @@ public final class DebugEngine {
                     if (stageStarted && !stageFinished) {
                         try { context.finishStage(status.name(), Duration.between(started, Instant.now()).toMillis()); } catch (Exception ignored) { }
                     }
-                    try { Files.write(artifacts.resolve("case.yaml"), new Yaml().dump(att.core.PathPresentation.displayStructure(context.caseTree(), projectRoot)).getBytes(StandardCharsets.UTF_8)); }
+                    try { Files.write(artifacts.resolve("case.yaml"), log.protectSnapshotText(new Yaml().dump(att.security.SecretProtection.value(att.core.PathPresentation.displayStructure(context.caseTree(), projectRoot)))).getBytes(StandardCharsets.UTF_8)); }
                     catch (Exception ignored) { /* result.yaml still records the primary outcome */ }
                 }
                 if (log != null) try { log.close(); } catch (Exception ignored) { }
