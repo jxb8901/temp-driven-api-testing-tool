@@ -175,6 +175,7 @@ public final class DebugEngine {
     }
 
     private boolean containsSensitiveValue(Object value, String key, String path) {
+        if (isKeepDefaultMarker(value)) return false;
         if (key != null && (sensitiveFormKey(key) || matchesConfiguredSensitivePath(path) || matchesConfiguredSensitiveField(key))
                 && hasValue(value)) return true;
         if (value instanceof Map) {
@@ -206,6 +207,11 @@ public final class DebugEngine {
             return false;
         }
         return true;
+    }
+
+    private static boolean isKeepDefaultMarker(Object value) {
+        if (!(value instanceof Map) || ((Map<?, ?>) value).size() != 1) return false;
+        return ((Map<?, ?>) value).get(KEEP_DEFAULT_MARKER) instanceof String;
     }
 
     private void validateTargetInput(String type, String id, DebugInput input) throws Exception {
@@ -271,9 +277,10 @@ public final class DebugEngine {
         }
         if (value instanceof String) {
             if ("/schemaVersion".equals(path) || ((String) value).isEmpty()) return value;
-            return redactionEnabled ? keepDefault(path, redacted) : scrub((String) value);
+            String safe = scrub((String) value);
+            return safe.equals(value) ? value : keepDefault(path, redacted);
         }
-        if (value != null) return redactionEnabled ? keepDefault(path, redacted) : value;
+        if (value != null) return value;
         return value;
     }
 
@@ -775,9 +782,8 @@ public final class DebugEngine {
 
     private boolean redactedByPolicy(Object value, String key, String path) {
         if (key != null && sensitiveFormKey(key)) return true;
-        if (value == null) return false;
-        if ("/schemaVersion".equals(path)) return false;
-        return !(value instanceof String && ((String) value).isEmpty());
+        if (key != null && (configuredSensitivePath(path) || configuredSensitiveField(key))) return true;
+        return value instanceof String && !scrub((String) value).equals(value);
     }
 
     private Path autoInput(String type, String id) throws Exception {

@@ -176,7 +176,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         if (locator == null || locator.length() > 1024) throw new IllegalArgumentException("Package file locator is invalid");
         try {
             boolean linked=originPath!=null&&!originPath.codePoints().allMatch(Character::isWhitespace);
-            if(linked!=(referenceId!=null&&!referenceId.isBlank()))throw new ResourceNotFoundException();
+            if(linked!=(referenceId!=null&&!referenceId.trim().isEmpty()))throw new ResourceNotFoundException();
             PackageResourceResolver.ResourceOrigin origin=resources.origin(packageRoot);
             PackageResourceResolver.PackageResource sourceFile=null;
             if(linked) {
@@ -1053,6 +1053,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("input", projection.get("input"));
         result.put("redacted", projection.get("redacted"));
         result.put("normalizedInput", projection.get("normalizedInput"));
+        result.put("containsSensitiveValues", Boolean.valueOf(engine.containsSensitiveValue(input)));
         result.put("revisionDigest", index.revisionDigest);
         return bounded(result);
     }

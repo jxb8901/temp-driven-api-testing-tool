@@ -95,6 +95,31 @@ class DebugEngineTest {
         assertTrue(configuredWithoutMasking.containsSensitiveValue(configuredField));
     }
 
+    @Test void keepsOrdinaryExpressionsVisibleButClassifiedDebugValuesProtectedForSchedules() {
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
+                Paths.get("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+        DebugEngine engine = new DebugEngine(temp, config, new att.exec.IbmMqClientFactory(), true,
+                Collections.singletonList("/inputs/customerRef"), Collections.<String>emptyList());
+        Map<String, Object> inputs = new LinkedHashMap<String, Object>();
+        inputs.put("currency", "@{edda.currency}");
+        inputs.put("password", "package-secret");
+        inputs.put("customerRef", "customer-private-123");
+
+        Map<String, Object> projected = engine.projectSafeValue(Collections.singletonMap("inputs", inputs));
+        assertTrue(projected.toString().contains("@{edda.currency}"), "Non-secret expression defaults remain literal and editable.");
+        assertFalse(projected.toString().contains("package-secret"));
+        assertFalse(projected.toString().contains("customer-private-123"));
+
+        @SuppressWarnings("unchecked") Map<String, Object> safeValue = (Map<String, Object>) projected.get("value");
+        @SuppressWarnings("unchecked") Map<String, Object> safeInputs = (Map<String, Object>) safeValue.get("inputs");
+        assertEquals("/inputs/password", ((Map<?, ?>) safeInputs.get("password")).get("$attDebugKeepDefault"));
+        assertEquals("/inputs/customerRef", ((Map<?, ?>) safeInputs.get("customerRef")).get("$attDebugKeepDefault"));
+        assertFalse(engine.containsSensitiveValue(Collections.singletonMap("inputs", safeInputs)),
+                "Validated keep-default markers must not be mistaken for persisted secret values.");
+        assertTrue(engine.containsSensitiveValue(Collections.singletonMap("inputs", inputs)),
+                "Raw secret-bearing overrides must not be persisted in a schedule.");
+    }
+
     @Test void hidesPackageAuthoredDebugValuesAndRestoresOnlyPathBoundMarkers() throws Exception {
         Path project = fixtureWithoutSidecars();
         Files.write(project.resolve("templates/SIMPLE/debug.yaml"), ("schemaVersion: att-debug/v1.2\n"
@@ -105,7 +130,7 @@ class DebugEngineTest {
                 + "vars: {orderId: ORD-PRIVATE-123}\n").getBytes(StandardCharsets.UTF_8));
         Path tools = Files.createDirectories(project.resolve("config/tools"));
         Files.write(tools.resolve("echo.debug.yaml"), ("schemaVersion: att-debug/v1.2\n"
-                + "arguments: {value: 'tool argument secret'}\n").getBytes(StandardCharsets.UTF_8));
+                + "arguments: {value: 'tool argument secret: private-tool-value'}\n").getBytes(StandardCharsets.UTF_8));
         Map<String, ToolArgumentConfig> args = Collections.singletonMap("value",
                 new ToolArgumentConfig("value", "Value", "Value", true, ""));
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
@@ -118,7 +143,7 @@ class DebugEngineTest {
         assertFalse(safeForm.contains("123456789"));
         assertFalse(safeForm.contains("violet-123"));
         assertFalse(safeForm.contains("array secret one"));
-        assertFalse(safeForm.contains("ORD-PRIVATE-123"));
+        assertTrue(safeForm.contains("ORD-PRIVATE-123"), "Ordinary scalar defaults remain editable instead of being hidden wholesale.");
         @SuppressWarnings("unchecked") Map<String, Object> safeInput = (Map<String, Object>) form.get("input");
         @SuppressWarnings("unchecked") Map<String, Object> safeInputs = (Map<String, Object>) safeInput.get("inputs");
         @SuppressWarnings("unchecked") Map<String, Object> safePayload = (Map<String, Object>) safeInputs.get("payload");
@@ -139,7 +164,7 @@ class DebugEngineTest {
         editedInputs.put("newLiteral", "[REDACTED]");
         editedInputs.put("value", "visible override");
         submitted.put("inputs", editedInputs);
-        submitted.put("vars", Collections.singletonMap("orderId", ((Map<?, ?>) ((Map<?, ?>) safeInput.get("vars")).get("orderId"))));
+        submitted.put("vars", Collections.singletonMap("orderId", ((Map<?, ?>) safeInput.get("vars")).get("orderId")));
 
         Map<String, Object> validated = engine.validateInlineInput("template", "SIMPLE", submitted);
         @SuppressWarnings("unchecked") Map<String, Object> normalized = (Map<String, Object>) validated.get("normalizedInput");

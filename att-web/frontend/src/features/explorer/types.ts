@@ -271,6 +271,7 @@ export interface ExplorerPageProps {
   onJobAccepted: (jobId: string) => void;
   onPrincipalLabelChange?: (label: string) => void;
   onOpenQuickLoad?: (identity: ResourceIdentity) => void;
+  onScheduleDebug?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string; jobType: 'debug'; target: { type: DebugResourceType; id: string } }) => void;
   onOpenConfiguration?: (identity: ResourceIdentity) => void;
   onOpenConfigurationFile?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
 }

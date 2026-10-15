@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-/** Single-node, bounded scheduler. It records an occurrence before submitting its normal Load job. */
+/** Single-node, bounded scheduler. It records an occurrence before submitting its typed job. */
 final class LoadScheduleScheduler implements AutoCloseable {
     interface Submitter { Map<String,Object> submit(LoadSchedule schedule,String occurrenceId) throws Exception; }
     private static final Logger LOG=Logger.getLogger(LoadScheduleScheduler.class.getName());
@@ -25,7 +25,7 @@ final class LoadScheduleScheduler implements AutoCloseable {
 
     LoadScheduleScheduler(ServerConfig.Scheduling config,JobStore store,Submitter submitter,Clock clock) {
         this.config=config;this.store=store;this.submitter=submitter;this.clock=clock;this.startedAt=clock.instant();
-        this.executor=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-load-scheduler");t.setDaemon(true);return t;});
+        this.executor=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-scheduler");t.setDaemon(true);return t;});
     }
 
     void start() {
@@ -92,7 +92,7 @@ final class LoadScheduleScheduler implements AutoCloseable {
             store.updateOccurrence(occurrenceId,"skipped","schedule-overlap-limit",null);return;
         }
         if(store.activeScheduledCount(null)>=config.maxConcurrentRuns) {
-            store.updateOccurrence(occurrenceId,"skipped","global-scheduled-load-capacity",null);return;
+            store.updateOccurrence(occurrenceId,"skipped","global-scheduled-job-capacity",null);return;
         }
         try {
             Map<String,Object> job=submitter.submit(schedule,occurrenceId);
@@ -100,7 +100,7 @@ final class LoadScheduleScheduler implements AutoCloseable {
         } catch(Exception failure) {
             String reason=ServerRuntime.safeMessage(failure);
             store.updateOccurrence(occurrenceId,"failed-to-submit",reason.length()>240?reason.substring(0,240):reason,null);
-            LOG.info("Scheduled Load submission failed for occurrence "+occurrenceId+": "+reason);
+            LOG.info("Scheduled job submission failed for occurrence "+occurrenceId+": "+reason);
             if("pauseAfterSubmitFailure".equals(config.failurePolicy))try {
                 LoadSchedule paused=null;
                 synchronized(store) {
