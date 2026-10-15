@@ -405,7 +405,7 @@ public final class ApiServlet extends HttpServlet {
             int limit="declared".equals(action)||"source".equals(action)?0:parseConfigurationLimit(req.getParameter("limit"));
             String inspectionPath="files".equals(action)||"source".equals(action)?req.getParameter("path"):null;
             String inspectionOrigin="source".equals(action)?req.getParameter("origin"):null;
-            String inspectionQuery="files".equals(action)?req.getParameter("query"):
+            String inspectionQuery="files".equals(action)||"effective".equals(action)?req.getParameter("query"):
                     "testdata-records".equals(action)&&parseOptionalBoolean(req.getParameter("previewGenerated"),"previewGenerated")
                             ?"preview-generated":null;
             String inspectionReferenceId="source".equals(action)?req.getParameter("referenceId"):null;

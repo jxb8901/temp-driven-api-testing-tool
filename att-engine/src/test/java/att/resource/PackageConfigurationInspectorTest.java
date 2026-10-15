@@ -72,6 +72,35 @@ class PackageConfigurationInspectorTest {
         assertTrue(expandedFields.stream().anyMatch(item->"globals.timeoutMs".equals(item.get("path"))));
     }
 
+    @Test void compareHidesUnchangedDescriptorsSharedByBothEnvironmentsByDefault() throws Exception {
+        Path root=packageRoot("compare-shared-descriptor");
+        write(root.resolve("config/dbhelpers/shared.yaml"),helper("jdbc:postgresql://shared.internal/orders","shared-user","shared-secret",false)
+                .replace("id: orders","id: shared"));
+        write(root.resolve("config/dbhelpers/sit-only.yaml"),helper("jdbc:postgresql://sit.internal/orders","sit-user","sit-secret",false)
+                .replace("id: orders","id: sitOnly"));
+        write(root.resolve("config/dbhelpers/uat-only.yaml"),helper("jdbc:postgresql://uat.internal/orders","uat-user","uat-secret",true)
+                .replace("id: orders","id: uatOnly"));
+        write(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                +"templates:\n  root: templates\ntestcase:\n  root: testcase\n"
+                +"environments:\n  SIT:\n    dbhelpers: [config/dbhelpers/shared.yaml, config/dbhelpers/sit-only.yaml]\n"
+                +"  UAT:\n    dbhelpers: [config/dbhelpers/shared.yaml, config/dbhelpers/uat-only.yaml]\n");
+
+        PackageConfigurationInspector inspector=inspector(root);
+        Map<String,Object> scoped=inspector.inspect("compare","SIT","UAT","dbhelpers",0,100,false);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> scopedFields=(List<Map<String,Object>>)scoped.get("fields");
+        assertTrue(scopedFields.stream().noneMatch(item->"dbhelpers.shared.readOnly".equals(item.get("path"))),
+                "An unchanged descriptor selected from the same package file in both profiles is shared, not an environment difference.");
+        assertTrue(scopedFields.stream().anyMatch(item->"dbhelpers.sitOnly.readOnly".equals(item.get("path"))));
+        assertTrue(scopedFields.stream().anyMatch(item->"dbhelpers.uatOnly.readOnly".equals(item.get("path"))));
+
+        Map<String,Object> expanded=inspector.inspect("compare","SIT","UAT","dbhelpers",0,100,true);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> expandedFields=(List<Map<String,Object>>)expanded.get("fields");
+        Map<String,Object> shared=expandedFields.stream().filter(item->"dbhelpers.shared.readOnly".equals(item.get("path")))
+                .findFirst().orElseThrow(AssertionError::new);
+        assertEquals("config/dbhelpers/shared.yaml",shared.get("source"),
+                "The expanded comparison identifies the actual shared descriptor file.");
+    }
+
     @Test void supportsRootOnlyEffectiveConfigurationAndReportsSelectedProfileOrigin() throws Exception {
         Path root=packageRoot("root-only-config");
         write(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: LOCAL\ntimeoutMs: 5000\ntemplates:\n  root: templates\ntestcase:\n  root: testcase\n");
@@ -204,6 +233,27 @@ class PackageConfigurationInspectorTest {
         assertNull(maskedPage.get("nextOffset"));
         assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
                 ()->visible.inspect("testdata-records","SIT",null,"missing",0,1));
+    }
+
+    @Test void filtersAndPaginatesTheTestdataCatalogBySafeDescriptorIdentity() throws Exception {
+        Path root=packageRoot("testdata-search");
+        Files.createDirectories(root.resolve("testdata"));
+        write(root.resolve("testdata/customers.yaml"),"schemaVersion: att-testdata/v1.0\nid: customers\nrecords:\n"
+                +"  - accountId: A-1001\n    note: do-not-search\nselection:\n  strategy: sequential\n");
+        String configured=baseConfig("config/dbhelpers/sit.yaml","config/dbhelpers/uat.yaml")
+                .replace("  SIT:\n    dbhelpers:","  SIT:\n    testdata: [testdata/customers.yaml]\n    dbhelpers:");
+        write(root.resolve("config/config.yaml"),configured);
+        PackageConfigurationInspector inspector=inspector(root);
+        Map<String,Object> bySource=inspector.inspect("effective","SIT",null,"testdata",0,1,false,false,"CUSTOMERS.YAML");
+        assertEquals(1,bySource.get("total"),bySource.toString());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> sections=(List<Map<String,Object>>)bySource.get("sections");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> entries=(List<Map<String,Object>>)sections.stream()
+                .filter(section->"testdata".equals(section.get("id"))).findFirst().orElseThrow(AssertionError::new).get("entries");
+        assertEquals("customers",entries.get(0).get("id"));
+
+        Map<String,Object> secretQuery=inspector.inspect("effective","SIT",null,"testdata",0,1,false,false,"do-not-search");
+        assertEquals(0,secretQuery.get("total"));
+        assertNull(secretQuery.get("nextOffset"));
     }
 
     @Test void generatedTestdataRequiresExplicitPreviewAndUsesTheSharedRedactionPolicy() throws Exception {

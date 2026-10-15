@@ -28,6 +28,14 @@ function safeValue(field?: ConfigurationField): string {
   const value = field.value;
   return typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value ?? 'null');
 }
+function originText(origin?: string, comparison = false): string {
+  if (origin === 'profile') return 'environment';
+  if (comparison && origin === 'global') return 'inherited from global';
+  return origin || '';
+}
+function comparisonState(field: ConfigurationField): string {
+  return field.state === 'missing' ? 'not declared' : field.state;
+}
 function visibleFieldMatches(field: ConfigurationField | undefined, query: string): boolean {
   if (!query) return true;
   if (!field) return false;
@@ -250,7 +258,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
       <div className="att-config-grid" role="table" aria-label="Declared global configuration">
         <div role="row"><span role="columnheader">Field</span><span role="columnheader">Value</span><span role="columnheader">State</span><span role="columnheader">Origin</span></div>
         {Object.entries(data.globals || {}).filter(([name, field]) => name.toLowerCase().includes(normalizedQuery) || visibleFieldMatches(field, normalizedQuery))
-          .map(([name, field]) => <div role="row" key={name}><strong role="rowheader">{name}</strong><span role="cell">{safeValue(field)}</span><span role="cell" data-state={field.state}>{field.state}</span><span role="cell">{field.state === 'visible' ? field.origin || 'declared' : '—'}</span></div>)}
+          .map(([name, field]) => <div role="row" key={name}><strong role="rowheader">{name}</strong><span role="cell">{safeValue(field)}</span><span role="cell" data-state={field.state}>{field.state}</span><span role="cell">{field.state === 'visible' ? originText(field.origin) || 'declared' : '—'}</span></div>)}
         {!Object.keys(data.globals || {}).length && <p>No declared global configuration was returned.</p>}
       </div>
     </div>}
@@ -258,7 +266,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
       <h3>Effective values · {data?.environment || environment || 'package default'}</h3>
       {effectiveRows.length ? <div className="att-config-grid" role="table" aria-label="Effective configuration fields">
         <div role="row"><span role="columnheader">Field</span><span role="columnheader">Value</span><span role="columnheader">State</span><span role="columnheader">Origin</span></div>
-        {effectiveRows.map(row => <div role="row" key={row.path}><strong role="rowheader">{row.path}</strong><span role="cell">{safeValue(row.field)}</span><span role="cell" data-state={row.field.state}>{row.field.state}</span><span role="cell">{row.field.state === 'visible' ? row.field.origin || '—' : '—'}</span></div>)}
+        {effectiveRows.map(row => <div role="row" key={row.path}><strong role="rowheader">{row.path}</strong><span role="cell">{safeValue(row.field)}</span><span role="cell" data-state={row.field.state}>{row.field.state}</span><span role="cell">{row.field.state === 'visible' ? originText(row.field.origin) || '—' : '—'}</span></div>)}
       </div> : <p>No effective fields match this filter.</p>}
     </div>}
     {mode === 'compare' && <div className="att-config-results">
@@ -266,12 +274,14 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
       {compareRows.length ? <div className="att-config-compare" role="table" aria-label="Configuration profile comparison">
         <div className="att-config-compare-row" role="row"><span role="columnheader">Field</span><span role="columnheader">{data?.leftEnvironment || left}</span><span role="columnheader">{data?.rightEnvironment || right}</span><span role="columnheader">Change</span></div>
         {compareRows.map(row => <div className="att-config-compare-row" role="row" key={row.path}>
-          <strong role="rowheader">{row.path}</strong>
-          <span role="cell" data-label={data?.leftEnvironment || left}><b data-state={row.left.state}>{row.left.state}</b>{row.left.state === 'visible' && <span>{safeValue(row.left)}{row.left.origin ? ` · ${row.left.origin}` : ''}</span>}</span>
-          <span role="cell" data-label={data?.rightEnvironment || right}><b data-state={row.right.state}>{row.right.state}</b>{row.right.state === 'visible' && <span>{safeValue(row.right)}{row.right.origin ? ` · ${row.right.origin}` : ''}</span>}</span>
+          <strong role="rowheader">{row.path}{row.source && <small>Shared source: {row.source}</small>}</strong>
+          <span role="cell" data-label={data?.leftEnvironment || left}><b data-state={row.left.state}>{comparisonState(row.left)}</b>{row.left.state === 'visible' && <span>{safeValue(row.left)}{row.left.origin ? ` · ${originText(row.left.origin, true)}` : ''}</span>}</span>
+          <span role="cell" data-label={data?.rightEnvironment || right}><b data-state={row.right.state}>{comparisonState(row.right)}</b>{row.right.state === 'visible' && <span>{safeValue(row.right)}{row.right.origin ? ` · ${originText(row.right.origin, true)}` : ''}</span>}</span>
           <span role="cell" data-label="Change">{row.change === 'hidden' ? 'Hidden value; comparison unavailable' : row.change === 'same' ? 'Unchanged' : row.change}</span>
         </div>)}
-      </div> : <p>No comparison fields match this filter.</p>}
+      </div> : data?.total === 0 && !normalizedQuery && !includeInherited
+        ? <p>No environment-specific differences. Turn on “Include inherited/global fields” to inspect shared values.</p>
+        : <p>No comparison fields match this filter.</p>}
     </div>}
     {nextOffset != null && <button type="button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load more configuration'}</button>}
   </section>;

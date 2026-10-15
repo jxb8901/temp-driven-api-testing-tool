@@ -194,6 +194,17 @@ class DebugEngineTest {
         assertFalse(visibleInput.contains("123456789"));
         assertFalse(visibleInput.contains("customer@example.test"));
         assertFalse(visibleInput.contains("violet-123"));
+
+        Map<String, Object> keepDefault = new LinkedHashMap<>();
+        keepDefault.put("schemaVersion", "att-debug/v1.2");
+        keepDefault.put("inputs", Collections.singletonMap("value",
+                Collections.singletonMap("$attDebugKeepDefault", "/inputs/value")));
+        Map<String, Object> restoredWithMaskingDisabled = visibleEngine.validateInlineInput("template", "SIMPLE", keepDefault);
+        @SuppressWarnings("unchecked") Map<String, Object> restoredInput =
+                (Map<String, Object>) restoredWithMaskingDisabled.get("normalizedInput");
+        @SuppressWarnings("unchecked") Map<String, Object> restoredValues = (Map<String, Object>) restoredInput.get("inputs");
+        assertEquals("safe", restoredValues.get("value"),
+                "Path-bound Keep Default markers remain valid when presentation masking is disabled.");
     }
 
     @Test void configuredDebugIdentityIsUsedAndCollisionsFail() throws Exception {

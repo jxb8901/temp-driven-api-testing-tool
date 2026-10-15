@@ -79,6 +79,7 @@ class ServerRuntimeTest {
         Path configFile=temp.resolve("server.yaml");Files.writeString(configFile,"server:\n  dataDir: "+temp.resolve("data")+"\n  javaExecutable: "+javaBin+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
@@ -248,6 +249,7 @@ class ServerRuntimeTest {
         Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("inspection-runtime-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("inspection-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
@@ -285,6 +287,7 @@ class ServerRuntimeTest {
         Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("configuration-inspection-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(packageRoot)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("configuration-inspection-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
@@ -335,6 +338,7 @@ class ServerRuntimeTest {
                 +"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         Path libs=Files.createDirectory(temp.resolve("debug-draft-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")
@@ -401,6 +405,7 @@ class ServerRuntimeTest {
                 +"\n  inlineLoad:\n    enabled: true\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         Path libs=Files.createDirectory(temp.resolve("quick-load-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")

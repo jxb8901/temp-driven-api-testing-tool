@@ -145,7 +145,7 @@ export function explainOccurrence(reason?: string | null): string {
   if (!reason) return '';
   if (reason.startsWith('misfire-no-backfill')) return 'Missed times are recorded as skipped; the Server does not replay them after a restart or late poll.';
   if (reason === 'schedule-overlap-limit') return 'Skipped because this schedule already reached its concurrent-run limit.';
-  if (reason === 'global-scheduled-load-capacity') return 'Skipped because the Server reached its scheduled-load capacity.';
+  if (reason === 'global-scheduled-load-capacity' || reason === 'global-scheduled-job-capacity') return 'Skipped because the Server reached its scheduled-job capacity.';
   if (reason === 'manual-trigger-rate-limit') return 'Skipped because the Server minimum interval limits repeated manual runs.';
   return reason;
 }

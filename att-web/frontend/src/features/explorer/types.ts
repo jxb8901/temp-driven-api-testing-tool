@@ -94,6 +94,7 @@ export interface ConfigurationField {
 
 export interface ConfigurationComparisonField {
   path: string;
+  source?: string;
   left: ConfigurationField;
   right: ConfigurationField;
   change: string;
@@ -227,6 +228,7 @@ export type ResourceSortField = 'name' | 'type' | 'logicalId' | 'state';
 export interface EffectiveConfigurationQuery {
   environment?: string;
   section?: string;
+  query?: string;
   offset?: number;
   limit?: number;
 }

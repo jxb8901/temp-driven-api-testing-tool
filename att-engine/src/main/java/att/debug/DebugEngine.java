@@ -789,9 +789,7 @@ public final class DebugEngine {
         if (key != null && sensitiveFormKey(key)) return true;
         if (key != null && (configuredSensitivePath(path) || configuredSensitiveField(key))) return true;
         if (value == null || "/schemaVersion".equals(path)) return false;
-        if (redactionEnabled && !(value instanceof String
-                && (((String) value).isEmpty() || isAttExpression((String) value)))) return true;
-        return value instanceof String && !scrub((String) value).equals(value);
+        return !(value instanceof String && ((String) value).isEmpty());
     }
 
     private Path autoInput(String type, String id) throws Exception {

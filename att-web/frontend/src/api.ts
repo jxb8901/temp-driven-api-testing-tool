@@ -236,6 +236,7 @@ export const api = {
     return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/effective' + queryString({
       environment: query.environment,
       section: query.section,
+      query: query.query,
       offset: query.offset,
       limit: query.limit,
     }), { signal });

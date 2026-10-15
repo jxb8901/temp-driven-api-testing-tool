@@ -92,7 +92,8 @@ final class LoadScheduleScheduler implements AutoCloseable {
             store.updateOccurrence(occurrenceId,"skipped","schedule-overlap-limit",null);return;
         }
         if(store.activeScheduledCount(null)>=config.maxConcurrentRuns) {
-            store.updateOccurrence(occurrenceId,"skipped","global-scheduled-job-capacity",null);return;
+            // Preserve the established occurrence reason code for existing API consumers.
+            store.updateOccurrence(occurrenceId,"skipped","global-scheduled-load-capacity",null);return;
         }
         try {
             Map<String,Object> job=submitter.submit(schedule,occurrenceId);

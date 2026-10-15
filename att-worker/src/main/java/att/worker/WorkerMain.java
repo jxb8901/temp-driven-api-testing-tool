@@ -180,7 +180,8 @@ public final class WorkerMain {
                             r.inspectionOffset == null ? 0 : r.inspectionOffset,
                             r.inspectionLimit == null ? 0 : r.inspectionLimit,
                             Boolean.TRUE.equals(r.inspectionIncludeInherited),
-                            "preview-generated".equals(r.inspectionQuery));
+                            "preview-generated".equals(r.inspectionQuery),
+                            "effective".equals(r.inspectionAction) ? r.inspectionQuery : null);
                 }
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));

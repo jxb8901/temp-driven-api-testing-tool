@@ -345,35 +345,38 @@ function TestdataCatalog({ api, packageId, environment, onSourceFile, onOpenReso
   const [revision, setRevision] = useState(0);
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogNextOffset, setCatalogNextOffset] = useState<number | null>(null);
+  const [catalogTotal, setCatalogTotal] = useState<number | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [previewGenerated, setPreviewGenerated] = useState(false);
   const [copiedRecord, setCopiedRecord] = useState<number | null>(null);
   const selectedEntry = entries.find(item => item.id === selectedId);
   const visibleEntries = useMemo(() => entries
-    .filter(item => item.id.toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase()))
+    .filter(item => !catalogSearch.trim() || item.id.toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase())
+      || (item.source || displayField(item, 'source')).toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase()))
     .sort((left, right) => left.id.localeCompare(right.id, undefined, { numeric: true, sensitivity: 'base' })),
   [entries, catalogSearch]);
   const isGenerated = selectedEntry?.generated === true || displayField(selectedEntry || { id: '' }, 'generated') === 'true';
 
   useEffect(() => {
-    const controller = new AbortController(); setEntries([]); setSelectedId(''); setResponse(null); setError(''); setStatus('Loading resolved Testdata catalog…'); setCatalogNextOffset(null); setCatalogSearch(''); setOffset(0); setPreviewGenerated(false);
-    api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', offset: 0, limit: 50 }, controller.signal)
+    const controller = new AbortController(); setEntries([]); setSelectedId(''); setResponse(null); setError(''); setStatus('Loading resolved Testdata catalog…'); setCatalogNextOffset(null); setCatalogTotal(null); setOffset(0); setPreviewGenerated(false);
+    api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogSearch.trim() || undefined, offset: 0, limit: 50 }, controller.signal)
       .then(result => {
         const data = result.sections?.find(section => section.id === 'testdata')?.entries || [];
         if (controller.signal.aborted) return;
         setEntries(data); setSelectedId(data[0]?.id || ''); setCatalogNextOffset(result.nextOffset ?? null);
-        setStatus(data.length ? data.length + ' Testdata descriptors loaded for ' + (environment || result.environment || 'package default') + '.' : 'No Testdata descriptors are configured for this environment.');
+        setCatalogTotal(result.total ?? data.length);
+        setStatus(data.length ? `${result.total ?? data.length} Testdata descriptors match this search for ${environment || result.environment || 'package default'}.` : 'No Testdata descriptors match this search.');
       }).catch(reason => { if (!controller.signal.aborted) { setError(errorText(reason, 'load the Testdata catalog')); setStatus('Testdata catalog unavailable.'); } });
     return () => controller.abort();
-  }, [api, packageId, environment]);
+  }, [api, packageId, environment, catalogSearch]);
 
   async function loadMoreCatalog() {
     if (catalogNextOffset == null || catalogLoading) return;
     setCatalogLoading(true); setError('');
     try {
-      const result = await api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', offset: catalogNextOffset, limit: 50 });
+      const result = await api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogSearch.trim() || undefined, offset: catalogNextOffset, limit: 50 });
       const next = result.sections?.find(section => section.id === 'testdata')?.entries || [];
-      setEntries(current => [...current, ...next]); setCatalogNextOffset(result.nextOffset ?? null);
+      setEntries(current => [...current, ...next]); setCatalogNextOffset(result.nextOffset ?? null); setCatalogTotal(result.total ?? entries.length + next.length);
     } catch (reason) { setError(errorText(reason, 'load more Testdata descriptors')); }
     finally { setCatalogLoading(false); }
   }
@@ -409,13 +412,13 @@ function TestdataCatalog({ api, packageId, environment, onSourceFile, onOpenReso
   if (error && !selectedId) return <section className="att-testdata-workspace"><h2>Testdata</h2><p className="att-error" role="alert">{error}</p></section>;
   return <section className="att-testdata-workspace" aria-label="Structured Testdata catalog">
     <header><div><h2>Testdata</h2><p>Resolved descriptor metadata and bounded records for {environment || 'the package default environment'}.</p></div>
-      {entries.length > 0 && <label>Search descriptors<input type="search" aria-label="Search Testdata descriptors" value={catalogSearch} onChange={event => setCatalogSearch(event.currentTarget.value)} placeholder="Search descriptor IDs" /></label>}
+      {(catalogTotal !== 0 || entries.length > 0 || catalogSearch) && <label>Search descriptors<input type="search" aria-label="Search Testdata descriptors" value={catalogSearch} onChange={event => setCatalogSearch(event.currentTarget.value)} placeholder="Search descriptor IDs and sources" /></label>}
     </header>
     <p role="status" aria-live="polite">{status}{loading ? ' Loading records…' : ''}</p>
     {error && <p className="att-error" role="alert">{error}<button type="button" onClick={() => setRevision(value => value + 1)}>Retry</button></p>}
     <div className="att-testdata-layout">
       <nav className="att-testdata-catalog" aria-label="Testdata descriptors">
-        <h3>Catalog</h3><p>{visibleEntries.length} shown of {entries.length} loaded</p>
+        <h3>Catalog</h3><p>{visibleEntries.length} shown of {catalogTotal ?? entries.length} matching descriptors ({entries.length} loaded)</p>
         <ul>{visibleEntries.map(item => <li key={item.id}><button type="button" aria-current={selectedId === item.id ? 'true' : undefined}
           onClick={() => { setSelectedId(item.id); setOffset(0); setPreviewGenerated(false); setRevision(value => value + 1); }}>
           <span>{item.id}</span><small>{item.source || displayField(item, 'source')}</small></button></li>)}</ul>
