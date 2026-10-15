@@ -66,7 +66,7 @@ async function main() {
     await page.getByRole('treeitem', { name: /config\.yaml/ }).click();
     const configSource = page.locator('.att-config-source-view .att-code-editor .cm-content');
     await configSource.getByText('testcase:', { exact: false }).waitFor();
-    await page.getByText('Safe read-only source', { exact: true }).waitFor();
+    await page.getByText(/Safe read-only source/).waitFor();
 
     await page.getByRole('tab', { name: 'Testdata' }).click();
     await page.getByRole('heading', { name: 'Testdata' }).waitFor();
