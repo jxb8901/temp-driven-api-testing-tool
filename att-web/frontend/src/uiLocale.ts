@@ -26,6 +26,8 @@ const translations: Record<string, string> = {
   'Keyboard shortcuts (?)': '鍵盤快速鍵 (?)',
   'Dashboard summary': '儀表板摘要', 'Available to this Server': '此伺服器可用',
   'Active jobs in results': '結果中的執行中工作', 'Waiting for recent jobs': '等待近期工作',
+  'Recent outcomes': '近期結果', 'Nonterminal jobs in the returned rows': '回傳資料中的未終結工作',
+  'Counts from the latest 100 job rows returned by the Server': '伺服器回傳的最近 100 筆工作統計',
   'Latest job': '最新工作', 'From the latest 100 job rows returned by the Server': '來自伺服器回傳的最近 100 筆工作',
   'Server status': '伺服器狀態', 'ATT API v1': 'ATT API v1',
   'Monitor recent ATT activity and open a package workspace.': '查看 ATT 近期活動並開啟套件工作區。',

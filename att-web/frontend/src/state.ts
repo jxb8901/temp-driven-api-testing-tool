@@ -23,6 +23,11 @@ export const initialAppState: AppState = {
   jobs: { status: 'loading' },
 };
 
+/** The Server returns the newest job rows first; Dashboard summaries use the same 100-row window. */
+export function latestServerJobWindow(rows: JobSummary[]): JobSummary[] {
+  return rows.slice(0, 100);
+}
+
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'version/loading': return { ...state, serverVersion: { status: 'loading' } };

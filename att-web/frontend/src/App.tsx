@@ -3,7 +3,7 @@ import { api } from './api';
 import { AppShell, useAppShellContext } from './AppShell';
 import { DashboardPage, LoadLanding } from './DashboardPage';
 import { useNavigationGuard, useRouteState } from './router';
-import { appReducer, initialAppState, serverCapabilities } from './state';
+import { appReducer, initialAppState, latestServerJobWindow, serverCapabilities } from './state';
 import { ExplorerPage } from './features/explorer/ExplorerPage';
 import './features/explorer/explorer.css';
 import type { ExplorerPageProps, ResourceSourceReference } from './features/explorer/types';
@@ -249,7 +249,7 @@ export default function App() {
     try {
       const response = await api.getJobs(signal);
       if (!signal?.aborted && requestSequence === jobsRequestSequence.current) {
-        dispatch({ type: 'jobs/ready', data: Array.isArray(response.items) ? response.items.slice(0, 100) : [] });
+        dispatch({ type: 'jobs/ready', data: latestServerJobWindow(Array.isArray(response.items) ? response.items : []) });
         setJobsUpdatedAt(new Date().toISOString());
       }
     } catch (error) {
