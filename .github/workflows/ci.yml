@@ -49,9 +49,10 @@ jobs:
 
   java-17-server-and-release:
     name: Java 17 / Server and full distribution
-    needs: java-8-compatibility
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      ATT_UI_SERVER_PLAYWRIGHT: "1"
 
     steps:
       - name: Checkout
@@ -104,9 +105,6 @@ jobs:
       - name: Install Chromium, Firefox, and WebKit for browser acceptance
         run: npx playwright install --with-deps chromium firefox webkit
         working-directory: tools/ui-acceptance
-
-      - name: Verify
-        run: ATT_UI_SERVER_PLAYWRIGHT=1 mvn -B -ntp clean verify
 
       - name: Verify UI browser smoke and axe accessibility
         run: npm run smoke
