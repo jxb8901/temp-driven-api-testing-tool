@@ -15,11 +15,15 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Full browser matrix only on default branch or manual runs; PRs stay Chromium-only.
+  FULL_BROWSER_SUITE: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/load')) }}
+
 jobs:
   java-8-compatibility:
     name: Java 8 / CLI, Engine, and Worker
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -39,7 +43,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: surefire-reports-${{ github.run_id }}
+          name: surefire-reports-java8-${{ github.run_id }}
           path: |
             att-engine/target/surefire-reports/
             att-cli/target/surefire-reports/
@@ -47,10 +51,40 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  frontend-unit:
+    name: Frontend typecheck, unit tests, and Vite build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+          cache: npm
+          cache-dependency-path: att-web/frontend/package-lock.json
+
+      - name: Verify React, TypeScript, component tests, Vite build, and bundle budget
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+          npm run bundle:budget
+        working-directory: att-web/frontend
+
+      - name: Verify ATT Web UI JavaScript
+        run: |
+          node --check att-web/src/main/resources/META-INF/resources/ui/app.js
+          node --test att-web/src/test/js/*.test.mjs
+
   java-17-server-and-release:
     name: Java 17 / Server and full distribution
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -68,18 +102,7 @@ jobs:
         with:
           node-version: '22.22.2'
           cache: npm
-          cache-dependency-path: |
-            att-web/frontend/package-lock.json
-            tools/ui-acceptance/package-lock.json
-
-      - name: Verify React, TypeScript, component tests, Vite build, and bundle budget
-        run: |
-          npm ci
-          npm run typecheck
-          npm test
-          npm run build
-          npm run bundle:budget
-        working-directory: att-web/frontend
+          cache-dependency-path: att-web/frontend/package-lock.json
 
       - name: Install Pandoc
         run: |
@@ -91,19 +114,6 @@ jobs:
           sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
           pandoc --version | head -n 1 | grep -Fx 'pandoc 3.1.3'
 
-      - name: Verify ATT Web UI JavaScript
-        run: |
-          node --check att-web/src/main/resources/META-INF/resources/ui/app.js
-          node --test att-web/src/test/js/*.test.mjs
-
-      - name: Install browser acceptance dependencies
-        run: npm ci
-        working-directory: tools/ui-acceptance
-
-      - name: Install Chromium, Firefox, and WebKit for browser acceptance
-        run: npx playwright install --with-deps chromium firefox webkit
-        working-directory: tools/ui-acceptance
-
       - name: Verify documentation release gate
         run: python3 tools/verify_documentation.py
 
@@ -111,39 +121,6 @@ jobs:
         env:
           ATT_UI_SERVER_PLAYWRIGHT: "1"
         run: ./build.sh
-
-      - name: Verify UI browser smoke and axe accessibility
-        run: npm run smoke
-        working-directory: tools/ui-acceptance
-
-      - name: Verify Explorer, Configuration, Quick Load, and inline scheduling flows
-        run: npm run smoke:explorer
-        working-directory: tools/ui-acceptance
-
-      - name: Verify native authentication UI flows and accessibility
-        run: npm run smoke:auth
-        working-directory: tools/ui-acceptance
-
-      - name: Verify Scheduled Load flows and accessibility
-        run: npm run smoke:scheduled-load
-        working-directory: tools/ui-acceptance
-
-      - name: Verify responsive UI in Chromium, Firefox, and WebKit
-        run: npm run smoke:cross-browser
-        working-directory: tools/ui-acceptance
-
-      - name: Upload Scheduled Load cross-browser screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scheduled-load-browser-screenshots-${{ github.run_id }}
-          path: tools/ui-acceptance/artifacts/scheduled-load/
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Capture UI screenshot baselines
-        run: npm run screenshots
-        working-directory: tools/ui-acceptance
 
       - name: Upload Local and Server release packages
         uses: actions/upload-artifact@v4
@@ -155,6 +132,20 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Upload built tree for browser acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: att-workspace-for-ui-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/
+            att-server/target/
+            att-web/target/
+            att-dist/target/
+            tools/ui-acceptance/
+            att-web/src/main/resources/META-INF/resources/ui/
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Upload test reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -165,6 +156,90 @@ jobs:
             att-cli/target/surefire-reports/
             att-worker/target/surefire-reports/
             att-server/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ui-browser-acceptance:
+    name: UI browser acceptance (${{ matrix.suite }})
+    needs: java-17-server-and-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - smoke
+          - smoke:explorer
+          - smoke:auth
+          - smoke:scheduled-load
+        include:
+          - suite: smoke:cross-browser
+            full_only: true
+          - suite: screenshots
+            full_only: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Skip full-only suite on pull requests
+        id: gate
+        run: |
+          if [ "${{ matrix.full_only }}" = "true" ] && [ "${{ env.FULL_BROWSER_SUITE }}" != "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping ${{ matrix.suite }} on PR (runs on master/load/workflow_dispatch)."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up pinned Node.js
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+          cache: npm
+          cache-dependency-path: tools/ui-acceptance/package-lock.json
+
+      - name: Download built workspace
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: att-workspace-for-ui-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Install browser acceptance dependencies
+        if: steps.gate.outputs.skip != 'true'
+        run: npm ci
+        working-directory: tools/ui-acceptance
+
+      - name: Cache Playwright browsers
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tools/ui-acceptance/package-lock.json') }}-${{ env.FULL_BROWSER_SUITE }}
+
+      - name: Install Playwright browsers
+        if: steps.gate.outputs.skip != 'true'
+        working-directory: tools/ui-acceptance
+        run: |
+          if [ "${{ env.FULL_BROWSER_SUITE }}" = "true" ]; then
+            npx playwright install --with-deps chromium firefox webkit
+          else
+            # PR path: Chromium only — largest time win vs installing three engines every run.
+            npx playwright install --with-deps chromium
+          fi
+
+      - name: Run UI suite
+        if: steps.gate.outputs.skip != 'true'
+        run: npm run ${{ matrix.suite }}
+        working-directory: tools/ui-acceptance
+
+      - name: Upload Scheduled Load cross-browser screenshots
+        if: always() && steps.gate.outputs.skip != 'true' && matrix.suite == 'smoke:cross-browser'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-load-browser-screenshots-${{ github.run_id }}
+          path: tools/ui-acceptance/artifacts/scheduled-load/
           if-no-files-found: ignore
           retention-days: 7
 
