@@ -104,6 +104,14 @@ jobs:
         run: npx playwright install --with-deps chromium firefox webkit
         working-directory: tools/ui-acceptance
 
+      - name: Verify documentation release gate
+        run: python3 tools/verify_documentation.py
+
+      - name: Verify assembled release
+        env:
+          ATT_UI_SERVER_PLAYWRIGHT: "1"
+        run: ./build.sh
+
       - name: Verify UI browser smoke and axe accessibility
         run: npm run smoke
         working-directory: tools/ui-acceptance
@@ -136,14 +144,6 @@ jobs:
       - name: Capture UI screenshot baselines
         run: npm run screenshots
         working-directory: tools/ui-acceptance
-
-      - name: Verify documentation release gate
-        run: python3 tools/verify_documentation.py
-
-      - name: Verify assembled release
-        env:
-          ATT_UI_SERVER_PLAYWRIGHT: "1"
-        run: ./build.sh
 
       - name: Upload Local and Server release packages
         uses: actions/upload-artifact@v4
