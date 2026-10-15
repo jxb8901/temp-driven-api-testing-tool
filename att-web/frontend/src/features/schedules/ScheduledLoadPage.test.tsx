@@ -108,10 +108,15 @@ describe('ScheduledLoadPage', () => {
 
   it('requires a server preview before creating a disabled schedule by default', async () => {
     const api = makeApi();
+    const resolvedOptions = new Intl.DateTimeFormat().resolvedOptions();
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+      ...resolvedOptions, timeZone: 'Asia/Hong_Kong',
+    });
     await render(api);
     expect(host.textContent).toContain('No schedules have been created');
     expect(host.textContent).toContain('This preview calculates the next five occurrence times from timezone and cron. It does not validate the package or test snapshot.');
     expect(host.textContent).toContain('Oct 20, 2026');
+    expect(host.querySelectorAll('.att-schedule-occurrence-preview li')).toHaveLength(5);
     const save = [...host.querySelectorAll('button')].find(button => button.textContent === 'Save schedule') as HTMLButtonElement;
     expect(save.disabled).toBe(false);
     expect((host.querySelector('.att-schedule-enable input') as HTMLInputElement).checked).toBe(false);
