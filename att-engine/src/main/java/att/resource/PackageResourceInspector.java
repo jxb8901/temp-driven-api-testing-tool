@@ -1581,7 +1581,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             if(canonical.startsWith(root)&&(matchingRoot==null||root.getNameCount()>matchingRoot.getNameCount()))
                 matchingRoot=root;
         }
-        return matchingRoot==null?null:matchingRoot.relativize(canonical).toString().replace('\\\\','/');
+        return matchingRoot==null?null:matchingRoot.relativize(canonical).toString().replace('\\','/');
     }
 
     private static Path canonicalMissingCandidate(Path normalized) throws Exception {

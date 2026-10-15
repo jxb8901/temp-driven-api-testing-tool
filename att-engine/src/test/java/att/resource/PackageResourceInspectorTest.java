@@ -190,7 +190,7 @@ class PackageResourceInspectorTest {
         assertEquals(Boolean.TRUE,allowed.get("sourceAvailable"),allowed.toString());
         Map<String,Object> allowedSource=inspector.inspect("source","tool",String.valueOf(allowed.get("resourceId")),null,0,1);
         assertEquals(Boolean.TRUE,allowedSource.get("available"),allowedSource.toString());
-        assertTrue(String.valueOf(allowedSource.get("logicalPath")).matches("external/[0-9a-f]{64}\\\\.sh"));
+        assertTrue(String.valueOf(allowedSource.get("logicalPath")).matches("external/[0-9a-f]{64}\\.sh"));
         assertTrue(String.valueOf(allowedSource.get("text")).contains("echo allowed"));
         assertFalse(allowedSource.toString().contains(externalRoot.toString()));
     }
