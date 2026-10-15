@@ -406,8 +406,29 @@ describe('Explorer page integration', () => {
     click(button('Compare'));
     await settle();
     expect(container.textContent).toContain('hidden');
-    expect(container.textContent).toContain('missing');
+    expect(container.textContent).toContain('not declared');
     expect(container.textContent).not.toContain('must-not-display');
+  });
+
+  it('identifies the package file shared by both sides of a comparison', async () => {
+    const api = apiWith({
+      getDeclaredConfiguration: vi.fn(async () => ({
+        state: 'ready', environments: [{ name: 'left', state: 'active', default: true }, { name: 'right', state: 'active' }],
+        globals: {}, sections: [],
+      })),
+      compareConfiguration: vi.fn(async () => ({
+        state: 'ready', leftEnvironment: 'left', rightEnvironment: 'right',
+        fields: [{ path: 'dbhelpers.shared.readOnly', source: 'config/dbhelpers/shared.yaml',
+          left: { state: 'visible', value: false, origin: 'profile' },
+          right: { state: 'visible', value: false, origin: 'profile' }, change: 'same' }],
+      })),
+    });
+    await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
+      onEnvironmentChange={() => {}} initialMode="declared" />);
+    click(button('Compare'));
+    await settle();
+    expect(container.textContent).toContain('Shared source: config/dbhelpers/shared.yaml');
+    expect(container.textContent).toContain('environment');
   });
 
   it('scopes Compare pages to the selected section and preserves that section while loading more', async () => {
