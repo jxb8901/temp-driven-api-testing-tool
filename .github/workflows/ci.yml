@@ -81,6 +81,14 @@ jobs:
           node --check att-web/src/main/resources/META-INF/resources/ui/app.js
           node --test att-web/src/test/js/*.test.mjs
 
+      - name: Upload built UI assets for browser acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: att-ui-assets-${{ github.run_id }}-${{ github.run_attempt }}
+          path: att-web/frontend/dist/
+          if-no-files-found: error
+          retention-days: 1
+
   java-17-server-and-release:
     name: Java 17 / Server and full distribution
     runs-on: ubuntu-24.04
@@ -118,15 +126,24 @@ jobs:
 
       - name: Install Playwright Chromium for ServerWarUiIT
         working-directory: tools/ui-acceptance
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
+        run: npm ci
+
+      - name: Cache Playwright Chromium for ServerWarUiIT
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tools/ui-acceptance/package-lock.json') }}-chromium
+
+      - name: Install Playwright Chromium for ServerWarUiIT
+        working-directory: tools/ui-acceptance
+        run: npx playwright install --with-deps chromium
 
       - name: Verify documentation release gate
         run: python3 tools/verify_documentation.py
 
       - name: Verify assembled release
         env:
+          ATT_CI_SKIP_COVERED_TESTS: "true"
           ATT_UI_SERVER_PLAYWRIGHT: "1"
         run: ./build.sh
 
@@ -153,82 +170,68 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Static UI harness (tools/ui-acceptance) uses its own Python fixture — it does not
-  # need build.sh output and can run in parallel with the Java 17 release job.
+  # Build the static UI once before running the Python fixture-backed browser suites.
+  # Keeping the suites in one job avoids four concurrent Chromium/dependency installs.
   ui-browser-acceptance:
-    name: UI browser acceptance (${{ matrix.suite }})
+    name: UI browser acceptance
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - suite: smoke
-            browsers: chromium
-          - suite: smoke:explorer
-            browsers: chromium
-          - suite: smoke:auth
-            browsers: chromium
-          - suite: smoke:scheduled-load
-            browsers: chromium
-          - suite: smoke:cross-browser
-            browsers: all
-            full_only: true
-          - suite: screenshots
-            browsers: chromium
-            full_only: true
+    timeout-minutes: 20
+    needs: frontend-unit
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Skip full-only suite on pull requests
-        id: gate
-        run: |
-          if [ "${{ matrix.full_only }}" = "true" ] && [ "${{ env.FULL_BROWSER_SUITE }}" != "true" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Skipping ${{ matrix.suite }} on PR (runs on master/load/workflow_dispatch)."
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Set up pinned Node.js
-        if: steps.gate.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22.22.2'
           cache: npm
-          cache-dependency-path: tools/ui-acceptance/package-lock.json
+          cache-dependency-path: |
+            att-web/frontend/package-lock.json
+            tools/ui-acceptance/package-lock.json
+
+      - name: Download validated UI assets
+        uses: actions/download-artifact@v4
+        with:
+          name: att-ui-assets-${{ github.run_id }}-${{ github.run_attempt }}
+          path: att-web/frontend/dist/
 
       - name: Install browser acceptance dependencies
-        if: steps.gate.outputs.skip != 'true'
         run: npm ci
         working-directory: tools/ui-acceptance
 
       - name: Cache Playwright browsers
-        if: steps.gate.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('tools/ui-acceptance/package-lock.json') }}-${{ matrix.browsers }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('tools/ui-acceptance/package-lock.json') }}-${{ env.FULL_BROWSER_SUITE == 'true' && 'all' || 'chromium' }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ hashFiles('tools/ui-acceptance/package-lock.json') }}-chromium
 
       - name: Install Playwright browsers
-        if: steps.gate.outputs.skip != 'true'
         working-directory: tools/ui-acceptance
         run: |
-          if [ "${{ matrix.browsers }}" = "all" ]; then
+          if [ "$FULL_BROWSER_SUITE" = "true" ]; then
             npx playwright install --with-deps chromium firefox webkit
           else
             npx playwright install --with-deps chromium
           fi
 
-      - name: Run UI suite
-        if: steps.gate.outputs.skip != 'true'
-        run: npm run ${{ matrix.suite }}
+      - name: Run Chromium UI suites
         working-directory: tools/ui-acceptance
+        run: |
+          npm run smoke
+          npm run smoke:explorer
+          npm run smoke:auth
+          npm run smoke:scheduled-load
+          if [ "$FULL_BROWSER_SUITE" = "true" ]; then
+            npm run smoke:cross-browser
+            npm run screenshots
+          fi
 
       - name: Upload Scheduled Load cross-browser screenshots
-        if: always() && steps.gate.outputs.skip != 'true' && matrix.suite == 'smoke:cross-browser'
+        if: always() && env.FULL_BROWSER_SUITE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: scheduled-load-browser-screenshots-${{ github.run_id }}

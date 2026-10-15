@@ -23,6 +23,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm:ss'Z'</maven.build.timestamp.format>
         <att.gitCommit>unknown</att.gitCommit>
+        <att.skipJava8ModuleTests>false</att.skipJava8ModuleTests>
+        <att.skipFrontendUnitTests>false</att.skipFrontendUnitTests>
         <att.cli.java>8</att.cli.java>
         <jackson.version>2.17.2</jackson.version>
         <jakarta.servlet.version>6.0.0</jakarta.servlet.version>
