@@ -4,7 +4,7 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 class SecretProtectionTest {
     @Test void protectsEveryTextFormatAndRegisteredValuesIdempotently() {
-        for (String source : Arrays.asList("password=canary", "password=canary; after=ordinary", "password=canary\nmessage=ordinary", "DB_PASSWORD=canary", "refresh_token=canary", "password: {unknown: {value: canary}}", "password:\n  unknown: canary", "{\"token\":\"canary\"}",
+        for (String source : Arrays.asList("password=canary", "password=canary; after=ordinary", "password=canary\nmessage=ordinary", "DB_PASSWORD=canary", "refresh_token=canary", "password: {unknown: {value: canary}}", "password:\n  unknown: canary", "{\"token\":\"canary\"}", "{\"password\":\"abc\\\"suffix-canary\"}", "password: unquoted secret-canary",
                 "Authorization: Bearer canary", "Cookie: session=canary", "<s:password>canary</s:password>",
                 "https://user:canary@host/path", "-----BEGIN PRIVATE KEY-----\ncanary\n-----END PRIVATE KEY-----",
                 "value: !secret canary", "name,password\r\nalice,\"canary\"\r\n")) {
@@ -12,6 +12,16 @@ class SecretProtectionTest {
             assertFalse(safe.contains("canary"), source);
             assertEquals(safe,SecretProtection.text(safe),source);
         }
+        String escaped = "{\"password\":\"abc\\\"suffix-canary\"}";
+        String escapedSafe = SecretProtection.text(escaped);
+        assertFalse(escapedSafe.contains("suffix-canary"), escapedSafe);
+        assertEquals(escapedSafe, SecretProtection.text(escapedSafe));
+        String plain = "password: unquoted secret-canary\nmessage: ordinary";
+        String plainSafe = SecretProtection.text(plain);
+        assertFalse(plainSafe.contains("unquoted"), plainSafe);
+        assertFalse(plainSafe.contains("secret-canary"), plainSafe);
+        assertTrue(plainSafe.contains("message: ordinary"), plainSafe);
+        assertEquals(plainSafe, SecretProtection.text(plainSafe));
         assertEquals("x [REDACTED_SECRET]",SecretProtection.text("x registered-value",Arrays.asList("registered-value")));
         String protectedMarker=SecretProtection.text("x SECRET",Arrays.asList("SECRET","REDACTED"));
         assertEquals("x [REDACTED_SECRET]",protectedMarker);

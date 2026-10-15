@@ -30,6 +30,7 @@ public class CaseExecutionLog implements AutoCloseable {
     private static final java.util.regex.Pattern SECRET_MARKER = java.util.regex.Pattern.compile("\\[REDACTED(?:_SECRET)?\\]");
     private static final String TRUNCATION_MARKER = "... earlier case log events omitted ...\n";
     private static final int BATCHED_LOG_BUFFER_CHARS = 64 * 1024;
+    private static final int MAX_RAW_REDACTION_RECORD_CHARS = 64 * 1024;
     private final Path path;
     private Path projectRoot;
     private final boolean yamlAnchors;
@@ -230,37 +231,56 @@ public class CaseExecutionLog implements AutoCloseable {
         if (redactions != null) for (String token : redactions)
             if (token != null && !token.isEmpty() && !effectiveRedactions.contains(token)) effectiveRedactions.add(token);
         effectiveRedactions.sort((left, right) -> Integer.compare(right.length(), left.length()));
-        if (!effectiveRedactions.isEmpty()) for (String token : effectiveRedactions)
+        for (String token : effectiveRedactions)
             if (token != null) longestRedaction = Math.max(longestRedaction, token.length());
         if (longestRedaction > 0) longestRedaction = Math.max(longestRedaction, "[REDACTED_SECRET]".length());
-        StringBuilder pending = longestRedaction == 0 ? null : new StringBuilder();
+        StringBuilder registeredPending = longestRedaction == 0 ? null : new StringBuilder();
+        StringBuilder recordPending = new StringBuilder();
+        boolean omittedOversizedRecord = false;
         char[] buffer = new char[8192];
         try (Reader reader = new InputStreamReader(Files.newInputStream(source), StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPLACE).onUnmappableCharacter(CodingErrorAction.REPLACE))) {
             int count;
             while ((count = reader.read(buffer)) >= 0) {
-                StringBuilder chunk = new StringBuilder(count + 1);
                 for (int index = 0; index < count; index++) {
                     char value = buffer[index];
-                    chunk.append(value);
-                }
-                if (chunk.length() > 0) {
-                    writeRedactedChunk(chunk.toString(), pending, effectiveRedactions, longestRedaction);
-                    char last = chunk.charAt(chunk.length() - 1);
-                    lastCharacter = last;
-                    endedWithNewline = last == '\n' || last == '\r';
+                    lastCharacter = value;
+                    endedWithNewline = value == '\n' || value == '\r';
+                    if (omittedOversizedRecord) continue;
+                    recordPending.append(value);
+                    if (recordPending.length() > MAX_RAW_REDACTION_RECORD_CHARS) {
+                        write("[ATT process output omitted: redaction record exceeded "
+                                + MAX_RAW_REDACTION_RECORD_CHARS + " characters]\n");
+                        recordPending.setLength(0);
+                        omittedOversizedRecord = true;
+                        continue;
+                    }
+                    if ((value == '\n' || value == '\r')
+                            && !att.security.SecretProtection.hasIncompleteSensitiveBlock(recordPending.toString())) {
+                        writeRedactedRecord(recordPending, registeredPending, effectiveRedactions, longestRedaction);
+                        recordPending.setLength(0);
+                    }
                 }
             }
         }
-        if (pending != null && pending.length() > 0) {
-            String tail = pending.toString();
-            tail = att.security.SecretProtection.text(tail, effectiveRedactions);
+        if (recordPending.length() > 0) {
+            writeRedactedRecord(recordPending, registeredPending, effectiveRedactions, longestRedaction);
+        }
+        if (registeredPending != null && registeredPending.length() > 0) {
+            String tail = att.security.SecretProtection.text(registeredPending.toString(), effectiveRedactions);
             write(tail);
         }
         if (!endedWithNewline) write("\n");
         else if (lastCharacter == '\r') write("\r\n");
         if (truncated) write("... ATT process output truncated; totalBytes=" + totalBytes + " ...\n");
         write("\n");
+    }
+
+    private void writeRedactedRecord(StringBuilder record, StringBuilder registeredPending,
+                                     List<String> redactions, int longestRedaction) throws IOException {
+        String safe = att.security.SecretProtection.text(record.toString());
+        if (registeredPending == null) write(safe);
+        else writeRedactedChunk(safe, registeredPending, redactions, longestRedaction);
     }
 
     private void writeRedactedChunk(String chunk, StringBuilder pending, List<String> redactions,

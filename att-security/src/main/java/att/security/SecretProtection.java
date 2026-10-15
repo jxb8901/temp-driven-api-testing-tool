@@ -11,7 +11,7 @@ public final class SecretProtection {
     public static final String REDACTED = "[REDACTED_SECRET]";
     private static final String NAMES = "password|passwd|passphrase|token|secret|api[-_]?key|authorization|credential|private[-_]?key|cookie|set-cookie|access[-_]?key|identityfile|truststorepassword|client[-_]?secret";
     private static final Pattern MARKER = Pattern.compile("\\[REDACTED(?:_SECRET)?\\]");
-    private static final Pattern ASSIGNMENT = Pattern.compile("(?i)((?<![A-Za-z0-9])(?:" + NAMES + ")\\b[\\\"']?[ \\t]*[=:][ \\t]*)(\\\"[^\\\"]*\\\"|'[^']*'|[^\\s,;&<>}]+)");
+    private static final Pattern ASSIGNMENT = Pattern.compile("(?i)((?<![A-Za-z0-9])(?:" + NAMES + ")\\b[\\\"']?[ \\t]*[=:][ \\t]*)");
     private static final Pattern SENSITIVE_BLOCK_KEY = Pattern.compile("(?i)((?<![A-Za-z0-9])(?:" + NAMES + ")\\b[\\\"\']?[ \\t]*[=:][ \\t]*+)");
     private static final Pattern HEADER = Pattern.compile("(?i)(\\b(?:proxy-authorization|authorization|set-cookie|cookie)\\b[ \\t]*[:=][ \\t]*+)(?![\"'])[^\\r\\n]*");
     private static final Pattern AUTH = Pattern.compile("(?i)\\b(Bearer|Basic)\\s+[A-Za-z0-9+/_.~=-]+");
@@ -46,7 +46,7 @@ public final class SecretProtection {
         result = URL_AUTH.matcher(result).replaceAll("$1" + REDACTED + "@");
         result = replace(XML, result, 1, 3);
         result = redactSensitiveBlocks(result);
-        result = replace(ASSIGNMENT, result, 1, 0);
+        result = redactAssignments(result);
         result = TAGGED.matcher(result).replaceAll("$1" + REDACTED);
         return csv(result);
     }
@@ -64,18 +64,157 @@ public final class SecretProtection {
         Matcher m = pattern.matcher(value); StringBuffer out = new StringBuffer();
         while (m.find()) {
             // Parser prose names a lexical token; it is not a credential field.
-            if (pattern == ASSIGNMENT && m.start() >= 11
-                    && value.regionMatches(true, m.start() - 11, "unexpected ", 0, 11)
-                    && m.group(1).matches("(?i)token[ \\t]*:[ \\t]*")) {
-                m.appendReplacement(out, Matcher.quoteReplacement(m.group()));
-                continue;
-            }
             String marker = REDACTED;
-            if (pattern == ASSIGNMENT && m.group(2).length() >= 2 && (m.group(2).charAt(0) == '\"' || m.group(2).charAt(0) == '\''))
-                marker = m.group(2).substring(0,1) + marker + m.group(2).substring(0,1);
             m.appendReplacement(out, Matcher.quoteReplacement(m.group(prefix) + marker + (suffix == 0 ? "" : m.group(suffix))));
         }
         m.appendTail(out); return out.toString();
+    }
+
+    /** Redact complete quoted values and fail closed to end-of-line for plain scalars. */
+    private static String redactAssignments(String value) {
+        Matcher matcher = ASSIGNMENT.matcher(value);
+        StringBuilder result = new StringBuilder(value.length());
+        int copiedThrough = 0;
+        int searchFrom = 0;
+        while (matcher.find(searchFrom)) {
+            String prefix = matcher.group(1);
+            if (matcher.start() >= 11
+                    && value.regionMatches(true, matcher.start() - 11, "unexpected ", 0, 11)
+                    && prefix.matches("(?i)token[ \\t]*:[ \\t]*")) {
+                searchFrom = matcher.end();
+                continue;
+            }
+
+            int start = matcher.end();
+            if (start >= value.length() || value.charAt(start) == '\r' || value.charAt(start) == '\n') {
+                searchFrom = matcher.end();
+                continue;
+            }
+
+            char quote = value.charAt(start);
+            int end;
+            String replacement;
+            if (quote == '\"' || quote == '\'') {
+                int close = quotedValueEnd(value, start, quote);
+                if (close >= 0) {
+                    end = close + 1;
+                    replacement = quote + REDACTED + quote;
+                } else {
+                    end = lineEnd(value, start);
+                    replacement = quote + REDACTED;
+                }
+            } else {
+                end = plainValueEnd(value, start);
+                replacement = REDACTED;
+            }
+            if (end <= start) {
+                searchFrom = matcher.end();
+                continue;
+            }
+            result.append(value, copiedThrough, start).append(replacement);
+            copiedThrough = end;
+            searchFrom = end;
+        }
+        return result.append(value, copiedThrough, value.length()).toString();
+    }
+
+    private static int plainValueEnd(String value, int start) {
+        int end = lineEnd(value, start);
+        for (int i = start; i < end; i++) {
+            char c = value.charAt(i);
+            if (c == ',' || c == ';' || c == '&'
+                    || c == '<' || c == '>' || c == '}') return i;
+        }
+        return end;
+    }
+
+    private static int quotedValueEnd(String value, int start, char quote) {
+        for (int i = start + 1; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\r' || c == '\n') return -1;
+            if (c == '\\' && i + 1 < value.length()) {
+                i++;
+            } else if (quote == '\'' && c == '\'' && i + 1 < value.length()
+                    && value.charAt(i + 1) == '\'') {
+                i++;
+            } else if (c == quote) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** True while a sensitive YAML/container value at the end may continue in the next read. */
+    public static boolean hasIncompleteSensitiveBlock(String value) {
+        Matcher matcher = SENSITIVE_BLOCK_KEY.matcher(value);
+        while (matcher.find()) {
+            int start = matcher.end();
+            if (start >= value.length()) return true;
+            char first = value.charAt(start);
+            if (first == '{' || first == '[') {
+                if (!containerClosed(value, start)) return true;
+            } else if (first == '\n' || first == '\r') {
+                if (!indentedBlockComplete(value, matcher.start(), start)) return true;
+            } else if (first == '|' || first == '>') {
+                int headerEnd = lineEnd(value, start);
+                if (headerEnd >= value.length()
+                        || !indentedBlockComplete(value, matcher.start(), headerEnd)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containerClosed(String value, int start) {
+        Deque<Character> closings = new ArrayDeque<Character>();
+        char quote = 0;
+        boolean escaped = false;
+        for (int i = start; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (quote != 0) {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == quote) quote = 0;
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            } else if (c == '{' || c == '[') {
+                closings.push(c == '{' ? '}' : ']');
+            } else if (c == '}' || c == ']') {
+                if (closings.isEmpty() || closings.pop() != c) return false;
+                if (closings.isEmpty()) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean indentedBlockComplete(String value, int keyStart, int newline) {
+        int lineStart = value.lastIndexOf('\n', Math.max(0, keyStart - 1)) + 1;
+        int parentIndent = 0;
+        for (int i = lineStart; i < keyStart; i++) {
+            char c = value.charAt(i);
+            if (c != ' ' && c != '\t') { parentIndent = 0; break; }
+            parentIndent++;
+        }
+        int cursor = newline;
+        while (cursor < value.length()) {
+            if (value.charAt(cursor) == '\r') cursor++;
+            if (cursor < value.length() && value.charAt(cursor) == '\n') cursor++;
+            else break;
+            if (cursor >= value.length()) return false;
+            int nextEnd = lineEnd(value, cursor);
+            int indentation = 0;
+            while (cursor + indentation < nextEnd) {
+                char c = value.charAt(cursor + indentation);
+                if (c != ' ' && c != '\t') break;
+                indentation++;
+            }
+            if (cursor + indentation == nextEnd) {
+                cursor = nextEnd;
+                continue;
+            }
+            if (indentation <= parentIndent) return true;
+            cursor = nextEnd;
+        }
+        return false;
     }
 
     /** Mask only the sensitive nested value, retaining later sibling fields and diagnostics. */

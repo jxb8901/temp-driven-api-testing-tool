@@ -265,6 +265,39 @@ class CaseExecutionLogTest {
         assertFalse(text.contains("[REDACTED_["), text);
     }
 
+    @Test void mandatorySecretAssignmentsAreRedactedAcrossRawFileReadBoundaries() throws Exception {
+        for (boolean registerAnUnrelatedSecret : new boolean[]{false, true}) {
+            String keySplit = String.join("", Collections.nCopies(8184, "x"))
+                    + " passwor" + "d=boundary-canary\n";
+            String valueSplit = String.join("", Collections.nCopies(8175, "x"))
+                    + " password=" + String.join("", Collections.nCopies(9000, "v"))
+                    + "suffix-canary\n";
+            Path source = tempDir.resolve("mandatory-secrets-" + registerAnUnrelatedSecret + ".txt");
+            Files.write(source, (keySplit + valueSplit).getBytes("UTF-8"));
+            Path file = tempDir.resolve("mandatory-secrets-" + registerAnUnrelatedSecret + ".log");
+            try (CaseExecutionLog log = new CaseExecutionLog(file)) {
+                if (registerAnUnrelatedSecret) log.registerSecretRedactions(Collections.singletonList("registered-secret"));
+                log.appendRawFile("TOOL STDOUT", source, false, Files.size(source));
+            }
+            String text = new String(Files.readAllBytes(file), "UTF-8");
+            assertFalse(text.contains("boundary-canary"), text);
+            assertFalse(text.contains("suffix-canary"), text);
+            assertTrue(text.contains("password=[REDACTED_SECRET]"), text);
+        }
+    }
+
+    @Test void rawFileKeepsMultilineSensitiveBlocksTogetherForRedaction() throws Exception {
+        Path source = tempDir.resolve("multiline-secret-output.txt");
+        Files.write(source, "password:\n  nested:\n    value: boundary-canary\nmessage: ordinary\n".getBytes("UTF-8"));
+        Path file = tempDir.resolve("multiline-secret-output.log");
+        try (CaseExecutionLog log = new CaseExecutionLog(file)) {
+            log.appendRawFile("TOOL STDOUT", source, false, Files.size(source));
+        }
+        String text = new String(Files.readAllBytes(file), "UTF-8");
+        assertFalse(text.contains("boundary-canary"), text);
+        assertTrue(text.contains("message: ordinary"), text);
+    }
+
     @Test void presentsProjectPathsPortablyAndBoundsExternalPathFields() throws Exception {
         Path root = Files.createDirectories(tempDir.resolve("ATT home space"));
         Path file = tempDir.resolve("paths.log");
