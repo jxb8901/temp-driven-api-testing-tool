@@ -13,6 +13,7 @@ async function main() {
     httpCredentials: { username, password, send: 'always' },
     viewport: { width: 1440, height: 1000 },
   });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
   const page = await context.newPage();
   const pageErrors = [];
   const consoleErrors = [];
@@ -21,6 +22,7 @@ async function main() {
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigationEvents.push(frame.url()); });
   await page.addInitScript(() => {
+    localStorage.setItem('att-ui-theme', 'light');
     window.__attCspViolations = [];
     document.addEventListener('securitypolicyviolation', event => {
       window.__attCspViolations.push(`${event.violatedDirective}: ${event.blockedURI}`);
@@ -43,21 +45,61 @@ async function main() {
     await page.getByRole('button', { name: 'Reference Flow' }).click();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
 
+    const definitionEditor = page.locator('#att-explorer-panel-definition .cm-editor');
+    await definitionEditor.waitFor();
+    const inspectEditor = (locator, tokenSelector) => locator.evaluate((element, selector) => {
+      const content = element.querySelector('.cm-content');
+      const token = content?.querySelector(selector);
+      return {
+        text: Array.from(content?.querySelectorAll('.cm-line') || []).map(line => line.textContent || '').join('\n'),
+        height: element.getBoundingClientRect().height,
+        tokenText: token?.textContent || '',
+        tokenColor: token ? getComputedStyle(token).color : '',
+        editorColor: content ? getComputedStyle(content).color : '',
+      };
+    }, tokenSelector);
+    const jsonLight = await inspectEditor(definitionEditor, '.att-token-string');
+    assert.ok(jsonLight.text.includes('reference.flow.v1'), 'the JSON Definition source must be visible under the production CSP');
+    assert.ok(jsonLight.height > 0, 'the JSON Definition editor must have visible layout under the production CSP');
+    assert.ok(jsonLight.tokenText && jsonLight.tokenColor !== jsonLight.editorColor,
+      `JSON string tokens must have visible syntax color in the light theme: ${JSON.stringify(jsonLight)}`);
+    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+    const jsonDark = await inspectEditor(definitionEditor, '.att-token-string');
+    assert.ok(jsonDark.text.includes('reference.flow.v1') && jsonDark.height > 0, 'JSON Definition text and layout must remain visible in the dark theme');
+    assert.ok(jsonDark.tokenColor && jsonDark.tokenColor !== jsonDark.editorColor, 'JSON string tokens must have visible syntax color in the dark theme');
+    await page.getByRole('button', { name: 'Switch to light theme' }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+
     await page.getByRole('tab', { name: 'Source' }).click();
     await page.getByRole('tabpanel', { name: 'Source' }).getByText('Code viewer ready.').waitFor();
     const editor = page.locator('.att-explorer-source .cm-editor');
     await editor.waitFor();
-    const editorState = await editor.evaluate(element => ({
-      text: element.querySelector('.cm-content')?.textContent || '',
-      height: element.getBoundingClientRect().height,
-      generatedStyles: Array.from(document.querySelectorAll('style[nonce]')).map(style => style.nonce),
-    }));
+    const editorState = await editor.evaluate(element => {
+      const content = element.querySelector('.cm-content');
+      const keyToken = content?.querySelector('.att-token-property');
+      return {
+        text: Array.from(content?.querySelectorAll('.cm-line') || []).map(line => line.textContent || '').join('\n'),
+        height: element.getBoundingClientRect().height,
+        generatedStyles: Array.from(document.querySelectorAll('style[nonce]')).map(style => style.nonce),
+        keyText: keyToken?.textContent || '',
+        keyColor: keyToken ? getComputedStyle(keyToken).color : '',
+        editorColor: content ? getComputedStyle(content).color : '',
+      };
+    });
     assert.ok(editorState.text.includes('&{templates/SCHEDULED/payload/request.xml}'), 'CodeMirror must show the source text under the production CSP');
     assert.ok(editorState.height > 0, 'CodeMirror must have visible layout under the production CSP');
     assert.ok(editorState.generatedStyles.length > 0 && editorState.generatedStyles.every(nonce => nonce === pageNonce), 'generated editor styles must carry the page nonce');
+    assert.ok(editorState.keyText && editorState.keyColor !== editorState.editorColor,
+      `YAML keys must have visible syntax color in the light theme: ${JSON.stringify(editorState)}`);
+    await editor.locator('xpath=ancestor::section[contains(@class,"att-code-editor")]').getByRole('button', { name: 'Copy' }).click();
+    await page.getByText('Copied displayed code.').waitFor();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), editorState.text, 'Copy must match the visible YAML source under the production CSP');
     await page.getByRole('button', { name: 'Switch to dark theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
-    assert.ok(await editor.evaluate(element => getComputedStyle(element).height !== '0px'), 'the editor must remain laid out in the dark theme');
+    const yamlDark = await inspectEditor(editor, '.att-token-property');
+    assert.ok(yamlDark.text.includes('&{templates/SCHEDULED/payload/request.xml}') && yamlDark.height > 0, 'YAML Source text and layout must remain visible in the dark theme');
+    assert.ok(yamlDark.tokenText && yamlDark.tokenColor !== yamlDark.editorColor, 'YAML keys must have visible syntax color in the dark theme');
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
     const fileLink = page.locator('.att-explorer-source [data-att-reference]');

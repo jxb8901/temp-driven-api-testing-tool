@@ -1,5 +1,9 @@
 package att.server.api.internal;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,27 +47,66 @@ public final class DiagnosticSanitizer {
 
     /** Hides host-local absolute paths while preserving URLs and the useful final path segment. */
     public static String redactAbsolutePaths(String value) {
+        return redactAbsolutePaths(value, null);
+    }
+
+    /** Keeps package-relative locations actionable while hiding absolute host paths. */
+    public static String redactAbsolutePaths(String value, Path packageRoot) {
         if(value==null||value.isEmpty())return value;
+        Path safeRoot=canonicalRoot(packageRoot);
         List<String> urls=new ArrayList<>();Matcher urlMatcher=URL.matcher(value);StringBuffer protectedValue=new StringBuffer();
         while(urlMatcher.find()) {
             String token="\u0001ATT_URL_"+urls.size()+"\u0002";urls.add(urlMatcher.group());
             urlMatcher.appendReplacement(protectedValue,Matcher.quoteReplacement(token));
         }
         urlMatcher.appendTail(protectedValue);
-        String redacted=replacePaths(protectedValue.toString(),QUOTED_ABSOLUTE_PATH,true);
-        redacted=replacePaths(redacted,ABSOLUTE_PATH_TOKEN,false);
+        String redacted=replacePaths(protectedValue.toString(),QUOTED_ABSOLUTE_PATH,true,safeRoot);
+        redacted=replacePaths(redacted,ABSOLUTE_PATH_TOKEN,false,safeRoot);
         for(int i=0;i<urls.size();i++)redacted=redacted.replace("\u0001ATT_URL_"+i+"\u0002",urls.get(i));
         return redacted;
     }
 
-    private static String replacePaths(String value,Pattern pattern,boolean quoted) {
+    private static String replacePaths(String value,Pattern pattern,boolean quoted,Path packageRoot) {
         Matcher matcher=pattern.matcher(value);StringBuffer result=new StringBuffer();
         while(matcher.find()) {
             String path=quoted?matcher.group(2):matcher.group();
-            String replacement=(quoted?matcher.group(1):"")+externalBasename(path)+(quoted?matcher.group(1):"");
+            String replacement=(quoted?matcher.group(1):"")+safePathLabel(path,packageRoot)+(quoted?matcher.group(1):"");
             matcher.appendReplacement(result,Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(result);return result.toString();
+    }
+
+    private static String safePathLabel(String value,Path packageRoot) {
+        if(packageRoot==null)return externalBasename(value);
+        try {
+            Path candidate=Paths.get(value);
+            if(!candidate.isAbsolute())return externalBasename(value);
+            Path root=packageRoot;
+            if(root==null)return externalBasename(value);
+            Path absolute=candidate.toAbsolutePath().normalize();
+            List<Path> suffix=new ArrayList<>();
+            Path existing=absolute;
+            while(existing!=null&&!Files.exists(existing)) {
+                Path name=existing.getFileName();
+                if(name!=null)suffix.add(0,name);
+                existing=existing.getParent();
+            }
+            if(existing==null)return externalBasename(value);
+            Path resolved=existing.toRealPath();
+            for(Path part:suffix)resolved=resolved.resolve(part);
+            resolved=resolved.normalize();
+            if(!resolved.startsWith(root))return externalBasename(value);
+            Path relative=root.relativize(resolved);
+            return relative.toString().isEmpty()?"$ATT_PACKAGE_ROOT":relative.toString().replace('\\','/');
+        } catch(IOException|IllegalArgumentException failure) {
+            return externalBasename(value);
+        }
+    }
+
+    private static Path canonicalRoot(Path root) {
+        if(root==null)return null;
+        try { return root.toRealPath(); }
+        catch(IOException failure) { return root.toAbsolutePath().normalize(); }
     }
 
     private static String externalBasename(String value) {

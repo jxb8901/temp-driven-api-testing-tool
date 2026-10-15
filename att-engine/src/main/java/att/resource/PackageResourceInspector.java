@@ -897,6 +897,22 @@ public final class PackageResourceInspector implements AutoCloseable {
         Map<String, Object> composed = new att.load.LoadScenarioBuilder(new att.load.LoadScenarioLoader(packageRoot))
                 .composeScenario(policy, workloads);
         att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(packageRoot).loadInline(composed);
+        return validatedLoadScenario(index, config, engine, scenario);
+    }
+
+    /** Validates a package-backed Load scenario while retaining source locations from its YAML file. */
+    public Map<String, Object> validateLoadScenarioFile(String relativePath) throws Exception {
+        if (relativePath == null || relativePath.trim().isEmpty()) throw new IllegalArgumentException("Load scenario path is required");
+        Index index = index();
+        FrameworkConfig config = frameworkConfig();
+        DebugEngine engine = debugEngine(config);
+        PackageResourceResolver.PackageResource source = resources.resolvePackageRelative(relativePath, PackageResourceResolver.Kind.FILE);
+        att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(packageRoot).load(source.canonicalPath());
+        return validatedLoadScenario(index, config, engine, scenario);
+    }
+
+    private Map<String, Object> validatedLoadScenario(Index index, FrameworkConfig config, DebugEngine engine,
+                                                       att.load.LoadScenario scenario) throws Exception {
         att.load.LoadRunCoordinator.resolveAndValidateTargets(packageRoot, config, scenario);
         Map<String, Object> scenarioMap = scenario.toMap();
         Map<String, Object> projection = projectSafeLoadScenario(scenarioMap, engine);

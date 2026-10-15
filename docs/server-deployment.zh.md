@@ -262,7 +262,7 @@ Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的
 
 如要排程已驗證的 UI draft，請用 `draftId`（`A...` Advanced Load ID 或 `L...` Quick Load ID）取代 `scenario`，並提供驗證時使用的相同 `environment`。此方式只適用於建立排程；之後不可替換已保存的 snapshot。
 
-Preview endpoint 只檢查 recurrence 並計算執行時間；不會驗證 package scenario、Testdata 或已保存的 draft。`POST /load-schedules` 會在保存前驗證完整 scenario 及 target closure。驗證拒絕會以 HTTP 400 回傳 `error` 及 `diagnostics` 陣列。每項可用診斷可包括 code、summary、detail、field、source file 及行/欄位置、package ID、environment、resource/target ID 和 suggestion。頂層 `requestId` 亦會複製到每項診斷。Server API 診斷會遮蔽本機絕對路徑。UI 會在排程編輯器旁顯示這些資料，並可將焦點移至相符欄位或開啟已保存的 snapshot。
+Preview endpoint 只檢查 recurrence 並計算執行時間；不會驗證 package scenario、Testdata 或已保存的 draft。`POST /load-schedules` 會在保存前驗證完整 scenario 及 target closure。驗證拒絕會以 HTTP 400 回傳 `error` 及 `diagnostics` 陣列。每項可用診斷可包括 code、summary、detail、field、source file 及行/欄位置、package ID、environment、resource/target ID 和 suggestion。頂層 `requestId` 亦會複製到每項診斷。Server API 路徑淨化獨立於本機 CLI 路徑顯示旗標：package 內檔案會保留安全的 package-relative 路徑（例如 `load/scenario.yaml`）及 source 行/欄位置；package 以外的絕對路徑則顯示為 `$EXTERNAL/<basename>`。UI 會在排程編輯器旁顯示這些資料，並可將焦點移至相符欄位或開啟已保存的 snapshot。
 
 排程預設為 paused。建立、編輯及恢復時會按目前時間計算下一個符合的 instant。Occurrence 狀態為 `scheduled`、`submitted`、`skipped` 及 `failed-to-submit`；job 執行結果仍使用一般 job API。刪除排程會移除定義，但保留歷史，也不會取消已接納的工作。刪除前請記下 UI/API 顯示的 schedule ID；只要仍有保留記錄，管理員在定義刪除後仍可使用 `/load-schedules/{scheduleId}/executions` 讀取歷史，即使該排程不再出現在 UI 或 schedule list。History 受 `maxExecutionsPerSchedule` 限制；處理中 occurrence 及連結至執行中工作的 occurrence 可暫時超出上限，相關工作進入 terminal 狀態時會執行 pruning，schedule 定義刪除後亦會如此。
 

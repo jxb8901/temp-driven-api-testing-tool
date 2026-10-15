@@ -326,16 +326,23 @@ class ServerWarUiIT {
             assertEquals(401, apiStatus(port, "POST", api + "/load-schedules", null, origin, invalid));
             assertEquals(403, apiStatus(port, "POST", api + "/load-schedules", ordinary, origin, invalid));
             JsonNode invalidSchedule = apiJsonResponse(port, "POST", api + "/load-schedules", admin, origin, invalid, 400);
-            assertEquals("WORKER_REQUEST_INVALID", invalidSchedule.path("diagnostics").path(0).path("code").asText());
-            assertTrue(invalidSchedule.path("diagnostics").path(0).path("summary").asText().length() > 0);
+            JsonNode invalidDiagnostic = invalidSchedule.path("diagnostics").path(0);
+            assertEquals("ATT-LOAD-001", invalidDiagnostic.path("code").asText());
+            assertTrue(invalidDiagnostic.path("summary").asText().length() > 0);
             assertNotEquals("Load or Debug input failed schema or target validation",
-                    invalidSchedule.path("diagnostics").path(0).path("summary").asText());
-            assertEquals("payments", invalidSchedule.path("diagnostics").path(0).path("packageId").asText());
-            assertEquals("SIT", invalidSchedule.path("diagnostics").path(0).path("environment").asText());
-            assertEquals("SCHEDULED", invalidSchedule.path("diagnostics").path(0).path("targets").path(0).path("id").asText());
+                    invalidDiagnostic.path("summary").asText());
+            assertEquals("load/invalid.yaml", invalidDiagnostic.path("file").asText());
+            assertEquals("load/invalid.yaml", invalidDiagnostic.path("sourceFile").asText());
+            assertTrue(invalidDiagnostic.path("line").asInt() > 0, invalidDiagnostic.toString());
+            assertTrue(invalidDiagnostic.path("sourceColumn").asInt() > 0, invalidDiagnostic.toString());
+            assertFalse(invalidDiagnostic.toString().contains(packageRoot.toString()), invalidDiagnostic.toString());
+            assertFalse(invalidDiagnostic.toString().contains("$EXTERNAL"), invalidDiagnostic.toString());
+            assertEquals("payments", invalidDiagnostic.path("packageId").asText());
+            assertEquals("SIT", invalidDiagnostic.path("environment").asText());
+            assertEquals("SCHEDULED", invalidDiagnostic.path("targets").path(0).path("id").asText());
             assertTrue(invalidSchedule.path("requestId").isTextual());
             assertEquals(invalidSchedule.path("requestId").asText(),
-                    invalidSchedule.path("diagnostics").path(0).path("requestId").asText());
+                    invalidDiagnostic.path("requestId").asText());
 
             JsonNode first = apiJson(port, "POST", api + "/load-schedules", admin, origin,
                     scheduleRequest("Nightly payments", "load/scenario.yaml"), 201);

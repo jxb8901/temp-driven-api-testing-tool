@@ -503,7 +503,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
 
     <section className={`att-schedule-panel att-schedule-editor${modal ? ' att-schedule-modal-panel' : ''}`} aria-labelledby="schedule-editor-heading">
       <div className="att-schedule-section-heading"><div><h2 id="schedule-editor-heading" tabIndex={-1}>{editingId ? `Edit schedule: ${draft.name || editingId}` : 'Create schedule'}</h2>
-        <p>{draft.inlineSnapshot ? `This schedule stores the immutable ${draft.jobType === 'debug' ? 'Debug target and input' : 'Load scenario'} snapshot from your validated draft. The editor stays open behind this form.` : 'Scenario and config paths are package-relative. The Server validates the complete Load scenario when a run is submitted.'}</p></div>
+        <p>{draft.inlineSnapshot ? `This schedule stores the immutable ${draft.jobType === 'debug' ? 'Debug target and input' : 'Load scenario'} snapshot from your validated draft. The editor stays open behind this form.` : 'Scenario and config paths are package-relative. The next-run preview checks recurrence times only; the Server validates the package scenario before saving and again before each scheduled run.'}</p></div>
         {modal && <button type="button" className="button button-quiet" onClick={onClose}>Cancel and return to editor</button>}
         {!modal && editingId && <button type="button" className="button button-quiet" onClick={resetForm}>Cancel edit</button>}
       </div>

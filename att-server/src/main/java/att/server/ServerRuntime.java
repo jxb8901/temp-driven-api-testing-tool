@@ -914,7 +914,7 @@ final class ServerRuntime implements AutoCloseable {
                     Object item=value.get(key);
                     if(item instanceof String) {
                         String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
-                        text=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text);
+                        text=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,root);
                         safe.put(key,text);
                     }
                 }
@@ -926,7 +926,7 @@ final class ServerRuntime implements AutoCloseable {
                 fallback.put("code",workerError==null?"ATT-SERVER-DRAFT-INVALID":workerError);
                 Object message=envelope.get("message");
                 String summary=message instanceof String?String.valueOf(message):"Load or Debug input failed schema or target validation";
-                fallback.put("summary",att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(summary)));
+                fallback.put("summary",att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(summary),root));
                 String resourceId=request.inspectionTargetId==null?request.inspectionResourceId:request.inspectionTargetId;
                 if(resourceId!=null)fallback.put("resourceId",resourceId);
                 diagnostics.add(fallback);
@@ -1281,10 +1281,10 @@ final class ServerRuntime implements AutoCloseable {
 
     private ValidatedScheduledScenario validateScheduleScenario(Path root,LoadSchedule schedule) throws Exception {
         Map<String,Object> requested=schedule.inlineScenario==null?readScheduledScenario(root,schedule.scenario):deepMap(schedule.inlineScenario);
-        ValidatedScheduledScenario validated=validateScheduledScenario(root,schedule,requested);
+        ValidatedScheduledScenario validated=validateScheduledScenario(root,schedule,requested,schedule.inlineScenario==null);
         if(schedule.load!=null&&!schedule.load.isEmpty()) {
             Map<String,Object> overridden=withScheduledLoadOptions(validated.scenario,schedule.load);
-            validated=validateScheduledScenario(root,schedule,overridden);
+            validated=validateScheduledScenario(root,schedule,overridden,false);
         }
         if(schedule.inlineScenario!=null&&validated.containsSensitiveValues)
             throw new IllegalArgumentException("An inline schedule cannot store credentials, private values, or other classified sensitive fields. Remove them from the Load draft or keep them in package-managed configuration.");
@@ -1303,10 +1303,12 @@ final class ServerRuntime implements AutoCloseable {
         return result;
     }
 
-    private ValidatedScheduledScenario validateScheduledScenario(Path root,LoadSchedule schedule,Map<String,Object> scenario) throws Exception {
+    private ValidatedScheduledScenario validateScheduledScenario(Path root,LoadSchedule schedule,Map<String,Object> scenario,
+                                                                  boolean packageFile) throws Exception {
         WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
         if(schedule.config!=null){request.config=safeRelative(schedule.config,"config");validatePackagePath(root,request.config,"config");}
         request.inspectionAction="load-scenario";request.inlineLoadScenario=scenario;
+        if(packageFile)request.inspectionPath=schedule.scenario;
         Map<String,Object> inspected=executeInspection(root,request);
         Object rawScenario=inspected.get("normalizedScenario"),rawDigest=inspected.get("revisionDigest"),rawModel=inspected.get("model"),rawSensitive=inspected.get("containsSensitiveValues");
         if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")

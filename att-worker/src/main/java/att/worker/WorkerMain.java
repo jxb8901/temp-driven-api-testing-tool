@@ -236,7 +236,9 @@ public final class WorkerMain {
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
             if("load-scenario".equals(r.inspectionAction)) {
-                Map<String,Object> inspected=inspector.validateLoadScenario(r.inlineLoadScenario);
+                Map<String,Object> inspected=r.inspectionPath==null
+                        ?inspector.validateLoadScenario(r.inlineLoadScenario)
+                        :inspector.validateLoadScenarioFile(r.inspectionPath);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }

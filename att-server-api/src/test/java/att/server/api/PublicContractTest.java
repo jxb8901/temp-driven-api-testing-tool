@@ -2,11 +2,17 @@ package att.server.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PublicContractTest {
+    @TempDir Path temp;
+
     @Test void submissionUsesOnlyLogicalServerFields() throws Exception {
         JobSubmission request=new JobSubmission();request.packageId="payments";request.environment="SIT";request.all=true;
         String json=new ObjectMapper().writeValueAsString(request);
@@ -48,5 +54,22 @@ class PublicContractTest {
         assertEquals("effective",json.path("view").asText());assertEquals("visible",json.path("globals").path("timeoutMs").path("state").asText());
         assertEquals(120,json.path("total").asInt());assertEquals(50,json.path("nextOffset").asInt());
         assertFalse(json.toString().contains("packageRoot"));assertFalse(json.toString().contains("serverDataDir"));
+    }
+
+    @Test void diagnosticPathRedactionPreservesPackageRelativeLocationsAndHidesExternalRoots() throws Exception {
+        Path packageRoot=Files.createDirectories(temp.resolve("packages/payments"));
+        Path source=packageRoot.resolve("load/invalid.yaml");
+        Files.createDirectories(source.getParent());
+        Files.write(source,"schemaVersion: invalid\n".getBytes(StandardCharsets.UTF_8));
+        Path external=Files.createDirectories(temp.resolve("private" )).resolve("credentials.yaml");
+        Files.write(external,"password: must-not-leak\n".getBytes(StandardCharsets.UTF_8));
+
+        String diagnostic="file=\""+source+"\" line=12 sourceFile="+source+"; external="+external;
+        String safe=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(diagnostic,packageRoot);
+        assertTrue(safe.contains("load/invalid.yaml"),safe);
+        assertTrue(safe.contains("line=12"),safe);
+        assertTrue(safe.contains("$EXTERNAL/credentials.yaml"),safe);
+        assertFalse(safe.contains(packageRoot.toString()),safe);
+        assertFalse(safe.contains(external.toString()),safe);
     }
 }
