@@ -166,12 +166,12 @@ class PackageResourceInspectorTest {
         Path externalRoot=Files.createDirectories(temp.resolve("external-source-deny-root"));
         Path privateScript=Files.createDirectories(externalRoot.resolve("private")).resolve("check.sh");
         Path allowedScript=Files.createDirectories(externalRoot.resolve("mq")).resolve("check-queue.sh");
-        writeUtf8(privateScript,"#!/bin/sh\\necho private\\n");
-        writeUtf8(allowedScript,"#!/bin/sh\\necho allowed\\n");
-        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\\nenvironment: SIT\\nenvironments:\\n  SIT: {}\\n"
-                +"testcase:\\n  root: testcase\\ntemplates:\\n  root: templates\\ntools:\\n"
-                +"  privateCheck:\\n    name: Private external script\\n    description: Deny glob regression\\n    command: [bash, '"+privateScript.toString()+"']\\n    stdoutFormat: text\\n    arguments: {}\\n"
-                +"  mqCheck:\\n    name: Allowed external script\\n    description: Deny glob regression\\n    command: [bash, '"+allowedScript.toString()+"']\\n    stdoutFormat: text\\n    arguments: {}\\n");
+        writeUtf8(privateScript,"#!/bin/sh\necho private\n");
+        writeUtf8(allowedScript,"#!/bin/sh\necho allowed\n");
+        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n"
+                +"  privateCheck:\n    name: Private external script\n    description: Deny glob regression\n    command: [bash, '"+privateScript.toString()+"']\n    stdoutFormat: text\n    arguments: {}\n"
+                +"  mqCheck:\n    name: Allowed external script\n    description: Deny glob regression\n    command: [bash, '"+allowedScript.toString()+"']\n    stdoutFormat: text\n    arguments: {}\n");
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
                 Collections.<String>emptyList(),java.util.Arrays.asList(privateScript.toRealPath().toString(),allowedScript.toRealPath().toString()),
                 Collections.singletonList(externalRoot.toRealPath().toString()),65536,262144,false,true,"safe-package-files",
