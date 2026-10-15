@@ -446,7 +446,7 @@ async function main() {
     await page.getByText(/Saved Validated Load snapshot\. Next run:/).waitFor();
     assert.equal(submittedScheduleInput.draftId, 'LOAD-DRAFT-QUICK-99');
     assert.equal(Object.hasOwn(submittedScheduleInput, 'scenario'), false, 'inline scheduling submits the validated draft ID, not a scenario path');
-    await scheduleDialog.getByRole('button', { name: 'Return to Load', exact: true }).click();
+    await scheduleDialog.getByRole('button', { name: 'Return to editor', exact: true }).click();
     await scheduleDialog.waitFor({ state: 'detached' });
     assert.equal(page.url(), quickLoadUrl, 'Saving should leave the user on the originating Quick Load route');
     assert.deepEqual(pageErrors, [], 'Configuration and Quick Load should not produce uncaught browser errors');
