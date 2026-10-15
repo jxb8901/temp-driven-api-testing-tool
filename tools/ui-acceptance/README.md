@@ -25,7 +25,7 @@ npm run smoke
 
 The script covers static resources below the non-root `/att/` context, loaded/empty/error/loading dashboard states, the package/jobs/load route aliases, selected navigation and breadcrumb state, skip-link keyboard behavior, uncaught browser errors, and axe-core WCAG 2.0/2.1/2.2 A/AA rules. It reports selectors for any axe violations.
 
-The fixture prefers the packaged Maven UI, then `att-web/frontend/dist`. Set `ATT_UI_DIST` to a built Vite output directory to test a build stored outside the repository worktree.
+The fixture prefers the packaged Maven UI, then `att-web/frontend/dist`, and falls back to static login and legacy resources from `att-web/src/main/resources/META-INF/resources/ui`, matching the WAR resource layout. Set `ATT_UI_DIST` to a built Vite output directory to test a build stored outside the repository worktree; static login and legacy assets still come from the source resource directory.
 
 The issue-216 integration check also runs Playwright against the packaged WAR while `ServerWarUiIT` has authenticated stock Tomcat mounted at the non-root `/tools/att` context. It uses the real API without route interception to open a Flow's server-projected XML reference, inspect allowed and withheld configuration sources, preview generated Testdata, and open Quick Load at a tablet viewport. CI installs this harness and its browsers before Maven, then sets `ATT_UI_SERVER_PLAYWRIGHT=1` for `mvn clean verify`. To run it locally, install the harness and browser dependencies as above, then run `ATT_UI_SERVER_PLAYWRIGHT=1 mvn -B -ntp clean verify` from the repository root.
 

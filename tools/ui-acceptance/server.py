@@ -16,13 +16,16 @@ from urllib.parse import parse_qs, unquote, urlsplit
 REPOSITORY = Path(__file__).resolve().parents[2]
 BUILT_UI_ROOT = REPOSITORY / "att-web/target/classes/META-INF/resources/ui"
 BUILT_FRONTEND_ROOT = REPOSITORY / "att-web/frontend/dist"
+STATIC_UI_ROOT = REPOSITORY / "att-web/src/main/resources/META-INF/resources/ui"
 OVERRIDE_UI_ROOT = os.environ.get("ATT_UI_DIST")
-UI_ROOT = Path(OVERRIDE_UI_ROOT).expanduser().resolve() if OVERRIDE_UI_ROOT else (
-    BUILT_UI_ROOT if (BUILT_UI_ROOT / "index.html").is_file() else (
-        BUILT_FRONTEND_ROOT if (BUILT_FRONTEND_ROOT / "index.html").is_file()
-        else REPOSITORY / "att-web/src/main/resources/META-INF/resources/ui"
-    )
-)
+if OVERRIDE_UI_ROOT:
+    UI_ROOTS = (Path(OVERRIDE_UI_ROOT).expanduser().resolve(), STATIC_UI_ROOT)
+elif (BUILT_UI_ROOT / "index.html").is_file():
+    UI_ROOTS = (BUILT_UI_ROOT, STATIC_UI_ROOT)
+elif (BUILT_FRONTEND_ROOT / "index.html").is_file():
+    UI_ROOTS = (BUILT_FRONTEND_ROOT, STATIC_UI_ROOT)
+else:
+    UI_ROOTS = (STATIC_UI_ROOT,)
 PACKAGES = [
     {"packageId": "payments"},
     {"packageId": "ledger"},
@@ -572,13 +575,18 @@ class Handler(BaseHTTPRequestHandler):
         relative = request_path.removeprefix("/att/ui/")
         if not relative:
             relative = "index.html"
-        candidate = (UI_ROOT / relative).resolve()
-        try:
-            candidate.relative_to(UI_ROOT.resolve())
-        except ValueError:
-            self.send_error(404)
-            return
-        if not candidate.is_file():
+        candidate = None
+        for root in UI_ROOTS:
+            candidate_path = (root / relative).resolve()
+            try:
+                candidate_path.relative_to(root.resolve())
+            except ValueError:
+                self.send_error(404)
+                return
+            if candidate_path.is_file():
+                candidate = candidate_path
+                break
+        if candidate is None:
             self.send_error(404)
             return
         body = candidate.read_bytes()
@@ -598,8 +606,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    if not UI_ROOT.is_dir():
-        raise SystemExit(f"UI assets not found: {UI_ROOT}")
+    if not any(root.is_dir() for root in UI_ROOTS):
+        raise SystemExit(f"UI assets not found: {', '.join(str(root) for root in UI_ROOTS)}")
     port = int(os.environ.get("ATT_UI_FIXTURE_PORT", "0"))
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.valid_drafts = set()
