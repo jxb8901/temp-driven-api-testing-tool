@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from './api';
 import { AuthPasswordField } from './AuthPasswordField';
-import { authUiLocale, authUiText } from './authUiText';
+import { authUiText, type AuthUiLocale } from './authUiText';
 import { ApiError } from './types';
 
 function validPassword(password: string): boolean {
   return password.length >= 12 && password.length <= 1024 && !/[\u0000-\u001f\u007f-\u009f]/.test(password);
 }
 
-export function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose(): void }) {
-  const locale = useMemo(authUiLocale,[]);
+export function ChangePasswordDialog({ open, onClose, locale }: { open: boolean; onClose(): void; locale: AuthUiLocale }) {
   const t = (key: Parameters<typeof authUiText>[0]) => authUiText(key,locale);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [currentPassword, setCurrentPassword] = useState('');

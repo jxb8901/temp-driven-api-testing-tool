@@ -93,6 +93,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Build a source checkout](#build-a-source-checkout)
   - [Find syntax, options, and examples by task](#find-syntax-options-and-examples-by-task)
   - [Use ATT Server from the CLI](#use-att-server-from-the-cli)
+  - [Path display](#path-display)
   - [Typed overrides and quick Load](#typed-overrides-and-quick-load)
   - [Debug inputs and outputs](#debug-inputs-and-outputs)
   - [Exit codes](#exit-codes)
@@ -2652,6 +2653,15 @@ Remote-only options include `--server <profile|url>`, `--no-auth`, `--principal 
 Options are command-specific. Unknown commands/options and missing option values are errors. `--package` and `--selected` are mutually exclusive. Selected validation and run require an explicit selection.
 
 No-target `debug` and `load` are read-only discovery commands. Debug validates target contracts without invoking Tools or creating output. Load scans only declared `att-load/*` YAML, validates every target before listing the scenario, reports invalid declared descriptors, and ignores unrelated YAML. Both accept `--config`, `--env`, `--format`, `--quiet`, and `--verbose` in discovery mode.
+
+### Path display
+
+Local CLI output shows absolute paths by default. Add `--substitute-package-root` to display package-contained paths as `$ATT_PACKAGE_ROOT` or `$ATT_PACKAGE_ROOT/<relative-path>`, and `--substitute-external-basename` to display other absolute paths as `$EXTERNAL/<basename>`. These options are independent and apply to human-readable diagnostics, structured results, and displayed report paths for `run`, `validate`, `snapshot`, `debug`, and `load`. They change presentation only; filesystem access and saved package data are unchanged. These CLI switches apply to the local CLI process only; Server Workers force both substitutions for API and Studio output regardless of CLI flags, to avoid exposing host paths. Add the flags to restore the previous local CLI presentation when upgrading to 4.2.0.
+
+```sh
+./att.sh validate --package --substitute-package-root
+./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
+```
 
 ### Typed overrides and quick Load
 

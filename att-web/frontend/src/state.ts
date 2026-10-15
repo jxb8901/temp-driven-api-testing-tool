@@ -31,7 +31,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'packages/loading': return { ...state, packages: { status: 'loading' } };
     case 'packages/ready': return { ...state, packages: { status: 'ready', data: action.data } };
     case 'packages/error': return { ...state, packages: { status: 'error', error: action.error } };
-    case 'jobs/loading': return { ...state, jobs: { status: 'loading' } };
+    case 'jobs/loading': return state.jobs.status === 'ready' ? state : { ...state, jobs: { status: 'loading' } };
     case 'jobs/ready': return { ...state, jobs: { status: 'ready', data: action.data } };
     case 'jobs/error': return { ...state, jobs: { status: 'error', error: action.error } };
   }

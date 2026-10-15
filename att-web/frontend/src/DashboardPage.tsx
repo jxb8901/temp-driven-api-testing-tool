@@ -10,6 +10,8 @@ interface DashboardPageProps {
   onJobChange(jobId: string): void;
   onRetryPackages(): void;
   onRetryJobs(): void;
+  jobsRefreshing?: boolean;
+  jobsUpdatedAt?: string | null;
 }
 
 function ErrorText({ error }: { error: Error }) {
@@ -57,19 +59,24 @@ function PackageState({ state, onPackageChange }: { state: AsyncState<PackageSum
 }
 
 function JobPanel({
-  state, onJobChange, onRetry, heading = 'Recent activity', description = 'Latest job rows returned by this Server.',
+  state, onJobChange, onRetry, heading = 'Recent activity', description = 'Latest job rows returned by this Server.', jobsRefreshing = false, jobsUpdatedAt = null,
 }: {
   state: AsyncState<JobSummary[]>;
   onJobChange(jobId: string): void;
   onRetry(): void;
   heading?: string;
   description?: string;
+  jobsRefreshing?: boolean;
+  jobsUpdatedAt?: string | null;
 }) {
   return (
     <section id="home-jobs-section" className="panel" aria-labelledby="jobs-heading">
       <div className="section-heading">
         <div><h2 id="jobs-heading">{heading}</h2><p className="section-description">{description}</p></div>
-        {state.status === 'error' && <button id="retry-jobs" className="button button-quiet" type="button" onClick={onRetry}>Retry</button>}
+        <div className="job-refresh-actions">
+          {jobsUpdatedAt && <span className="section-description">Updated {new Date(jobsUpdatedAt).toLocaleTimeString()}</span>}
+          <button id="retry-jobs" className="button button-quiet" type="button" onClick={onRetry} disabled={jobsRefreshing || state.status === 'loading'}>{jobsRefreshing ? 'Refreshing…' : state.status === 'error' ? 'Retry' : 'Refresh'}</button>
+        </div>
       </div>
       <JobState state={state} onJobChange={onJobChange} />
     </section>
@@ -110,14 +117,14 @@ function SummaryCards({ state }: { state: AppState }) {
     <section className="summary-grid" aria-label="Dashboard summary">
       <article className="summary-card"><span className="summary-label">Configured packages</span><strong className="summary-value">{packages === null ? '—' : packages.length}</strong><span className="summary-detail">Available to this Server</span></article>
       <article className="summary-card"><span className="summary-label">Active jobs in results</span><strong className="summary-value">{activeCount === undefined ? '—' : activeCount}</strong><span className="summary-detail">{jobs === null ? 'Waiting for recent jobs' : 'From ' + jobs.length + ' returned job rows'}</span></article>
-      <article className="summary-card"><span className="summary-label">Latest job</span><strong className="summary-value summary-value-text">{latest ? latest.status : jobs === null ? '—' : 'No jobs yet'}</strong><span className="summary-detail">{latest ? 'Job ' + latest.jobId : 'From the latest job rows'}</span></article>
+      <article className="summary-card"><span className="summary-label">Latest job</span><strong className="summary-value summary-value-text">{latest ? latest.status : jobs === null ? '—' : 'No jobs yet'}</strong><span className="summary-detail">{latest ? `Job ${latest.jobId} · ${latest.command} · ${latest.packageId} · ${latest.createdAt}` : 'From the latest 100 job rows returned by the Server'}</span></article>
       <article className="summary-card"><span className="summary-label">Server status</span><strong className="summary-value summary-value-text">{serverStatus}</strong><span className="summary-detail">ATT API v1</span></article>
     </section>
   );
 }
 
 export function DashboardPage({
-  view, state, onPackageChange, onJobChange, onRetryPackages, onRetryJobs,
+  view, state, onPackageChange, onJobChange, onRetryPackages, onRetryJobs, jobsRefreshing = false, jobsUpdatedAt = null,
 }: DashboardPageProps) {
   const title = view === 'dashboard' ? 'Dashboard' : view === 'packages' ? 'Packages' : 'Jobs and results';
   const description = view === 'dashboard' ? 'Monitor recent ATT activity and open a package workspace.'
@@ -132,11 +139,11 @@ export function DashboardPage({
       {view === 'dashboard'
         ? <div className="dashboard-columns">
             <PackagePanel state={state.packages} onPackageChange={onPackageChange} onRetry={onRetryPackages} />
-            <JobPanel state={state.jobs} onJobChange={onJobChange} onRetry={onRetryJobs} />
+            <JobPanel state={state.jobs} onJobChange={onJobChange} onRetry={onRetryJobs} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />
           </div>
         : view === 'packages'
           ? <PackagePanel state={state.packages} onPackageChange={onPackageChange} onRetry={onRetryPackages} />
-          : <JobPanel state={state.jobs} onJobChange={onJobChange} onRetry={onRetryJobs} />}
+          : <JobPanel state={state.jobs} onJobChange={onJobChange} onRetry={onRetryJobs} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EditorView } from '@codemirror/view';
 import { createEditor } from './codemirrorRuntime';
 
 const views: Array<{ destroy(): void }> = [];
@@ -44,6 +45,25 @@ describe('CodeMirror safe package-file references', () => {
     unavailable?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(open).not.toHaveBeenCalled();
 
+    host.remove();
+  });
+});
+
+
+describe('CodeMirror content security policy', () => {
+  it('uses the nonce on the page for generated editor styles', async () => {
+    const nonceScript = document.createElement('script');
+    nonceScript.nonce = 'att-editor-test-nonce';
+    document.head.append(nonceScript);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const view = await createEditor(host, { value: 'key: value', language: 'yaml', readOnly: true, onChange: vi.fn() });
+    views.push(view);
+
+    expect(view.state.facet(EditorView.cspNonce)).toBe('att-editor-test-nonce');
+    expect(document.querySelector('style[nonce="att-editor-test-nonce"]')).not.toBeNull();
+
+    nonceScript.remove();
     host.remove();
   });
 });

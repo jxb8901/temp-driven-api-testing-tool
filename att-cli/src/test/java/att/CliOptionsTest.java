@@ -5,6 +5,15 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CliOptionsTest {
+    @Test void pathSubstitutionOptionsDefaultOffAndAreIndependent() {
+        CliOptions defaults=CliOptions.parse(new String[]{"run","--all"});
+        assertFalse(defaults.substitutePackageRoot());assertFalse(defaults.substituteExternalBasename());
+        CliOptions selected=CliOptions.parse(new String[]{"run","--all","--substitute-package-root"});
+        assertTrue(selected.substitutePackageRoot());assertFalse(selected.substituteExternalBasename());
+        CliOptions external=CliOptions.parse(new String[]{"run","--all","--substitute-external-basename"});
+        assertFalse(external.substitutePackageRoot());assertTrue(external.substituteExternalBasename());
+    }
+
     @Test void parsesDocsAndSelectionOptions() {
         CliOptions options = CliOptions.parse(new String[]{"docs"});
         assertEquals("docs", options.command());

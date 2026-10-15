@@ -119,6 +119,10 @@ function testdataCompletionSource(suggestions: string[]) {
   };
 }
 
+function pageCspNonce(): string {
+  return document.querySelector<HTMLScriptElement>('script[nonce]')?.nonce || '';
+}
+
 async function languageExtension(language: CodeLanguage): Promise<Extension> {
   switch (language) {
     case 'yaml': return (await import('@codemirror/lang-yaml')).yaml();
@@ -166,6 +170,7 @@ export async function createEditor(host: HTMLElement, options: EditorOptions): P
       },
     }),
     keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, ...searchKeymap, indentWithTab]),
+    EditorView.cspNonce.of(pageCspNonce()),
     EditorState.readOnly.of(options.readOnly),
     EditorView.editable.of(!options.readOnly),
     language,

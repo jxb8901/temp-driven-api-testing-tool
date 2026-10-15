@@ -25,3 +25,5 @@
 :root[data-theme='dark'] .att-code-editor { --att-code-context: #7db8ff; --att-code-expression: #ffb07a; --att-code-testdata: #d2a8ff; --att-code-file: #6dd6a6; }
 :root[data-theme='light'] .att-code-editor { --att-code-context: #0755a0; --att-code-expression: #9a3412; --att-code-testdata: #7030a0; --att-code-file: #087443; }
 @media (max-width: 700px) { .att-code-editor { min-height: 12rem; } .att-code-host { min-height: 9rem; } .att-code-toolbar { gap: .3rem; } .att-code-language { flex-basis: 100%; } }
+
+.att-code-fallback { flex: 1 1 auto; min-height: 12rem; max-height: 50vh; overflow: auto; margin: 0; padding: .75rem; white-space: pre-wrap; overflow-wrap: anywhere; color: inherit; background: var(--att-color-surface, #fff); font: .875rem/1.5 var(--att-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }

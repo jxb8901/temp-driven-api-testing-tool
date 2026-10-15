@@ -22,6 +22,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PackageResourceInspectorTest {
     @TempDir Path temp;
+
+    @org.junit.jupiter.api.BeforeEach void enableServerPathPresentation() { att.core.PathPresentation.configure(true, true); }
+    @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
+
     private PackageResourceInspector inspector() throws Exception {
         Path root=Paths.get("").toRealPath();
         assertTrue(Files.isRegularFile(root.resolve("config/config.yaml")),"Tests run from the repository root");
@@ -328,6 +332,8 @@ class PackageResourceInspectorTest {
         assertFalse(text.contains("/outside/private"));assertFalse(text.contains(root.toString()));
         assertFalse(text.contains("123456789"));assertFalse(text.contains("violet-123"));
         Map<String,Object> detail=inspector.inspect("detail","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
+        assertTrue(String.valueOf(items.get(0).get("description")).contains("Bearer [REDACTED]"));
+        assertFalse(String.valueOf(items.get(0).get("description")).contains("top-secret"));
         assertFalse(detail.toString().contains("123456789"));assertFalse(detail.toString().contains("violet-123"));
     }
 

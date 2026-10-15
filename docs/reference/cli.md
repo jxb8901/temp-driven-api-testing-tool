@@ -152,6 +152,15 @@ Options are command-specific. Unknown commands/options and missing option values
 
 No-target `debug` and `load` are read-only discovery commands. Debug validates target contracts without invoking Tools or creating output. Load scans only declared `att-load/*` YAML, validates every target before listing the scenario, reports invalid declared descriptors, and ignores unrelated YAML. Both accept `--config`, `--env`, `--format`, `--quiet`, and `--verbose` in discovery mode.
 
+## Path display
+
+Local CLI output shows absolute paths by default. Add `--substitute-package-root` to display package-contained paths as `$ATT_PACKAGE_ROOT` or `$ATT_PACKAGE_ROOT/<relative-path>`, and `--substitute-external-basename` to display other absolute paths as `$EXTERNAL/<basename>`. These options are independent and apply to human-readable diagnostics, structured results, and displayed report paths for `run`, `validate`, `snapshot`, `debug`, and `load`. They change presentation only; filesystem access and saved package data are unchanged. These CLI switches apply to the local CLI process only; Server Workers force both substitutions for API and Studio output regardless of CLI flags, to avoid exposing host paths. Add the flags to restore the previous local CLI presentation when upgrading to 4.2.0.
+
+```sh
+./att.sh validate --package --substitute-package-root
+./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
+```
+
 ## Typed overrides and quick Load
 
 `--set` is repeatable and accepts exactly one namespace: `input`, `arg`, or `vars`. Values use safe YAML parsing (for example `42`, `true`, `null`, `[a, b]`, or `{id: 7}`), and nested paths may use map keys and numeric list indexes such as `input.customer.ids[0]=42`. Duplicate assignments are applied in order, so the last value wins. ATT expressions are not evaluated while parsing an override; quote expression-looking values when a shell could expand them. `arg.*` is Tool-only; `vars.*` is Template/Flow-only. Unqualified overrides are rejected for multi-workload Load scenarios.

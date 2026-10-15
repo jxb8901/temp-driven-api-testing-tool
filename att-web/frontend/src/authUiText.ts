@@ -1,4 +1,5 @@
 export type AuthUiLocale = 'en' | 'zh-Hant';
+import { readUiLocale } from './uiLocale';
 
 const english = {
   userManagementTitle: 'User Management',
@@ -135,8 +136,7 @@ const traditionalChinese: Record<keyof typeof english, string> = {
 };
 
 export function authUiLocale(): AuthUiLocale {
-  const languages = typeof navigator === 'undefined' ? [] : [...(navigator.languages || []), navigator.language];
-  return languages.some(language => /^zh-(?:Hant|TW|HK|MO)(?:-|$)/i.test(language)) ? 'zh-Hant' : 'en';
+  return readUiLocale();
 }
 
 export function authUiText(key: keyof typeof english, locale = authUiLocale()): string {

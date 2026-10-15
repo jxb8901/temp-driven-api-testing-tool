@@ -13,6 +13,12 @@ type LoadState = 'loading' | 'ready' | 'error' | 'disabled';
 type PreviewState = { status: 'idle' | 'loading' | 'ready' | 'error'; signature: string; nextRunAt?: string; nextOccurrences?: string[]; error?: string };
 type Confirmation = { action: 'run' | 'delete'; schedule: LoadSchedule };
 type HistoryState = { status: 'idle' | 'loading' | 'ready' | 'error'; items: ScheduleOccurrence[]; error?: string };
+type ScheduleDiagnosticTarget = { type: string; id: string };
+type ScheduleValidationDiagnostic = {
+  code: string; summary: string; detail?: string; field?: string; file?: string; sourceFile?: string;
+  suggestion?: string; packageId?: string; environment?: string; resourceId?: string;
+  line?: number; sourceColumn?: number; targets?: ScheduleDiagnosticTarget[];
+};
 
 export interface ScheduledLoadPageProps {
   api: ScheduledLoadApi;
@@ -38,6 +44,52 @@ function errorMessage(error: unknown, operation: string): string {
   if (status === 409) return 'This schedule changed on the Server. Reload the schedule list before editing it again.';
   if (status === 429) return 'The Server is at its scheduled-load capacity. Review the occurrence history and retry later.';
   return error instanceof Error ? error.message : `${operation} failed. Check the connection and retry.`;
+}
+
+function scheduleDiagnostics(error: unknown): ScheduleValidationDiagnostic[] {
+  if (!(error instanceof ApiError) || !Array.isArray(error.diagnostics)) return [];
+  return error.diagnostics.slice(0, 20).flatMap((raw): ScheduleValidationDiagnostic[] => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const value = raw as Record<string, unknown>;
+    const safeText = (key: string, maximum = 1000): string | undefined => {
+      const item = value[key];
+      return typeof item === 'string' && item.trim() ? item.slice(0, maximum) : undefined;
+    };
+    const targets = Array.isArray(value.targets) ? value.targets.slice(0, 32).flatMap((target): ScheduleDiagnosticTarget[] => {
+      if (!target || typeof target !== 'object' || Array.isArray(target)) return [];
+      const item = target as Record<string, unknown>;
+      return typeof item.type === 'string' && typeof item.id === 'string'
+        ? [{ type: item.type.slice(0, 80), id: item.id.slice(0, 256) }] : [];
+    }) : undefined;
+    const numberValue = (key: string): number | undefined => typeof value[key] === 'number' && Number.isFinite(value[key]) ? Number(value[key]) : undefined;
+    const summary = safeText('summary') || safeText('message') || 'The Server rejected this schedule input.';
+    return [{
+      code: safeText('code', 120) || 'ATT-SERVER-DRAFT-INVALID', summary,
+      detail: safeText('detail'), field: safeText('field', 300), file: safeText('file', 512),
+      sourceFile: safeText('sourceFile', 512), suggestion: safeText('suggestion'),
+      packageId: safeText('packageId', 120), environment: safeText('environment', 120),
+      resourceId: safeText('resourceId', 300), line: numberValue('line'), sourceColumn: numberValue('sourceColumn'), targets,
+    }];
+  });
+}
+
+function focusDiagnosticField(field: string): void {
+  const value = field.toLowerCase();
+  const exact: Array<[RegExp, string]> = [
+    [/^name(?:\.|$)/, 'schedule-name'], [/^packageid(?:\.|$)/, 'schedule-package'],
+    [/^scenario(?:\.|$)/, 'schedule-scenario'], [/^config(?:\.|$)/, 'schedule-config'],
+    [/^environment(?:\.|$)/, 'schedule-environment'], [/^timezone(?:\.|$)/, 'schedule-timezone'],
+    [/^(?:cron|recurrence)(?:\.|$)/, 'schedule-cron'], [/^maxconcurrentruns(?:\.|$)/, 'schedule-overlap'],
+  ];
+  const match = exact.find(([pattern]) => pattern.test(value));
+  let target = match ? document.getElementById(match[1]) : null;
+  if (!target && /workload|target|scenario|load|debug/.test(value)) {
+    const snapshotDetails = document.querySelector<HTMLDetailsElement>('.att-schedule-snapshot-review');
+    if (snapshotDetails) snapshotDetails.open = true;
+    target = document.getElementById('schedule-snapshot-content') || document.getElementById('schedule-scenario')
+      || document.getElementById('schedule-load-options');
+  }
+  (target || document.getElementById('schedule-editor-heading'))?.focus();
 }
 
 function recurrenceLabel(schedule: LoadSchedule): string {
@@ -76,6 +128,8 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const [loadError, setLoadError] = useState('');
   const [notice, setNotice] = useState('');
   const [mutationError, setMutationError] = useState('');
+  const [validationDiagnostics, setValidationDiagnostics] = useState<ScheduleValidationDiagnostic[]>([]);
+  const [validationRequestId, setValidationRequestId] = useState('');
   const [filter, setFilter] = useState('');
   const [stateFilter, setStateFilter] = useState<'all' | 'enabled' | 'paused'>('all');
   const [packageFilter, setPackageFilter] = useState('');
@@ -238,6 +292,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     setDraft(current => ({ ...current, [key]: value }));
     setSaved(false);
     setMutationError('');
+    setValidationDiagnostics([]); setValidationRequestId('');
     setNotice('');
   }
 
@@ -248,6 +303,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     setEditingId('');
     setSaved(false);
     setMutationError('');
+    setValidationDiagnostics([]); setValidationRequestId('');
     setNotice('');
   }
 
@@ -257,6 +313,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     setBaseline(JSON.stringify(next));
     setEditingId(schedule.id);
     setMutationError('');
+    setValidationDiagnostics([]); setValidationRequestId('');
     setNotice(`Editing ${schedule.name}.`);
     document.getElementById('schedule-editor-heading')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     document.getElementById('schedule-name')?.focus({ preventScroll: true });
@@ -265,6 +322,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   async function submitSchedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMutationError('');
+    setValidationDiagnostics([]); setValidationRequestId('');
     setNotice('');
     let input;
     try { input = scheduleInputFromDraft(draft); }
@@ -285,7 +343,12 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
       } else resetForm();
       setNotice(`Saved ${saved.name}. Next run: ${formatScheduleTime(saved.nextRunAt, saved.timezone)} (${saved.timezone}).`);
       await loadSchedules();
-    } catch (error) { setMutationError(errorMessage(error, 'Saving schedule')); }
+    } catch (error) {
+      const diagnostics = scheduleDiagnostics(error);
+      setValidationDiagnostics(diagnostics);
+      setValidationRequestId(error instanceof ApiError ? error.requestId || '' : '');
+      setMutationError(diagnostics.length ? 'The Server rejected this schedule. Review the validation details below.' : errorMessage(error, 'Saving schedule'));
+    }
     finally { setSaving(false); }
   }
 
@@ -446,10 +509,27 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
       </div>
       {modal && scenarioPreviewYaml && <details className="att-schedule-snapshot-review">
         <summary>Review the validated {draft.jobType === 'debug' ? 'Debug input' : 'Load scenario'} snapshot</summary>
-        <pre tabIndex={0} aria-label="Validated Load scenario snapshot">{scenarioPreviewYaml}</pre>
+        <pre id="schedule-snapshot-content" tabIndex={0} aria-label="Validated Load scenario snapshot">{scenarioPreviewYaml}</pre>
       </details>}
       {notice && <p className="att-schedule-notice" role="status" aria-live="polite">{notice}</p>}
-      {mutationError && <p className="att-schedule-error" role="alert">{mutationError}</p>}
+      {mutationError && <div className="att-schedule-error" role="alert" aria-live="assertive">
+        <p>{mutationError}</p>
+        {validationDiagnostics.length > 0 && <section aria-labelledby="schedule-validation-heading">
+          <h3 id="schedule-validation-heading">Validation details</h3>
+          <ul className="att-schedule-diagnostics">{validationDiagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}:${index}`}>
+            <p><code>{diagnostic.code}</code> {diagnostic.summary}</p>
+            {diagnostic.detail && <p>{diagnostic.detail}</p>}
+            {diagnostic.field && <p><strong>Field:</strong> <code>{diagnostic.field}</code></p>}
+            {(diagnostic.file || diagnostic.sourceFile) && <p><strong>Location:</strong> <code>{diagnostic.sourceFile || diagnostic.file}{diagnostic.line ? `:${diagnostic.line}${diagnostic.sourceColumn ? `:${diagnostic.sourceColumn}` : ''}` : ''}</code></p>}
+            {(diagnostic.packageId || diagnostic.environment) && <p><strong>Package / environment:</strong> {[diagnostic.packageId, diagnostic.environment].filter(Boolean).join(' · ')}</p>}
+            {diagnostic.resourceId && <p><strong>Resource:</strong> <code>{diagnostic.resourceId}</code></p>}
+            {diagnostic.targets?.length ? <p><strong>Targets:</strong> {diagnostic.targets.map(target => `${target.type} · ${target.id}`).join(', ')}</p> : null}
+            {diagnostic.suggestion && <p><strong>Suggestion:</strong> {diagnostic.suggestion}</p>}
+            {diagnostic.field && <button type="button" className="button button-quiet" onClick={() => focusDiagnosticField(diagnostic.field || '')}>Review field</button>}
+          </li>)}</ul>
+        </section>}
+        {validationRequestId && <p><strong>Request ID:</strong> <code>{validationRequestId}</code></p>}
+      </div>}
       {actionPending && <p className="att-schedule-status" role="status" aria-live="polite" aria-busy="true">Applying the confirmed action to {schedules.find(item => item.id === actionPending)?.name || 'the schedule'}…</p>}
       {packages.status === 'loading' && <p role="status" aria-busy="true">Loading configured packages…</p>}
       {packages.status === 'error' && <p className="att-schedule-error" role="alert">Configured packages could not be loaded: {packages.error.message}</p>}

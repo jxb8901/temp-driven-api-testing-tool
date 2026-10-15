@@ -124,6 +124,7 @@ export function CodeEditor({ value, language, label, readOnly = true, onChange, 
     <p className="att-code-status" role="status" aria-live="polite">{value.length > maxCharacters ? `Showing first ${maxCharacters.toLocaleString()} of ${value.length.toLocaleString()} characters. ` : ''}{status}</p>
     {error && <p className="att-code-error" role="alert">{error}</p>}
     <div ref={host} className="att-code-host" aria-label={label + (readOnly ? ', read only' : ', editable')} />
+    {error && <pre className="att-code-fallback" aria-label={label + ' plain text fallback'}>{bounded}</pre>}
   </section>;
 }
 

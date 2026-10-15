@@ -9,6 +9,7 @@ import type {
   JobSummary as LoadJobSummary, JobView, LoadDraftInput, LoadDraftResponse, LoadModel,
   LoadPolicyResponse, LoadTargetType, QuickLoadFormResponse, SubmitLoadDraftInput, TargetResource,
 } from './features/load/types';
+import { contextRelativeReturnTo } from './contextPaths';
 import type {
   DeleteScheduleResponse, LoadSchedule, LoadScheduleInput, ScheduleOccurrence, SchedulePreview,
   SchedulePreviewInput,
@@ -56,7 +57,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     const payload = body && typeof body === 'object' ? body as { error?: ApiErrorBody; requestId?: string; diagnostics?: unknown } : {};
     const detail = payload.error;
     if (localAuthMode && detail?.code === 'ATT-SERVER-AUTHENTICATION-REQUIRED' && path !== 'auth/me') {
-      const returnTo = location.pathname + location.search + location.hash;
+      const returnTo = contextRelativeReturnTo(location.pathname, location.search, location.hash);
       location.assign(new URL('login.html?returnTo=' + encodeURIComponent(returnTo), document.baseURI).toString());
     }
     throw new ApiError(detail?.summary || ('ATT API request failed (' + response.status + ').'), {
@@ -138,6 +139,9 @@ export const api = {
   },
   getCurrentUser(signal?: AbortSignal): Promise<{ loginId: string; displayName: string; role: 'ADMIN' | 'USER'; csrfToken?: string }> {
     return request('auth/me', { signal });
+  },
+  getAuthCapabilities(signal?: AbortSignal): Promise<{ configurationAdmin: boolean }> {
+    return request('auth/capabilities', { signal });
   },
   logout(): Promise<{ loggedOut: boolean }> {
     return request('auth/logout', { method: 'POST', body: '{}' });
@@ -229,8 +233,8 @@ export const api = {
   getResourceSourceFile(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection> {
     return request<SourceProjection>(resourcePath(identity) + '/source-file' + queryString({ referenceId, origin }), { signal });
   },
-  getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse> {
-    return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration?view=declared', { signal });
+  getDeclaredConfiguration(packageId: string, signal?: AbortSignal, includeAllFields = false): Promise<ConfigurationResponse> {
+    return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration' + queryString({ view: 'declared', includeAllFields: includeAllFields || undefined }), { signal });
   },
   getEffectiveConfiguration(packageId: string, query: EffectiveConfigurationQuery, signal?: AbortSignal): Promise<ConfigurationResponse> {
     return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/effective' + queryString({
@@ -239,6 +243,7 @@ export const api = {
       query: query.query,
       offset: query.offset,
       limit: query.limit,
+      includeAllFields: query.includeAllFields || undefined,
     }), { signal });
   },
   compareConfiguration(packageId: string, query: ConfigurationComparisonQuery, signal?: AbortSignal): Promise<ConfigurationResponse> {
@@ -249,6 +254,7 @@ export const api = {
       includeInherited: query.includeInherited,
       offset: query.offset,
       limit: query.limit,
+      includeAllFields: query.includeAllFields || undefined,
     }), { signal });
   },
   listConfigurationFiles(packageId: string, path?: string, search?: string, offset = 0, signal?: AbortSignal): Promise<ConfigurationFilePage> {

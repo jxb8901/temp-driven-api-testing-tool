@@ -179,6 +179,15 @@ Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應
 
 無 target 的 `debug` 和 `load` 是唯讀 discovery。Debug 會驗證可執行 target，但不呼叫 Tool，也不建立 output。Load 只掃描宣告 `att-load/*` 的 YAML、驗證 target，並回報無效的已宣告 descriptor；其他 YAML 會忽略。Discovery 模式支援 `--config`、`--env`、`--format`、`--quiet` 和 `--verbose`。
 
+## 路徑顯示
+
+本機 CLI 預設顯示絕對路徑。加入 `--substitute-package-root`，可將 package 內路徑顯示為 `$ATT_PACKAGE_ROOT` 或 `$ATT_PACKAGE_ROOT/<relative-path>`；加入 `--substitute-external-basename`，可將其他絕對路徑顯示為 `$EXTERNAL/<basename>`。兩個 option 可獨立使用，適用於 `run`、`validate`、`snapshot`、`debug` 及 `load` 的人類可讀診斷、結構化結果與顯示的報表路徑。這只會改變呈現方式，不會改變檔案存取或儲存的 package data。這些 CLI options 只適用於本機 CLI；為避免洩露 host path，Server Worker 在 API 和 Studio 輸出中一律強制啟用兩種替換，並優先於 CLI 設定。升級至 4.2.0 後，如要恢復舊有本機 CLI 呈現方式，請明確加入相應旗標。
+
+```sh
+./att.sh validate --package --substitute-package-root
+./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
+```
+
 `--set` 可重複使用，namespace 只能是 `input`、`arg` 或 `vars`。值使用 safe YAML 解析並保留型別，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可用 map key 及數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效。解析時不會執行 ATT expression；shell 可能展開的值要加引號。`arg.*` 僅適用 Tool，`vars.*` 僅適用 Template/Flow。多 workload Load scenario 會拒絕未限定的 override。
 
 可選的 `load/load.yaml` 使用現行 policy-only `att-load/v1.6`，不能包含 target 或 business inputs。它可設定 `load`，以及可選的 `execution`、`thresholds`、`evidence` 和 `seed`。`load --debug` 會將 sidecar `inputs` promotion 到 `EXEC.INPUT`、Template/Flow `vars` promotion 到 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，之後使用正常 Load validator、scheduler 和 evidence pipeline；不會先執行 Debug。明確的 CLI pacing 會覆蓋 policy。沒有 policy 時，請在命令列提供完整 policy：

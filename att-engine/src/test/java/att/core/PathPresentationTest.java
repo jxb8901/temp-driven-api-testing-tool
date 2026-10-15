@@ -1,6 +1,8 @@
 package att.core;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
@@ -14,6 +16,30 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class PathPresentationTest {
     @TempDir Path temp;
+
+    @BeforeEach void enableAliasesForLegacyFormattingCases() { PathPresentation.configure(true, true); }
+    @AfterEach void restoreDefaultAliases() { PathPresentation.configure(false, false); }
+
+    @Test void showsRawPathsByDefaultAndEnablesTheTwoAliasesIndependently() throws Exception {
+        PathPresentation.configure(false, false);
+        Path root = Files.createDirectories(temp.resolve("raw-project"));
+        Path inside = root.resolve("templates/request.yaml");
+        Path outside = Files.createDirectories(temp.resolve("private")).resolve("token.pem");
+        assertFalse(PathPresentation.substitutesPackageRoot());
+        assertFalse(PathPresentation.substitutesExternalBasename());
+        assertEquals(inside.toAbsolutePath().normalize().toString(), PathPresentation.displayPath(inside, root));
+        assertEquals(outside.toAbsolutePath().normalize().toString(), PathPresentation.displayPath(outside, root));
+
+        PathPresentation.configure(true, false);
+        assertEquals("$ATT_PACKAGE_ROOT/templates/request.yaml", PathPresentation.displayPath(inside, root));
+        assertEquals(outside.toAbsolutePath().normalize().toString(), PathPresentation.displayPath(outside, root));
+
+        PathPresentation.configure(false, true);
+        assertEquals(inside.toAbsolutePath().normalize().toString(), PathPresentation.displayPath(inside, root));
+        assertEquals("$EXTERNAL/token.pem", PathPresentation.displayPath(outside, root));
+        assertEquals("Problem reading $EXTERNAL/token.pem", PathPresentation.displayDiagnosticText(
+                "Problem reading " + outside.toAbsolutePath().normalize(), root));
+    }
 
     @Test void rendersRootAndPortableProjectRelativePaths() throws Exception {
         Path root = Files.createDirectories(temp.resolve("專案 folder"));

@@ -171,9 +171,11 @@ public final class ServerConfig {
 
     private static Inspection inspection(Object raw,Map<String,Path> packages) throws Exception {
         Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.inspection");
-        Set<String> allowed=Set.of("enabled","maxConcurrent","queuedLimit","timeoutMs","heapMaxMb","maxResponseBytes","maxSourceBytes","safeTextSources","sourceBrowsing","redaction");
+        Set<String> allowed=Set.of("enabled","maxConcurrent","queuedLimit","timeoutMs","heapMaxMb","maxResponseBytes","maxSourceBytes","safeTextSources","sourceBrowsing","redaction","configurationAdminRole");
         for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))throw new IllegalArgumentException("server.inspection contains an unknown setting");
         boolean enabled=boolValue(values,"enabled",true);
+        String configurationAdminRole=values.get("configurationAdminRole")==null?"ATT_ADMIN":string(values.get("configurationAdminRole"),"server.inspection.configurationAdminRole");
+        if(!configurationAdminRole.matches("[A-Za-z][A-Za-z0-9._-]{0,63}"))throw new IllegalArgumentException("server.inspection.configurationAdminRole is invalid");
         int concurrent=intValue(values,"maxConcurrent",2,1,16);
         int queued=intValue(values,"queuedLimit",16,0,1024);
         int timeout=intValue(values,"timeoutMs",30000,100,300000);
@@ -251,8 +253,8 @@ public final class ServerConfig {
                     throw new IllegalArgumentException("Inspection source paths must be normalized package-relative paths");
                 String logical=relative.toString().replace('\\','/');
                 String lower=logical.toLowerCase(java.util.Locale.ROOT);
-                if(!(lower.endsWith(".sh")||lower.endsWith(".bash")||lower.endsWith(".py")||lower.endsWith(".js")||lower.endsWith(".ts")||lower.endsWith(".sql")||lower.endsWith(".groovy")||lower.endsWith(".rb")||lower.endsWith(".pl")||lower.endsWith(".ps1")||lower.endsWith(".bat")||lower.endsWith(".cmd")||lower.endsWith(".txt")))
-                    throw new IllegalArgumentException("Inspection source allowlist accepts text script files only");
+                if(!(lower.endsWith(".sh")||lower.endsWith(".bash")||lower.endsWith(".py")||lower.endsWith(".js")||lower.endsWith(".ts")||lower.endsWith(".sql")||lower.endsWith(".groovy")||lower.endsWith(".rb")||lower.endsWith(".pl")||lower.endsWith(".ps1")||lower.endsWith(".bat")||lower.endsWith(".cmd")||lower.endsWith(".txt")||lower.endsWith(".yaml")||lower.endsWith(".yml")||lower.endsWith(".json")||lower.endsWith(".xml")))
+                    throw new IllegalArgumentException("Inspection source allowlist accepts supported UTF-8 text files only (scripts, YAML, JSON, XML, SQL, or TXT)");
                 Path candidate=packageRoot.resolve(relative).normalize();
                 if(!candidate.startsWith(packageRoot)||!Files.isRegularFile(candidate))throw new IllegalArgumentException("Inspection source must be an existing regular file inside its package");
                 Path canonical=candidate.toRealPath();
@@ -262,7 +264,7 @@ public final class ServerConfig {
             }
             safeSources.put(packageId,List.copyOf(checked));
         }
-        return new Inspection(enabled,concurrent,queued,timeout,heap,response,source,safeSources,externalRoots,externalSources,
+        return new Inspection(enabled,configurationAdminRole,concurrent,queued,timeout,heap,response,source,safeSources,externalRoots,externalSources,
                 sourceBrowsingEnabled,sourcePolicy,denyGlobs,redactionEnabled,sensitivePaths,sensitiveFieldPatterns);
     }
 
@@ -385,6 +387,7 @@ public final class ServerConfig {
 
     public static final class Inspection {
         public final boolean enabled;
+        public final String configurationAdminRole;
         public final int maxConcurrent,queuedLimit,timeoutMs,heapMaxMb,maxResponseBytes,maxSourceBytes;
         public final Map<String,List<String>> safeTextSources;
         public final List<String> externalSourceRoots;
@@ -392,9 +395,9 @@ public final class ServerConfig {
         public final boolean sourceBrowsingEnabled,redactionEnabled;
         public final String sourcePolicy;
         public final List<String> sourceDenyGlobs,sensitivePaths,sensitiveFieldPatterns;
-        private Inspection(boolean enabled,int maxConcurrent,int queuedLimit,int timeoutMs,int heapMaxMb,int maxResponseBytes,int maxSourceBytes,Map<String,List<String>> safeTextSources,List<Path> externalSourceRoots,Map<String,List<String>> externalTextSources,
+        private Inspection(boolean enabled,String configurationAdminRole,int maxConcurrent,int queuedLimit,int timeoutMs,int heapMaxMb,int maxResponseBytes,int maxSourceBytes,Map<String,List<String>> safeTextSources,List<Path> externalSourceRoots,Map<String,List<String>> externalTextSources,
                            boolean sourceBrowsingEnabled,String sourcePolicy,List<String> sourceDenyGlobs,boolean redactionEnabled,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) {
-            this.enabled=enabled;this.maxConcurrent=maxConcurrent;this.queuedLimit=queuedLimit;this.timeoutMs=timeoutMs;this.heapMaxMb=heapMaxMb;this.maxResponseBytes=maxResponseBytes;this.maxSourceBytes=maxSourceBytes;
+            this.enabled=enabled;this.configurationAdminRole=configurationAdminRole;this.maxConcurrent=maxConcurrent;this.queuedLimit=queuedLimit;this.timeoutMs=timeoutMs;this.heapMaxMb=heapMaxMb;this.maxResponseBytes=maxResponseBytes;this.maxSourceBytes=maxSourceBytes;
             this.safeTextSources=Collections.unmodifiableMap(new LinkedHashMap<>(safeTextSources));
             this.externalSourceRoots=externalSourceRoots.stream().map(Path::toString).toList();
             this.externalTextSources=Collections.unmodifiableMap(new LinkedHashMap<>(externalTextSources));

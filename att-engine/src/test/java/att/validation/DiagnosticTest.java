@@ -6,6 +6,9 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DiagnosticTest {
+    @org.junit.jupiter.api.BeforeEach void enableLegacyPathPresentation() { att.core.PathPresentation.configure(true, true); }
+    @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
+
     @Test void physicalSourceDoesNotReplaceExcelLocationAndSurvivesWrapping() {
         IllegalArgumentException cause = new IllegalArgumentException("bad token");
         SourceLocation source = new SourceLocation("flows/a/flow.yaml", 12, 9, 12, 10, "        )");

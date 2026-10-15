@@ -158,12 +158,24 @@ class ServerConfigTest {
     @Test void loadsBoundedInspectionSettingsAndValidatesScriptAllowlist() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("inspection-packages"));Path pkg=Files.createDirectory(allowed.resolve("payments"));
         Path safe=Files.createDirectories(pkg.resolve("tools")).resolve("safe.sh");Files.writeString(safe,"#!/bin/sh\necho ok\n");
+        Path nestedYaml=Files.createDirectories(pkg.resolve("config/nested")).resolve("settings.yml");Files.writeString(nestedYaml,"enabled: true\n");
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path file=temp.resolve("inspection-server.yaml");
-        Files.writeString(file,"server:\n  dataDir: "+yaml(temp.resolve("inspection-data"))+"\n  javaExecutable: "+yaml(java)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 5000\n    heapMaxMb: 128\n    safeTextSources:\n      payments:\n        - tools/safe.sh\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    payments: "+yaml(pkg)+"\n");
+        Files.writeString(file,"server:\n  dataDir: "+yaml(temp.resolve("inspection-data"))+"\n  javaExecutable: "+yaml(java)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 5000\n    heapMaxMb: 128\n    safeTextSources:\n      payments:\n        - tools/safe.sh\n        - config/nested/settings.yml\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    payments: "+yaml(pkg)+"\n");
         ServerConfig config=ServerConfig.load(file);
         assertTrue(config.inspection.enabled);assertEquals(1,config.inspection.maxConcurrent);assertEquals(2,config.inspection.queuedLimit);
-        assertEquals(List.of("tools/safe.sh"),config.inspection.safeTextSources("payments"));
+        assertEquals("ATT_ADMIN",config.inspection.configurationAdminRole);
+        assertEquals(List.of("tools/safe.sh","config/nested/settings.yml"),config.inspection.safeTextSources("payments"));
+    }
+
+    @Test void validatesConfigurationInspectorAdminRole() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("inspection-admin-allowed"));Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path valid=Files.writeString(temp.resolve("inspection-admin.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("inspection-admin-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  inspection:\n    configurationAdminRole: ATT_CONFIG_ADMIN\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    default: "+yaml(pkg)+"\n");
+        assertEquals("ATT_CONFIG_ADMIN",ServerConfig.load(valid).inspection.configurationAdminRole);
+        Path invalid=Files.writeString(temp.resolve("inspection-admin-invalid.yaml"),Files.readString(valid).replace("ATT_CONFIG_ADMIN","bad role"));
+        assertThrows(IllegalArgumentException.class,()->ServerConfig.load(invalid));
     }
 
     @Test void rejectsInspectionSourcePathsOutsideThePackage() throws Exception {

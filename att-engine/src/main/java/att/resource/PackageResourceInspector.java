@@ -84,7 +84,8 @@ public final class PackageResourceInspector implements AutoCloseable {
     private static final Pattern XML_SECRET = Pattern.compile(
             "(?is)(<(password|passwd|passphrase|token|secret|authorization|credential|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)(?:\\s+[^>]*)?>)[^<]*(</\\2\\s*>)");
     private static final Pattern SOURCE_PII_VALUE = Pattern.compile(
-            "(?i)([\\\"']?(?:e-?mail|phone(?:number)?|mobile(?:number)?|address|ssn|socialsecuritynumber|nationalid|passport|dateofbirth|birthdate|taxid|creditcard|cardnumber|cvv|iban|routingnumber)[\\\"']?\\s*(?::|=)\\s*)(?:\\\"[^\\\"]*\\\"|'[^']*'|[^,\\r\\n}]+)");
+            "(?i)([\\\"']?(?:e-?mail|phone(?:number)?|mobile(?:number)?|address|account(?:number|id)?|ssn|socialsecuritynumber|nationalid|passport|dateofbirth|birthdate|taxid|creditcard|cardnumber|cvv|iban|routingnumber)[\\\"']?\\s*(?::|=)\\s*)(?:\\\"[^\\\"]*\\\"|'[^']*'|[^,\\r\\n}]+)");
+    private static final Pattern ACCOUNT_IDENTIFIER = Pattern.compile("(?i)(\\baccount(?:\\s+(?:number|id))?\\s+)([A-Za-z0-9][A-Za-z0-9-]{5,})");
     private static final Pattern XML_CLOSE_TAG = Pattern.compile("</[A-Za-z][A-Za-z0-9:_.-]*\\s*>");
     private static final Pattern XML_PII = Pattern.compile(
             "(?is)(<(email|e-?mail|phone(?:number)?|mobile(?:number)?|address|ssn|socialsecuritynumber|nationalid|passport|dateofbirth|birthdate|taxid|creditcard|cardnumber|cvv|iban|routingnumber)(?:\\s+[^>]*)?>)[^<]*(</\\2\\s*>)");
@@ -1459,7 +1460,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("type", resource.type);
         result.put("logicalId", scrub(resource.logicalId));
         result.put("name", scrub(resource.name));
-        result.put("description", resource.description == null || resource.description.isEmpty() ? "" : "[HIDDEN]");
+        result.put("description", resource.description == null ? "" : scrubDescription(resource.description));
         result.put("tags", new ArrayList<String>(resource.tags));
         result.put("state", resource.state);
         result.put("sourceAvailable", Boolean.valueOf(sourceAvailable(resource)));
@@ -1484,7 +1485,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("toolId", tool.key());
         result.put("groupId", tool.groupId());
         result.put("name", tool.name());
-        result.put("description", scrub(tool.description()));
+        result.put("description", scrubDescription(tool.description()));
         result.put("executionKind", tool.commandBacked() ? "command" : "call");
         result.put("timeoutMs", tool.timeoutMs());
         Map<String, Object> arguments = new LinkedHashMap<String, Object>();
@@ -1492,7 +1493,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             ToolArgumentConfig argument = entry.getValue();
             Map<String, Object> field = new LinkedHashMap<String, Object>();
             field.put("name", argument.name());
-            field.put("description", scrub(argument.description()));
+            field.put("description", scrubDescription(argument.description()));
             field.put("required", Boolean.valueOf(argument.required()));
             field.put("type", argument.type());
             field.put("enum", argument.enumValues());
@@ -1928,6 +1929,14 @@ public final class PackageResourceInspector implements AutoCloseable {
     private String scrub(String value) {
         if (value == null) return null;
         return att.core.PathPresentation.displayDiagnosticText(scrubSensitiveValues(value), packageRoot);
+    }
+
+    private String scrubDescription(String value) {
+        if (value == null) return null;
+        String result = scrub(value);
+        result = SOURCE_PII_VALUE.matcher(result).replaceAll("$1[REDACTED]");
+        result = XML_PII.matcher(result).replaceAll("$1[REDACTED]$3");
+        return ACCOUNT_IDENTIFIER.matcher(result).replaceAll("$1[REDACTED]");
     }
 
     private String scrubSensitiveValues(String value) {

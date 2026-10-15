@@ -4,15 +4,15 @@ import type { JobArtifact, JobEvent, JobResultResponse, JobStatus, JobSummary, J
 
 const PAGE_SIZE = 25;
 const MAX_EVENTS = 500;
-const MAX_LOG_LINES = 1000;
 const MAX_LINE_LENGTH = 4000;
 const MAX_BUCKET_ROWS = 4096;
+const EVENT_TYPES = ['status', 'progress', 'log', 'diagnostic', 'result'] as const;
 
 type LoadState = 'loading' | 'refreshing' | 'ready' | 'error';
 type JobTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics';
 const tabs: Array<{ id: JobTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
-  { id: 'live', label: 'Live logs' },
+  { id: 'live', label: 'Live events' },
   { id: 'events', label: 'Events' },
   { id: 'results', label: 'Results' },
   { id: 'artifacts', label: 'Artifacts' },
@@ -43,6 +43,21 @@ function eventText(event: JobEvent): string {
     }
   }
   return displayValue(data);
+}
+
+function eventTimestamp(event: JobEvent): string {
+  const data = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+    ? event.data as Record<string, unknown> : {};
+  const candidate = [data.timestamp, data.createdAt, data.time, data.at, event.receivedAt]
+    .find(value => typeof value === 'string' && Number.isFinite(Date.parse(value)));
+  return typeof candidate === 'string' ? candidate : '';
+}
+
+function chronologicalEvents(events: JobEvent[]): JobEvent[] {
+  return events.map((event, index) => ({ event, index })).sort((left, right) => {
+    const a = Number(left.event.id); const b = Number(right.event.id);
+    return Number.isFinite(a) && Number.isFinite(b) ? a - b : left.index - right.index;
+  }).map(item => item.event);
 }
 
 function dateTime(value?: string | null): string {
@@ -295,11 +310,16 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const [activeTab, setActiveTab] = useState<JobTab>('overview');
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
   const [events, setEvents] = useState<JobEvent[]>([]);
+  const [eventTypeFilter, setEventTypeFilter] = useState<string[]>([...EVENT_TYPES]);
+  const [eventSearch, setEventSearch] = useState('');
+  const [eventAutoScroll, setEventAutoScroll] = useState(true);
+  const [eventScrollPaused, setEventScrollPaused] = useState(false);
+  const [eventCopyStatus, setEventCopyStatus] = useState('');
+  const eventPanelRef = useRef<HTMLElement>(null);
   const [cancelState, setCancelState] = useState<'idle' | 'pending' | 'error'>('idle');
   const [cancelError, setCancelError] = useState('');
   const [detailRefresh, setDetailRefresh] = useState(0);
   const cancellationLock = useRef(false);
-  const logEntries = useMemo(() => events.filter(event => event.type === 'log').slice(-MAX_LOG_LINES), [events]);
   const liveStatus = useMemo(() => [...events].reverse().find(event => event.type === 'status'), [events]);
 
   useEffect(() => {
@@ -340,7 +360,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
             : event.data;
           if (typeof payload === 'string' && payload) setJob(currentJob => currentJob ? { ...currentJob, status: payload } : currentJob);
         }
-        return [...current, event].slice(-MAX_EVENTS);
+        return [...current, { ...event, receivedAt: event.receivedAt || new Date().toISOString() }].slice(-MAX_EVENTS);
       }),
     });
   }, [api, jobId]);
@@ -371,8 +391,44 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const jobStatus = job?.status || 'UNKNOWN';
   const canCancel = Boolean(job && ['QUEUED', 'PREPARING', 'RUNNING'].includes(job.status));
   const metrics = resultMetrics(result);
+  const orderedEvents = useMemo(() => chronologicalEvents(events), [events]);
+  const visibleEvents = useMemo(() => {
+    const query = eventSearch.trim().toLocaleLowerCase();
+    const allEventTypesSelected = eventTypeFilter.length === EVENT_TYPES.length;
+    return orderedEvents.filter(event => (allEventTypesSelected || eventTypeFilter.includes(event.type))
+      && (!query || `${event.type} ${event.id || ''} ${eventText(event)}`.toLocaleLowerCase().includes(query)));
+  }, [orderedEvents, eventTypeFilter, eventSearch]);
   const buckets = metricBuckets(metrics?.buckets).slice(0, MAX_BUCKET_ROWS);
   const charts = metricSeries(buckets);
+
+  useEffect(() => {
+    if (activeTab !== 'live' || !eventAutoScroll || eventScrollPaused) return;
+    const list = eventPanelRef.current?.querySelector<HTMLOListElement>('.att-job-events');
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [activeTab, eventAutoScroll, eventScrollPaused, visibleEvents.length]);
+
+  async function copyEvents() {
+    const value = visibleEvents.map(event => {
+      const timestamp = eventTimestamp(event);
+      return [timestamp, event.type, event.id ? `#${event.id}` : '', eventText(event)].filter(Boolean).join(' · ');
+    }).join('\n');
+    try {
+      await navigator.clipboard.writeText(value);
+      setEventCopyStatus(`${visibleEvents.length} events copied.`);
+    } catch {
+      setEventCopyStatus('Clipboard access is unavailable.');
+    }
+  }
+
+  function toggleEventType(type: string, checked: boolean) {
+    setEventTypeFilter(current => checked
+      ? current.includes(type) ? current : [...current, type]
+      : current.filter(item => item !== type));
+  }
+
+  function toggleAllEventTypes(checked: boolean) {
+    setEventTypeFilter(checked ? [...EVENT_TYPES] : []);
+  }
 
   function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const index = tabs.findIndex(tab => tab.id === activeTab);
@@ -415,18 +471,38 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
       </dl> : jobState !== 'loading' && <p>Job details are unavailable.</p>}
       {liveStatus && <p className="att-live-status" role="status">Latest live status event: {eventText(liveStatus)}</p>}
     </section>
-    <section className="att-job-panel" role="tabpanel" id="job-panel-live" aria-labelledby="job-tab-live" hidden={activeTab !== 'live'} tabIndex={0}>
-      <div className="att-live-heading"><h2>Live logs</h2><span role="status" data-state={connection}>SSE {connection}</span></div>
-      <p className="att-help">The browser EventSource reconnects automatically; the Server resumes from the last delivered event ID.</p>
-      {logEntries.length ? <ol className="att-job-log" aria-label="Latest live log events">{logEntries.map((event, index) => <li key={event.id || `${index}-${event.type}`}><time>{event.id || 'Event'}</time><pre>{eventText(event).slice(0, MAX_LINE_LENGTH)}</pre></li>)}</ol>
-        : <p role="status">{connection === 'reconnecting' ? 'Reconnecting to live events…' : 'No live log events have been returned.'}</p>}
-      {events.filter(event => event.type === 'log').length > MAX_LOG_LINES && <p role="note">Showing the latest {MAX_LOG_LINES} log events.</p>}
+    <section ref={eventPanelRef} className="att-job-panel" role="tabpanel" id="job-panel-live" aria-labelledby="job-tab-live" hidden={activeTab !== 'live'} tabIndex={0}>
+      <div className="att-live-heading"><h2>Live events</h2><span role="status" data-state={connection}>SSE {connection}</span></div>
+      <p className="att-help">The browser EventSource reconnects automatically; the Server resumes from the last delivered event ID. Job state appears separately above.</p>
+      <div className="att-event-controls" aria-label="Event controls">
+        <fieldset className="att-event-type-filters"><legend>Filter event type</legend>
+          <label><input type="checkbox" aria-label="All Events" checked={eventTypeFilter.length === EVENT_TYPES.length}
+            onChange={event => toggleAllEventTypes(event.currentTarget.checked)} /> All Events</label>
+          {EVENT_TYPES.map(type => <label key={type}><input type="checkbox" aria-label={type}
+            checked={eventTypeFilter.includes(type)} onChange={event => toggleEventType(type, event.currentTarget.checked)} /> {type}</label>)}
+        </fieldset>
+        <label>Search events<input aria-label="Search events" type="search" value={eventSearch} onChange={event => setEventSearch(event.currentTarget.value)} placeholder="Search event text" /></label>
+        <label><input type="checkbox" checked={eventAutoScroll} onChange={event => setEventAutoScroll(event.currentTarget.checked)} /> Auto-scroll</label>
+        <button type="button" onClick={() => setEventScrollPaused(value => !value)} aria-pressed={eventScrollPaused}>{eventScrollPaused ? 'Resume auto-scroll' : 'Pause auto-scroll'}</button>
+        <button type="button" onClick={() => void copyEvents()} disabled={!visibleEvents.length}>Copy visible events</button>
+      </div>
+      {eventCopyStatus && <p role="status">{eventCopyStatus}</p>}
+      {visibleEvents.length ? <ol className="att-job-events" aria-label="Chronological job events">{visibleEvents.map((event, index) => {
+        const timestamp = eventTimestamp(event);
+        return <li key={event.id || `${index}-${event.type}`}><strong>{event.type}</strong>{event.id && <code>#{event.id}</code>}{timestamp && <time dateTime={timestamp}>{dateTime(timestamp)}</time>}<pre>{eventText(event).slice(0, MAX_LINE_LENGTH)}</pre></li>;
+      })}</ol>
+        : <p role="status">{events.length ? 'No events match the current filters.'
+          : connection === 'connected' ? 'Connected; no events have been emitted yet.'
+            : connection === 'reconnecting' ? 'Reconnecting to live events; no recent events are available.'
+              : 'Connecting to live events…'}</p>}
+      {events.length >= MAX_EVENTS && <p role="note">The oldest events are discarded after {MAX_EVENTS} entries to keep the view bounded.</p>}
     </section>
     <section className="att-job-panel" role="tabpanel" id="job-panel-events" aria-labelledby="job-tab-events" hidden={activeTab !== 'events'} tabIndex={0}>
       <h2>Events</h2><p role="status">SSE {connection}; {events.length} recent events retained in this view.</p>
-      {events.length ? <ol className="att-job-events">{events.map((event, index) => <li key={event.id || `${index}-${event.type}`}><strong>{event.type}</strong>{event.id && <code>{event.id}</code>}<pre>{eventText(event).slice(0, MAX_LINE_LENGTH)}</pre></li>)}</ol>
-        : <p>No SSE events have been returned.</p>}
-      {events.length >= MAX_EVENTS && <p role="note">The oldest events are discarded after {MAX_EVENTS} entries to keep the view bounded.</p>}
+      {orderedEvents.length ? <ol className="att-job-events" aria-label="Structured job events">{orderedEvents.map((event, index) => {
+        const timestamp = eventTimestamp(event);
+        return <li key={event.id || `${index}-${event.type}`}><strong>{event.type}</strong>{event.id && <code>#{event.id}</code>}{timestamp && <time dateTime={timestamp}>{dateTime(timestamp)}</time>}<pre>{eventText(event).slice(0, MAX_LINE_LENGTH)}</pre></li>;
+      })}</ol> : <p>No SSE events have been returned.</p>}
     </section>
     <section className="att-job-panel" role="tabpanel" id="job-panel-results" aria-labelledby="job-tab-results" hidden={activeTab !== 'results'} tabIndex={0}>
       <h2>Results</h2>

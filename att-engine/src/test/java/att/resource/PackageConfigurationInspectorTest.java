@@ -17,6 +17,9 @@ import static org.junit.jupiter.api.Assertions.*;
 class PackageConfigurationInspectorTest {
     @TempDir Path temp;
 
+    @org.junit.jupiter.api.BeforeEach void enableServerPathPresentation() { att.core.PathPresentation.configure(true, true); }
+    @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
+
     @Test void exposesDeclaredProfilesAndEngineResolvedSafeEffectiveConfiguration() throws Exception {
         Path root = packageRoot("safe-config");
         Map<String, Object> declared = inspector(root).inspect("declared", null, null);
@@ -39,6 +42,40 @@ class PackageConfigurationInspectorTest {
         assertFalse(serialized.contains("sit-user"));
         assertFalse(serialized.contains(root.toString()));
     }
+
+    @Test void revealsOrdinaryNestedDbFieldsOnlyInAdminProjectionAndKeepsSecretsRedacted() throws Exception {
+        Path root = packageRoot("admin-db-fields");
+        PackageConfigurationInspector ordinary = inspector(root);
+        Map<String,Object> standard = ordinary.inspect("effective", "SIT", null, "dbhelpers", 0, 50);
+        Map<String,Object> standardFields = dbFields(standard);
+        assertEquals("hidden", fieldState(standardFields.get("evidence.sql")));
+        assertEquals("hidden", fieldState(standardFields.get("properties")));
+
+        PackageConfigurationInspector admin = new PackageConfigurationInspector(root, Paths.get("config/config.yaml"),
+                262144, true, Collections.emptyList(), Collections.emptyList(), true);
+        Map<String,Object> expanded = admin.inspect("effective", "SIT", null, "dbhelpers", 0, 50);
+        Map<String,Object> expandedFields = dbFields(expanded);
+        assertEquals("visible", fieldState(expandedFields.get("properties")), expanded.toString());
+        assertEquals("visible", fieldState(expandedFields.get("url")), expanded.toString());
+        @SuppressWarnings("unchecked") Map<String,Object> properties=(Map<String,Object>)((Map<?,?>)expandedFields.get("properties")).get("value");
+        assertEquals("require", properties.get("sslMode"));
+        assertEquals("[REDACTED]", properties.get("password"));
+        assertEquals("visible", fieldState(expandedFields.get("evidence.sql")));
+        assertEquals("visible", fieldState(expandedFields.get("evidence.parameters")));
+        assertFalse(expanded.toString().contains("property-secret"));
+        assertEquals("hidden", fieldState(expandedFields.get("username")));
+        assertEquals("hidden", fieldState(expandedFields.get("password")));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String,Object> dbFields(Map<String,Object> response) {
+        List<Map<String,Object>> sections=(List<Map<String,Object>>)response.get("sections");
+        Map<String,Object> section=sections.stream().filter(item->"dbhelpers".equals(item.get("id"))).findFirst().orElseThrow(AssertionError::new);
+        List<Map<String,Object>> entries=(List<Map<String,Object>>)section.get("entries");
+        return (Map<String,Object>)entries.get(0).get("fields");
+    }
+
+    private static String fieldState(Object field) { return String.valueOf(((Map<?,?>)field).get("state")); }
 
     @Test void comparesOnlyVisibleValuesAndNeverReportsHiddenEqualityOrChanges() throws Exception {
         Path root = packageRoot("compare-config");
@@ -386,7 +423,9 @@ class PackageConfigurationInspectorTest {
                 + "id: orders\nname: Orders database\ndescription: profile helper\n"
                 + "connection:\n  url: '" + url + "'\n  username: '" + username + "'\n  password: '" + password + "'\n"
                 + "  driverClass: org.postgresql.Driver\n  readOnly: " + readOnly + "\n  isolation: readCommitted\n"
-                + "statement:\n  timeoutSeconds: 30\ntransaction:\n  scope: case\n  onEnd: rollback\n";
+                + "  properties: {sslMode: require, password: property-secret}\n"
+                + "statement:\n  timeoutSeconds: 30\ntransaction:\n  scope: case\n  onEnd: rollback\n"
+                + "evidence:\n  sql: full\n  parameters: masked\n";
     }
 
     private static Path write(Path file, String value) throws Exception {

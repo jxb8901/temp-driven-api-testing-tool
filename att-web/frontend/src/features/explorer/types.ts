@@ -231,6 +231,7 @@ export interface EffectiveConfigurationQuery {
   query?: string;
   offset?: number;
   limit?: number;
+  includeAllFields?: boolean;
 }
 
 export interface ConfigurationComparisonQuery {
@@ -240,6 +241,7 @@ export interface ConfigurationComparisonQuery {
   includeInherited?: boolean;
   offset?: number;
   limit?: number;
+  includeAllFields?: boolean;
 }
 
 /** Operation-level facade implemented by the shared same-origin API module. */
@@ -248,7 +250,7 @@ export interface ExplorerApi {
   getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail>;
   getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection>;
   getResourceSourceFile?(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection>;
-  getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse>;
+  getDeclaredConfiguration(packageId: string, signal?: AbortSignal, includeAllFields?: boolean): Promise<ConfigurationResponse>;
   getEffectiveConfiguration(packageId: string, query: EffectiveConfigurationQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
   compareConfiguration(packageId: string, query: ConfigurationComparisonQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
   listConfigurationFiles?(packageId: string, path?: string, query?: string, offset?: number, signal?: AbortSignal): Promise<ConfigurationFilePage>;

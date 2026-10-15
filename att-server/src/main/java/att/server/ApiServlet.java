@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -143,6 +144,17 @@ public final class ApiServlet extends HttpServlet {
 
     private void authGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
         try {
+            if("/auth/capabilities".equals(path)) {
+                String login=principal(req);
+                if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
+                boolean configurationAdmin;
+                if(runtime.auth.local(runtime.config)) {
+                    Map<String,Object> user=runtime.store.authUser(login);
+                    configurationAdmin=user!=null&&"ADMIN".equals(user.get("role"));
+                } else configurationAdmin=req.isUserInRole(runtime.config.inspection.configurationAdminRole);
+                res.setHeader("Cache-Control","no-store");
+                json(res,200,Map.of("configurationAdmin",configurationAdmin,"requestId",requestId));return;
+            }
             if(!runtime.auth.local(runtime.config)){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
             if("/auth/bootstrap/status".equals(path)){json(res,200,Map.of("required",runtime.auth.bootstrapRequired(),"requestId",requestId));return;}
             if("/auth/users".equals(path)){if(!requireAdmin(req,res,requestId))return;json(res,200,Map.of("items",runtime.store.authUsers(),"requestId",requestId));return;}
@@ -409,8 +421,15 @@ public final class ApiServlet extends HttpServlet {
                     "testdata-records".equals(action)&&parseOptionalBoolean(req.getParameter("previewGenerated"),"previewGenerated")
                             ?"preview-generated":null;
             String inspectionReferenceId="source".equals(action)?req.getParameter("referenceId"):null;
+            boolean includeAllFields=parseOptionalBoolean(req.getParameter("includeAllFields"),"includeAllFields");
+            if(includeAllFields) {
+                if(!Set.of("declared","effective","compare").contains(action))throw new IllegalArgumentException("includeAllFields is available only for declared, effective, or compare configuration views");
+                if(!configurationAdmin(req,res,requestId))return;
+                res.setHeader("Cache-Control","no-store");
+                runtime.store.audit(principal,"CONFIGURATION_INCLUDE_ALL_FIELDS",null,packageId,"SUCCESS");
+            }
             Map<String,Object> result=runtime.inspectConfiguration(packageId,action,environment,otherEnvironment,section,
-                    offset,limit,inspectionPath,inspectionOrigin,inspectionQuery,includeInherited,inspectionReferenceId,principal);
+                    offset,limit,inspectionPath,inspectionOrigin,inspectionQuery,includeInherited,inspectionReferenceId,includeAllFields,principal);
             if("declared".equals(action)||"effective".equals(action)||"compare".equals(action)) {
                 ConfigurationInspection.Response response=ServerRuntime.JSON.convertValue(result,ConfigurationInspection.Response.class);
                 response.requestId=requestId;json(res,200,response);
@@ -423,6 +442,21 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
           catch(IllegalArgumentException e){throw e;}
           catch(Exception e){throw new IOException(e);}
+    }
+    private boolean configurationAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
+        String login=principal(req);
+        if("local".equals(runtime.config.authMode)) {
+            if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;}
+            try {
+                Map<String,Object> user=runtime.store.authUser(login);
+                if(user!=null&&"ADMIN".equals(user.get("role")))return true;
+            } catch(Exception failure) {
+                error(res,500,"ATT-SERVER-REQUEST-FAILED","The configuration request could not be completed",requestId);return false;
+            }
+            error(res,403,"ATT-SERVER-FORBIDDEN","Administrator access is required",requestId);return false;
+        }
+        if(login!=null&&req.isUserInRole(runtime.config.inspection.configurationAdminRole))return true;
+        error(res,403,"ATT-SERVER-FORBIDDEN","The configured configuration administrator role is required",requestId);return false;
     }
     private void loadPolicyGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
         String[] parts=path.split("/");
@@ -465,8 +499,10 @@ public final class ApiServlet extends HttpServlet {
     private static void error(HttpServletResponse res,int status,String code,String summary,String requestId)throws IOException{Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);json(res,status,Map.of("error",e));}
     private static void error(HttpServletResponse res,int status,String code,String summary,String requestId,List<Map<String,Object>> diagnostics)throws IOException{
         Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);
-        Map<String,Object> response=new LinkedHashMap<>();response.put("error",e);response.put("diagnostics",diagnostics);json(res,status,response);
+        List<Map<String,Object>> correlated=new ArrayList<>();
+        if(diagnostics!=null)for(Map<String,Object> diagnostic:diagnostics){Map<String,Object> item=new LinkedHashMap<>(diagnostic);item.putIfAbsent("requestId",requestId);correlated.add(item);}
+        Map<String,Object> response=new LinkedHashMap<>();response.put("error",e);response.put("diagnostics",correlated);response.put("requestId",requestId);json(res,status,response);
     }
-    private static String safeDetail(IllegalArgumentException e){String m=e.getMessage();return m==null?"Invalid request":m.length()>300?m.substring(0,300):m;}
+    static String safeDetail(IllegalArgumentException e){String m=e.getMessage();if(m==null)return "Invalid request";m=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(m));return m.length()>300?m.substring(0,300):m;}
 }
 

@@ -18,6 +18,8 @@ export interface TargetResource {
 
 export interface ServerDiagnostic {
   code?: string;
+  reason?: string;
+  field?: string;
   path?: string;
   severity?: string;
   message?: string;
@@ -57,6 +59,7 @@ export interface LoadDraftInput {
 
 export interface LoadDraftResponse {
   draftId: string;
+  requestId?: string;
   packageId: string;
   environment?: string;
   model?: LoadModel;
@@ -122,6 +125,7 @@ export interface JobEvent {
   id?: string;
   type: 'status' | 'progress' | 'log' | 'diagnostic' | 'result' | string;
   data: unknown;
+  receivedAt?: string;
 }
 
 export interface JobEventHandlers {

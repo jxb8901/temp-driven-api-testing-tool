@@ -16,7 +16,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class SchemaMigrationGuidanceTest {
     @TempDir Path root;
 
-    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(root); }
+    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception {
+        att.TestSchemas.install(root);
+        att.core.PathPresentation.configure(true, true);
+    }
+    @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
     @Test void currentAndHistoricalSchemasHaveSingleLocations() throws Exception {
         Path packageRoot = Paths.get("").toAbsolutePath();

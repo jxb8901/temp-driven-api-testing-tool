@@ -46,9 +46,9 @@ describe('UserManagementPanel',()=>{
   function render(authMode:'local'|'container'='local',role:'ADMIN'|'USER'='ADMIN') {
     host=document.createElement('div');document.body.append(host);root=createRoot(host);
     const context:AppShellContextValue={
-      selectedPackage:'',selectedEnvironment:'',themePreference:'system',authMode,
+      selectedPackage:'',selectedEnvironment:'',themePreference:'system',uiLocale:'en',uiLocalePreference:'browser',authMode,canRevealConfigurationFields:false,
       currentUser:{loginId:role==='ADMIN'?'admin':'jane',displayName:role==='ADMIN'?'ATT Admin':'Jane Tester',role},
-      onPackageChange:vi.fn(),onEnvironmentChange:vi.fn(),onThemePreferenceChange:vi.fn(),onJobAccepted:vi.fn(),
+      onPackageChange:vi.fn(),onEnvironmentChange:vi.fn(),onThemePreferenceChange:vi.fn(),onUiLocaleChange:vi.fn(),onJobAccepted:vi.fn(),
     };
     act(()=>root?.render(<AppShellContext.Provider value={context}><UserManagementPanel /></AppShellContext.Provider>));
   }

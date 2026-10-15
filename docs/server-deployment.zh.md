@@ -44,6 +44,8 @@ att/                              # ATT_HOME
 
 `server.inspection.redaction.enabled` 預設為 `false`，會在安全 projection 中顯示一般 package 值。即使關閉遮蔽或匿名存取，憑證、認證資料、private key 及常見個人資料欄位仍會保護；啟用遮蔽後亦會套用設定的敏感路徑、欄位 pattern 及自由文字預設值。遮蔽關閉時 Server 會記錄啟動警告，UI 會顯示目前設定。共享或正式資料建議啟用遮蔽並要求登入；未遮蔽值只應用於隔離的 SIT 網絡。
 
+`server.inspection.configurationAdminRole`（預設 `ATT_ADMIN`）控制 declared、effective 及 compare configuration view 的 `includeAllFields=true`。Local-auth mode 只有本地 `ADMIN` 可使用。此檢視會加入其他非秘密 properties、evidence fields 及平常會遮蔽的 DB 運作設定；username、password、已分類欄位及設定的敏感值仍會保護。回應會設定 `Cache-Control: no-store` 並寫入 audit log。
+
 `server.security.checkCrossOrigin` 預設為 `false`，只控制 state-changing API 的 Origin 相等檢查；設為 `true` 時，不匹配會回傳 `ATT-SERVER-ORIGIN-MISMATCH`。關閉此檢查不會略過 local cookie authentication 的 CSRF 驗證或 login/bootstrap 的 Origin 檢查，也不會啟用 CORS 或 wildcard header。反向代理應以可信來源設定 Tomcat `RemoteIpValve`，讓 Servlet request 提供外部 scheme、host 及 port；應用程式不會信任任意 forwarded header。Origin 檢查關閉時 Server 會記錄啟動警告。
 
 瀏覽器建立的 Quick Load 及 Advanced Load draft 另有獨立 opt-in：`server.inlineLoad.enabled` 預設為 `false`。啟用後，Server 會在 Engine 驗證後及進入佇列前，再次檢查 workload 數、target 數、Virtual User 總數、Arrival Rate 總和、每個 workload 及整體並行數上限，以及完整時間窗口上限。以下範例設定保守預設值。時間窗口上限為 warmup、ramp-up、duration、ramp-down 的總和；target 數包含固定 target 及每個 VU mix entry。功能停用時回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出設定上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。這些限制適用於瀏覽器建立的 draft；既有 path-based Load request 維持相容行為，並繼續受 `workers.maxConcurrentLoad` 限制。
@@ -65,6 +67,7 @@ server:
   jobRetentionDays: 30
   inspection:
     enabled: true
+    configurationAdminRole: ATT_ADMIN
     maxConcurrent: 2
     queuedLimit: 16
     timeoutMs: 30000
@@ -235,7 +238,7 @@ Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的
 | `GET` | `/jobs/{jobId}/artifacts/{path}` | 下載輸出檔案 |
 | `DELETE` | `/jobs/{jobId}` | 取消執行中工作並保留歷史 |
 | `GET`、`POST` | `/load-schedules` | 列出或建立排程（僅管理員） |
-| `POST` | `/load-schedules/preview` | 驗證 recurrence 並預覽下一次執行時間（僅管理員） |
+| `POST` | `/load-schedules/preview` | 只驗證 timezone/cron 並預覽執行時間（僅管理員） |
 | `GET`、`PATCH`、`DELETE` | `/load-schedules/{scheduleId}` | 讀取、編輯或刪除排程（僅管理員） |
 | `POST` | `/load-schedules/{scheduleId}/pause`、`resume`、`trigger` | 暫停、恢復或手動觸發（僅管理員） |
 | `GET` | `/load-schedules/{scheduleId}/executions?limit=100` | 讀取 occurrence history 及已接納工作連結 |
@@ -258,6 +261,8 @@ Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的
 ```
 
 如要排程已驗證的 UI draft，請用 `draftId`（`A...` Advanced Load ID 或 `L...` Quick Load ID）取代 `scenario`，並提供驗證時使用的相同 `environment`。此方式只適用於建立排程；之後不可替換已保存的 snapshot。
+
+Preview endpoint 只檢查 recurrence 並計算執行時間；不會驗證 package scenario、Testdata 或已保存的 draft。`POST /load-schedules` 會在保存前驗證完整 scenario 及 target closure。驗證拒絕會以 HTTP 400 回傳 `error` 及 `diagnostics` 陣列。每項可用診斷可包括 code、summary、detail、field、source file 及行/欄位置、package ID、environment、resource/target ID 和 suggestion。頂層 `requestId` 亦會複製到每項診斷。Server API 診斷會遮蔽本機絕對路徑。UI 會在排程編輯器旁顯示這些資料，並可將焦點移至相符欄位或開啟已保存的 snapshot。
 
 排程預設為 paused。建立、編輯及恢復時會按目前時間計算下一個符合的 instant。Occurrence 狀態為 `scheduled`、`submitted`、`skipped` 及 `failed-to-submit`；job 執行結果仍使用一般 job API。刪除排程會移除定義，但保留歷史，也不會取消已接納的工作。刪除前請記下 UI/API 顯示的 schedule ID；只要仍有保留記錄，管理員在定義刪除後仍可使用 `/load-schedules/{scheduleId}/executions` 讀取歷史，即使該排程不再出現在 UI 或 schedule list。History 受 `maxExecutionsPerSchedule` 限制；處理中 occurrence 及連結至執行中工作的 occurrence 可暫時超出上限，相關工作進入 terminal 狀態時會執行 pruning，schedule 定義刪除後亦會如此。
 
@@ -433,10 +438,13 @@ Server 會驗證完整 scenario 並 resolve 所有 target，不會排程流量�
 
 ```http
 GET /api/v1/packages/payments/configuration?view=declared
+GET /api/v1/packages/payments/configuration?view=declared&includeAllFields=true
 GET /api/v1/packages/payments/configuration/effective?environment=SIT
 GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&offset=0&limit=50
+GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&includeAllFields=true
 GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&section=dbhelpers
 GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&section=dbhelpers&includeInherited=true&offset=0&limit=50
+GET /api/v1/packages/payments/configuration/compare?left=SIT&right=UAT&section=dbhelpers&includeAllFields=true
 GET /api/v1/packages/payments/configuration/source?path=templates%2Fpayment%2Fpayload%2Frequest.xml&origin=flows%2Fpayment.yaml
 GET /api/v1/packages/payments/configuration/testdata/accounts/records?environment=SIT&offset=0&limit=50
 GET /api/v1/packages/payments/configuration/testdata/generatedAccounts/records?environment=SIT&offset=0&limit=50&previewGenerated=true
@@ -445,6 +453,8 @@ GET /api/v1/packages/payments/configuration/testdata/generatedAccounts/records?e
 Declared view 會回傳 schema version、安全的 global 欄位、已設定 profile，以及每個設定 section 的 declared/absent 狀態、項目數量和 profile 繼承或替換狀態。Effective view 使用 `FrameworkConfigLoader` 選擇 environment，並回傳安全的 helper、Tool 及 Testdata descriptor metadata。Root-only package 或使用已設定的預設值時可省略 `environment`。第一個 effective 回應會提供各 section 的數量；按 section ID（`dbhelpers`、`mqhelpers`、`sshhelpers`、`httphelpers`、`tools` 或 `testdata`）要求其項目。Effective section 及 comparison 欄位回應支援 `offset` 與 `limit`（1–100，預設 50），並回傳 `total` 和 `nextOffset` 以供分頁。比較要求必須提供 section ID；Server 會先驗證並篩選兩個 profile，再分頁。檢查過程不會連接 DB、MQ、HTTP 或 SSH 服務，也不會回傳未限制的設定 YAML。只有所選 environment 已設定的 Testdata descriptor 可透過上述 records endpoint 分頁預覽；一般值預設可見，憑證、認證資料及常見個人資料欄位始終遮蔽。啟用 `redaction` 後亦會套用設定的敏感路徑和欄位 pattern。未知或未設定的 descriptor 回傳 `404`。
 
 Compare 預設比較 profile-sourced values；`includeInherited=true` 會一併包括 inherited/global values 及其來源。Section filter 會在分頁前套用。比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對本機路徑、憑證、Server 自身的秘密或未限制的 descriptor 內容。關閉 masking 時，非憑證 URL、host 及 port 等一般連線設定會顯示；啟用 masking 後，設定的操作欄位及路徑亦會遮蔽。
+
+`includeAllFields=true` 會在 declared、effective 或 compare view 加入其他非秘密 configuration properties 及 evidence fields；caller 必須具備 `server.inspection.configurationAdminRole`，local-auth mode 則必須是本地 `ADMIN`。回應不會快取並會寫入 audit log。Username、password、已分類欄位及設定的敏感值仍會遮蔽。
 
 `source` endpoint 在 `safe-package-files` policy 下可依 origin 解析合資格的 package-local 文字參照；`allowlist-only` 則要求既有 `server.inspection.safeTextSources` 精確 package-relative 路徑。連結請求必須包含已授權 parent source 回傳的 Server 不透明 `referenceId`；caller 自行提供 path 和 origin 並不足以授權。External scripts 只會透過設定 external root 下每 package 的 canonical 精確 allowlist 提供，且不會回傳其絕對路徑。這仍是有界 source endpoint，並非任意檔案瀏覽器。Testdata records endpoint 需要 effective descriptor ID。Literal records 使用 `limit` 1–100 分頁（UI 每次讀取 50 筆）。Generated descriptor 預設回傳 `state: "preview-required"` 且不含 records；只有明確設定 `previewGenerated=true` 才會回傳有界 generated preview。此 endpoint 使用相同身份、redaction policy、bounded inspection worker、source/response 大小、佇列和逾時限制。
 

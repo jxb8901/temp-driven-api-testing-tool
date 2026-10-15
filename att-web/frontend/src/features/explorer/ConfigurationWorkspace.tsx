@@ -21,6 +21,7 @@ interface ConfigurationWorkspaceProps {
   onFileChange(filePath?: string, origin?: string, reference?: ResourceSourceReference, configurationReferenceId?: string): void;
   onTabChange(tab: WorkspaceTab): void;
   onOpenResource(resource: { type: string; resourceId: string }): void;
+  canRevealAdminFields?: boolean;
 }
 interface DirectoryState { items: ConfigurationFileNode[]; loading: boolean; error: string; truncated?: boolean; nextOffset?: number | null }
 
@@ -47,7 +48,7 @@ function safeCell(value: unknown): string {
   try { return JSON.stringify(value, null, 2); } catch { return '[unavailable]'; }
 }
 
-export function ConfigurationWorkspace({ api, packages, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onPackageChange, onEnvironmentChange, onFileChange, onTabChange, onOpenResource }: ConfigurationWorkspaceProps) {
+export function ConfigurationWorkspace({ api, packages, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onPackageChange, onEnvironmentChange, onFileChange, onTabChange, onOpenResource, canRevealAdminFields = false }: ConfigurationWorkspaceProps) {
   const [declared, setDeclared] = useState<Awaited<ReturnType<ExplorerApi['getDeclaredConfiguration']>> | null>(null);
   const [directoryMap, setDirectoryMap] = useState<Record<string, DirectoryState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['']));
@@ -60,6 +61,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
   const [sourceError, setSourceError] = useState('');
   const [sourceLoading, setSourceLoading] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [includeAllFields, setIncludeAllFields] = useState(false);
   const requestRefs = useRef(new Map<string, AbortController>());
   const profiles = useMemo(() => (declared?.environments || []).filter(item => item.name && item.state === 'active'), [declared]);
   const selectedFile = useMemo(() => {
@@ -105,9 +107,9 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
     if (!packageId) return;
     void loadDirectory('');
     const controller = new AbortController();
-    api.getDeclaredConfiguration(packageId, controller.signal).then(setDeclared).catch(() => { if (!controller.signal.aborted) setDeclared(null); });
+    api.getDeclaredConfiguration(packageId, controller.signal, includeAllFields).then(setDeclared).catch(() => { if (!controller.signal.aborted) setDeclared(null); });
     return () => { controller.abort(); requestRefs.current.forEach(item => item.abort()); requestRefs.current.clear(); };
-  }, [api, packageId, loadDirectory]);
+  }, [api, packageId, loadDirectory, includeAllFields]);
 
   useEffect(() => {
     if (tab !== 'source' || !filePath || !packageId) { setSource(null); setSourceError(''); return; }
@@ -227,6 +229,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
           <option value="">Package default</option>{profiles.map(item => <option key={item.name} value={item.name}>{item.name}{item.default ? ' · default' : ''}</option>)}
         </select></label>}
         <button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen(value => !value)}>Inspector {inspectorOpen ? 'on' : 'off'}</button>
+        {canRevealAdminFields && <label className="att-config-all-fields-toggle"><input type="checkbox" checked={includeAllFields} onChange={event => setIncludeAllFields(event.currentTarget.checked)} /> Show additional DB configuration fields</label>}
       </div>
     </header>
     {!packageId ? <section className="att-config-select-package"><h2>Choose a package</h2><p>Configuration is scoped to a registered package.</p>
@@ -281,7 +284,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
         </section>}
         {(tab === 'declared' || tab === 'effective' || tab === 'compare') && <ConfigurationExplorer
           api={api} packageId={packageId} environment={environment} onEnvironmentChange={onEnvironmentChange}
-          initialMode={tab} showEnvironmentSelector={false} onViewChange={onTabChange}
+          initialMode={tab} showEnvironmentSelector={false} onViewChange={onTabChange} includeAllFields={includeAllFields}
         />}
         {tab === 'testdata' && <TestdataCatalog api={api} packageId={packageId} environment={environment} onSourceFile={onFileChange} onOpenResource={onOpenResource} />}
       </section>

@@ -834,6 +834,13 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
                                             String section,int offset,int limit,String inspectionPath,String inspectionOrigin,
                                             String inspectionQuery,boolean includeInherited,String inspectionReferenceId,String principal) throws Exception {
+        return inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,inspectionPath,
+                inspectionOrigin,inspectionQuery,includeInherited,inspectionReferenceId,false,principal);
+    }
+    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
+                                            String section,int offset,int limit,String inspectionPath,String inspectionOrigin,
+                                            String inspectionQuery,boolean includeInherited,String inspectionReferenceId,
+                                            boolean includeAllFields,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
@@ -871,6 +878,7 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=inspectionRequest(packageId,root,selected);
         request.inspectionAction=action;request.inspectionType="configuration";request.inspectionEnvironment=selected;request.inspectionOtherEnvironment=other;
         request.inspectionSection=section;request.inspectionIncludeInherited=Boolean.valueOf(includeInherited);
+        request.inspectionIncludeAllFields=Boolean.valueOf(includeAllFields);
         request.inspectionOffset=offset;request.inspectionLimit=limit;
         request.redactionEnabled=config.inspection.redactionEnabled;request.sensitivePaths=config.inspection.sensitivePaths;request.sensitiveFieldPatterns=config.inspection.sensitiveFieldPatterns;
         request.inspectionPath=inspectionPath;request.inspectionOrigin=inspectionOrigin;request.inspectionQuery=inspectionQuery;
@@ -902,19 +910,34 @@ final class ServerRuntime implements AutoCloseable {
             if(rawDiagnostics instanceof List)for(Object raw:(List<?>)rawDiagnostics)if(raw instanceof Map) {
                 @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
                 Map<String,Object> safe=new LinkedHashMap<String,Object>();
-                for(String key:List.of("code","summary","field","resourceId")) {
+                for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile")) {
                     Object item=value.get(key);
-                    if(item instanceof String)safe.put(key,att.server.api.internal.DiagnosticSanitizer.redactText((String)item));
+                    if(item instanceof String) {
+                        String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
+                        text=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text);
+                        safe.put(key,text);
+                    }
                 }
+                for(String key:List.of("line","sourceColumn"))if(value.get(key) instanceof Number)safe.put(key,value.get(key));
                 if(!safe.isEmpty())diagnostics.add(safe);
             }
             if(diagnostics.isEmpty()) {
                 Map<String,Object> fallback=new LinkedHashMap<>();
                 fallback.put("code",workerError==null?"ATT-SERVER-DRAFT-INVALID":workerError);
-                fallback.put("summary","Load or Debug input failed schema or target validation");
+                Object message=envelope.get("message");
+                String summary=message instanceof String?String.valueOf(message):"Load or Debug input failed schema or target validation";
+                fallback.put("summary",att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(summary)));
                 String resourceId=request.inspectionTargetId==null?request.inspectionResourceId:request.inspectionTargetId;
                 if(resourceId!=null)fallback.put("resourceId",resourceId);
                 diagnostics.add(fallback);
+            }
+            String packageId=configuredPackageId(root);
+            List<Map<String,String>> targets=diagnosticTargets(request);
+            for(Map<String,Object> diagnostic:diagnostics) {
+                if(packageId!=null)diagnostic.putIfAbsent("packageId",packageId);
+                String environment=request.inspectionEnvironment==null?request.environment:request.inspectionEnvironment;
+                if(environment!=null&&!environment.isBlank())diagnostic.putIfAbsent("environment",environment);
+                if(!targets.isEmpty())diagnostic.putIfAbsent("targets",targets);
             }
             throw new DraftValidationException(diagnostics);
         }
@@ -924,6 +947,33 @@ final class ServerRuntime implements AutoCloseable {
         Object raw=envelope.get("inspection");if(!(raw instanceof Map))throw new IllegalStateException("Package inspection Worker returned an invalid response");
         @SuppressWarnings("unchecked") Map<String,Object> result=new LinkedHashMap<>((Map<String,Object>)raw);
         return result;
+    }
+    private String configuredPackageId(Path root) {
+        if(root==null)return null;
+        Path normalized=root.toAbsolutePath().normalize();
+        for(Map.Entry<String,Path> entry:config.packages.entrySet())
+            if(entry.getValue().toAbsolutePath().normalize().equals(normalized))return entry.getKey();
+        return null;
+    }
+    private static List<Map<String,String>> diagnosticTargets(WorkerRequest request) {
+        List<Map<String,String>> targets=new ArrayList<>();
+        if(request.inspectionTargetId!=null) {
+            Map<String,String> target=new LinkedHashMap<>();
+            if(request.inspectionType!=null)target.put("type",request.inspectionType);
+            target.put("id",request.inspectionTargetId);targets.add(target);return targets;
+        }
+        Object rawWorkloads=request.inlineLoadScenario==null?null:request.inlineLoadScenario.get("workloads");
+        if(rawWorkloads instanceof List<?>)for(Object raw:(List<?>)rawWorkloads) {
+            if(!(raw instanceof Map<?,?>))continue;
+            Object rawTarget=((Map<?,?>)raw).get("target");if(!(rawTarget instanceof Map<?,?>))continue;
+            Map<?,?> source=(Map<?,?>)rawTarget;Object type=source.get("type"),id=source.get("id");
+            if(type instanceof String&&id instanceof String) {
+                Map<String,String> target=new LinkedHashMap<>();target.put("type",(String)type);target.put("id",(String)id);
+                if(!targets.contains(target))targets.add(target);
+                if(targets.size()>=32)break;
+            }
+        }
+        return targets;
     }
     private static String inspectionEnvironment(String value,String name) {
         if(value==null||!value.trim().matches("[A-Za-z][A-Za-z0-9_-]{0,31}"))throw new IllegalArgumentException(name+" must be a valid profile name");
@@ -990,13 +1040,19 @@ final class ServerRuntime implements AutoCloseable {
                 Map<String,Object> response=new LinkedHashMap<>();
                 if(errorCode!=null) {
                     response.put("errorCode",errorCode);
-                    if(workerDiagnostic!=null&&workerDiagnostic.get("summary") instanceof String) {
+                    if(workerDiagnostic!=null) {
                         Map<String,Object> diagnostic=new LinkedHashMap<>();
-                        for(String key:List.of("code","summary","field","resourceId")) {
+                        for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile")) {
                             Object value=workerDiagnostic.get(key);
                             if(value instanceof String)diagnostic.put(key,value);
                         }
-                        response.put("diagnostics",Collections.singletonList(diagnostic));
+                        for(String key:List.of("line","sourceColumn"))if(workerDiagnostic.get(key) instanceof Number)diagnostic.put(key,workerDiagnostic.get(key));
+                        Object summary=diagnostic.get("summary");
+                        if(!(summary instanceof String)||((String)summary).isBlank()) {
+                            Object message=workerDiagnostic.get("message");
+                            if(message instanceof String&&!((String)message).isBlank())diagnostic.put("summary",message);
+                        }
+                        if(!diagnostic.isEmpty())response.put("diagnostics",Collections.singletonList(diagnostic));
                     }
                     return response;
                 }
@@ -1480,7 +1536,7 @@ final class ServerRuntime implements AutoCloseable {
         return node.deepCopy();
     }
     private static String replacePathPrefix(String value,String prefix,String logical){if(value.equals(prefix))return logical+":";String separator=java.io.File.separator;value=value.replace(prefix+separator,logical+":");if("\\".equals(separator))value=value.replace(prefix+"/",logical+":");else value=value.replace(prefix+"\\",logical+":");return value;}
-    static String safeMessage(Exception e){String m=att.server.api.internal.DiagnosticSanitizer.redactText(e.getMessage());return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
+    static String safeMessage(Exception e){String m=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(e.getMessage()));return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
     private static String readBoundedLine(BufferedReader reader,int limit) throws java.io.IOException {StringBuilder line=new StringBuilder();boolean oversized=false;int c;while((c=reader.read())!=-1){if(c=='\n')break;if(c=='\r')continue;if(line.length()<limit)line.append((char)c);else oversized=true;}if(c==-1&&line.isEmpty()&&!oversized)return null;return oversized?"\u0000OVERSIZED":line.toString();}
     JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob):active.events;}
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
@@ -1523,10 +1579,14 @@ final class ServerRuntime implements AutoCloseable {
     static final class DraftValidationException extends IllegalArgumentException {
         final List<Map<String,Object>> diagnostics;
         DraftValidationException(List<Map<String,Object>> diagnostics) {
-            super("Load or Debug draft failed schema or target validation");
+            super(firstDiagnosticSummary(diagnostics));
             List<Map<String,Object>> copy=new ArrayList<Map<String,Object>>();
             for(Map<String,Object> diagnostic:diagnostics)copy.add(Collections.unmodifiableMap(new LinkedHashMap<String,Object>(diagnostic)));
             this.diagnostics=Collections.unmodifiableList(copy);
+        }
+        private static String firstDiagnosticSummary(List<Map<String,Object>> diagnostics) {
+            Object summary=diagnostics==null||diagnostics.isEmpty()?null:diagnostics.get(0).get("summary");
+            return summary instanceof String&&!((String)summary).isBlank()?(String)summary:"Load or Debug input failed schema or target validation";
         }
     }
     private static final class DebugDraft {

@@ -27,8 +27,7 @@ class CliDiscoveryTest {
         Map<String, Object> withSidecar = find(targets, "template", "TARGET");
         assertTrue(withSidecar.containsKey("sidecar"));
         assertTrue(String.valueOf(withSidecar.get("command")).contains("debug template"));
-        assertEquals("$ATT_PACKAGE_ROOT/templates/TARGET/debug.yaml", withSidecar.get("sidecar"));
-        assertFalse(String.valueOf(withSidecar.get("sidecar")).contains(root.toString()));
+        assertEquals(root.toRealPath().resolve("templates/TARGET/debug.yaml").toString(), withSidecar.get("sidecar"));
         assertFalse(targets.stream().anyMatch(target -> "NO_SIDECAR".equals(target.get("id"))));
         assertFalse(targets.stream().anyMatch(target -> "LOAD_ONLY".equals(target.get("id"))),
                 "Debug discovery must not advertise a sidecar that depends on Load-only roots");

@@ -32,6 +32,9 @@ public final class WorkerMain {
     private boolean inspectionDaemon;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
+        // Server Workers always use path aliases so absolute paths outside the authorized
+        // package view are never returned to API/UI clients.
+        att.core.PathPresentation.configure(true, true);
         PrintStream protocol=System.out;
         System.setOut(System.err);
         WorkerMain worker=new WorkerMain(protocol);
@@ -122,14 +125,26 @@ public final class WorkerMain {
             else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
             Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message));
-            if("inspect".equals(request.command)&&("debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
+            boolean draftInspection="inspect".equals(request.command)&&("debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                     ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                     ||"quick-load-policy".equals(request.inspectionAction)
-                    ||"load-scenario".equals(request.inspectionAction))
-                    &&error instanceof att.validation.DiagnosticException) {
+                    ||"load-scenario".equals(request.inspectionAction));
+            if(draftInspection) {
+                String safeMessage=DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message);
+                diagnostic.put("summary",safeMessage);
+            }
+            if(draftInspection&&error instanceof att.validation.DiagnosticException) {
                 att.validation.DiagnosticException typed=(att.validation.DiagnosticException)error;
                 diagnostic.put("summary",DiagnosticSanitizer.redactText(typed.summary()));
+                if(typed.detail()!=null)diagnostic.put("detail",DiagnosticSanitizer.redactText(typed.detail()));
+                if(typed.file()!=null)diagnostic.put("file",DiagnosticSanitizer.redactText(typed.file()));
                 if(typed.field()!=null)diagnostic.put("field",DiagnosticSanitizer.redactText(typed.field()));
+                if(typed.suggestion()!=null)diagnostic.put("suggestion",DiagnosticSanitizer.redactText(typed.suggestion()));
+                if(typed.source()!=null) {
+                    diagnostic.put("sourceFile",DiagnosticSanitizer.redactText(typed.source().file()));
+                    diagnostic.put("line",typed.source().line());
+                    diagnostic.put("sourceColumn",typed.source().column());
+                }
                 String resourceId=request.inspectionTargetId==null?request.inspectionResourceId:request.inspectionTargetId;
                 if(resourceId!=null)diagnostic.put("resourceId",DiagnosticSanitizer.redactText(resourceId));
             }
@@ -174,7 +189,8 @@ public final class WorkerMain {
                     inspected = resourceInspector(root, config, r).inspectPackageFileSource(r.inspectionPath, r.inspectionOrigin,r.inspectionReferenceId);
                 } else {
                     PackageConfigurationInspector inspector = new PackageConfigurationInspector(root, config,
-                            maxResponseBytes, Boolean.TRUE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns);
+                            maxResponseBytes, Boolean.TRUE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns,
+                            Boolean.TRUE.equals(r.inspectionIncludeAllFields));
                     inspected = inspector.inspect(r.inspectionAction,
                             r.inspectionEnvironment, r.inspectionOtherEnvironment, r.inspectionSection,
                             r.inspectionOffset == null ? 0 : r.inspectionOffset,

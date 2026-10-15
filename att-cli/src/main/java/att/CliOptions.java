@@ -50,6 +50,8 @@ public final class CliOptions {
     private final String loadMaxConcurrent;
     private final String loadOverloadPolicy;
     private final List<String> variableOverrides;
+    private boolean substitutePackageRoot;
+    private boolean substituteExternalBasename;
 
     public CliOptions(Path configPath, Path suitePath, Path suiteDirectory, Set<String> caseIds, Set<String> tags,
                             Set<String> excludeTags, String runId, boolean rerunFailed, boolean dryRun,
@@ -228,6 +230,7 @@ public final class CliOptions {
         Set<String> ciOutputs = defaultCiOutputs();
         List<String> variableOverrides = new ArrayList<String>();
         boolean unsafeFailureDetails = false;
+        boolean substitutePackageRoot = false, substituteExternalBasename = false;
         Set<String> seenOptions = new LinkedHashSet<String>();
         for (int i = start; i < args.length; i++) {
             String arg = args[i];
@@ -250,6 +253,8 @@ public final class CliOptions {
             else if ("--output-dir".equals(arg)) output = Paths.get(value(args, ++i, arg));
             else if ("--input".equals(arg)) debugInput = Paths.get(value(args, ++i, arg));
             else if ("--unsafe-failure-details".equals(arg)) unsafeFailureDetails = true;
+            else if ("--substitute-package-root".equals(arg)) substitutePackageRoot = true;
+            else if ("--substitute-external-basename".equals(arg)) substituteExternalBasename = true;
             else if ("--set".equals(arg)) variableOverrides.add(value(args, ++i, arg));
             else if ("--format".equals(arg)) format = value(args, ++i, arg);
             else if ("--ci-output".equals(arg)) ciOutputs = parseCiOutputs(value(args, ++i, arg));
@@ -284,10 +289,10 @@ public final class CliOptions {
         if ("debug".equals(command) && (packageScope || selectedScope)) throw new IllegalArgumentException("--package/--selected are not valid for debug");
         if ("load".equals(command) && loadScenario != null && debugInput != null) throw new IllegalArgumentException("--input is valid only for load --debug");
         if ("debug".equals(command) && debugTargetType.isEmpty()
-                && seenOptions.stream().anyMatch(option -> !java.util.Arrays.asList("--config", "--env", "--format", "--quiet", "--verbose").contains(option)))
+                && seenOptions.stream().anyMatch(option -> !java.util.Arrays.asList("--config", "--env", "--format", "--quiet", "--verbose", "--substitute-package-root", "--substitute-external-basename").contains(option)))
             throw new IllegalArgumentException("Debug discovery accepts only --config, --env, --format, --quiet, and --verbose");
         if ("load".equals(command) && loadScenario == null && debugTargetType.isEmpty()
-                && seenOptions.stream().anyMatch(option -> !java.util.Arrays.asList("--config", "--env", "--format", "--quiet", "--verbose").contains(option)))
+                && seenOptions.stream().anyMatch(option -> !java.util.Arrays.asList("--config", "--env", "--format", "--quiet", "--verbose", "--substitute-package-root", "--substitute-external-basename").contains(option)))
             throw new IllegalArgumentException("Load discovery accepts only --config, --env, --format, --quiet, and --verbose");
         if ((packageScope || selectedScope) && !"validate".equals(command)) throw new IllegalArgumentException("--package/--selected are valid only for validate");
         String validationScope = "debug".equals(command) ? "debug" : packageScope || ("validate".equals(command) && !selectedScope) ? "package" : "selected";
@@ -313,18 +318,20 @@ public final class CliOptions {
                 loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime,
                 loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails);
         parsed.debugId = debugId;
+        parsed.substitutePackageRoot = substitutePackageRoot;
+        parsed.substituteExternalBasename = substituteExternalBasename;
         return parsed;
     }
 
     private static void validateAllowed(String command, Set<String> seen) {
         Set<String> allowed = new LinkedHashSet<String>(java.util.Arrays.asList("--config", "--help"));
-        if ("run".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--run-id", "--output-dir", "--format", "--ci-output", "--queue", "--parallel", "--allow-parallel-runs", "--profile", "--all", "--rerun-failed", "--dry-run", "--fail-fast", "--quiet", "--verbose", "--update-snapshot", "--env"));
-        else if ("validate".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--format", "--all", "--package", "--selected", "--quiet", "--verbose", "--env"));
-        else if ("snapshot".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--all"));
+        if ("run".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--run-id", "--output-dir", "--format", "--ci-output", "--queue", "--parallel", "--allow-parallel-runs", "--profile", "--all", "--rerun-failed", "--dry-run", "--fail-fast", "--quiet", "--verbose", "--update-snapshot", "--env", "--substitute-package-root", "--substitute-external-basename"));
+        else if ("validate".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--case", "--case-id", "--tag", "--exclude-tag", "--format", "--all", "--package", "--selected", "--quiet", "--verbose", "--env", "--substitute-package-root", "--substitute-external-basename"));
+        else if ("snapshot".equals(command)) allowed.addAll(java.util.Arrays.asList("--suite", "--suite-dir", "--all", "--substitute-package-root", "--substitute-external-basename"));
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
         else if ("build".equals(command)) allowed.add("--output-dir");
-        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--debug-id", "--output-dir", "--profile", "--format", "--quiet", "--verbose", "--env", "--unsafe-failure-details"));
-        else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--format", "--quiet", "--verbose", "--profile", "--output-dir", "--run-id", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy", "--env"));
+        else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--debug-id", "--output-dir", "--profile", "--format", "--quiet", "--verbose", "--env", "--unsafe-failure-details", "--substitute-package-root", "--substitute-external-basename"));
+        else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--format", "--quiet", "--verbose", "--profile", "--output-dir", "--run-id", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy", "--env", "--substitute-package-root", "--substitute-external-basename"));
         for (String option : seen) if (!allowed.contains(option)) throw new IllegalArgumentException("Option " + option + " is not valid for command " + command);
     }
 
@@ -376,6 +383,8 @@ public final class CliOptions {
     public String loadThinkTime() { return loadThinkTime; }
     public String loadMaxConcurrent() { return loadMaxConcurrent; }
     public String loadOverloadPolicy() { return loadOverloadPolicy; }
+    public boolean substitutePackageRoot() { return substitutePackageRoot; }
+    public boolean substituteExternalBasename() { return substituteExternalBasename; }
 
     private static String value(String[] args, int index, String option) {
         if (index >= args.length) throw new IllegalArgumentException("Missing value for " + option);
