@@ -101,9 +101,145 @@ class PackageResourceInspectorTest {
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,100).get("items");
         Map<String,Object> permitted=items.stream().filter(item->Boolean.TRUE.equals(item.get("sourceAvailable"))).findFirst().get();
         Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(permitted.get("resourceId")),null,0,1);
-        assertEquals(Boolean.TRUE,source.get("available"));assertEquals("text",source.get("format"));
+        assertEquals(Boolean.TRUE,source.get("available"));assertEquals("shell",source.get("format"));
         assertEquals("tools/tool_group_dispatch.sh",source.get("logicalPath"));
         assertFalse(String.valueOf(source.get("text")).contains(root.toString()));
+    }
+
+    @Test void opensNestedPackageToolScriptsByDefaultForRelativeAndAbsoluteCommands() throws Exception {
+        Path root=packageWithTemplate("default-tool-source","FORM","description: safe");
+        Path script=Files.createDirectories(root.resolve("tools/mq")).resolve("檢查佇列.sh");
+        writeUtf8(script,"#!/bin/sh\n# café\necho safe\n");
+        String config="schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n"
+                +"  relative:\n    name: Relative script\n    description: Relative test script\n    command: [bash, 'tools/mq/檢查佇列.sh']\n    stdoutFormat: text\n    arguments: {}\n"
+                +"  absolute:\n    name: Absolute script\n    description: Absolute test script\n    command: [bash, '"+script.toString()+"']\n    stdoutFormat: text\n    arguments: {}\n";
+        writeUtf8(root.resolve("config/config.yaml"),config);
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),Collections.<String>emptyList(),Collections.<String>emptyList(),
+                65536,262144,false,true,"safe-package-files",Collections.<String>emptyList(),false,
+                Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
+        assertEquals(2,items.size());
+        for(Map<String,Object> item:items) {
+            assertEquals(Boolean.TRUE,item.get("sourceAvailable"),item.toString());
+            Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(item.get("resourceId")),null,0,1);
+            assertEquals(Boolean.TRUE,source.get("available"),source.toString());
+            assertEquals("tools/mq/檢查佇列.sh",source.get("logicalPath"));
+            assertEquals("shell",source.get("format"));
+            assertTrue(String.valueOf(source.get("text")).contains("café"));
+            assertFalse(source.toString().contains(root.toString()));
+        }
+    }
+
+    @Test void requiresAnExactExternalScriptAllowlistAndNeverReturnsItsFilesystemPath() throws Exception {
+        Path root=packageWithTemplate("external-tool-source","FORM","description: safe");
+        Path externalRoot=Files.createDirectories(temp.resolve("external-tool-root"));
+        Path script=Files.createDirectories(externalRoot.resolve("mq")).resolve("check-queue.sh");writeUtf8(script,"#!/bin/sh\necho external\n");
+        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  queue:\n    name: External queue script\n"
+                +"    description: External queue test script\n    command: [bash, '"+script.toString()+"']\n    stdoutFormat: text\n    arguments: {}\n");
+        PackageResourceInspector denied=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),Collections.<String>emptyList(),Collections.singletonList(externalRoot.toString()),
+                65536,262144,false,true,"safe-package-files",Collections.<String>emptyList(),false,
+                Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") Map<String,Object> deniedItem=((List<Map<String,Object>>)denied.inspect("list","tool",null,null,0,10).get("items")).get(0);
+        assertEquals(Boolean.FALSE,deniedItem.get("sourceAvailable"));assertEquals("not-allowlisted",deniedItem.get("sourceReason"));
+        assertFalse(deniedItem.toString().contains(script.toString()));
+        PackageResourceInspector allowed=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),Collections.singletonList(script.toRealPath().toString()),Collections.singletonList(externalRoot.toRealPath().toString()),
+                65536,262144,false,true,"safe-package-files",Collections.<String>emptyList(),false,
+                Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") Map<String,Object> allowedItem=((List<Map<String,Object>>)allowed.inspect("list","tool",null,null,0,10).get("items")).get(0);
+        assertEquals(Boolean.TRUE,allowedItem.get("sourceAvailable"));
+        Map<String,Object> source=allowed.inspect("source","tool",String.valueOf(allowedItem.get("resourceId")),null,0,1);
+        assertEquals(Boolean.TRUE,source.get("available"));assertEquals("shell",source.get("format"));
+        assertTrue(String.valueOf(source.get("logicalPath")).matches("external/[0-9a-f]{64}\\.sh"));
+        assertFalse(source.toString().contains(externalRoot.toString()));assertTrue(String.valueOf(source.get("text")).contains("echo external"));
+        Files.delete(script);
+        Map<String,Object> missing=allowed.inspect("source","tool",String.valueOf(allowedItem.get("resourceId")),null,0,1);
+        assertEquals(Boolean.FALSE,missing.get("available"));assertEquals("missing",missing.get("reason"));
+    }
+
+    @Test void appliesDenyGlobsToCanonicalExternalRootRelativePathsBeforeAliasing() throws Exception {
+        Path root=packageWithTemplate("external-source-deny-globs","FORM","description: safe");
+        Path externalRoot=Files.createDirectories(temp.resolve("external-source-deny-root"));
+        Path privateScript=Files.createDirectories(externalRoot.resolve("private")).resolve("check.sh");
+        Path allowedScript=Files.createDirectories(externalRoot.resolve("mq")).resolve("check-queue.sh");
+        writeUtf8(privateScript,"#!/bin/sh\necho private\n");
+        writeUtf8(allowedScript,"#!/bin/sh\necho allowed\n");
+        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n"
+                +"  privateCheck:\n    name: Private external script\n    description: Deny glob regression\n    command: [bash, '"+privateScript.toString()+"']\n    stdoutFormat: text\n    arguments: {}\n"
+                +"  mqCheck:\n    name: Allowed external script\n    description: Deny glob regression\n    command: [bash, '"+allowedScript.toString()+"']\n    stdoutFormat: text\n    arguments: {}\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),java.util.Arrays.asList(privateScript.toRealPath().toString(),allowedScript.toRealPath().toString()),
+                Collections.singletonList(externalRoot.toRealPath().toString()),65536,262144,false,true,"safe-package-files",
+                Collections.singletonList("**/private/**"),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
+        Map<String,Object> denied=items.stream().filter(item->"Private external script".equals(item.get("name"))).findFirst().get();
+        assertEquals(Boolean.FALSE,denied.get("sourceAvailable"),denied.toString());
+        assertEquals("forbidden",denied.get("sourceReason"),denied.toString());
+        Map<String,Object> deniedSource=inspector.inspect("source","tool",String.valueOf(denied.get("resourceId")),null,0,1);
+        assertEquals(Boolean.FALSE,deniedSource.get("available"),deniedSource.toString());
+        assertEquals("forbidden",deniedSource.get("reason"),deniedSource.toString());
+        assertFalse(denied.toString().contains(externalRoot.toString()));
+        assertFalse(deniedSource.toString().contains(externalRoot.toString()));
+
+        Map<String,Object> allowed=items.stream().filter(item->"Allowed external script".equals(item.get("name"))).findFirst().get();
+        assertEquals(Boolean.TRUE,allowed.get("sourceAvailable"),allowed.toString());
+        Map<String,Object> allowedSource=inspector.inspect("source","tool",String.valueOf(allowed.get("resourceId")),null,0,1);
+        assertEquals(Boolean.TRUE,allowedSource.get("available"),allowedSource.toString());
+        assertTrue(String.valueOf(allowedSource.get("logicalPath")).matches("external/[0-9a-f]{64}\\.sh"));
+        assertTrue(String.valueOf(allowedSource.get("text")).contains("echo allowed"));
+        assertFalse(allowedSource.toString().contains(externalRoot.toString()));
+    }
+
+    @Test void rejectsPackageAndExternalSymlinkEscapesForToolSource() throws Exception {
+        Path root=packageWithTemplate("tool-source-symlink-escape","FORM","description: safe");
+        Path external=Files.createDirectories(temp.resolve("symlink-external"));Path secret=writeUtf8(external.resolve("private.sh"),"echo private\n");
+        Path packageLink=root.resolve("tools-link.sh");Path approvedRoot=Files.createDirectories(temp.resolve("symlink-approved-root"));
+        Path externalLink=approvedRoot.resolve("alias.sh");
+        try {Files.createSymbolicLink(packageLink,secret);Files.createSymbolicLink(externalLink,secret);}
+        catch(UnsupportedOperationException|java.io.IOException|SecurityException unavailable){org.junit.jupiter.api.Assumptions.abort("Symbolic links are unavailable in this test environment");}
+        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  packageEscape:\n    name: Package symlink\n    description: Package symlink escape\n    command: [bash, '"+packageLink.toString()+"']\n    stdoutFormat: text\n    arguments: {}\n"
+                +"  externalEscape:\n    name: External symlink\n    description: External symlink escape\n    command: [bash, '"+externalLink.toString()+"']\n    stdoutFormat: text\n    arguments: {}\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),Collections.singletonList(secret.toRealPath().toString()),Collections.singletonList(approvedRoot.toRealPath().toString()),
+                65536,262144,false,true,"safe-package-files",Collections.<String>emptyList(),false,
+                Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
+        assertEquals(2,items.size());for(Map<String,Object> item:items){assertEquals(Boolean.FALSE,item.get("sourceAvailable"));assertEquals("out-of-root",item.get("sourceReason"));}
+        assertFalse(items.toString().contains(secret.toString()));
+    }
+
+    @Test void navigatesNestedPackageLocalFileReferencesWithoutPerFileAllowlistEntries() throws Exception {
+        Path root=packageWithTemplate("default-reference-source","SOURCE","description: nested source reference");
+        Path payload=Files.createDirectories(root.resolve("templates/SOURCE/payload"));
+        writeUtf8(payload.resolve("request.xml"),"<request>&{./nested.sql}</request>\n");
+        writeUtf8(payload.resolve("nested.sql"),"select 'café';\n");
+        writeUtf8(root.resolve("templates/SOURCE/template.yaml"),"schemaVersion: att-template/v3.6\nname: SOURCE\ndescription: nested source reference\n"
+                +"actions:\n  note:\n    type: log\n    message: '&{./payload/request.xml}'\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),Collections.<String>emptyList(),Collections.<String>emptyList(),
+                65536,262144,false,true,"safe-package-files",Collections.<String>emptyList(),false,
+                Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        Map<String,Object> template=items.get(0);String resourceId=String.valueOf(template.get("resourceId"));
+        Map<String,Object> source=inspector.inspect("source","template",resourceId,null,0,1);
+        assertEquals(Boolean.TRUE,source.get("available"),source.toString());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> firstReferences=(List<Map<String,Object>>)source.get("fileReferences");
+        assertTrue(firstReferences.stream().anyMatch(ref->"templates/SOURCE/payload/request.xml".equals(ref.get("logicalPath"))),source.toString());
+        String firstId=String.valueOf(firstReferences.stream().filter(ref->"templates/SOURCE/payload/request.xml".equals(ref.get("logicalPath"))).findFirst().get().get("referenceId"));
+        Map<String,Object> firstFile=inspector.inspect("source-file","template",resourceId,firstId,0,1,null,null);
+        assertEquals(Boolean.TRUE,firstFile.get("available"));assertEquals("text",firstFile.get("format"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> nested=(List<Map<String,Object>>)firstFile.get("fileReferences");
+        assertTrue(nested.stream().anyMatch(ref->"templates/SOURCE/payload/nested.sql".equals(ref.get("logicalPath"))));
+        String nestedId=String.valueOf(nested.stream().filter(ref->"templates/SOURCE/payload/nested.sql".equals(ref.get("logicalPath"))).findFirst().get().get("referenceId"));
+        Map<String,Object> nestedFile=inspector.inspect("source-file","template",resourceId,nestedId,0,1,null,"templates/SOURCE/payload/request.xml");
+        assertEquals(Boolean.TRUE,nestedFile.get("available"));assertEquals("text",nestedFile.get("format"));
+        assertTrue(String.valueOf(nestedFile.get("text")).contains("café"));
     }
 
     @Test void marksAllowlistedBinaryToolSourceUnavailableWithAStableReason() throws Exception {
@@ -120,9 +256,9 @@ class PackageResourceInspectorTest {
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
         Map<String,Object> item=items.stream().filter(value->"binary".equals(value.get("logicalId"))).findFirst()
                 .orElseThrow(()->new AssertionError("binary Tool should be indexed"));
-        assertEquals(Boolean.FALSE,item.get("sourceAvailable"));assertEquals("binary",item.get("sourceReason"));
+        assertEquals(Boolean.FALSE,item.get("sourceAvailable"));assertEquals("binary-file",item.get("sourceReason"));
         Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(item.get("resourceId")),null,0,1);
-        assertEquals(Boolean.FALSE,source.get("available"));assertEquals("binary",source.get("reason"));
+        assertEquals(Boolean.FALSE,source.get("available"));assertEquals("binary-file",source.get("reason"));
         assertFalse(source.containsKey("text"));
     }
 
@@ -137,7 +273,7 @@ class PackageResourceInspectorTest {
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
                 java.util.Arrays.asList(origin,"config/queries/lookup.sql","config/queries/result.json","config/queries/large.yaml"),65536,262144);
 
-        Map<String,Object> result=inspector.inspectPackageFileSource("../../config/queries/lookup.sql",origin);
+        Map<String,Object> result=inspector.inspectPackageFileSource("config/queries/lookup.sql",null);
         assertEquals(Boolean.TRUE,result.get("available"),result.toString());
         assertEquals("config/queries/lookup.sql",result.get("logicalPath"));
         assertEquals("sql",result.get("format"));
@@ -148,7 +284,8 @@ class PackageResourceInspectorTest {
         assertEquals(Boolean.TRUE,result.get("redacted"));
         @SuppressWarnings("unchecked") List<Map<String,Object>> fileReferences=(List<Map<String,Object>>)result.get("fileReferences");
         assertTrue(fileReferences.stream().anyMatch(item->"config/queries/result.json".equals(item.get("logicalPath"))),result.toString());
-        Map<String,Object> referenced=inspector.inspectPackageFileSource("config/queries/result.json","config/queries/lookup.sql");
+        assertTrue(String.valueOf(fileReferences.get(0).get("referenceId")).matches("[0-9a-f]{64}"));
+        Map<String,Object> referenced=inspector.inspectPackageFileSource("./result.json","config/queries/lookup.sql","server-verified");
         assertEquals(Boolean.TRUE,referenced.get("available"));
         assertTrue(String.valueOf(referenced.get("text")).contains("${EXEC.RESULT.status}"));
 
@@ -160,12 +297,12 @@ class PackageResourceInspectorTest {
         Map<String,Object> denied=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
                 Collections.<String>emptyList(),65536,262144).inspectPackageFileSource("config/queries/lookup.sql",null);
         assertEquals(Boolean.FALSE,denied.get("available"));
-        assertEquals("visibility-policy",denied.get("reason"));
+        assertEquals("not-allowlisted",denied.get("reason"));
         Map<String,Object> denylisted=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
                 java.util.Arrays.asList(origin,"config/queries/lookup.sql","config/queries/result.json"),65536,262144,
                 false,true,"safe-package-files",Collections.singletonList("**/result.json"),false,
                 Collections.<String>emptyList(),Collections.<String>emptyList()).inspectPackageFileSource("config/queries/result.json",null);
-        assertEquals(Boolean.FALSE,denylisted.get("available"));assertEquals("deny-policy",denylisted.get("reason"));
+        assertEquals(Boolean.FALSE,denylisted.get("available"));assertEquals("forbidden",denylisted.get("reason"));
         assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
                 ()->inspector.inspectPackageFileSource("../../../outside.yaml",origin));
     }
@@ -200,9 +337,9 @@ class PackageResourceInspectorTest {
                 Collections.<String>emptyList(),65536,262144);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
         assertEquals(Boolean.FALSE,items.get(0).get("sourceAvailable"));
-        assertEquals("visibility-policy",items.get(0).get("sourceReason"));
+        assertEquals("not-allowlisted",items.get(0).get("sourceReason"));
         Map<String,Object> source=inspector.inspect("source","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
-        assertEquals(Boolean.FALSE,source.get("available"));assertEquals("visibility-policy",source.get("reason"));
+        assertEquals(Boolean.FALSE,source.get("available"));assertEquals("not-allowlisted",source.get("reason"));
     }
 
     @Test void exposesSafePackageYamlByDefaultWhileKeepingClassifiedSecretsHidden() throws Exception {

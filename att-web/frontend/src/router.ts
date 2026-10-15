@@ -13,7 +13,7 @@ export type AppRoute =
   | { kind: 'dashboard' }
   | { kind: 'packages' }
   | { kind: 'package'; packageId: string; resource?: ResourceRoute }
-  | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; tab?: ConfigurationTab }
+  | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab }
   | { kind: 'quick-load'; packageId: string; target: ResourceRoute; environment?: string }
   | { kind: 'jobs'; jobId?: string }
   | { kind: 'load'; packageId?: string }
@@ -55,6 +55,7 @@ export function parseRoute(hash: string): AppRoute {
       && sourceResourceId && sourceResourceId.length <= 512
       && sourceReferenceId && /^[0-9a-f]{64}$/.test(sourceReferenceId)
       ? { type: sourceType as ResourceSourceReferenceRoute['type'], resourceId: sourceResourceId, referenceId: sourceReferenceId } : undefined;
+    const configurationReferenceId=query.get('configurationReferenceId');
     return {
       kind: 'configuration',
       packageId: parts[1] || undefined,
@@ -62,6 +63,7 @@ export function parseRoute(hash: string): AppRoute {
       filePath: query.get('file') || undefined,
       ...(query.get('origin') ? { fileOrigin: query.get('origin')! } : {}),
       ...(sourceReference ? { sourceReference } : {}),
+      ...(configurationReferenceId&&/^[A-Za-z0-9_-]{1,4096}$/.test(configurationReferenceId)?{configurationReferenceId}:{}),
       tab,
     };
   }
@@ -100,6 +102,7 @@ export function formatRoute(route: AppRoute): string {
         query.set('sourceResourceId', route.sourceReference.resourceId);
         query.set('sourceReferenceId', route.sourceReference.referenceId);
       }
+      if(route.configurationReferenceId)query.set('configurationReferenceId',route.configurationReferenceId);
       if (route.tab) query.set('tab', route.tab);
       const suffix = query.toString();
       return '#/configuration' + (route.packageId ? '/' + encodeURIComponent(route.packageId) : '') + (suffix ? '?' + suffix : '');

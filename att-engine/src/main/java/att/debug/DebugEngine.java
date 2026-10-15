@@ -175,6 +175,7 @@ public final class DebugEngine {
     }
 
     private boolean containsSensitiveValue(Object value, String key, String path) {
+        if (isKeepDefaultMarker(value)) return false;
         if (key != null && (sensitiveFormKey(key) || matchesConfiguredSensitivePath(path) || matchesConfiguredSensitiveField(key))
                 && hasValue(value)) return true;
         if (value instanceof Map) {
@@ -206,6 +207,11 @@ public final class DebugEngine {
             return false;
         }
         return true;
+    }
+
+    private static boolean isKeepDefaultMarker(Object value) {
+        if (!(value instanceof Map) || ((Map<?, ?>) value).size() != 1) return false;
+        return ((Map<?, ?>) value).get(KEEP_DEFAULT_MARKER) instanceof String;
     }
 
     private void validateTargetInput(String type, String id, DebugInput input) throws Exception {
@@ -271,10 +277,16 @@ public final class DebugEngine {
         }
         if (value instanceof String) {
             if ("/schemaVersion".equals(path) || ((String) value).isEmpty()) return value;
-            return redactionEnabled ? keepDefault(path, redacted) : scrub((String) value);
+            String safe = scrub((String) value);
+            if (!safe.equals(value)) return keepDefault(path, redacted);
+            return redactionEnabled && !isAttExpression((String) value) ? keepDefault(path, redacted) : value;
         }
         if (value != null) return redactionEnabled ? keepDefault(path, redacted) : value;
         return value;
+    }
+
+    private static boolean isAttExpression(String value) {
+        return value.matches("(?:\\$\\{[^{}]+}|#\\{[^{}]+}|@\\{[^{}]+}|&\\{[^{}]+})");
     }
 
     private boolean configuredSensitivePath(String path) {
@@ -775,8 +787,8 @@ public final class DebugEngine {
 
     private boolean redactedByPolicy(Object value, String key, String path) {
         if (key != null && sensitiveFormKey(key)) return true;
-        if (value == null) return false;
-        if ("/schemaVersion".equals(path)) return false;
+        if (key != null && (configuredSensitivePath(path) || configuredSensitiveField(key))) return true;
+        if (value == null || "/schemaVersion".equals(path)) return false;
         return !(value instanceof String && ((String) value).isEmpty());
     }
 

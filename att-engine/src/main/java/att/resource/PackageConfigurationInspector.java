@@ -92,10 +92,19 @@ public final class PackageConfigurationInspector {
     public Map<String, Object> inspect(String action, String environment, String otherEnvironment,
                                        String section, int offset, int limit, boolean includeInherited,
                                        boolean previewGenerated) throws Exception {
+        return inspect(action,environment,otherEnvironment,section,offset,limit,includeInherited,previewGenerated,null);
+    }
+
+    public Map<String, Object> inspect(String action, String environment, String otherEnvironment,
+                                       String section, int offset, int limit, boolean includeInherited,
+                                       boolean previewGenerated, String query) throws Exception {
         if (offset < 0) throw new IllegalArgumentException("offset must be non-negative");
         if (limit < 0 || limit > 100) throw new IllegalArgumentException("limit must be between 1 and 100");
+        if (query != null && query.length() > 200) throw new IllegalArgumentException("query must contain at most 200 characters");
+        if (query != null) for (int i=0;i<query.length();i++)
+            if (Character.isISOControl(query.charAt(i))) throw new IllegalArgumentException("query must contain printable characters");
         if ("declared".equals(action)) return bounded(declared());
-        if ("effective".equals(action)) return bounded(effective(environment, section, offset, limit));
+        if ("effective".equals(action)) return bounded(effective(environment, section, offset, limit, query));
         if ("compare".equals(action)) return bounded(compare(environment, otherEnvironment, section, offset, limit, includeInherited));
         if ("testdata-records".equals(action)) return bounded(testdataRecords(environment, section, offset, limit, previewGenerated));
         throw new IllegalArgumentException("Unsupported configuration inspection action");
@@ -236,12 +245,16 @@ public final class PackageConfigurationInspector {
     }
 
     private Map<String, Object> effective(String environment, String section, int offset, int limit) {
+        return effective(environment,section,offset,limit,null);
+    }
+
+    private Map<String, Object> effective(String environment, String section, int offset, int limit, String query) {
         String safeEnvironment = normalizedEnvironment(environment);
         try {
             Map<?, ?> raw = readConfig();
             validateReferencedFiles(raw, safeEnvironment);
             FrameworkConfig config = new FrameworkConfigLoader().load(configFile(), packageRoot, safeEnvironment);
-            return snapshot(raw, config, "effective", section, offset, limit);
+            return snapshot(raw, config, "effective", section, offset, limit, query);
         } catch (ConfigurationLimitException exceeded) {
             throw exceeded;
         } catch (Exception invalid) {
@@ -291,6 +304,8 @@ public final class PackageConfigurationInspector {
         for (String path : paths) {
             Map<String, Object> before = leftFields.get(path);
             Map<String, Object> after = rightFields.get(path);
+            String sharedSource = sharedSourceForPath(path, leftFields, rightFields);
+            if (!includeInherited && sharedSource != null && sameVisibleField(before, after)) continue;
             if (!includeInherited && !profileScoped(path, before, after, leftFields, rightFields)) continue;
             boolean hidden = redactionEnabled && isSensitivePath(path)
                     || alwaysHiddenField(path.substring(path.lastIndexOf('.') + 1))
@@ -300,6 +315,7 @@ public final class PackageConfigurationInspector {
                     || after != null && "hidden".equals(after.get("state"));
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("path", path);
+            if (sharedSource != null) item.put("source", sharedSource);
             if (hidden) {
                 item.put("left", field("hidden", null, null, null));
                 item.put("right", field("hidden", null, null, null));
@@ -344,8 +360,35 @@ public final class PackageConfigurationInspector {
                 ||"profile".equals(rightEntry==null?null:rightEntry.get("origin"));
     }
 
+    private static String sharedSourceForPath(String path, Map<String,Map<String,Object>> leftFields,
+                                              Map<String,Map<String,Object>> rightFields) {
+        Map<String,Object> leftEntry=entryForPath(path,leftFields),rightEntry=entryForPath(path,rightFields);
+        Object leftSource=leftEntry==null?null:leftEntry.get("source");
+        Object rightSource=rightEntry==null?null:rightEntry.get("source");
+        return leftSource instanceof String && leftSource.equals(rightSource) ? (String)leftSource : null;
+    }
+
+    private static Map<String,Object> entryForPath(String path, Map<String,Map<String,Object>> fields) {
+        Map<String,Object> nearest=null; int longest=-1;
+        for (Map.Entry<String,Map<String,Object>> candidate:fields.entrySet()) {
+            String marker=candidate.getKey();
+            if (!marker.endsWith(".$entry")) continue;
+            String prefix=marker.substring(0,marker.length()-".$entry".length());
+            if ((path.equals(marker)||path.startsWith(prefix+"."))&&prefix.length()>longest) {
+                nearest=candidate.getValue(); longest=prefix.length();
+            }
+        }
+        return nearest;
+    }
+
+    private static boolean sameVisibleField(Map<String,Object> left, Map<String,Object> right) {
+        return left!=null && right!=null && "visible".equals(left.get("state"))
+                && "visible".equals(right.get("state"))
+                && ObjectsEqual.value(left.get("value"),right.get("value"));
+    }
+
     private Map<String, Object> snapshot(Map<?, ?> raw, FrameworkConfig config, String view,
-                                         String selectedSection, int offset, int limit) throws Exception {
+                                         String selectedSection, int offset, int limit, String query) throws Exception {
         String environment = config.environment();
         Map<String, Object> result = base(view, "ready", text(raw.get("schemaVersion"), 64));
         result.put("environment", environment);
@@ -376,6 +419,16 @@ public final class PackageConfigurationInspector {
         sections.add(httpSection(config.httpHelpers(), httpOrigin));
         sections.add(toolSection(config.tools()));
         sections.add(testdataSection(config, origin(raw, environment, "testdata")));
+        if (selectedSection != null) for (Map<String,Object> section : sections) {
+            if (!selectedSection.equals(section.get("id"))) continue;
+            @SuppressWarnings("unchecked") List<Map<String,Object>> entries=(List<Map<String,Object>>)section.get("entries");
+            if (query != null && !query.trim().isEmpty()) entries.removeIf(entry->!entryMatches(entry,query.trim().toLowerCase(Locale.ROOT)));
+            if ("testdata".equals(selectedSection)) entries.sort((left,right)->{
+                String a=String.valueOf(left.get("id")),b=String.valueOf(right.get("id"));
+                int order=String.CASE_INSENSITIVE_ORDER.compare(a,b);return order!=0?order:a.compareTo(b);
+            });
+            break;
+        }
         result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
         result.put("sections", sections);
         result.put("diagnostics", Collections.emptyList());
@@ -405,6 +458,14 @@ public final class PackageConfigurationInspector {
             result.put("nextOffset", selectedSection != null && offset + limit < total ? Integer.valueOf(offset + limit) : null);
         }
         return result;
+    }
+
+    private static boolean entryMatches(Map<?,?> entry, String query) {
+        for (String key:Arrays.asList("id","source")) {
+            Object value=entry.get(key);
+            if (value instanceof String && ((String)value).toLowerCase(Locale.ROOT).contains(query)) return true;
+        }
+        return false;
     }
 
     private static boolean sectionExists(Map<String, Object> snapshot, String requested) {
@@ -803,9 +864,17 @@ public final class PackageConfigurationInspector {
     }
 
     private static void flattenEntry(Map<String, Map<String, Object>> target, String prefix, Map<?, ?> entry) {
+        flattenEntry(target,prefix,entry,null);
+    }
+
+    private static void flattenEntry(Map<String, Map<String, Object>> target, String prefix, Map<?, ?> entry,
+                                     String inheritedSource) {
         String id = String.valueOf(entry.get("id"));
         String path = prefix + "." + id;
-        target.put(path + ".$entry", field("visible", Boolean.TRUE, entry.get("origin"), "visible"));
+        String source=entry.get("source") instanceof String ? (String)entry.get("source") : inheritedSource;
+        Map<String,Object> marker=field("visible", Boolean.TRUE, entry.get("origin"), "visible");
+        if(source!=null)marker.put("source",source);
+        target.put(path + ".$entry", marker);
         flattenFields(target, path, object(entry.get("fields")));
         Object arguments = entry.get("arguments");
         if (arguments instanceof Iterable) for (Object argumentValue : (Iterable<?>) arguments) {
@@ -813,7 +882,7 @@ public final class PackageConfigurationInspector {
             flattenFields(target, path + ".arguments." + argument.get("id"), object(argument.get("fields")));
         }
         Object instances = entry.get("instances");
-        if (instances instanceof Iterable) for (Object instanceValue : (Iterable<?>) instances) flattenEntry(target, path + ".instances", object(instanceValue));
+        if (instances instanceof Iterable) for (Object instanceValue : (Iterable<?>) instances) flattenEntry(target, path + ".instances", object(instanceValue), source);
     }
 
     private static void flattenFields(Map<String, Map<String, Object>> target, String prefix, Map<?, ?> fields) {

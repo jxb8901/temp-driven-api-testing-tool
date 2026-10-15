@@ -6,6 +6,8 @@ export interface LoadSchedule {
   description?: string | null;
   tags?: string[];
   packageId: string;
+  jobType?: 'load' | 'debug';
+  debugTarget?: { type: string; id: string } | null;
   scenario?: string | null;
   inlineSnapshot?: boolean;
   loadModel?: string | null;
@@ -26,6 +28,7 @@ export interface LoadScheduleInput {
   description: string;
   tags: string[];
   packageId: string;
+  jobType?: 'load' | 'debug';
   scenario?: string;
   draftId?: string;
   config: string;
@@ -44,6 +47,7 @@ export interface SchedulePreviewInput {
 
 export interface SchedulePreview extends SchedulePreviewInput {
   nextRunAt: string;
+  nextOccurrences?: string[];
 }
 
 export interface ValidatedLoadDraftIntent {
@@ -51,6 +55,8 @@ export interface ValidatedLoadDraftIntent {
   environment?: string;
   draftId: string;
   previewYaml?: string;
+  jobType?: 'load' | 'debug';
+  target?: { type: string; id: string };
 }
 
 export interface ScheduleOccurrence {

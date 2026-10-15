@@ -14,10 +14,11 @@ interface ConfigurationWorkspaceProps {
   filePath?: string;
   fileOrigin?: string;
   sourceReference?: ResourceSourceReference;
+  configurationReferenceId?: string;
   tab: WorkspaceTab;
   onPackageChange(packageId: string): void;
   onEnvironmentChange(environment: string): void;
-  onFileChange(filePath?: string, origin?: string, reference?: ResourceSourceReference): void;
+  onFileChange(filePath?: string, origin?: string, reference?: ResourceSourceReference, configurationReferenceId?: string): void;
   onTabChange(tab: WorkspaceTab): void;
   onOpenResource(resource: { type: string; resourceId: string }): void;
 }
@@ -46,7 +47,7 @@ function safeCell(value: unknown): string {
   try { return JSON.stringify(value, null, 2); } catch { return '[unavailable]'; }
 }
 
-export function ConfigurationWorkspace({ api, packages, packageId, environment, filePath, fileOrigin, sourceReference, tab, onPackageChange, onEnvironmentChange, onFileChange, onTabChange, onOpenResource }: ConfigurationWorkspaceProps) {
+export function ConfigurationWorkspace({ api, packages, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onPackageChange, onEnvironmentChange, onFileChange, onTabChange, onOpenResource }: ConfigurationWorkspaceProps) {
   const [declared, setDeclared] = useState<Awaited<ReturnType<ExplorerApi['getDeclaredConfiguration']>> | null>(null);
   const [directoryMap, setDirectoryMap] = useState<Record<string, DirectoryState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['']));
@@ -113,14 +114,14 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
     const controller = new AbortController(); setSourceLoading(true); setSource(null); setSourceError('');
     const sourceRequest = sourceReference
       ? api.getResourceSourceFile?.({ packageId, type: sourceReference.type, resourceId: sourceReference.resourceId }, sourceReference.referenceId, controller.signal, fileOrigin)
-      : api.getConfigurationFileSource?.(packageId, filePath, fileOrigin, controller.signal);
+      : api.getConfigurationFileSource?.(packageId, filePath, fileOrigin, controller.signal, configurationReferenceId);
     if (!sourceRequest) { setSource({ text: '', format: '', available: false, reason: 'unsupported' }); setSourceLoading(false); return () => controller.abort(); }
     sourceRequest.then(result => setSource({
       text: result.text || '', format: result.format || filePath.split('.').pop() || 'text', logicalPath: result.logicalPath, available: result.available, reason: result.reason, fileReferences: result.fileReferences,
     })).catch(error => { if (!controller.signal.aborted) setSourceError(errorText(error, 'load safe source')); })
       .finally(() => { if (!controller.signal.aborted) setSourceLoading(false); });
     return () => controller.abort();
-  }, [api, packageId, filePath, fileOrigin, sourceReference?.type, sourceReference?.resourceId, sourceReference?.referenceId, tab]);
+  }, [api, packageId, filePath, fileOrigin, sourceReference?.type, sourceReference?.resourceId, sourceReference?.referenceId, configurationReferenceId, tab]);
 
   useEffect(() => {
     if (!filePath || !filePath.startsWith('config/') || !packageId) return;
@@ -268,13 +269,13 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
           {sourceLoading && <p role="status">Loading safe configuration source…</p>}
           {sourceError && <p className="att-error" role="alert">{sourceError}<button type="button" onClick={() => filePath && void loadDirectory(filePath.split('/').slice(0, -1).join('/'))}>Refresh file list</button></p>}
           {source && !source.available && <div className="att-config-unavailable"><h3>Source is not available</h3><p>The Server withheld or could not read this file. Its path and safe metadata remain visible.</p></div>}
-          {source?.available && source.text.includes('&{') && !source.fileReferences?.some(item => item.referenceId && item.available !== false) && <p className="att-config-tree-message" role="status">{sourceReference ? 'This projection includes no Server-verified file-reference token, so file references cannot be opened.' : 'References in config/ source remain visible but cannot be opened because this endpoint did not return Server-verified reference tokens.'}</p>}
+          {source?.available && source.text.includes('&{') && !source.fileReferences?.some(item => item.referenceId && item.available !== false) && <p className="att-config-tree-message" role="status">The Server did not authorize any referenced files for navigation from this source.</p>}
           {source?.available && <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || filePath || source.format || '')} label={`Safe source ${filePath || ''}`} readOnly sourcePath={source.logicalPath || filePath} fileReferences={source.fileReferences || []} onFileReference={(_locator, origin, referenceId) => {
             const reference = source.fileReferences?.find(item => item.referenceId === referenceId && item.available !== false);
             if (!reference) return;
             const nextOrigin = source.logicalPath || origin;
             if (sourceReference) onFileChange(reference.logicalPath, nextOrigin, { ...sourceReference, referenceId: reference.referenceId });
-            else onFileChange(reference.logicalPath, nextOrigin);
+            else onFileChange(reference.logicalPath, nextOrigin, undefined, reference.referenceId);
           }} maxCharacters={200_000} />}
           {!filePath && !sourceLoading && <div className="att-config-empty"><h3>Select a file</h3><p>Choose a configuration file to inspect its safe source.</p></div>}
         </section>}
@@ -344,35 +345,38 @@ function TestdataCatalog({ api, packageId, environment, onSourceFile, onOpenReso
   const [revision, setRevision] = useState(0);
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogNextOffset, setCatalogNextOffset] = useState<number | null>(null);
+  const [catalogTotal, setCatalogTotal] = useState<number | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [previewGenerated, setPreviewGenerated] = useState(false);
   const [copiedRecord, setCopiedRecord] = useState<number | null>(null);
   const selectedEntry = entries.find(item => item.id === selectedId);
   const visibleEntries = useMemo(() => entries
-    .filter(item => item.id.toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase()))
+    .filter(item => !catalogSearch.trim() || item.id.toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase())
+      || (item.source || displayField(item, 'source')).toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase()))
     .sort((left, right) => left.id.localeCompare(right.id, undefined, { numeric: true, sensitivity: 'base' })),
   [entries, catalogSearch]);
   const isGenerated = selectedEntry?.generated === true || displayField(selectedEntry || { id: '' }, 'generated') === 'true';
 
   useEffect(() => {
-    const controller = new AbortController(); setEntries([]); setSelectedId(''); setResponse(null); setError(''); setStatus('Loading resolved Testdata catalog…'); setCatalogNextOffset(null); setCatalogSearch(''); setOffset(0); setPreviewGenerated(false);
-    api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', offset: 0, limit: 50 }, controller.signal)
+    const controller = new AbortController(); setEntries([]); setSelectedId(''); setResponse(null); setError(''); setStatus('Loading resolved Testdata catalog…'); setCatalogNextOffset(null); setCatalogTotal(null); setOffset(0); setPreviewGenerated(false);
+    api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogSearch.trim() || undefined, offset: 0, limit: 50 }, controller.signal)
       .then(result => {
         const data = result.sections?.find(section => section.id === 'testdata')?.entries || [];
         if (controller.signal.aborted) return;
         setEntries(data); setSelectedId(data[0]?.id || ''); setCatalogNextOffset(result.nextOffset ?? null);
-        setStatus(data.length ? data.length + ' Testdata descriptors loaded for ' + (environment || result.environment || 'package default') + '.' : 'No Testdata descriptors are configured for this environment.');
+        setCatalogTotal(result.total ?? data.length);
+        setStatus(data.length ? `${result.total ?? data.length} Testdata descriptors match this search for ${environment || result.environment || 'package default'}.` : 'No Testdata descriptors match this search.');
       }).catch(reason => { if (!controller.signal.aborted) { setError(errorText(reason, 'load the Testdata catalog')); setStatus('Testdata catalog unavailable.'); } });
     return () => controller.abort();
-  }, [api, packageId, environment]);
+  }, [api, packageId, environment, catalogSearch]);
 
   async function loadMoreCatalog() {
     if (catalogNextOffset == null || catalogLoading) return;
     setCatalogLoading(true); setError('');
     try {
-      const result = await api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', offset: catalogNextOffset, limit: 50 });
+      const result = await api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogSearch.trim() || undefined, offset: catalogNextOffset, limit: 50 });
       const next = result.sections?.find(section => section.id === 'testdata')?.entries || [];
-      setEntries(current => [...current, ...next]); setCatalogNextOffset(result.nextOffset ?? null);
+      setEntries(current => [...current, ...next]); setCatalogNextOffset(result.nextOffset ?? null); setCatalogTotal(result.total ?? entries.length + next.length);
     } catch (reason) { setError(errorText(reason, 'load more Testdata descriptors')); }
     finally { setCatalogLoading(false); }
   }
@@ -408,13 +412,13 @@ function TestdataCatalog({ api, packageId, environment, onSourceFile, onOpenReso
   if (error && !selectedId) return <section className="att-testdata-workspace"><h2>Testdata</h2><p className="att-error" role="alert">{error}</p></section>;
   return <section className="att-testdata-workspace" aria-label="Structured Testdata catalog">
     <header><div><h2>Testdata</h2><p>Resolved descriptor metadata and bounded records for {environment || 'the package default environment'}.</p></div>
-      {entries.length > 0 && <label>Search descriptors<input type="search" aria-label="Search Testdata descriptors" value={catalogSearch} onChange={event => setCatalogSearch(event.currentTarget.value)} placeholder="Search descriptor IDs" /></label>}
+      {(catalogTotal !== 0 || entries.length > 0 || catalogSearch) && <label>Search descriptors<input type="search" aria-label="Search Testdata descriptors" value={catalogSearch} onChange={event => setCatalogSearch(event.currentTarget.value)} placeholder="Search descriptor IDs and sources" /></label>}
     </header>
     <p role="status" aria-live="polite">{status}{loading ? ' Loading records…' : ''}</p>
     {error && <p className="att-error" role="alert">{error}<button type="button" onClick={() => setRevision(value => value + 1)}>Retry</button></p>}
     <div className="att-testdata-layout">
       <nav className="att-testdata-catalog" aria-label="Testdata descriptors">
-        <h3>Catalog</h3><p>{visibleEntries.length} shown of {entries.length} loaded</p>
+        <h3>Catalog</h3><p>{visibleEntries.length} shown of {catalogTotal ?? entries.length} matching descriptors ({entries.length} loaded)</p>
         <ul>{visibleEntries.map(item => <li key={item.id}><button type="button" aria-current={selectedId === item.id ? 'true' : undefined}
           onClick={() => { setSelectedId(item.id); setOffset(0); setPreviewGenerated(false); setRevision(value => value + 1); }}>
           <span>{item.id}</span><small>{item.source || displayField(item, 'source')}</small></button></li>)}</ul>

@@ -27,7 +27,9 @@ if (!HTMLDialogElement.prototype.showModal) {
 function makeApi(overrides: Partial<ScheduledLoadApi> = {}): ScheduledLoadApi {
   return {
     listLoadSchedules: vi.fn(async () => ({ items: [] })),
-    previewLoadSchedule: vi.fn(async input => ({ ...input, nextRunAt: '2026-10-15T18:00:00Z' })),
+    previewLoadSchedule: vi.fn(async input => ({ ...input, nextRunAt: '2026-10-15T18:00:00Z', nextOccurrences: [
+      '2026-10-15T18:00:00Z', '2026-10-16T18:00:00Z', '2026-10-17T18:00:00Z', '2026-10-18T18:00:00Z', '2026-10-19T18:00:00Z',
+    ] })),
     createLoadSchedule: vi.fn(async input => ({ ...sampleSchedule, ...input, id: 'S-CREATED' })),
     updateLoadSchedule: vi.fn(async (id, input) => ({ ...sampleSchedule, ...input, id })),
     setLoadScheduleEnabled: vi.fn(async (id, enabled) => ({ ...sampleSchedule, id, enabled })),
@@ -107,8 +109,12 @@ describe('ScheduledLoadPage', () => {
   it('requires a server preview before creating a disabled schedule by default', async () => {
     const api = makeApi();
     await render(api);
+    await change(host.querySelector('#schedule-timezone') as HTMLInputElement, 'Asia/Hong_Kong');
+    await advance(300);
     expect(host.textContent).toContain('No schedules have been created');
-    expect(host.textContent).toContain('This preview calculates only the next run time from timezone and cron. It does not validate the package, scenario, or Load options.');
+    expect(host.textContent).toContain('This preview calculates the next five occurrence times from timezone and cron. It does not validate the package or test snapshot.');
+    expect(host.textContent).toContain('Oct 20, 2026');
+    expect(host.querySelectorAll('.att-schedule-occurrence-preview li')).toHaveLength(5);
     const save = [...host.querySelectorAll('button')].find(button => button.textContent === 'Save schedule') as HTMLButtonElement;
     expect(save.disabled).toBe(false);
     expect((host.querySelector('.att-schedule-enable input') as HTMLInputElement).checked).toBe(false);
@@ -149,7 +155,7 @@ describe('ScheduledLoadPage', () => {
     expect(navigation.navigate).not.toHaveBeenCalled();
     expect(navigation.registerUnsavedChanges).not.toHaveBeenCalledWith(expect.any(Boolean), 'Scheduled Load changes');
 
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Cancel and return to Load')!);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Cancel and return to editor')!);
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(navigation.navigate).not.toHaveBeenCalled();
   });

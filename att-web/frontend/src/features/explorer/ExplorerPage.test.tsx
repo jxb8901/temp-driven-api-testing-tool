@@ -320,6 +320,7 @@ describe('Explorer page integration', () => {
     });
     const onResourceRouteChange = vi.fn();
     const onJobAccepted = vi.fn();
+    const onScheduleDebug = vi.fn();
     const dirtyTransitions: boolean[] = [];
     const registerUnsavedChanges = vi.fn((dirty: boolean) => {
       dirtyTransitions.push(dirty);
@@ -327,7 +328,7 @@ describe('Explorer page integration', () => {
     });
     const props = {
       api, packageId: 'payments', resourceRoute: { type: 'template' as const, resourceId: 'checkout' }, environment: '',
-      registerUnsavedChanges, onResourceRouteChange, onEnvironmentChange: vi.fn(), onJobAccepted,
+      registerUnsavedChanges, onResourceRouteChange, onEnvironmentChange: vi.fn(), onJobAccepted, onScheduleDebug,
     };
     await render(<ExplorerPage {...props} />);
     await settle();
@@ -342,8 +343,17 @@ describe('Explorer page integration', () => {
     click(button('Debug this target'));
     await settle();
     expect(container.textContent).toContain('Hidden package-authored values are preserved');
-    expect(button('Schedule…').disabled).toBe(true);
-    expect(container.textContent).toContain('Debug runs are one-shot. Schedule is available only for validated immutable Load scenarios; Debug draft overrides are not converted to recurring Load jobs.');
+    expect(button('Schedule…').disabled).toBe(false);
+    expect(container.textContent).toContain('Scheduling keeps this validated Debug target, environment and input snapshot.');
+    click(button('Schedule…'));
+    await settle();
+    expect(api.previewDebug).toHaveBeenCalledWith(expect.objectContaining({
+      packageId: 'payments', target: { type: 'template', id: 'checkout' }, input: debugInput,
+    }));
+    expect(onScheduleDebug).toHaveBeenCalledWith(expect.objectContaining({
+      packageId: 'payments', draftId: 'draft-1', jobType: 'debug',
+      target: { type: 'template', id: 'checkout' },
+    }));
     click(container.querySelector('.att-sidecar-keep-default input')!);
     const type = [...container.querySelectorAll('select')].find(item => item.getAttribute('aria-label') === 'credential value type');
     setValue(type!, 'string');
@@ -363,7 +373,7 @@ describe('Explorer page integration', () => {
 
     setValue(container.querySelector<HTMLInputElement>('input[maxlength="120"]')!, 'anonymous-run-42');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    click(button('Start Debug'));
+    click(button('Run Now'));
     await settle();
     expect(submitDebug).toHaveBeenCalledWith(expect.objectContaining({ packageId: 'payments', principal: 'anonymous-run-42' }));
     expect(onJobAccepted).toHaveBeenCalledWith('job-99');
@@ -396,8 +406,29 @@ describe('Explorer page integration', () => {
     click(button('Compare'));
     await settle();
     expect(container.textContent).toContain('hidden');
-    expect(container.textContent).toContain('missing');
+    expect(container.textContent).toContain('not declared');
     expect(container.textContent).not.toContain('must-not-display');
+  });
+
+  it('identifies the package file shared by both sides of a comparison', async () => {
+    const api = apiWith({
+      getDeclaredConfiguration: vi.fn(async () => ({
+        state: 'ready', environments: [{ name: 'left', state: 'active', default: true }, { name: 'right', state: 'active' }],
+        globals: {}, sections: [],
+      })),
+      compareConfiguration: vi.fn(async () => ({
+        state: 'ready', leftEnvironment: 'left', rightEnvironment: 'right',
+        fields: [{ path: 'dbhelpers.shared.readOnly', source: 'config/dbhelpers/shared.yaml',
+          left: { state: 'visible', value: false, origin: 'profile' },
+          right: { state: 'visible', value: false, origin: 'profile' }, change: 'same' }],
+      })),
+    });
+    await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
+      onEnvironmentChange={() => {}} initialMode="declared" />);
+    click(button('Compare'));
+    await settle();
+    expect(container.textContent).toContain('Shared source: config/dbhelpers/shared.yaml');
+    expect(container.textContent).toContain('environment');
   });
 
   it('scopes Compare pages to the selected section and preserves that section while loading more', async () => {

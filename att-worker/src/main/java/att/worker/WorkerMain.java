@@ -145,16 +145,12 @@ public final class WorkerMain {
         AttService service=new DefaultAttService();
         if("run".equals(r.command)) return service.run(new RunRequest(root,config,r.environment,output,r.runId,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),bool(r.rerunFailed),bool(r.dryRun),bool(r.failFast),null,"reject",false,event -> emitExecution(event)));
         if("debug".equals(r.command)) { Map<String,Object> t=requiredTarget(r);
-            if(r.expectedRevisionDigest!=null) new PackageResourceInspector(root,config,r.environment,
-                    r.safeTextSources,r.maxSourceBytes==null?65536:r.maxSourceBytes,
-                    r.maxResponseBytes==null?262144:r.maxResponseBytes).verifyRevision(r.expectedRevisionDigest);
+            if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides,false,null,r.inlineDebugInput)); }
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
             att.load.LoadEventListener observer = event -> { try { emit(WorkerEvent.Type.PROGRESS, event.toMap(root)); } catch(Exception error) { throw new IllegalStateException(error); } };
             if(r.inlineLoadScenario!=null) {
-                if(r.expectedRevisionDigest!=null) new PackageResourceInspector(root,config,r.environment,
-                        r.safeTextSources,r.maxSourceBytes==null?65536:r.maxSourceBytes,
-                        r.maxResponseBytes==null?262144:r.maxResponseBytes).verifyRevision(r.expectedRevisionDigest);
+                if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
                 att.load.LoadScenario parsed=new att.load.LoadScenarioLoader(root).loadInline(r.inlineLoadScenario);
                 return service.load(new LoadRequest(root,config,r.environment,output,r.runId,null,null,null,
                         null,null,null,null,null,null,null,null,null,r.overrides,observer,parsed,false));
@@ -169,12 +165,13 @@ public final class WorkerMain {
                 if ("files".equals(r.inspectionAction)) {
                     PackageConfigurationFileInspector files = new PackageConfigurationFileInspector(root,
                             new java.util.HashSet<>(r.safeTextSources == null ? Collections.emptyList() : r.safeTextSources),
-                            r.maxSourceBytes == null ? 65536 : r.maxSourceBytes, maxResponseBytes);
+                            r.maxSourceBytes == null ? 65536 : r.maxSourceBytes, maxResponseBytes,
+                            !Boolean.FALSE.equals(r.sourceBrowsingEnabled),r.sourceBrowsingPolicy,r.sourceDenyGlobs);
                     inspected = files.list(r.inspectionPath, r.inspectionQuery,
                             r.inspectionOffset == null ? 0 : r.inspectionOffset,
                             r.inspectionLimit == null ? 50 : r.inspectionLimit);
                 } else if ("source".equals(r.inspectionAction)) {
-                    inspected = resourceInspector(root, config, r).inspectPackageFileSource(r.inspectionPath, r.inspectionOrigin);
+                    inspected = resourceInspector(root, config, r).inspectPackageFileSource(r.inspectionPath, r.inspectionOrigin,r.inspectionReferenceId);
                 } else {
                     PackageConfigurationInspector inspector = new PackageConfigurationInspector(root, config,
                             maxResponseBytes, Boolean.TRUE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns);
@@ -183,7 +180,8 @@ public final class WorkerMain {
                             r.inspectionOffset == null ? 0 : r.inspectionOffset,
                             r.inspectionLimit == null ? 0 : r.inspectionLimit,
                             Boolean.TRUE.equals(r.inspectionIncludeInherited),
-                            "preview-generated".equals(r.inspectionQuery));
+                            "preview-generated".equals(r.inspectionQuery),
+                            "effective".equals(r.inspectionAction) ? r.inspectionQuery : null);
                 }
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
@@ -239,19 +237,39 @@ public final class WorkerMain {
         throw new IllegalArgumentException("Unsupported Worker command: "+r.command);
     }
 
+    private static void verifyRevision(Path root,Path config,WorkerRequest request) throws Exception {
+        String policy=request.sourceBrowsingPolicy==null?"allowlist-only":request.sourceBrowsingPolicy;
+        boolean sourceBrowsingEnabled=!Boolean.FALSE.equals(request.sourceBrowsingEnabled);
+        boolean redactionEnabled=!Boolean.FALSE.equals(request.redactionEnabled);
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,config,request.environment,
+                request.safeTextSources,request.externalTextSources,request.externalSourceRoots,
+                request.maxSourceBytes==null?65536:request.maxSourceBytes,
+                request.maxResponseBytes==null?262144:request.maxResponseBytes,true,
+                sourceBrowsingEnabled,policy,request.sourceDenyGlobs,redactionEnabled,
+                request.sensitivePaths,request.sensitiveFieldPatterns)) {
+            inspector.verifyRevision(request.expectedRevisionDigest);
+        }
+    }
+
     private synchronized PackageResourceInspector resourceInspector(Path root,Path config,WorkerRequest request) {
         List<String> safeSources=new ArrayList<String>();
         if(request.safeTextSources!=null)safeSources.addAll(request.safeTextSources);
         Collections.sort(safeSources);
+        List<String> externalSources=new ArrayList<String>();
+        if(request.externalTextSources!=null)externalSources.addAll(request.externalTextSources);
+        Collections.sort(externalSources);
+        List<String> externalRoots=new ArrayList<String>();
+        if(request.externalSourceRoots!=null)externalRoots.addAll(request.externalSourceRoots);
+        Collections.sort(externalRoots);
         InspectorKey key=new InspectorKey(root.toAbsolutePath().normalize().toString(),
-                config==null?"":config.toString(),request.environment,safeSources,
+                config==null?"":config.toString(),request.environment,safeSources,externalSources,externalRoots,
                 request.maxSourceBytes==null?65536:request.maxSourceBytes,
                 request.maxResponseBytes==null?262144:request.maxResponseBytes,
                 Boolean.TRUE.equals(request.sourceBrowsingEnabled),request.sourceBrowsingPolicy,
                 request.sourceDenyGlobs,Boolean.TRUE.equals(request.redactionEnabled),request.sensitivePaths,request.sensitiveFieldPatterns);
         PackageResourceInspector inspector=resourceInspectors.get(key);
         if(inspector!=null)return inspector;
-        inspector=new PackageResourceInspector(root,config,request.environment,safeSources,
+        inspector=new PackageResourceInspector(root,config,request.environment,safeSources,externalSources,externalRoots,
                 key.maxSourceBytes,key.maxResponseBytes,inspectionDaemon,key.sourceBrowsingEnabled,key.sourceBrowsingPolicy,
                 key.sourceDenyGlobs,key.redactionEnabled,key.sensitivePaths,key.sensitiveFieldPatterns);
         resourceInspectors.put(key,inspector);
@@ -270,16 +288,18 @@ public final class WorkerMain {
 
     private static final class InspectorKey {
         final String root,config,environment;
-        final List<String> safeTextSources;
+        final List<String> safeTextSources,externalTextSources,externalSourceRoots;
         final int maxSourceBytes,maxResponseBytes;
         final boolean sourceBrowsingEnabled,redactionEnabled;
         final String sourceBrowsingPolicy;
         final List<String> sourceDenyGlobs,sensitivePaths,sensitiveFieldPatterns;
-        InspectorKey(String root,String config,String environment,List<String> safeTextSources,
+        InspectorKey(String root,String config,String environment,List<String> safeTextSources,List<String> externalTextSources,List<String> externalSourceRoots,
                      int maxSourceBytes,int maxResponseBytes,boolean sourceBrowsingEnabled,String sourceBrowsingPolicy,
                      List<String> sourceDenyGlobs,boolean redactionEnabled,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) {
             this.root=root;this.config=config;this.environment=environment;
             this.safeTextSources=Collections.unmodifiableList(new ArrayList<String>(safeTextSources));
+            this.externalTextSources=Collections.unmodifiableList(new ArrayList<String>(externalTextSources));
+            this.externalSourceRoots=Collections.unmodifiableList(new ArrayList<String>(externalSourceRoots));
             this.maxSourceBytes=maxSourceBytes;this.maxResponseBytes=maxResponseBytes;
             this.sourceBrowsingEnabled=sourceBrowsingEnabled;this.sourceBrowsingPolicy=sourceBrowsingPolicy;this.sourceDenyGlobs=copy(sourceDenyGlobs);
             this.redactionEnabled=redactionEnabled;this.sensitivePaths=copy(sensitivePaths);this.sensitiveFieldPatterns=copy(sensitiveFieldPatterns);
@@ -292,10 +312,11 @@ public final class WorkerMain {
             return maxSourceBytes==value.maxSourceBytes&&maxResponseBytes==value.maxResponseBytes&&sourceBrowsingEnabled==value.sourceBrowsingEnabled&&redactionEnabled==value.redactionEnabled
                     &&java.util.Objects.equals(root,value.root)&&java.util.Objects.equals(config,value.config)
                     &&java.util.Objects.equals(environment,value.environment)&&java.util.Objects.equals(sourceBrowsingPolicy,value.sourceBrowsingPolicy)
-                    &&safeTextSources.equals(value.safeTextSources)&&sourceDenyGlobs.equals(value.sourceDenyGlobs)&&sensitivePaths.equals(value.sensitivePaths)&&sensitiveFieldPatterns.equals(value.sensitiveFieldPatterns);
+                    &&safeTextSources.equals(value.safeTextSources)&&externalTextSources.equals(value.externalTextSources)&&externalSourceRoots.equals(value.externalSourceRoots)
+                    &&sourceDenyGlobs.equals(value.sourceDenyGlobs)&&sensitivePaths.equals(value.sensitivePaths)&&sensitiveFieldPatterns.equals(value.sensitiveFieldPatterns);
         }
         @Override public int hashCode() {
-            return java.util.Objects.hash(root,config,environment,safeTextSources,maxSourceBytes,maxResponseBytes,sourceBrowsingEnabled,sourceBrowsingPolicy,sourceDenyGlobs,redactionEnabled,sensitivePaths,sensitiveFieldPatterns);
+            return java.util.Objects.hash(root,config,environment,safeTextSources,externalTextSources,externalSourceRoots,maxSourceBytes,maxResponseBytes,sourceBrowsingEnabled,sourceBrowsingPolicy,sourceDenyGlobs,redactionEnabled,sensitivePaths,sensitiveFieldPatterns);
         }
     }
     private Map<String,Object> requiredTarget(WorkerRequest r) { if(r.target==null)throw new IllegalArgumentException("target is required"); return r.target; }

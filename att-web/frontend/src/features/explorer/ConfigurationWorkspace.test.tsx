@@ -36,14 +36,15 @@ function Harness({ api, sourceReference }: { api: ExplorerApi; sourceReference?:
   const [filePath, setFilePath] = useState<string | undefined>(sourceReference ? 'templates/payment/payload/request.xml' : undefined);
   const [fileOrigin, setFileOrigin] = useState<string | undefined>(sourceReference ? 'templates/payment/flow.yaml' : undefined);
   const [activeSourceReference, setActiveSourceReference] = useState(sourceReference);
+  const [configurationReferenceId, setConfigurationReferenceId] = useState<string | undefined>();
   const [tab, setTab] = useState<'source' | 'declared' | 'effective' | 'compare' | 'testdata'>('source');
   return <ConfigurationWorkspace api={api} packages={[{ packageId: 'payments' }]} packageId="payments" environment=""
-    filePath={filePath} fileOrigin={fileOrigin} sourceReference={activeSourceReference} tab={tab} onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()}
-    onFileChange={(path, origin, reference) => { setFilePath(path); setFileOrigin(origin); setActiveSourceReference(reference); }} onTabChange={setTab} onOpenResource={vi.fn()} />;
+    filePath={filePath} fileOrigin={fileOrigin} sourceReference={activeSourceReference} configurationReferenceId={configurationReferenceId} tab={tab} onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()}
+    onFileChange={(path, origin, reference, configurationReference) => { setFilePath(path); setFileOrigin(origin); setActiveSourceReference(reference); setConfigurationReferenceId(configurationReference); }} onTabChange={setTab} onOpenResource={vi.fn()} />;
 }
 
 describe('ConfigurationWorkspace', () => {
-  it('keeps config-source file references visible but non-navigable without server tokens', async () => {
+  it('shows a generic unavailable state when the Server withholds config-source references', async () => {
     const api = {
       listResources: vi.fn(async () => ({ items: [], total: 0 })),
       getResource: vi.fn(async () => ({ resource: { type: 'template', resourceId: 'x' } })),
@@ -70,11 +71,33 @@ describe('ConfigurationWorkspace', () => {
     await flush();
     await act(async () => host.querySelector<HTMLButtonElement>('[role="tree"] button[role="treeitem"]')?.click());
     await flush();
-    expect(api.getConfigurationFileSource).toHaveBeenCalledWith('payments', 'config/main.yaml', undefined, expect.any(AbortSignal));
+    expect(api.getConfigurationFileSource).toHaveBeenCalledWith('payments', 'config/main.yaml', undefined, expect.any(AbortSignal), undefined);
     expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('name: base\npayload: &{./refs/child.json}');
-    expect(host.textContent).toContain('References in config/ source remain visible but cannot be opened because this endpoint did not return Server-verified reference tokens.');
+    expect(host.textContent).toContain('The Server did not authorize any referenced files for navigation from this source.');
     expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Open linked file')).toBe(false);
     expect(api.getConfigurationFileSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a config-source reference with the Server-issued reference token', async () => {
+    const referenceId='eyJmaWxlUmVmZXJlbmNlIjoiYXV0aG9yaXplZCJ9';
+    const getConfigurationFileSource=vi.fn(async (_packageId:string,path:string) => ({
+      available:true,format:path.endsWith('.json')?'json':'yaml',logicalPath:path,
+      text:path==='config/main.yaml'?'payload: &{./refs/child.json}':'{"status":"ok"}',
+      fileReferences:path==='config/main.yaml'?[{referenceId,logicalPath:'config/refs/child.json',available:true}]:[],
+    }));
+    const api={
+      listResources:vi.fn(async()=>({items:[],total:0})),getResource:vi.fn(async()=>({resource:{type:'template',resourceId:'x'}})),
+      getSafeSource:vi.fn(async()=>({available:false})),getDeclaredConfiguration:vi.fn(async()=>({environments:[]})),
+      getEffectiveConfiguration:vi.fn(async()=>({sections:[]})),compareConfiguration:vi.fn(async()=>({fields:[]})),
+      listConfigurationFiles:vi.fn(async(_packageId:string,path?:string)=>({path:path||'',total:path?0:1,items:path?[]:[{name:'main.yaml',path:'config/main.yaml',kind:'file' as const,sourceAvailable:true}]})),
+      getConfigurationFileSource,getTestdataRecords:vi.fn(async()=>({descriptorId:'x',offset:0,limit:50,total:0,records:[]})),
+      getDebugForm:vi.fn(),previewDebug:vi.fn(),submitDebug:vi.fn(),runCase:vi.fn(),
+    } as unknown as ExplorerApi;
+    await act(async()=>root.render(<Harness api={api}/>));await flush();
+    await act(async()=>host.querySelector<HTMLButtonElement>('[role="tree"] button[role="treeitem"]')?.click());await flush();
+    await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Open linked file')?.click());await flush();
+    expect(getConfigurationFileSource).toHaveBeenLastCalledWith('payments','config/refs/child.json','config/main.yaml',expect.any(AbortSignal),referenceId);
+    expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('{"status":"ok"}');
   });
 
   it('uses tree arrow keys to expand, enter children, return to parents, and collapse', async () => {

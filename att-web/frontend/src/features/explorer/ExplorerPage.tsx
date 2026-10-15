@@ -79,7 +79,7 @@ function ExplorerReference({ reference, onOpen }: { reference: ResourceReference
 }
 
 export function ExplorerPage({ api, packageId, resourceRoute, environment, principalLabel = '', onResourceRouteChange,
-  onEnvironmentChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad, onOpenConfiguration, onOpenConfigurationFile, registerUnsavedChanges }: ExplorerPageProps) {
+  onEnvironmentChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad, onScheduleDebug, onOpenConfiguration, onOpenConfigurationFile, registerUnsavedChanges }: ExplorerPageProps) {
   const initialListState = useRef(savedExplorerList(packageId)).current;
   const [query, setQuery] = useState(initialListState.query);
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
@@ -117,6 +117,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   const listStateRef = useRef({ packageId, query, typeFilter, sortKey, sortDirection });
   listStateRef.current = { packageId, query, typeFilter, sortKey, sortDirection };
   const dirtyRef = useRef(false);
+  const debugValidationGeneration = useRef(0);
   const unregisterDirtyRef = useRef<(() => void) | null>(null);
   const selectedRouteKey = resourceRouteKey(resourceRoute);
   const identity = useMemo<ResourceIdentity | null>(() => resourceRoute && isResourceType(resourceRoute.type)
@@ -276,12 +277,14 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   }, [selectedRouteKey, resourceRoute?.tab]);
 
   useEffect(() => {
+    debugValidationGeneration.current++;
     setDebugOpen(false); setDebugForm(null); setDebugInput({}); setDraft(null); setDebugError(''); setDebugStatus('');
     setFormValid(true); setResetKey(value => value + 1); updateDirty(false);
   }, [packageId, selectedRouteKey, updateDirty]);
 
   useEffect(() => {
     if (!debugOpen || !identity || !isRunnable(detail)) return;
+    debugValidationGeneration.current++;
     const controller = new AbortController();
     setDebugForm(null); setDraft(null); setDebugError(''); setDebugStatus('Loading safe Debug defaults…');
     api.getDebugForm(identity, environment || undefined, controller.signal).then(response => {
@@ -298,6 +301,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   }, [api, debugOpen, identity?.packageId, identity?.type, identity?.resourceId, environment, detail?.resourceId]);
 
   const setBusinessInput = (value: JsonObject) => {
+    debugValidationGeneration.current++;
     setDebugInput(value); setDraft(null); updateDirty(true);
     setDebugStatus('Debug input changed. Validate it before starting.'); setDebugError('');
   };
@@ -305,15 +309,27 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   const previewDebug = async (): Promise<DraftResponse | null> => {
     if (!debugForm || !identity) { setDebugError('Open Debug for a Template, Flow, or Tool first.'); return null; }
     if (!formValid) { setDebugError('Correct the typed fields or Advanced JSON before validating.'); return null; }
+    const generation = ++debugValidationGeneration.current;
     const body: DebugDraftRequest = { packageId, target: debugForm.target, input: debugInput };
     if (environment) body.environment = environment;
     setPreviewLoading(true); setDebugError(''); setDebugStatus('Validating the effective Debug input…');
     try {
       const nextDraft = await api.previewDebug(body);
+      if (generation !== debugValidationGeneration.current) return null;
       setDraft(nextDraft); setDebugStatus(nextDraft.redacted ? 'Validation passed. Sensitive preview values remain hidden.' : 'Validation passed.');
       return nextDraft;
     } catch (error) { setDebugError(userError(error, 'Debug preview')); setDebugStatus('Debug preview failed.'); return null; }
     finally { setPreviewLoading(false); }
+  };
+
+  const scheduleDebug = async () => {
+    if (!debugForm || !identity || !onScheduleDebug || !formValid) return;
+    let currentDraft = draft;
+    const expiresAt = currentDraft?.expiresAt ? Date.parse(currentDraft.expiresAt) : Number.NaN;
+    if (!currentDraft || !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 15_000) currentDraft = await previewDebug();
+    if (!currentDraft) return;
+    onScheduleDebug({ packageId, environment: environment || undefined, draftId: currentDraft.draftId, jobType: 'debug',
+      previewYaml: currentDraft.previewYaml, target: { type: debugForm.target.type, id: debugForm.target.id } });
   };
 
   const startDebug = async () => {
@@ -338,6 +354,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
 
   const resetDebug = () => {
     if (!debugForm) return;
+    debugValidationGeneration.current++;
     setDebugInput(JSON.parse(JSON.stringify(debugForm.input || {})) as JsonObject);
     setDraft(null); setDebugError(''); setDebugStatus('Defaults restored. Validate before starting Debug.');
     setFormValid(true); setResetKey(value => value + 1); updateDirty(false);
@@ -466,14 +483,17 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
             {debugError && <p className="att-error" role="alert">{debugError}</p>}
             {debugForm && <>
               <TypedSidecarForm key={`${selectedRouteKey}:${resetKey}`} value={debugInput} groups={groups} resetKey={resetKey}
-                onChange={setBusinessInput} onValidityChange={setFormValid} />
+                onChange={setBusinessInput} onValidityChange={valid => {
+                  setFormValid(valid);
+                  if (!valid) { debugValidationGeneration.current++; setDraft(null); }
+                }} />
               <div className="att-debug-actions">
-                <button type="button" disabled title="The Server scheduler accepts immutable Load scenarios, not Debug draft overrides.">Schedule…</button>
                 <button type="button" onClick={resetDebug} disabled={previewLoading || submitLoading}>Reset defaults</button>
                 <button type="button" onClick={() => void previewDebug()} disabled={previewLoading || submitLoading || !formValid}>{previewLoading ? 'Validating…' : 'Validate and preview'}</button>
-                <button type="button" onClick={() => void startDebug()} disabled={submitLoading || previewLoading || !formValid}>{submitLoading ? 'Starting…' : 'Start Debug'}</button>
+                <button type="button" onClick={() => void startDebug()} disabled={submitLoading || previewLoading || !formValid}>{submitLoading ? 'Starting…' : 'Run Now'}</button>
+                {onScheduleDebug && <button type="button" onClick={() => void scheduleDebug()} disabled={submitLoading || previewLoading || !formValid}>Schedule…</button>}
               </div>
-              <p className="att-help" role="note">Debug runs are one-shot. Schedule is available only for validated immutable Load scenarios; Debug draft overrides are not converted to recurring Load jobs.</p>
+              <p className="att-help" role="note">Scheduling keeps this validated Debug target, environment and input snapshot. Protected package defaults remain server-managed and are not saved as schedule values.</p>
               {previewText && <section className="att-debug-preview"><h4>Safe effective Debug preview</h4><CodeEditor value={previewText} language={draft?.previewYaml ? 'yaml' : 'json'} label="Safe effective Debug preview" readOnly /></section>}
             </>}
           </section>}

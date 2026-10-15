@@ -23,10 +23,12 @@ function asError(value: unknown): Error {
 
 const loadJobsApi: LoadJobsApi = api;
 
-function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled }: {
+function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedulingEnabled, onSchedule }: {
   packageId: string;
   resourceRoute: ExplorerPageProps['resourceRoute'];
   inlineLoadEnabled: boolean;
+  schedulingEnabled: boolean;
+  onSchedule(input: ValidatedLoadDraftIntent): void;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
@@ -44,6 +46,9 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled }: {
   const onOpenConfiguration = useCallback((identity: { packageId: string }) => {
     navigation.navigate({ kind: 'configuration', packageId: identity.packageId, environment: workspace.selectedEnvironment, tab: 'effective' });
   }, [navigation.navigate, workspace.selectedEnvironment]);
+  const onScheduleDebug = useCallback<NonNullable<ExplorerPageProps['onScheduleDebug']>>((input) => {
+    onSchedule(input);
+  }, [onSchedule]);
 
   return <ExplorerPage key={packageId}
     api={api}
@@ -55,6 +60,7 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled }: {
     onEnvironmentChange={workspace.onEnvironmentChange}
     onJobAccepted={onJobAccepted}
     onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
+    onScheduleDebug={schedulingEnabled ? onScheduleDebug : undefined}
     onOpenConfiguration={onOpenConfiguration}
     onOpenConfigurationFile={(path, origin, sourceReference) => navigation.navigate({ kind: 'configuration', packageId, environment: workspace.selectedEnvironment, filePath: path, fileOrigin: origin, sourceReference, tab: 'source' })}
   />;
@@ -130,8 +136,8 @@ function ConfigurationRouteView({ route, packages }: {
     workspace.onEnvironmentChange(environment);
     navigation.navigate({ ...route, environment });
   }, [navigation.navigate, route, workspace.onEnvironmentChange]);
-  const onFileChange = useCallback((filePath?: string, fileOrigin?: string, sourceReference?: ResourceSourceReference) => {
-    navigation.navigate({ ...route, filePath, fileOrigin, sourceReference, tab: filePath ? 'source' : route.tab });
+  const onFileChange = useCallback((filePath?: string, fileOrigin?: string, sourceReference?: ResourceSourceReference, configurationReferenceId?: string) => {
+    navigation.navigate({ ...route, filePath, fileOrigin, sourceReference, configurationReferenceId, tab: filePath ? 'source' : route.tab });
   }, [navigation.navigate, route]);
   const onTabChange = useCallback((tab: 'source' | 'declared' | 'effective' | 'compare' | 'testdata') => {
     navigation.navigate({ ...route, tab });
@@ -147,6 +153,7 @@ function ConfigurationRouteView({ route, packages }: {
     filePath={route.filePath}
     fileOrigin={route.fileOrigin}
     sourceReference={route.sourceReference}
+    configurationReferenceId={route.configurationReferenceId}
     tab={route.tab || (route.filePath ? 'source' : 'declared')}
     onPackageChange={onPackageChange}
     onEnvironmentChange={onEnvironmentChange}
@@ -311,6 +318,8 @@ export default function App() {
       packageId={navigation.route.packageId}
       resourceRoute={navigation.route.resource || null}
       inlineLoadEnabled={capabilities.inlineLoadEnabled}
+      schedulingEnabled={capabilities.loadSchedulingEnabled}
+      onSchedule={onSchedule}
     />;
   } else {
     const packageOptions = state.packages.status === 'ready'

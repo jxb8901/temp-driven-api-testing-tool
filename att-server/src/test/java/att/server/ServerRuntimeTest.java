@@ -79,6 +79,7 @@ class ServerRuntimeTest {
         Path configFile=temp.resolve("server.yaml");Files.writeString(configFile,"server:\n  dataDir: "+temp.resolve("data")+"\n  javaExecutable: "+javaBin+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
@@ -99,16 +100,19 @@ class ServerRuntimeTest {
         Path allowed=Files.createDirectory(temp.resolve("scheduled-load-packages"));Path packageRoot=Files.createDirectory(allowed.resolve("p"));
         Path templates=Files.createDirectories(packageRoot.resolve("templates/SCHEDULED"));Path loads=Files.createDirectories(packageRoot.resolve("load"));
         Files.createDirectories(packageRoot.resolve("testcase"));Files.createDirectories(packageRoot.resolve("config"));copySchemas(packageRoot);
-        Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+        Files.createDirectories(packageRoot.resolve("config/testdata"));
+        Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [config/testdata/edda.yaml]\n"
                 +"testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        Files.writeString(packageRoot.resolve("config/testdata/edda.yaml"),"schemaVersion: att-testdata/v1.0\nid: edda\nrecords: [{currency: HKD}]\n");
         Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: SCHEDULED\ndescription: scheduled Load smoke target\nactions:\n"
                 +"  message:\n    type: log\n    message: scheduled Load passed\n");
+        Files.writeString(templates.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ntestdata: [config/testdata/edda.yaml]\ninputs:\n  currency: '@{edda.currency}'\n  password: package-sidecar-secret\n");
         Files.writeString(loads.resolve("scenario.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n  - id: scheduled-smoke\n    target:\n      type: template\n      id: SCHEDULED\n    load:\n      users: 1\n      duration: 1s\n");
         Files.writeString(loads.resolve("bad.yaml"),"schemaVersion: att-load/invalid\nworkloads: []\n");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path data=temp.resolve("scheduled-load-data");Path configFile=temp.resolve("scheduled-load-server.yaml");
         Files.writeString(configFile,"server:\n  dataDir: "+yaml(data)+"\n  javaExecutable: "+yaml(javaBin)
-                +"\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    maxConcurrentRuns: 1\n  inlineLoad:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
+                +"\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\n    redaction:\n      enabled: true\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    maxConcurrentRuns: 1\n  inlineLoad:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("scheduled-load-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
         addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
@@ -119,7 +123,7 @@ class ServerRuntimeTest {
                  "timezone":"Asia/Hong_Kong","cron":"0 2 * * *","enabled":false}
                 """);
         ServerRuntime setupRuntime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
-        String scheduleId;
+        String scheduleId,debugScheduleId;
         try {
             Map<String,Object> sensitiveWorkload=new java.util.LinkedHashMap<>();
             sensitiveWorkload.put("id","sensitive-snapshot");
@@ -141,12 +145,53 @@ class ServerRuntimeTest {
 
             Map<String,Object> preview=setupRuntime.previewLoadSchedule(ServerRuntime.JSON.readTree("{\"timezone\":\"Asia/Hong_Kong\",\"cron\":\"0 2 * * *\"}"));
             assertEquals("Asia/Hong_Kong",preview.get("timezone"));assertEquals("2026-10-12T18:00:00Z",preview.get("nextRunAt"));
+            assertEquals(5,((List<?>)preview.get("nextOccurrences")).size());
+            assertEquals(preview.get("nextRunAt"),((List<?>)preview.get("nextOccurrences")).get(0));
             ServerRuntime.DraftValidationException invalid=assertThrows(ServerRuntime.DraftValidationException.class,()->setupRuntime.createLoadSchedule(
                     ServerRuntime.JSON.readTree("{\"name\":\"Bad scenario\",\"packageId\":\"p\",\"scenario\":\"load/bad.yaml\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}"),"operator"));
             assertFalse(invalid.diagnostics.isEmpty());
             assertThrows(IllegalArgumentException.class,()->setupRuntime.createLoadSchedule(ServerRuntime.JSON.readTree(
                     "{\"name\":\"Over cap\",\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\",\"maxConcurrentRuns\":2}"),"operator"));
             LoadSchedule created=setupRuntime.createLoadSchedule(request,"alice");scheduleId=created.id;
+
+            Map<String,Object> resourcePage=setupRuntime.inspectResource("p","list","template",null,null,10,null,"alice");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> resources=(List<Map<String,Object>>)resourcePage.get("items");
+            String resourceId=String.valueOf(resources.get(0).get("resourceId"));
+            Map<String,Object> form=setupRuntime.inspectDebugForm("p","template",resourceId,"SIT","alice");
+            assertTrue(form.toString().contains("@{edda.currency}"),"Ordinary sidecar expressions remain visible with masking enabled.");
+            assertFalse(form.toString().contains("package-sidecar-secret"),"Password defaults remain protected in the safe form projection.");
+            com.fasterxml.jackson.databind.node.ObjectNode debugDraftRequest=ServerRuntime.JSON.createObjectNode();debugDraftRequest.put("packageId","p");debugDraftRequest.put("environment","SIT");
+            debugDraftRequest.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id","SCHEDULED")));
+            debugDraftRequest.set("input",ServerRuntime.JSON.valueToTree(form.get("input")));
+            Map<String,Object> debugDraft;
+            try { debugDraft=setupRuntime.createDebugDraft(debugDraftRequest,"alice"); }
+            catch(ServerRuntime.DraftValidationException invalidDebugDraft) { throw new AssertionError(invalidDebugDraft.diagnostics.toString(),invalidDebugDraft); }
+            assertTrue(debugDraft.toString().contains("@{edda.currency}"));
+            assertFalse(debugDraft.toString().contains("package-sidecar-secret"));
+            String debugDraftId=String.valueOf(debugDraft.get("draftId"));
+            JsonNode debugScheduleRequest=ServerRuntime.JSON.readTree("{\"name\":\"Nightly Debug\",\"packageId\":\"p\",\"jobType\":\"debug\",\"draftId\":\""
+                    +debugDraftId+"\",\"environment\":\"SIT\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\",\"enabled\":false}");
+            LoadSchedule debugSchedule=setupRuntime.createLoadSchedule(debugScheduleRequest,"alice");debugScheduleId=debugSchedule.id;
+            assertEquals("debug",debugSchedule.effectiveJobType());
+            assertTrue(debugSchedule.inlineDebugInput.toString().contains("@{edda.currency}"));
+            assertTrue(debugSchedule.inlineDebugInput.toString().contains("$attDebugKeepDefault"));
+            assertFalse(debugSchedule.inlineDebugInput.toString().contains("package-sidecar-secret"));
+            Map<String,Object> publicDebugSchedule=setupRuntime.loadScheduleView(debugSchedule);
+            assertEquals(Map.of("type","template","id","SCHEDULED"),publicDebugSchedule.get("debugTarget"));
+            assertFalse(publicDebugSchedule.containsKey("inlineDebugInput"));assertFalse(publicDebugSchedule.containsKey("expectedRevisionDigest"));
+            assertFalse(publicDebugSchedule.containsKey("debugResourceId"));assertFalse(publicDebugSchedule.toString().contains("package-sidecar-secret"));
+
+            com.fasterxml.jackson.databind.node.ObjectNode overrideDraftRequest=ServerRuntime.JSON.createObjectNode();overrideDraftRequest.put("packageId","p");overrideDraftRequest.put("environment","SIT");
+            overrideDraftRequest.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id","SCHEDULED")));
+            overrideDraftRequest.set("input",ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-debug/v1.2","inputs",Map.of("currency","@{edda.currency}","password","submitted-secret"))));
+            Map<String,Object> secretOverrideDraft=setupRuntime.createDebugDraft(overrideDraftRequest,"alice");
+            JsonNode secretOverrideSchedule=ServerRuntime.JSON.readTree("{\"name\":\"Secret Debug\",\"packageId\":\"p\",\"jobType\":\"debug\",\"draftId\":\""
+                    +secretOverrideDraft.get("draftId")+"\",\"environment\":\"SIT\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}");
+            IllegalArgumentException secretScheduleError=assertThrows(IllegalArgumentException.class,
+                    ()->setupRuntime.createLoadSchedule(secretOverrideSchedule,"alice"));
+            assertTrue(secretScheduleError.getMessage().contains("cannot persist submitted credentials"));
+            assertFalse(setupRuntime.loadSchedules().stream().anyMatch(item->"Secret Debug".equals(item.name)));
+
             LoadSchedule edited=setupRuntime.updateLoadSchedule(scheduleId,ServerRuntime.JSON.readTree("{\"description\":\"edited description\"}"),"bob");
             assertEquals("edited description",edited.description);assertEquals("alice",edited.createdBy);assertEquals("bob",edited.updatedBy);
             assertFalse(setupRuntime.setLoadScheduleEnabled(scheduleId,false,"operator").enabled);
@@ -171,6 +216,18 @@ class ServerRuntimeTest {
             assertTrue(Files.isDirectory(output));
             try(var files=Files.walk(output)){assertTrue(files.anyMatch(Files::isRegularFile),"A standard Load run should produce artifacts");}
 
+            LoadSchedule restoredDebug=runtime.loadSchedule(debugScheduleId);
+            assertEquals("debug",restoredDebug.effectiveJobType());assertTrue(restoredDebug.inlineDebugInput.toString().contains("@{edda.currency}"));
+            assertFalse(restoredDebug.inlineDebugInput.toString().contains("package-sidecar-secret"));
+            Map<String,Object> debugOccurrence=runtime.triggerLoadSchedule(debugScheduleId,"operator");
+            assertEquals("submitted",debugOccurrence.get("status"));String debugJobId=String.valueOf(debugOccurrence.get("jobId"));
+            long debugDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);Map<String,Object> debugRecord=runtime.jobRecord(debugJobId);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(debugRecord.get("status"))&&System.nanoTime()<debugDeadline) {
+                Thread.sleep(20);debugRecord=runtime.jobRecord(debugJobId);
+            }
+            assertEquals("PASS",debugRecord.get("status"),"Scheduled Debug must submit a standard Debug Worker job; result="+runtime.resultRecord(debugJobId));
+            assertEquals("debug",debugRecord.get("command"));assertEquals("debug-schedule:"+debugScheduleId,debugRecord.get("principal"));
+
             JsonNode unavailableRequest=ServerRuntime.JSON.readTree("{\"name\":\"Unavailable package\",\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}");
             String unavailableId=runtime.createLoadSchedule(unavailableRequest,"alice").id;
             try(var paths=Files.walk(packageRoot)) {
@@ -192,6 +249,7 @@ class ServerRuntimeTest {
         Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("inspection-runtime-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("inspection-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
@@ -229,6 +287,7 @@ class ServerRuntimeTest {
         Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("configuration-inspection-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(packageRoot)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("configuration-inspection-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")&&!candidate.getFileName().toString().startsWith("att-worker-")&&!candidate.getFileName().toString().startsWith("att-engine-")) {
@@ -279,6 +338,7 @@ class ServerRuntimeTest {
                 +"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         Path libs=Files.createDirectory(temp.resolve("debug-draft-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")
@@ -345,6 +405,7 @@ class ServerRuntimeTest {
                 +"\n  inlineLoad:\n    enabled: true\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         Path libs=Files.createDirectory(temp.resolve("quick-load-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
         String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
         for(String element:classpath.split(java.util.regex.Pattern.quote(System.getProperty("path.separator")))) {
             Path candidate=Path.of(element);if(Files.isRegularFile(candidate)&&candidate.toString().endsWith(".jar")

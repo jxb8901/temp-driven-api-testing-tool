@@ -40,7 +40,7 @@ att/                              # ATT_HOME
 
 ## 設定
 
-`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。`server.inspection` 以有界的常駐 Worker pool 獨立限制唯讀資源探索。Worker pool 的程序數不會超過 `maxConcurrent`，每個程序會依次處理請求，並快取最多兩個 package index；package 檔案變更事件會令快取失效。資源探索另設佇列、逾時、heap、source 及 response 上限。`sourceBrowsing.policy: safe-package-files` 預設允許受大小限制的 Template/Flow YAML 安全投影，無須逐檔 allowlist；設定檔、Testdata descriptor、Debug sidecar、secret 命名檔、binary、package root 以外的檔案及超大檔案不會透過 Source endpoint 提供。Tool script 文字仍須在 `server.inspection.safeTextSources` 以完全相同的 package-relative path 明確 allowlist。
+`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。`server.inspection` 以有界的常駐 Worker pool 獨立限制唯讀資源探索。Worker pool 的程序數不會超過 `maxConcurrent`，每個程序會依次處理請求，並快取最多兩個 package index；package 檔案變更事件會令快取失效。資源探索另設佇列、逾時、heap、source 及 response 上限。`sourceBrowsing.policy: safe-package-files` 預設允許合資格且非敏感的 package-local 文字，無須逐檔 allowlist，包括有界的 Template/Flow YAML 投影、Tool scripts、一般設定與 Testdata descriptor，以及由已授權 source 連結的合資格 `&{...}` targets。`config/` 是唯一可列出目錄的檔案樹。每個連結檔案都使用 Server 簽發、綁定 package 及 origin 的不透明 reference ID；caller 單靠路徑和 origin 不會獲得導覽權限。`allowlist-only` 會保留 `server.inspection.safeTextSources` 既有的 package-relative 精確路徑語義。External scripts 只會在 `sourceBrowsing.externalTextSources.<packageId>` 列出其 canonical 精確檔案，且檔案位於已設定的 canonical `externalSourceRoots` 目錄時提供；不接受 wildcard、不列出 external 檔案，回應亦不會洩露 filesystem path。敏感路徑、deny 檔案、binary、package root 以外的檔案及超大檔案仍不可用；憑證及個人資料在所有模式下都會受到保護。
 
 `server.inspection.redaction.enabled` 預設為 `false`，會在安全 projection 中顯示一般 package 值。即使關閉遮蔽或匿名存取，憑證、認證資料、private key 及常見個人資料欄位仍會保護；啟用遮蔽後亦會套用設定的敏感路徑、欄位 pattern 及自由文字預設值。遮蔽關閉時 Server 會記錄啟動警告，UI 會顯示目前設定。共享或正式資料建議啟用遮蔽並要求登入；未遮蔽值只應用於隔離的 SIT 網絡。
 
@@ -75,11 +75,18 @@ server:
       enabled: true
       policy: safe-package-files
       denyGlobs: []
+      # 選填 canonical external roots 及每 package 的精確檔案。
+      # externalSourceRoots:
+      #   - /srv/att/external-scripts
+      # externalTextSources:
+      #   payments:
+      #     - /srv/att/external-scripts/mq/check-queue.sh
     redaction:
       enabled: false
       sensitivePaths: []
       sensitiveFieldPatterns: []
-    # 選填 Tool script source allowlist；路徑相對於 package。
+    # 舊有精確 package-relative allowlist；只在 policy: allowlist-only 時使用。
+    # 不會把這些路徑重新解讀為 external filesystem paths。
     # safeTextSources:
     #   payments:
     #     - tools/payment-check.sh
@@ -210,7 +217,7 @@ Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的
 | `GET` | `/packages`、`/packages/{packageId}` | 讀取設定中的 registry |
 | `GET` | `/packages/{packageId}/resources?type=case&query=...&limit=50&cursor=...` | 列出安全的 Case、Template、Flow 及 Tool 投影 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}` | 讀取單一資源定義及關聯 |
-| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已淨化的 YAML 投影或允許清單內的 Tool script，並列出安全引用檔案 |
+| `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source` | 讀取已淨化 YAML 投影或合資格的 package-local Tool 文字；檔案引用須使用 Server 授權的不透明 ID |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/source-file?referenceId=...` | 透過不透明的資源範圍引用讀取一個合資格文字檔 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/debug-form?environment=SIT` | 讀取目標範圍內的安全 Debug 預設值 |
 | `GET` | `/packages/{packageId}/resources/{kind}/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT` | 讀取安全預設值及單 workload Quick Load 預覽 |
@@ -273,7 +280,7 @@ API 會回傳 `202 Accepted` 及 job ID。工作狀態依序為 `QUEUED`、`PREP
 
 `GET /jobs` 回傳最近 100 項工作。可加上 `?principal=<text>`，在既有 `principal` property 內作不區分大小寫的文字搜尋；搜尋會在 100 項上限前執行，並採用子字串比對，因此搜尋 `alice` 亦會匹配 `alice(anonym)`。Web UI 及 `att remote jobs --principal <text>` 均使用此篩選。舊紀錄保留原有值，包括先前的 `anonymous` 紀錄。系統不會保存提交 payload，只保存 command 及 package ID 摘要。Engine result 及診斷會作為控制平面 metadata 保存。較大的報告、log 及其他證據會留在工作輸出目錄。
 
-資源探索可用 `case`、`template`、`flow` 或 `tool` 篩選。每頁預設 50 項，最多 100 項；續頁 cursor 會加密並綁定 Server 解析出的身份及查詢。匿名模式下所有 caller 共用同一 cursor 身份。若 package 內容改變，舊 cursor 會以 `409` 拒絕。Explorer 回傳邏輯資源 ID、安全投影、來源資訊、關聯及穩定診斷碼。YAML source 是解析及淨化後的投影，並非原始檔案內容。Template/Flow 的安全 `&{...}` 引用文字可透過 `source-file` endpoint 讀取；Server 會確認 canonical path 留在 package root，並檢查副檔名、deny path、文字編碼及大小，再以資源範圍不透明 `referenceId` 取用。Tool script source 只會在 Server 明確允許其 package 相對路徑時提供。憑證、個人資料、原始 config/Testdata、Debug sidecar、binary 及拒絕路徑仍會遮蔽或禁止，不受 display masking 設定影響。探索程序不會執行 Tool，也不提供檔案系統瀏覽器；檢查佇列、Worker heap、逾時及 response 大小均與一般工作執行分開限制。
+資源探索可用 `case`、`template`、`flow` 或 `tool` 篩選。每頁預設 50 項，最多 100 項；續頁 cursor 會加密並綁定 Server 解析出的身份及查詢。匿名模式下所有 caller 共用同一 cursor 身份。若 package 內容改變，舊 cursor 會以 `409` 拒絕。Explorer 回傳邏輯資源 ID、安全投影、來源資訊、關聯及穩定診斷碼。YAML source 是解析及淨化後的投影，並非原始檔案內容。預設 `safe-package-files` policy 會在無須逐檔 allowlist 的情況下提供合資格、有界的 package-local Tool 文字；`allowlist-only` 則要求 `server.inspection.safeTextSources` 內完全相同的 package-relative 路徑。External scripts 必須位於已設定的 external root，並列入該 package 的 canonical 精確 allowlist；回應不會返回其 filesystem path。denyGlobs 對 package 檔案比對 package-relative path；對 external 檔案則比對相對於最具體 canonical external root 的路徑。Template/Flow 或 Configuration source 內安全的 `&{...}` 引用可透過有界 source route 讀取合資格的 package-local 文字；Server 會確認 canonical path 留在 package root，檢查副檔名、deny path、文字編碼、大小及 visibility rules，並使用綁定 package 和 origin 的 Server 不透明 `referenceId`。獨立 Configuration source route 會對 `config/` 下的合資格文字套用相同 visibility policy，並不會提供通用檔案系統瀏覽器。Resource source route 不會提供原始 config、Testdata descriptor 或 Debug sidecar；合資格且非敏感的 configuration 和 Testdata 文字可透過 Configuration route 讀取。憑證及個人資料值一律受保護。探索程序不會執行 Tool，也不會暴露檔案系統瀏覽器；檢查佇列、Worker heap、逾時及 response 大小均與一般工作執行分開限制。
 
 ### 套件資源探索
 
@@ -439,7 +446,7 @@ Declared view 會回傳 schema version、安全的 global 欄位、已設定 pro
 
 Compare 預設比較 profile-sourced values；`includeInherited=true` 會一併包括 inherited/global values 及其來源。Section filter 會在分頁前套用。比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對本機路徑、憑證、Server 自身的秘密或未限制的 descriptor 內容。關閉 masking 時，非憑證 URL、host 及 port 等一般連線設定會顯示；啟用 masking 後，設定的操作欄位及路徑亦會遮蔽。
 
-`source` endpoint 可依 origin 解析 package-relative file reference，但仍只允許位於 package 內、canonical 的文字檔，並須符合 `server.inspection.safeTextSources`；它不是任意檔案 endpoint。Testdata records endpoint 需要 effective descriptor ID。Literal records 使用 `limit` 1–100 分頁（UI 每次讀取 50 筆）。Generated descriptor 預設回傳 `state: "preview-required"` 且不含 records；只有明確設定 `previewGenerated=true` 才會回傳有界 generated preview。此 endpoint 使用相同身份、redaction policy、bounded inspection worker、source/response 大小、佇列和逾時限制。
+`source` endpoint 在 `safe-package-files` policy 下可依 origin 解析合資格的 package-local 文字參照；`allowlist-only` 則要求既有 `server.inspection.safeTextSources` 精確 package-relative 路徑。連結請求必須包含已授權 parent source 回傳的 Server 不透明 `referenceId`；caller 自行提供 path 和 origin 並不足以授權。External scripts 只會透過設定 external root 下每 package 的 canonical 精確 allowlist 提供，且不會回傳其絕對路徑。這仍是有界 source endpoint，並非任意檔案瀏覽器。Testdata records endpoint 需要 effective descriptor ID。Literal records 使用 `limit` 1–100 分頁（UI 每次讀取 50 筆）。Generated descriptor 預設回傳 `state: "preview-required"` 且不含 records；只有明確設定 `previewGenerated=true` 才會回傳有界 generated preview。此 endpoint 使用相同身份、redaction policy、bounded inspection worker、source/response 大小、佇列和逾時限制。
 
 設定回應包含 `view`、`state`、可用時的 `schemaVersion` 及 `diagnostics`。分頁回應亦包含 `section`、`offset`、`limit`、`total` 及 `nextOffset`。無效設定會以 HTTP 200 回傳 `state: "invalid"` 及穩定診斷碼；格式錯誤的 profile 參數回傳 `400`。未知 package 回傳 `404`，超大回應回傳 `413`，檢查佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。回應大小、佇列和逾時限制與資源探索相同。
 

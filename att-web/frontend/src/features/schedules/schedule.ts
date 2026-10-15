@@ -3,6 +3,9 @@ import type { LoadSchedule, LoadScheduleInput } from './types';
 export type ScheduleRecurrence = 'daily' | 'weekly' | 'cron';
 
 export interface ScheduleDraft {
+  jobType: 'load' | 'debug';
+  debugTargetType: string;
+  debugTargetId: string;
   name: string;
   description: string;
   tags: string;
@@ -49,6 +52,7 @@ export function isIanaTimeZone(value: string): boolean {
 
 export function createScheduleDraft(timezone = localTimeZone()): ScheduleDraft {
   return {
+    jobType: 'load', debugTargetType: '', debugTargetId: '',
     name: '', description: '', tags: '', packageId: '', scenario: '', inlineSnapshot: false, config: '', environment: '', timezone,
     recurrence: 'daily', timeOfDay: '02:00', dayOfWeek: '1-5', cron: '', maxConcurrentRuns: '1', load: '{}', enabled: false,
   };
@@ -86,6 +90,8 @@ function cronTime(match: RegExpExecArray): string | null {
 
 export function draftFromSchedule(schedule: LoadSchedule): ScheduleDraft {
   return {
+    jobType: schedule.jobType === 'debug' ? 'debug' : 'load',
+    debugTargetType: schedule.debugTarget?.type || '', debugTargetId: schedule.debugTarget?.id || '',
     name: schedule.name || '', description: schedule.description || '', tags: (schedule.tags || []).join(', '),
     packageId: schedule.packageId || '', scenario: schedule.scenario || '', inlineSnapshot: schedule.inlineSnapshot === true, config: schedule.config || '',
     environment: schedule.environment || '', timezone: schedule.timezone || 'UTC',
@@ -113,13 +119,13 @@ export function scheduleInputFromDraft(draft: ScheduleDraft): LoadScheduleInput 
   if (!isIanaTimeZone(draft.timezone)) throw new Error('Enter a valid IANA timezone, such as Asia/Hong_Kong.');
   const input: LoadScheduleInput = {
     name: draft.name.trim(), description: draft.description.trim(), tags,
-    packageId: draft.packageId, config: draft.config.trim(),
+    packageId: draft.packageId, jobType: draft.jobType, config: draft.config.trim(),
     environment: draft.environment.trim(), timezone: draft.timezone.trim(), cron,
     load: load as Record<string, string>, maxConcurrentRuns, enabled: draft.enabled,
   };
   if (draft.inlineSnapshot) {
     if (draft.draftId) input.draftId = draft.draftId;
-  } else input.scenario = draft.scenario.trim();
+  } else if (draft.jobType === 'load') input.scenario = draft.scenario.trim();
   return input;
 }
 
@@ -139,7 +145,7 @@ export function explainOccurrence(reason?: string | null): string {
   if (!reason) return '';
   if (reason.startsWith('misfire-no-backfill')) return 'Missed times are recorded as skipped; the Server does not replay them after a restart or late poll.';
   if (reason === 'schedule-overlap-limit') return 'Skipped because this schedule already reached its concurrent-run limit.';
-  if (reason === 'global-scheduled-load-capacity') return 'Skipped because the Server reached its scheduled-load capacity.';
+  if (reason === 'global-scheduled-load-capacity' || reason === 'global-scheduled-job-capacity') return 'Skipped because the Server reached its scheduled-job capacity.';
   if (reason === 'manual-trigger-rate-limit') return 'Skipped because the Server minimum interval limits repeated manual runs.';
   return reason;
 }

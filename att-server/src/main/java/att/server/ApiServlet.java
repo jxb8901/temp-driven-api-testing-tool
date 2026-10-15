@@ -405,11 +405,12 @@ public final class ApiServlet extends HttpServlet {
             int limit="declared".equals(action)||"source".equals(action)?0:parseConfigurationLimit(req.getParameter("limit"));
             String inspectionPath="files".equals(action)||"source".equals(action)?req.getParameter("path"):null;
             String inspectionOrigin="source".equals(action)?req.getParameter("origin"):null;
-            String inspectionQuery="files".equals(action)?req.getParameter("query"):
+            String inspectionQuery="files".equals(action)||"effective".equals(action)?req.getParameter("query"):
                     "testdata-records".equals(action)&&parseOptionalBoolean(req.getParameter("previewGenerated"),"previewGenerated")
                             ?"preview-generated":null;
+            String inspectionReferenceId="source".equals(action)?req.getParameter("referenceId"):null;
             Map<String,Object> result=runtime.inspectConfiguration(packageId,action,environment,otherEnvironment,section,
-                    offset,limit,inspectionPath,inspectionOrigin,inspectionQuery,includeInherited,principal);
+                    offset,limit,inspectionPath,inspectionOrigin,inspectionQuery,includeInherited,inspectionReferenceId,principal);
             if("declared".equals(action)||"effective".equals(action)||"compare".equals(action)) {
                 ConfigurationInspection.Response response=ServerRuntime.JSON.convertValue(result,ConfigurationInspection.Response.class);
                 response.requestId=requestId;json(res,200,response);
