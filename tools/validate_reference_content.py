@@ -108,12 +108,11 @@ def main():
                 fail(errors, "system-design/runtime-execution.md still contains stale architecture text: %s" % stale)
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8") if (ROOT / "README.md").is_file() else ""
-    for link in ("docs/README.md", "docs/quick-start.md", "docs/reference.html", "docs/system-design/"):
+    for link in ("docs/README.md", "docs/quick-start.md", "docs/reference.md", "docs/system-design/"):
         if link not in readme:
             fail(errors, "README missing current documentation entry point: %s" % link)
 
-    for output in (DOCS / "reference.md", DOCS / "reference.html",
-                   DOCS / "reference.zh.md", DOCS / "reference.zh.html"):
+    for output in (DOCS / "reference.md", DOCS / "reference.zh.md"):
         if not output.is_file():
             fail(errors, "missing generated Reference output: %s" % output.relative_to(ROOT))
 

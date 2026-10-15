@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from pathlib import Path
-from html.parser import HTMLParser
 from urllib.parse import unquote
 import re
 import subprocess
@@ -21,9 +20,7 @@ HISTORICAL_PATHS = (
     DOCS / "history" / "03_Roadmap_V4.md",
     DOCS / "history" / "08_Quick_Start_V3.md",
     DOCS / "history" / "09_Reference_Manual_V3.md",
-    DOCS / "history" / "09_Reference_Manual_V3.html",
     DOCS / "history" / "09_Reference_Manual_V3.zh.md",
-    DOCS / "history" / "09_Reference_Manual_V3.zh.html",
     DOCS / "history" / "10_Diagnostics_V3.3_Plan.md",
     DOCS / "history" / "documentation-architecture.md",
     DOCS / "history" / "reference-migration-map.md",
@@ -143,48 +140,6 @@ def check_markdown_links(path):
                      (path.relative_to(ROOT), target))
 
 
-class IdHrefParser(HTMLParser):
-    def __init__(self):
-        HTMLParser.__init__(self)
-        self.ids = set()
-        self.hrefs = []
-
-    def handle_starttag(self, tag, attrs):
-        values = dict(attrs)
-        if "id" in values:
-            self.ids.add(values["id"])
-        if tag == "a" and "href" in values:
-            self.hrefs.append(values["href"])
-
-
-def check_html_links(path):
-    parser = IdHrefParser()
-    parser.feed(read(path))
-    for href in parser.hrefs:
-        if not href or is_external(href):
-            continue
-        path_part, _, fragment = href.partition("#")
-        if not path_part:
-            if fragment and fragment not in parser.ids:
-                fail("%s broken generated HTML anchor: #%s" %
-                     (path.relative_to(ROOT), fragment))
-            continue
-        resolved = (path.parent / unquote(path_part)).resolve()
-        try:
-            resolved.relative_to(ROOT.resolve())
-        except ValueError:
-            fail("%s HTML link escapes repository root: %s" %
-                 (path.relative_to(ROOT), href))
-            continue
-        if not resolved.exists():
-            fail("%s broken generated HTML local link: %s -> %s" %
-                 (path.relative_to(ROOT), href, resolved.relative_to(ROOT)))
-            continue
-        if fragment and resolved == path and fragment not in parser.ids:
-            fail("%s broken generated HTML anchor: %s" %
-                 (path.relative_to(ROOT), href))
-
-
 def check_version_consistency(version):
     exact_prefixes = {
         ROOT / "README.md": "# ATT %s - Automated Testing Tool" % version,
@@ -207,18 +162,6 @@ def check_version_consistency(version):
         if path.is_file() and ("Version: " + version) not in read(path)[:500]:
             fail("%s does not declare authoritative Version: %s" %
                  (path.relative_to(ROOT), version))
-
-    html_titles = {
-        DOCS / "reference.html": "<title>ATT v%s reference manual</title>" % version,
-        DOCS / "reference.zh.html": "<title>ATT v%s 使用手冊與參考</title>" % version,
-    }
-    for path, expected in html_titles.items():
-        if not path.is_file():
-            fail("missing generated HTML: %s" % path.relative_to(ROOT))
-        elif expected not in read(path)[:2000]:
-            fail("%s generated HTML title/version drift: expected %s" %
-                 (path.relative_to(ROOT), expected))
-
 
 def check_language_parity(items):
     expected = set(items)
@@ -243,7 +186,7 @@ def check_language_parity(items):
             fail("EN/ZH numbered heading mismatch for %s: EN=%s ZH=%s" %
                  (rel, en_shape, zh_shape))
 
-    for name in ("reference.md", "reference.zh.md", "reference.html", "reference.zh.html"):
+    for name in ("reference.md", "reference.zh.md"):
         if not (DOCS / name).is_file():
             fail("missing generated EN/ZH artifact: docs/%s" % name)
 
@@ -413,7 +356,7 @@ def check_critical_examples():
 
 def check_ownership_links():
     readme = read(ROOT / "README.md")
-    for canonical in ("docs/README.md", "docs/quick-start.md", "docs/reference.html",
+    for canonical in ("docs/README.md", "docs/quick-start.md", "docs/reference.md",
                       "docs/system-design/", "docs/history/"):
         if canonical not in readme:
             fail("README missing canonical documentation entry point: %s" % canonical)
@@ -427,7 +370,7 @@ def check_ownership_links():
         return
     landing = read(LANDING)
     for canonical in (
-            "quick-start.md", "quick-start.zh.md", "reference.html", "reference.zh.html",
+            "quick-start.md", "quick-start.zh.md", "reference.md", "reference.zh.md",
             "reference/test-authoring.md", "reference/execution-modes/debug.md",
             "reference/execution-modes/load.md", "reference/resources/dbhelper.md",
             "reference/resources/mqhelper.md", "reference/configuration.md",
@@ -509,10 +452,6 @@ def main():
     for path in markdown_files:
         if path.is_file():
             check_markdown_links(path)
-
-    for path in (DOCS / "reference.html", DOCS / "reference.zh.html"):
-        if path.is_file():
-            check_html_links(path)
 
     if errors:
         print("Documentation release gate failed:", file=sys.stderr)

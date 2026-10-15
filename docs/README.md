@@ -8,8 +8,8 @@ This is the canonical entry point for the current ATT documentation. Current use
 |---|---|
 | New to ATT | [Quick Start (English)](quick-start.md) |
 | 使用中文 | [快速入門（繁體中文）](quick-start.zh.md) |
-| Looking up a supported field, CLI option, or schema | [Reference Manual (English)](reference.html) · [modular sources](reference/README.md) |
-| 查閱欄位、CLI 選項或 schema | [Reference Manual（繁體中文）](reference.zh.html) · [模組化來源](reference.zh/README.md) |
+| Looking up a supported field, CLI option, or schema | [Reference Manual (English)](reference.md) · [modular sources](reference/README.md) |
+| 查閱欄位、CLI 選項或 schema | [Reference Manual（繁體中文）](reference.zh.md) · [模組化來源](reference.zh/README.md) |
 
 Minimal offline workflow:
 
@@ -43,7 +43,7 @@ Minimal offline workflow:
 ## Documentation types and language
 
 - **Quick Start** is the tutorial for a first successful run.
-- **Reference** is the supported public contract. Use the generated [English](reference.html) or [繁體中文](reference.zh.html) manual, or the matching [English](reference/) and [繁體中文](reference.zh/) source modules.
+- **Reference** is the supported public contract. Use the generated [English](reference.md) or [繁體中文](reference.zh.md) manual, or the matching [English](reference/) and [繁體中文](reference.zh/) source modules.
 - **System Design** explains maintainer-facing implementation architecture: [runtime execution](system-design/runtime-execution.md), [Web UI inspection and inline job contracts](system-design/web-ui-inspection-inline-jobs.md), [Run and Load benchmark](system-design/run-load-benchmark.md) / [Run 與 Load 效能基準](system-design/run-load-benchmark.zh.md), [Server Worker and SSE benchmark](system-design/server-worker-sse-benchmark.md) / [Server Worker 與 SSE 效能基準](system-design/server-worker-sse-benchmark.zh.md), [Server event-journal benchmark](system-design/server-event-journal-benchmark.md) / [Server 事件日誌基準](system-design/server-event-journal-benchmark.zh.md), [Load scheduler](system-design/load-scheduler.md) / [Load scheduler 中文](system-design/load-scheduler.zh.md), [Load telemetry](system-design/load-telemetry.md) / [Load telemetry 中文](system-design/load-telemetry.zh.md), and SSHHelper [English](system-design/sshhelper.md) / [中文](system-design/sshhelper.zh.md).
 - **CHANGELOG** records release chronology: [CHANGELOG.md](../CHANGELOG.md).
 - **History** preserves superseded, version-specific, migration, compatibility, and issue-specific material: [history/README.md](history/README.md).
@@ -63,9 +63,7 @@ docs/
 ├── remote-client.md         # ATT Remote client guide
 ├── remote-client.zh.md      # ATT Remote 用戶端指南
 ├── reference.md              # generated combined English Reference
-├── reference.html            # generated combined English Reference
 ├── reference.zh.md           # generated combined 繁體中文 Reference
-├── reference.zh.html         # generated combined 繁體中文 Reference
 ├── reference/                # current English Reference sources
 ├── reference.zh/             # current 繁體中文 Reference sources
 ├── system-design/            # current maintainer design

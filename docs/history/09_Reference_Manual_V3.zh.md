@@ -6,7 +6,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
 
-> Compatibility path only: use the [canonical current Reference Manual](generated/reference.zh.html) or the [documentation landing page](README.md).
+> Compatibility path only: use the [canonical current Reference Manual](../reference.zh.md) or the [documentation landing page](../README.md).
 > This generated file is retained for existing versioned links and is not a separate documentation source.
 ## 01 概覽與核心概念
 

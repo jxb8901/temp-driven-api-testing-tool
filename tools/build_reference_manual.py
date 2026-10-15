@@ -3,10 +3,7 @@ from pathlib import Path
 import argparse
 import os
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,14 +14,12 @@ LANGS = {
     "en": {
         "root": DOCS / "reference",
         "md": DOCS / "reference.md",
-        "html": DOCS / "reference.html",
         "title": "ATT v{version} reference manual",
         "status": "Normative end-user documentation; generated from modular sources",
     },
     "zh": {
         "root": DOCS / "reference.zh",
         "md": DOCS / "reference.zh.md",
-        "html": DOCS / "reference.zh.html",
         "title": "ATT v{version} 使用手冊與參考",
         "status": "規範性使用者文件；由模組化來源自動生成",
     },
@@ -162,7 +157,7 @@ def rebase_headings(text, offset):
     return result + ("\n" if text.endswith("\n") else "")
 
 
-def markdown(lang, items, ver, include_toc=True):
+def markdown(lang, items, ver):
     cfg = LANGS[lang]
     chunks = []
     for rel in items:
@@ -185,27 +180,9 @@ def markdown(lang, items, ver, include_toc=True):
         "",
     ]
     combined = "\n".join(header)
-    if include_toc:
-        combined += "\n" + table_of_contents(chunks, lang, title) + "\n"
+    combined += "\n" + table_of_contents(chunks, lang, title) + "\n"
     combined += "\n\n".join(chunks) + "\n"
     return combined
-
-
-def render_html(md_path, html_path, title):
-    pandoc = shutil.which("pandoc")
-    if not pandoc:
-        raise SystemExit("pandoc is required to generate the Reference Manual HTML")
-    cmd = [
-        pandoc,
-        "--standalone",
-        "--toc",
-        "--metadata", "title=" + title,
-        "--from", "gfm",
-        "--to", "html5",
-        str(md_path),
-        "-o", str(html_path),
-    ]
-    subprocess.run(cmd, check=True, cwd=str(ROOT))
 
 
 def compare(expected, path):
@@ -227,7 +204,7 @@ def check_or_write(path, data, check, errors):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build ATT modular Reference Manual outputs")
+    parser = argparse.ArgumentParser(description="Build the combined Markdown Reference Manuals")
     parser.add_argument("--check", action="store_true",
                         help="fail when generated outputs differ from modular sources")
     args = parser.parse_args()
@@ -243,17 +220,9 @@ def main():
     if errors:
         raise SystemExit("\n".join(errors))
 
-    with tempfile.TemporaryDirectory(prefix="att-reference-") as tmpdir:
-        tmp = Path(tmpdir)
-        for lang, cfg in LANGS.items():
-            md_text = markdown(lang, items, ver)
-            html_source = markdown(lang, items, ver, include_toc=False)
-            md_tmp = tmp / ("reference.zh.md" if lang == "zh" else "reference.md")
-            html_tmp = tmp / ("reference.zh.html" if lang == "zh" else "reference.html")
-            md_tmp.write_text(html_source, encoding="utf-8")
-            render_html(md_tmp, html_tmp, cfg["title"].format(version=ver))
-            check_or_write(cfg["md"], md_text.encode("utf-8"), args.check, errors)
-            check_or_write(cfg["html"], html_tmp.read_bytes(), args.check, errors)
+    for lang, cfg in LANGS.items():
+        md_text = markdown(lang, items, ver)
+        check_or_write(cfg["md"], md_text.encode("utf-8"), args.check, errors)
 
     if args.check and errors:
         print("Reference Manual generated outputs are stale:", file=sys.stderr)

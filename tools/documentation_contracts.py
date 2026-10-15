@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Validate current public documentation against project/catalog metadata."""
 from pathlib import Path
-from html import unescape
 import re
 import sys
 
@@ -66,24 +65,6 @@ def current_blocks(text):
     if historical:
         raise ValueError("unclosed historical block")
 
-
-def current_html(text):
-    text = re.sub(r"<h2\b[^>]*>(.*?)</h2>", lambda m: "\n## " +
-                  unescape(re.sub(r"<[^>]*>", "", m.group(1))) + "\n",
-                  text, flags=re.S)
-    # Keep actual historical comments out of both comment removal and generic
-    # tag stripping. Newlines preserve boundaries even in compact HTML.
-    markers = {
-        HISTORICAL_START: "\x00att-docs-historical-start\x00",
-        HISTORICAL_END: "\x00att-docs-historical-end\x00",
-    }
-    for marker, sentinel in markers.items():
-        text = text.replace(marker, "\n" + sentinel + "\n")
-    text = re.sub(r"<!--[\s\S]*?-->", "", text)
-    text = unescape(re.sub(r"<[^>]*>", " ", text))
-    for marker, sentinel in markers.items():
-        text = text.replace(sentinel, marker)
-    return text
 
 def stale_claims(text, active, version):
     errors = []
@@ -330,8 +311,8 @@ def editorial_errors(text, standalone=False, allow_reference_structure=False):
 
 def current_files(root):
     files = {root / "README.md"}
-    for directory, suffixes in (("docs", (".md", ".html")),
-                               ("examples", (".md", ".html", ".yaml", ".yml", ".json", ".xml"))):
+    for directory, suffixes in (("docs", (".md",)),
+                               ("examples", (".md", ".yaml", ".yml", ".json", ".xml"))):
         for path in (root / directory).rglob("*"):
             if path.is_file() and path.suffix.lower() in suffixes and "history" not in path.relative_to(root).parts:
                 files.add(path)
@@ -395,8 +376,6 @@ def validate(root=ROOT):
                 rel in ("README.md", "docs/README.md", "docs/quick-start.md", "docs/quick-start.zh.md")
                 or rel.startswith("examples/")):
             errors += [rel + ": " + e for e in chapter_label_errors(text)]
-        if path.suffix == ".html":
-            text = current_html(text)
         try:
             errors += [rel + ": " + e for e in stale_claims(text, active, version)]
         except ValueError as exc:

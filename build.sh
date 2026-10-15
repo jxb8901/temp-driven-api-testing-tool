@@ -21,7 +21,7 @@ LOCAL_ARCHIVE="$ROOT_DIR/att-dist/target/$LOCAL_PACKAGE_NAME.tar.gz"
 SERVER_ARCHIVE="$ROOT_DIR/att-dist/target/$SERVER_PACKAGE_NAME.tar.gz"
 SOURCE_ARCHIVE="$ROOT_DIR/att-dist/target/$SOURCE_PACKAGE_NAME.tar.gz"
 MAX_BINARY_PACKAGE_BYTES=25000000
-for command in mvn python3 pandoc tar; do
+for command in mvn python3 tar; do
   if ! command -v "$command" >/dev/null 2>&1; then echo "$command is required to execute the ATT release gate" >&2; exit 2; fi
 done
 GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
