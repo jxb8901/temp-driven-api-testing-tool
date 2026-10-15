@@ -65,6 +65,15 @@ class PackageConfigurationInspectorTest {
         assertFalse(expanded.toString().contains("property-secret"));
         assertEquals("hidden", fieldState(expandedFields.get("username")));
         assertEquals("hidden", fieldState(expandedFields.get("password")));
+
+        Map<String,Object> comparison=admin.inspect("compare","SIT","UAT","dbhelpers",0,100);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> compared=(List<Map<String,Object>>)comparison.get("fields");
+        Map<String,Object> evidence=compared.stream().filter(item->"dbhelpers.orders.evidence.sql".equals(item.get("path"))).findFirst().orElseThrow(AssertionError::new);
+        assertEquals("visible",fieldState(evidence.get("left")),comparison.toString());
+        assertEquals("visible",fieldState(evidence.get("right")),comparison.toString());
+        Map<String,Object> username=compared.stream().filter(item->"dbhelpers.orders.username".equals(item.get("path"))).findFirst().orElseThrow(AssertionError::new);
+        assertEquals("hidden",username.get("change"),comparison.toString());
+        assertFalse(username.toString().contains("sit-user"));
     }
 
     @SuppressWarnings("unchecked")

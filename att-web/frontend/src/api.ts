@@ -233,8 +233,8 @@ export const api = {
   getResourceSourceFile(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection> {
     return request<SourceProjection>(resourcePath(identity) + '/source-file' + queryString({ referenceId, origin }), { signal });
   },
-  getDeclaredConfiguration(packageId: string, signal?: AbortSignal, includeAllFields = false): Promise<ConfigurationResponse> {
-    return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration' + queryString({ view: 'declared', includeAllFields: includeAllFields || undefined }), { signal });
+  getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse> {
+    return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration' + queryString({ view: 'declared' }), { signal });
   },
   getEffectiveConfiguration(packageId: string, query: EffectiveConfigurationQuery, signal?: AbortSignal): Promise<ConfigurationResponse> {
     return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/effective' + queryString({

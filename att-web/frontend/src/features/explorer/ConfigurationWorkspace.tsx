@@ -107,9 +107,9 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
     if (!packageId) return;
     void loadDirectory('');
     const controller = new AbortController();
-    api.getDeclaredConfiguration(packageId, controller.signal, includeAllFields).then(setDeclared).catch(() => { if (!controller.signal.aborted) setDeclared(null); });
+    api.getDeclaredConfiguration(packageId, controller.signal).then(setDeclared).catch(() => { if (!controller.signal.aborted) setDeclared(null); });
     return () => { controller.abort(); requestRefs.current.forEach(item => item.abort()); requestRefs.current.clear(); };
-  }, [api, packageId, loadDirectory, includeAllFields]);
+  }, [api, packageId, loadDirectory]);
 
   useEffect(() => {
     if (tab !== 'source' || !filePath || !packageId) { setSource(null); setSourceError(''); return; }
@@ -229,7 +229,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
           <option value="">Package default</option>{profiles.map(item => <option key={item.name} value={item.name}>{item.name}{item.default ? ' · default' : ''}</option>)}
         </select></label>}
         <button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen(value => !value)}>Inspector {inspectorOpen ? 'on' : 'off'}</button>
-        {canRevealAdminFields && <label className="att-config-all-fields-toggle"><input type="checkbox" checked={includeAllFields} onChange={event => setIncludeAllFields(event.currentTarget.checked)} /> Show additional DB configuration fields</label>}
+        {canRevealAdminFields && (tab === 'effective' || tab === 'compare') && <label className="att-config-all-fields-toggle"><input type="checkbox" checked={includeAllFields} onChange={event => setIncludeAllFields(event.currentTarget.checked)} /> Show more DB fields (sensitive values stay hidden)</label>}
       </div>
     </header>
     {!packageId ? <section className="att-config-select-package"><h2>Choose a package</h2><p>Configuration is scoped to a registered package.</p>

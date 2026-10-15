@@ -186,7 +186,7 @@ Object.assign(translations, {
   'Observed type': '觀察到的型別', 'Visibility': '可見性', 'Actions': '動作', 'Some fields redacted': '部分欄位已遮蔽',
   'Visible by Server policy': '依伺服器政策顯示', 'Copy row': '複製資料列', 'Load next 50 records': '載入接下來 50 筆記錄',
   'Advanced descriptor metadata': '進階描述項中繼資料', 'No Testdata descriptors were returned for the selected environment.': '所選環境沒有回傳 Testdata 描述項。',
-  'Show additional DB configuration fields': '顯示其他資料庫設定欄位',
+  'Show more DB fields (sensitive values stay hidden)': '顯示更多資料庫欄位（敏感值仍會隱藏）',
   'Declared global fields': '已宣告的全域欄位', 'Declared global configuration': '已宣告的全域設定',
   'No declared global configuration was returned.': '沒有回傳已宣告的全域設定。',
   'Effective configuration fields': '生效的設定欄位', 'No effective fields match this filter.': '沒有生效欄位符合此篩選條件。',

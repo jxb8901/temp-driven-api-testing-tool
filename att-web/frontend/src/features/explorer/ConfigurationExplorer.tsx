@@ -88,7 +88,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
   useEffect(() => {
     const { controller, sequence } = startRequest();
     setMode(initialMode || 'declared'); setData(null); setDeclaredData(null); setError(''); setStatus('Loading declared configuration…');
-    api.getDeclaredConfiguration(packageId, controller.signal, includeAllFields).then(response => {
+    api.getDeclaredConfiguration(packageId, controller.signal).then(response => {
       if (sequence !== requestSequence.current) return;
       setData(response); setDeclaredData(response); setStatus(`Declared configuration: ${response.state || 'ready'}.`);
       const environments = (response.environments || []).filter(item => item.state === 'active' && item.name);
@@ -103,7 +103,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
     return () => { controller.abort(); if (sequence === requestSequence.current) requestSequence.current += 1; };
     // Initial mode changes are handled by the route effect below; refetch only when package/API changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, packageId, includeAllFields]);
+  }, [api, packageId]);
 
   const profiles = useMemo(() => (declaredData?.environments || []).filter(item => item.state === 'active' && item.name), [declaredData]);
 

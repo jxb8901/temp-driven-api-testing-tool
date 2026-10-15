@@ -212,7 +212,19 @@ public final class PackageResourceInspector implements AutoCloseable {
                 result.put("reason", "binary-file");
                 return bounded(result);
             }
-            String safe = scrubSourceText(text, logicalPath);
+            boolean yamlConfiguration = logicalPath.startsWith("config/")
+                    && (logicalPath.toLowerCase(Locale.ROOT).endsWith(".yaml") || logicalPath.toLowerCase(Locale.ROOT).endsWith(".yml"));
+            String safe;
+            boolean redacted;
+            if (yamlConfiguration) {
+                Object authored = loadYaml(file.canonicalPath(), maxSourceBytes);
+                Object projected = sourceYamlProjection(authored, "", logicalPath);
+                safe = dumpYaml(projected);
+                redacted = !deepEquals(authored, projected);
+            } else {
+                safe = scrubSourceText(text, logicalPath);
+                redacted = !safe.equals(text);
+            }
             if (utf8(safe).length > maxSourceBytes) {
                 result.put("reason", "size-limit");
                 return bounded(result);
@@ -221,7 +233,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             result.put("logicalPath", logicalPath);
             result.put("format", sourceFormat(logicalPath));
             result.put("text", safe);
-            result.put("redacted", Boolean.valueOf(!safe.equals(text)));
+            result.put("redacted", Boolean.valueOf(redacted));
             SourceFileReferences references = packageFileSourceReferences(file.canonicalPath(), logicalPath, safe);
             result.put("fileReferences", references.items);
             result.put("fileReferencesTruncated", Boolean.valueOf(references.truncated));
@@ -1858,7 +1870,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
                 String key = String.valueOf(entry.getKey());
                 String childPath = path.isEmpty() ? key : path + "." + key;
-                if (sensitiveKey(key) || configuredSensitivePath(childPath) || configuredSensitiveField(key)
+                if (sensitiveKey(key) || protectedSshConnectionField(childPath) || configuredSensitivePath(childPath) || configuredSensitiveField(key)
                         || redactionEnabled && (freeFormKey(key) || isSensitivePath(childPath))) result.put(key, "[REDACTED]");
                 else result.put(key, sourceYamlProjection(entry.getValue(), childPath,sourceLogicalPath));
             }
@@ -1927,11 +1939,22 @@ public final class PackageResourceInspector implements AutoCloseable {
                 || normalized.contains("secret") || normalized.contains("credential") || normalized.equals("authorization")
                 || normalized.contains("apikey") || normalized.contains("accesskey") || normalized.contains("clientid")
                 || normalized.contains("username") || normalized.contains("privatekey") || normalized.contains("identityfile")
+                || normalized.equals("evidencepayload")
                 || normalized.contains("cookie") || normalized.equals("headers") || normalized.equals("header")
                 || normalized.equals("email") || normalized.contains("phone") || normalized.equals("address")
                 || normalized.equals("ssn") || normalized.equals("nationalid") || normalized.equals("passport")
                 || normalized.equals("dateofbirth") || normalized.equals("birthdate")) return true;
         return false;
+    }
+
+    private static boolean protectedSshConnectionField(String path) {
+        String lower = path.toLowerCase(Locale.ROOT);
+        int section = lower.lastIndexOf("sshhelpers.");
+        if (section < 0) return false;
+        String[] parts = lower.substring(section + "sshhelpers.".length()).split("\\.");
+        if (parts.length < 2) return false;
+        String field = parts[parts.length - 1];
+        return "host".equals(field) || "hostname".equals(field) || "port".equals(field) || "user".equals(field);
     }
 
     private static boolean isSensitivePath(String path) {

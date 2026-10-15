@@ -423,7 +423,7 @@ public final class ApiServlet extends HttpServlet {
             String inspectionReferenceId="source".equals(action)?req.getParameter("referenceId"):null;
             boolean includeAllFields=parseOptionalBoolean(req.getParameter("includeAllFields"),"includeAllFields");
             if(includeAllFields) {
-                if(!Set.of("declared","effective","compare").contains(action))throw new IllegalArgumentException("includeAllFields is available only for declared, effective, or compare configuration views");
+                if(!Set.of("effective","compare").contains(action))throw new IllegalArgumentException("includeAllFields is available only for effective or compare configuration views");
                 if(!configurationAdmin(req,res,requestId))return;
                 res.setHeader("Cache-Control","no-store");
                 runtime.store.audit(principal,"CONFIGURATION_INCLUDE_ALL_FIELDS",null,packageId,"SUCCESS");

@@ -78,7 +78,7 @@ class AuthenticationIntegrationTest {
             HttpResponse<String> me=sendWithCookie(client,port,"GET","/att/api/v1/auth/me",ownerCookie,null,null,null);assertEquals(200,me.statusCode(),me.body());assertFalse(me.body().contains("passwordHash"));String csrf=me.headers().firstValue("X-ATT-CSRF").orElseThrow();
             JsonNode ownerCapabilities=ServerRuntime.JSON.readTree(sendWithCookie(client,port,"GET","/att/api/v1/auth/capabilities",ownerCookie,null,null,null).body());
             assertTrue(ownerCapabilities.path("configurationAdmin").asBoolean());
-            HttpResponse<String> adminConfiguration=sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration?view=declared&includeAllFields=true",ownerCookie,null,null,null);
+            HttpResponse<String> adminConfiguration=sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration/effective?includeAllFields=true",ownerCookie,null,null,null);
             assertEquals(200,adminConfiguration.statusCode(),adminConfiguration.body());
             assertEquals("no-store",adminConfiguration.headers().firstValue("Cache-Control").orElse(""));
             Class.forName("org.h2.Driver"); // Tomcat may deregister its webapp-loaded driver between embedded contexts.
@@ -86,6 +86,8 @@ class AuthenticationIntegrationTest {
                 java.sql.PreparedStatement query=audit.prepareStatement("SELECT COUNT(*) FROM audit WHERE principal=? AND action='CONFIGURATION_INCLUDE_ALL_FIELDS' AND package_id='p'")) {
                 query.setString(1,"owner");try(java.sql.ResultSet rows=query.executeQuery()){assertTrue(rows.next());assertEquals(1,rows.getInt(1));}
             }
+            assertEquals(400,sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration?view=declared&includeAllFields=true",ownerCookie,null,null,null).statusCode(),
+                    "includeAllFields is meaningful only on Effective and Compare projections");
             assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
             HttpResponse<String> failedPasswordChange=sendWithCookie(client,port,"POST","/att/api/v1/auth/password",ownerCookie,origin,csrf,
                     "{\"currentPassword\":\"incorrect current password\",\"newPassword\":\"replacement secure password\"}");
@@ -112,7 +114,7 @@ class AuthenticationIntegrationTest {
             viewerLogin=send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"viewer\",\"password\":\"viewer reset secure password\"}");assertEquals(200,viewerLogin.statusCode());viewerCookie=viewerLogin.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
             JsonNode viewerCapabilities=ServerRuntime.JSON.readTree(sendWithCookie(client,port,"GET","/att/api/v1/auth/capabilities",viewerCookie,null,null,null).body());
             assertFalse(viewerCapabilities.path("configurationAdmin").asBoolean());
-            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration?view=declared&includeAllFields=true",viewerCookie,null,null,null).statusCode());
+            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration/effective?includeAllFields=true",viewerCookie,null,null,null).statusCode());
             HttpResponse<String> submitted=sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",ownerCookie,origin,csrf,"{\"packageId\":\"p\",\"all\":true}");assertEquals(202,submitted.statusCode(),submitted.body());
             String ownedJobId=ServerRuntime.JSON.readTree(submitted.body()).path("jobId").asText();assertTrue(ownedJobId.matches("J[0-9A-F]{16}"));
             assertEquals(200,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,origin,csrf,"{}").statusCode());
