@@ -118,7 +118,7 @@ jobs:
         # Each test class gets a separate JVM, isolating Tomcat, global properties,
         # authentication state and temporary database files. Tests within a class
         # remain sequential; no tests or assertions are excluded.
-        run: mvn -B -ntp -T 1C -pl att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=2 -DreuseForks=false test
+        run: mvn -B -ntp -T 1C -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=2 -DreuseForks=false test
 
       - name: Upload Server unit reports on failure
         if: failure()
