@@ -266,15 +266,44 @@ final class ServerRuntime implements AutoCloseable {
         return store.list(100,search);
     }
     Job job(String id){if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Job j=jobs.get(id);if(j==null)throw new NotFoundException();return j;}
-    Map<String,Object> jobRecord(String id) throws Exception {Job j=jobs.get(id);if(j!=null)return j.view();if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();record.remove("resultJson");record.remove("diagnosticJson");String performance=(String)record.remove("performanceJson");if(performance!=null&&!performance.isBlank())record.put("performance",JSON.readValue(performance,Map.class));return record;}
-    Map<String,Object> resultRecord(String id) throws Exception {
-        Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
+    Map<String,Object> jobRecord(String id) throws Exception {
+        if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
         Job active=jobs.get(id);
-        String resultJson=active==null?(String)record.get("resultJson"):active.resultJson;
-        String diagnosticJson=active==null?(String)record.get("diagnosticJson"):active.diagnosticJson;
+        if(active!=null) {
+            // Terminal status must not become visible before finish() has persisted
+            // the result, diagnostic, and final event. All of these share the Job monitor.
+            synchronized(active) { return active.view(); }
+        }
+        Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
+        record.remove("resultJson");record.remove("diagnosticJson");
+        String performance=(String)record.remove("performanceJson");
+        if(performance!=null&&!performance.isBlank())record.put("performance",JSON.readValue(performance,Map.class));
+        return record;
+    }
+    Map<String,Object> resultRecord(String id) throws Exception {
+        if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
+        Job active=jobs.get(id);
+        if(active!=null) {
+            synchronized(active) {
+                // Avoid mixing an uncommitted terminal Job view with an older H2 snapshot.
+                // Reading while holding the Job lock also waits for a concurrent finish().
+                Map<String,Object> record=store.get(id);
+                if(record==null)throw new NotFoundException();
+                String resultJson=active.resultJson!=null?active.resultJson:(String)record.get("resultJson");
+                String diagnosticJson=active.diagnosticJson!=null?active.diagnosticJson:(String)record.get("diagnosticJson");
+                Map<String,Object> out=new LinkedHashMap<>();
+                out.put("job",active.view());
+                out.put("result",resultJson==null?null:publicJson(id,resultJson));
+                out.put("diagnostic",diagnosticJson==null?null:publicJson(id,diagnosticJson));
+                return out;
+            }
+        }
+        Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
         Map<String,Object> out=new LinkedHashMap<>();out.put("job",jobRecord(id));
+        String resultJson=(String)record.get("resultJson"),diagnosticJson=(String)record.get("diagnosticJson");
         out.put("result",resultJson==null?null:publicJson(id,resultJson));
-        out.put("diagnostic",diagnosticJson==null?null:publicJson(id,diagnosticJson));return out;
+        out.put("diagnostic",diagnosticJson==null?null:publicJson(id,diagnosticJson));
+        return out;
     }
     List<Map<String,Object>> packages(){List<Map<String,Object>> out=new ArrayList<>();config.packages.forEach((id,path)->out.add(Map.of("packageId",id,"name",path.getFileName().toString())));return out;}
     Map<String,Object> packageView(String id){Path root=config.packages.get(id);if(root==null)throw new NotFoundException();return Map.of("packageId",id,"name",root.getFileName().toString());}
