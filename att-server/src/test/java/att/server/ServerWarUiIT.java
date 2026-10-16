@@ -605,7 +605,7 @@ class ServerWarUiIT {
     }
 
     private static void copySchemas(Path packageRoot) throws Exception {
-        Path source = Path.of("schemas").toRealPath();
+        Path source = Path.of("packages/default/schemas").toRealPath();
         Path destination = packageRoot.resolve("schemas");
         try (var paths = Files.walk(source)) {
             for (Path path : (Iterable<Path>) paths::iterator) {

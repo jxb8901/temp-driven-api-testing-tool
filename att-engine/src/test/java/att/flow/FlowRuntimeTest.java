@@ -55,7 +55,7 @@ class FlowRuntimeTest {
     }
 
     @Test void executesNestedFlowsInTheCallingTemplateContext() throws Exception {
-        Path project = Paths.get("").toAbsolutePath();
+        Path project = Paths.get("").toAbsolutePath().resolve("packages/default");
         FlowRegistry flows = new FlowRegistry(project, project.resolve("templates"));
         StageTemplate template = new StageTemplateLoader(project, project.resolve("templates")).load("V3_FLOW_EXAMPLE");
         TestCase test = new TestCase(2, "book", "group", "Cases", "TC1", Collections.<String>emptyList(),

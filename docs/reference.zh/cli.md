@@ -171,8 +171,8 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 
 ```sh
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
-./att.sh load examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
+./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
+./att.sh load ../examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
   --arrival-rate 5/s --warmup 1s --ramp-up 1s --duration 5s --ramp-down 1s \
   --max-concurrent 4 --overload-policy drop --format json
 ```

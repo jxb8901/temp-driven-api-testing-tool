@@ -13,6 +13,8 @@ it('negotiates RUN support and preserves legacy resource and Case adapters', asy
   const definition = { schemaVersion: 'att-execution/v1' as const, executionType: 'run' as const, packageId: 'p', environment: 'UAT', target: { type: 'flow', id: 'checkout.v1' }, input: { inputs: { amount: null } }, options: { debug: false } };
   await api.getVersion();
   const legacy = await api.previewRun(definition); await api.submitRun({ packageId: 'p', draftId: legacy.draftId });
+  expect(() => api.previewRun({ ...definition, target: { type: 'case', id: 'cases.default.C1' }, input: undefined })).toThrow(/Case and batch Run validation require ATT Server 4\.2\.1/);
+  expect(() => api.previewRun({ ...definition, target: undefined, input: undefined, selection: { all: true } })).toThrow(/legacy Case action in Explorer/);
   await api.runCase({ packageId: 'p', suite: 'testcase/a.xlsx', caseId: 'a.default.C1', environment: 'UAT' });
   expect(calls.map(call => call.path.split('/').slice(-2).join('/'))).toEqual(['drafts/debug', 'jobs/debug', 'jobs/run']);
   expect(calls[0].body).toEqual({ packageId: 'p', environment: 'UAT', target: definition.target, input: definition.input });

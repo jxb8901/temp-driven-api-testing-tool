@@ -27,7 +27,7 @@ class LoadAcceptanceTest {
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
         List<String> examples = Arrays.asList("closed-minimal.yaml", "closed-smoke.yaml", "closed.yaml", "arrival-smoke.yaml", "arrival-rate.yaml", "tool.yaml");
         for (String name : examples) {
-            Path scenarioFile = root.resolve("examples/load").resolve(name);
+            Path scenarioFile = Paths.get("").toAbsolutePath().normalize().resolve("examples/load").resolve(name);
             LoadScenario scenario = new LoadScenarioLoader(root).load(scenarioFile);
             LoadTarget target = new LoadTargetResolver(root, config).resolve(scenario);
             new LoadTargetValidator(root, config).validate(scenario, target);
@@ -180,7 +180,7 @@ class LoadAcceptanceTest {
     }
 
     private static Path projectRoot() {
-        return Paths.get("").toAbsolutePath().normalize();
+        return Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
     }
 
     private static String javaExecutable() {

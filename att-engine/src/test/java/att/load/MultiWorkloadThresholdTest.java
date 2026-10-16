@@ -17,7 +17,7 @@ class MultiWorkloadThresholdTest {
     @TempDir Path temp;
 
     @Test void anyWorkloadOrGlobalThresholdFailureMakesRunFailWithExitOne() throws Exception {
-        Path root = Paths.get("").toAbsolutePath().normalize();
+        Path root = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
         Path file = temp.resolve("thresholds.yaml");
         Files.write(file, (
                 "schemaVersion: att-load/v1.3\n"

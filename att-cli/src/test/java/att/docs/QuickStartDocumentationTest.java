@@ -26,6 +26,7 @@ class QuickStartDocumentationTest {
     @Test
     void quickStartAssetsAndLanguageEntryPointsStayAligned() throws Exception {
         Path root = Paths.get("").toAbsolutePath().normalize();
+        Path packageRoot = root.resolve("packages/default");
 
         for (String relative : Arrays.asList(
                 "testcase/quick_start.xlsx",
@@ -34,7 +35,8 @@ class QuickStartDocumentationTest {
                 "templates/QUICK_START/template.yaml",
                 "docs/quick-start.md",
                 "docs/quick-start.zh.md")) {
-            assertTrue(Files.isRegularFile(root.resolve(relative)), "Missing Quick Start asset: " + relative);
+            Path assetRoot = relative.startsWith("docs/") ? root : packageRoot;
+            assertTrue(Files.isRegularFile(assetRoot.resolve(relative)), "Missing Quick Start asset: " + relative);
         }
 
         String en = read(root.resolve("docs/quick-start.md"));
@@ -57,10 +59,11 @@ class QuickStartDocumentationTest {
     @Test
     void quickStartCasesExecuteThroughTheRealCli() throws Exception {
         Path root = Paths.get("").toAbsolutePath().normalize();
-        String config = root.resolve("config/config.yaml").toString();
-        String suite = root.resolve("testcase/quick_start.xlsx").toString();
+        Path packageRoot = root.resolve("packages/default");
+        String config = packageRoot.resolve("config/config.yaml").toString();
+        String suite = packageRoot.resolve("testcase/quick_start.xlsx").toString();
 
-        CliResult basic = runCli(root, "run", "--config", config,
+        CliResult basic = runCli(packageRoot, "run", "--config", config,
                 "--suite", suite, "--case", "quickStart.default.QS001",
                 "--output-dir", temp.resolve("basic-output").toString(),
                 "--run-id", "quick-start-basic", "--format", "human", "--profile");
@@ -73,7 +76,7 @@ class QuickStartDocumentationTest {
         assertTrue(phases.containsKey("configLoadMs"));
         assertTrue(phases.containsKey("validationMs"));
 
-        CliResult tool = runCli(root, "run", "--config", config,
+        CliResult tool = runCli(packageRoot, "run", "--config", config,
                 "--suite", suite, "--case", "quickStart.default.QS002",
                 "--output-dir", temp.resolve("tool-output").toString(),
                 "--run-id", "quick-start-tool", "--format", "json", "--quiet");

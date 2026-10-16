@@ -44,3 +44,9 @@ it('schedules the reviewed snapshot and diagnostic changes do not execute', asyn
   expect(host.querySelector('[aria-label="Review RUN"]')).toBeNull();
   await click('Validate'); expect(api.previewRun).toHaveBeenLastCalledWith(expect.objectContaining({ options: { debug: true } }));
 });
+it('schedules a mixed-version resource fallback as legacy Debug', async () => {
+  vi.mocked(api.previewRun).mockResolvedValueOnce({ draftId: 'D123', preview: { target: { type: 'flow', id: 'payment.flow' } } });
+  await change('Target type', 'flow'); await change('Target ID', 'payment.flow');
+  await click('Validate'); await click('Schedule…');
+  expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'D123', jobType: 'debug' }));
+});

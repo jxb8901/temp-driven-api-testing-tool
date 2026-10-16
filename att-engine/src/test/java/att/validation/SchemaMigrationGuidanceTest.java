@@ -23,7 +23,7 @@ class SchemaMigrationGuidanceTest {
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
     @Test void currentAndHistoricalSchemasHaveSingleLocations() throws Exception {
-        Path packageRoot = Paths.get("").toAbsolutePath();
+        Path packageRoot = Paths.get("").toAbsolutePath().resolve("packages/default");
         assertEquals(packageRoot.resolve("schemas/history/att-flow-v3.1.schema.json"),
                 SchemaFiles.resolve(packageRoot, "att-flow-v3.1.schema.json"));
         assertEquals(packageRoot.resolve("schemas/history/att-flow-v3.0.schema.json"),

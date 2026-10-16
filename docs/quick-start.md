@@ -19,14 +19,14 @@ Excel Testcase
          -> ordered Actions
 ```
 
-For this tutorial, the important files are already in the repository:
+For this tutorial, the important files are already in the default package:
 
 ```text
-testcase/quick_start.xlsx
-testcase/quick_start.yaml
-testcase/quick_start.xml
-templates/QUICK_START/template.yaml
-config/config.yaml
+packages/default/testcase/quick_start.xlsx
+packages/default/testcase/quick_start.yaml
+packages/default/testcase/quick_start.xml
+packages/default/templates/QUICK_START/template.yaml
+packages/default/config/config.yaml
 ```
 
 The workbook contains two Testcases:

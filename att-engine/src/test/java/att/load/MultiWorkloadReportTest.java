@@ -17,7 +17,7 @@ class MultiWorkloadReportTest {
     @TempDir Path temp;
 
     @Test void writesSchemaValidAggregateAndPerWorkloadReport() throws Exception {
-        Path root = Paths.get("").toAbsolutePath().normalize();
+        Path root = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
         Path scenarioFile = temp.resolve("report-v11.yaml");
         Files.write(scenarioFile, (
                 "schemaVersion: att-load/v1.3\n"
@@ -55,7 +55,7 @@ class MultiWorkloadReportTest {
     }
 
     @Test void executesClosedMixAndReportsPerEntryMetrics() throws Exception {
-        Path root = Paths.get("").toAbsolutePath().normalize();
+        Path root = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
         Path scenarioFile = temp.resolve("mixed-report.yaml");
         Files.write(scenarioFile, ("schemaVersion: att-load/v1.6\nseed: 73\nworkloads:\n"
                 + "- id: checkout\n  inputs: {region: HK}\n  mix:\n"

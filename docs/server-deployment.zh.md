@@ -4,7 +4,7 @@ ATT Server 4.2.1 提供單節點控制平面，讓用戶透過版本化 REST API
 
 ## 準備部署
 
-1. 將 Local archive 解壓至安裝根目錄，並將 `ATT_HOME` 設為該目錄。升級時，先移除舊的 `lib/att-local-*.jar` 再解壓新 archive，確保 `ATT_HOME/lib` 只包含一個 runtime。預設 package root 為 `$ATT_HOME/packages/default`；其中包含自己的 `config/config.yaml`、`schemas/`、單數 `testcase/`、`templates/` 及頂層 `tools/`。
+1. 將 Local archive 解壓至安裝根目錄，並將 `ATT_HOME` 設為該目錄。升級時，先移除舊的 `lib/att-local-*.jar` 再解壓新 archive，確保 `ATT_HOME/lib` 只包含一個 runtime。預設 package root 為 `$ATT_HOME/packages/default`；其中包含自己的 `config/config.yaml`、`schemas/`、單數 `testcase/`、`templates/` 及頂層 `tools/`。ATT 4.2.1 source checkout 亦採用相同 package layout；根目錄 `config/att-server.example.yaml` 仍是獨立的 Server deployment 設定範本。
 2. 將 package root 設於 allowed root 之下，並確保 Tomcat 服務帳戶可讀取。解壓後的 `$ATT_HOME/packages/default` 可直接註冊為 package root。
 3. 啟動前先建立 `server.dataDir`，並只允許 Tomcat 服務帳戶寫入。範例使用 `$ATT_HOME/data`；只要它與所有已註冊 package root 不相等、互不包含，即可使用。亦可使用 `/var/lib/att-server`。Server data 不可放入 package 內容。
 4. 將 `$ATT_HOME/config/att-server.example.yaml` 複製至 `$ATT_HOME/config/att-server.yaml` 或受保護的外部路徑，更新絕對路徑，並勿將憑證放入 package。升級時不可覆寫既有的 active config。

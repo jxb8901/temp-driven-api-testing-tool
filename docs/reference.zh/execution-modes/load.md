@@ -218,10 +218,10 @@ evidence: {mode: failures}
 ~~~
 
 ~~~sh
-./att.sh load examples/load/closed-smoke.yaml
-./att.sh load examples/load/arrival-smoke.yaml --format json
-./att.sh load examples/load/multi-closed.yaml
-./att.sh load examples/load/multi-arrival.yaml
+./att.sh load ../examples/load/closed-smoke.yaml
+./att.sh load ../examples/load/arrival-smoke.yaml --format json
+./att.sh load ../examples/load/multi-closed.yaml
+./att.sh load ../examples/load/multi-arrival.yaml
 ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh debug

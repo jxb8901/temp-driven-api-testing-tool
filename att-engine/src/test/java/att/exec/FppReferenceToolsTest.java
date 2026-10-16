@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FppReferenceToolsTest {
     @TempDir Path tempDir;
-    private final Path projectRoot = Paths.get("").toAbsolutePath().normalize();
+    private final Path projectRoot = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
 
     @Test void apiSkeletonReturnsXmlAndWritesCorrelationLog() throws Exception {
         requirePosix();

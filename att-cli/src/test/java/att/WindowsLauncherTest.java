@@ -55,8 +55,12 @@ class WindowsLauncherTest {
         assertTrue(binary.contains("<destName>att-local-${project.version}.jar</destName>"));
         assertTrue(binary.contains("<outputDirectory>packages/default/config</outputDirectory>"));
         assertTrue(binary.contains("<outputDirectory>packages/default/templates</outputDirectory>"));
-        assertTrue(binary.contains("<exclude>att-server.yaml</exclude>"));
+        assertTrue(binary.contains("../packages/default/config</directory>"));
+        assertTrue(binary.contains("../packages/default/schemas</directory>"));
+        assertTrue(binary.contains("../config/att-server.example.yaml</source>"));
+        assertFalse(binary.contains("../config/att-server.yaml"));
         assertTrue(source.contains("<include>att.bat</include>"));
+        assertTrue(source.contains("<include>packages/default/**</include>"));
         assertTrue(manifest.contains("mainWindows: att.bat"));
     }
 
@@ -91,6 +95,7 @@ class WindowsLauncherTest {
                 .directory(Paths.get("").toAbsolutePath().toFile())
                 .redirectOutput(output.toFile()).redirectError(error.toFile());
         builder.environment().put("M2_REPO", mavenRepository.toString());
+        builder.environment().put("ATT_PACKAGE_ROOT", packageRoot.toString());
         Process process = builder.start();
         try {
             assertTrue(process.waitFor(90, TimeUnit.SECONDS), "att.bat did not finish the command-backed Tool smoke test");

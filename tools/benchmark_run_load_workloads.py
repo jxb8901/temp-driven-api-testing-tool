@@ -237,32 +237,37 @@ def install_package(runtime_root, destination, http_port, case_count):
         raise RuntimeError("Missing {} in runtime distribution {}".format(launcher_name, runtime_root))
     if not (runtime_root / "lib").is_dir() or not list((runtime_root / "lib").glob("att-*.jar")):
         raise RuntimeError("Runtime distribution must contain lib/att-*.jar")
-    if not (runtime_root / "schemas").is_dir():
-        raise RuntimeError("Runtime distribution must contain schemas/")
+    package_source = runtime_root / "packages" / "default"
+    if not package_source.is_dir():
+        package_source = runtime_root
+    schemas_source = package_source / "schemas"
+    if not schemas_source.is_dir():
+        raise RuntimeError("Runtime distribution must contain packages/default/schemas/")
 
     shutil.copy2(launcher, destination / launcher_name)
     if os.name != "nt":
         (destination / launcher_name).chmod(0o755)
     shutil.copytree(runtime_root / "lib", destination / "lib")
-    shutil.copytree(runtime_root / "schemas", destination / "schemas")
-    write_text(destination / "config" / "config.yaml",
+    package_root = destination / "packages" / "default"
+    shutil.copytree(schemas_source, package_root / "schemas")
+    write_text(package_root / "config" / "config.yaml",
         "schemaVersion: att-config/v2.12\n"
         "outputDirectory: output\n"
         "environment: BENCHMARK\n"
         "testcase: {root: testcase}\n"
         "templates: {root: templates}\n"
         "httphelpers: [config/httphelpers/benchmark.yaml]\n")
-    write_text(destination / "config" / "httphelpers" / "benchmark.yaml",
+    write_text(package_root / "config" / "httphelpers" / "benchmark.yaml",
         ("schemaVersion: att-httphelper/v1.1\n"
         "id: benchmark\nname: Local benchmark endpoint\n"
         "description: Loopback-only fixed response\n"
         "baseUrl: http://127.0.0.1:{}\n"
         "pool: {{maxConnections: 256, maxConnectionsPerRoute: 256}}\n").format(http_port))
-    write_text(destination / "templates" / "BENCH_NOOP" / "template.yaml",
+    write_text(package_root / "templates" / "BENCH_NOOP" / "template.yaml",
         "schemaVersion: att-template/v3.6\nname: BENCH_NOOP\n"
         "description: Synthetic no-op Run benchmark\nactions:\n"
         "  record: {type: log, message: \"case ${META.SOURCE.caseId?}\"}\n")
-    write_text(destination / "templates" / "BENCH_HTTP" / "template.yaml",
+    write_text(package_root / "templates" / "BENCH_HTTP" / "template.yaml",
         "schemaVersion: att-template/v3.6\nname: BENCH_HTTP\n"
         "description: Local HTTP fixed-arrival Load benchmark\nactions:\n"
         "  request: {type: tool, call: \"#{http.benchmark.get(path='/ready')}\"}\n")
@@ -273,8 +278,8 @@ def install_package(runtime_root, destination, http_port, case_count):
         "  caseId: Case ID\n  tags: Tags\n"
         "stages:\n  - key: main\n    template: Template\n"
         "    required: true\n    onFailure: stop\n")
-    write_text(destination / "testcase" / "run-20.yaml", sidecar)
-    create_workbook(destination / "testcase" / "run-20.xlsx", case_count)
+    write_text(package_root / "testcase" / "run-20.yaml", sidecar)
+    create_workbook(package_root / "testcase" / "run-20.xlsx", case_count)
 
 
 def summarize_metric(values):

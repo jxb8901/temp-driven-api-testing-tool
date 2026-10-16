@@ -1,6 +1,6 @@
 # Configuration 與 environments
 
-本頁是作者編寫配置時的權威閱讀參考。[`schemas/`](../../schemas/) 目錄中的文件仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
+本頁是作者編寫配置時的權威閱讀參考。[`schemas/`](../../packages/default/schemas/) 目錄中的文件仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
 
 ## 按任務查找配置
 
@@ -144,13 +144,13 @@ actions:
 ./att.sh validate --config config/config.yaml --env SIT --package
 ./att.sh run --config config/config.yaml --env SIT --all
 ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
+./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
 
 # UAT
 ./att.sh validate --config config/config.yaml --env UAT --package
 ./att.sh run --config config/config.yaml --env UAT --all
 ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
+./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
 ```
 
 CI 對每個目標環境分別執行 `validate --package` 和 `run --all`：
@@ -170,7 +170,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ## Schema catalog
 
-[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 是 active schema 的 source of truth。Package validation 檢查 registrations；封存 schema 不會成為 active runtime contract。完整矩陣見 [Schema and Version Matrix](appendices/schema-matrix.md)。
+[`schemas/catalog.yaml`](../../packages/default/schemas/catalog.yaml) 是 active schema 的 source of truth。Package validation 檢查 registrations；封存 schema 不會成為 active runtime contract。完整矩陣見 [Schema and Version Matrix](appendices/schema-matrix.md)。
 
 ## 設定 package-wide options
 

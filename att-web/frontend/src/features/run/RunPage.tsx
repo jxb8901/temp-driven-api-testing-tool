@@ -88,7 +88,7 @@ export function RunPage({ packageId: initialPackage = '', onAccepted, onSchedule
       <p>Validation passed. Package changes require validation again.</p>
       <CodeEditor label="Validated RUN preview" language={draft.previewYaml ? 'yaml' : 'json'} value={draft.previewYaml || JSON.stringify(draft.preview || draft, null, 2)} readOnly />
       <button className="button button-primary" type="button" disabled={busy} onClick={() => void submit()}>Run Now</button>
-      {schedulingEnabled && <button className="button button-primary" type="button" disabled={busy} onClick={() => onSchedule({ packageId: definition.packageId, environment: definition.environment, draftId: draft.draftId, jobType: 'run', previewYaml: draft.previewYaml, target: definition.target })}>Schedule…</button>}
+      {schedulingEnabled && <button className="button button-primary" type="button" disabled={busy} onClick={() => onSchedule({ packageId: definition.packageId, environment: definition.environment, draftId: draft.draftId, jobType: draft.draftId.startsWith('D') ? 'debug' : 'run', previewYaml: draft.previewYaml, target: definition.target })}>Schedule…</button>}
     </section>}
   </section>;
 }

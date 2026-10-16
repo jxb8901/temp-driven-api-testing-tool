@@ -821,7 +821,7 @@ class AuthenticationIntegrationTest {
     }
     private static Object field(Object target,String name)throws Exception {var field=target.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(target);}
     private static void copySchemas(Path packageRoot)throws Exception {
-        Path source=Path.of("schemas").toRealPath(),destination=packageRoot.resolve("schemas");
+        Path source=Path.of("packages/default/schemas").toRealPath(),destination=packageRoot.resolve("schemas");
         try(var paths=Files.walk(source)) {for(Path path:(Iterable<Path>)paths::iterator){Path target=destination.resolve(source.relativize(path));if(Files.isDirectory(path))Files.createDirectories(target);else{Files.createDirectories(target.getParent());Files.copy(path,target);}}}
     }
     private static void addModuleJar(Path lib,String name,Path classes)throws Exception {

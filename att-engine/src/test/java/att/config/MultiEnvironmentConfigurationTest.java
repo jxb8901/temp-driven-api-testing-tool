@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MultiEnvironmentConfigurationTest {
-    private final Path root = Paths.get("").toAbsolutePath().normalize();
+    private final Path root = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
 
     @Test
     void checkedInSitAndUatConfigsKeepSharedRegistryAndValidateDescriptors() throws Exception {

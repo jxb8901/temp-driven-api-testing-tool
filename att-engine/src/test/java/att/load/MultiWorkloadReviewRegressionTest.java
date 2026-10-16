@@ -209,5 +209,5 @@ class MultiWorkloadReviewRegressionTest {
         return new LoadScenarioLoader(projectRoot()).load(file);
     }
 
-    private static Path projectRoot() { return Paths.get("").toAbsolutePath().normalize(); }
+    private static Path projectRoot() { return Paths.get("").toAbsolutePath().normalize().resolve("packages/default"); }
 }

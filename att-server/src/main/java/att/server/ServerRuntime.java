@@ -85,7 +85,7 @@ final class ServerRuntime implements AutoCloseable {
     private final Object draftLock=new Object();
     private final ConcurrentHashMap<String,DebugDraft> debugDrafts=new ConcurrentHashMap<>();
     private record RunDraft(String id,String principal,String packageId,String revision,JsonNode workerInput,
-                            Map<String,Object> preview,Instant expiresAt,String debugDraftId) { }
+                            Map<String,Object> preview,Instant expiresAt,DebugDraft resourceDebugDraft) { }
     private final ConcurrentHashMap<String,RunDraft> runDrafts=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,QuickLoadDraft> quickLoadDrafts=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdvancedLoadDraftState> advancedLoadDrafts=new ConcurrentHashMap<>();
@@ -401,6 +401,15 @@ final class ServerRuntime implements AutoCloseable {
         return executeInspection(root,request);
     }
     Map<String,Object> createDebugDraft(JsonNode input,String principal) throws Exception {
+        DebugDraft draft=buildDebugDraft(input,principal);
+        synchronized(draftLock) {
+            expireDrafts();
+            checkDraftCapacity(principal);
+            debugDrafts.put(draft.id,draft);
+        }
+        return debugDraftView(draft);
+    }
+    private DebugDraft buildDebugDraft(JsonNode input,String principal) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         requireObject(input,"A JSON object is required");
@@ -434,12 +443,7 @@ final class ServerRuntime implements AutoCloseable {
         DebugDraft draft=new DebugDraft("D"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,
                 environment,resolvedType,resolvedId,resourceId,(String)rawDigest,normalized,submitted,((Boolean)rawSensitive).booleanValue(),inspected,
                 clock.instant().plusMillis(DRAFT_TTL_MILLIS));
-        synchronized(draftLock) {
-            expireDrafts();
-            checkDraftCapacity(principal);
-            debugDrafts.put(draft.id,draft);
-        }
-        return debugDraftView(draft);
+        return draft;
     }
     Map<String,Object> createQuickLoadDraft(JsonNode input,String principal) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
@@ -550,15 +554,15 @@ final class ServerRuntime implements AutoCloseable {
         Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         ObjectNode input=run.workerInput.deepCopy();
         if(input.path("rerunFailed").asBoolean(false))resolveFailedCases(input,principal,packageId);
-        Map<String,Object> preview;String debugDraftId=null,revision;
+        Map<String,Object> preview;DebugDraft resourceDebugDraft=null;String revision;
         if(run.resourceTarget) {
             ObjectNode debug=JSON.createObjectNode();debug.put("packageId",packageId);
             if(body.has("environment"))debug.set("environment",body.get("environment"));
             debug.set("target",body.get("target"));debug.set("input",body.get("input"));
-            preview=createDebugDraft(debug,principal);debugDraftId=(String)preview.get("draftId");
-            DebugDraft validated=debugDrafts.get(debugDraftId);
-            input.set("inlineDebugInput",JSON.valueToTree(validated.input));
-            input.put("draftResourceId",validated.resourceId);revision=validated.revisionDigest;
+            resourceDebugDraft=buildDebugDraft(debug,principal);
+            preview=debugDraftView(resourceDebugDraft);preview.remove("draftId");
+            input.set("inlineDebugInput",JSON.valueToTree(resourceDebugDraft.input));
+            input.put("draftResourceId",resourceDebugDraft.resourceId);revision=resourceDebugDraft.revisionDigest;
         } else {
             WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
             request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();
@@ -578,7 +582,7 @@ final class ServerRuntime implements AutoCloseable {
         if(revision==null||!revision.matches("[a-f0-9]{64}"))throw new IllegalStateException("RUN validation did not return a package revision");
         input.put("expectedRevisionDigest",revision);applyInspectionPolicy(input,packageId);
         RunDraft draft=new RunDraft("R"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,revision,input,
-                new LinkedHashMap<>(preview),clock.instant().plusMillis(DRAFT_TTL_MILLIS),debugDraftId);
+                new LinkedHashMap<>(preview),clock.instant().plusMillis(DRAFT_TTL_MILLIS),resourceDebugDraft);
         synchronized(draftLock) {
             expireDrafts();
             checkDraftCapacity(principal);
@@ -637,7 +641,7 @@ final class ServerRuntime implements AutoCloseable {
             try { executeInspection(config.packages.get(draft.packageId),revisionRequest); }
             catch(StaleCursorException stale) {runDrafts.remove(draft.id,draft);throw new StaleDraftException();}
             Map<String,Object> accepted=submit("run",draft.workerInput,persistedPrincipal,true);
-            runDrafts.remove(draft.id,draft);if(draft.debugDraftId!=null)debugDrafts.remove(draft.debugDraftId);
+            runDrafts.remove(draft.id,draft);
             return accepted;
         }
     }
@@ -1654,8 +1658,8 @@ final class ServerRuntime implements AutoCloseable {
                 s.runInput=JSON.convertValue(draft.workerInput,Map.class);s.expectedRevisionDigest=draft.revision;
                 s.config=draft.workerInput.path("config").isTextual()?draft.workerInput.path("config").asText():null;
                 s.scenario=null;s.inlineScenario=null;s.load=new LinkedHashMap<>();
-                if(draft.debugDraftId!=null) {
-                    DebugDraft debug=scheduleDraftDebug(draft.debugDraftId,principal,s.packageId,draftEnvironment);
+                if(draft.resourceDebugDraft!=null) {
+                    DebugDraft debug=draft.resourceDebugDraft;
                     if(debug.containsSensitiveValues)throw new IllegalArgumentException("A RUN schedule cannot persist submitted sensitive values");
                     s.inlineDebugInput=deepMap(debug.scheduleInput);s.runInput.put("inlineDebugInput",s.inlineDebugInput);
                     s.debugTargetType=debug.targetType;s.debugTargetId=debug.targetId;s.debugResourceId=debug.resourceId;
@@ -1918,7 +1922,7 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }

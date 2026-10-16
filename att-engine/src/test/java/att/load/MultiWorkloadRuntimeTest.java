@@ -123,7 +123,7 @@ class MultiWorkloadRuntimeTest {
         Path file = temp.resolve(name); Files.write(file, content.getBytes(StandardCharsets.UTF_8));
         return new LoadScenarioLoader(projectRoot()).load(file);
     }
-    private static Path projectRoot() { return Paths.get("").toAbsolutePath().normalize(); }
+    private static Path projectRoot() { return Paths.get("").toAbsolutePath().normalize().resolve("packages/default"); }
     private static String message(Throwable value) {
         StringBuilder result = new StringBuilder();
         while (value != null) { if (value.getMessage() != null) result.append(value.getMessage()).append('\n'); value = value.getCause(); }

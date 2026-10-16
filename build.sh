@@ -25,7 +25,7 @@ build_timer_finish() {
   printf '[ATT BUILD TIME] Total: %ss (exit %s)\n' "$((now - BUILD_STARTED_AT))" "$status" >&2
 }
 trap 'build_timer_finish' 0
-for required in pom.xml att-security/pom.xml att-security/src/main/java att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-web/pom.xml att-web/frontend/index.html att-server/pom.xml att-dist/pom.xml att-dist/src/assembly/local.xml att-dist/src/assembly/server.xml att-server/src/assembly/server-app.xml att-dist/src/release/local/RELEASE_MANIFEST.txt att-dist/src/release/server/RELEASE_MANIFEST.txt config templates tools testcase schemas att.sh att.bat README.md CHANGELOG.md docs/server-deployment.md docs/server-deployment.zh.md docs/att-server-web-ui.md docs/att-server-web-ui.zh.md; do
+for required in pom.xml att-security/pom.xml att-security/src/main/java att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-web/pom.xml att-web/frontend/index.html att-server/pom.xml att-dist/pom.xml att-dist/src/assembly/local.xml att-dist/src/assembly/server.xml att-server/src/assembly/server-app.xml att-dist/src/release/local/RELEASE_MANIFEST.txt att-dist/src/release/server/RELEASE_MANIFEST.txt config packages/default/config packages/default/templates packages/default/tools packages/default/testcase packages/default/schemas packages/default/sql tools att.sh att.bat README.md CHANGELOG.md docs/server-deployment.md docs/server-deployment.zh.md docs/att-server-web-ui.md docs/att-server-web-ui.zh.md; do
   if [ ! -e "$ROOT_DIR/$required" ]; then echo "Missing required package path: $ROOT_DIR/$required" >&2; exit 2; fi
 done
 VERSION="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' "$ROOT_DIR/pom.xml" | head -n 1)"
@@ -55,11 +55,21 @@ build_timer_next "Maven clean verify"
 build_timer_next "Source launcher checks"
 (cd "$ROOT_DIR" && ./scripts/verify-source-launcher.sh)
 build_timer_next "Source package validation"
-(cd "$ROOT_DIR" && ATT_HOME="$ROOT_DIR" ATT_PACKAGE_ROOT="$ROOT_DIR" ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}" ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-build-placeholder}" PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-build-placeholder}" PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-build-placeholder}" ./att.sh validate --package)
+(cd "$ROOT_DIR" && ATT_HOME="$ROOT_DIR" ATT_PACKAGE_ROOT="$ROOT_DIR/packages/default" ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}" ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-build-placeholder}" PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-build-placeholder}" PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-build-placeholder}" ./att.sh validate --package)
 build_timer_next "Archive checks, repack and smoke tests"
 for archive in "$LOCAL_ARCHIVE" "$SERVER_ARCHIVE" "$SOURCE_ARCHIVE"; do
   if [ ! -f "$archive" ]; then echo "Maven distribution assembly did not produce: $archive" >&2; exit 2; fi
 done
+SOURCE_ENTRIES="$(tar -tzf "$SOURCE_ARCHIVE")"
+for required in packages/default/config/config.yaml packages/default/schemas packages/default/testcase packages/default/templates packages/default/tools; do
+  case "$SOURCE_ENTRIES" in
+    *"$SOURCE_PACKAGE_NAME/$required"*) ;;
+    *) echo "Source archive is missing required package path: $required" >&2; exit 2 ;;
+  esac
+done
+if printf '%s\n' "$SOURCE_ENTRIES" | grep -E "^$SOURCE_PACKAGE_NAME/(config/config.yaml|config/(dbhelpers|environments|mqhelpers|testdata|tools)/|testcase/|templates/|schemas/|sql/)" >/dev/null; then
+  echo "Source archive still contains package assets at their former top-level paths: $SOURCE_ARCHIVE" >&2; exit 2
+fi
 for archive in "$LOCAL_ARCHIVE" "$SOURCE_ARCHIVE"; do
   if tar -tzf "$archive" | grep -E '(^|/)node_modules(/|$)' >/dev/null; then
     echo "Release archive must not include build-time Node.js dependencies: $archive" >&2; exit 2

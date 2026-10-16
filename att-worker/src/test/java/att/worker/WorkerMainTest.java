@@ -37,7 +37,7 @@ class WorkerMainTest {
         Files.createDirectories(root.resolve("templates/SLOW"));
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("tools"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("schemas"))) {
+        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
             for(Path source:(Iterable<Path>)paths::iterator) {
                 Path dest=root.resolve(source);
                 if(Files.isDirectory(source)) Files.createDirectories(dest);
@@ -98,7 +98,7 @@ class WorkerMainTest {
         Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("load"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("schemas"))) {
+        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
             for(Path source:(Iterable<Path>)paths::iterator) {
                 Path dest=root.resolve(source);
                 if(Files.isDirectory(source)) Files.createDirectories(dest);
@@ -192,7 +192,7 @@ class WorkerMainTest {
     @Test void workerAndDirectApiReturnEquivalentDebugOutcomesAndKeepStdoutMachineReadable() throws Exception {
         Path root=temp.resolve("package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("schemas"))) {
+        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
             for(Path source:(Iterable<Path>)paths::iterator) { Path dest=root.resolve(source); if(Files.isDirectory(source)) Files.createDirectories(dest); else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING); }
         }
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
@@ -245,7 +245,7 @@ class WorkerMainTest {
         Path root=temp.resolve("debug-overrides-package");
         Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/flows/debug/echo"));
         Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("schemas"))) {
+        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
             for(Path source:(Iterable<Path>)paths::iterator) { Path dest=root.resolve(source); if(Files.isDirectory(source)) Files.createDirectories(dest); else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING); }
         }
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\n"
@@ -319,7 +319,7 @@ class WorkerMainTest {
     @Test void workerAndDirectApiReturnEquivalentSmallLoadOutcomes() throws Exception {
         Path root=temp.resolve("load-package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("load"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("schemas"))) {
+        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
             for(Path source:(Iterable<Path>)paths::iterator) { Path dest=root.resolve(source); if(Files.isDirectory(source)) Files.createDirectories(dest); else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING); }
         }
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
@@ -351,16 +351,16 @@ class WorkerMainTest {
 
     @Test void cliWorkerAndDirectApiReturnEquivalentRunOutcomes() throws Exception {
         Path root=temp.resolve("run-package"); Files.createDirectories(root.resolve("config/tools")); Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("schemas"))) {
+        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
             for(Path source:(Iterable<Path>)paths::iterator) { Path dest=root.resolve(source); if(Files.isDirectory(source)) Files.createDirectories(dest); else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING); }
         }
-        Files.copy(Paths.get("testcase/quick_start.xlsx"),root.resolve("testcase/quick_start.xlsx"));
-        Files.copy(Paths.get("testcase/quick_start.yaml"),root.resolve("testcase/quick_start.yaml"));
-        Files.copy(Paths.get("testcase/quick_start.xml"),root.resolve("testcase/quick_start.xml"));
-        copyTree(Paths.get("templates/QUICK_START"),root.resolve("templates/QUICK_START"));
-        Files.copy(Paths.get("config/tools/sample.yaml"),root.resolve("config/tools/sample.yaml"));
-        Files.copy(Paths.get("tools/get_ac_date.sh"),root.resolve("tools/get_ac_date.sh"));
-        Path dispatcher=root.resolve("tools/tool_group_dispatch.sh"); Files.copy(Paths.get("tools/tool_group_dispatch.sh"),dispatcher);
+        Files.copy(Paths.get("packages/default/testcase/quick_start.xlsx"),root.resolve("testcase/quick_start.xlsx"));
+        Files.copy(Paths.get("packages/default/testcase/quick_start.yaml"),root.resolve("testcase/quick_start.yaml"));
+        Files.copy(Paths.get("packages/default/testcase/quick_start.xml"),root.resolve("testcase/quick_start.xml"));
+        copyTree(Paths.get("packages/default/templates/QUICK_START"),root.resolve("templates/QUICK_START"));
+        Files.copy(Paths.get("packages/default/config/tools/sample.yaml"),root.resolve("config/tools/sample.yaml"));
+        Files.copy(Paths.get("packages/default/tools/get_ac_date.sh"),root.resolve("tools/get_ac_date.sh"));
+        Path dispatcher=root.resolve("tools/tool_group_dispatch.sh"); Files.copy(Paths.get("packages/default/tools/tool_group_dispatch.sh"),dispatcher);
         dispatcher.toFile().setExecutable(true,true); root.resolve("tools/get_ac_date.sh").toFile().setExecutable(true,true);
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\noutputDirectory: output\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntoolGroups: [config/tools/sample.yaml]\n").getBytes(StandardCharsets.UTF_8));
         List<ExecutionEvent> directEvents=new ArrayList<ExecutionEvent>();

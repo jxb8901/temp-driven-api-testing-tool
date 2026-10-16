@@ -1485,10 +1485,10 @@ evidence: {mode: failures}
 ~~~
 
 ~~~sh
-./att.sh load examples/load/closed-smoke.yaml
-./att.sh load examples/load/arrival-smoke.yaml --format json
-./att.sh load examples/load/multi-closed.yaml
-./att.sh load examples/load/multi-arrival.yaml
+./att.sh load ../examples/load/closed-smoke.yaml
+./att.sh load ../examples/load/arrival-smoke.yaml --format json
+./att.sh load ../examples/load/multi-closed.yaml
+./att.sh load ../examples/load/multi-arrival.yaml
 ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh debug
@@ -1931,7 +1931,7 @@ MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive
 
 Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
 
-The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.3.schema.json).
+The machine-readable field constraints remain in [the active MQ schema](../packages/default/schemas/att-mqhelper-v1.3.schema.json).
 
 DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
 
@@ -2230,7 +2230,7 @@ Direct `update` Action 支援 `timeoutMs`，但明確拒絕 `retry`。發生 tim
 
 ## Configuration 與 environments
 
-本頁是作者編寫配置時的權威閱讀參考。[`schemas/`](../schemas) 目錄中的文件仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
+本頁是作者編寫配置時的權威閱讀參考。[`schemas/`](../packages/default/schemas) 目錄中的文件仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
 
 ### 按任務查找配置
 
@@ -2374,13 +2374,13 @@ actions:
 ./att.sh validate --config config/config.yaml --env SIT --package
 ./att.sh run --config config/config.yaml --env SIT --all
 ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
+./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
 
 # UAT
 ./att.sh validate --config config/config.yaml --env UAT --package
 ./att.sh run --config config/config.yaml --env UAT --all
 ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
+./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
 ```
 
 CI 對每個目標環境分別執行 `validate --package` 和 `run --all`：
@@ -2400,7 +2400,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) 是 active schema 的 source of truth。Package validation 檢查 registrations；封存 schema 不會成為 active runtime contract。完整矩陣見 [Schema and Version Matrix](reference.zh/appendices/schema-matrix.md)。
+[`schemas/catalog.yaml`](../packages/default/schemas/catalog.yaml) 是 active schema 的 source of truth。Package validation 檢查 registrations；封存 schema 不會成為 active runtime contract。完整矩陣見 [Schema and Version Matrix](reference.zh/appendices/schema-matrix.md)。
 
 ### 設定 package-wide options
 
@@ -2755,8 +2755,8 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 
 ```sh
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
-./att.sh load examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
+./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
+./att.sh load ../examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
   --arrival-rate 5/s --warmup 1s --ramp-up 1s --duration 5s --ramp-down 1s \
   --max-concurrent 4 --overload-policy drop --format json
 ```
@@ -2963,7 +2963,7 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 
 針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 僅接受 [Schema and Version Matrix](reference.zh/appendices/schema-matrix.md) 列出的 active schemas。`schemas/history/` 中的舊 schema 僅供歷史參考，不是 runtime compatibility contract。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，將 historical Render Action 改為使用 `&{path}` 的 Assign，再依[Actions and Typed Values](reference.zh/actions.md)傳遞 resulting String。Unsupported version 會在執行前失敗。
 
-現行 schema 位於 [`schemas/`](../schemas)，較舊定義位於 [`schemas/history/`](../schemas/history)。`validate --package` 會檢查 catalog 登錄的每一份 schema，即使 package 沒有使用。缺少、無法讀取、不安全或重複的註冊 schema 會硬性回報 `PACKAGE_INVALID`。Validation 不會改寫 YAML。請檢視 migration guidance、更新檔案，再針對每個選定的 `--env` 重跑 package validation。
+現行 schema 位於 [`schemas/`](../packages/default/schemas)，較舊定義位於 [`schemas/history/`](../packages/default/schemas/history)。`validate --package` 會檢查 catalog 登錄的每一份 schema，即使 package 沒有使用。缺少、無法讀取、不安全或重複的註冊 schema 會硬性回報 `PACKAGE_INVALID`。Validation 不會改寫 YAML。請檢視 migration guidance、更新檔案，再針對每個選定的 `--env` 重跑 package validation。
 
 Package validation 會依照 Debug execution 相同的 discovery 與 schema/input validation，檢查現有 Template、Flow、分組及未分組 Tool 的 `debug.yaml` sidecar。歷史 schema version 與不符合現行 schema 的結構會在執行 `att debug` 前回報；可選 sidecar 缺少時仍屬有效。
 

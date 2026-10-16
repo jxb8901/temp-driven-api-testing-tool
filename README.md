@@ -33,8 +33,8 @@ Useful peer-mode commands after the basic Run workflow is familiar:
 
 ```sh
 ./att.sh debug template PAYMENT_INVOKE
-./att.sh load examples/load/closed-smoke.yaml
-./att.sh load examples/load/arrival-smoke.yaml --format json
+./att.sh load ../examples/load/closed-smoke.yaml
+./att.sh load ../examples/load/arrival-smoke.yaml --format json
 ```
 
 To submit work to ATT Server, use the thin `att remote` adapter. Configure a Server profile first; local commands remain offline and do not require Server connectivity. See the [ATT Remote client guide](docs/remote-client.md) and [中文指南](docs/remote-client.zh.md).
@@ -65,7 +65,7 @@ DB operations run under ordinary `type: tool` Actions through `db.<helper>.<quer
 
 ## Repository modules
 
-The repository is a Maven source checkout. Its top-level package directories are assembled under `packages/default/` in the Local release; the extracted release directory is `ATT_HOME`, which also holds the launchers and runtime libraries:
+The repository is a Maven source checkout whose default package lives under `packages/default/`. The Local release keeps that package layout beneath its extracted installation root, `ATT_HOME`, alongside the launchers and runtime libraries:
 
 ```text
 pom.xml       parent / aggregator
@@ -80,20 +80,24 @@ att-dist/     binary/source release assembly
 
 ATT Server is a single-node REST/SSE control plane deployed as a WAR to external Tomcat 10.1+ on Java 17+. Tomcat owns authentication; Server consumes the Servlet Principal and launches isolated Worker processes. `att remote` uses the public API, SSE replay, and canonical job results. See [ATT Server deployment and API](docs/server-deployment.md). CLI, Engine, Worker, Remote, and Server API modules remain Java 8-compatible. See [Multi-module build layout](docs/system-design/multi-module-build.md).
 
-## Core package layout
+## Default package layout
 
 ```text
-config/       global config, Tool groups, DBHelper/MQHelper/SSHHelper descriptors
-testcase/     xlsx + yaml sidecar + generated xml snapshot
-templates/    Template directories and reusable Flows
-tools/        process-backed integration scripts/programs
-schemas/      published ATT schemas
-output/       run/debug/load evidence and reports
+packages/default/
+  config/       package config, Tool groups, DBHelper/MQHelper/SSHHelper descriptors
+  testcase/     xlsx + yaml sidecar + generated xml snapshot
+  templates/    Template directories and reusable Flows
+  tools/        process-backed integration scripts/programs
+  schemas/      published ATT schemas
+  sql/          package SQL resources
+  output/       run/debug/load evidence and reports
+config/         ATT_HOME Server deployment template
+tools/          repository build, documentation, benchmark, and QA automation
 ```
 
-In a Local archive, the tree above is rooted at `packages/default/`, while `att.sh`, `att.bat`, and `lib/` remain at the `ATT_HOME` root. ATT Server can register `$ATT_HOME/packages/default` directly. Its `server.dataDir` can be `$ATT_HOME/data` when that path is disjoint from every registered package root; the archive does not include Server data or an active `config/att-server.yaml`. See the [Server deployment guide](docs/server-deployment.md) for config discovery and flat-layout migration.
+The source checkout and Local archive use the same `packages/default/` package root. `./att.sh` runs commands against that package; `att.sh`, `att.bat`, Maven modules, and `lib/` stay at the repository or `ATT_HOME` root. In the archive, ATT Server can register `$ATT_HOME/packages/default` directly. Its `server.dataDir` can be `$ATT_HOME/data` when that path is disjoint from every registered package root; the archive does not include Server data or an active `config/att-server.yaml`. See the [Server deployment guide](docs/server-deployment.md) for config discovery and migration from earlier flat source checkouts.
 
-ATT 4.2.1 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.3`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.7`. Current schemas live under `schemas/`; previous and older definitions are historical references under `schemas/history/`, not current runtime contracts.
+ATT 4.2.1 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.3`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.7`. Current schemas live under `packages/default/schemas/`; previous and older definitions are historical references under `packages/default/schemas/history/`, not current runtime contracts.
 
 ## Build and validation
 

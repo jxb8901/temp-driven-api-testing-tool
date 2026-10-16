@@ -19,7 +19,8 @@ contents:
 notes:
   - ATT_HOME is the extracted install root (set by launchers; overridable via ATT_HOME / -Datt.home)
   - Package root defaults to packages/default; override with ATT_PACKAGE_ROOT
-  - config/att-server.example.yaml is a template; no active config/att-server.yaml is shipped or overwritten on upgrade
+  - ATT_HOME/config/att-server.example.yaml is a template; package configuration lives under packages/default/config/
+  - no active config/att-server.yaml is shipped or overwritten on upgrade
   - Optional Server config: ATT_HOME/config/att-server.yaml, discovered after -Datt.server.config and ATT_SERVER_CONFIG
   - Optional Server data directory: ATT_HOME/data/ when disjoint from every package root; data/ is not shipped
   - server.dataDir may be under ATT_HOME but must not equal, contain, or be inside a registered package root

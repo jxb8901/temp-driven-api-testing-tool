@@ -283,7 +283,7 @@ class ServerRuntimeTest {
     }
 
     @Test void listsPackageResourcesThroughTheBoundedInspectorWorkerAndSignsPaginationCursors() throws Exception {
-        Path packageRoot=Path.of("").toRealPath();Path allowed=packageRoot;
+        Path packageRoot=Path.of("").toRealPath().resolve("packages/default");Path allowed=packageRoot;
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path configFile=temp.resolve("inspection-runtime-server.yaml");
         Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("inspection-runtime-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
@@ -321,7 +321,7 @@ class ServerRuntimeTest {
     }
 
     @Test void returnsDeclaredEffectiveAndComparisonConfigurationThroughTheBoundedInspectorWorker() throws Exception {
-        Path packageRoot=Path.of("").toRealPath();
+        Path packageRoot=Path.of("").toRealPath().resolve("packages/default");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name"," ").toLowerCase().contains("win")?"java.exe":"java");
         Path configFile=temp.resolve("configuration-inspection-server.yaml");
         Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("configuration-inspection-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(packageRoot)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
@@ -823,6 +823,19 @@ class ServerRuntimeTest {
             Map<String,Object> stale=runtime.createRunDraft(selection,"alice");
             Files.writeString(root.resolve("templates/SIMPLE/template.yaml"),"\n# package changed\n",java.nio.file.StandardOpenOption.APPEND);
             assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",stale.get("draftId"))),"alice","alice"));
+
+            var debugInput=ServerRuntime.JSON.createObjectNode();debugInput.put("packageId","p");
+            debugInput.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id","SIMPLE")));
+            debugInput.set("input",ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-debug/v1.2","inputs",Map.of())));
+            for(int i=0;i<ServerRuntime.MAX_DRAFTS_PER_PRINCIPAL-1;i++)runtime.createDebugDraft(debugInput,"quota-boundary");
+            var resourceRun=ServerRuntime.JSON.createObjectNode();resourceRun.put("schemaVersion",RunDefinition.VERSION);resourceRun.put("executionType","run");resourceRun.put("packageId","p");
+            resourceRun.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id","SIMPLE")));
+            resourceRun.set("input",ServerRuntime.JSON.createObjectNode());resourceRun.set("options",ServerRuntime.JSON.valueToTree(Map.of("debug",false)));
+            Map<String,Object> oneSlotRun=runtime.createRunDraft(resourceRun,"quota-boundary");
+            assertThrows(ServerRuntime.DraftCapacityException.class,()->runtime.createDebugDraft(debugInput,"quota-boundary"));
+            Map<String,Object> oneSlotAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",oneSlotRun.get("draftId"))),"quota-boundary","quota-boundary");
+            assertEquals("PASS",((Map<?,?>)awaitUnifiedJob(runtime,String.valueOf(oneSlotAccepted.get("jobId"))).get("job")).get("status"));
+            assertDoesNotThrow(()->runtime.createDebugDraft(debugInput,"quota-boundary"),"A resource RUN draft must occupy and release one quota slot");
         }
     }
     private static Map<String,Object> awaitUnifiedJob(ServerRuntime runtime,String id) throws Exception {
@@ -862,7 +875,7 @@ class ServerRuntimeTest {
         void advance(Duration duration){current=current.plus(duration);}
     }
     private static void copySchemas(Path packageRoot)throws Exception {
-        Path source=Path.of("schemas").toRealPath(),destination=packageRoot.resolve("schemas");
+        Path source=Path.of("packages/default/schemas").toRealPath(),destination=packageRoot.resolve("schemas");
         try(var paths=Files.walk(source)) {
             for(Path path:(Iterable<Path>)paths::iterator) {
                 Path target=destination.resolve(source.relativize(path));

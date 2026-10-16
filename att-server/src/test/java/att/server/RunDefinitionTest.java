@@ -10,7 +10,7 @@ class RunDefinitionTest {
     private static String request(String body){return "{\"schemaVersion\":\"att-execution/v1\",\"executionType\":\"run\",\"packageId\":\"payments\","+body+"}";}
 
     @Test void publishedSchemaAcceptsTheSameTargetAndSelectionShapes() throws Exception {
-        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v1.schema.json");
+        java.nio.file.Path schema=java.nio.file.Path.of("packages/default/schemas/att-execution-v1.schema.json");
         for(String body:List.of(request("\"target\":{\"type\":\"case\",\"id\":\"A\"}"),
                 request("\"target\":{\"type\":\"flow\",\"id\":\"f\"},\"input\":{}"),
                 request("\"selection\":{\"tags\":[\"smoke\"]}"))) {
@@ -24,7 +24,7 @@ class RunDefinitionTest {
         }
     }
     @Test void publishedScheduleSchemaDiscriminatesTriggersAndExecutionTypes() throws Exception {
-        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-schedule-v2.schema.json");
+        java.nio.file.Path schema=java.nio.file.Path.of("packages/default/schemas/att-schedule-v2.schema.json");
         String base="{\"schemaVersion\":\"att-schedule/v2\",\"name\":\"Nightly\",\"packageId\":\"p\",";
         att.validation.JsonSchemaVerifier.verifyJson(schema,base+"\"executionType\":\"run\",\"draftId\":\"R123\",\"cron\":\"0 2 * * *\",\"timezone\":\"UTC\"}");
         att.validation.JsonSchemaVerifier.verifyJson(schema,base+"\"executionType\":\"load\",\"scenario\":\"load/nightly.yaml\",\"runAt\":\"2026-11-01T02:00:00Z\"}");

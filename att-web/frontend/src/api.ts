@@ -327,8 +327,13 @@ export const api = {
     return request<DebugFormResponse>(resourcePath(identity) + '/debug-form' + queryString({ environment }), { signal });
   },
   previewRun(input: RunDefinition, signal?: AbortSignal): Promise<DraftResponse> {
-    if (!unifiedRunSupported && input.target && input.target.type !== 'case') {
-      return postJson<DraftResponse>('drafts/debug', { packageId: input.packageId, environment: input.environment, target: input.target, input: input.input }, signal);
+    if (!unifiedRunSupported) {
+      if (input.selection || input.target?.type === 'case') {
+        throw new Error('Case and batch Run validation require ATT Server 4.2.1 or newer. On older servers, use the legacy Case action in Explorer.');
+      }
+      if (input.target) {
+        return postJson<DraftResponse>('drafts/debug', { packageId: input.packageId, environment: input.environment, target: input.target, input: input.input }, signal);
+      }
     }
     return postJson<DraftResponse>('drafts/run', input, signal);
   },

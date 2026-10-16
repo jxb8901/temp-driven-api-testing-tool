@@ -17,13 +17,15 @@ contents:
   - att-worker/pom.xml
   - att-server/pom.xml
   - att-dist/pom.xml
-  - templates/
+  - packages/default/templates/
   - tools/
-  - testcase/
-  - sql/ (when present)
-  - config/
+  - packages/default/testcase/
+  - packages/default/sql/ (when present)
+  - packages/default/config/
   - docs/
-  - schemas/
+  - packages/default/schemas/
+  - packages/default/tools/ (package runtime tools)
+  - config/att-server.example.yaml (ATT_HOME Server template)
   - examples/
   - README.md
   - CHANGELOG.md

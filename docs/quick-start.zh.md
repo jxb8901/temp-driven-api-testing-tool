@@ -19,14 +19,14 @@ Excel Testcase
          -> ordered Actions
 ```
 
-本指南直接使用 repository 內已準備好的檔案：
+本指南直接使用 default package 內已準備好的檔案：
 
 ```text
-testcase/quick_start.xlsx
-testcase/quick_start.yaml
-testcase/quick_start.xml
-templates/QUICK_START/template.yaml
-config/config.yaml
+packages/default/testcase/quick_start.xlsx
+packages/default/testcase/quick_start.yaml
+packages/default/testcase/quick_start.xml
+packages/default/templates/QUICK_START/template.yaml
+packages/default/config/config.yaml
 ```
 
 Workbook 內有兩個 Testcase：

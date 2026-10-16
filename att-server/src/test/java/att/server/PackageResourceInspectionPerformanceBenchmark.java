@@ -263,7 +263,7 @@ class PackageResourceInspectionPerformanceBenchmark {
     }
 
     private void copySchemas(Path root) throws Exception {
-        Path source = Path.of("schemas").toAbsolutePath().normalize();
+        Path source = Path.of("packages/default/schemas").toAbsolutePath().normalize();
         try (var paths = Files.walk(source)) {
             for (Path path : (Iterable<Path>) paths::iterator) {
                 Path destination = root.resolve("schemas").resolve(source.relativize(path));

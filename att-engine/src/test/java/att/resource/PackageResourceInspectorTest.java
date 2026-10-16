@@ -27,7 +27,7 @@ class PackageResourceInspectorTest {
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
     private PackageResourceInspector inspector() throws Exception {
-        Path root=Paths.get("").toRealPath();
+        Path root=Paths.get("").toRealPath().resolve("packages/default");
         assertTrue(Files.isRegularFile(root.resolve("config/config.yaml")),"Tests run from the repository root");
         return new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
     }
@@ -99,7 +99,7 @@ class PackageResourceInspectorTest {
     }
 
     @Test void readsToolScriptOnlyWhenItsPackageRelativePathIsAllowlisted() throws Exception {
-        Path root=Paths.get("").toRealPath();
+        Path root=Paths.get("").toRealPath().resolve("packages/default");
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
                 Collections.singletonList("tools/tool_group_dispatch.sh"),65536,262144);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,100).get("items");

@@ -4,7 +4,7 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/att-launcher.XXXXXX")"
 SOURCE_DEBUG_FIXTURE=""
-trap 'rm -rf "$TEMP_DIR"; if [ -n "$SOURCE_DEBUG_FIXTURE" ]; then rm -rf "$ROOT_DIR/$SOURCE_DEBUG_FIXTURE"; fi' EXIT HUP INT TERM
+trap 'rm -rf "$TEMP_DIR"; if [ -n "$SOURCE_DEBUG_FIXTURE" ]; then rm -rf "$ROOT_DIR/packages/default/$SOURCE_DEBUG_FIXTURE"; fi' EXIT HUP INT TERM
 
 JAVA_BIN="$(command -v java)"
 DIRNAME_BIN="$(command -v dirname)"
@@ -143,7 +143,7 @@ done
 
 run_commands "$ROOT_DIR" "$MAVEN_PATH" "$MAVEN_LOG"
 run_commands "$ROOT_DIR" "$NO_MAVEN_PATH" "$NO_MAVEN_LOG"
-SOURCE_DEBUG_FIXTURE="$(write_debug_fixture "$ROOT_DIR")"
+SOURCE_DEBUG_FIXTURE="$(write_debug_fixture "$ROOT_DIR/packages/default")"
 run_debug "$ROOT_DIR" "$MAVEN_PATH" "$MAVEN_LOG" "$SOURCE_DEBUG_FIXTURE"
 run_debug "$ROOT_DIR" "$NO_MAVEN_PATH" "$NO_MAVEN_LOG" "$SOURCE_DEBUG_FIXTURE"
 
@@ -182,6 +182,6 @@ run_commands "$PACKAGE_ROOT" "$NO_MAVEN_PATH" "$NO_MAVEN_LOG"
 PACKAGE_DEBUG_FIXTURE="$(write_debug_fixture "$PACKAGE_ROOT/packages/default")"
 run_debug "$PACKAGE_ROOT" "$MAVEN_PATH" "$MAVEN_LOG" "$PACKAGE_DEBUG_FIXTURE"
 run_debug "$PACKAGE_ROOT" "$NO_MAVEN_PATH" "$MAVEN_LOG" "$PACKAGE_DEBUG_FIXTURE"
-rm -rf "$ROOT_DIR/$SOURCE_DEBUG_FIXTURE"
+rm -rf "$ROOT_DIR/packages/default/$SOURCE_DEBUG_FIXTURE"
 
 echo "Source and packaged launchers passed run-only and Debug execution checks with Maven present and absent."

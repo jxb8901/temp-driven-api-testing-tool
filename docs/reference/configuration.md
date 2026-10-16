@@ -1,6 +1,6 @@
 # Configuration and environments
 
-This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../../schemas/) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
+This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../../packages/default/schemas/) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
 
 ## Find a configuration task
 
@@ -142,13 +142,13 @@ actions:
 ./att.sh validate --config config/config.yaml --env SIT --package
 ./att.sh run --config config/config.yaml --env SIT --all
 ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
+./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
 
 # UAT
 ./att.sh validate --config config/config.yaml --env UAT --package
 ./att.sh run --config config/config.yaml --env UAT --all
 ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
+./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
 ```
 
 For CI, run the same validation and execution stages once per selected environment:
@@ -168,7 +168,7 @@ Use profiles when the same test package is promoted across environments and only
 
 ## Schema catalog
 
-[`schemas/catalog.yaml`](../../schemas/catalog.yaml) is authoritative for active schema registrations. Package validation checks registrations; archived schemas do not become active runtime contracts. See the complete matrix in [Schema and Version Matrix](appendices/schema-matrix.md).
+[`schemas/catalog.yaml`](../../packages/default/schemas/catalog.yaml) is authoritative for active schema registrations. Package validation checks registrations; archived schemas do not become active runtime contracts. See the complete matrix in [Schema and Version Matrix](appendices/schema-matrix.md).
 
 ## Set package-wide options
 
