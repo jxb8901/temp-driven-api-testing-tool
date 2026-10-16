@@ -39,8 +39,8 @@ function errorStatus(error: unknown): number {
 function errorMessage(error: unknown, operation: string): string {
   const status = errorStatus(error);
   if (status === 401) return 'Your Tomcat session is not authenticated. Sign in and retry.';
-  if (status === 403) return 'Your account does not have the configured Scheduled Load administrator role.';
-  if (status === 404) return 'Scheduled Load is disabled by the Server or this schedule no longer exists.';
+  if (status === 403) return 'Your account does not have the configured Schedules administrator role.';
+  if (status === 404) return 'Schedules is disabled by the Server or this schedule no longer exists.';
   if (status === 409) return 'This schedule changed on the Server. Reload the schedule list before editing it again.';
   if (status === 429) return 'The Server is at its scheduled-load capacity. Review the occurrence history and retry later.';
   return error instanceof Error ? error.message : `${operation} failed. Check the connection and retry.`;
@@ -93,20 +93,21 @@ function focusDiagnosticField(field: string): void {
 }
 
 function recurrenceLabel(schedule: LoadSchedule): string {
-  const minute = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(schedule.cron.trim());
+  if (schedule.runAt) return `Once · ${schedule.runAt}`;
+  const minute = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec((schedule.cron || '').trim());
   if (minute) return `Daily at ${String(Number(minute[2])).padStart(2, '0')}:${String(Number(minute[1])).padStart(2, '0')}`;
-  const weekly = /^(\d{1,2}) (\d{1,2}) \* \* (1-5|0,6|[0-6])$/.exec(schedule.cron.trim());
+  const weekly = /^(\d{1,2}) (\d{1,2}) \* \* (1-5|0,6|[0-6])$/.exec((schedule.cron || '').trim());
   if (weekly) {
     const days = WEEKDAYS.find(day => day.value === weekly[3])?.label || `day ${weekly[3]}`;
     return `Weekly · ${days} at ${String(Number(weekly[2])).padStart(2, '0')}:${String(Number(weekly[1])).padStart(2, '0')}`;
   }
-  return `Cron · ${schedule.cron}`;
+  return `Cron · ${schedule.cron || ''}`;
 }
 
 function jobSummary(schedule: LoadSchedule): string {
-  if (schedule.jobType === 'debug') {
+  if (schedule.jobType === 'debug' || schedule.jobType === 'run') {
     const target = schedule.debugTarget;
-    return target ? `Debug · ${target.type} · ${target.id}` : 'Debug snapshot';
+    return target ? `${schedule.jobType === 'run' ? 'Run' : 'Debug'} · ${target.type} · ${target.id}` : schedule.jobType === 'run' ? 'Validated Run snapshot' : 'Debug snapshot';
   }
   return schedule.inlineSnapshot ? 'Validated Load snapshot' : schedule.scenario || 'Scenario unavailable';
 }
@@ -133,6 +134,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const [filter, setFilter] = useState('');
   const [stateFilter, setStateFilter] = useState<'all' | 'enabled' | 'paused'>('all');
   const [packageFilter, setPackageFilter] = useState('');
+  const [executionFilter, setExecutionFilter] = useState('all');
   const [draft, setDraft] = useState<ScheduleDraft>(() => createScheduleDraft());
   const [scenarioPreviewYaml, setScenarioPreviewYaml] = useState('');
   const [saved, setSaved] = useState(false);
@@ -189,13 +191,13 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     };
   }, [loadSchedules]);
 
-  useEffect(() => modal ? undefined : navigation.registerUnsavedChanges(dirty, 'Scheduled Load changes'), [dirty, modal, navigation.registerUnsavedChanges]);
+  useEffect(() => modal ? undefined : navigation.registerUnsavedChanges(dirty, 'Schedules changes'), [dirty, modal, navigation.registerUnsavedChanges]);
 
   useEffect(() => {
     if (!initialDraft?.draftId) return;
     const seeded = createScheduleDraft();
-    seeded.jobType = initialDraft.jobType === 'debug' ? 'debug' : 'load';
-    seeded.name = `Validated ${seeded.jobType === 'debug' ? 'Debug' : 'Load'} snapshot`;
+    seeded.jobType = initialDraft.jobType === 'run' ? 'run' : initialDraft.jobType === 'debug' ? 'debug' : 'load';
+    seeded.name = `Validated ${seeded.jobType === 'run' ? 'Run' : seeded.jobType === 'debug' ? 'Debug' : 'Load'} snapshot`;
     seeded.packageId = initialDraft.packageId;
     seeded.environment = initialDraft.environment || '';
     seeded.debugTargetType = initialDraft.target?.type || '';
@@ -207,7 +209,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     setBaseline(JSON.stringify(seeded));
     setEditingId('');
     setMutationError('');
-    setNotice(`Schedule form loaded from the validated ${seeded.jobType === 'debug' ? 'Debug' : 'Load'} draft. Choose a recurrence and review the Server next-run preview.`);
+    setNotice(`Schedule form loaded from the validated ${seeded.jobType === 'run' ? 'Run' : seeded.jobType === 'debug' ? 'Debug' : 'Load'} draft. Choose a recurrence and review the Server next-run preview.`);
     onInitialDraftConsumed?.();
   }, [initialDraft, onInitialDraftConsumed]);
 
@@ -237,7 +239,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     previewController.current = controller;
     setPreview({ status: 'loading', signature: previewSignature });
     const timer = window.setTimeout(() => {
-      void api.previewLoadSchedule({ timezone: draft.timezone.trim(), cron }, controller.signal)
+      void api.previewLoadSchedule({ timezone: draft.timezone.trim(), ...(draft.recurrence === 'once' ? { runAt: draft.runAt } : { cron }) }, controller.signal)
         .then(response => {
           if (!controller.signal.aborted && sequence === previewSequence.current) {
             setPreview({ status: 'ready', signature: previewSignature, nextRunAt: response.nextRunAt,
@@ -284,9 +286,9 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
       const matchesText = !query || [schedule.name, schedule.description, schedule.packageId, schedule.scenario || 'Validated inline snapshot', schedule.cron]
         .some(value => String(value || '').toLocaleLowerCase().includes(query));
       const matchesState = stateFilter === 'all' || (stateFilter === 'enabled' ? schedule.enabled : !schedule.enabled);
-      return matchesText && matchesState && (!packageFilter || schedule.packageId === packageFilter);
+      return matchesText && matchesState && (executionFilter === 'all' || executionFilter === (schedule.jobType === 'load' || !schedule.jobType ? 'load' : 'run')) && (!packageFilter || schedule.packageId === packageFilter);
     });
-  }, [filter, packageFilter, schedules, stateFilter]);
+  }, [executionFilter, filter, packageFilter, schedules, stateFilter]);
 
   function updateDraft<K extends keyof ScheduleDraft>(key: K, value: ScheduleDraft[K]) {
     setDraft(current => ({ ...current, [key]: value }));
@@ -396,16 +398,16 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const packageItems = packages.status === 'ready' ? packages.data : [];
 
   if (!enabled) return <section className={modal ? 'att-schedule-disabled-modal' : 'page-content att-schedules-page'} aria-labelledby="schedules-title">
-    <div className="page-heading"><div><p className="eyebrow">ATT Studio</p><h1 id="schedules-title">Scheduled Load</h1></div></div>
-    <p className="att-schedule-callout" role="status">Scheduled Load is disabled by Server configuration. Ask the Server administrator to enable scheduling.</p>
+    <div className="page-heading"><div><p className="eyebrow">ATT Studio</p><h1 id="schedules-title">Schedules</h1></div></div>
+    <p className="att-schedule-callout" role="status">Schedules is disabled by Server configuration. Ask the Server administrator to enable scheduling.</p>
     {modal && <button className="button button-quiet" type="button" onClick={onClose}>Return to Load</button>}
   </section>;
 
   const pageContent = <>
     {!modal && <>
     <header className="page-heading att-schedules-heading">
-      <div><p className="eyebrow">Load testing</p><h1 id="schedules-title">Scheduled Load</h1>
-        <p className="page-description">Manage recurring Load and Debug jobs and inspect the Server's recorded occurrences.</p>
+      <div><p className="eyebrow">Execution schedules</p><h1 id="schedules-title">Schedules</h1>
+        <p className="page-description">Manage recurring RUN and LOAD jobs and inspect the Server's recorded occurrences.</p>
       </div>
       <button className="button button-primary" type="button" onClick={() => {
         if (dirty) { setMutationError('Save or clear the current schedule draft before starting another.'); return; }
@@ -425,6 +427,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
         <label>Search schedules
           <input type="search" value={filter} onChange={event => setFilter(event.currentTarget.value)} placeholder="Name, package, scenario or cron" />
         </label>
+        <label>Execution type<select value={executionFilter} onChange={event => setExecutionFilter(event.currentTarget.value)}><option value="all">RUN and LOAD</option><option value="run">RUN</option><option value="load">LOAD</option></select></label>
         <label>Status
           <select value={stateFilter} onChange={event => setStateFilter(event.currentTarget.value as typeof stateFilter)}>
             <option value="all">All schedules</option><option value="enabled">Enabled</option><option value="paused">Paused</option>
@@ -503,12 +506,12 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
 
     <section className={`att-schedule-panel att-schedule-editor${modal ? ' att-schedule-modal-panel' : ''}`} aria-labelledby="schedule-editor-heading">
       <div className="att-schedule-section-heading"><div><h2 id="schedule-editor-heading" tabIndex={-1}>{editingId ? `Edit schedule: ${draft.name || editingId}` : 'Create schedule'}</h2>
-        <p>{draft.inlineSnapshot ? `This schedule stores the immutable ${draft.jobType === 'debug' ? 'Debug target and input' : 'Load scenario'} snapshot from your validated draft. The editor stays open behind this form.` : 'Scenario and config paths are package-relative. The next-run preview checks recurrence times only; the Server validates the package scenario before saving and again before each scheduled run.'}</p></div>
+        <p>{draft.inlineSnapshot ? `This schedule stores the immutable ${draft.jobType === 'run' ? 'Run definition' : draft.jobType === 'debug' ? 'Debug target and input' : 'Load scenario'} snapshot from your validated draft. The editor stays open behind this form.` : 'Scenario and config paths are package-relative. The next-run preview checks recurrence times only; the Server validates the package scenario before saving and again before each scheduled run.'}</p></div>
         {modal && <button type="button" className="button button-quiet" onClick={onClose}>Cancel and return to editor</button>}
         {!modal && editingId && <button type="button" className="button button-quiet" onClick={resetForm}>Cancel edit</button>}
       </div>
       {modal && scenarioPreviewYaml && <details className="att-schedule-snapshot-review">
-        <summary>Review the validated {draft.jobType === 'debug' ? 'Debug input' : 'Load scenario'} snapshot</summary>
+        <summary>Review the validated {draft.jobType === 'run' ? 'Run definition' : draft.jobType === 'debug' ? 'Debug input' : 'Load scenario'} snapshot</summary>
         <pre id="schedule-snapshot-content" tabIndex={0} aria-label="Validated Load scenario snapshot">{scenarioPreviewYaml}</pre>
       </details>}
       {notice && <p className="att-schedule-notice" role="status" aria-live="polite">{notice}</p>}
@@ -567,11 +570,14 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
           </label>
           <label htmlFor="schedule-recurrence">Recurrence
             <select id="schedule-recurrence" value={draft.recurrence} onChange={event => updateDraft('recurrence', event.currentTarget.value as ScheduleRecurrence)}>
-              <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="cron">Cron</option>
+              <option value="once">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="cron">Cron</option>
             </select>
           </label>
-          {draft.recurrence !== 'cron' && <label htmlFor="schedule-time">Local time · {draft.timezone || 'timezone required'}
+          {draft.recurrence !== 'cron' && draft.recurrence !== 'once' && <label htmlFor="schedule-time">Local time · {draft.timezone || 'timezone required'}
             <input id="schedule-time" type="time" value={draft.timeOfDay} onChange={event => updateDraft('timeOfDay', event.currentTarget.value)} required />
+          </label>}
+          {draft.recurrence === 'once' && <label htmlFor="schedule-run-at">Run at · ISO-8601 with UTC offset
+            <input id="schedule-run-at" value={draft.runAt} onChange={event => updateDraft('runAt', event.currentTarget.value)} placeholder="2026-10-20T02:00:00+08:00" required />
           </label>}
           {draft.recurrence === 'weekly' && <label htmlFor="schedule-weekday">Day(s) of week
             <select id="schedule-weekday" value={draft.dayOfWeek} onChange={event => updateDraft('dayOfWeek', event.currentTarget.value)}>{WEEKDAYS.map(day => <option key={day.value} value={day.value}>{day.label}</option>)}</select>
@@ -619,7 +625,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
       onCancel={event => { event.preventDefault(); setPendingConfirmation(null); }}>
       <h2 id="schedule-confirm-title">{pendingConfirmation?.action === 'run' ? 'Run this schedule now?' : 'Delete this schedule?'}</h2>
       <p id="schedule-confirm-description">{pendingConfirmation?.action === 'run'
-        ? `Submit ${pendingConfirmation.schedule.name} as a ${pendingConfirmation.schedule.jobType === 'debug' ? 'Debug' : 'Load'} job now? The Server will apply its rate and capacity limits.`
+        ? `Submit ${pendingConfirmation.schedule.name} as a ${pendingConfirmation.schedule.jobType === 'run' ? 'Run' : pendingConfirmation.schedule.jobType === 'debug' ? 'Debug' : 'Load'} job now? The Server will apply its rate and capacity limits.`
         : `Delete ${pendingConfirmation?.schedule.name || 'this schedule'}? Any already accepted jobs will continue running.`}</p>
       <div className="att-schedule-confirm-actions">
         <button ref={cancelConfirmation} type="button" className="button button-quiet" onClick={() => setPendingConfirmation(null)}>Cancel</button>

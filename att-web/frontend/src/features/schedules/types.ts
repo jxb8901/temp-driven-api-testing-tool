@@ -6,7 +6,7 @@ export interface LoadSchedule {
   description?: string | null;
   tags?: string[];
   packageId: string;
-  jobType?: 'load' | 'debug';
+  jobType?: 'load' | 'debug' | 'run';
   debugTarget?: { type: string; id: string } | null;
   scenario?: string | null;
   inlineSnapshot?: boolean;
@@ -14,7 +14,8 @@ export interface LoadSchedule {
   config?: string | null;
   environment?: string | null;
   timezone: string;
-  cron: string;
+  cron?: string;
+  runAt?: string;
   load?: Record<string, string>;
   maxConcurrentRuns: number;
   enabled: boolean;
@@ -28,13 +29,14 @@ export interface LoadScheduleInput {
   description: string;
   tags: string[];
   packageId: string;
-  jobType?: 'load' | 'debug';
+  jobType?: 'load' | 'debug' | 'run';
   scenario?: string;
   draftId?: string;
   config: string;
   environment: string;
   timezone: string;
-  cron: string;
+  cron?: string;
+  runAt?: string;
   load: Record<string, string>;
   maxConcurrentRuns: number;
   enabled: boolean;
@@ -42,7 +44,8 @@ export interface LoadScheduleInput {
 
 export interface SchedulePreviewInput {
   timezone: string;
-  cron: string;
+  cron?: string;
+  runAt?: string;
 }
 
 export interface SchedulePreview extends SchedulePreviewInput {
@@ -55,7 +58,7 @@ export interface ValidatedLoadDraftIntent {
   environment?: string;
   draftId: string;
   previewYaml?: string;
-  jobType?: 'load' | 'debug';
+  jobType?: 'load' | 'debug' | 'run';
   target?: { type: string; id: string };
 }
 

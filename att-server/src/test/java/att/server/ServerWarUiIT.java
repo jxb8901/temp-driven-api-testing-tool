@@ -91,6 +91,8 @@ class ServerWarUiIT {
                     "opaque Origins must be rejected");
             assertEquals(200, postJson(port, previewPath, scheduleAdminAuth, "http://127.0.0.1:" + port, previewBody),
                     "same-origin schedule preview may proceed");
+            assertEquals(403,apiStatus(port,"POST","/tools/att/api/v1/drafts/run",scheduleAdminAuth,"https://attacker.example",Map.of()),
+                    "Canonical RUN drafts retain the configured same-origin boundary.");
             assertEquals(403, delete(port, "/tools/att/api/v1/load-schedules/unknown", scheduleAdminAuth, "https://attacker.example"),
                     "cross-origin deletes must be rejected before schedule lookup");
             assertJobDeepLink(port, auth);
@@ -314,6 +316,34 @@ class ServerWarUiIT {
                     + "&origin=" + java.net.URLEncoder.encode("templates/SCHEDULED/template.yaml", java.nio.charset.StandardCharsets.UTF_8);
             assertEquals(404, get(port, deniedSourcePath, ordinary),
                     "A caller-supplied origin does not authorize configuration navigation to arbitrary package files.");
+
+            Map<String,Object> runDefinition=Map.of("schemaVersion","att-execution/v1","executionType","run",
+                    "packageId","payments","environment","SIT","target",Map.of("type","template","id","SCHEDULED"),
+                    "input",Map.of(),"options",Map.of("debug",false));
+            assertEquals(401,apiStatus(port,"POST",api+"/drafts/run",null,origin,runDefinition));
+            JsonNode runDraft=apiJson(port,"POST",api+"/drafts/run",admin,origin,runDefinition,201);
+            String runDraftId=runDraft.path("draftId").asText();
+            assertEquals("run",runDraft.path("executionType").asText());
+            assertEquals(404,get(port,api+"/drafts/"+runDraftId,ordinary));
+            Map<String,Object> runScheduleInput=Map.of("name","One-time functional RUN","packageId","payments",
+                    "environment","SIT","executionType","run","draftId",runDraftId,"enabled",false,
+                    "runAt",java.time.Instant.now().plusSeconds(3600).toString());
+            assertEquals(403,apiStatus(port,"POST",api+"/schedules",ordinary,origin,runScheduleInput));
+            JsonNode runSchedule=apiJson(port,"POST",api+"/schedules",admin,origin,runScheduleInput,201);
+            assertEquals("att-schedule/v2",runSchedule.path("schemaVersion").asText());
+            assertFalse(runSchedule.has("runInput"));
+            JsonNode runSchedules=getJson(port,api+"/schedules?executionType=run",admin);
+            assertEquals(1,runSchedules.path("items").size(),runSchedules.toString());
+            assertEquals(400,get(port,api+"/schedules?executionType=debug",admin));
+            JsonNode acceptedRun=apiJson(port,"POST",api+"/jobs/run",admin,origin,
+                    Map.of("packageId","payments","draftId",runDraftId),202);
+            assertEquals("run",acceptedRun.path("executionType").asText());
+            String runJobPath=api+"/jobs/"+acceptedRun.path("jobId").asText();
+            awaitJobStatus(port,runJobPath,admin,"PASS");
+            assertEquals("PASS",getJson(port,runJobPath+"/result",admin).path("job").path("status").asText());
+            assertTrue(firstSseEventId(port,runJobPath+"/events",admin)>0);
+            assertEquals(404,apiStatus(port,"POST",api+"/jobs/run",admin,origin,Map.of("packageId","payments","draftId",runDraftId)));
+            assertEquals(200,apiStatus(port,"DELETE",api+"/schedules/"+runSchedule.path("id").asText(),admin,origin,null));
 
             Map<String, Object> inlineScenario = Map.of(
                     "schemaVersion", "att-load/v1.6",

@@ -9,6 +9,7 @@ import type {
   JobSummary as LoadJobSummary, JobView, LoadDraftInput, LoadDraftResponse, LoadModel,
   LoadPolicyResponse, LoadTargetType, QuickLoadFormResponse, SubmitLoadDraftInput, TargetResource,
 } from './features/load/types';
+import type { RunDefinition } from './features/run/RunPage';
 import { contextRelativeReturnTo } from './contextPaths';
 import { inspectionCache } from './inspectionCache';
 import type {
@@ -18,6 +19,7 @@ import type {
 
 let csrfToken = '';
 let localAuthMode = false;
+let unifiedRunSupported = false;
 
 /** Resolve the API below the current UI context (for example /att/ui/ -> /att/api/v1/). */
 export function apiBaseUrl(): URL {
@@ -189,6 +191,7 @@ export const api = {
   async getVersion(signal?: AbortSignal): Promise<ServerVersion> {
     const version = await request<ServerVersion>('version', { signal });
     localAuthMode = version.authMode === 'local';
+    unifiedRunSupported = version.unifiedRunVersion === 'att-execution/v1';
     return version;
   },
   getCurrentUser(signal?: AbortSignal): Promise<{ loginId: string; displayName: string; role: 'ADMIN' | 'USER'; csrfToken?: string }> {
@@ -323,18 +326,32 @@ export const api = {
   getDebugForm(identity: ResourceIdentity, environment?: string, signal?: AbortSignal): Promise<DebugFormResponse> {
     return request<DebugFormResponse>(resourcePath(identity) + '/debug-form' + queryString({ environment }), { signal });
   },
+  previewRun(input: RunDefinition, signal?: AbortSignal): Promise<DraftResponse> {
+    if (!unifiedRunSupported && input.target && input.target.type !== 'case') {
+      return postJson<DraftResponse>('drafts/debug', { packageId: input.packageId, environment: input.environment, target: input.target, input: input.input }, signal);
+    }
+    return postJson<DraftResponse>('drafts/run', input, signal);
+  },
+  submitRun(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob> {
+    return postJson<AcceptedJob>(input.draftId.startsWith('D') ? 'jobs/debug' : 'jobs/run', input, signal);
+  },
   previewDebug(input: DebugDraftRequest, signal?: AbortSignal): Promise<DraftResponse> {
     return postJson<DraftResponse>('drafts/debug', input, signal);
   },
   submitDebug(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob> {
     return postJson<AcceptedJob>('jobs/debug', input, signal);
   },
-  runCase(input: { packageId: string; suite: string; caseId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob> {
-    const body: { packageId: string; suites: string[]; caseIds: string[]; principal?: string } = {
+  async runCase(input: { packageId: string; suite: string; caseId: string; environment?: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob> {
+    if (unifiedRunSupported) {
+      const draft = await postJson<DraftResponse>('drafts/run', { schemaVersion: 'att-execution/v1', executionType: 'run', packageId: input.packageId, environment: input.environment, selection: { suites: [input.suite], caseIds: [input.caseId] }, options: { debug: false } }, signal);
+      return postJson<AcceptedJob>('jobs/run', { packageId: input.packageId, draftId: draft.draftId, principal: input.principal }, signal);
+    }
+    const body: { packageId: string; suites: string[]; caseIds: string[]; environment?: string; principal?: string } = {
       packageId: input.packageId,
       suites: [input.suite],
       caseIds: [input.caseId],
     };
+    if (input.environment) body.environment = input.environment;
     if (input.principal) body.principal = input.principal;
     return postJson<AcceptedJob>('jobs/run', body, signal);
   },

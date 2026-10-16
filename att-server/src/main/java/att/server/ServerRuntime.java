@@ -6,6 +6,7 @@ import static att.metrics.InspectionMetrics.Stage.*;
 import att.server.api.WorkerRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
@@ -83,6 +84,9 @@ final class ServerRuntime implements AutoCloseable {
     private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
     private final Object draftLock=new Object();
     private final ConcurrentHashMap<String,DebugDraft> debugDrafts=new ConcurrentHashMap<>();
+    private record RunDraft(String id,String principal,String packageId,String revision,JsonNode workerInput,
+                            Map<String,Object> preview,Instant expiresAt,String debugDraftId) { }
+    private final ConcurrentHashMap<String,RunDraft> runDrafts=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,QuickLoadDraft> quickLoadDrafts=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdvancedLoadDraftState> advancedLoadDrafts=new ConcurrentHashMap<>();
     private final List<InspectionWorker> inspectionWorkerPool=new ArrayList<>();
@@ -178,7 +182,7 @@ final class ServerRuntime implements AutoCloseable {
         validatePackagePath(root,request.config,"config");validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
         validatePackagePath(root,request.scenario,"scenario");validatePackagePath(root,request.debugInput,"debugInput");
         if(request.suites!=null)for(String suite:request.suites)validatePackagePath(root,suite,"suites");
-        if("debug".equals(command))validateTarget(request.target);
+        if("debug".equals(command)||("run".equals(command)&&request.target!=null))validateTarget(request.target);
         if("load".equals(command)&&request.target!=null)validateTarget(request.target);
         boolean loadAdmission="load".equals(command);
         if(loadAdmission&&!loadSlots.tryAcquire()){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
@@ -284,6 +288,7 @@ final class ServerRuntime implements AutoCloseable {
             synchronized(active) { return active.view(); }
         }
         Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
+        record.put("executionType",Job.executionType(String.valueOf(record.get("command"))));
         record.remove("resultJson");record.remove("diagnosticJson");
         String performance=(String)record.remove("performanceJson");
         if(performance!=null&&!performance.isBlank())record.put("performance",JSON.readValue(performance,Map.class));
@@ -431,9 +436,7 @@ final class ServerRuntime implements AutoCloseable {
                 clock.instant().plusMillis(DRAFT_TTL_MILLIS));
         synchronized(draftLock) {
             expireDrafts();
-            if(debugDrafts.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
-            long owned=debugDrafts.values().stream().filter(value->value.principal.equals(principal)).count();
-            if(owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
+            checkDraftCapacity(principal);
             debugDrafts.put(draft.id,draft);
         }
         return debugDraftView(draft);
@@ -479,11 +482,7 @@ final class ServerRuntime implements AutoCloseable {
                 scenario,inspected,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
         synchronized(draftLock) {
             expireDrafts();
-            if(debugDrafts.size()+quickLoadDrafts.size()+advancedLoadDrafts.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
-            long owned=debugDrafts.values().stream().filter(value->value.principal.equals(principal)).count()
-                    +quickLoadDrafts.values().stream().filter(value->value.principal.equals(principal)).count()
-                    +advancedLoadDrafts.values().stream().filter(value->value.principal.equals(principal)).count();
-            if(owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
+            checkDraftCapacity(principal);
             quickLoadDrafts.put(draft.id,draft);
         }
         return quickLoadDraftView(draft);
@@ -512,11 +511,7 @@ final class ServerRuntime implements AutoCloseable {
                 clock.instant().plusMillis(DRAFT_TTL_MILLIS));
         synchronized(draftLock) {
             expireDrafts();
-            if(debugDrafts.size()+quickLoadDrafts.size()+advancedLoadDrafts.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
-            long owned=debugDrafts.values().stream().filter(value->value.principal.equals(principal)).count()
-                    +quickLoadDrafts.values().stream().filter(value->value.principal.equals(principal)).count()
-                    +advancedLoadDrafts.values().stream().filter(value->value.principal.equals(principal)).count();
-            if(owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
+            checkDraftCapacity(principal);
             advancedLoadDrafts.put(draft.id,draft);
         }
         return advancedLoadDraftView(draft);
@@ -547,7 +542,107 @@ final class ServerRuntime implements AutoCloseable {
             return advancedLoadDraftView(draft);
         }
     }
+    Map<String,Object> createRunDraft(JsonNode body,String principal) throws Exception {
+        RunDefinition run=RunDefinition.parse(body);
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        if(!config.inspection.enabled)throw new NotFoundException();
+        String packageId=run.workerInput.path("packageId").asText();
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        ObjectNode input=run.workerInput.deepCopy();
+        if(input.path("rerunFailed").asBoolean(false))resolveFailedCases(input,principal,packageId);
+        Map<String,Object> preview;String debugDraftId=null,revision;
+        if(run.resourceTarget) {
+            ObjectNode debug=JSON.createObjectNode();debug.put("packageId",packageId);
+            if(body.has("environment"))debug.set("environment",body.get("environment"));
+            debug.set("target",body.get("target"));debug.set("input",body.get("input"));
+            preview=createDebugDraft(debug,principal);debugDraftId=(String)preview.get("draftId");
+            DebugDraft validated=debugDrafts.get(debugDraftId);
+            input.set("inlineDebugInput",JSON.valueToTree(validated.input));
+            input.put("draftResourceId",validated.resourceId);revision=validated.revisionDigest;
+        } else {
+            WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
+            request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();
+            request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.inspectionAction="run-input";
+            request.config=safeRelative(request.config,"config");validatePackagePath(root,request.config,"config");
+            request.suites=safePaths(request.suites,"suites");if(request.suites!=null)for(String suite:request.suites)validatePackagePath(root,suite,"suites");
+            request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
+            if(request.environment!=null)request.environment=inspectionEnvironment(request.environment,"environment");
+            ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,packageId);
+            JSON.readerForUpdating(request).readValue(policy);
+            preview=executeInspection(root,request);revision=(String)preview.remove("revisionDigest");
+            Object ids=preview.get("selectedCaseIds");
+            if(!(ids instanceof List<?> selected)||selected.isEmpty()||selected.size()>10000)throw new IllegalArgumentException("RUN must select between 1 and 10000 cases");
+            // Freeze the resolved selection; never reevaluate tags or rerun history when a schedule fires.
+            input.set("caseIds",JSON.valueToTree(selected));input.remove("tags");input.remove("excludeTags");input.remove("rerunFailed");
+        }
+        if(revision==null||!revision.matches("[a-f0-9]{64}"))throw new IllegalStateException("RUN validation did not return a package revision");
+        input.put("expectedRevisionDigest",revision);applyInspectionPolicy(input,packageId);
+        RunDraft draft=new RunDraft("R"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,revision,input,
+                new LinkedHashMap<>(preview),clock.instant().plusMillis(DRAFT_TTL_MILLIS),debugDraftId);
+        synchronized(draftLock) {
+            expireDrafts();
+            checkDraftCapacity(principal);
+            runDrafts.put(draft.id,draft);
+        }
+        return runDraftView(draft);
+    }
+    private void resolveFailedCases(ObjectNode input,String principal,String packageId) throws Exception {
+        Path selectedManifest=null;
+        for(Map<String,Object> previous:store.listOwned(100,principal)) {
+            if(!packageId.equals(previous.get("packageId"))||!"run".equals(previous.get("command"))||!List.of("PASS","FAIL","ERROR","INVALID").contains(previous.get("status")))continue;
+            Path output=config.dataDir.resolve("jobs").resolve(String.valueOf(previous.get("jobId"))).resolve("output");
+            if(!Files.isDirectory(output))continue;
+            List<Path> manifests;
+            try(var files=Files.walk(output,3)){manifests=files.filter(file->file.getFileName().toString().equals("run.yaml")&&Files.isRegularFile(file,java.nio.file.LinkOption.NOFOLLOW_LINKS)).toList();}
+            if(manifests.isEmpty())continue; // A Template/Flow/Tool RUN has a specialized report, not a Case manifest.
+            if(manifests.size()!=1||Files.size(manifests.get(0))>8*1024*1024)throw new IllegalArgumentException("Previous Case RUN manifest is unavailable or exceeds the selection limit");
+            selectedManifest=manifests.get(0);break;
+        }
+        if(selectedManifest==null)throw new IllegalArgumentException("No completed owned Case RUN is available for rerunFailed");
+        Object document=new Yaml().load(Files.readString(selectedManifest));
+        if(!(document instanceof Map<?,?> manifest)||!(manifest.get("cases") instanceof List<?> cases))throw new IllegalArgumentException("Previous Case RUN manifest is invalid");
+        List<String> failed=new ArrayList<>();
+        for(Object value:cases)if(value instanceof Map<?,?> row&&List.of("FAIL","ERROR","INVALID").contains(row.get("status"))&&row.get("caseId") instanceof String id) {
+            if(!input.has("caseIds")||JSON.convertValue(input.get("caseIds"),List.class).contains(id))failed.add(id);
+        }
+        if(failed.isEmpty())throw new IllegalArgumentException("Previous Case RUN has no failed cases matching this selection");
+        input.set("caseIds",JSON.valueToTree(failed));input.remove("rerunFailed");
+    }
+    private Map<String,Object> runDraftView(RunDraft draft) {
+        Map<String,Object> view=new LinkedHashMap<>(draft.preview);
+        view.put("draftId",draft.id);view.put("schemaVersion",RunDefinition.VERSION);view.put("executionType","run");
+        view.put("packageId",draft.packageId);view.put("revisionDigest",draft.revision);view.put("expiresAt",draft.expiresAt.toString());
+        view.put("options",Map.of("debug",draft.workerInput.path("diagnosticMode").asBoolean()));
+        return view;
+    }
+    private RunDraft runDraft(String id,String principal,String packageId) {
+        synchronized(draftLock) {
+            expireDrafts();RunDraft draft=runDrafts.get(id);
+            if(draft==null||!draft.principal.equals(principal)||!draft.packageId.equals(packageId))throw new NotFoundException();
+            return draft;
+        }
+    }
+    Map<String,Object> getRunDraft(String id,String principal) {
+        RunDraft draft=runDrafts.get(id);if(draft==null)throw new NotFoundException();
+        return runDraftView(runDraft(id,principal,draft.packageId));
+    }
+    Map<String,Object> submitRunDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
+        requireOnlyFields(body,"packageId","draftId","principal");
+        RunDraft draft=runDraft(required(body,"draftId"),principal,required(body,"packageId"));
+        synchronized(draft) {
+            if(runDrafts.get(draft.id)!=draft)throw new NotFoundException();
+            WorkerRequest revisionRequest=inspectionRequest(draft.packageId,config.packages.get(draft.packageId),draft.workerInput.path("environment").isTextual()?draft.workerInput.path("environment").asText():null);
+            if(draft.workerInput.path("config").isTextual())revisionRequest.config=draft.workerInput.path("config").asText();
+            revisionRequest.inspectionAction="revision";revisionRequest.expectedRevisionDigest=draft.revision;
+            try { executeInspection(config.packages.get(draft.packageId),revisionRequest); }
+            catch(StaleCursorException stale) {runDrafts.remove(draft.id,draft);throw new StaleDraftException();}
+            Map<String,Object> accepted=submit("run",draft.workerInput,persistedPrincipal,true);
+            runDrafts.remove(draft.id,draft);if(draft.debugDraftId!=null)debugDrafts.remove(draft.debugDraftId);
+            return accepted;
+        }
+    }
     Map<String,Object> getDraft(String id,String principal) {
+        if(id!=null&&id.matches("R[0-9A-F]{32}"))return getRunDraft(id,principal);
         if(DRAFT_ID.matcher(id==null?"":id).matches())return getDebugDraft(id,principal);
         if(QUICK_LOAD_DRAFT_ID.matcher(id==null?"":id).matches())return getQuickLoadDraft(id,principal);
         if(ADVANCED_LOAD_DRAFT_ID.matcher(id==null?"":id).matches())return getAdvancedLoadDraft(id,principal);
@@ -722,8 +817,17 @@ final class ServerRuntime implements AutoCloseable {
         view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));view.put("diagnostics",Collections.emptyList());
         view.put("expiresAt",draft.expiresAt.toString());return view;
     }
+    private void checkDraftCapacity(String principal) {
+        long total=debugDrafts.size()+quickLoadDrafts.size()+advancedLoadDrafts.size()+runDrafts.size();
+        long owned=debugDrafts.values().stream().filter(d->d.principal.equals(principal)).count()
+                +quickLoadDrafts.values().stream().filter(d->d.principal.equals(principal)).count()
+                +advancedLoadDrafts.values().stream().filter(d->d.principal.equals(principal)).count()
+                +runDrafts.values().stream().filter(d->d.principal.equals(principal)).count();
+        if(total>=MAX_ACTIVE_DRAFTS||owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
+    }
     private void expireDrafts() {
-        Instant now=clock.instant();debugDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
+        Instant now=clock.instant();runDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
+        debugDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
         quickLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
         advancedLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
     }
@@ -947,7 +1051,7 @@ final class ServerRuntime implements AutoCloseable {
         String workerError=(String)envelope.get("errorCode");
         if("ATT-RESOURCE-NOT-FOUND".equals(workerError))throw new NotFoundException();
         if("ATT-RESOURCE-CURSOR-STALE".equals(workerError))throw new StaleCursorException();
-        boolean draftInspection="debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
+        boolean draftInspection="run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                 ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction);
         if(draftInspection&&("WORKER_REQUEST_INVALID".equals(workerError)
@@ -1318,9 +1422,16 @@ final class ServerRuntime implements AutoCloseable {
     LoadSchedule loadSchedule(String id) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();return schedule;}
     Map<String,Object> loadScheduleView(LoadSchedule schedule) {
         Map<String,Object> view=JSON.convertValue(schedule,Map.class);
+        view.remove("runInput");view.put("executionType","load".equals(schedule.effectiveJobType())?"load":"run");
+        view.put("revisionPolicy",schedule.runInput!=null||schedule.inlineDebugInput!=null?"reject-package-changes":"validate-current-package");
         view.remove("inlineScenario");view.remove("inlineDebugInput");view.remove("debugResourceId");view.remove("expectedRevisionDigest");
         view.put("jobType",schedule.effectiveJobType());
-        view.put("inlineSnapshot",Boolean.valueOf(schedule.inlineScenario!=null||schedule.inlineDebugInput!=null));
+        view.put("inlineSnapshot",Boolean.valueOf(schedule.inlineScenario!=null||schedule.inlineDebugInput!=null||schedule.runInput!=null));
+        if(schedule.runInput!=null) {
+            Object target=schedule.runInput.get("target");
+            if(target instanceof Map)view.put("debugTarget",target);
+            else view.put("selectedCaseIds",schedule.runInput.get("caseIds"));
+        }
         if("debug".equals(schedule.effectiveJobType()))view.put("debugTarget",Map.of("type",schedule.debugTargetType,"id",schedule.debugTargetId));
         return view;
     }
@@ -1332,7 +1443,13 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> previewLoadSchedule(JsonNode input) {
         if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
-        input.fieldNames().forEachRemaining(key->{if(!Set.of("timezone","cron").contains(key))throw new IllegalArgumentException("Unknown preview field: "+key);});
+        input.fieldNames().forEachRemaining(key->{if(!Set.of("timezone","cron","runAt").contains(key))throw new IllegalArgumentException("Unknown preview field: "+key);});
+        if(input.hasNonNull("runAt")) {
+            if(input.hasNonNull("cron"))throw new IllegalArgumentException("Provide exactly one cron or runAt trigger");
+            String fire=futureRunAt(fieldText(input,"runAt",null,true));
+            String zone=fieldText(input,"timezone","UTC",false);scheduleZone(zone);
+            return Map.of("timezone",zone,"runAt",fire,"nextRunAt",fire,"nextOccurrences",List.of(fire));
+        }
         String timezone=fieldText(input,"timezone",null,true),cronText=fieldText(input,"cron",null,true);
         java.time.ZoneId zone=scheduleZone(timezone);CronExpression cron=CronExpression.parse(cronText,config.scheduling.minimumIntervalMinutes);
         cron.validateTimezoneMinimumInterval(zone,config.scheduling.minimumIntervalMinutes,clock.instant());
@@ -1344,8 +1461,8 @@ final class ServerRuntime implements AutoCloseable {
         requireSchedulingEnabled();LoadSchedule prior=store.schedule(id);if(prior==null)throw new NotFoundException();
         LoadSchedule schedule=buildLoadSchedule(input,prior,principal);schedule.id=id;schedule.createdBy=prior.createdBy;schedule.createdAt=prior.createdAt;
         schedule.updatedBy=principal;schedule.updatedAt=clock.instant().toString();
-        if(!prior.enabled&&schedule.enabled||!prior.cron.equals(schedule.cron)||!prior.timezone.equals(schedule.timezone))
-            schedule.nextRunAt=nextRun(schedule.cron,schedule.timezone,clock.instant()).toString();
+        if(!prior.enabled&&schedule.enabled||!java.util.Objects.equals(prior.cron,schedule.cron)||!java.util.Objects.equals(prior.runAt,schedule.runAt)||!prior.timezone.equals(schedule.timezone))
+            schedule.nextRunAt=schedule.runAt==null?nextRun(schedule.cron,schedule.timezone,clock.instant()).toString():futureRunAt(schedule.runAt);
         else if(!schedule.enabled)schedule.nextRunAt=prior.nextRunAt;
         LoadSchedule updated=store.updateSchedule(schedule,prior.updatedAt);if(updated==null)throw new NotFoundException();
         store.audit(principal,"SCHEDULE_UPDATE",null,schedule.packageId,"UPDATED");return updated;
@@ -1354,7 +1471,7 @@ final class ServerRuntime implements AutoCloseable {
         requireSchedulingEnabled();Instant now=clock.instant();LoadSchedule schedule;
         synchronized(store) {
             LoadSchedule current=store.schedule(id);if(current==null)throw new NotFoundException();
-            String next=enabled?nextRun(current.cron,current.timezone,now).toString():null;
+            String next=enabled?(current.runAt==null?nextRun(current.cron,current.timezone,now).toString():futureRunAt(current.runAt)):null;
             schedule=store.setScheduleEnabled(id,enabled,principal,now.toString(),next);
         }
         if(schedule==null)throw new NotFoundException();
@@ -1365,9 +1482,34 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> triggerLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule);store.audit(principal,"SCHEDULE_TRIGGER",String.valueOf(occurrence.get("jobId")),schedule.packageId,String.valueOf(occurrence.get("status")));return occurrence;}
 
     private Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId) throws Exception {
+        if("local".equals(config.authMode)) {
+            Map<String,Object> owner=store.authUser(schedule.createdBy);
+            if(owner==null||!Boolean.TRUE.equals(owner.get("active"))||!"ADMIN".equals(owner.get("role")))throw new IllegalArgumentException("Schedule owner is no longer authorized");
+        }
+        if("run".equals(schedule.effectiveJobType()))return submitScheduledRun(schedule,occurrenceId);
         return "debug".equals(schedule.effectiveJobType())
                 ? submitScheduledDebug(schedule,occurrenceId)
                 : submitScheduledLoad(schedule,occurrenceId);
+    }
+
+    private Map<String,Object> submitScheduledRun(LoadSchedule schedule,String occurrenceId) throws Exception {
+        validateScheduledRun(schedule);
+        ObjectNode input=JSON.valueToTree(schedule.runInput);applyInspectionPolicy(input,schedule.packageId);
+        Map<String,Object> accepted=submit("run",input,schedule.createdBy,true,occurrenceId,true);
+        store.audit(schedule.createdBy,"SCHEDULE_EXECUTE",String.valueOf(accepted.get("jobId")),schedule.packageId,"ACCEPTED");
+        return accepted;
+    }
+    private void validateScheduledRun(LoadSchedule schedule) throws Exception {
+        Path root=config.packages.get(schedule.packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        if(schedule.runInput==null||schedule.expectedRevisionDigest==null)throw new IllegalArgumentException("Scheduled RUN snapshot is incomplete");
+        if(schedule.inlineDebugInput!=null)validateScheduledDebugInput(root,schedule);
+        else {
+            WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
+            if(schedule.config!=null){request.config=safeRelative(schedule.config,"config");validatePackagePath(root,request.config,"config");}
+            request.inspectionAction="revision";request.expectedRevisionDigest=schedule.expectedRevisionDigest;
+            try { executeInspection(root,request); }
+            catch(StaleCursorException stale) {throw new StaleDraftException();}
+        }
     }
 
     private Map<String,Object> submitScheduledLoad(LoadSchedule schedule,String occurrenceId) throws Exception {
@@ -1482,15 +1624,22 @@ final class ServerRuntime implements AutoCloseable {
 
     private LoadSchedule buildLoadSchedule(JsonNode input,LoadSchedule prior,String principal) throws Exception {
         if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
-        Set<String> allowed=Set.of("name","description","tags","packageId","jobType","scenario","draftId","config","environment","timezone","cron","load","maxConcurrentRuns","enabled");
+        Set<String> allowed=Set.of("name","description","tags","packageId","jobType","executionType","schemaVersion","scenario","draftId","config","environment","timezone","cron","runAt","load","maxConcurrentRuns","enabled");
         input.fieldNames().forEachRemaining(key->{if(!allowed.contains(key))throw new IllegalArgumentException("Unknown schedule field: "+key);});
+        if(input.has("schemaVersion")&&!"att-schedule/v2".equals(fieldText(input,"schemaVersion",null,true)))throw new IllegalArgumentException("Unsupported schedule schemaVersion");
         LoadSchedule s=prior==null?new LoadSchedule():prior.copy();
         s.name=fieldText(input,"name",s.name,true);s.description=fieldText(input,"description",s.description,false);
         if(input.has("tags"))s.tags=scheduleTags(input.get("tags"));else if(s.tags==null)s.tags=List.of();
         s.packageId=fieldText(input,"packageId",s.packageId,true);
         String jobType=fieldText(input,"jobType",prior==null?"load":prior.effectiveJobType(),false);
         if(jobType==null||jobType.isBlank())jobType="load";
-        if(!List.of("load","debug").contains(jobType))throw new IllegalArgumentException("jobType must be load or debug");
+        if(input.has("executionType")) {
+            String type=fieldText(input,"executionType",null,true);
+            if(!List.of("run","load").contains(type))throw new IllegalArgumentException("executionType must be run or load");
+            if(input.has("jobType")&&!type.equals(jobType))throw new IllegalArgumentException("executionType and jobType disagree");
+            jobType=type;
+        }
+        if(!List.of("load","debug","run").contains(jobType))throw new IllegalArgumentException("jobType must be run, load or legacy debug");
         if(prior!=null&&!prior.effectiveJobType().equals(jobType))throw new IllegalArgumentException("A schedule job type is immutable; create a new schedule to change it");
         s.jobType=jobType;
         String draftId=fieldText(input,"draftId",null,false);
@@ -1499,7 +1648,19 @@ final class ServerRuntime implements AutoCloseable {
             if(input.has("scenario")&&!input.get("scenario").isNull())throw new IllegalArgumentException("Provide either a validated draft or a package scenario path");
             String draftEnvironment=input.has("environment")?fieldText(input,"environment",null,false):null;
             draftEnvironment=draftEnvironment==null||draftEnvironment.isBlank()?null:inspectionEnvironment(draftEnvironment,"environment");
-            if("debug".equals(jobType)) {
+            if("run".equals(jobType)) {
+                RunDraft draft=runDraft(draftId,principal,s.packageId);
+                if(!java.util.Objects.equals(draftEnvironment,draft.workerInput.path("environment").isTextual()?draft.workerInput.path("environment").asText():null))throw new IllegalArgumentException("Schedule environment differs from the validated RUN draft");
+                s.runInput=JSON.convertValue(draft.workerInput,Map.class);s.expectedRevisionDigest=draft.revision;
+                s.config=draft.workerInput.path("config").isTextual()?draft.workerInput.path("config").asText():null;
+                s.scenario=null;s.inlineScenario=null;s.load=new LinkedHashMap<>();
+                if(draft.debugDraftId!=null) {
+                    DebugDraft debug=scheduleDraftDebug(draft.debugDraftId,principal,s.packageId,draftEnvironment);
+                    if(debug.containsSensitiveValues)throw new IllegalArgumentException("A RUN schedule cannot persist submitted sensitive values");
+                    s.inlineDebugInput=deepMap(debug.scheduleInput);s.runInput.put("inlineDebugInput",s.inlineDebugInput);
+                    s.debugTargetType=debug.targetType;s.debugTargetId=debug.targetId;s.debugResourceId=debug.resourceId;
+                }
+            } else if("debug".equals(jobType)) {
                 DebugDraft debug=scheduleDraftDebug(draftId,principal,s.packageId,draftEnvironment);
                 if(debug.containsSensitiveValues)throw new IllegalArgumentException("A Debug schedule cannot persist submitted credentials, private values, or other classified sensitive fields. Keep classified package defaults protected or remove them from the override.");
                 s.scenario=null;s.inlineScenario=null;s.inlineDebugInput=deepMap(debug.scheduleInput);
@@ -1509,6 +1670,9 @@ final class ServerRuntime implements AutoCloseable {
                 s.scenario=null;s.inlineDebugInput=null;s.debugTargetType=null;s.debugTargetId=null;s.debugResourceId=null;s.expectedRevisionDigest=null;
                 s.inlineScenario=scheduleDraftScenario(draftId,principal,s.packageId,draftEnvironment);
             }
+        } else if("run".equals(jobType)) {
+            if(s.runInput==null)throw new IllegalArgumentException("A RUN schedule requires a validated RUN draft");
+            if(input.has("scenario")||input.has("load"))throw new IllegalArgumentException("RUN schedules cannot use Load fields");
         } else if("debug".equals(jobType)) {
             if(s.inlineDebugInput==null||s.inlineScenario!=null)throw new IllegalArgumentException("A Debug schedule requires a validated Debug draft snapshot");
             if(input.has("scenario")&&!input.get("scenario").isNull()&&!input.get("scenario").asText().isBlank())
@@ -1524,7 +1688,10 @@ final class ServerRuntime implements AutoCloseable {
             if(input.has("draftId"))throw new IllegalArgumentException("An inline scenario snapshot cannot be replaced");
         }
         s.config=fieldText(input,"config",s.config,false);s.environment=fieldText(input,"environment",s.environment,false);
-        s.timezone=fieldText(input,"timezone",s.timezone,true);s.cron=fieldText(input,"cron",s.cron,true);
+        s.timezone=fieldText(input,"timezone",s.timezone, !input.hasNonNull("runAt")&&s.runAt==null);
+        s.runAt=fieldText(input,"runAt",s.runAt,false);s.cron=fieldText(input,"cron",s.cron,s.runAt==null);
+        if(s.runAt!=null&&s.cron!=null)throw new IllegalArgumentException("Provide exactly one cron or runAt trigger");
+        if(s.timezone==null)s.timezone="UTC";
         if(input.has("enabled")){if(!input.get("enabled").isBoolean())throw new IllegalArgumentException("enabled must be true or false");s.enabled=input.get("enabled").booleanValue();}
         if(input.has("maxConcurrentRuns")){
             JsonNode limit=input.get("maxConcurrentRuns");if(!limit.isIntegralNumber()||!limit.canConvertToInt())throw new IllegalArgumentException("maxConcurrentRuns must be an integer");
@@ -1538,7 +1705,15 @@ final class ServerRuntime implements AutoCloseable {
         Path root=config.packages.get(s.packageId);validatePackageRoot(root);
         s.config=safeRelative(s.config,"config");validatePackagePath(root,s.config,"config");
         s.environment=s.environment==null||s.environment.isBlank()?null:safeText(s.environment,128,"environment");
-        if("debug".equals(s.effectiveJobType())) {
+        if("run".equals(s.effectiveJobType())) {
+            JsonNode snapshot=JSON.valueToTree(s.runInput);
+            String expectedEnvironment=snapshot.path("environment").isTextual()?snapshot.path("environment").asText():null;
+            String expectedConfig=snapshot.path("config").isTextual()?snapshot.path("config").asText():null;
+            if(!s.packageId.equals(snapshot.path("packageId").asText())||!java.util.Objects.equals(s.environment,expectedEnvironment)||!java.util.Objects.equals(s.config,expectedConfig))
+                throw new IllegalArgumentException("A RUN snapshot is immutable; create a new schedule for changed values");
+            if(input.has("scenario")||s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("RUN schedules cannot use Load fields");
+            validateScheduledRun(s);
+        } else if("debug".equals(s.effectiveJobType())) {
             if(s.config!=null&&!"config/config.yaml".equals(s.config))throw new IllegalArgumentException("A Debug schedule must use the configuration validated by the Debug draft");
             if(prior!=null&&debugSnapshotInputChanged(prior,s,input))throw new IllegalArgumentException("A Debug snapshot is immutable; create a new schedule for changed values");
             validateScheduledDebugInput(root,s);
@@ -1553,14 +1728,23 @@ final class ServerRuntime implements AutoCloseable {
             if(s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("Inline scenario snapshots cannot use separate Load overrides");
         }
         java.time.ZoneId zone=scheduleZone(s.timezone);
-        CronExpression cron=CronExpression.parse(s.cron,config.scheduling.minimumIntervalMinutes);
-        cron.validateTimezoneMinimumInterval(zone,config.scheduling.minimumIntervalMinutes,clock.instant());
+        if(s.runAt==null) {
+            CronExpression cron=CronExpression.parse(s.cron,config.scheduling.minimumIntervalMinutes);
+            cron.validateTimezoneMinimumInterval(zone,config.scheduling.minimumIntervalMinutes,clock.instant());
+        } else if(prior==null||!java.util.Objects.equals(s.runAt,prior.runAt)||!prior.enabled&&s.enabled)
+            s.runAt=futureRunAt(s.runAt);
         if("load".equals(s.effectiveJobType())) {
             ValidatedScheduledScenario validated=validateScheduleScenario(root,s);
             if(s.inlineScenario!=null)s.inlineScenario=deepMap(validated.scenario);
         }
-        s.nextRunAt=nextRun(s.cron,s.timezone,clock.instant()).toString();
+        s.nextRunAt=s.runAt==null?nextRun(s.cron,s.timezone,clock.instant()).toString():s.runAt;
         s.updatedBy=principal;s.updatedAt=clock.instant().toString();return s;
+    }
+    private String futureRunAt(String runAt) {
+        Instant fire;
+        try { fire=Instant.parse(runAt); } catch(java.time.format.DateTimeParseException invalid) {throw new IllegalArgumentException("runAt must be an ISO-8601 instant with UTC offset");}
+        if(!fire.isAfter(clock.instant()))throw new IllegalArgumentException("runAt must be in the future");
+        return fire.toString();
     }
     private Map<String,Object> scheduleDraftScenario(String draftId,String principal,String packageId,String environment) {
         synchronized(draftLock) {

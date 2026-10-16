@@ -33,13 +33,13 @@ async function main() {
     await selectFixture(context, fixture.origin, 'scheduled-workspace');
     const base = `${fixture.origin}/att/ui/`;
     await page.goto(`${base}#/load-schedules`);
-    await page.getByRole('heading', { name: 'Scheduled Load', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
     await page.getByText('Nightly payments', { exact: true }).first().waitFor();
     assert.equal(await page.locator('[data-nav="scheduled-load"]').getAttribute('aria-current'), 'page');
     assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark', 'the UI should follow the OS dark preference until a user choice is stored');
 
     await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
-    await assertAxe(page, 'Scheduled Load should pass WCAG 2.2 AA checks');
+    await assertAxe(page, 'Schedules should pass WCAG 2.2 AA checks');
 
     await page.getByRole('button', { name: 'History Nightly payments' }).first().click();
     await page.getByText(/Skipped because this schedule already reached its concurrent-run limit/).waitFor();
@@ -104,7 +104,7 @@ async function main() {
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
 
     await page.goto(`${base}#/load-schedules`);
-    await page.getByRole('heading', { name: 'Scheduled Load', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
     for (const width of [1280, 768, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await page.waitForTimeout(80);
@@ -116,7 +116,7 @@ async function main() {
           text: element.textContent?.trim().slice(0, 30), right: Math.round(element.getBoundingClientRect().right),
         })).filter(item => item.right > window.innerWidth + 1).slice(0, 8),
       }));
-      assert.ok(layout.scrollWidth <= width, `Scheduled Load must not overflow at ${width}px: ${JSON.stringify(layout)}`);
+      assert.ok(layout.scrollWidth <= width, `Schedules must not overflow at ${width}px: ${JSON.stringify(layout)}`);
       if (width <= 820) assert.equal(await page.locator('.att-schedule-cards').isVisible(), true, `schedule cards should be visible at ${width}px`);
     }
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
@@ -133,10 +133,10 @@ async function main() {
     assert.match(await page.locator('#main-content').innerText(), /authenticated/);
     await selectFixture(context, fixture.origin, 'schedule-disabled');
     await page.reload();
-    await page.getByText(/Scheduled Load is disabled by Server configuration/).waitFor();
+    await page.getByText(/Schedules is disabled by Server configuration/).waitFor();
 
-    assert.deepEqual(pageErrors, [], 'Scheduled Load should not report uncaught browser errors');
-    console.log('ATT Scheduled Load browser acceptance passed.');
+    assert.deepEqual(pageErrors, [], 'Schedules should not report uncaught browser errors');
+    console.log('ATT Schedules browser acceptance passed.');
     await context.close();
   } finally {
     if (browser) await browser.close();

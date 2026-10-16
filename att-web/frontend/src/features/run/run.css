@@ -1,0 +1,13 @@
+.att-run-page { max-width: 1120px; }
+.att-run-page > p { color: var(--att-color-muted); line-height: 1.6; }
+.att-run-definition, .att-run-review { min-width: 0; margin-block: var(--att-space-5); padding: var(--att-space-5); border: 1px solid var(--att-color-border); border-radius: var(--att-radius-card); background: var(--att-color-surface); }
+.att-run-definition { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--att-space-4); }
+.att-run-definition legend { padding-inline: var(--att-space-2); font-weight: 700; }
+.att-run-definition > label { display: grid; min-width: 0; gap: var(--att-space-2); font-size: .86rem; font-weight: 650; }
+.att-run-definition input:not([type="checkbox"]), .att-run-definition select { width: 100%; min-height: 42px; border: 1px solid var(--att-color-border); border-radius: var(--att-radius-control); background: var(--att-color-surface); color: var(--att-color-text); padding: .55rem .7rem; }
+.att-run-definition > p, .att-run-definition > .att-code-editor, .att-run-definition > .att-run-diagnostics { grid-column: 1 / -1; }
+.att-run-definition > p { margin: 0; font-size: .86rem; line-height: 1.6; color: var(--att-color-muted); }
+.att-run-definition > .att-run-diagnostics { display: flex; align-items: center; }
+.att-run-definition > button { justify-self: start; }
+.att-run-review .button { margin-top: var(--att-space-4); margin-right: var(--att-space-3); }
+@media (max-width: 640px) { .att-run-definition { grid-template-columns: minmax(0, 1fr); padding: var(--att-space-4); } }

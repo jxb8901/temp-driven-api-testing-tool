@@ -17,9 +17,9 @@ Testcase
 
 **Testcase** 是作者編寫並正規化的 Workbook row。**Case execution** 是 Run 對該 Testcase 的一次執行；其完整 Case ID 標識 Testcase，並沿用於執行結果和 evidence。討論 Workbook data 和 authoring 時使用 *Testcase*；討論 runtime status、日誌、報表和 artifacts 時使用 *Case execution*。**Stage** 選擇 Template 並提供 stage-private data；**Template** 是可執行 scenario 邊界；**Flow** 是具有獨立 Action scope 的可重用 Template 邏輯；**Action** 是一個有序工作單元；**Resource** 是 Action 或允許的 expression call 所使用的 Tool、DBHelper、MQHelper、HTTPHelper 或 SSHHelper。
 
-## 三種執行模式是同級概念
+## RUN 與 LOAD 執行模型
 
-Run、Debug、Load 把不同輸入適配到同一 execution-neutral Context 和同一批 reusable components：
+RUN 單次執行功能目標或 Case selection；Debug 為診斷選項；LOAD 保留效能引擎。請參閱[統一 RUN 與排程](execution-modes/unified-run.md)。舊 adapter 保留專用輸入及報告：
 
 | 模式 | 主要輸入 | 重用內容 |
 |---|---|---|

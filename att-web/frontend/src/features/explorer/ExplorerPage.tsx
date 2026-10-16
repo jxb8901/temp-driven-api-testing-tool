@@ -102,6 +102,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   const [detailLoading, setDetailLoading] = useState(false);
   const [tab, setTab] = useState<DetailTab>('definition');
   const [debugOpen, setDebugOpen] = useState(false);
+  const [diagnosticMode, setDiagnosticMode] = useState(false);
   const [debugForm, setDebugForm] = useState<Awaited<ReturnType<ExplorerApi['getDebugForm']>> | null>(null);
   const [debugInput, setDebugInput] = useState<JsonObject>({});
   const [debugStatus, setDebugStatus] = useState('');
@@ -322,7 +323,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
     if (environment) body.environment = environment;
     setPreviewLoading(true); setDebugError(''); setDebugStatus('Validating the effective Debug input…');
     try {
-      const nextDraft = await api.previewDebug(body);
+      const nextDraft = api.previewRun ? await api.previewRun({ ...body, schemaVersion: 'att-execution/v1', executionType: 'run', options: { debug: diagnosticMode } }) : await api.previewDebug(body);
       if (generation !== debugValidationGeneration.current) return null;
       setDraft(nextDraft); setDebugStatus(nextDraft.redacted ? 'Validation passed. Sensitive preview values remain hidden.' : 'Validation passed.');
       return nextDraft;
@@ -336,7 +337,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
     const expiresAt = currentDraft?.expiresAt ? Date.parse(currentDraft.expiresAt) : Number.NaN;
     if (!currentDraft || !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 15_000) currentDraft = await previewDebug();
     if (!currentDraft) return;
-    onScheduleDebug({ packageId, environment: environment || undefined, draftId: currentDraft.draftId, jobType: 'debug',
+    onScheduleDebug({ packageId, environment: environment || undefined, draftId: currentDraft.draftId, jobType: currentDraft.draftId.startsWith('R') ? 'run' : 'debug',
       previewYaml: currentDraft.previewYaml, target: { type: debugForm.target.type, id: debugForm.target.id } });
   };
 
@@ -346,11 +347,11 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
     const expiresAt = currentDraft?.expiresAt ? Date.parse(currentDraft.expiresAt) : Number.NaN;
     if (!currentDraft || !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 15_000) currentDraft = await previewDebug();
     if (!currentDraft) return;
-    if (!window.confirm(`Start Debug for ${detail?.logicalId || detail?.name || identity.resourceId}?`)) return;
-    setSubmitLoading(true); setDebugError(''); setDebugStatus('Submitting Debug…');
+    if (!window.confirm(`Run ${detail?.logicalId || detail?.name || identity.resourceId}?`)) return;
+    setSubmitLoading(true); setDebugError(''); setDebugStatus('Submitting Run…');
     try {
-      const accepted = await api.submitDebug({ packageId, draftId: currentDraft.draftId, principal: principal.trim() || undefined });
-      setDraft(null); updateDirty(false); setDebugStatus(`Debug job ${accepted.jobId} was accepted. Opening job status…`);
+      const accepted = await (currentDraft.draftId.startsWith('R') && api.submitRun ? api.submitRun : api.submitDebug)({ packageId, draftId: currentDraft.draftId, principal: principal.trim() || undefined });
+      setDraft(null); updateDirty(false); setDebugStatus(`Run job ${accepted.jobId} was accepted. Opening job status…`);
       onJobAccepted(accepted.jobId);
     } catch (error) {
       const status = statusOf(error);
@@ -373,7 +374,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
     if (!window.confirm(`Run case ${detail.logicalId}?`)) return;
     setDetailError(''); setDetailLoading(true);
     try {
-      const accepted = await api.runCase({ packageId, suite: String(detail.provenance.suite), caseId: detail.logicalId, principal: principal.trim() || undefined });
+      const accepted = await api.runCase({ packageId, suite: String(detail.provenance.suite), caseId: detail.logicalId, environment: environment || undefined, principal: principal.trim() || undefined });
       updateDirty(false); onJobAccepted(accepted.jobId);
     } catch (error) { setDetailError(userError(error, 'case run')); }
     finally { setDetailLoading(false); }
@@ -482,11 +483,11 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
             <div><dt>Tags</dt><dd>{selectedResource.tags?.join(', ') || '—'}</dd></div></dl>
           <label>Anonymous job label (optional)<input value={principal} maxLength={120} onChange={event => changePrincipal(event.currentTarget.value)} /></label>
           {selectedResource.type === 'case' && <button type="button" disabled={detailLoading || !detail?.provenance?.suite || !detail.logicalId} onClick={() => void runCase()}>Run selected case</button>}
-          {debugEnabled && <button type="button" aria-expanded={debugOpen} onClick={() => setDebugOpen(value => !value)}>{debugOpen ? 'Close Debug' : 'Debug this target'}</button>}
+          {debugEnabled && <button type="button" aria-expanded={debugOpen} onClick={() => setDebugOpen(value => !value)}>{debugOpen ? 'Close Run' : 'Run this target'}</button>}
           {onOpenConfiguration && identity && ['template', 'flow', 'tool'].includes(identity.type) && <button type="button" onClick={() => onOpenConfiguration(identity)}>Open in Configuration</button>}
           {onOpenQuickLoad && debugEnabled && identity && <button type="button" onClick={() => onOpenQuickLoad(identity)}>Quick Load</button>}
           {debugOpen && <section className="att-debug-panel" aria-labelledby="att-debug-heading">
-            <h3 id="att-debug-heading">Debug / Test Runner</h3>
+            <h3 id="att-debug-heading">Run</h3>
             <p className="att-debug-status" role="status" aria-live="polite">{debugStatus}</p>
             {debugError && <p className="att-error" role="alert">{debugError}</p>}
             {debugForm && <>
@@ -495,6 +496,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
                   setFormValid(valid);
                   if (!valid) { debugValidationGeneration.current++; setDraft(null); }
                 }} />
+              <label><input type="checkbox" checked={diagnosticMode} onChange={event => { setDiagnosticMode(event.target.checked); setDraft(null); debugValidationGeneration.current++; updateDirty(true); }} />Debug diagnostics</label>
               <div className="att-debug-actions">
                 <button type="button" onClick={resetDebug} disabled={previewLoading || submitLoading}>Reset defaults</button>
                 <button type="button" onClick={() => void previewDebug()} disabled={previewLoading || submitLoading || !formValid}>{previewLoading ? 'Validating…' : 'Validate and preview'}</button>

@@ -28,6 +28,7 @@ export class ApiError extends Error {
 }
 
 export interface ServerVersion {
+  unifiedRunVersion?: string;
   version?: string;
   apiVersion: string;
   buildTime?: string;
@@ -64,6 +65,7 @@ export type JobStatus =
   | string;
 
 export interface JobSummary {
+  executionType?: string;
   jobId: string;
   packageId: string;
   command: string;

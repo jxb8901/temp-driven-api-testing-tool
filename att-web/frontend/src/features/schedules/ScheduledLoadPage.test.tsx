@@ -94,7 +94,7 @@ describe('ScheduledLoadPage', () => {
   it('shows a configured schedule, explains skips, and links submitted jobs', async () => {
     const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
     const onOpenJob = await render(api);
-    expect(host.querySelector('h1')?.textContent).toBe('Scheduled Load');
+    expect(host.querySelector('h1')?.textContent).toBe('Schedules');
     expect(host.textContent).toContain('Nightly payments');
     expect(host.textContent).toContain('Missed runs are recorded as skipped');
 
@@ -134,7 +134,7 @@ describe('ScheduledLoadPage', () => {
     expect(host.textContent).toContain('Saved Nightly payments. Next run:');
     expect(api.previewLoadSchedule).toHaveBeenCalled();
     expect(vi.mocked(api.previewLoadSchedule).mock.calls.at(-1)?.[0]).toEqual({ timezone: expect.any(String), cron: '0 2 * * *' });
-    expect(navigation.registerUnsavedChanges).toHaveBeenCalledWith(true, 'Scheduled Load changes');
+    expect(navigation.registerUnsavedChanges).toHaveBeenCalledWith(true, 'Schedules changes');
   });
 
   it('shows safe Worker validation diagnostics, package context, target, and request ID after a rejected save', async () => {
@@ -181,7 +181,7 @@ describe('ScheduledLoadPage', () => {
     expect(host.querySelector('.att-schedule-snapshot-review pre')?.textContent).toBe('schemaVersion: att-load/v1.6\nworkloads: []\n');
     expect((host.querySelector('#schedule-environment') as HTMLInputElement).value).toBe('SIT');
     expect(navigation.navigate).not.toHaveBeenCalled();
-    expect(navigation.registerUnsavedChanges).not.toHaveBeenCalledWith(expect.any(Boolean), 'Scheduled Load changes');
+    expect(navigation.registerUnsavedChanges).not.toHaveBeenCalledWith(expect.any(Boolean), 'Schedules changes');
 
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Cancel and return to editor')!);
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -217,7 +217,7 @@ describe('ScheduledLoadPage', () => {
   it('communicates authentication and administrator permission failures', async () => {
     const api = makeApi({ listLoadSchedules: vi.fn(async () => { throw Object.assign(new Error('forbidden'), { status: 403 }); }) });
     await render(api);
-    expect(host.textContent).toContain('Your account does not have the configured Scheduled Load administrator role.');
+    expect(host.textContent).toContain('Your account does not have the configured Schedules administrator role.');
     expect(host.querySelector('[role="status"]')).not.toBeNull();
   });
 });

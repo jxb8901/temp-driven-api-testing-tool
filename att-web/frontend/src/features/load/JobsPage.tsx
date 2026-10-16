@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEv
 import './load.css';
 import type { JobArtifact, JobEvent, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps } from './types';
 
+function executionType(job: JobSummary): string { return job.executionType || (job.command === 'debug' ? 'run' : job.command); }
+
 const PAGE_SIZE = 25;
 const MAX_EVENTS = 500;
 const MAX_LINE_LENGTH = 4000;
@@ -246,7 +248,7 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
       const created = dateKey(job.createdAt || '');
       return (!status || job.status === status)
         && (!packageId || job.packageId === packageId)
-        && (!command || job.command === command)
+        && (!command || executionType(job) === command)
         && created >= start && created <= end;
     }).sort((a, b) => {
       if (sort === 'id') return a.jobId.localeCompare(b.jobId);
@@ -285,7 +287,7 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
         <select value={packageId} onChange={resetPage(setPackageId)}><option value="">All loaded packages</option>{packageId && !rows.some(job => job.packageId === packageId) && <option value={packageId}>{packageId} (not in latest loaded rows)</option>}{unique(rows.map(job => job.packageId)).map(value => <option key={value}>{value}</option>)}</select>
       </label>
       <label>Type
-        <select value={command} onChange={resetPage(setCommand)}><option value="">All loaded types</option>{command && !rows.some(job => job.command === command) && <option value={command}>{command} (not in latest loaded rows)</option>}{unique(rows.map(job => job.command)).map(value => <option key={value}>{value}</option>)}</select>
+        <select value={command} onChange={resetPage(setCommand)}><option value="">All loaded types</option>{command && !rows.some(job => executionType(job) === command) && <option value={command}>{command} (not in latest loaded rows)</option>}{unique(rows.map(executionType)).map(value => <option key={value}>{value}</option>)}</select>
       </label>
       <label>Created from
         <input type="date" value={fromDate} onChange={resetPage(setFromDate)} />
@@ -311,7 +313,7 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
           <thead><tr><th scope="col">Job ID</th><th scope="col">Package</th><th scope="col">Type</th><th scope="col">Principal</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Open</th></tr></thead>
           <tbody>{pageRows.map(job => <tr key={job.jobId}>
             <th scope="row"><button type="button" className="att-link-button" onClick={() => onOpenJob(job.jobId)}>{job.jobId}</button></th>
-            <td>{job.packageId}</td><td>{job.command}</td><td>{job.principal || 'Not reported'}</td>
+            <td>{job.packageId}</td><td>{executionType(job)}</td><td>{job.principal || 'Not reported'}</td>
             <td><StatusBadge status={job.status} /></td><td><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></td>
             <td><button type="button" onClick={() => onOpenJob(job.jobId)}>Open details</button></td>
           </tr>)}</tbody>
@@ -491,7 +493,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     <section className="att-job-panel" role="tabpanel" id="job-panel-overview" aria-labelledby="job-tab-overview" hidden={activeTab !== 'overview'} tabIndex={0}>
       {job ? <dl className="att-job-overview">
         <div><dt>Job ID</dt><dd>{job.jobId}</dd></div><div><dt>Status</dt><dd><StatusBadge status={job.status} /></dd></div>
-        <div><dt>Command</dt><dd>{job.command || 'Not reported'}</dd></div><div><dt>Package</dt><dd>{job.packageId || 'Not reported'}</dd></div>
+        <div><dt>Execution type</dt><dd>{executionType(job)}</dd></div><div><dt>Command</dt><dd>{job.command || 'Not reported'}</dd></div><div><dt>Package</dt><dd>{job.packageId || 'Not reported'}</dd></div>
         <div><dt>Principal</dt><dd>{job.principal || 'Not reported'}</dd></div><div><dt>Created</dt><dd><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></dd></div>
         <div><dt>Started</dt><dd><time dateTime={job.startedAt || undefined}>{dateTime(job.startedAt)}</time></dd></div><div><dt>Finished</dt><dd><time dateTime={job.finishedAt || undefined}>{dateTime(job.finishedAt)}</time></dd></div>
         <div><dt>Exit code</dt><dd>{job.exitCode ?? 'Not reported'}</dd></div>

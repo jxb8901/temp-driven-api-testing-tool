@@ -5,7 +5,16 @@ import {
 } from './schedule';
 import type { LoadSchedule } from './types';
 
-describe('Scheduled Load draft helpers', () => {
+describe('Scheduled execution draft helpers', () => {
+  it('preserves a one-time RUN snapshot without introducing cron or Load overrides', () => {
+    const draft = { ...createScheduleDraft('Asia/Hong_Kong'), name: 'Once', packageId: 'p', jobType: 'run' as const, draftId: 'R123', inlineSnapshot: true, recurrence: 'once' as const, runAt: '2026-11-01T02:30:00+08:00' };
+    const input = scheduleInputFromDraft(draft);
+    expect(input).toMatchObject({ jobType: 'run', draftId: 'R123', runAt: '2026-10-31T18:30:00.000Z' });
+    expect(input).not.toHaveProperty('cron'); expect(input).not.toHaveProperty('load');
+    const restored = draftFromSchedule({ id: 'S1', name: 'Once', packageId: 'p', jobType: 'run', inlineSnapshot: true, timezone: 'UTC', runAt: input.runAt, maxConcurrentRuns: 1, enabled: false });
+    expect(restored).toMatchObject({ recurrence: 'once', jobType: 'run', runAt: input.runAt });
+    expect(() => scheduleInputFromDraft({ ...draft, runAt: '2026-11-01T02:30:00' })).toThrow(/offset/);
+  });
   it('converts daily, weekly, and cron recurrence drafts', () => {
     const draft = createScheduleDraft('Asia/Hong_Kong');
     expect(cronForDraft(draft)).toBe('0 2 * * *');

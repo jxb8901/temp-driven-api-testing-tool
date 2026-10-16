@@ -1,7 +1,7 @@
-# ATT v4.2.0 reference manual
+# ATT v4.2.1 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 4.2.0
+Version: 4.2.1
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -10,7 +10,7 @@ Status: Normative end-user documentation; generated from modular sources
 
 - [Overview and product model](#overview-and-product-model)
   - [Product model](#product-model)
-  - [Execution modes are peers](#execution-modes-are-peers)
+  - [RUN and LOAD execution models](#run-and-load-execution-models)
   - [Resources are peers](#resources-are-peers)
   - [Package boundaries](#package-boundaries)
   - [How to use this manual](#how-to-use-this-manual)
@@ -53,7 +53,8 @@ Status: Normative end-user documentation; generated from modular sources
   - [Resource helper methods](#resource-helper-methods)
   - [Expression scope and errors](#expression-scope-and-errors)
   - [Retry-condition lifecycle](#retry-condition-lifecycle)
-- [Execution modes](#execution-modes)
+- [RUN and LOAD execution adapters](#run-and-load-execution-adapters)
+  - [Unified RUN and schedules](#unified-run-and-schedules)
   - [Run mode](#run-mode)
   - [Standalone Debug](#standalone-debug)
   - [Load mode](#load-mode)
@@ -157,9 +158,9 @@ Testcase
 
 A **Testcase** is one authored, normalized workbook row. A **Case execution** is one Run execution of that Testcase; its full Case ID identifies the Testcase and is reused in execution results and evidence. Use *Testcase* when discussing workbook data and authoring, and *Case execution* when discussing runtime status, logs, reports, and artifacts. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper, MQHelper, HTTPHelper or SSHHelper used by Actions or permitted expression calls.
 
-### Execution modes are peers
+### RUN and LOAD execution models
 
-Run, Debug and Load adapt different inputs into the same execution-neutral Context and reusable components:
+RUN executes a functional target or Case selection once. Debug is an optional diagnostic mode; LOAD retains its performance engine. See [Unified RUN and schedules](reference/execution-modes/unified-run.md). Legacy adapters retain their specialized inputs and reports:
 
 | Mode | Primary input | Reuses |
 |---|---|---|
@@ -923,27 +924,121 @@ Removed APIs: `dbText`/`misc.dbText`, `prettyPrint`/`misc.prettyPrint`/`format.p
 
 `retry.when` runs after the current attempt completes, only after retryOn matches and while another attempt is available. `output.*` binds current result/evidence/diagnostic and `output.attempt`. Normal Boolean typing and strict/optional Context paths apply. Only deterministic pure built-ins are permitted; external, file, sequence, random and current-time operations are rejected. See [Action retry](reference/actions.md).
 
-## Execution modes
+## RUN and LOAD execution adapters
 
-Run, Debug and Load are peer adapters over the same reusable Template/Flow/Tool/DB/MQ/HTTP/SSH execution semantics.
+RUN is the functional execution model for a Case, selected cases, or one Template/Flow/Tool. Debug is an opt-in diagnostic option. LOAD retains its performance engine and concurrency semantics. See [Unified RUN and schedules](reference/execution-modes/unified-run.md) for validation and migration examples.
 
-| Mode | `EXEC.ID` | Unit of execution | Primary result location |
+The existing Engine adapters and output formats remain stable:
+
+| RUN/LOAD adapter | `EXEC.ID` | Execution unit | Main output |
 |---|---|---|---|
-| Run | canonical Case ID | selected Testcase | `output/<RunID>/` |
-| Debug | debug ID | one target invocation | `output/debug/<debugId>/` |
-| Load | unique iteration execution ID | repeated target iterations | `output/load/<runId>/` |
+| RUN: Case runner | canonical Case ID | selected Testcase | `output/<RunID>/` |
+| RUN: resource runner (legacy Debug adapter) | debug ID | one target invocation | `output/debug/<debugId>/` |
+| LOAD | unique iteration execution ID within a run | repeated target iterations | `output/load/<runId>/` |
 
-`EXEC.RUN_ID` identifies the enclosing ATT run. Mode and scheduler-specific information are retained under evidence-only `DIAG`; neither `EXEC.MODE`, `EXEC.LOAD`, nor `DIAG` is available to expressions.
+`EXEC.RUN_ID` identifies the outer ATT run. Mode and scheduler metadata remains evidence-only `DIAG`; `EXEC.MODE`, `EXEC.LOAD` and `DIAG` are unavailable to expressions.
 
-All three resolve the selected environment before execution, construct canonical Context, validate the target/dependency closure, and use the same component contracts. Mode-specific scheduling, selection and reporting do not create alternate Template or expression semantics.
+All adapters resolve the environment, construct canonical Context, validate the dependency closure, and use the same Template/Flow/Tool/DB/MQ/HTTP/SSH contracts. Selection, scheduling and reporting do not introduce alternate expression or parameter-binding semantics. Enabling Debug diagnostics changes diagnostic events, not invocation count or privileges.
 
-| Mode | Typical use |
+### Unified RUN and schedules
+
+ATT 4.2.1 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+
+#### Validate and execute a RUN
+
+Use the same authenticated Server origin and context path as ATT Studio. Send this request to `POST /api/v1/drafts/run`:
+
+```json
+{
+  "schemaVersion": "att-execution/v1",
+  "executionType": "run",
+  "packageId": "payments",
+  "environment": "SIT",
+  "target": {"type": "template", "id": "PAYMENT"},
+  "input": {"schemaVersion": "att-debug/v1.2", "inputs": {"amount": 100}},
+  "options": {"debug": false}
+}
+```
+
+Replace `payments`, `SIT` and `PAYMENT` with configured package values. Review the safe preview, then send `{"packageId":"payments","draftId":"R..."}` to `POST /api/v1/jobs/run`. The accepted job uses the existing status, cancellation, events, results and artifact routes. Opening a page or changing a mode does not submit a job.
+
+The request follows `schemas/att-execution-v1.schema.json`. Unknown fields and mixed target/selection requests fail validation. A draft expires after ten minutes, belongs to the validating identity, and binds the package revision. Package changes require validation again. Invalid input returns HTTP 400, unavailable drafts 404, changed revisions 409 and exhausted job/draft capacity 429. Inspection capacity/time/size limits remain in force.
+
+For a single Case, use `target: {"type":"case","id":"payments.default.PAY001"}` and omit `input`. Case values continue to come from Excel/sidecar bindings. Template, Flow and Tool inputs retain Debug sidecar semantics, including omitted values, explicit null, literals, expressions, variables and Tool arguments. Do not translate Case parameters into resource input fields.
+
+#### Select a batch
+
+Replace `target` and `input` with an explicit selection:
+
+```json
+{
+  "schemaVersion": "att-execution/v1",
+  "executionType": "run",
+  "packageId": "payments",
+  "environment": "UAT",
+  "selection": {
+    "suites": ["testcase/payments.xlsx"],
+    "caseIds": ["payments.default.PAY001"],
+    "tags": ["smoke"],
+    "excludeTags": ["slow"]
+  },
+  "options": {"debug": true, "failFast": false}
+}
+```
+
+`suites` and `suiteDirectory` are mutually exclusive. `suiteDirectory` selects a package-relative group directory. Case and tag filters retain CLI intersection rules; tags match any requested tag, and excluded tags remove matches. Use `all:true` for the package selection. Arrays must be nonempty, unique and contain at most 1000 values. Validation resolves and freezes at most 10000 selected Case IDs. An empty selection fails rather than falling back to all Cases.
+
+`rerunFailed:true` resolves failures from the latest retained completed Case RUN owned by the caller in this package, within the latest 100 owned jobs. It intersects explicit Case/tag filters and freezes the resulting IDs. An unavailable manifest or no matching failures is a validation error. Existing CLI `--rerun-failed` continues to use its local output history.
+
+#### Enable Debug diagnostics
+
+Set `options.debug:true` to retain additional Debug execution events. This option does not repeat execution, increase concurrency, grant a role or enable unsafe failure details. Central Server size limits, disclosure policy, secret filtering and artifact controls still apply. Existing functional and resource report representations remain available through the shared job routes.
+
+#### Schedule the validated definition
+
+Canonical creation requests use `schemas/att-schedule-v2.schema.json`; legacy routes retain their existing optional fields.
+
+Create a RUN schedule by sending this body to `POST /api/v1/schedules`:
+
+```json
+{
+  "schemaVersion": "att-schedule/v2",
+  "name": "Nightly payment checks",
+  "executionType": "run",
+  "packageId": "payments",
+  "environment": "SIT",
+  "draftId": "R...",
+  "timezone": "Asia/Hong_Kong",
+  "cron": "0 2 * * *",
+  "maxConcurrentRuns": 1,
+  "enabled": false
+}
+```
+
+Use the draft ID returned by validation. RUN schedules store the validated input/selection and revision, not a mutable query. A changed package, target, environment or configuration requires a fresh schedule. Protected package defaults use path-bound keep markers. Submitted sensitive overrides cannot be persisted in a schedule.
+
+LOAD schedules continue to accept package scenario paths and validated Load drafts. Their existing scenario validation and pacing limits remain authoritative. Legacy package-path LOAD schedules validate the current package scenario at each firing; the public `revisionPolicy` distinguishes them from revision-bound RUN snapshots.
+
+Use either five-field `cron` with an IANA timezone, or a single `runAt` instant such as `2026-10-20T02:00:00+08:00`. Do not supply both. One-time triggers are claimed once. Cron skips nonexistent local times during spring-forward; repeated local times during fall-back can produce two instants subject to the configured minimum interval. Preview trigger times with `POST /api/v1/schedules/preview` before enabling.
+
+The shared scheduler records an occurrence before admission. Per-schedule/global overlap limits skip an occurrence at capacity; ordinary Worker and Load admission limits also apply. Late/restart misfires are skipped without backfill. Failed submissions follow `server.scheduling.failurePolicy`; there are no automatic execution retries. Cancelling a job cancels that occurrence, while pausing a schedule prevents future firings. Job and occurrence retention keep their existing Server limits.
+
+Schedule management requires the configured administrator role. Local-auth schedule owners must remain active administrators at firing time. Scheduled RUN jobs execute as the owner and record the occurrence and audit trail. Container-auth roles are checked on management requests; container administrators must pause schedules when externally managed identities lose access.
+
+#### Migrate existing clients
+
+| Existing interface | Mapping in 4.2.1 |
 |---|---|
-| Run | Normal functional SIT/UAT execution |
-| Debug | Isolate one Template/Flow/Tool during authoring or diagnosis |
-| Load | Repeated/concurrent performance execution |
+| CLI `validate`, `run`, `report` | Existing validation, Case RUN and report commands remain valid |
+| CLI `--suite`, `--suite-dir`, `--case`, `--tag`, `--rerun-failed` | Existing selectors retain their behavior; Server batches use `selection` |
+| Debug CLI, sidecars, `/jobs/debug`, `/drafts/debug` | Compatibility resource RUN with legacy diagnostic behavior |
+| `/jobs/run` with legacy Case selection | Existing Case adapter remains valid |
+| `/load-schedules`, legacy `jobType:load/debug` | Shared scheduler compatibility routes; existing definitions remain readable |
+| `/jobs/...`, saved Studio job/result links | Existing shared history, cancellation, events and results routes |
 
-All three share the execution model. Each mode owns its inputs, identity/bootstrap lifecycle, CLI behavior and output layout.
+No legacy endpoint is removed in 4.2.1. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.1; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
+
+Schedule persistence adds JSON fields in the existing H2 tables, leaving legacy LOAD rows unchanged. Before downgrade, stop scheduling, export new definitions, remove RUN/one-time definitions and restore the pre-upgrade database backup. An older scheduler must not interpret a new RUN definition as LOAD. Retained job artifacts remain separate from database metadata.
 
 ### Run mode
 
@@ -2709,7 +2804,7 @@ No-target `debug` and `load` are read-only discovery commands. Debug validates t
 
 ### Path display
 
-Local CLI output shows absolute paths by default. Add `--substitute-package-root` to display package-contained paths as `$ATT_PACKAGE_ROOT` or `$ATT_PACKAGE_ROOT/<relative-path>`, and `--substitute-external-basename` to display other absolute paths as `$EXTERNAL/<basename>`. These options are independent and apply to human-readable diagnostics, structured results, and displayed report paths for `run`, `validate`, `snapshot`, `debug`, and `load`. They change presentation only; filesystem access and saved package data are unchanged. These CLI switches apply to the local CLI process only; Server Workers force both substitutions for API and Studio output regardless of CLI flags, to avoid exposing host paths. Add the flags to restore the previous local CLI presentation when upgrading to 4.2.0.
+Local CLI output shows absolute paths by default. Add `--substitute-package-root` to display package-contained paths as `$ATT_PACKAGE_ROOT` or `$ATT_PACKAGE_ROOT/<relative-path>`, and `--substitute-external-basename` to display other absolute paths as `$EXTERNAL/<basename>`. These options are independent and apply to human-readable diagnostics, structured results, and displayed report paths for `run`, `validate`, `snapshot`, `debug`, and `load`. They change presentation only; filesystem access and saved package data are unchanged. These CLI switches apply to the local CLI process only; Server Workers force both substitutions for API and Studio output regardless of CLI flags, to avoid exposing host paths. Add the flags to restore the previous local CLI presentation when upgrading to 4.2.1.
 
 ```sh
 ./att.sh validate --package --substitute-package-root
@@ -3026,7 +3121,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.0",
+  "attVersion": "4.2.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3065,7 +3160,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` runs the release gate, regenerates the modular Markdown Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven and Python 3. It outputs `att-4.2.0-local.tar.gz` for the CLI, `att-4.2.0-server.tar.gz` for the WAR and deployment guides, and `att-4.2.0-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
+`build.sh` runs the release gate, regenerates the modular Markdown Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven and Python 3. It outputs `att-4.2.1-local.tar.gz` for the CLI, `att-4.2.1-server.tar.gz` for the WAR and deployment guides, and `att-4.2.1-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
 
 ### Runtime dependencies
 
@@ -3103,6 +3198,8 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 
 | Artifact | Active schema |
 |---|---|
+| Schedule creation | att-schedule/v2 |
+| RUN definition | att-execution/v1 |
 | Global configuration | att-config/v2.12 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
@@ -3271,7 +3368,7 @@ Unexpected internal failures such as `NullPointerException`, `ClassCastException
 
 #### Why does `att.bat` ask for Maven, or why does a `.sh` Tool fail on windows?
 
-In a binary release, `att.bat` finds the versioned runtime JAR, such as `lib\att-local-4.2.0.jar`, and only requires Java 8+. Keep one `att-local-<version>.jar` in each `ATT_HOME/lib` so the launcher selects an unambiguous runtime. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
+In a binary release, `att.bat` finds the versioned runtime JAR, such as `lib\att-local-4.2.1.jar`, and only requires Java 8+. Keep one `att-local-<version>.jar` in each `ATT_HOME/lib` so the launcher selects an unambiguous runtime. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
 
 The launcher makes ATT itself cross-platform; it cannot translate external tool executables. Configure a Windows-compatible `.bat`, `.cmd`, PowerShell script (with an explicit `powershell`/`pwsh` argv), or native executable instead of a POSIX-only `.sh` command. PATH validation follows Windows `PATHEXT`, so names such as `pwsh` can resolve `pwsh.exe`. Keep argument contracts and stdout output formats identical when maintaining platform variants.
 

@@ -1,5 +1,7 @@
 schemaVersion: att-schema-catalog/v3.0
 schemas:
+  att-schedule/v2: att-schedule-v2.schema.json
+  att-execution/v1: att-execution-v1.schema.json
   att-debug/v1.2: att-debug-v1.2.schema.json
   historicalDebugV11: history/att-debug-v1.1.schema.json
   historicalDebugV10: history/att-debug-v1.0.schema.json

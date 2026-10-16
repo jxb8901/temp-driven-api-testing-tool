@@ -1,5 +1,12 @@
 # Changelog
 
+# ATT 4.2.1 - 2026-10-16
+
+- Unify functional execution as RUN with optional Debug diagnostics, validated drafts, frozen Case selections, shared RUN/LOAD schedules and one-time triggers (#220).
+- Preserve legacy CLI, Debug, Case Run and Load schedule interfaces; add Studio Run and bilingual migration contracts.
+
+- 統一功能執行為 RUN，提供選用 Debug 診斷、固定 Case 選取，以及共用 RUN／LOAD 排程與單次觸發；保留舊 CLI／REST／報表契約，附繁體中文遷移說明。
+
 # ATT 4.2.0 - 2026-10-14
 
 - Reuse bounded Studio query and Worker configuration caches, prefer idle inspectors with matching package state, and add optional asynchronous warm-up and inspection metrics (#227).

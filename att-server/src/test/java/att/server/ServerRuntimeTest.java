@@ -181,9 +181,49 @@ class ServerRuntimeTest {
             assertFalse(publicDebugSchedule.containsKey("inlineDebugInput"));assertFalse(publicDebugSchedule.containsKey("expectedRevisionDigest"));
             assertFalse(publicDebugSchedule.containsKey("debugResourceId"));assertFalse(publicDebugSchedule.toString().contains("package-sidecar-secret"));
 
+            // Unified RUN uses the same resource binding, protected defaults and Worker engine.
+            com.fasterxml.jackson.databind.node.ObjectNode runRequest=debugDraftRequest.deepCopy();
+            runRequest.put("schemaVersion",RunDefinition.VERSION);runRequest.put("executionType","run");
+            runRequest.set("options",ServerRuntime.JSON.valueToTree(Map.of("debug",false)));
+            Map<String,Object> runDraft=setupRuntime.createRunDraft(runRequest,"alice");
+            String runDraftId=String.valueOf(runDraft.get("draftId"));
+            assertEquals("run",runDraft.get("executionType"));
+            assertFalse(runDraft.toString().contains("package-sidecar-secret"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->setupRuntime.getRunDraft(runDraftId,"bob"));
+            com.fasterxml.jackson.databind.node.ObjectNode runScheduleRequest=ServerRuntime.JSON.createObjectNode();
+            runScheduleRequest.put("name","Unified RUN");runScheduleRequest.put("packageId","p");runScheduleRequest.put("executionType","run");
+            runScheduleRequest.put("draftId",runDraftId);runScheduleRequest.put("environment","SIT");
+            runScheduleRequest.put("timezone","UTC");runScheduleRequest.put("cron","0 2 * * *");
+            LoadSchedule runSchedule=setupRuntime.createLoadSchedule(runScheduleRequest,"alice");
+            assertEquals("run",runSchedule.effectiveJobType());
+            assertFalse(setupRuntime.loadScheduleView(runSchedule).containsKey("runInput"));
+            assertFalse(runSchedule.runInput.toString().contains("package-sidecar-secret"));
+            assertTrue(runSchedule.runInput.toString().contains("$attDebugKeepDefault"));
+            assertEquals("run",setupRuntime.loadScheduleView(runSchedule).get("executionType"));
+            assertEquals("RUN renamed",setupRuntime.updateLoadSchedule(runSchedule.id,ServerRuntime.JSON.readTree("{\"name\":\"RUN renamed\"}"),"alice").name);
+            assertThrows(IllegalArgumentException.class,()->setupRuntime.updateLoadSchedule(runSchedule.id,ServerRuntime.JSON.readTree("{\"environment\":\"UAT\"}"),"alice"));
+            Map<String,Object> runOccurrence=setupRuntime.triggerLoadSchedule(runSchedule.id,"alice");
+            assertEquals("submitted",runOccurrence.get("status"),runOccurrence.toString());
+            String runJobId=String.valueOf(runOccurrence.get("jobId"));
+            long runDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+            Map<String,Object> runRecord=setupRuntime.jobRecord(runJobId);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(runRecord.get("status"))&&System.nanoTime()<runDeadline) {
+                Thread.sleep(20);runRecord=setupRuntime.jobRecord(runJobId);
+            }
+            assertEquals("PASS",runRecord.get("status"),setupRuntime.resultRecord(runJobId).toString());
+            assertEquals("run",runRecord.get("command"));assertEquals("alice",runRecord.get("principal"));
+            setupRuntime.deleteLoadSchedule(runSchedule.id,"alice");
+
             com.fasterxml.jackson.databind.node.ObjectNode overrideDraftRequest=ServerRuntime.JSON.createObjectNode();overrideDraftRequest.put("packageId","p");overrideDraftRequest.put("environment","SIT");
             overrideDraftRequest.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id","SCHEDULED")));
             overrideDraftRequest.set("input",ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-debug/v1.2","inputs",Map.of("currency","@{edda.currency}","password","submitted-secret"))));
+            var runOverride=overrideDraftRequest.deepCopy();runOverride.put("schemaVersion",RunDefinition.VERSION);runOverride.put("executionType","run");
+            runOverride.set("options",ServerRuntime.JSON.valueToTree(Map.of("debug",true)));
+            Map<String,Object> privateRunDraft=setupRuntime.createRunDraft(runOverride,"alice");
+            assertFalse(privateRunDraft.toString().contains("submitted-secret"));
+            IllegalArgumentException privateRunSchedule=assertThrows(IllegalArgumentException.class,()->setupRuntime.createLoadSchedule(
+                    ServerRuntime.JSON.valueToTree(Map.of("name","Private RUN","packageId","p","executionType","run","draftId",privateRunDraft.get("draftId"),"environment","SIT","timezone","UTC","cron","0 2 * * *")),"alice"));
+            assertTrue(privateRunSchedule.getMessage().contains("cannot persist submitted sensitive values"));
             Map<String,Object> secretOverrideDraft=setupRuntime.createDebugDraft(overrideDraftRequest,"alice");
             JsonNode secretOverrideSchedule=ServerRuntime.JSON.readTree("{\"name\":\"Secret Debug\",\"packageId\":\"p\",\"jobType\":\"debug\",\"draftId\":\""
                     +secretOverrideDraft.get("draftId")+"\",\"environment\":\"SIT\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}");
@@ -694,6 +734,108 @@ class ServerRuntimeTest {
             String publicEvents=runtime.events(id).after(0).toString();String published=publicResult+publicEvents;
             assertTrue(publicResult.contains("oracle.jdbc.OracleDriver"));assertFalse(published.contains("synthetic-"));assertTrue(published.contains("[REDACTED_SECRET]"));
         } finally {runtime.close();}
+    }
+
+    @Test void scheduledJobsRecheckLocalOwnerAuthorityBeforeAnyWorkerStarts() throws Exception {
+        Path root=Files.createDirectories(temp.resolve("owner-package"));
+        Path config=Files.writeString(temp.resolve("owner-server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("owner-data"))+"\n  auth: {mode: local}\n  scheduling: {enabled: true}\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(root)+"]\n  entries:\n    p: "+yaml(root)+"\n");
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(config),"")) {
+            runtime.store.createBootstrapAdmin("keeper","Active administrator","unused","csrf");
+            runtime.store.createAuthUser("disabled","Disabled owner","unused","ADMIN","csrf");
+            runtime.store.setAuthActive("disabled",false);
+            runtime.store.createAuthUser("reader","Reader owner","unused","USER","csrf");
+            for(String type:List.of("run","load","debug"))for(String owner:List.of("missing","disabled","reader")) {
+                LoadSchedule schedule=new LoadSchedule();schedule.id="S"+type+owner;schedule.name="Owner authority";schedule.jobType=type;
+                schedule.packageId="p";schedule.createdBy=owner;schedule.timezone="UTC";schedule.cron="0 2 * * *";
+                schedule.createdAt=Instant.now().toString();schedule.updatedAt=schedule.createdAt;
+                runtime.store.createSchedule(schedule,100);
+                Map<String,Object> occurrence=runtime.triggerLoadSchedule(schedule.id,"admin");
+                assertEquals("failed-to-submit",occurrence.get("status"));
+                assertTrue(String.valueOf(occurrence.get("reason")).contains("no longer authorized"),occurrence.toString());
+            }
+            assertEquals(0,runtime.workers.getActiveCount());assertTrue(runtime.store.list(100).isEmpty());
+        }
+    }
+
+    @Test void unifiedRunExecutesAllTargetsAndFreezesCaseSelectionsAcrossEnvironments() throws Exception {
+        Path root=Files.createDirectories(temp.resolve("unified-package"));copySchemas(root);
+        Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("testcase"));
+        Files.createDirectories(root.resolve("templates/SIMPLE"));Files.createDirectories(root.resolve("templates/BAD"));Files.createDirectories(root.resolve("templates/flows/simple"));
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Files.writeString(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools:\n  version:\n    name: Version\n    description: Local runtime version\n    command: ["+yaml(javaBin)+", '-version']\n    stdoutFormat: text\n    arguments: {}\n");
+        Files.writeString(root.resolve("templates/SIMPLE/template.yaml"),"schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Unified RUN fixture\nactions:\n  show: {type: log, message: once}\n");
+        Files.writeString(root.resolve("templates/BAD/template.yaml"),"schemaVersion: att-template/v3.6\nname: BAD\ndescription: Failed Case fixture\nactions:\n  check: {type: assert, assert: '#{1 == 2}'}\n");
+        Files.writeString(root.resolve("templates/flows/simple/flow.yaml"),"schemaVersion: att-flow/v3.6\nid: simple.flow.v1\nname: Simple flow\ndescription: Unified RUN flow\nactions:\n  show: {type: log, message: once}\n");
+        Path workbook=root.resolve("testcase/cases.xlsx");
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var out=Files.newOutputStream(workbook)) {
+            var sheet=book.createSheet("Cases");String[] columns={"ID","Tags","Template"};var header=sheet.createRow(0);
+            for(int i=0;i<columns.length;i++)header.createCell(i).setCellValue(columns[i]);
+            for(int i=1;i<=2;i++){var row=sheet.createRow(i);row.createCell(0).setCellValue("C"+i);row.createCell(1).setCellValue(i==1?"smoke":"slow");row.createCell(2).setCellValue("name: "+(i==1?"SIMPLE":"BAD"));}
+            book.write(out);
+        }
+        Files.writeString(root.resolve("testcase/cases.yaml"),"schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
+        new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(root,Path.of("config/config.yaml"),"SIT",List.of(workbook),null,java.util.Set.of(),false));
+        Path server=temp.resolve("unified-server.yaml");
+        Files.writeString(server,"server:\n  dataDir: "+yaml(temp.resolve("unified-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+yaml(root)+"]\n  entries:\n    p: "+yaml(root)+"\n");
+        Path libs=Files.createDirectory(temp.resolve("unified-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        addWorkerClasspathJars(libs);
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(server),libs.toString())) {
+            for(String environment:List.of("SIT","UAT"))for(String type:List.of("case","template","flow","tool")) {
+                var body=ServerRuntime.JSON.createObjectNode();body.put("schemaVersion",RunDefinition.VERSION);body.put("executionType","run");body.put("packageId","p");body.put("environment",environment);
+                String id=switch(type){case "case"->"cases.default.C1";case "template"->"SIMPLE";case "flow"->"simple.flow.v1";default->"version";};
+                body.set("target",ServerRuntime.JSON.valueToTree(Map.of("type",type,"id",id)));if(!"case".equals(type))body.set("input",ServerRuntime.JSON.createObjectNode());
+                body.set("options",ServerRuntime.JSON.valueToTree(Map.of("debug","UAT".equals(environment))));
+                Map<String,Object> draft;
+                try {draft=runtime.createRunDraft(body,"alice");}catch(Exception failure){throw new AssertionError(environment+" "+type+" "+runtime.inspectResource("p","list",type,null,null,100,null,"alice"),failure);}
+                String draftId=String.valueOf(draft.get("draftId"));
+                assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getRunDraft(draftId,"bob"));
+                LoadSchedule scheduled=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name",environment+" "+type,
+                        "packageId","p","environment",environment,"executionType","run","draftId",draftId,
+                        "timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
+                Map<String,Object> occurrence=runtime.triggerLoadSchedule(scheduled.id,"alice");
+                Map<String,Object> scheduledResult=awaitUnifiedJob(runtime,String.valueOf(occurrence.get("jobId")));
+                assertEquals("PASS",((Map<?,?>)scheduledResult.get("job")).get("status"),environment+" scheduled "+type+" "+scheduledResult);
+                assertEquals("alice",((Map<?,?>)scheduledResult.get("job")).get("principal"));
+                runtime.deleteLoadSchedule(scheduled.id,"alice");
+                Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",draftId)),"alice","alice");
+                Map<String,Object> result=awaitUnifiedJob(runtime,String.valueOf(accepted.get("jobId")));
+                assertEquals("PASS",((Map<?,?>)result.get("job")).get("status"),environment+" "+type+" "+result);
+                assertEquals("run",((Map<?,?>)result.get("job")).get("executionType"));
+                assertTrue(runtime.events(String.valueOf(accepted.get("jobId"))).after(0).stream().anyMatch(event->"result".equals(event.get("event"))));
+                assertThrows(ServerRuntime.NotFoundException.class,()->runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",draftId)),"alice","alice"));
+            }
+            var selection=ServerRuntime.JSON.readTree("{\"schemaVersion\":\"att-execution/v1\",\"executionType\":\"run\",\"packageId\":\"p\",\"selection\":{\"all\":true,\"tags\":[\"smoke\"]}}");
+            Map<String,Object> draft=runtime.createRunDraft(selection,"alice");assertEquals(List.of("cases.default.C1"),draft.get("selectedCaseIds"));
+            var all=ServerRuntime.JSON.readTree("{\"schemaVersion\":\"att-execution/v1\",\"executionType\":\"run\",\"packageId\":\"p\",\"selection\":{\"all\":true}}");
+            for(Map<String,Object> filters:List.<Map<String,Object>>of(Map.of("suiteDirectory","testcase","tags",List.of("smoke")),Map.of("suites",List.of("testcase/cases.xlsx"),"caseIds",List.of("cases.default.C1","cases.default.C2"),"excludeTags",List.of("slow")))) {
+                var filtered=all.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)filtered).set("selection",ServerRuntime.JSON.valueToTree(filters));
+                assertEquals(List.of("cases.default.C1"),runtime.createRunDraft(filtered,"filters").get("selectedCaseIds"));
+            }
+            var unknown=all.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)unknown).set("selection",ServerRuntime.JSON.valueToTree(Map.of("caseIds",List.of("cases.default.C1","cases.default.MISSING"))));
+            assertThrows(ServerRuntime.DraftValidationException.class,()->runtime.createRunDraft(unknown,"unknown"));
+            Map<String,Object> allDraft=runtime.createRunDraft(all,"alice");
+            Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",allDraft.get("draftId"))),"alice","alice");
+            Map<String,Object> allResult=awaitUnifiedJob(runtime,String.valueOf(accepted.get("jobId")));
+            assertEquals("FAIL",((Map<?,?>)allResult.get("job")).get("status"),allResult.toString());
+            var rerun=(com.fasterxml.jackson.databind.node.ObjectNode)all.deepCopy();rerun.set("selection",ServerRuntime.JSON.valueToTree(Map.of("rerunFailed",true)));
+            Map<String,Object> failed=runtime.createRunDraft(rerun,"alice");assertEquals(List.of("cases.default.C2"),failed.get("selectedCaseIds"));
+            Map<String,Object> stale=runtime.createRunDraft(selection,"alice");
+            Files.writeString(root.resolve("templates/SIMPLE/template.yaml"),"\n# package changed\n",java.nio.file.StandardOpenOption.APPEND);
+            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",stale.get("draftId"))),"alice","alice"));
+        }
+    }
+    private static Map<String,Object> awaitUnifiedJob(ServerRuntime runtime,String id) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+        while(System.nanoTime()<deadline) {
+            Map<String,Object> job=runtime.jobRecord(id);
+            if(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(job.get("status"))) {
+                while(runtime.workers.getActiveCount()>0&&System.nanoTime()<deadline)Thread.sleep(10);
+                return runtime.resultRecord(id);
+            }
+            Thread.sleep(20);
+        }
+        fail("RUN did not terminate: "+runtime.jobRecord(id));return Map.of();
     }
 
     private static void addModuleJar(Path lib,String name,Path classes)throws Exception {

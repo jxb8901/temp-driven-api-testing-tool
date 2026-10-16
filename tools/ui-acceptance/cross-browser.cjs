@@ -17,14 +17,14 @@ async function assertAxe(page, engine, theme, width) {
   }));
   assert.deepEqual(audit.violations.map(({ id, impact, nodes }) => ({
     id, impact, selectors: nodes.map(node => node.target),
-  })), [], `${engine} ${theme} ${width}px Scheduled Load accessibility audit`);
+  })), [], `${engine} ${theme} ${width}px Schedules accessibility audit`);
 }
 
 async function main() {
   if (!updateVisualBaselines) {
-    assert.ok(['darwin', 'linux'].includes(process.platform), `No committed Scheduled Load screenshot baseline exists for ${process.platform}.`);
+    assert.ok(['darwin', 'linux'].includes(process.platform), `No committed Schedules screenshot baseline exists for ${process.platform}.`);
     const baselineManifest = JSON.parse(await fs.readFile(path.join(visualBaselineDirectory, 'manifest.json'), 'utf8'));
-    assert.equal(baselineManifest.platform, process.platform, `Scheduled Load screenshots must use the ${process.platform} baseline, not another platform's captures.`);
+    assert.equal(baselineManifest.platform, process.platform, `Schedules screenshots must use the ${process.platform} baseline, not another platform's captures.`);
     assert.equal(baselineManifest.captures?.length, 18, `The ${process.platform} baseline must describe all 18 browser, viewport, and theme captures.`);
   }
   await fs.mkdir(outputDirectory, { recursive: true });
@@ -44,7 +44,7 @@ async function main() {
             const pageErrors = [];
             page.on('pageerror', error => pageErrors.push(error.message));
             await page.goto(`${fixture.origin}/att/ui/#/load-schedules`);
-            await page.getByRole('heading', { name: 'Scheduled Load', exact: true }).waitFor();
+            await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
             await page.locator('.att-schedule-table-wrap:visible, .att-schedule-cards:visible').getByText('Nightly payments', { exact: true }).waitFor();
             assert.equal(await page.locator('[data-nav="scheduled-load"]').getAttribute('aria-current'), 'page');
             assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), theme);
@@ -77,9 +77,9 @@ async function main() {
             await assertAxe(page, engineName, theme, width);
             if (width === 1280) {
               await page.keyboard.press('/');
-              await page.getByRole('dialog').getByLabel('Search pages').fill('Scheduled');
-              await page.getByRole('button', { name: /Scheduled Load/ }).click();
-              await page.getByRole('heading', { name: 'Scheduled Load', exact: true }).waitFor();
+              await page.getByRole('dialog').getByLabel('Search pages').fill('Schedules');
+              await page.getByRole('button', { name: /Schedules/ }).click();
+              await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
             }
             assert.deepEqual(pageErrors, [], `${engineName} should not report browser errors`);
             const file = `${engineName}-scheduled-${width}-${theme}.png`;
@@ -104,12 +104,12 @@ async function main() {
       }
     }
     await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
-      repositoryVersion: '4.2.0', generatedAt: new Date().toISOString(), platform: process.platform,
+      repositoryVersion: '4.2.1', generatedAt: new Date().toISOString(), platform: process.platform,
       architecture: process.arch, captures: manifest,
     }, null, 2)}\n`);
     if (updateVisualBaselines) {
       await fs.writeFile(path.join(visualBaselineDirectory, 'manifest.json'), `${JSON.stringify({
-        repositoryVersion: '4.2.0', generatedAt: new Date().toISOString(), platform: process.platform,
+        repositoryVersion: '4.2.1', generatedAt: new Date().toISOString(), platform: process.platform,
         architecture: process.arch,
         maxChangedPixelRatio: visualDifferenceLimit, channelTolerance, captures: manifest,
       }, null, 2)}\n`);
@@ -121,7 +121,7 @@ async function main() {
       assert.fail(`${visualDifferences.length} screenshot(s) exceeded the ${(visualDifferenceLimit * 100).toFixed(0)}% visual regression threshold. ` +
         'Review tools/ui-acceptance/artifacts/scheduled-load/visual-differences.json and the uploaded screenshots.');
     }
-    console.log(`Scheduled Load cross-browser checks passed; captured ${manifest.length} screenshots.`);
+    console.log(`Schedules cross-browser checks passed; captured ${manifest.length} screenshots.`);
   } finally {
     await stopFixture(fixture);
   }

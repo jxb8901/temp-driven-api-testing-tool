@@ -255,6 +255,7 @@ jobs:
         run: |
           npm run smoke
           npm run smoke:explorer
+          npm run smoke:run
           npm run smoke:auth
           npm run smoke:scheduled-load
           if [ "$FULL_BROWSER_SUITE" = "true" ]; then

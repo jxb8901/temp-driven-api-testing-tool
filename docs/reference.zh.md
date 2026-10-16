@@ -1,7 +1,7 @@
-# ATT v4.2.0 使用手冊與參考
+# ATT v4.2.1 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.2.0
+Version: 4.2.1
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -10,7 +10,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
 
 - [概覽與 Product model](#概覽與-product-model)
   - [產品模型](#產品模型)
-  - [三種執行模式是同級概念](#三種執行模式是同級概念)
+  - [RUN 與 LOAD 執行模型](#run-與-load-執行模型)
   - [五種 Resource 是同級概念](#五種-resource-是同級概念)
   - [Package 邊界](#package-邊界)
   - [如何使用本手冊](#如何使用本手冊)
@@ -53,7 +53,8 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Resource helper methods](#resource-helper-methods)
   - [Expression scope 與錯誤](#expression-scope-與錯誤)
   - [Retry condition 的生命週期](#retry-condition-的生命週期)
-- [Execution modes](#execution-modes)
+- [RUN 與 LOAD 執行 adapter](#run-與-load-執行-adapter)
+  - [統一 RUN 與排程](#統一-run-與排程)
   - [Run 模式](#run-模式)
   - [Standalone Debug](#standalone-debug)
   - [Load 模式](#load-模式)
@@ -157,9 +158,9 @@ Testcase
 
 **Testcase** 是作者編寫並正規化的 Workbook row。**Case execution** 是 Run 對該 Testcase 的一次執行；其完整 Case ID 標識 Testcase，並沿用於執行結果和 evidence。討論 Workbook data 和 authoring 時使用 *Testcase*；討論 runtime status、日誌、報表和 artifacts 時使用 *Case execution*。**Stage** 選擇 Template 並提供 stage-private data；**Template** 是可執行 scenario 邊界；**Flow** 是具有獨立 Action scope 的可重用 Template 邏輯；**Action** 是一個有序工作單元；**Resource** 是 Action 或允許的 expression call 所使用的 Tool、DBHelper、MQHelper、HTTPHelper 或 SSHHelper。
 
-### 三種執行模式是同級概念
+### RUN 與 LOAD 執行模型
 
-Run、Debug、Load 把不同輸入適配到同一 execution-neutral Context 和同一批 reusable components：
+RUN 單次執行功能目標或 Case selection；Debug 為診斷選項；LOAD 保留效能引擎。請參閱[統一 RUN 與排程](reference.zh/execution-modes/unified-run.md)。舊 adapter 保留專用輸入及報告：
 
 | 模式 | 主要輸入 | 重用內容 |
 |---|---|---|
@@ -905,27 +906,121 @@ Expression language 由本頁定義；可用 roots 與求值時機由欄位的 s
 
 `retry.when` 在當前 attempt 完成後、retryOn 符合且尚有 attempt 時才評估。`output.*` 綁定當前 result/evidence/diagnostic 及 `output.attempt`。Normal Boolean typing、strict/optional Context path 契約均適用。僅允許 deterministic pure built-in；external、file、sequence、random 及 current-time operation 禁止。詳見 [Actions retry](reference.zh/actions.md)。
 
-## Execution modes
+## RUN 與 LOAD 執行 adapter
 
-Run、Debug、Load 是同級 adapter，共用相同的 Template/Flow/Tool/DB/MQ/HTTP/SSH 執行語義。
+RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型；Debug 是選用的診斷選項。LOAD 保留效能引擎與併發語義。驗證及遷移範例請參閱[統一 RUN 與排程](reference.zh/execution-modes/unified-run.md)。
 
-| 模式 | `EXEC.ID` | 執行單位 | 主要結果位置 |
+現有 Engine adapter 與輸出格式保持相容：
+
+| RUN/LOAD adapter | `EXEC.ID` | 執行單位 | 主要結果位置 |
 |---|---|---|---|
-| Run | canonical Case ID | selected Testcase | `output/<RunID>/` |
-| Debug | debug ID | 單一 target invocation | `output/debug/<debugId>/` |
-| Load | run 內唯一的 iteration execution ID | 重複 target iterations | `output/load/<runId>/` |
+| RUN：Case runner | canonical Case ID | selected Testcase | `output/<RunID>/` |
+| RUN：Resource runner（舊 Debug adapter） | debug ID | 單一 target invocation | `output/debug/<debugId>/` |
+| LOAD | run 內唯一的 iteration execution ID | 重複 target iterations | `output/load/<runId>/` |
 
-`EXEC.RUN_ID` 表示外層 ATT run。模式與 scheduler 資料只保存在 evidence-only `DIAG`，`EXEC.MODE`、`EXEC.LOAD` 和 `DIAG` 均不能供 expression 使用。
+`EXEC.RUN_ID` 表示外層 ATT run。模式與 scheduler 資料只保存在 evidence-only `DIAG`；`EXEC.MODE`、`EXEC.LOAD` 與 `DIAG` 均不能供 expression 使用。
 
-三種模式都會先解析 environment、建立 canonical Context、驗證 target/dependency closure，再使用相同 component contract。Mode-specific scheduling、selection、reporting 不會建立另一套 Template 或 expression 語義。
+所有 adapter 都先解析 environment、建立 canonical Context、驗證 dependency closure，再使用相同的 Template/Flow/Tool/DB/MQ/HTTP/SSH contract。Selection、scheduling 與 reporting 不會建立另一套 expression 或參數綁定語義。啟用 Debug 診斷只影響診斷事件，不會改變呼叫次數或權限。
 
-| Mode | 典型用途 |
+### 統一 RUN 與排程
+
+ATT 4.2.1 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+
+#### 驗證及執行 RUN
+
+使用 ATT Studio 相同的已驗證 Server origin 和 context path，向 `POST /api/v1/drafts/run` 提交：
+
+```json
+{
+  "schemaVersion": "att-execution/v1",
+  "executionType": "run",
+  "packageId": "payments",
+  "environment": "SIT",
+  "target": {"type": "template", "id": "PAYMENT"},
+  "input": {"schemaVersion": "att-debug/v1.2", "inputs": {"amount": 100}},
+  "options": {"debug": false}
+}
+```
+
+將 `payments`、`SIT`、`PAYMENT` 換成已設定的套件值。檢閱安全預覽後，向 `POST /api/v1/jobs/run` 提交 `{"packageId":"payments","draftId":"R..."}`。工作沿用現有狀態、取消、事件、結果和 artifact 路徑。開啟頁面或切換模式不會提交工作。
+
+請求遵循 `schemas/att-execution-v1.schema.json`。未知欄位、混合 target/selection 的請求均會被拒絕。Draft 有效期為十分鐘，綁定驗證身分及套件 revision。套件改變後必須重新驗證。無效輸入回傳 HTTP 400、不可用 draft 回傳 404、revision 改變回傳 409、工作或 draft 容量已滿回傳 429。Inspection 的容量、時間及大小限制仍然生效。
+
+單一 Case 使用 `target:{"type":"case","id":"payments.default.PAY001"}`，並省略 `input`。Case 沿用 Excel/sidecar 綁定。Template、Flow、Tool 保留 Debug sidecar 的省略、明確 null、literal、expression、vars 和 Tool arguments 語義；不會將 Case 參數轉成Resource輸入。
+
+#### 選取批次
+
+以明確 selection 取代 target 和 input：
+
+```json
+{
+  "schemaVersion": "att-execution/v1",
+  "executionType": "run",
+  "packageId": "payments",
+  "environment": "UAT",
+  "selection": {
+    "suites": ["testcase/payments.xlsx"],
+    "caseIds": ["payments.default.PAY001"],
+    "tags": ["smoke"],
+    "excludeTags": ["slow"]
+  },
+  "options": {"debug": true, "failFast": false}
+}
+```
+
+`suites` 與 `suiteDirectory` 互斥；後者選取套件內的 group 目錄。Case/tag 篩選沿用 CLI 交集規則，任一要求的 tag 可匹配，excludeTags 則排除匹配 Case。`all:true` 表示套件選取。陣列必須非空、不重複，最多 1000 個值。驗證會解析並固定最多 10000 個 Case ID；空選取不會退回執行全部 Case。
+
+`rerunFailed:true` 從呼叫者最近 100 個擁有的工作中，選取同套件最近一個已完成 Case RUN 的失敗項目，與明確 Case/tag 篩選取交集，再固定 ID。Manifest 不可用或沒有匹配失敗項目會驗證失敗。既有 CLI `--rerun-failed` 繼續使用本機 output history。
+
+#### 啟用 Debug 診斷
+
+`options.debug:true` 會保留額外 Debug 執行事件，不會增加次數、並行度、權限或啟用 unsafe failure details。Server 中央大小限制、披露政策、敏感資料過濾和 artifact 控制仍然適用。功能測試和 Resource 執行保留專用報告，並共用工作路徑。
+
+#### 排程已驗證的定義
+
+Canonical 建立請求使用 `schemas/att-schedule-v2.schema.json`；舊路由保留原有的選用欄位。
+
+向 `POST /api/v1/schedules` 建立 RUN 排程：
+
+```json
+{
+  "schemaVersion": "att-schedule/v2",
+  "name": "Nightly payment checks",
+  "executionType": "run",
+  "packageId": "payments",
+  "environment": "SIT",
+  "draftId": "R...",
+  "timezone": "Asia/Hong_Kong",
+  "cron": "0 2 * * *",
+  "maxConcurrentRuns": 1,
+  "enabled": false
+}
+```
+
+使用驗證回傳的 draft ID。RUN 排程保存已驗證輸入、Case 選取及 revision，而非可變查詢。套件、目標、environment、config 改變後必須建立新排程。受保護的套件預設值以路徑綁定 keep marker 表示；提交的敏感覆寫值不可持久化。
+
+LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 scenario 驗證及負載上限。舊式 package-path LOAD 排程每次執行前驗證目前套件 scenario；公開 `revisionPolicy` 區分此模式與 revision 綁定 RUN snapshot。
+
+可使用五欄 `cron` 加 IANA timezone，或單次 `runAt` instant，例如 `2026-10-20T02:00:00+08:00`；不可同時提供。單次觸發只會被領取一次。春季 DST 不存在的本地時間會跳過；秋季重複時間可產生兩個 instant，但仍受最短間隔限制。啟用前可用 `POST /api/v1/schedules/preview` 預覽時間。
+
+共用 scheduler 先記錄 occurrence，再提交工作。每排程及全域 overlap 容量已滿會跳過該次；一般 Worker/Load admission 上限仍生效。重啟或延誤 misfire 不會補跑。提交失敗遵循 `server.scheduling.failurePolicy`，不會自動重試執行。取消工作只取消該次 occurrence，暫停排程則阻止未來觸發。工作與 occurrence retention 沿用 Server 上限。
+
+排程管理需要設定的管理員角色。Local auth 的 owner 在觸發時必須仍為啟用的管理員；RUN 工作以 owner 身分執行，並記錄 occurrence 與 audit。Container auth 在管理請求檢查角色；外部身分權限被撤銷時，container 管理員必須暫停相關排程。
+
+#### 遷移既有用戶端
+
+| 既有介面 | 4.2.1 對應 |
 |---|---|
-| Run | 一般功能 SIT/UAT execution |
-| Debug | 在 authoring 或 diagnosis 階段隔離一個 Template/Flow/Tool |
-| Load | 重複／併發 performance execution |
+| CLI `validate`、`run`、`report` | 保留驗證、Case RUN、報告命令 |
+| CLI `--suite`、`--suite-dir`、`--case`、`--tag`、`--rerun-failed` | 保留選取行為；Server 批次使用 `selection` |
+| Debug CLI、sidecar、`/jobs/debug`、`/drafts/debug` | 相容Resource RUN，保留舊式診斷行為 |
+| `/jobs/run` 舊式 Case selection | 保留 Case adapter |
+| `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
+| `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
 
-三者共用 execution model；各模式分別定義 input、identity/bootstrap lifecycle、CLI behavior 與 output layout。
+4.2.1 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.1；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
+
+持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
 
 ### Run 模式
 
@@ -2670,7 +2765,7 @@ Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應
 
 ### 路徑顯示
 
-本機 CLI 預設顯示絕對路徑。加入 `--substitute-package-root`，可將 package 內路徑顯示為 `$ATT_PACKAGE_ROOT` 或 `$ATT_PACKAGE_ROOT/<relative-path>`；加入 `--substitute-external-basename`，可將其他絕對路徑顯示為 `$EXTERNAL/<basename>`。兩個 option 可獨立使用，適用於 `run`、`validate`、`snapshot`、`debug` 及 `load` 的人類可讀診斷、結構化結果與顯示的報表路徑。這只會改變呈現方式，不會改變檔案存取或儲存的 package data。這些 CLI options 只適用於本機 CLI；為避免洩露 host path，Server Worker 在 API 和 Studio 輸出中一律強制啟用兩種替換，並優先於 CLI 設定。升級至 4.2.0 後，如要恢復舊有本機 CLI 呈現方式，請明確加入相應旗標。
+本機 CLI 預設顯示絕對路徑。加入 `--substitute-package-root`，可將 package 內路徑顯示為 `$ATT_PACKAGE_ROOT` 或 `$ATT_PACKAGE_ROOT/<relative-path>`；加入 `--substitute-external-basename`，可將其他絕對路徑顯示為 `$EXTERNAL/<basename>`。兩個 option 可獨立使用，適用於 `run`、`validate`、`snapshot`、`debug` 及 `load` 的人類可讀診斷、結構化結果與顯示的報表路徑。這只會改變呈現方式，不會改變檔案存取或儲存的 package data。這些 CLI options 只適用於本機 CLI；為避免洩露 host path，Server Worker 在 API 和 Studio 輸出中一律強制啟用兩種替換，並優先於 CLI 設定。升級至 4.2.1 後，如要恢復舊有本機 CLI 呈現方式，請明確加入相應旗標。
 
 ```sh
 ./att.sh validate --package --substitute-package-root
@@ -2940,7 +3035,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.0",
+  "attVersion": "4.2.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -2979,7 +3074,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.0-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.0-server.tar.gz`，以及 source archive `att-4.2.0-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
+`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.1-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.1-server.tar.gz`，以及 source archive `att-4.2.1-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
 
 ### Runtime dependencies
 
@@ -3017,6 +3112,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 
 | Artifact | 現行 schema |
 |---|---|
+| 排程建立 | att-schedule/v2 |
+| RUN 定義 | att-execution/v1 |
 | Global configuration | att-config/v2.12 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
@@ -3183,7 +3280,7 @@ Timeout range、evidence sample bound、result limit、pool size 等 operational
 
 #### 為什麼 `Att.bat` 會要求 Maven，或者為什麼 `.sh` Tool 在 windows 上失敗？
 
-在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.0.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
+在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.1.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
 
 啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名稱可解析為 `pwsh.exe`。維護多平臺版本時，請保持參數契約和 stdout 輸出格式一致。
 

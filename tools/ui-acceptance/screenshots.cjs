@@ -76,7 +76,7 @@ async function main() {
       {
         name: 'scheduled-load', fixture: 'scheduled-workspace', route: '#/load-schedules',
         wait: async page => {
-          await page.getByRole('heading', { name: 'Scheduled Load', exact: true }).waitFor();
+          await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
           await page.locator('.att-schedule-table-wrap:visible, .att-schedule-cards:visible')
             .getByText('Nightly payments', { exact: true }).waitFor();
         },
@@ -123,7 +123,7 @@ async function main() {
     }
     await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
       generatedAt: new Date().toISOString(),
-      repositoryVersion: '4.2.0',
+      repositoryVersion: '4.2.1',
       browser: await browser.version(),
       playwright: require('playwright/package.json').version,
       fixtureOrigin: fixture.origin,

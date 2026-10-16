@@ -84,6 +84,7 @@ export interface JobAccepted {
 }
 
 export interface JobSummary {
+  executionType?: string;
   jobId: string;
   command: string;
   packageId: string;

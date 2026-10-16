@@ -136,7 +136,7 @@ public final class WorkerMain {
             else if(error instanceof PackageResourceInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package resource response exceeded the configured limit"; }
             else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured limit"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException
-                    &&("debug".equals(request.command)||"load".equals(request.command))
+                    &&("run".equals(request.command)||"debug".equals(request.command)||"load".equals(request.command))
                     &&request.expectedRevisionDigest!=null) { code="ATT-SERVER-DRAFT-STALE"; message="Package content changed after preview; rebuild the draft"; exit=2; status="INVALID"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException) { code="ATT-RESOURCE-CURSOR-STALE"; message="The package resources changed; refresh the Explorer"; }
             else if(error instanceof PackageConfigurationInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package configuration response exceeded the configured limit"; }
@@ -146,7 +146,8 @@ public final class WorkerMain {
             boolean draftInspection="inspect".equals(request.command)&&("debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                     ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                     ||"quick-load-policy".equals(request.inspectionAction)
-                    ||"load-scenario".equals(request.inspectionAction));
+                    ||"load-scenario".equals(request.inspectionAction)
+                    ||"run-input".equals(request.inspectionAction));
             if(draftInspection) {
                 String safeMessage=DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message);
                 diagnostic.put("summary",safeMessage);
@@ -176,7 +177,12 @@ public final class WorkerMain {
         Path root=Paths.get(r.packageRoot).toAbsolutePath().normalize();
         Path config=path(r.config); Path output=path(r.outputDirectory);
         AttService service=new DefaultAttService();
-        if("run".equals(r.command)) return service.run(new RunRequest(root,config,r.environment,output,r.runId,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),bool(r.rerunFailed),bool(r.dryRun),bool(r.failFast),null,"reject",false,event -> emitExecution(event)));
+        if("run".equals(r.command)&&r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
+        if("run".equals(r.command)&&r.target!=null) {
+            Map<String,Object> t=requiredTarget(r);
+            return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),false,event -> emitRunExecution(event,r.diagnosticMode),r.debugId,r.overrides,false,null,r.inlineDebugInput));
+        }
+        if("run".equals(r.command)) return service.run(new RunRequest(root,config,r.environment,output,r.runId,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),bool(r.rerunFailed),bool(r.dryRun),bool(r.failFast),null,"reject",false,event -> emitRunExecution(event,r.diagnosticMode)));
         if("debug".equals(r.command)) { Map<String,Object> t=requiredTarget(r);
             if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides,false,null,r.inlineDebugInput)); }
@@ -222,6 +228,26 @@ public final class WorkerMain {
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
             PackageResourceInspector inspector = resourceInspector(root, config, r);
+            if("run-input".equals(r.inspectionAction)) {
+                String revision=inspector.executionRevisionDigest();
+                OperationResult validated=service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),"selected"));
+                if(validated.exitCode()!=0) {
+                    for(att.validation.Diagnostic diagnostic:validated.diagnostics())emit(WorkerEvent.Type.DIAGNOSTIC,diagnostic.toMap());
+                    return validated;
+                }
+                if(r.caseIds!=null&&!r.caseIds.isEmpty()) {
+                    OperationResult identities=validated;
+                    if(r.tags!=null&&!r.tags.isEmpty()||r.excludeTags!=null&&!r.excludeTags.isEmpty())
+                        identities=service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),Collections.<String>emptySet(),Collections.<String>emptySet(),bool(r.all),"selected"));
+                    Object resolved=identities.summary().get("selectedCaseIds");
+                    if(!(resolved instanceof List)||!new java.util.HashSet<Object>((List<?>)resolved).containsAll(r.caseIds))
+                        throw new IllegalArgumentException("RUN includes Case IDs that do not exist in the selected suites");
+                }
+                inspector.verifyRevision(revision);
+                Map<String,Object> inspected=new LinkedHashMap<String,Object>(validated.summary());
+                inspected.put("revisionDigest",revision);
+                return new OperationResult(null,"PASS",0,0,validated.diagnostics(),Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
             if("revision".equals(r.inspectionAction)) {
                 inspector.verifyRevision(r.expectedRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
@@ -362,6 +388,10 @@ public final class WorkerMain {
         }
     }
     private Map<String,Object> requiredTarget(WorkerRequest r) { if(r.target==null)throw new IllegalArgumentException("target is required"); return r.target; }
+    private void emitRunExecution(att.api.ExecutionEvent event,Boolean diagnosticMode) {
+        if(Boolean.FALSE.equals(diagnosticMode)&&event.type()==att.api.ExecutionEvent.Type.DEBUG)return;
+        emitExecution(event);
+    }
     private void emitExecution(att.api.ExecutionEvent event) {
         Map<String,Object> data = new LinkedHashMap<String,Object>();
         if(event.runId()!=null)data.put("executionId",event.runId()); if(event.caseId()!=null)data.put("caseId",event.caseId());

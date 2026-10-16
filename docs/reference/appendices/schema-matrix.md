@@ -4,6 +4,8 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 
 | Artifact | Active schema |
 |---|---|
+| Schedule creation | att-schedule/v2 |
+| RUN definition | att-execution/v1 |
 | Global configuration | att-config/v2.12 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
