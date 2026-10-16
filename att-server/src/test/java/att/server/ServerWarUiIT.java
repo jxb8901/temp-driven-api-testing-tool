@@ -91,7 +91,7 @@ class ServerWarUiIT {
                     "opaque Origins must be rejected");
             assertEquals(200, postJson(port, previewPath, scheduleAdminAuth, "http://127.0.0.1:" + port, previewBody),
                     "same-origin schedule preview may proceed");
-            assertEquals(403,apiStatus(port,"POST","/tools/att/api/v1/drafts/run",scheduleAdminAuth,"https://attacker.example",Map.of()),
+            assertEquals(403,postJson(port,"/tools/att/api/v1/drafts/run",scheduleAdminAuth,"https://attacker.example","{}"),
                     "Canonical RUN drafts retain the configured same-origin boundary.");
             assertEquals(403, delete(port, "/tools/att/api/v1/load-schedules/unknown", scheduleAdminAuth, "https://attacker.example"),
                     "cross-origin deletes must be rejected before schedule lookup");
