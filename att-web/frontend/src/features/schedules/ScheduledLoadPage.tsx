@@ -104,6 +104,28 @@ function recurrenceLabel(schedule: LoadSchedule): string {
   return `Cron · ${schedule.cron || ''}`;
 }
 
+type ScheduleState = 'completed' | 'enabled' | 'paused';
+
+function scheduleState(schedule: LoadSchedule): ScheduleState {
+  if (schedule.runAt && schedule.nextRunAt === null) return 'completed';
+  return schedule.enabled ? 'enabled' : 'paused';
+}
+
+function scheduleStateLabel(state: ScheduleState): string {
+  return state === 'completed' ? 'Completed' : state === 'enabled' ? 'Enabled' : 'Paused';
+}
+
+function scheduleStateIcon(state: ScheduleState): string {
+  return state === 'completed' ? '✓' : state === 'enabled' ? '●' : '■';
+}
+
+function ScheduleStateBadge({ schedule }: { schedule: LoadSchedule }): React.JSX.Element {
+  const state = scheduleState(schedule);
+  return <span className={`att-schedule-state is-${state}`} title={state === 'completed' ? 'The one-time firing was consumed; check History for its outcome.' : undefined}>
+    <span aria-hidden="true">{scheduleStateIcon(state)}</span> {scheduleStateLabel(state)}
+  </span>;
+}
+
 function jobSummary(schedule: LoadSchedule): string {
   if (schedule.jobType === 'debug' || schedule.jobType === 'run') {
     const target = schedule.debugTarget;
@@ -132,7 +154,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const [validationDiagnostics, setValidationDiagnostics] = useState<ScheduleValidationDiagnostic[]>([]);
   const [validationRequestId, setValidationRequestId] = useState('');
   const [filter, setFilter] = useState('');
-  const [stateFilter, setStateFilter] = useState<'all' | 'enabled' | 'paused'>('all');
+  const [stateFilter, setStateFilter] = useState<'all' | ScheduleState>('all');
   const [packageFilter, setPackageFilter] = useState('');
   const [executionFilter, setExecutionFilter] = useState('all');
   const [draft, setDraft] = useState<ScheduleDraft>(() => createScheduleDraft());
@@ -285,7 +307,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     return schedules.filter(schedule => {
       const matchesText = !query || [schedule.name, schedule.description, schedule.packageId, schedule.scenario || 'Validated inline snapshot', schedule.cron]
         .some(value => String(value || '').toLocaleLowerCase().includes(query));
-      const matchesState = stateFilter === 'all' || (stateFilter === 'enabled' ? schedule.enabled : !schedule.enabled);
+      const matchesState = stateFilter === 'all' || scheduleState(schedule) === stateFilter;
       return matchesText && matchesState && (executionFilter === 'all' || executionFilter === (schedule.jobType === 'load' || !schedule.jobType ? 'load' : 'run')) && (!packageFilter || schedule.packageId === packageFilter);
     });
   }, [executionFilter, filter, packageFilter, schedules, stateFilter]);
@@ -430,7 +452,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
         <label>Execution type<select value={executionFilter} onChange={event => setExecutionFilter(event.currentTarget.value)}><option value="all">RUN and LOAD</option><option value="run">RUN</option><option value="load">LOAD</option></select></label>
         <label>Status
           <select value={stateFilter} onChange={event => setStateFilter(event.currentTarget.value as typeof stateFilter)}>
-            <option value="all">All schedules</option><option value="enabled">Enabled</option><option value="paused">Paused</option>
+            <option value="all">All schedules</option><option value="enabled">Enabled</option><option value="paused">Paused</option><option value="completed">Completed</option>
           </select>
         </label>
         <label>Package
@@ -455,7 +477,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
               <td data-label="Package and scenario"><span>{schedule.packageId}</span><small>{jobSummary(schedule)}{schedule.config ? ` · ${schedule.config}` : ''}</small></td>
               <td data-label="Recurrence"><span>{recurrenceLabel(schedule)}</span><small>{schedule.timezone}</small></td>
               <td data-label="Next run">{formatScheduleTime(schedule.nextRunAt, schedule.timezone)}</td>
-              <td data-label="Status"><span className={`att-schedule-state ${schedule.enabled ? 'is-enabled' : 'is-paused'}`}><span aria-hidden="true">{schedule.enabled ? '●' : '■'}</span> {schedule.enabled ? 'Enabled' : 'Paused'}</span></td>
+              <td data-label="Status"><ScheduleStateBadge schedule={schedule} /></td>
               <td data-label="Actions"><div className="att-schedule-actions">
                 <button type="button" onClick={() => openHistory(schedule)} aria-label={`History ${schedule.name}`}>History</button>
                 <button type="button" onClick={() => editSchedule(schedule)} aria-label={`Edit ${schedule.name}`}>Edit</button>
@@ -468,7 +490,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
         </div>
         <section className="att-schedule-cards" aria-label="Schedule list">
           {visibleSchedules.map(schedule => <article className="att-schedule-card" key={schedule.id}>
-            <div className="att-schedule-card-heading"><h3>{schedule.name}</h3><span className={`att-schedule-state ${schedule.enabled ? 'is-enabled' : 'is-paused'}`}>{schedule.enabled ? '● Enabled' : '■ Paused'}</span></div>
+            <div className="att-schedule-card-heading"><h3>{schedule.name}</h3><ScheduleStateBadge schedule={schedule} /></div>
             {schedule.description && <p>{schedule.description}</p>}
             <dl><div><dt>Package</dt><dd>{schedule.packageId}</dd></div><div><dt>Job</dt><dd>{jobSummary(schedule)}</dd></div>
               <div><dt>Recurrence</dt><dd>{recurrenceLabel(schedule)}</dd></div><div><dt>Next run · {schedule.timezone}</dt><dd>{formatScheduleTime(schedule.nextRunAt, schedule.timezone)}</dd></div></dl>

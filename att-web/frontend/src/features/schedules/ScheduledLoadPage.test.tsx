@@ -106,6 +106,27 @@ describe('ScheduledLoadPage', () => {
     expect(api.getLoadScheduleExecutions).toHaveBeenCalledWith(sampleSchedule.id, 100, expect.any(AbortSignal));
   });
 
+  it('labels consumed one-time schedules as completed and filters them separately', async () => {
+    const completed: LoadSchedule = {
+      ...sampleSchedule, id: 'S-ONCE', name: 'One-time import', runAt: '2026-10-16T10:00:00Z',
+      cron: undefined, nextRunAt: null,
+    };
+    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule, completed] })) });
+    await render(api);
+    expect(host.textContent).toContain('One-time import');
+    expect(host.querySelector('.att-schedule-table tbody tr:last-child [data-label="Status"]')?.textContent).toContain('Completed');
+    expect(host.querySelector('.att-schedule-table tbody tr:last-child [data-label="Next run"]')?.textContent).toContain('No next run scheduled');
+
+    const statusFilter = host.querySelectorAll('.att-schedule-filters select')[1] as HTMLSelectElement;
+    await change(statusFilter, 'completed');
+    expect(host.querySelector('.att-schedule-status')?.textContent).toBe('1 of 2 schedules shown.');
+    expect(host.textContent).toContain('One-time import');
+    expect(host.textContent).not.toContain('Nightly payments');
+    await change(statusFilter, 'enabled');
+    expect(host.textContent).toContain('Nightly payments');
+    expect(host.textContent).not.toContain('One-time import');
+  });
+
   it('requires a server preview before creating a disabled schedule by default', async () => {
     const api = makeApi();
     await render(api);

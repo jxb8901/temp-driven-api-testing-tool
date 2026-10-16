@@ -95,7 +95,7 @@ class WindowsLauncherTest {
                 .directory(Paths.get("").toAbsolutePath().toFile())
                 .redirectOutput(output.toFile()).redirectError(error.toFile());
         builder.environment().put("M2_REPO", mavenRepository.toString());
-        builder.environment().put("ATT_PACKAGE_ROOT", packageRoot.toString());
+        builder.environment().put("ATT_PACKAGE_ROOT", packageRoot.resolve("packages/default").toString());
         Process process = builder.start();
         try {
             assertTrue(process.waitFor(90, TimeUnit.SECONDS), "att.bat did not finish the command-backed Tool smoke test");
@@ -185,6 +185,7 @@ class WindowsLauncherTest {
     private static Path createDebugFixture(Path root, Path fixture) throws Exception {
         Path template = fixture.resolve("templates/SIMPLE");
         Files.createDirectories(template);
+        copyTree(Paths.get("packages/default/schemas"), fixture.resolve("schemas"));
         String fixtureRelative = root.relativize(fixture).toString().replace(File.separatorChar, '/');
         Files.write(fixture.resolve("config.yaml"), ("schemaVersion: att-config/v2.11\n"
                 + "environment: SIT\noutputDirectory: " + fixtureRelative + "/output\n"
@@ -210,8 +211,9 @@ class WindowsLauncherTest {
         Files.createDirectories(packageRoot);
         Files.copy(Paths.get("att.bat"), root.resolve("att.bat"));
         createApplicationJar(lib.resolve("att-local-"+projectVersion()+".jar"));
+        Path sourcePackage = Paths.get("packages/default");
         for (String directory : new String[]{"config", "templates", "testcase", "load", "tools", "schemas"}) {
-            Path source = Paths.get(directory);
+            Path source = sourcePackage.resolve(directory);
             Path destination = packageRoot.resolve(directory);
             if (Files.isDirectory(source)) copyTree(source, destination);
             else Files.createDirectories(destination);
