@@ -66,7 +66,7 @@ class WindowsLauncherTest {
 
     @Test @EnabledOnOs(OS.WINDOWS)
     void sourceTreeLauncherRunsCommandBackedToolWithoutNativeProcessDependency() throws Exception {
-        Path packageRoot = Paths.get("").toAbsolutePath();
+        Path packageRoot = Paths.get("").toAbsolutePath().resolve("packages/default");
         Path targetDirectory = packageRoot.resolve("target");
         Files.createDirectories(targetDirectory);
         Path temp = Files.createTempDirectory(targetDirectory, "windows-launcher-smoke-" + UUID.randomUUID() + "-");
@@ -95,7 +95,7 @@ class WindowsLauncherTest {
                 .directory(Paths.get("").toAbsolutePath().toFile())
                 .redirectOutput(output.toFile()).redirectError(error.toFile());
         builder.environment().put("M2_REPO", mavenRepository.toString());
-        builder.environment().put("ATT_PACKAGE_ROOT", packageRoot.resolve("packages/default").toString());
+        builder.environment().put("ATT_PACKAGE_ROOT", packageRoot.toString());
         Process process = builder.start();
         try {
             assertTrue(process.waitFor(90, TimeUnit.SECONDS), "att.bat did not finish the command-backed Tool smoke test");
@@ -115,7 +115,7 @@ class WindowsLauncherTest {
     @Test @EnabledOnOs(OS.WINDOWS)
     void sourceAndPackagedLaunchersNeverCompileWithMavenPresentOrAbsent() throws Exception {
         Path workspace = Paths.get("").toAbsolutePath();
-        Path targetDirectory = workspace.resolve("target");
+        Path targetDirectory = workspace.resolve("packages/default/target");
         Files.createDirectories(targetDirectory);
         Path temp = Files.createTempDirectory(targetDirectory, "windows-launcher-run-only-");
         Path buildToolLog = temp.resolve("build-tools.log");
@@ -138,7 +138,7 @@ class WindowsLauncherTest {
             }
 
             for (Path root : roots) {
-                Path executionRoot = root.equals(sourceRoot) ? root : root.resolve("packages/default");
+                Path executionRoot = root.resolve("packages/default");
                 Path fixturePath = root.equals(sourceRoot) ? temp.resolve("source-debug-fixture")
                         : executionRoot.resolve("target/launcher-debug-smoke");
                 Path debugFixture = createDebugFixture(executionRoot, fixturePath);
