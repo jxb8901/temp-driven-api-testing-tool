@@ -1122,7 +1122,7 @@ final class ServerRuntime implements AutoCloseable {
         }
         private volatile Map<String,Object> metrics=Collections.emptyMap();
         private volatile Process process;
-        private volatile BufferedReader reader;
+        private volatile InspectionProtocolReader reader;
         private volatile OutputStream writer;
 
         Map<String,Object> request(Path root,WorkerRequest request) throws Exception {
@@ -1141,7 +1141,7 @@ final class ServerRuntime implements AutoCloseable {
                 Map<String,Object> workerDiagnostic=null;
                 long total=0;
                 while(result==null) {
-                    String line=readBoundedLine(reader,config.inspection.maxResponseBytes);
+                    String line=reader.readLine(config.inspection.maxResponseBytes);
                     if(line==null)throw new IllegalStateException("Package inspection Worker exited before completing the request");
                     if("\u0000OVERSIZED".equals(line))throw new InspectionResponseTooLargeException();
                     total+=line.getBytes(StandardCharsets.UTF_8).length+1L;
@@ -1219,7 +1219,7 @@ final class ServerRuntime implements AutoCloseable {
             process=started;
             inspectionProcesses.put(started,Boolean.TRUE);
             writer=started.getOutputStream();
-            reader=new BufferedReader(new InputStreamReader(started.getInputStream(),StandardCharsets.UTF_8));
+            reader=new InspectionProtocolReader(new InputStreamReader(started.getInputStream(),StandardCharsets.UTF_8));
             if(closing){discard();throw new InterruptedException("Server is shutting down");}
             Thread stderr=new Thread(()->{
                 try(java.io.InputStream in=started.getErrorStream()) {
@@ -1242,7 +1242,7 @@ final class ServerRuntime implements AutoCloseable {
             synchronized(retained){retained.clear();}
             warmed.clear();
             if(!warming){warmAttempts.clear();warmRetryAt=0;}
-            BufferedReader input=reader;reader=null;
+            InspectionProtocolReader input=reader;reader=null;
             OutputStream output=writer;writer=null;
             if(current!=null) {
                 if(current.isAlive())current.destroyForcibly();
