@@ -2,6 +2,8 @@
 
 # ATT 4.2.0 - 2026-10-14
 
+- Reuse bounded Studio query and Worker configuration caches, prefer idle inspectors with matching package state, and add optional asynchronous warm-up and inspection metrics (#227).
+
 - Add a standalone Configuration workspace and improve Explorer navigation, source browsing, Testdata inspection, and environment comparison (#216).
 - Improve Debug and Load authoring with editable sidecar defaults, threshold and evidence forms, Quick Load, and schedule entry points (#216).
 - Add shared syntax-aware source viewing with ATT expression and package-file navigation (#216).

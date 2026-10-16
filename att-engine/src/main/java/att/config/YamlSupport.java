@@ -37,6 +37,8 @@ public final class YamlSupport {
 
     /** Safe construction plus source capture in a single YAML parse. */
     public static Object load(Path file) throws IOException {
+        long inspectionStarted = System.nanoTime();
+        att.metrics.InspectionMetrics.JVM.add(att.metrics.InspectionMetrics.Stage.READ_BYTES,Files.size(file));
         Path key = file.toAbsolutePath().normalize();
         synchronized (SOURCES) { SOURCES.remove(key); }
         SourceConstructor constructor = new SourceConstructor(options());
@@ -45,6 +47,8 @@ public final class YamlSupport {
             YamlSource source = new YamlSource(file, constructor.root);
             synchronized (SOURCES) { SOURCES.put(key, source); }
             return value;
+        } finally {
+            att.metrics.InspectionMetrics.JVM.record(att.metrics.InspectionMetrics.Stage.YAML_PARSE, System.nanoTime() - inspectionStarted);
         }
     }
 

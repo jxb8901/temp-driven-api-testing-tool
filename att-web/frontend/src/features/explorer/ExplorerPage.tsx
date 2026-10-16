@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type UIEvent } from 'react';
+import { inspectionCache } from '../../inspectionCache';
+import { useInspectionRefresh } from '../../useInspectionRefresh';
 import { ResourceTree, resourceKey } from './ResourceTree';
 import { SourceViewer } from './SourceViewer';
 import { CodeEditor } from '../code/CodeEditor';
@@ -17,7 +19,10 @@ interface ExplorerListSnapshot {
   scrollTop: number;
 }
 
-const explorerListSnapshots = new Map<string, ExplorerListSnapshot>();
+const explorerListSnapshots = {
+  get: (key: string) => inspectionCache.getView<ExplorerListSnapshot>('explorer:' + key),
+  set: (key: string, value: ExplorerListSnapshot) => inspectionCache.setView('explorer:' + key, value),
+};
 
 function savedExplorerList(packageId: string): ExplorerListSnapshot {
   return explorerListSnapshots.get(packageId) || {
@@ -109,6 +114,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   const [dirty, setDirty] = useState(false);
   const [principal, setPrincipal] = useState(principalLabel);
   const [resourceRefresh, setResourceRefresh] = useState(0);
+  const inspectionRefresh = useInspectionRefresh();
   const resourceListRef = useRef<HTMLDivElement | null>(null);
   const pagesToRestore = useRef(Math.max(1, initialListState.pagesLoaded));
   const savedScrollTop = useRef(Math.max(0, initialListState.scrollTop));
@@ -179,6 +185,8 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
             nextCursor = page.nextCursor || null;
             diagnostics = page.diagnostics || [];
             pagesFetched++;
+            // Paint each restored page as soon as its session check/cache lookup completes.
+            setResources([...accumulated]); setTotalResources(total); setCursor(nextCursor);
             if (!nextCursor) break;
           }
           if (controller.signal.aborted) return;
@@ -196,7 +204,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
       })();
     }, query ? 220 : 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [api, packageId, query, typeFilter, sortKey, sortDirection, resourceRefresh]);
+  }, [api, packageId, query, typeFilter, sortKey, sortDirection, resourceRefresh, inspectionRefresh]);
 
   useEffect(() => {
     explorerListSnapshots.set(packageId, {
@@ -269,7 +277,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
       if (!controller.signal.aborted) setDetailError(userError(error, 'resource detail'));
     }).finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
     return () => controller.abort();
-  }, [api, identity?.packageId, identity?.type, identity?.resourceId]);
+  }, [api, identity?.packageId, identity?.type, identity?.resourceId, inspectionRefresh]);
 
   useEffect(() => {
     const requestedTab = resourceRoute?.tab;
@@ -426,7 +434,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
               onClick={() => { resetListPosition(); setTypeFilter(value); }}>{label}</button>)}
         </div>
         <p className="att-explorer-status" role="status" aria-live="polite">{resourceStatus}</p>
-        {resourceError && <p className="att-error" role="alert">{resourceError}<button type="button" onClick={() => setResourceRefresh(value => value + 1)}>Retry</button></p>}
+        {resourceError && <p className="att-error" role="alert">{resourceError}<button type="button" onClick={() => (inspectionCache.clear(), setResourceRefresh(value => value + 1))}>Retry</button></p>}
         <ResourceTree items={resources} selectedKey={selectedKey} loading={loadingResources} nextCursor={cursor} sortKey={sortKey} direction={sortDirection} onSortChange={changeSort}
           onSelect={resource => onResourceRouteChange({ type: resource.type, resourceId: resource.resourceId })}
           onLoadMore={() => void loadMore()} scrollContainerRef={resourceListRef} onListScroll={handleListScroll} />

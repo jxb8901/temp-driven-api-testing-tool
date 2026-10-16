@@ -684,6 +684,35 @@ class PackageResourceInspectorTest {
                 ()->inspector.inspect("list","template",null,null,1,1,revision));
     }
 
+    @Test void watcherOverflowForcesACompleteAtomicRebuild() throws Exception {
+        Path root=packageWithTemplate("overflow-index","PAYMENT","description: first");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144,true);
+        try {
+            Map<String,Object> first=inspector.inspect("list","template",null,null,0,1);
+            long builds=inspector.indexBuildCount();
+            java.lang.reflect.Field field=PackageResourceInspector.class.getDeclaredField("packageWatch");field.setAccessible(true);
+            Object watch=field.get(inspector);
+            java.nio.file.WatchKey overflow=new java.nio.file.WatchKey() {
+                public boolean isValid(){return true;}
+                public java.nio.file.Watchable watchable(){return root;}
+                public void cancel(){}
+                public boolean reset(){return true;}
+                public List<java.nio.file.WatchEvent<?>> pollEvents(){return Collections.<java.nio.file.WatchEvent<?>>singletonList(new java.nio.file.WatchEvent<Object>() {
+                    public java.nio.file.WatchEvent.Kind<Object> kind(){return java.nio.file.StandardWatchEventKinds.OVERFLOW;}
+                    public int count(){return 1;}
+                    public Object context(){return null;}
+                });}
+            };
+            java.lang.reflect.Field directories=watch.getClass().getDeclaredField("directories");directories.setAccessible(true);
+            java.lang.reflect.Method process=watch.getClass().getDeclaredMethod("process",java.nio.file.WatchKey.class);process.setAccessible(true);
+            synchronized(watch){((Map<java.nio.file.WatchKey,Path>)directories.get(watch)).put(overflow,root);process.invoke(watch,overflow);}
+            Map<String,Object> rebuilt=inspector.inspect("list","template",null,null,0,1);
+            assertEquals(builds+1,inspector.indexBuildCount());
+            assertEquals(first.get("revisionDigest"),rebuilt.get("revisionDigest"));
+            assertEquals(first.get("items").toString(),rebuilt.get("items").toString());
+        } finally {inspector.close();}
+    }
+
     @Test void reusesTheBoundedIndexAndInvalidatesItWhenPackageFilesChange() throws Exception {
         Path root=packageWithTemplate("cached-index", "PAYMENT", "description: first");
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",

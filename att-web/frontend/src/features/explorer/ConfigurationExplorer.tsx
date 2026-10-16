@@ -1,3 +1,4 @@
+import { useInspectionRefresh } from '../../useInspectionRefresh';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ConfigurationField, ConfigurationResponse, ExplorerApi } from './types';
 
@@ -55,6 +56,8 @@ function flattenEntries(response: ConfigurationResponse, section: string): Array
 }
 
 export function ConfigurationExplorer({ api, packageId, environment, onEnvironmentChange, initialMode, showEnvironmentSelector = true, onViewChange, includeAllFields = false }: ConfigurationExplorerProps) {
+  const inspectionRefresh = useInspectionRefresh();
+  const initializedPackage = useRef<string | null>(null);
   const [mode, setMode] = useState<ConfigMode>(initialMode || 'declared');
   const [data, setData] = useState<ConfigurationResponse | null>(null);
   const [declaredData, setDeclaredData] = useState<ConfigurationResponse | null>(null);
@@ -87,14 +90,15 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
 
   useEffect(() => {
     const { controller, sequence } = startRequest();
-    setMode(initialMode || 'declared'); setData(null); setDeclaredData(null); setError(''); setStatus('Loading declared configuration…');
+    if (initializedPackage.current !== packageId) { setMode(initialMode || 'declared'); initializedPackage.current = packageId; }
+    setData(null); setDeclaredData(null); setError(''); setStatus('Loading declared configuration…');
     api.getDeclaredConfiguration(packageId, controller.signal).then(response => {
-      if (sequence !== requestSequence.current) return;
+      if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setData(response); setDeclaredData(response); setStatus(`Declared configuration: ${response.state || 'ready'}.`);
       const environments = (response.environments || []).filter(item => item.state === 'active' && item.name);
       const defaultName = environments.find(item => item.default)?.name || environments[0]?.name || '';
-      setLeft(defaultName);
-      setRight(environments.find(item => item.name !== defaultName)?.name || '');
+      setLeft(current => environments.some(item => item.name === current) ? current : defaultName);
+      setRight(current => environments.some(item => item.name === current) ? current : environments.find(item => item.name !== defaultName)?.name || '');
       setCompareSection(current => current || response.sections?.find(item => item.id !== 'globals')?.id || 'globals');
       if (!environment && defaultName) onEnvironmentChange(defaultName);
     }).catch(reason => {
@@ -103,7 +107,7 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
     return () => { controller.abort(); if (sequence === requestSequence.current) requestSequence.current += 1; };
     // Initial mode changes are handled by the route effect below; refetch only when package/API changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, packageId]);
+  }, [api, packageId, inspectionRefresh]);
 
   const profiles = useMemo(() => (declaredData?.environments || []).filter(item => item.state === 'active' && item.name), [declaredData]);
 
@@ -153,12 +157,12 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
 
   useEffect(() => {
     if (!declaredData) return;
-    if (initialMode === 'declared') {
+    if ((initialMode || mode) === 'declared') {
       cancelPending(); setMode('declared'); setData(declaredData); setNextOffset(null);
       return;
     }
-    if (initialMode === 'effective') void loadEffective(section);
-    if (initialMode === 'compare' && profiles.length > 1) void compare();
+    if ((initialMode || mode) === 'effective') void loadEffective(section);
+    if ((initialMode || mode) === 'compare' && profiles.length > 1) void compare();
     // Route changes intentionally trigger the matching projection request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMode, packageId, profiles.length, declaredData]);

@@ -119,6 +119,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
 - [CI、打包與運維](#ci打包與運維)
   - [Development/release gates](#developmentrelease-gates)
   - [Runtime dependencies](#runtime-dependencies)
+  - [Studio inspection cache](#studio-inspection-cache)
   - [Documentation operations](#documentation-operations)
   - [CI 與 environment promotion](#ci-與-environment-promotion)
 - [Appendix A — schema 與 version matrix](#appendix-a-schema-與-version-matrix)
@@ -2983,6 +2984,20 @@ python3 tools/validate_reference_content.py
 ### Runtime dependencies
 
 CLI、Engine 及 Worker 仍相容 Java 8。ATT Server WAR 需要 Java 17+ 及外部 Tomcat 10.1+。ATT 不內置 CLI integration 所需的 JDBC driver；請將 driver/dependency jar 放入 `lib/`。IBM MQ 是 optional integration：default CLI build 在沒有 MQ client class 時仍可使用；MQ deployment 需 package 支援的 IBM client jar/profile。
+
+### Studio inspection cache
+
+Studio 將 Resource 分頁、Detail、安全 Source 及一般 Configuration projection 保存在 session memory。共用 cache 最多保留 128 個 response 及 8 MiB encoded payload；單一 response 超過 1 MiB 不會加入 cache。資料在 15 秒內視為 fresh；重新開啟較舊 view 時先顯示 cached projection，再由 background read 更新。相同 in-flight read 會合併；取消一個 consumer 不會取消其他 consumer 的 request。返回 view 時保留搜尋、排序、分頁及捲動狀態。
+
+每次重用前先檢查 authenticated inspection context。Identity、session、role 或 inspection policy 改變會清除舊 response。Package/environment selection、明確 refresh、logout、頁面暫停、新觀察到的 package revision，以及 stale cursor 或存取錯誤，會使相關 memory 失效。Configuration 和 Source content 不會寫入 localStorage、IndexedDB、service worker 或 HTTP cache。Auth/CSRF response 及 `includeAllFields` administrator response 不會加入 query cache。HTTP response 仍遵守 `Cache-Control: no-store`。
+
+每個 inspection Worker 仍逐一處理 request，並保留兩個 Resource inspector。Dispatch 優先選擇已保留相同 package/config/environment 及 policy key 的 idle Worker，再使用其他 idle Worker。Parsed Configuration snapshot 另有每 JVM 四個 entry 的 LRU，以及 32 MiB weighted retention budget；Worker heap 設定仍是 JVM 的硬性上限。重用時會對 root configuration、所選 Helper/Tool Group/Testdata dependency 及 schema tree 作 bounded content reconciliation，因此 rename、delete、相同 timestamp 的內容替換及未知 dependency 改動均會重新載入。Cache 錯誤會回退至原有 uncached validation。每個 request 均重新建立 permission-checked projection；administrator projection 不會進入一般 cache。
+
+Optional `server.inspection.warmup` 預設為 `enabled: false`、`workers: 1`、`keys: []`。`workers` 範圍為 1 至 `server.inspection.maxConcurrent`。每個 key 包含 `packageId` 及 optional Engine `environment`；key 數量不得超過 warmup Worker 數量的兩倍，亦不可重複。不設定 `environment` 可預熱 Explorer 使用的 package-default index。Keys 分配至各 Worker，每個最多兩個；沒有 keys 時，所選 Worker 會預熱第一個 registered package。Package 缺失或 preload 失敗不會阻塞 Tomcat startup。Warmup 會避開 interactive demand，每個 key 最多 retry 三次並加入 backoff；daemon 更換後會重新預熱，shutdown 時停止。所有 Worker 均忙碌時，interactive traffic 可以取消 preload。
+
+`GET /api/v1/metrics` 遵循既有 Server authentication policy，包含 `inspection.server` 及最新的 bounded `inspection.workers` snapshot。Counter 與 total nanoseconds 涵蓋 HTTP handling、queue、process launch、dispatch、processing、Configuration load/parse、Source request、workbook/YAML parsing 及 index build，亦提供 cache hit/miss/eviction、watcher invalidation/overflow、watched directory、retained key、instrumented read bytes、protocol response bytes、heap-pool peak、GC 及 process CPU。每個 Worker 最多保留 16 個 opaque package/environment aggregate，記錄 request count、processing time、index build、Configuration load 及 instrumented read bytes。Package key 經 hash；counter 不包含 path、configuration value 或 file content。Byte counter 代表已 instrument 的 inspection read，不等於 OS physical I/O。Process-launch timing 不包含 JVM readiness；dispatch 包含 readiness 及 protocol transport。Benchmark 另行記錄 sample p50/p95。
+
+Display snapshot 不會授權 execution。Debug/Quick Load approval 及 Worker execution 仍保留 authoritative package revision check、`ATT-SERVER-DRAFT-STALE`、綁定 principal 的 cursor，以及 stale cursor HTTP `409`。設定例子見 [Server 部署](server-deployment.zh.md)；量測程序見 [inspection benchmark](system-design/web-ui-inspection-inline-jobs.md)。
 
 ### Documentation operations
 

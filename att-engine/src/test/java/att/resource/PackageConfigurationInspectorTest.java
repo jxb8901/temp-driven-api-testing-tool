@@ -20,6 +20,51 @@ class PackageConfigurationInspectorTest {
     @org.junit.jupiter.api.BeforeEach void enableServerPathPresentation() { att.core.PathPresentation.configure(true, true); }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
+    @Test void snapshotsReuseParsedProfilesAndReconcileDependencyContentWithoutMtimeHints() throws Exception {
+        Path root=packageRoot("cached-profiles");
+        PackageConfigurationSnapshots cache=new PackageConfigurationSnapshots();
+        Object context="policy-a";
+        PackageConfigurationSnapshots.Snapshot sit=cache.get(root,Paths.get("config/config.yaml"),"SIT",context,true);
+        assertSame(sit,cache.get(root,Paths.get("config/config.yaml"),"SIT",context,true));
+        PackageConfigurationSnapshots.Snapshot defaultProfile=cache.get(root,Paths.get("config/config.yaml"),null,context,true);
+        PackageConfigurationSnapshots.Snapshot uat=cache.get(root,Paths.get("config/config.yaml"),"UAT",context,true);
+        assertNotSame(sit,uat);
+        Path dependency=root.resolve("config/dbhelpers/sit.yaml");
+        java.nio.file.attribute.FileTime time=Files.getLastModifiedTime(dependency);
+        String original=new String(Files.readAllBytes(dependency),StandardCharsets.UTF_8);
+        Files.write(dependency,original.replace("sit-user","new-user").getBytes(StandardCharsets.UTF_8));
+        Files.setLastModifiedTime(dependency,time);
+        PackageConfigurationSnapshots.Snapshot updated=cache.get(root,Paths.get("config/config.yaml"),"SIT",context,true);
+        assertNotSame(sit,updated);
+        assertNotSame(defaultProfile,cache.get(root,Paths.get("config/config.yaml"),null,context,true));
+        assertSame(uat,cache.get(root,Paths.get("config/config.yaml"),"UAT",context,true));
+        assertNotSame(updated,cache.get(root,Paths.get("config/config.yaml"),"SIT","policy-b",true));
+        Files.move(dependency,dependency.resolveSibling("renamed.yaml"));
+        assertThrows(Exception.class,()->cache.get(root,Paths.get("config/config.yaml"),"SIT",context,true));
+        Files.move(dependency.resolveSibling("renamed.yaml"),dependency);
+        assertNotSame(updated,cache.get(root,Paths.get("config/config.yaml"),"SIT",context,true));
+    }
+
+    @Test void sharedRawSnapshotsAlwaysProduceFreshPrivilegeCheckedProjectionsAndRemainBounded() throws Exception {
+        Path root=packageRoot("cached-privileges");
+        PackageConfigurationSnapshots cache=new PackageConfigurationSnapshots();
+        PackageConfigurationInspector admin=new PackageConfigurationInspector(root,Paths.get("config/config.yaml"),262144,true,
+                Collections.emptyList(),Collections.emptyList(),true).withSnapshots(cache,"policy");
+        PackageConfigurationInspector ordinary=inspector(root).withSnapshots(cache,"policy");
+        Map<String,Object> elevated=admin.inspect("effective","SIT",null,"dbhelpers",0,50);
+        assertEquals("visible",fieldState(dbFields(elevated).get("url")));
+        Map<String,Object> normal=ordinary.inspect("effective","SIT",null,"dbhelpers",0,50);
+        assertEquals("hidden",fieldState(dbFields(normal).get("url")));
+        assertFalse(normal.toString().contains("sit-secret"));
+        assertFalse(elevated.toString().contains("sit-secret"));
+        normal.clear();
+        assertEquals("ready",ordinary.inspect("effective","SIT",null).get("state"));
+        for(int i=0;i<6;i++)cache.get(packageRoot("churn-"+i),Paths.get("config/config.yaml"),null,"policy",false);
+        assertEquals(4,cache.size());
+        assertTrue(cache.retainedWeight()<=32L*1024*1024);
+        cache.clear();assertEquals(0,cache.size());assertEquals(0,cache.retainedWeight());
+    }
+
     @Test void exposesDeclaredProfilesAndEngineResolvedSafeEffectiveConfiguration() throws Exception {
         Path root = packageRoot("safe-config");
         Map<String, Object> declared = inspector(root).inspect("declared", null, null);

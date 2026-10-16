@@ -10,6 +10,7 @@ import type {
   LoadPolicyResponse, LoadTargetType, QuickLoadFormResponse, SubmitLoadDraftInput, TargetResource,
 } from './features/load/types';
 import { contextRelativeReturnTo } from './contextPaths';
+import { inspectionCache } from './inspectionCache';
 import type {
   DeleteScheduleResponse, LoadSchedule, LoadScheduleInput, ScheduleOccurrence, SchedulePreview,
   SchedulePreviewInput,
@@ -33,7 +34,45 @@ function parseBody(text: string): unknown {
 }
 
 /** Same-origin JSON transport shared by the Server UI feature modules. */
+function isInspectionQuery(path: string, init: RequestInit): boolean {
+  if ((init.method || 'GET').toUpperCase() !== 'GET') return false;
+  const [route, query] = path.split('?');
+  if (new URLSearchParams(query).has('includeAllFields')) return false;
+  return /^packages\/[^/]+\/resources(?:\/[^/]+\/[^/]+(?:\/(?:source|source-file))?)?$/.test(route)
+    || /^packages\/[^/]+\/configuration(?:\/(?:effective|compare|files|source))?$/.test(route);
+}
+let capabilitiesFlight: Promise<void> | undefined;
+async function verifyInspectionContext() {
+  if (!capabilitiesFlight) {
+    const epoch = inspectionCache.epoch;
+    capabilitiesFlight = transport<{ inspectionCacheContext?: string }>('auth/capabilities', { cache: 'no-store' }).then(result => {
+      if (inspectionCache.epoch !== epoch) throw new DOMException('Session changed', 'AbortError');
+      if (result.inspectionCacheContext) inspectionCache.setContext(result.inspectionCacheContext);
+      return result.inspectionCacheContext;
+    }).then(context => { if (!context) throw new Error('Inspection cache context unavailable'); }).finally(() => { capabilitiesFlight = undefined; });
+  }
+  return capabilitiesFlight;
+}
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (!isInspectionQuery(path, init)) {
+    if (!['GET', 'HEAD', 'OPTIONS'].includes((init.method || 'GET').toUpperCase())) {
+      if (path === 'auth/logout') inspectionCache.resetSession(); else inspectionCache.clear();
+    }
+    return transport<T>(path, init);
+  }
+  if (init.signal?.aborted) throw new DOMException('Inspection request cancelled', 'AbortError');
+  // Auth responses are never cached; coalesce only the currently running permission check.
+  try { await verifyInspectionContext(); }
+  catch (error) {
+    if (error instanceof ApiError && [401, 403].includes(error.status)) { inspectionCache.resetSession(); throw error; }
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    // Older Servers without a context token remain safely uncached.
+    return transport<T>(path, init);
+  }
+  if (init.signal?.aborted) throw new DOMException('Inspection request cancelled', 'AbortError');
+  return inspectionCache.query(path, signal => transport<T>(path, { ...init, signal, cache: 'no-store' }), init.signal || undefined);
+}
+async function transport<T>(path: string, init: RequestInit = {}): Promise<T> {
   const base = apiBaseUrl();
   const relativePath = path.replace(/^\/+/, '');
   if (!relativePath || path.startsWith('//') || /^[a-z][a-z\d+.-]*:/i.test(path)) {
@@ -49,13 +88,17 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   if (init.body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   const method = (init.method || 'GET').toUpperCase();
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken) headers.set('X-ATT-CSRF', csrfToken);
-  const response = await fetch(url, { ...init, headers, credentials: 'same-origin' });
+  const response = await fetch(url, { ...init, cache: 'no-store', headers, credentials: 'same-origin' });
   const nextCsrf = response.headers.get('X-ATT-CSRF');
   if (nextCsrf) csrfToken = nextCsrf;
   const body = parseBody(await response.text());
   if (!response.ok) {
     const payload = body && typeof body === 'object' ? body as { error?: ApiErrorBody; requestId?: string; diagnostics?: unknown } : {};
     const detail = payload.error;
+    if (isInspectionQuery(path, init) && [401, 403, 404, 409].includes(response.status)) {
+      const packageMatch = /^packages\/([^/]+)\//.exec(path);
+      if (packageMatch) inspectionCache.invalidatePackage(decodeURIComponent(packageMatch[1]));
+    }
     if (localAuthMode && detail?.code === 'ATT-SERVER-AUTHENTICATION-REQUIRED' && path !== 'auth/me') {
       const returnTo = contextRelativeReturnTo(location.pathname, location.search, location.hash);
       location.assign(new URL('login.html?returnTo=' + encodeURIComponent(returnTo), document.baseURI).toString());
@@ -74,6 +117,9 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
       requestId: response.headers.get('X-Request-Id') || undefined,
     });
   }
+  const revision = response.headers.get('X-ATT-Inspection-Revision');
+  const packageMatch = /^packages\/([^/]+)\//.exec(path);
+  if (revision && packageMatch && !init.signal?.aborted) inspectionCache.revision(decodeURIComponent(packageMatch[1]), revision, path);
   return body as T;
 }
 

@@ -46,6 +46,8 @@ att/                              # ATT_HOME
 
 `server.inspection.redaction.enabled` 預設為 `false`，會在安全 projection 中顯示一般 package 值。即使關閉遮蔽或匿名存取，憑證、認證資料、private key 及常見個人資料欄位仍會保護；啟用遮蔽後亦會套用設定的敏感路徑、欄位 pattern 及自由文字預設值。遮蔽關閉時 Server 會記錄啟動警告，UI 會顯示目前設定。共享或正式資料建議啟用遮蔽並要求登入；未遮蔽值只應用於隔離的 SIT 網絡。
 
+Inspection cache、optional `server.inspection.warmup` 設定、lifecycle 及 metrics 的完整 contract 見 [運維 Reference](reference.zh/ci-packaging-operations.md#studio-inspection-cache)。
+
 `server.inspection.configurationAdminRole`（預設 `ATT_ADMIN`）控制 Effective 及 Compare configuration view 的 `includeAllFields=true`。Local-auth mode 只有本地 `ADMIN` 可使用。此選項會加入非秘密 DB properties、evidence SQL／parameters 及平常會遮蔽的 DB 運作設定；它不會完整披露設定值。Username、password、token、個人資料、HTTP header maps、MQ evidence payload、SSH 連線資料及 identity-file 路徑、已分類欄位及設定為敏感的值仍會受到保護。Source 維持安全 source projection；Declared 顯示宣告狀態及項目數量。各 view 都會隱藏受保護值。回應會設定 `Cache-Control: no-store` 並寫入 audit log。
 
 `server.security.checkCrossOrigin` 預設為 `false`，只控制 state-changing API 的 Origin 相等檢查；設為 `true` 時，不匹配會回傳 `ATT-SERVER-ORIGIN-MISMATCH`。關閉此檢查不會略過 local cookie authentication 的 CSRF 驗證或 login/bootstrap 的 Origin 檢查，也不會啟用 CORS 或 wildcard header。反向代理應以可信來源設定 Tomcat `RemoteIpValve`，讓 Servlet request 提供外部 scheme、host 及 port；應用程式不會信任任意 forwarded header。Origin 檢查關閉時 Server 會記錄啟動警告。
@@ -99,6 +101,14 @@ server:
     heapMaxMb: 512
     maxResponseBytes: 262144
     maxSourceBytes: 65536
+    # Optional asynchronous preload. Keep at most two keys per warmup Worker.
+    warmup:
+      enabled: false
+      workers: 1
+      keys: []
+      # keys:
+      #   - packageId: payments
+      #     environment: SIT
     sourceBrowsing:
       enabled: true
       policy: safe-package-files

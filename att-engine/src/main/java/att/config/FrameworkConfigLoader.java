@@ -34,8 +34,18 @@ public final class FrameworkConfigLoader {
      * files remain unchanged and do not silently reinterpret --env.
      */
     public FrameworkConfig load(Path path, Path projectRoot, String selectedEnvironment) throws IOException {
+        return loadInternal(path,projectRoot,selectedEnvironment,null,false);
+    }
+
+    /** Trusted parsed root for inspection snapshots; all schema and profile validation is unchanged. */
+    public FrameworkConfig loadParsed(Path path, Path projectRoot, String selectedEnvironment, Object loaded) throws IOException {
+        return loadInternal(path,projectRoot,selectedEnvironment,loaded,true);
+    }
+
+    private FrameworkConfig loadInternal(Path path, Path projectRoot, String selectedEnvironment, Object parsed, boolean supplied) throws IOException {
+        long inspectionStarted=System.nanoTime();
         try {
-            Object loaded = YamlSupport.load(path);
+            Object loaded=supplied?parsed:YamlSupport.load(path);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Config must be a YAML map: " + path);
             Map<?, ?> rawMap = (Map<?, ?>) loaded;
             String schemaVersion = String.valueOf(rawMap.get("schemaVersion"));
@@ -125,6 +135,8 @@ public final class FrameworkConfigLoader {
                             : "Compare the reported field with the strict config schema and correct its name, type, or value.", e);
             throw (schema == null ? YamlSupport.locate(diagnostic, path, field)
                     : YamlSupport.locateSchema(diagnostic, path, schema.structuredViolations())).forPackage(projectRoot);
+        } finally {
+            att.metrics.InspectionMetrics.JVM.record(att.metrics.InspectionMetrics.Stage.CONFIG_LOAD,System.nanoTime()-inspectionStarted);
         }
     }
 

@@ -10,6 +10,24 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerConfigTest {
     @TempDir Path temp;
 
+    @Test void boundsWarmupKeysToTwoEntriesPerWorkerAndRetainsLazyDefaults() throws Exception {
+        Path pkg=Files.createDirectory(temp.resolve("warmup-package"));
+        Path config=temp.resolve("warmup-server.yaml");
+        String base="server:\n  dataDir: "+yaml(temp.resolve("warmup-data"))+"\n  inspection:\n    maxConcurrent: 2\n";
+        String tail="workers: {}\npackages:\n  allowedRoots: ["+yaml(pkg)+"]\n  entries:\n    p: "+yaml(pkg)+"\n";
+        Files.writeString(config,base+tail);
+        assertFalse(ServerConfig.load(config).inspection.warmup.enabled());
+        Files.writeString(config,base+"    warmup:\n      enabled: true\n      workers: 1\n      keys: [{packageId: p}, {packageId: absent, environment: UAT}]\n"+tail);
+        ServerConfig.Warmup warm=ServerConfig.load(config).inspection.warmup;
+        assertEquals(2,warm.keys().size());assertTrue(warm.enabled());
+        for(String invalid:List.of("workers: 3", "workers: 0", "unknown: true",
+                "keys: [{packageId: p}, {packageId: p}]", "keys: [{packageId: p, environment: '../escape'}]",
+                "workers: 1\n      keys: [{packageId: p}, {packageId: q}, {packageId: r}]")) {
+            Files.writeString(config,base+"    warmup:\n      "+invalid+"\n"+tail);
+            assertThrows(IllegalArgumentException.class,()->ServerConfig.load(config),invalid);
+        }
+    }
+
     @Test void validatesTrustedOriginsAtStartup() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("origins/packages"));
         Path pkg=Files.createDirectory(packages.resolve("p"));

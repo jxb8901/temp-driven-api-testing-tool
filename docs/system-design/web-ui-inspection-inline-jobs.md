@@ -150,14 +150,16 @@ Display masking defaults off for ordinary package values. When enabled, configur
 
 Resource discovery runs in a bounded pool of long-lived inspector Worker processes, not on Tomcat request threads. Each Worker handles one request at a time and retains at most two package indexes. Initial index construction scans configured package resources; subsequent page, detail, and source requests reuse the snapshot. Package file events and watcher overflow invalidate cached indexes, and authoritative draft revision checks build a fresh snapshot before approval. The inspector is read-only and does not invoke Tools. Initial `server.inspection` defaults are `maxConcurrent: 2`, `queuedLimit: 16`, `timeoutMs: 30000`, `heapMaxMb: 512`, `maxResponseBytes: 262144`, and `maxSourceBytes: 65536`. These bounds do not inherit the general job queue limits. Timeout or output-limit violations terminate the inspector Worker; the next request starts a replacement. The inspector reuses `PackageResourceResolver` for package confinement and rejects traversal and external symlinks. Responses are paginated.
 
-The opt-in `att.server.PackageResourceInspectionPerformanceBenchmark` exercises this cache on a generated package with five Excel workbooks (300 Cases each) and 200 Templates. It records cold index construction and warm Case/Template first-page, page-N, detail, and Tool-source latency through the persistent Worker; it excludes HTTP and Tomcat overhead. Run it from the repository root:
+The opt-in `att.server.PackageResourceInspectionPerformanceBenchmark` exercises generated packages, each with five Excel workbooks (300 Cases each) and 200 Templates. It records cold startup, the second request for the same package, warm Case/Template first-page, page-N, detail and Tool-source latency, declared/effective SIT/UAT Configuration, Compare, package churn and concurrent clients. Fixed-cardinality Server/Worker telemetry records startup counts, index builds, instrumented reads, heap, GC and CPU. It excludes HTTP, Tomcat and browser rendering overhead. Run it from the repository root:
 
 ```sh
-mvn -B -ntp -pl att-server -am \
+mvn -B -ntp -pl att-worker,att-server -am \
   -Dtest=PackageResourceInspectionPerformanceBenchmark \
   -Dsurefire.failIfNoSpecifiedTests=false \
   -Datt.server.inspection.benchmark.warmups=1 \
-  -Datt.server.inspection.benchmark.runs=5 \
+  -Datt.server.inspection.benchmark.runs=15 \
+  -Datt.server.inspection.benchmark.workers=2 \
+  -Datt.server.inspection.benchmark.packages=3 \
   -Datt.server.inspection.benchmark.pageSize=50 \
   -Datt.server.inspection.benchmark.revision="$(git rev-parse HEAD)" \
   -Datt.server.inspection.benchmark.output=target/issue-176-resource-discovery-large.json \

@@ -1,5 +1,8 @@
 package att.server;
 
+import att.metrics.InspectionMetrics;
+import static att.metrics.InspectionMetrics.Stage.*;
+
 import att.server.api.WorkerRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -83,6 +86,9 @@ final class ServerRuntime implements AutoCloseable {
     private final ConcurrentHashMap<String,QuickLoadDraft> quickLoadDrafts=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdvancedLoadDraftState> advancedLoadDrafts=new ConcurrentHashMap<>();
     private final List<InspectionWorker> inspectionWorkerPool=new ArrayList<>();
+    private final ScheduledExecutorService inspectionWarmup;
+    private volatile boolean closing;
+    final InspectionMetrics inspectionMetrics=new InspectionMetrics();
     private final AtomicLong inspectionWorkerSelection=new AtomicLong();
     private final byte[] cursorKey=new byte[32];
     private final SecureRandom cursorRandom=new SecureRandom();
@@ -105,6 +111,8 @@ final class ServerRuntime implements AutoCloseable {
         for(int i=0;i<config.inspection.maxConcurrent;i++)inspectionWorkerPool.add(new InspectionWorker());
         retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
         inspectionWatchdogs=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-watchdog");t.setDaemon(true);return t;});
+        inspectionWarmup=config.inspection.enabled&&config.inspection.warmup.enabled()
+                ?java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-warmup");t.setDaemon(true);return t;}):null;
         recover();cleanupExpiredJobsSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
         if(config.scheduling.enabled) {
@@ -113,6 +121,7 @@ final class ServerRuntime implements AutoCloseable {
             loadScheduleScheduler=new LoadScheduleScheduler(config.scheduling,store,this::submitScheduledJob,clock);
             loadScheduleScheduler.start();
         } else loadScheduleScheduler=null;
+        if(inspectionWarmup!=null)inspectionWarmup.scheduleWithFixedDelay(this::warmInspectionSafely,250,250,TimeUnit.MILLISECONDS);
         if(config.inspection.enabled&&!config.inspection.redactionEnabled)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Inspection masking is disabled; ordinary package values are visible to authorized callers, while classified secrets remain protected");
         if(!config.security.checkCrossOrigin)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("server.security.checkCrossOrigin is disabled; configure trusted proxy origin handling and retain local-auth CSRF protection");
     }
@@ -339,6 +348,7 @@ final class ServerRuntime implements AutoCloseable {
         request.expectedRevisionDigest=prior==null?null:prior.revision;
         Map<String,Object> result=executeInspection(root,request);
         Object revision=result.remove("revisionDigest");
+        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision)));
         if("list".equals(action)) {
             Object next=result.remove("nextOffset");
             if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,normalizedSort,normalizedDirection,((Number)next).intValue(),(String)revision,principal));
@@ -926,7 +936,8 @@ final class ServerRuntime implements AutoCloseable {
     }
     private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {
         Future<Map<String,Object>> future;
-        try { future=inspectors.submit(()->runInspectionWorker(root,request)); }
+        long queuedAt=System.nanoTime();
+        try { future=inspectors.submit(()->{inspectionMetrics.record(QUEUE,System.nanoTime()-queuedAt);return runInspectionWorker(root,request);}); }
         catch(RejectedExecutionException full){throw new InspectionCapacityException();}
         Map<String,Object> envelope;
         try { envelope=future.get(config.inspection.timeoutMs,TimeUnit.MILLISECONDS); }
@@ -1025,23 +1036,91 @@ final class ServerRuntime implements AutoCloseable {
         return value.trim();
     }
     private Map<String,Object> runInspectionWorker(Path root,WorkerRequest request) throws Exception {
-        InspectionWorker worker=acquireInspectionWorker();
-        try { return worker.request(root,request); }
-        finally { worker.lock.unlock(); }
+        String affinity=inspectionAffinity(root,request);
+        InspectionWorker worker=acquireInspectionWorker(affinity);
+        long started=System.nanoTime();
+        try {
+            Map<String,Object> response=worker.request(root,request);
+            return response;
+        }
+        finally { inspectionMetrics.record(DISPATCH,System.nanoTime()-started);worker.lock.unlock(); }
     }
-    private InspectionWorker acquireInspectionWorker() throws InterruptedException {
+    String inspectionCacheToken(Object context) throws Exception {
+        javax.crypto.Mac mac=javax.crypto.Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(cursorKey,"HmacSHA256"));
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(JSON.writeValueAsBytes(context)));
+    }
+    private void warmInspectionSafely() {
+        if(closing||inspectors.getActiveCount()>0||!inspectors.getQueue().isEmpty())return;
+        List<ServerConfig.WarmupKey> keys=config.inspection.warmup.keys();
+        for(int slot=0;slot<config.inspection.warmup.workers();slot++) {
+            InspectionWorker worker=inspectionWorkerPool.get(slot);
+            if(!worker.lock.tryLock())continue;
+            try {
+                if(closing||inspectors.getActiveCount()>0||!inspectors.getQueue().isEmpty())return;
+                if(worker.process!=null&&!worker.process.isAlive())worker.discard();
+                List<ServerConfig.WarmupKey> assigned=new ArrayList<>();
+                for(int i=slot;i<keys.size();i+=config.inspection.warmup.workers())assigned.add(keys.get(i));
+                if(assigned.isEmpty()&&!config.packages.isEmpty())assigned.add(new ServerConfig.WarmupKey(config.packages.keySet().iterator().next(),null));
+                for(ServerConfig.WarmupKey key:assigned) {
+                    int attempts=worker.warmAttempts.getOrDefault(key,0);
+                    if(worker.warmed.contains(key)||attempts>=3||System.nanoTime()<worker.warmRetryAt)continue;
+                    worker.warmAttempts.put(key,attempts+1);
+                    worker.warming=true;
+                    try {
+                        Path root=config.packages.get(key.packageId());
+                        if(root==null)continue; // Missing packages never affect Server startup.
+                        WorkerRequest request=inspectionRequest(key.packageId(),root,key.environment());
+                        request.inspectionAction="list";request.inspectionType="template";request.inspectionLimit=1;request.inspectionOffset=0;
+                        Map<String,Object> response=worker.request(root,request);
+                        if(!response.containsKey("errorCode"))worker.warmed.add(key);
+                    } catch(Exception ignored) { /* No package contents or paths in background failure logs. */ }
+                    finally {worker.warming=false;worker.warmRetryAt=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(250L<<attempts);}
+                    return;
+                }
+            } finally {worker.lock.unlock();}
+        }
+    }
+    private String inspectionAffinity(Path root,WorkerRequest request) throws Exception {
+        return att.server.api.internal.InspectionCacheIdentity.requested(root,request);
+    }
+    private InspectionWorker acquireInspectionWorker(String affinity) throws InterruptedException {
         int size=inspectionWorkerPool.size();
         int first=(int)Math.floorMod(inspectionWorkerSelection.getAndIncrement(),(long)size);
         for(int offset=0;offset<size;offset++) {
             InspectionWorker worker=inspectionWorkerPool.get((first+offset)%size);
+            if(worker.lock.tryLock()) {
+                if(worker.process!=null&&worker.process.isAlive()&&worker.holds(affinity))return worker;
+                worker.lock.unlock();
+            }
+        }
+        for(int offset=0;offset<size;offset++) {
+            InspectionWorker worker=inspectionWorkerPool.get((first+offset)%size);
             if(worker.lock.tryLock())return worker;
         }
+        // Interactive demand may cancel a background preload when every Worker is occupied.
+        for(InspectionWorker candidate:inspectionWorkerPool)if(candidate.warming)candidate.kill();
         InspectionWorker worker=inspectionWorkerPool.get(first);
         worker.lock.lockInterruptibly();
         return worker;
     }
     private final class InspectionWorker implements AutoCloseable {
         final ReentrantLock lock=new ReentrantLock();
+        private volatile boolean warming;
+        private final Map<ServerConfig.WarmupKey,Integer> warmAttempts=new LinkedHashMap<>();
+        private final java.util.Set<ServerConfig.WarmupKey> warmed=new java.util.HashSet<>();
+        private long warmRetryAt;
+        private final java.util.LinkedHashSet<String> retained=new java.util.LinkedHashSet<>();
+        boolean holds(String key){synchronized(retained){return retained.contains(key);}}
+        void retainActualKeys(Map<String,Object> metrics) {
+            synchronized(retained) {
+                retained.clear();
+                Object keys=metrics.get("retainedAffinityKeys");
+                if(keys instanceof List)for(Object key:(List<?>)keys)
+                    if(key instanceof String&&((String)key).matches("[A-Za-z0-9_-]{43}")&&retained.size()<6)retained.add((String)key);
+            }
+        }
+        private volatile Map<String,Object> metrics=Collections.emptyMap();
         private volatile Process process;
         private volatile BufferedReader reader;
         private volatile OutputStream writer;
@@ -1083,6 +1162,8 @@ final class ServerRuntime implements AutoCloseable {
                 if(result.path("exitCode").asInt(3)!=0&&errorCode==null)
                     throw new IllegalStateException("Package inspection Worker did not complete successfully");
                 Map<String,Object> response=new LinkedHashMap<>();
+                if(result.path("inspectionMetrics").isObject()){metrics=JSON.convertValue(result.path("inspectionMetrics"),Map.class);retainActualKeys(metrics);}
+                inspectionMetrics.add(RESPONSE_BYTES,total);
                 if(errorCode!=null) {
                     response.put("errorCode",errorCode);
                     if(workerDiagnostic!=null) {
@@ -1115,6 +1196,7 @@ final class ServerRuntime implements AutoCloseable {
         }
 
         private void ensureStarted(Path root) throws Exception {
+            if(closing)throw new InterruptedException("Server is shutting down");
             Process current=process;
             if(current!=null&&current.isAlive())return;
             discard();
@@ -1124,11 +1206,14 @@ final class ServerRuntime implements AutoCloseable {
             ProcessBuilder builder=new ProcessBuilder(config.javaExecutable.toString(),"-Xmx"+config.inspection.heapMaxMb+"m",
                     "-cp",cp,"att.worker.WorkerMain","--inspection-daemon");
             builder.directory(root.toFile());
+            long startupStarted=System.nanoTime();
             Process started=processLauncher.start(builder);
+            inspectionMetrics.record(STARTUP,System.nanoTime()-startupStarted);
             process=started;
             inspectionProcesses.put(started,Boolean.TRUE);
             writer=started.getOutputStream();
             reader=new BufferedReader(new InputStreamReader(started.getInputStream(),StandardCharsets.UTF_8));
+            if(closing){discard();throw new InterruptedException("Server is shutting down");}
             Thread stderr=new Thread(()->{
                 try(java.io.InputStream in=started.getErrorStream()) {
                     byte[] buffer=new byte[8192];while(in.read(buffer)>=0) { }
@@ -1146,6 +1231,10 @@ final class ServerRuntime implements AutoCloseable {
         private void discard() {
             Process current=process;
             process=null;
+            metrics=Collections.emptyMap();
+            synchronized(retained){retained.clear();}
+            warmed.clear();
+            if(!warming){warmAttempts.clear();warmRetryAt=0;}
             BufferedReader input=reader;reader=null;
             OutputStream output=writer;writer=null;
             if(current!=null) {
@@ -1156,7 +1245,15 @@ final class ServerRuntime implements AutoCloseable {
             try { if(output!=null)output.close(); } catch(Exception ignored) { }
         }
 
-        @Override public void close() { discard(); }
+        @Override public void close() {
+            Process current=process;
+            kill();lock.lock();
+            try {
+                discard();
+                if(current!=null)try{current.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS);}
+                catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
+            } finally {lock.unlock();}
+        }
     }
     private String encodeCursor(String packageId,String type,String query,String sort,String direction,int offset,String revision,String principal) throws Exception {
         Map<String,Object> payload=new LinkedHashMap<>();payload.put("packageId",packageId);payload.put("type",type);payload.put("query",query);payload.put("sort",sort);payload.put("direction",direction);payload.put("offset",offset);payload.put("revision",revision);payload.put("principal",principal);
@@ -1532,7 +1629,15 @@ final class ServerRuntime implements AutoCloseable {
     }
     private static Instant nextRun(String cron,String timezone,Instant after) {return CronExpression.parse(cron,1).nextAfter(after,java.time.ZoneId.of(timezone));}
     private void requireSchedulingEnabled(){if(!config.scheduling.enabled||loadScheduleScheduler==null)throw new NotFoundException();}
-    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}return m;}
+    Map<String,Object> inspectionStatistics() {
+        Map<String,Object> result=new LinkedHashMap<>();
+        result.put("server",inspectionMetrics.snapshot());
+        List<Map<String,Object>> daemons=new ArrayList<>();
+        for(InspectionWorker worker:inspectionWorkerPool)daemons.add(worker.metrics);
+        result.put("workers",daemons);
+        return result;
+    }
+    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}return m;}
     Path artifact(Job job,String requested) throws Exception {
         if(requested==null||requested.isBlank())throw new IllegalArgumentException("artifact path is required");
         Path base=config.dataDir.resolve("jobs").resolve(job.id).resolve("output").toRealPath();Path relative=Paths.get(requested);
@@ -1622,7 +1727,7 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }

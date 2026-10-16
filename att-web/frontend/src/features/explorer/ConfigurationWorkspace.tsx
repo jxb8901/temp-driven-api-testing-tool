@@ -1,3 +1,4 @@
+import { useInspectionRefresh } from '../../useInspectionRefresh';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { PackageOption } from '../load/types';
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
@@ -49,6 +50,7 @@ function safeCell(value: unknown): string {
 }
 
 export function ConfigurationWorkspace({ api, packages, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onPackageChange, onEnvironmentChange, onFileChange, onTabChange, onOpenResource, canRevealAdminFields = false }: ConfigurationWorkspaceProps) {
+  const inspectionRefresh = useInspectionRefresh();
   const [declared, setDeclared] = useState<Awaited<ReturnType<ExplorerApi['getDeclaredConfiguration']>> | null>(null);
   const [directoryMap, setDirectoryMap] = useState<Record<string, DirectoryState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['']));
@@ -107,9 +109,9 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
     if (!packageId) return;
     void loadDirectory('');
     const controller = new AbortController();
-    api.getDeclaredConfiguration(packageId, controller.signal).then(setDeclared).catch(() => { if (!controller.signal.aborted) setDeclared(null); });
+    api.getDeclaredConfiguration(packageId, controller.signal).then(result => { if (!controller.signal.aborted) setDeclared(result); }).catch(() => { if (!controller.signal.aborted) setDeclared(null); });
     return () => { controller.abort(); requestRefs.current.forEach(item => item.abort()); requestRefs.current.clear(); };
-  }, [api, packageId, loadDirectory]);
+  }, [api, packageId, loadDirectory, inspectionRefresh]);
 
   useEffect(() => {
     if (tab !== 'source' || !filePath || !packageId) { setSource(null); setSourceError(''); return; }
@@ -118,12 +120,12 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
       ? api.getResourceSourceFile?.({ packageId, type: sourceReference.type, resourceId: sourceReference.resourceId }, sourceReference.referenceId, controller.signal, fileOrigin)
       : api.getConfigurationFileSource?.(packageId, filePath, fileOrigin, controller.signal, configurationReferenceId);
     if (!sourceRequest) { setSource({ text: '', format: '', available: false, reason: 'unsupported' }); setSourceLoading(false); return () => controller.abort(); }
-    sourceRequest.then(result => setSource({
+    sourceRequest.then(result => { if (!controller.signal.aborted) setSource({
       text: result.text || '', format: result.format || filePath.split('.').pop() || 'text', logicalPath: result.logicalPath, available: result.available, reason: result.reason, fileReferences: result.fileReferences,
-    })).catch(error => { if (!controller.signal.aborted) setSourceError(errorText(error, 'load safe source')); })
+    }); }).catch(error => { if (!controller.signal.aborted) setSourceError(errorText(error, 'load safe source')); })
       .finally(() => { if (!controller.signal.aborted) setSourceLoading(false); });
     return () => controller.abort();
-  }, [api, packageId, filePath, fileOrigin, sourceReference?.type, sourceReference?.resourceId, sourceReference?.referenceId, configurationReferenceId, tab]);
+  }, [api, packageId, filePath, fileOrigin, sourceReference?.type, sourceReference?.resourceId, sourceReference?.referenceId, configurationReferenceId, tab, inspectionRefresh]);
 
   useEffect(() => {
     if (!filePath || !filePath.startsWith('config/') || !packageId) return;

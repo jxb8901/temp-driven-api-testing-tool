@@ -120,6 +120,21 @@ class ServerWarUiIT {
             }
             String api = "/tools/att/api/v1";
             assertCliAndTomcatDiagnosticFidelity(port, api, auth, origin, packageRoot, localHome);
+            JsonNode cacheCapabilities=getJson(port,api+"/auth/capabilities",auth);
+            String cacheContext=cacheCapabilities.path("inspectionCacheContext").asText();
+            assertTrue(cacheContext.matches("[A-Za-z0-9_-]{43}"));
+            assertEquals(cacheContext,getJson(port,api+"/auth/capabilities",auth).path("inspectionCacheContext").asText());
+            assertNotEquals(cacheContext,getJson(port,api+"/auth/capabilities",scheduleAdminAuth).path("inspectionCacheContext").asText());
+            HttpURLConnection cachedPage=open(port,api+"/packages/payments/resources?type=flow",auth);
+            assertEquals(200,cachedPage.getResponseCode());
+            assertEquals("no-store",cachedPage.getHeaderField("Cache-Control"));
+            assertTrue(cachedPage.getHeaderField("X-ATT-Inspection-Revision").matches("[A-Za-z0-9_-]{43}"));
+            try(var input=cachedPage.getInputStream()){String body=new String(input.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);assertFalse(body.contains("revisionDigest"));assertFalse(body.contains("_cacheRevision"));}
+            cachedPage.disconnect();
+            JsonNode inspectionMetrics=getJson(port,api+"/metrics",auth).path("inspection");
+            assertTrue(inspectionMetrics.path("server").path("HTTP").path("count").asLong()>0);
+            assertTrue(inspectionMetrics.path("workers").isArray());
+            assertFalse(inspectionMetrics.toString().contains(packageRoot.toString()));
             JsonNode flowResources = getJson(port, api + "/packages/payments/resources?type=flow", scheduleAdminAuth);
             JsonNode referenceFlow = null;
             for (JsonNode item : flowResources.path("items")) {

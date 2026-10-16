@@ -17,6 +17,8 @@ import att.template.HelperCallOperations;
 import att.template.FileExpressionResolver;
 import att.debug.DebugEngine;
 import att.config.YamlSupport;
+import att.metrics.InspectionMetrics;
+import static att.metrics.InspectionMetrics.Stage.*;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
@@ -705,7 +707,8 @@ public final class PackageResourceInspector implements AutoCloseable {
         for (int attempt = 0; attempt < 3; attempt++) {
             long version = watch.version();
             Index cached = cachedIndex;
-            if (cached != null && cachedIndexVersion == version) return cached;
+            if (cached != null && cachedIndexVersion == version) { InspectionMetrics.JVM.add(INDEX_HIT, 1); return cached; }
+            InspectionMetrics.JVM.add(INDEX_MISS, 1);
             Index built = buildIndex();
             try { watch.registerFileParents(built.files); }
             catch (Exception unavailable) {
@@ -725,6 +728,12 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private Index buildIndex() throws Exception {
         indexBuildCount++;
+        long buildStarted = System.nanoTime();
+        try { return buildIndexContents(); }
+        finally { InspectionMetrics.JVM.record(INDEX_BUILD,System.nanoTime()-buildStarted); }
+    }
+
+    private Index buildIndexContents() throws Exception {
         Index index = new Index();
         Path configFile = configPath.isAbsolute() ? configPath : packageRoot.resolve(configPath);
         configFile = resources.fromInternalPath(configFile, PackageResourceResolver.Kind.FILE).canonicalPath();
@@ -1171,6 +1180,12 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     long indexBuildCount() { return indexBuildCount; }
+
+    public int watchedDirectoryCount() {
+        PackageWatch watch = packageWatch;
+        if (watch == null) return 0;
+        synchronized (watch) { return watch.watchedDirectories.size(); }
+    }
     long packageChangeVersion() throws Exception { return packageWatch().version(); }
 
     private PackageWatch packageWatch() throws Exception {
@@ -1242,10 +1257,11 @@ public final class PackageResourceInspector implements AutoCloseable {
                     indexFile(index, descriptor);
                     template = loader.load(relative);
                     resource.name = template.name();
-                    resource.description = stringValue(yamlMap(descriptor).get("description"));
+                    Map<String,Object> authored=yamlMap(descriptor);
+                    resource.description = stringValue(authored.get("description"));
                     resource.state = "ready";
                     resource.yamlSource = descriptor;
-                    resource.definition = sourceYamlMap(yamlMap(descriptor),resources.fromInternalPath(descriptor,PackageResourceResolver.Kind.FILE).logicalName());
+                    resource.definition = sourceYamlMap(authored,resources.fromInternalPath(descriptor,PackageResourceResolver.Kind.FILE).logicalName());
                     indexReferencedSources(index, resource);
                     index.templateAliases.put(alias("template", relative), resource);
                     index.templateAliases.put(alias("template", template.name()), resource);
@@ -1358,7 +1374,9 @@ public final class PackageResourceInspector implements AutoCloseable {
                 FrameworkConfig suiteConfig = new SuiteConfigResolver(packageRoot, config).resolve(canonical);
                 Path sidecar = sidecar(canonical);
                 indexFile(index, resources.fromInternalPath(sidecar, PackageResourceResolver.Kind.FILE).canonicalPath());
+                long workbookStarted = System.nanoTime();
                 List<TestCase> cases = new ExcelTestSuiteLoader(suiteConfig).load(canonical);
+                InspectionMetrics.JVM.record(WORKBOOK_PARSE, System.nanoTime() - workbookStarted);
                 for (TestCase testCase : cases) {
                     if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException();
                     Resource resource = new Resource("case",
@@ -2086,7 +2104,9 @@ public final class PackageResourceInspector implements AutoCloseable {
     private static Object loadYaml(Path file,int byteLimit) throws Exception {
         byte[] bytes=readBounded(file,byteLimit);
         String source=decodeUtf8(bytes);
-        return YamlSupport.parser().load(new StringReader(source));
+        long started = System.nanoTime();
+        try { return YamlSupport.parser().load(new StringReader(source)); }
+        finally { InspectionMetrics.JVM.record(YAML_PARSE, System.nanoTime() - started); }
     }
 
     private static byte[] readBounded(Path file,int byteLimit) throws Exception {
@@ -2094,6 +2114,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         try(InputStream input=Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
             byte[] buffer=new byte[8192];int count,total=0;
             while((count=input.read(buffer))!=-1) {
+                InspectionMetrics.JVM.add(READ_BYTES,count);
                 total+=count;if(total>byteLimit)throw new ResponseTooLargeException();
                 output.write(buffer,0,count);
             }
@@ -2127,6 +2148,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             try (InputStream input = Files.newInputStream(resource.canonicalPath())) {
                 int read;
                 while ((read = input.read(buffer)) >= 0) {
+                    InspectionMetrics.JVM.add(READ_BYTES,read);
                     total += read;
                     if (total > MAX_REVISION_BYTES) throw new ResourceLimitException();
                     digest.update(buffer, 0, read);
@@ -2273,6 +2295,11 @@ public final class PackageResourceInspector implements AutoCloseable {
             return version.get();
         }
 
+        private void invalidate(boolean overflow) {
+            version.incrementAndGet();
+            InspectionMetrics.JVM.add(overflow ? WATCH_OVERFLOW : INVALIDATION, 1);
+        }
+
         private void watchLoop() {
             while (!closed) {
                 try {
@@ -2282,7 +2309,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                     Thread.currentThread().interrupt();
                     return;
                 } catch (Exception ignored) {
-                    version.incrementAndGet();
+                    invalidate(false);
                 }
             }
         }
@@ -2296,12 +2323,12 @@ public final class PackageResourceInspector implements AutoCloseable {
             Path directory = directories.get(key);
             if (directory == null) {
                 key.cancel();
-                version.incrementAndGet();
+                invalidate(false);
                 return;
             }
             for (WatchEvent<?> event : key.pollEvents()) {
                 if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
-                    version.incrementAndGet();
+                    invalidate(true);
                     continue;
                 }
                 Object context = event.context();
@@ -2312,12 +2339,12 @@ public final class PackageResourceInspector implements AutoCloseable {
                         catch (Exception ignored) { /* the create event still invalidates the old snapshot */ }
                     }
                 }
-                version.incrementAndGet();
+                invalidate(false);
             }
             if (!key.reset()) {
                 directories.remove(key);
                 if (directory != null) watchedDirectories.remove(directory);
-                version.incrementAndGet();
+                invalidate(false);
             }
         }
 

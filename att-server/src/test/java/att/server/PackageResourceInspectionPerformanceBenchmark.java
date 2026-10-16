@@ -28,6 +28,7 @@ class PackageResourceInspectionPerformanceBenchmark {
     @Test void writesLargePackageResourceDiscoveryLatencyReport() throws Exception {
         int warmups = integerProperty("att.server.inspection.benchmark.warmups", 1, 0);
         int runs = integerProperty("att.server.inspection.benchmark.runs", 5, 1);
+        int workers = integerProperty("att.server.inspection.benchmark.workers", 1, 1);
         int pageSize = integerProperty("att.server.inspection.benchmark.pageSize", 50, 1);
         int workbookCount = integerProperty("att.server.inspection.benchmark.workbooks", 5, 1);
         int casesPerWorkbook = integerProperty("att.server.inspection.benchmark.casesPerWorkbook", 300, 1);
@@ -36,29 +37,40 @@ class PackageResourceInspectionPerformanceBenchmark {
 
         Path packageRoot = createRepresentativePackage(temp.resolve("large-package"),
                 workbookCount, casesPerWorkbook, templateCount);
+        int packageCount=integerProperty("att.server.inspection.benchmark.packages", 3, 1);
+        StringBuilder packageEntries=new StringBuilder("\n  entries:\n    benchmark: " + yaml(packageRoot) + "\n");
+        for(int i=1;i<packageCount;i++) {
+            Path extra=createRepresentativePackage(temp.resolve("package-"+i),workbookCount,casesPerWorkbook,templateCount);
+            packageEntries.append("    package-").append(i).append(": ").append(yaml(extra)).append("\n");
+        }
         Path javaBin = Path.of(System.getProperty("java.home"), "bin",
                 System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
         Path serverConfig = temp.resolve("inspection-benchmark-server.yaml");
         Path dataDir = temp.resolve("server-data");
         Files.writeString(serverConfig, "server:\n  dataDir: " + yaml(dataDir)
                 + "\n  javaExecutable: " + yaml(javaBin)
-                + "\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 120000\n    heapMaxMb: 512"
+                + "\n  inspection:\n    maxConcurrent: " + workers + "\n    queuedLimit: 16\n    timeoutMs: 120000\n    heapMaxMb: 512"
                 + "\n    safeTextSources:\n      benchmark:\n        - tools/benchmark.sh"
-                + "\nworkers: {}\npackages:\n  allowedRoots:\n    - " + yaml(packageRoot)
-                + "\n  entries:\n    benchmark: " + yaml(packageRoot) + "\n", StandardCharsets.UTF_8);
+                + "\nworkers: {}\npackages:\n  allowedRoots:\n    - " + yaml(temp)
+                + packageEntries, StandardCharsets.UTF_8);
 
         Path webInfLib = Files.createDirectory(temp.resolve("WEB-INF-lib"));
+        addModuleJar(webInfLib, "att-security", Path.of("att-security/target/classes"));
+        addModuleJar(webInfLib, "att-server-api", Path.of("att-server-api/target/classes"));
         addModuleJar(webInfLib, "att-worker", Path.of("att-worker/target/classes"));
         addModuleJar(webInfLib, "att-engine", Path.of("att-engine/target/classes"));
         copyWorkerDependencies(webInfLib);
 
+        java.util.concurrent.atomic.AtomicInteger startups = new java.util.concurrent.atomic.AtomicInteger();
         List<Map<String, Object>> samples = new ArrayList<>();
         Map<String, Object> coldIndex = new LinkedHashMap<>();
+        Map<String,Object> telemetry=new LinkedHashMap<>();
         try (ServerRuntime runtime = new ServerRuntime(ServerConfig.load(serverConfig), webInfLib.toString(), builder -> {
             builder.environment().put("ORDERS_DB_USERNAME", "inspection-benchmark");
             builder.environment().put("ORDERS_DB_PASSWORD", "inspection-benchmark");
             builder.environment().put("PAYMENT_MQ_USERNAME", "inspection-benchmark");
             builder.environment().put("PAYMENT_MQ_PASSWORD", "inspection-benchmark");
+            startups.incrementAndGet();
             return builder.start();
         })) {
             long coldStart = System.nanoTime();
@@ -67,6 +79,9 @@ class PackageResourceInspectionPerformanceBenchmark {
             coldIndex.put("totalResources", caseFirstPage.get("total"));
             coldIndex.put("returnedResources", itemCount(caseFirstPage));
 
+            long repeatStart=System.nanoTime();
+            list(runtime,"case",pageSize,null);
+            coldIndex.put("secondSamePackageRequestMs",elapsedMs(repeatStart));
             String caseCursor = cursor(caseFirstPage);
             String templateCursor = cursor(list(runtime, "template", pageSize, null));
             String caseId = firstResourceId(caseFirstPage);
@@ -74,6 +89,14 @@ class PackageResourceInspectionPerformanceBenchmark {
             String templateId = firstResourceId(firstTemplates);
             String toolId = firstResourceId(list(runtime, "tool", pageSize, null));
 
+            measure(samples, "config-declared", warmups, runs, () ->
+                    runtime.inspectConfiguration("benchmark", "declared", null, null, "benchmark"));
+            measure(samples, "config-effective-SIT", warmups, runs, () ->
+                    runtime.inspectConfiguration("benchmark", "effective", "SIT", null, "benchmark"));
+            measure(samples, "config-effective-UAT", warmups, runs, () ->
+                    runtime.inspectConfiguration("benchmark", "effective", "UAT", null, "benchmark"));
+            measure(samples, "config-compare", warmups, runs, () ->
+                    runtime.inspectConfiguration("benchmark", "compare", "SIT", "UAT", "globals", 0, 50, "benchmark"));
             measure(samples, "case-first-page", warmups, runs, () -> list(runtime, "case", pageSize, null));
             measure(samples, "case-page-n", warmups, runs, () -> list(runtime, "case", pageSize, caseCursor));
             measure(samples, "case-detail", warmups, runs, () ->
@@ -84,11 +107,26 @@ class PackageResourceInspectionPerformanceBenchmark {
                     runtime.inspectResource("benchmark", "detail", "template", templateId, null, pageSize, null, "benchmark"));
             measure(samples, "tool-source", warmups, runs, () ->
                     runtime.inspectResource("benchmark", "source", "tool", toolId, null, pageSize, null, "benchmark"));
+            measure(samples,"multi-package-churn",warmups,runs,()->{
+                for(int i=1;i<packageCount;i++)runtime.inspectResource("package-"+i,"list","case",null,null,pageSize,null,"benchmark");
+                return list(runtime,"case",pageSize,null);
+            });
+            java.util.concurrent.ExecutorService clients=java.util.concurrent.Executors.newFixedThreadPool(workers+1);
+            try {
+                measure(samples,"concurrent-clients",warmups,runs,()->{
+                    List<java.util.concurrent.Future<Map<String,Object>>> responses=new ArrayList<>();
+                    for(int i=0;i<workers+1;i++)responses.add(clients.submit(()->list(runtime,"case",pageSize,null)));
+                    for(java.util.concurrent.Future<Map<String,Object>> response:responses)response.get();
+                    return java.util.Collections.emptyMap();
+                });
+            } finally {clients.shutdownNow();}
+            telemetry.putAll(runtime.inspectionStatistics());
         }
 
         List<Map<String, Object>> scenarios = new ArrayList<>();
         List<String> names = List.of("case-first-page", "case-page-n", "case-detail", "template-first-page",
-                "template-page-n", "template-detail", "tool-source");
+                "template-page-n", "template-detail", "tool-source", "config-declared",
+                "config-effective-SIT", "config-effective-UAT", "config-compare", "multi-package-churn", "concurrent-clients");
         for (String name : names) {
             List<Double> latencies = samples.stream()
                     .filter(sample -> name.equals(sample.get("scenario")))
@@ -113,16 +151,19 @@ class PackageResourceInspectionPerformanceBenchmark {
         environment.put("capturedAt", Instant.now().toString());
 
         Map<String, Object> report = new LinkedHashMap<>();
-        report.put("schemaVersion", "att-package-resource-discovery-benchmark/v2");
-        report.put("version", "4.1.0");
+        report.put("schemaVersion", "att-package-resource-discovery-benchmark/v3");
+        report.put("version", "4.2.0");
+        report.put("workerStartups", startups.get());
+        report.put("telemetry",telemetry);
         report.put("sourceRevision", System.getProperty("att.server.inspection.benchmark.revision", "unknown"));
         report.put("dataset", "synthetic multi-workbook package");
         report.put("measurementScope", "ServerRuntime.inspectResource through a persistent bounded inspection Worker; excludes HTTP and Tomcat overhead");
         report.put("environment", environment);
+        report.put("packageCount",packageCount);
         report.put("settings", Map.of("warmups", warmups, "runs", runs, "pageSize", pageSize,
                 "workbooks", workbookCount, "casesPerWorkbook", casesPerWorkbook,
                 "totalCases", workbookCount * casesPerWorkbook, "templates", templateCount,
-                "workerHeapMaxMb", 512, "workerTimeoutMs", 120000));
+                "workers", workers, "workerHeapMaxMb", 512, "workerTimeoutMs", 120000));
         report.put("coldIndexBuild", coldIndex);
         report.put("scenarios", scenarios);
         report.put("samples", samples);
@@ -144,6 +185,7 @@ class PackageResourceInspectionPerformanceBenchmark {
             long start = System.nanoTime();
             Map<String, Object> response = call.run();
             double latency = elapsedMs(start);
+            if("invalid".equals(response.get("state")))throw new IllegalStateException("Benchmark scenario returned invalid data: "+scenario);
             if (sample < warmups) continue;
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("scenario", scenario);
@@ -182,7 +224,7 @@ class PackageResourceInspectionPerformanceBenchmark {
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("templates"));
         copySchemas(root);
-        writeUtf8(root.resolve("config/config.yaml"), "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+        writeUtf8(root.resolve("config/config.yaml"), "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n"
                 + "testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  benchmarkEcho:\n"
                 + "    name: Benchmark Echo\n    description: Resource source benchmark\n    command: [./tools/benchmark.sh]\n"
                 + "    stdoutFormat: text\n    arguments: {}\n");

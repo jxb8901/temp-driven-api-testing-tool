@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { inspectionCache } from '../../inspectionCache';
+import { useInspectionRefresh } from '../../useInspectionRefresh';
 import type { ExplorerApi, ResourceIdentity, ResourceSourceReference, SourceProjection } from './types';
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
 
@@ -28,6 +30,7 @@ export function SourceViewer({ api, identity, available, active, onFileReference
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
+  const inspectionRefresh = useInspectionRefresh();
   const key = `${identity.packageId}:${identity.type}:${identity.resourceId}`;
 
   useEffect(() => { setProjection(null); setError(''); }, [key]);
@@ -35,11 +38,11 @@ export function SourceViewer({ api, identity, available, active, onFileReference
     if (!active || !available) return;
     const controller = new AbortController();
     setLoading(true); setError('');
-    api.getSafeSource(identity, controller.signal).then(data => { setProjection(data); setError(''); })
-      .catch(reason => { if (!controller.signal.aborted) setError(friendlyError(reason)); })
+    api.getSafeSource(identity, controller.signal).then(data => { if (!controller.signal.aborted) { setProjection(data); setError(''); } })
+      .catch(reason => { if (!controller.signal.aborted) { setProjection(null); setError(friendlyError(reason)); } })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [active, available, identity.packageId, identity.type, identity.resourceId, refreshKey, api]);
+  }, [active, available, identity.packageId, identity.type, identity.resourceId, refreshKey, api, inspectionRefresh]);
 
   const rawText = projection?.available ? String(projection.text ?? '') : '';
   const characterCapped = rawText.length > MAX_SOURCE_CHARACTERS;
@@ -52,7 +55,7 @@ export function SourceViewer({ api, identity, available, active, onFileReference
   return <section className="att-explorer-source" aria-label="Safe source projection">
     <div className="att-source-toolbar">
       <span>{projection?.format ? `${projection.format.toUpperCase()} source` : 'Safe source'}</span>
-      <button type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={!available || loading}>{loading ? 'Refreshing…' : projection ? 'Refresh source' : 'Load source'}</button>
+      <button type="button" onClick={() => (inspectionCache.clear(), setRefreshKey(value => value + 1))} disabled={!available || loading}>{loading ? 'Refreshing…' : projection ? 'Refresh source' : 'Load source'}</button>
     </div>
     <p className="att-source-status" role="status" aria-live="polite">
       {loading ? 'Loading safe source projection…'
@@ -61,7 +64,7 @@ export function SourceViewer({ api, identity, available, active, onFileReference
             : capped ? `Source exceeds the viewer limit. Showing ${sourceLines.slice(0, MAX_SOURCE_LINES).length.toLocaleString()} lines within ${MAX_SOURCE_CHARACTERS.toLocaleString()} characters.`
               : projection?.available ? `${sourceLines.length.toLocaleString()} lines` : !available ? 'Source is not available for this resource.' : 'Choose Source to load the safe projection.')}
     </p>
-    {error && <button type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}>Retry source</button>}
+    {error && <button type="button" onClick={() => (inspectionCache.clear(), setRefreshKey(value => value + 1))} disabled={loading}>Retry source</button>}
     {projection?.available && rawText.length > 0 && <CodeEditor
       value={shown}
       language={detectCodeLanguage(projection.logicalPath || identity.resourceId || projection.format || '')}

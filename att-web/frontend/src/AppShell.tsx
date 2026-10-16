@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { inspectionCache } from './inspectionCache';
+import { createContext, useContext, useEffect, useLayoutEffect, useSyncExternalStore, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import type { AsyncState, ServerVersion } from './types';
 import { formatRoute, type AppRoute, type RouteState } from './router';
 import { NavigationGuardContext } from './router';
@@ -218,6 +219,15 @@ export function AppShell({
   const [keyboardMode, setKeyboardMode] = useState<'palette' | 'shortcuts' | null>(null);
   const [currentUser, setCurrentUser] = useState<Pick<LocalAuthUser,'loginId'|'displayName'|'role'>|null>(null);
   const [canRevealConfigurationFields, setCanRevealConfigurationFields] = useState(false);
+  const inspectionSessionEpoch = useSyncExternalStore(inspectionCache.subscribeSession, () => inspectionCache.sessionEpoch);
+  useLayoutEffect(() => { inspectionCache.select(selectedPackage, selectedEnvironment); }, [selectedPackage, selectedEnvironment]);
+  useEffect(() => {
+    const clear = () => inspectionCache.clear();
+    const visibility = () => { if (document.hidden) clear(); };
+    window.addEventListener('pagehide', clear);
+    document.addEventListener('visibilitychange', visibility);
+    return () => { window.removeEventListener('pagehide', clear); document.removeEventListener('visibilitychange', visibility); };
+  }, []);
   const [changePasswordOpen,setChangePasswordOpen]=useState(false);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -230,7 +240,7 @@ export function AppShell({
   useEffect(() => {
     if (!versionData) { setCurrentUser(null); setCanRevealConfigurationFields(false); return; }
     const controller = new AbortController();
-    if (versionData.authMode === 'local') api.getCurrentUser(controller.signal).then(setCurrentUser).catch(() => {
+    if (versionData.authMode === 'local') api.getCurrentUser(controller.signal).then(user => { if (!controller.signal.aborted) setCurrentUser(user); }).catch(() => {
         if (controller.signal.aborted) return;
         const returnTo = contextRelativeReturnTo(location.pathname, location.search, location.hash);
         location.assign(new URL('login.html?returnTo=' + encodeURIComponent(returnTo), document.baseURI).toString());
@@ -240,7 +250,7 @@ export function AppShell({
       if (!controller.signal.aborted) setCanRevealConfigurationFields(result.configurationAdmin === true);
     }).catch(() => { if (!controller.signal.aborted) setCanRevealConfigurationFields(false); });
     return () => controller.abort();
-  }, [versionData?.authMode, versionData?.apiVersion]);
+  }, [versionData?.authMode, versionData?.apiVersion, inspectionSessionEpoch]);
   async function signOut() {
     try { await api.logout(); } finally {
       const login = new URL('login.html', document.baseURI);
@@ -481,7 +491,7 @@ export function AppShell({
             </div>
           </div>
 
-          <main id="main-content" tabIndex={-1}>{children}</main>
+          <main key={inspectionSessionEpoch} id="main-content" tabIndex={-1}>{children}</main>
           <footer className="page-footer"><span>ATT Server</span><span>API v{versionData?.apiVersion || '1'}</span></footer>
         </div>
         <DiscardChangesDialog navigation={navigation} />
