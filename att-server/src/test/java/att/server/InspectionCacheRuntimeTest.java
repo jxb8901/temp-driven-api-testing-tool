@@ -64,6 +64,17 @@ class InspectionCacheRuntimeTest {
         for(Process process:processes)assertFalse(process.isAlive());
     }
 
+    @Test void optionalTelemetryCannotConsumeTheConfiguredResponseBudget() throws Exception {
+        Path root=fixture("small-response");config(root,1,"");
+        Path file=temp.resolve("server.yaml");
+        Files.writeString(file,Files.readString(file).replace("timeoutMs: 10000", "timeoutMs: 10000\n    maxResponseBytes: 2048\n    maxSourceBytes: 1024"));
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(file),libs().toString(),ProcessBuilder::start)) {
+            list(runtime,"p");list(runtime,"p");
+            assertTrue(((Map<?,?>)((List<?>)runtime.inspectionStatistics().get("workers")).get(0)).isEmpty(),
+                    "Optional metrics are unavailable when the response budget cannot contain them");
+        }
+    }
+
     @Test void timeoutDiscardsAffinityAndTheNextInteractiveRequestUsesAReplacement() throws Exception {
         Path root=fixture("timeout");ServerConfig initial=config(root,1,"");
         Path configFile=temp.resolve("server.yaml");Files.writeString(configFile,Files.readString(configFile).replace("timeoutMs: 10000","timeoutMs: 2000"));

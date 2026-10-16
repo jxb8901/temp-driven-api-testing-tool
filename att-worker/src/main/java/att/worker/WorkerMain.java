@@ -34,6 +34,8 @@ public final class WorkerMain {
     private final LinkedHashMap<String,Map<String,Object>> inspectionAggregates=new LinkedHashMap<String,Map<String,Object>>(16,.75f,true);
     private String jobId;
     private boolean inspectionDaemon;
+    private int inspectionResponseLimit=262144;
+    private long inspectionResponseBytes;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
@@ -99,11 +101,12 @@ public final class WorkerMain {
     }
 
     private int executeRequest(JsonNode input) throws Exception {
+        inspectionResponseBytes=0;inspectionResponseLimit=262144;
         if(input==null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","A JSON request is required"); }
         if(input.hasNonNull("jobId")) jobId=input.get("jobId").asText();
         WorkerRequest request;
         emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
-        try { request=mapper.treeToValue(input,WorkerRequest.class); }
+        try { request=mapper.treeToValue(input,WorkerRequest.class); if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes; }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
         if(!PROTOCOL.equals(request.protocolVersion)) return fail("WORKER_PROTOCOL_UNSUPPORTED","Unsupported protocolVersion; expected "+PROTOCOL);
         if(inspectionDaemon&&!("inspect".equals(request.command))) return fail("WORKER_REQUEST_INVALID","Inspection Workers accept only inspect requests");
@@ -369,7 +372,20 @@ public final class WorkerMain {
                 ? WorkerEvent.Type.PROGRESS : WorkerEvent.Type.LOG;
         try { emit(type,data); } catch(Exception error) { throw new IllegalStateException(error); }
     }
-    private void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception { resourceTelemetry.sample();protocol.println(mapper.writeValueAsString(new WorkerEvent(type,jobId,DiagnosticSanitizer.sanitize(data)).toMap())); protocol.flush(); }
+    private void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception {
+        resourceTelemetry.sample();
+        String line=mapper.writeValueAsString(new WorkerEvent(type,jobId,DiagnosticSanitizer.sanitize(data)).toMap());
+        long bytes=line.getBytes(StandardCharsets.UTF_8).length+1L;
+        if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&data.containsKey("inspectionMetrics")
+                &&inspectionResponseBytes+bytes>inspectionResponseLimit) {
+            // Optional telemetry must never make an otherwise valid bounded response fail.
+            data.remove("inspectionMetrics");
+            line=mapper.writeValueAsString(new WorkerEvent(type,jobId,DiagnosticSanitizer.sanitize(data)).toMap());
+            bytes=line.getBytes(StandardCharsets.UTF_8).length+1L;
+        }
+        protocol.println(line);protocol.flush();
+        if(inspectionDaemon)inspectionResponseBytes+=bytes;
+    }
     private void recordInspectionAggregate(WorkerRequest request,long started,long buildsBefore,long loadsBefore,long bytesBefore) {
         if(!inspectionDaemon)return;
         try {
