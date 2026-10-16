@@ -23,6 +23,7 @@ if (!HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
 }
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
 
 function makeApi(overrides: Partial<ScheduledLoadApi> = {}): ScheduledLoadApi {
   return {
@@ -125,6 +126,66 @@ describe('ScheduledLoadPage', () => {
     await change(statusFilter, 'enabled');
     expect(host.textContent).toContain('Nightly payments');
     expect(host.textContent).not.toContain('One-time import');
+  });
+
+  it('saves a consumed one-time schedule metadata edit without a new preview', async () => {
+    const completed: LoadSchedule = {
+      ...sampleSchedule, id: 'S-ONCE', name: 'One-time import', runAt: '2026-10-16T10:00:00Z',
+      cron: undefined, nextRunAt: null,
+    };
+    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [completed] })) });
+    await render(api);
+    vi.mocked(api.previewLoadSchedule).mockClear();
+
+    await click(host.querySelector('[aria-label="Edit One-time import"]')!);
+    await advance(400);
+    expect(host.textContent).toContain('Saved trigger unchanged');
+    expect(host.textContent).not.toContain('Preview unavailable');
+    expect(api.previewLoadSchedule).not.toHaveBeenCalled();
+
+    const save = [...host.querySelectorAll('button')].find(button => button.textContent === 'Save changes') as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    await change(host.querySelector('#schedule-description') as HTMLInputElement, 'Post-mortem notes');
+    await click(save);
+    await advance(0);
+    expect(api.previewLoadSchedule).not.toHaveBeenCalled();
+    expect(api.updateLoadSchedule).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(api.updateLoadSchedule).mock.calls[0][1];
+    expect(payload.name).toBe('One-time import');
+    expect(payload.description).toBe('Post-mortem notes');
+    expect(payload.runAt).toBe('2026-10-16T10:00:00.000Z');
+    expect(payload.cron).toBeUndefined();
+  });
+
+  it('switches an existing schedule between cron and a one-time trigger with a single trigger field', async () => {
+    const completed: LoadSchedule = {
+      ...sampleSchedule, id: 'S-ONCE', name: 'One-time import', runAt: '2026-10-16T10:00:00Z',
+      cron: undefined, nextRunAt: null,
+    };
+    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule, completed] })) });
+    await render(api);
+
+    await click(host.querySelector('[aria-label="Edit Nightly payments"]')!);
+    await change(host.querySelector('#schedule-recurrence') as HTMLSelectElement, 'once');
+    await change(host.querySelector('#schedule-run-at') as HTMLInputElement, '2026-11-02T02:00:00+08:00');
+    await advance(400);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Save changes')!);
+    await advance(0);
+    expect(api.updateLoadSchedule).toHaveBeenCalledTimes(1);
+    const cronToOnce = vi.mocked(api.updateLoadSchedule).mock.calls[0][1];
+    expect(cronToOnce.runAt).toBe('2026-11-01T18:00:00.000Z');
+    expect(cronToOnce.cron).toBeUndefined();
+
+    await click(host.querySelector('[aria-label="Edit One-time import"]')!);
+    await change(host.querySelector('#schedule-recurrence') as HTMLSelectElement, 'cron');
+    await change(host.querySelector('#schedule-cron') as HTMLInputElement, '30 3 * * *');
+    await advance(400);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Save changes')!);
+    await advance(0);
+    expect(api.updateLoadSchedule).toHaveBeenCalledTimes(2);
+    const onceToCron = vi.mocked(api.updateLoadSchedule).mock.calls[1][1];
+    expect(onceToCron.cron).toBe('30 3 * * *');
+    expect(onceToCron.runAt).toBeUndefined();
   });
 
   it('requires a server preview before creating a disabled schedule by default', async () => {

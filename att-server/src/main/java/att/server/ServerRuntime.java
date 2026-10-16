@@ -1693,7 +1693,11 @@ final class ServerRuntime implements AutoCloseable {
         }
         s.config=fieldText(input,"config",s.config,false);s.environment=fieldText(input,"environment",s.environment,false);
         s.timezone=fieldText(input,"timezone",s.timezone, !input.hasNonNull("runAt")&&s.runAt==null);
-        s.runAt=fieldText(input,"runAt",s.runAt,false);s.cron=fieldText(input,"cron",s.cron,s.runAt==null);
+        if(input.hasNonNull("runAt")&&input.hasNonNull("cron"))throw new IllegalArgumentException("Provide exactly one cron or runAt trigger");
+        // A schedule holds exactly one trigger, so an update that supplies a new trigger replaces the stored one instead of retaining the field the request omits.
+        if(input.hasNonNull("runAt")) {s.runAt=fieldText(input,"runAt",null,true);s.cron=null;}
+        else if(input.hasNonNull("cron")) {s.cron=fieldText(input,"cron",null,true);s.runAt=null;}
+        else {s.runAt=fieldText(input,"runAt",s.runAt,false);s.cron=fieldText(input,"cron",s.cron,s.runAt==null);}
         if(s.runAt!=null&&s.cron!=null)throw new IllegalArgumentException("Provide exactly one cron or runAt trigger");
         if(s.timezone==null)s.timezone="UTC";
         if(input.has("enabled")){if(!input.get("enabled").isBoolean())throw new IllegalArgumentException("enabled must be true or false");s.enabled=input.get("enabled").booleanValue();}

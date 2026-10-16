@@ -77,7 +77,7 @@ Canonical 建立請求使用 `schemas/att-schedule-v2.schema.json`；舊路由�
 
 LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 scenario 驗證及負載上限。舊式 package-path LOAD 排程每次執行前驗證目前套件 scenario；公開 `revisionPolicy` 區分此模式與 revision 綁定 RUN snapshot。
 
-可使用五欄 `cron` 加 IANA timezone，或單次 `runAt` instant，例如 `2026-10-20T02:00:00+08:00`；不可同時提供。單次觸發只會被領取一次。春季 DST 不存在的本地時間會跳過；秋季重複時間可產生兩個 instant，但仍受最短間隔限制。啟用前可用 `POST /api/v1/schedules/preview` 預覽時間。
+可使用五欄 `cron` 加 IANA timezone，或單次 `runAt` instant，例如 `2026-10-20T02:00:00+08:00`；不可同時提供。排程只保留一個 trigger：更新時提供任一欄位會取代已儲存的 trigger，兩者皆未提供則保留現有 trigger。單次觸發只會被領取一次。春季 DST 不存在的本地時間會跳過；秋季重複時間可產生兩個 instant，但仍受最短間隔限制。啟用前可用 `POST /api/v1/schedules/preview` 預覽時間。
 
 共用 scheduler 先記錄 occurrence，再提交工作。每排程及全域 overlap 容量已滿會跳過該次；一般 Worker/Load admission 上限仍生效。重啟或延誤 misfire 不會補跑。提交失敗遵循 `server.scheduling.failurePolicy`，不會自動重試執行。取消工作只取消該次 occurrence，暫停排程則阻止未來觸發。工作與 occurrence retention 沿用 Server 上限。
 

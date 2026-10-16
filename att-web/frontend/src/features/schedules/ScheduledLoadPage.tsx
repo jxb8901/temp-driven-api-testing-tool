@@ -10,7 +10,7 @@ import {
 import './schedules.css';
 
 type LoadState = 'loading' | 'ready' | 'error' | 'disabled';
-type PreviewState = { status: 'idle' | 'loading' | 'ready' | 'error'; signature: string; nextRunAt?: string; nextOccurrences?: string[]; error?: string };
+type PreviewState = { status: 'idle' | 'loading' | 'ready' | 'unchanged' | 'error'; signature: string; nextRunAt?: string; nextOccurrences?: string[]; error?: string };
 type Confirmation = { action: 'run' | 'delete'; schedule: LoadSchedule };
 type HistoryState = { status: 'idle' | 'loading' | 'ready' | 'error'; items: ScheduleOccurrence[]; error?: string };
 type ScheduleDiagnosticTarget = { type: string; id: string };
@@ -161,6 +161,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const [scenarioPreviewYaml, setScenarioPreviewYaml] = useState('');
   const [saved, setSaved] = useState(false);
   const [editingId, setEditingId] = useState('');
+  const [editingNextRunAt, setEditingNextRunAt] = useState<string | undefined>(undefined);
   const [baseline, setBaseline] = useState(() => JSON.stringify(createScheduleDraft()));
   const [preview, setPreview] = useState<PreviewState>({ status: 'idle', signature: '' });
   const [saving, setSaving] = useState(false);
@@ -182,7 +183,14 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const dirty = draftSignature !== baseline;
   const cron = cronForDraft(draft);
   const previewSignature = `${draft.timezone.trim()}\n${cron}`;
-  const previewIsCurrent = preview.status === 'ready' && preview.signature === previewSignature;
+  const previewIsCurrent = (preview.status === 'ready' || preview.status === 'unchanged') && preview.signature === previewSignature;
+  // A metadata-only edit keeps the stored trigger, so the Server already holds a valid next run and no new preview is required.
+  const triggerUnchanged = useMemo(() => {
+    if (!editingId) return false;
+    let saved: ScheduleDraft;
+    try { saved = JSON.parse(baseline) as ScheduleDraft; } catch { return false; }
+    return saved.timezone.trim() === draft.timezone.trim() && saved.recurrence === draft.recurrence && cronForDraft(saved) === cron;
+  }, [baseline, cron, draft.recurrence, draft.timezone, editingId]);
 
   const loadSchedules = useCallback(async () => {
     if (!enabled) { setLoadState('disabled'); return; }
@@ -230,6 +238,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     setDraft(seeded);
     setBaseline(JSON.stringify(seeded));
     setEditingId('');
+    setEditingNextRunAt(undefined);
     setMutationError('');
     setNotice(`Schedule form loaded from the validated ${seeded.jobType === 'run' ? 'Run' : seeded.jobType === 'debug' ? 'Debug' : 'Load'} draft. Choose a recurrence and review the Server next-run preview.`);
     onInitialDraftConsumed?.();
@@ -257,6 +266,10 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
       setPreview({ status: 'idle', signature: previewSignature });
       return;
     }
+    if (triggerUnchanged) {
+      setPreview({ status: 'unchanged', signature: previewSignature, nextRunAt: editingNextRunAt });
+      return;
+    }
     const controller = new AbortController();
     previewController.current = controller;
     setPreview({ status: 'loading', signature: previewSignature });
@@ -275,7 +288,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
         });
     }, 250);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [api, cron, draft.timezone, enabled, previewSignature]);
+  }, [api, cron, draft.timezone, editingNextRunAt, enabled, previewSignature, triggerUnchanged]);
 
   useEffect(() => {
     const dialog = confirmationDialog.current;
@@ -325,6 +338,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     setDraft(fresh);
     setBaseline(JSON.stringify(fresh));
     setEditingId('');
+    setEditingNextRunAt(undefined);
     setSaved(false);
     setMutationError('');
     setValidationDiagnostics([]); setValidationRequestId('');
@@ -336,6 +350,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     setDraft(next);
     setBaseline(JSON.stringify(next));
     setEditingId(schedule.id);
+    setEditingNextRunAt(schedule.nextRunAt || undefined);
     setMutationError('');
     setValidationDiagnostics([]); setValidationRequestId('');
     setNotice(`Editing ${schedule.name}.`);
@@ -622,14 +637,17 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
           <p role="status" aria-live="polite" aria-busy={preview.status === 'loading'}>
             {preview.status === 'loading' ? 'Calculating the next occurrence on the Server…'
               : preview.status === 'ready' ? `Next run: ${formatScheduleTime(preview.nextRunAt, draft.timezone)} · ${draft.timezone}`
-                : preview.status === 'error' ? `Preview unavailable: ${preview.error}`
-                  : !isIanaTimeZone(draft.timezone) ? 'Enter a valid IANA timezone to preview this schedule.'
-                    : 'Enter a valid recurrence to preview the next run.'}
+                : preview.status === 'unchanged' ? (preview.nextRunAt
+                  ? `Saved trigger unchanged · next run: ${formatScheduleTime(preview.nextRunAt, draft.timezone)} · ${draft.timezone}`
+                  : 'Saved trigger unchanged · no next run scheduled · the Server keeps the current trigger.')
+                  : preview.status === 'error' ? `Preview unavailable: ${preview.error}`
+                    : !isIanaTimeZone(draft.timezone) ? 'Enter a valid IANA timezone to preview this schedule.'
+                      : 'Enter a valid recurrence to preview the next run.'}
           </p>
           {preview.status === 'ready' && <ol className="att-schedule-occurrence-preview" aria-label="Next five scheduled occurrences">
             {(preview.nextOccurrences || []).map(instant => <li key={instant}>{formatScheduleTime(instant, draft.timezone)}</li>)}
           </ol>}
-          <p className="att-schedule-hint">This preview calculates the next five occurrence times from timezone and cron. It does not validate the package or test snapshot. The Server validates the full schedule when you save and validates it again before submitting each occurrence; it applies timezone and DST rules and records actual occurrences in UTC.</p>
+          <p className="att-schedule-hint">This preview calculates the next five occurrence times from timezone and cron. It does not validate the package or test snapshot. The Server validates the full schedule when you save and validates it again before submitting each occurrence; it applies timezone and DST rules and records actual occurrences in UTC. Saving an unchanged trigger keeps the schedule the Server already holds, so a completed one-time schedule can still be renamed or re-described.</p>
         </section>
         <label className="att-schedule-enable"><input type="checkbox" checked={draft.enabled} onChange={event => updateDraft('enabled', event.currentTarget.checked)} /> Enable after saving</label>
         <div className="att-schedule-form-actions">

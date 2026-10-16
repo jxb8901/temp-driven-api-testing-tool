@@ -236,6 +236,20 @@ class ServerRuntimeTest {
             assertEquals("edited description",edited.description);assertEquals("alice",edited.createdBy);assertEquals("bob",edited.updatedBy);
             assertFalse(setupRuntime.setLoadScheduleEnabled(scheduleId,false,"operator").enabled);
             assertTrue(setupRuntime.setLoadScheduleEnabled(scheduleId,true,"operator").enabled);
+
+            // A schedule holds exactly one trigger, so an editor that switches recurrence replaces the stored trigger instead of retaining the omitted field.
+            LoadSchedule triggerSwitch=setupRuntime.createLoadSchedule(ServerRuntime.JSON.readTree(
+                    "{\"name\":\"Trigger switch\",\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"environment\":\"SIT\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\",\"enabled\":false}"),"alice");
+            assertEquals("2026-10-13T02:00:00Z",triggerSwitch.nextRunAt);
+            LoadSchedule cronToOnce=setupRuntime.updateLoadSchedule(triggerSwitch.id,ServerRuntime.JSON.readTree("{\"runAt\":\"2026-10-13T09:30:00Z\"}"),"alice");
+            assertEquals("2026-10-13T09:30:00Z",cronToOnce.runAt);assertNull(cronToOnce.cron);assertEquals("2026-10-13T09:30:00Z",cronToOnce.nextRunAt);
+            LoadSchedule onceToCron=setupRuntime.updateLoadSchedule(triggerSwitch.id,ServerRuntime.JSON.readTree("{\"cron\":\"30 3 * * *\"}"),"alice");
+            assertEquals("30 3 * * *",onceToCron.cron);assertNull(onceToCron.runAt);assertEquals("2026-10-13T03:30:00Z",onceToCron.nextRunAt);
+            assertThrows(IllegalArgumentException.class,()->setupRuntime.updateLoadSchedule(triggerSwitch.id,
+                    ServerRuntime.JSON.readTree("{\"cron\":\"30 3 * * *\",\"runAt\":\"2026-10-14T09:30:00Z\"}"),"alice"));
+            assertEquals("Trigger switch renamed",setupRuntime.updateLoadSchedule(triggerSwitch.id,ServerRuntime.JSON.readTree("{\"name\":\"Trigger switch renamed\"}"),"alice").name);
+            assertEquals("30 3 * * *",setupRuntime.loadSchedule(triggerSwitch.id).cron);
+            setupRuntime.deleteLoadSchedule(triggerSwitch.id,"alice");
         } finally {setupRuntime.close();}
 
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
