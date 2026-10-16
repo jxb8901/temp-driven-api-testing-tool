@@ -28,6 +28,8 @@ class PackageResourceInspectionPerformanceBenchmark {
     @Test void writesLargePackageResourceDiscoveryLatencyReport() throws Exception {
         int warmups = integerProperty("att.server.inspection.benchmark.warmups", 1, 0);
         int runs = integerProperty("att.server.inspection.benchmark.runs", 5, 1);
+        int concurrentRuns = integerProperty("att.server.inspection.benchmark.concurrentRuns", 100, 1);
+        int concurrentWarmups = integerProperty("att.server.inspection.benchmark.concurrentWarmups", 10, 0);
         int workers = integerProperty("att.server.inspection.benchmark.workers", 1, 1);
         int pageSize = integerProperty("att.server.inspection.benchmark.pageSize", 50, 1);
         int workbookCount = integerProperty("att.server.inspection.benchmark.workbooks", 5, 1);
@@ -113,7 +115,7 @@ class PackageResourceInspectionPerformanceBenchmark {
             });
             java.util.concurrent.ExecutorService clients=java.util.concurrent.Executors.newFixedThreadPool(workers+1);
             try {
-                measure(samples,"concurrent-clients",warmups,runs,()->{
+                measure(samples,"concurrent-clients",concurrentWarmups,concurrentRuns,()->{
                     List<java.util.concurrent.Future<Map<String,Object>>> responses=new ArrayList<>();
                     for(int i=0;i<workers+1;i++)responses.add(clients.submit(()->list(runtime,"case",pageSize,null)));
                     for(java.util.concurrent.Future<Map<String,Object>> response:responses)response.get();
