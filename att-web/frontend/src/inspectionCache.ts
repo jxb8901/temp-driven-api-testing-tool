@@ -55,6 +55,12 @@ export class InspectionQueryCache {
     if (entry) this.bytes -= entry.bytes;
     this.entries.delete(key);
   }
+  invalidatePath(path: string) {
+    const key = this.key(path);
+    this.remove(key);
+    this.flights.get(key)?.controller.abort();
+    this.flights.delete(key);
+  }
   invalidatePackage(packageId: string, exceptPath?: string) {
     const marker = 'packages/' + encodeURIComponent(packageId) + '/';
     for (const key of this.entries.keys()) if (String(JSON.parse(key)[2]).startsWith(marker)) this.remove(key);
@@ -86,7 +92,10 @@ export class InspectionQueryCache {
       this.entries.delete(key); this.entries.set(key, cached);
       if (this.now() - cached.at < this.freshMs) return structuredClone(cached.value) as T;
       // A stale display is replaced through subscribers when revalidation completes.
-      void this.fetch(key, load).then(() => this.notify(), () => { this.remove(key); this.notify(); });
+      void this.fetch(key, load).then(() => this.notify(), () => {
+        // An aborted older flight must not evict a replacement after invalidation.
+        if (this.entries.get(key) === cached) { this.remove(key); this.notify(); }
+      });
       return structuredClone(cached.value) as T;
     }
     return this.fetch(key, load, signal);

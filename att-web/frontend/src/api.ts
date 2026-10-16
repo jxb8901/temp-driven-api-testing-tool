@@ -142,6 +142,10 @@ function resourcePath(identity: ResourceIdentity): string {
     + '/' + encodeURIComponent(identity.resourceId);
 }
 
+export function resourceSourcePath(identity: ResourceIdentity): string {
+  return resourcePath(identity) + '/source';
+}
+
 function postJson<T>(path: string, value: unknown, signal?: AbortSignal): Promise<T> {
   return request<T>(path, { method: 'POST', body: JSON.stringify(value), signal });
 }
@@ -278,7 +282,7 @@ export const api = {
     return request<ResourceDetail>(resourcePath(identity), { signal });
   },
   getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection> {
-    return request<SourceProjection>(resourcePath(identity) + '/source', { signal });
+    return request<SourceProjection>(resourceSourcePath(identity), { signal });
   },
   getResourceSourceFile(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection> {
     return request<SourceProjection>(resourcePath(identity) + '/source-file' + queryString({ referenceId, origin }), { signal });

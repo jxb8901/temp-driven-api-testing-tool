@@ -60,6 +60,46 @@ describe('inspection session memory', () => {
     await expect(cache.query('page', async () => { throw { status: 403 }; })).rejects.toEqual({ status: 403 });
   });
 
+  for (const invalidate of ['clear', 'path', 'package', 'session'] as const) {
+    for (const outcome of ['resolve', 'reject'] as const) {
+      it(`preserves a newer response when obsolete revalidation settles: ${invalidate}/${outcome}`, async () => {
+        let now = 0; const cache = new InspectionQueryCache(10, () => now);
+        const path = 'packages/demo/resources';
+        await cache.query(path, async () => 'stale');
+        now = 11;
+        const pending = deferred<string>();
+        expect(await cache.query(path, () => pending.promise)).toBe('stale');
+        if (invalidate === 'clear') cache.clear();
+        if (invalidate === 'path') cache.invalidatePath(path);
+        if (invalidate === 'package') cache.invalidatePackage('demo');
+        if (invalidate === 'session') cache.resetSession();
+        expect(await cache.query(path, async () => 'current')).toBe('current');
+        const changed = vi.fn(); cache.subscribe(changed);
+        if (outcome === 'resolve') pending.resolve('obsolete');
+        else pending.reject(new Error('obsolete failure'));
+        // Drain the old transport, fetch, consumer, and revalidation handlers.
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const load = vi.fn(async () => 'unexpected');
+        expect(await cache.query(path, load)).toBe('current');
+        expect(load).not.toHaveBeenCalled();
+        expect(changed).not.toHaveBeenCalled();
+      });
+    }
+  }
+
+  it('refreshes only the requested path without discarding other views or metadata', async () => {
+    const cache = new InspectionQueryCache();
+    await cache.query('source', async () => 'old source');
+    await cache.query('list', async () => 'retained list');
+    cache.setView('filters', { query: 'checkout' });
+    cache.invalidatePath('source');
+    expect(await cache.query('source', async () => 'new source')).toBe('new source');
+    const load = vi.fn(async () => 'unexpected');
+    expect(await cache.query('list', load)).toBe('retained list');
+    expect(load).not.toHaveBeenCalled();
+    expect(cache.getView('filters')).toEqual({ query: 'checkout' });
+  });
+
   it('invalidates old pages and outstanding reads on a package revision change', async () => {
     const cache = new InspectionQueryCache();
     cache.revision('demo', 'v1');

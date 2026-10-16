@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { resourceSourcePath } from '../../api';
 import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import type { ExplorerApi, ResourceIdentity, ResourceSourceReference, SourceProjection } from './types';
@@ -44,6 +45,12 @@ export function SourceViewer({ api, identity, available, active, onFileReference
     return () => controller.abort();
   }, [active, available, identity.packageId, identity.type, identity.resourceId, refreshKey, api, inspectionRefresh]);
 
+  const refreshSource = () => {
+    inspectionCache.invalidatePath(resourceSourcePath(identity));
+    setLoading(true);
+    setRefreshKey(value => value + 1);
+  };
+
   const rawText = projection?.available ? String(projection.text ?? '') : '';
   const characterCapped = rawText.length > MAX_SOURCE_CHARACTERS;
   const byCharacters = rawText.slice(0, MAX_SOURCE_CHARACTERS);
@@ -55,7 +62,7 @@ export function SourceViewer({ api, identity, available, active, onFileReference
   return <section className="att-explorer-source" aria-label="Safe source projection">
     <div className="att-source-toolbar">
       <span>{projection?.format ? `${projection.format.toUpperCase()} source` : 'Safe source'}</span>
-      <button type="button" onClick={() => (inspectionCache.clear(), setRefreshKey(value => value + 1))} disabled={!available || loading}>{loading ? 'Refreshing…' : projection ? 'Refresh source' : 'Load source'}</button>
+      <button type="button" onClick={refreshSource} disabled={!available || loading}>{loading ? 'Refreshing…' : projection ? 'Refresh source' : 'Load source'}</button>
     </div>
     <p className="att-source-status" role="status" aria-live="polite">
       {loading ? 'Loading safe source projection…'
@@ -64,7 +71,7 @@ export function SourceViewer({ api, identity, available, active, onFileReference
             : capped ? `Source exceeds the viewer limit. Showing ${sourceLines.slice(0, MAX_SOURCE_LINES).length.toLocaleString()} lines within ${MAX_SOURCE_CHARACTERS.toLocaleString()} characters.`
               : projection?.available ? `${sourceLines.length.toLocaleString()} lines` : !available ? 'Source is not available for this resource.' : 'Choose Source to load the safe projection.')}
     </p>
-    {error && <button type="button" onClick={() => (inspectionCache.clear(), setRefreshKey(value => value + 1))} disabled={loading}>Retry source</button>}
+    {error && <button type="button" onClick={refreshSource} disabled={loading}>Retry source</button>}
     {projection?.available && rawText.length > 0 && <CodeEditor
       value={shown}
       language={detectCodeLanguage(projection.logicalPath || identity.resourceId || projection.format || '')}
