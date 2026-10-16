@@ -250,6 +250,20 @@ class ServerRuntimeTest {
             assertEquals("Trigger switch renamed",setupRuntime.updateLoadSchedule(triggerSwitch.id,ServerRuntime.JSON.readTree("{\"name\":\"Trigger switch renamed\"}"),"alice").name);
             assertEquals("30 3 * * *",setupRuntime.loadSchedule(triggerSwitch.id).cron);
             setupRuntime.deleteLoadSchedule(triggerSwitch.id,"alice");
+
+            LoadSchedule completedOnce=setupRuntime.createLoadSchedule(ServerRuntime.JSON.readTree(
+                    "{\"name\":\"Completed once\",\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"timezone\":\"UTC\",\"runAt\":\"2026-10-13T09:30:00Z\",\"enabled\":true}"),"alice");
+            completedOnce.nextRunAt=null;setupRuntime.store.saveSchedule(completedOnce);
+            Instant beforeCompletedEdit=clock.instant();clock.current=Instant.parse("2026-10-14T00:00:00Z");
+            LoadSchedule completedEdited=setupRuntime.updateLoadSchedule(completedOnce.id,ServerRuntime.JSON.readTree("""
+                    {"name":"Completed once renamed","description":"Post-run notes","tags":[],"packageId":"p","jobType":"load",
+                     "scenario":"load/scenario.yaml","config":"","environment":"","timezone":"UTC",
+                     "runAt":"2026-10-13T09:30:00.000Z","maxConcurrentRuns":1,"load":{},"enabled":true}
+                    """),"alice");
+            assertEquals("Completed once renamed",completedEdited.name);assertEquals("Post-run notes",completedEdited.description);
+            assertEquals("2026-10-13T09:30:00Z",completedEdited.runAt);assertNull(completedEdited.nextRunAt,"A consumed one-time schedule must remain completed after a metadata-only update.");
+            clock.current=beforeCompletedEdit;
+            setupRuntime.deleteLoadSchedule(completedOnce.id,"alice");
         } finally {setupRuntime.close();}
 
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);

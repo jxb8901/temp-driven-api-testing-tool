@@ -86,7 +86,7 @@ final class JobStore implements AutoCloseable {
                     // The scheduler advances nextRunAt without changing the schedule definition timestamp.
                     // Preserve that newer value when this edit leaves recurrence and enabled state unchanged.
                     if(java.util.Objects.equals(current.cron,schedule.cron)
-                            &&java.util.Objects.equals(current.runAt,schedule.runAt)
+                            &&LoadSchedule.sameInstant(current.runAt,schedule.runAt)
                             &&java.util.Objects.equals(current.timezone,schedule.timezone)
                             &&current.enabled==schedule.enabled) schedule.nextRunAt=current.nextRunAt;
                     try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=?,enabled=?,next_run_at=?,updated_at=? WHERE schedule_id=?")) {

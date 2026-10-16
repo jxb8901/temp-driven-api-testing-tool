@@ -1,6 +1,7 @@
 package att.server;
 
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +58,11 @@ final class LoadSchedule {
     }
 
     Instant nextRunInstant(){return nextRunAt==null?null:Instant.parse(nextRunAt);}
+    static boolean sameInstant(String left,String right) {
+        if(left==null||right==null)return left==null&&right==null;
+        try{return Instant.parse(left).equals(Instant.parse(right));}
+        catch(DateTimeParseException invalid){return left.equals(right);}
+    }
     String effectiveJobType(){
         if(schemaVersion!=null&&!"att-schedule/v2".equals(schemaVersion))throw new IllegalArgumentException("Unsupported schedule schemaVersion");
         if(jobType==null||"load".equals(jobType))return "load";

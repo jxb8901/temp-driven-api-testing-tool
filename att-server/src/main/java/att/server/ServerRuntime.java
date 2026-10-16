@@ -1465,9 +1465,9 @@ final class ServerRuntime implements AutoCloseable {
         requireSchedulingEnabled();LoadSchedule prior=store.schedule(id);if(prior==null)throw new NotFoundException();
         LoadSchedule schedule=buildLoadSchedule(input,prior,principal);schedule.id=id;schedule.createdBy=prior.createdBy;schedule.createdAt=prior.createdAt;
         schedule.updatedBy=principal;schedule.updatedAt=clock.instant().toString();
-        if(!prior.enabled&&schedule.enabled||!java.util.Objects.equals(prior.cron,schedule.cron)||!java.util.Objects.equals(prior.runAt,schedule.runAt)||!prior.timezone.equals(schedule.timezone))
+        if(!prior.enabled&&schedule.enabled||!java.util.Objects.equals(prior.cron,schedule.cron)||!LoadSchedule.sameInstant(prior.runAt,schedule.runAt)||!prior.timezone.equals(schedule.timezone))
             schedule.nextRunAt=schedule.runAt==null?nextRun(schedule.cron,schedule.timezone,clock.instant()).toString():futureRunAt(schedule.runAt);
-        else if(!schedule.enabled)schedule.nextRunAt=prior.nextRunAt;
+        else schedule.nextRunAt=prior.nextRunAt;
         LoadSchedule updated=store.updateSchedule(schedule,prior.updatedAt);if(updated==null)throw new NotFoundException();
         store.audit(principal,"SCHEDULE_UPDATE",null,schedule.packageId,"UPDATED");return updated;
     }
@@ -1698,6 +1698,8 @@ final class ServerRuntime implements AutoCloseable {
         if(input.hasNonNull("runAt")) {s.runAt=fieldText(input,"runAt",null,true);s.cron=null;}
         else if(input.hasNonNull("cron")) {s.cron=fieldText(input,"cron",null,true);s.runAt=null;}
         else {s.runAt=fieldText(input,"runAt",s.runAt,false);s.cron=fieldText(input,"cron",s.cron,s.runAt==null);}
+        // Studio serializes timestamps with milliseconds; retain the persisted canonical value when it denotes the same instant.
+        if(prior!=null&&LoadSchedule.sameInstant(s.runAt,prior.runAt))s.runAt=prior.runAt;
         if(s.runAt!=null&&s.cron!=null)throw new IllegalArgumentException("Provide exactly one cron or runAt trigger");
         if(s.timezone==null)s.timezone="UTC";
         if(input.has("enabled")){if(!input.get("enabled").isBoolean())throw new IllegalArgumentException("enabled must be true or false");s.enabled=input.get("enabled").booleanValue();}
@@ -1739,7 +1741,7 @@ final class ServerRuntime implements AutoCloseable {
         if(s.runAt==null) {
             CronExpression cron=CronExpression.parse(s.cron,config.scheduling.minimumIntervalMinutes);
             cron.validateTimezoneMinimumInterval(zone,config.scheduling.minimumIntervalMinutes,clock.instant());
-        } else if(prior==null||!java.util.Objects.equals(s.runAt,prior.runAt)||!prior.enabled&&s.enabled)
+        } else if(prior==null||!LoadSchedule.sameInstant(s.runAt,prior.runAt)||!prior.enabled&&s.enabled)
             s.runAt=futureRunAt(s.runAt);
         if("load".equals(s.effectiveJobType())) {
             ValidatedScheduledScenario validated=validateScheduleScenario(root,s);
