@@ -254,6 +254,7 @@ class ServerRuntimeTest {
             LoadSchedule completedOnce=setupRuntime.createLoadSchedule(ServerRuntime.JSON.readTree(
                     "{\"name\":\"Completed once\",\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"timezone\":\"UTC\",\"runAt\":\"2026-10-13T09:30:00Z\",\"enabled\":true}"),"alice");
             completedOnce.nextRunAt=null;setupRuntime.store.saveSchedule(completedOnce);
+            setupRuntime.setLoadScheduleEnabled(scheduleId,false,"alice");
             Instant beforeCompletedEdit=clock.instant();clock.current=Instant.parse("2026-10-14T00:00:00Z");
             LoadSchedule completedEdited=setupRuntime.updateLoadSchedule(completedOnce.id,ServerRuntime.JSON.readTree("""
                     {"name":"Completed once renamed","description":"Post-run notes","tags":[],"packageId":"p","jobType":"load",
@@ -263,6 +264,7 @@ class ServerRuntimeTest {
             assertEquals("Completed once renamed",completedEdited.name);assertEquals("Post-run notes",completedEdited.description);
             assertEquals("2026-10-13T09:30:00Z",completedEdited.runAt);assertNull(completedEdited.nextRunAt,"A consumed one-time schedule must remain completed after a metadata-only update.");
             clock.current=beforeCompletedEdit;
+            setupRuntime.setLoadScheduleEnabled(scheduleId,true,"alice");
             setupRuntime.deleteLoadSchedule(completedOnce.id,"alice");
         } finally {setupRuntime.close();}
 
