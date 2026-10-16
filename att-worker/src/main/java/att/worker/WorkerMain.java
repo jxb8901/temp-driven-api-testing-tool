@@ -374,13 +374,24 @@ public final class WorkerMain {
     }
     private void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception {
         resourceTelemetry.sample();
-        String line=mapper.writeValueAsString(new WorkerEvent(type,jobId,DiagnosticSanitizer.sanitize(data)).toMap());
+        Map<String,Object> safe;
+        if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&data.containsKey("inspectionMetrics")) {
+            Map<String,Object> content=new LinkedHashMap<String,Object>(data);
+            Object metrics=content.remove("inspectionMetrics");
+            safe=DiagnosticSanitizer.sanitize(content);
+            // These locally constructed metrics contain only fixed counters, numeric JMX
+            // samples, validated environment labels and opaque hashes. Repeated secret
+            // classification of every counter name adds work to every inspection read.
+            // Authored results, diagnostics and Worker telemetry still pass the sanitizer.
+            safe.put("inspectionMetrics",metrics);
+        } else safe=DiagnosticSanitizer.sanitize(data);
+        String line=mapper.writeValueAsString(new WorkerEvent(type,jobId,safe).toMap());
         long bytes=line.getBytes(StandardCharsets.UTF_8).length+1L;
-        if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&data.containsKey("inspectionMetrics")
+        if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&safe.containsKey("inspectionMetrics")
                 &&inspectionResponseBytes+bytes>inspectionResponseLimit) {
             // Optional telemetry must never make an otherwise valid bounded response fail.
-            data.remove("inspectionMetrics");
-            line=mapper.writeValueAsString(new WorkerEvent(type,jobId,DiagnosticSanitizer.sanitize(data)).toMap());
+            safe.remove("inspectionMetrics");
+            line=mapper.writeValueAsString(new WorkerEvent(type,jobId,safe).toMap());
             bytes=line.getBytes(StandardCharsets.UTF_8).length+1L;
         }
         protocol.println(line);protocol.flush();
