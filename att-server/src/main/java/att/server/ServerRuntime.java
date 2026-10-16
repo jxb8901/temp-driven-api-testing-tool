@@ -1162,7 +1162,13 @@ final class ServerRuntime implements AutoCloseable {
                 if(result.path("exitCode").asInt(3)!=0&&errorCode==null)
                     throw new IllegalStateException("Package inspection Worker did not complete successfully");
                 Map<String,Object> response=new LinkedHashMap<>();
-                if(result.path("inspectionMetrics").isObject()){metrics=JSON.convertValue(result.path("inspectionMetrics"),Map.class);retainActualKeys(metrics);}
+                if(result.path("inspectionMetrics").isObject()) {
+                    Map<String,Object> reported=JSON.convertValue(result.path("inspectionMetrics"),Map.class);
+                    if(result.path("inspectionMetricsDelta").asBoolean(false)) {
+                        Map<String,Object> merged=new LinkedHashMap<>(metrics);merged.putAll(reported);metrics=merged;
+                    } else metrics=reported;
+                    retainActualKeys(metrics);
+                }
                 else {metrics=Collections.emptyMap();synchronized(retained){retained.clear();}}
                 inspectionMetrics.add(RESPONSE_BYTES,total);
                 if(errorCode!=null) {

@@ -36,6 +36,7 @@ public final class WorkerMain {
     private boolean inspectionDaemon;
     private int inspectionResponseLimit=262144;
     private long inspectionResponseBytes;
+    private Map<String,Object> lastInspectionMetrics;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
@@ -390,7 +391,8 @@ public final class WorkerMain {
         if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&safe.containsKey("inspectionMetrics")
                 &&inspectionResponseBytes+bytes>inspectionResponseLimit) {
             // Optional telemetry must never make an otherwise valid bounded response fail.
-            safe.remove("inspectionMetrics");
+            safe.remove("inspectionMetrics");safe.remove("inspectionMetricsDelta");
+            lastInspectionMetrics=null;
             line=mapper.writeValueAsString(new WorkerEvent(type,jobId,safe).toMap());
             bytes=line.getBytes(StandardCharsets.UTF_8).length+1L;
         }
@@ -434,10 +436,20 @@ public final class WorkerMain {
                 List<String> affinity=new ArrayList<String>(configurationSnapshots.affinityKeys());
                 for(InspectorKey key:resourceInspectors.keySet())affinity.add(key.affinityKey);
                 metrics.put("retainedAffinityKeys",affinity);
-                metrics.put("packageEnvironmentAggregates",new LinkedHashMap<String,Map<String,Object>>(inspectionAggregates));
+                Map<String,Map<String,Object>> aggregates=new LinkedHashMap<String,Map<String,Object>>();
+                for(Map.Entry<String,Map<String,Object>> entry:inspectionAggregates.entrySet())
+                    aggregates.put(entry.getKey(),new LinkedHashMap<String,Object>(entry.getValue()));
+                metrics.put("packageEnvironmentAggregates",aggregates);
                 metrics.put("retainedConfigSnapshots",configurationSnapshots.size());
                 metrics.put("retainedConfigWeightBytes",configurationSnapshots.retainedWeight());
-                payload.put("inspectionMetrics",metrics);
+                if(lastInspectionMetrics==null)payload.put("inspectionMetrics",metrics);
+                else {
+                    Map<String,Object> changed=new LinkedHashMap<String,Object>();
+                    for(Map.Entry<String,Object> entry:metrics.entrySet())
+                        if(!java.util.Objects.equals(entry.getValue(),lastInspectionMetrics.get(entry.getKey())))changed.put(entry.getKey(),entry.getValue());
+                    payload.put("inspectionMetrics",changed);payload.put("inspectionMetricsDelta",Boolean.TRUE);
+                }
+                lastInspectionMetrics=metrics;
             }
         payload.put("workerMetrics",resourceTelemetry.snapshot());emit(WorkerEvent.Type.RESULT,payload);
     }

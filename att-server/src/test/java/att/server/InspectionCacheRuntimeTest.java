@@ -19,6 +19,9 @@ class InspectionCacheRuntimeTest {
             list(runtime,"p");list(runtime,"p");list(runtime,"p");
             assertEquals(1,starts.get(),"Serial requests must reuse the existing package inspector");
             assertEquals(1,indexBuilds(runtime));
+            Map<?,?> retained=(Map<?,?>)((List<?>)runtime.inspectionStatistics().get("workers")).get(0);
+            assertEquals(3L,((Number)((Map<?,?>)retained.get("PROCESSING")).get("count")).longValue(),
+                    "Metric deltas must merge current counters without losing unchanged index statistics");
             ExecutorService clients=Executors.newFixedThreadPool(4);
             try {
                 CountDownLatch start=new CountDownLatch(1);
