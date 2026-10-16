@@ -1,0 +1,2266 @@
+{
+  "schemaVersion" : "att-package-resource-discovery-benchmark/v3",
+  "version" : "4.2.0",
+  "workerStartups" : 1,
+  "telemetry" : {
+    "server" : {
+      "HTTP" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "QUEUE" : {
+        "count" : 463,
+        "totalNanos" : 743881200
+      },
+      "STARTUP" : {
+        "count" : 1,
+        "totalNanos" : 9848375
+      },
+      "DISPATCH" : {
+        "count" : 463,
+        "totalNanos" : 11912058915
+      },
+      "PROCESSING" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "CONFIG_PARSE" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "CONFIG_LOAD" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "SOURCE" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "WORKBOOK_PARSE" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "YAML_PARSE" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "INDEX_BUILD" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "INDEX_HIT" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "INDEX_MISS" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "INSPECTOR_HIT" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "INSPECTOR_MISS" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "INSPECTOR_EVICTION" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "CONFIG_HIT" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "CONFIG_MISS" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "CONFIG_EVICTION" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "INVALIDATION" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "WATCH_OVERFLOW" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "READ_BYTES" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "RESPONSE_BYTES" : {
+        "count" : 15143014,
+        "totalNanos" : 0
+      },
+      "heapUsedBytes" : 135956136,
+      "heapPoolPeakBytes" : 197766368,
+      "gcCount" : 45,
+      "gcTimeMs" : 61,
+      "processCpuNanos" : 12924335000
+    },
+    "workers" : [ {
+      "HTTP" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "QUEUE" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "STARTUP" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "DISPATCH" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "PROCESSING" : {
+        "count" : 463,
+        "totalNanos" : 10212018907
+      },
+      "CONFIG_PARSE" : {
+        "count" : 85,
+        "totalNanos" : 24053577
+      },
+      "CONFIG_LOAD" : {
+        "count" : 172,
+        "totalNanos" : 297391631
+      },
+      "SOURCE" : {
+        "count" : 17,
+        "totalNanos" : 7385835
+      },
+      "WORKBOOK_PARSE" : {
+        "count" : 260,
+        "totalNanos" : 2018507289
+      },
+      "YAML_PARSE" : {
+        "count" : 23553,
+        "totalNanos" : 541625745
+      },
+      "INDEX_BUILD" : {
+        "count" : 52,
+        "totalNanos" : 7881784622
+      },
+      "INDEX_HIT" : {
+        "count" : 343,
+        "totalNanos" : 0
+      },
+      "INDEX_MISS" : {
+        "count" : 52,
+        "totalNanos" : 0
+      },
+      "INSPECTOR_HIT" : {
+        "count" : 343,
+        "totalNanos" : 0
+      },
+      "INSPECTOR_MISS" : {
+        "count" : 52,
+        "totalNanos" : 0
+      },
+      "INSPECTOR_EVICTION" : {
+        "count" : 50,
+        "totalNanos" : 0
+      },
+      "CONFIG_HIT" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "CONFIG_MISS" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "CONFIG_EVICTION" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "INVALIDATION" : {
+        "count" : 50,
+        "totalNanos" : 0
+      },
+      "WATCH_OVERFLOW" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "READ_BYTES" : {
+        "count" : 16658800,
+        "totalNanos" : 0
+      },
+      "RESPONSE_BYTES" : {
+        "count" : 0,
+        "totalNanos" : 0
+      },
+      "heapUsedBytes" : 148518432,
+      "heapPoolPeakBytes" : 214662032,
+      "gcCount" : 98,
+      "gcTimeMs" : 206,
+      "processCpuNanos" : 24598245000,
+      "watchedDirectories" : 410,
+      "retainedInspectors" : 2
+    } ]
+  },
+  "sourceRevision" : "d291f8be+instrumentation",
+  "dataset" : "synthetic multi-workbook package",
+  "measurementScope" : "ServerRuntime.inspectResource through a persistent bounded inspection Worker; excludes HTTP and Tomcat overhead",
+  "environment" : {
+    "javaVersion" : "26.0.1",
+    "javaVm" : "OpenJDK 64-Bit Server VM",
+    "os" : "Mac OS X 26.1",
+    "architecture" : "aarch64",
+    "processors" : 8,
+    "maxHeapBytes" : 2147483648,
+    "liveThreads" : 9,
+    "capturedAt" : "2026-10-16T00:43:07.159931Z"
+  },
+  "packageCount" : 3,
+  "settings" : {
+    "workbooks" : 5,
+    "workers" : 1,
+    "warmups" : 2,
+    "templates" : 200,
+    "workerTimeoutMs" : 120000,
+    "totalCases" : 1500,
+    "casesPerWorkbook" : 300,
+    "workerHeapMaxMb" : 512,
+    "runs" : 15,
+    "pageSize" : 50
+  },
+  "coldIndexBuild" : {
+    "latencyMs" : 1215.663625,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "secondSamePackageRequestMs" : 46.15175
+  },
+  "scenarios" : [ {
+    "scenario" : "case-first-page",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 26.095416,
+    "p95LatencyMs" : 35.629917
+  }, {
+    "scenario" : "case-page-n",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 19.097625,
+    "p95LatencyMs" : 20.4335
+  }, {
+    "scenario" : "case-detail",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 1.08875,
+    "p95LatencyMs" : 2.756833
+  }, {
+    "scenario" : "template-first-page",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 22.636667,
+    "p95LatencyMs" : 44.531375
+  }, {
+    "scenario" : "template-page-n",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 14.821209,
+    "p95LatencyMs" : 15.697083
+  }, {
+    "scenario" : "template-detail",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 8.882708,
+    "p95LatencyMs" : 9.298709
+  }, {
+    "scenario" : "tool-source",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 1.100625,
+    "p95LatencyMs" : 1.550333
+  }, {
+    "scenario" : "config-declared",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 6.671208,
+    "p95LatencyMs" : 9.323333
+  }, {
+    "scenario" : "config-effective-SIT",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 6.20225,
+    "p95LatencyMs" : 16.587875
+  }, {
+    "scenario" : "config-effective-UAT",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 4.153334,
+    "p95LatencyMs" : 7.003792
+  }, {
+    "scenario" : "config-compare",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 3.943333,
+    "p95LatencyMs" : 4.58025
+  }, {
+    "scenario" : "multi-package-churn",
+    "measuredRuns" : 15,
+    "p50LatencyMs" : 483.826708,
+    "p95LatencyMs" : 546.826708
+  }, {
+    "scenario" : "concurrent-clients",
+    "measuredRuns" : 100,
+    "p50LatencyMs" : 25.00275,
+    "p95LatencyMs" : 26.844833
+  } ],
+  "samples" : [ {
+    "scenario" : "config-declared",
+    "sample" : 1,
+    "latencyMs" : 8.242042,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 2,
+    "latencyMs" : 4.489916,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 3,
+    "latencyMs" : 4.211417,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 4,
+    "latencyMs" : 4.265291,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 5,
+    "latencyMs" : 3.358459,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 6,
+    "latencyMs" : 7.30175,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 7,
+    "latencyMs" : 9.323333,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 8,
+    "latencyMs" : 7.68625,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 9,
+    "latencyMs" : 6.93075,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 10,
+    "latencyMs" : 5.696542,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 11,
+    "latencyMs" : 8.97925,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 12,
+    "latencyMs" : 5.770292,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 13,
+    "latencyMs" : 7.464917,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 14,
+    "latencyMs" : 5.333833,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-declared",
+    "sample" : 15,
+    "latencyMs" : 6.671208,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 1,
+    "latencyMs" : 16.587875,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 2,
+    "latencyMs" : 9.374709,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 3,
+    "latencyMs" : 5.719833,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 4,
+    "latencyMs" : 8.15275,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 5,
+    "latencyMs" : 5.177375,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 6,
+    "latencyMs" : 4.420958,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 7,
+    "latencyMs" : 4.85175,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 8,
+    "latencyMs" : 3.816583,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 9,
+    "latencyMs" : 5.07125,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 10,
+    "latencyMs" : 7.204958,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 11,
+    "latencyMs" : 7.092,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 12,
+    "latencyMs" : 6.20225,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 13,
+    "latencyMs" : 3.680083,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 14,
+    "latencyMs" : 6.865416,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-SIT",
+    "sample" : 15,
+    "latencyMs" : 7.653125,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 1,
+    "latencyMs" : 3.711458,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 2,
+    "latencyMs" : 4.651292,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 3,
+    "latencyMs" : 3.423375,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 4,
+    "latencyMs" : 3.5255,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 5,
+    "latencyMs" : 4.202916,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 6,
+    "latencyMs" : 3.424083,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 7,
+    "latencyMs" : 5.166292,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 8,
+    "latencyMs" : 4.153334,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 9,
+    "latencyMs" : 5.6715,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 10,
+    "latencyMs" : 6.606709,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 11,
+    "latencyMs" : 3.988666,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 12,
+    "latencyMs" : 3.78975,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 13,
+    "latencyMs" : 3.98175,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 14,
+    "latencyMs" : 6.736792,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-effective-UAT",
+    "sample" : 15,
+    "latencyMs" : 7.003792,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 1,
+    "latencyMs" : 4.357417,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 2,
+    "latencyMs" : 4.171958,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 3,
+    "latencyMs" : 3.764083,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 4,
+    "latencyMs" : 4.574958,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 5,
+    "latencyMs" : 4.428334,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 6,
+    "latencyMs" : 4.58025,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 7,
+    "latencyMs" : 3.943333,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 8,
+    "latencyMs" : 3.566917,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 9,
+    "latencyMs" : 4.197667,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 10,
+    "latencyMs" : 3.540875,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 11,
+    "latencyMs" : 3.473375,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 12,
+    "latencyMs" : 3.440041,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 13,
+    "latencyMs" : 3.478583,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 14,
+    "latencyMs" : 4.052375,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "config-compare",
+    "sample" : 15,
+    "latencyMs" : 3.392042,
+    "totalResources" : 1,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 1,
+    "latencyMs" : 35.629917,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 2,
+    "latencyMs" : 24.542458,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 3,
+    "latencyMs" : 26.422041,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 4,
+    "latencyMs" : 28.753208,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 5,
+    "latencyMs" : 25.023334,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 6,
+    "latencyMs" : 27.139416,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 7,
+    "latencyMs" : 23.612042,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 8,
+    "latencyMs" : 22.49775,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 9,
+    "latencyMs" : 28.506459,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 10,
+    "latencyMs" : 26.095416,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 11,
+    "latencyMs" : 23.528,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 12,
+    "latencyMs" : 29.98825,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 13,
+    "latencyMs" : 26.207208,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 14,
+    "latencyMs" : 22.474667,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-first-page",
+    "sample" : 15,
+    "latencyMs" : 21.834292,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 1,
+    "latencyMs" : 20.4335,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 2,
+    "latencyMs" : 19.8145,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 3,
+    "latencyMs" : 19.254334,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 4,
+    "latencyMs" : 19.119291,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 5,
+    "latencyMs" : 19.811459,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 6,
+    "latencyMs" : 18.408209,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 7,
+    "latencyMs" : 18.125542,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 8,
+    "latencyMs" : 19.097625,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 9,
+    "latencyMs" : 18.530041,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 10,
+    "latencyMs" : 18.56475,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 11,
+    "latencyMs" : 18.975,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 12,
+    "latencyMs" : 19.30125,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 13,
+    "latencyMs" : 18.765958,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 14,
+    "latencyMs" : 19.53875,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-page-n",
+    "sample" : 15,
+    "latencyMs" : 18.364041,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 1,
+    "latencyMs" : 1.634834,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 2,
+    "latencyMs" : 2.756833,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 3,
+    "latencyMs" : 1.185875,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 4,
+    "latencyMs" : 1.079209,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 5,
+    "latencyMs" : 1.08875,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 6,
+    "latencyMs" : 1.094917,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 7,
+    "latencyMs" : 1.056917,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 8,
+    "latencyMs" : 1.024291,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 9,
+    "latencyMs" : 1.065916,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 10,
+    "latencyMs" : 1.125084,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 11,
+    "latencyMs" : 1.18375,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 12,
+    "latencyMs" : 1.065875,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 13,
+    "latencyMs" : 1.237458,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 14,
+    "latencyMs" : 1.0575,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "case-detail",
+    "sample" : 15,
+    "latencyMs" : 1.066833,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 1,
+    "latencyMs" : 25.084208,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 2,
+    "latencyMs" : 44.531375,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 3,
+    "latencyMs" : 29.081709,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 4,
+    "latencyMs" : 22.515375,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 5,
+    "latencyMs" : 22.559167,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 6,
+    "latencyMs" : 22.300584,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 7,
+    "latencyMs" : 22.56375,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 8,
+    "latencyMs" : 22.638875,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 9,
+    "latencyMs" : 24.59025,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 10,
+    "latencyMs" : 23.250958,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 11,
+    "latencyMs" : 23.333,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 12,
+    "latencyMs" : 22.577542,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 13,
+    "latencyMs" : 22.636667,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 14,
+    "latencyMs" : 22.379875,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-first-page",
+    "sample" : 15,
+    "latencyMs" : 22.043,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 1,
+    "latencyMs" : 14.821209,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 2,
+    "latencyMs" : 14.703959,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 3,
+    "latencyMs" : 14.886167,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 4,
+    "latencyMs" : 14.891833,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 5,
+    "latencyMs" : 14.860166,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 6,
+    "latencyMs" : 14.744416,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 7,
+    "latencyMs" : 14.28125,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 8,
+    "latencyMs" : 15.50575,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 9,
+    "latencyMs" : 13.970208,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 10,
+    "latencyMs" : 14.491,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 11,
+    "latencyMs" : 14.480417,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 12,
+    "latencyMs" : 14.572,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 13,
+    "latencyMs" : 15.031875,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 14,
+    "latencyMs" : 15.697083,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-page-n",
+    "sample" : 15,
+    "latencyMs" : 14.99675,
+    "totalResources" : 200,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 1,
+    "latencyMs" : 9.250167,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 2,
+    "latencyMs" : 9.298709,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 3,
+    "latencyMs" : 9.2415,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 4,
+    "latencyMs" : 9.125041,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 5,
+    "latencyMs" : 8.949209,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 6,
+    "latencyMs" : 8.765917,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 7,
+    "latencyMs" : 8.699958,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 8,
+    "latencyMs" : 8.882708,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 9,
+    "latencyMs" : 8.808666,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 10,
+    "latencyMs" : 8.720833,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 11,
+    "latencyMs" : 8.832625,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 12,
+    "latencyMs" : 8.91975,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 13,
+    "latencyMs" : 8.904958,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 14,
+    "latencyMs" : 8.74575,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "template-detail",
+    "sample" : 15,
+    "latencyMs" : 8.878666,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 1,
+    "latencyMs" : 1.550333,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 2,
+    "latencyMs" : 1.367667,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 3,
+    "latencyMs" : 1.139667,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 4,
+    "latencyMs" : 1.209834,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 5,
+    "latencyMs" : 1.100625,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 6,
+    "latencyMs" : 1.139042,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 7,
+    "latencyMs" : 1.087,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 8,
+    "latencyMs" : 1.07425,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 9,
+    "latencyMs" : 1.148083,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 10,
+    "latencyMs" : 1.068708,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 11,
+    "latencyMs" : 0.976667,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 12,
+    "latencyMs" : 1.006666,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 13,
+    "latencyMs" : 1.03875,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 14,
+    "latencyMs" : 1.050125,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "tool-source",
+    "sample" : 15,
+    "latencyMs" : 1.128834,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 1,
+    "latencyMs" : 543.266583,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 2,
+    "latencyMs" : 546.826708,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 3,
+    "latencyMs" : 508.602542,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 4,
+    "latencyMs" : 495.753375,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 5,
+    "latencyMs" : 494.694,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 6,
+    "latencyMs" : 508.499292,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 7,
+    "latencyMs" : 502.5065,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 8,
+    "latencyMs" : 482.98375,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 9,
+    "latencyMs" : 483.826708,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 10,
+    "latencyMs" : 468.263334,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 11,
+    "latencyMs" : 467.526,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 12,
+    "latencyMs" : 466.058625,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 13,
+    "latencyMs" : 482.797584,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 14,
+    "latencyMs" : 464.441459,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "multi-package-churn",
+    "sample" : 15,
+    "latencyMs" : 468.979209,
+    "totalResources" : 1500,
+    "returnedResources" : 50,
+    "hasNextPage" : true
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 1,
+    "latencyMs" : 25.126709,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 2,
+    "latencyMs" : 24.770209,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 3,
+    "latencyMs" : 26.094417,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 4,
+    "latencyMs" : 26.641167,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 5,
+    "latencyMs" : 24.91325,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 6,
+    "latencyMs" : 26.965666,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 7,
+    "latencyMs" : 24.872875,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 8,
+    "latencyMs" : 24.804667,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 9,
+    "latencyMs" : 25.107042,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 10,
+    "latencyMs" : 26.422625,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 11,
+    "latencyMs" : 25.016792,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 12,
+    "latencyMs" : 26.700458,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 13,
+    "latencyMs" : 25.00275,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 14,
+    "latencyMs" : 24.873125,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 15,
+    "latencyMs" : 24.786583,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 16,
+    "latencyMs" : 26.370708,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 17,
+    "latencyMs" : 25.039708,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 18,
+    "latencyMs" : 26.754625,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 19,
+    "latencyMs" : 24.984,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 20,
+    "latencyMs" : 24.931667,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 21,
+    "latencyMs" : 24.909791,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 22,
+    "latencyMs" : 24.931,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 23,
+    "latencyMs" : 26.916291,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 24,
+    "latencyMs" : 24.922875,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 25,
+    "latencyMs" : 24.712167,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 26,
+    "latencyMs" : 24.785042,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 27,
+    "latencyMs" : 24.76,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 28,
+    "latencyMs" : 24.678416,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 29,
+    "latencyMs" : 27.790458,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 30,
+    "latencyMs" : 25.005125,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 31,
+    "latencyMs" : 25.438125,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 32,
+    "latencyMs" : 25.307667,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 33,
+    "latencyMs" : 24.756958,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 34,
+    "latencyMs" : 24.904916,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 35,
+    "latencyMs" : 26.187333,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 36,
+    "latencyMs" : 25.331583,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 37,
+    "latencyMs" : 24.840416,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 38,
+    "latencyMs" : 24.815,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 39,
+    "latencyMs" : 24.934292,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 40,
+    "latencyMs" : 25.0965,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 41,
+    "latencyMs" : 26.349083,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 42,
+    "latencyMs" : 28.083709,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 43,
+    "latencyMs" : 27.412125,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 44,
+    "latencyMs" : 25.882667,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 45,
+    "latencyMs" : 24.902125,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 46,
+    "latencyMs" : 25.434375,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 47,
+    "latencyMs" : 26.229209,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 48,
+    "latencyMs" : 24.936833,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 49,
+    "latencyMs" : 25.886791,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 50,
+    "latencyMs" : 25.202959,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 51,
+    "latencyMs" : 24.816167,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 52,
+    "latencyMs" : 25.233459,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 53,
+    "latencyMs" : 26.214166,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 54,
+    "latencyMs" : 25.100209,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 55,
+    "latencyMs" : 25.28,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 56,
+    "latencyMs" : 25.294041,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 57,
+    "latencyMs" : 25.312,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 58,
+    "latencyMs" : 24.904333,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 59,
+    "latencyMs" : 26.767833,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 60,
+    "latencyMs" : 25.40575,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 61,
+    "latencyMs" : 26.182,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 62,
+    "latencyMs" : 26.031292,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 63,
+    "latencyMs" : 25.422708,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 64,
+    "latencyMs" : 24.786458,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 65,
+    "latencyMs" : 26.696167,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 66,
+    "latencyMs" : 24.747542,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 67,
+    "latencyMs" : 24.726917,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 68,
+    "latencyMs" : 24.710291,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 69,
+    "latencyMs" : 24.858375,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 70,
+    "latencyMs" : 24.677375,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 71,
+    "latencyMs" : 26.429125,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 72,
+    "latencyMs" : 26.242458,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 73,
+    "latencyMs" : 25.021417,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 74,
+    "latencyMs" : 24.85525,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 75,
+    "latencyMs" : 25.527333,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 76,
+    "latencyMs" : 24.742708,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 77,
+    "latencyMs" : 26.844833,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 78,
+    "latencyMs" : 24.681,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 79,
+    "latencyMs" : 24.556167,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 80,
+    "latencyMs" : 24.412583,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 81,
+    "latencyMs" : 24.546291,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 82,
+    "latencyMs" : 24.837166,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 83,
+    "latencyMs" : 25.99775,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 84,
+    "latencyMs" : 24.54025,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 85,
+    "latencyMs" : 24.582083,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 86,
+    "latencyMs" : 24.679667,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 87,
+    "latencyMs" : 24.55925,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 88,
+    "latencyMs" : 25.341458,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 89,
+    "latencyMs" : 25.25325,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 90,
+    "latencyMs" : 24.430042,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 91,
+    "latencyMs" : 25.103834,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 92,
+    "latencyMs" : 24.804625,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 93,
+    "latencyMs" : 24.767208,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 94,
+    "latencyMs" : 24.888916,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 95,
+    "latencyMs" : 25.703417,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 96,
+    "latencyMs" : 25.198291,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 97,
+    "latencyMs" : 24.784833,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 98,
+    "latencyMs" : 24.496416,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 99,
+    "latencyMs" : 24.868875,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  }, {
+    "scenario" : "concurrent-clients",
+    "sample" : 100,
+    "latencyMs" : 24.605125,
+    "totalResources" : null,
+    "returnedResources" : 0,
+    "hasNextPage" : false
+  } ]
+}

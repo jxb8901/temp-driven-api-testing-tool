@@ -44,6 +44,8 @@ To migrate a flat Local installation, back it up first and extract the new archi
 
 On older releases, a YAML entry in `server.inspection.safeTextSources` could stop Tomcat with `Inspection source allowlist accepts text script files only`. To restore an older release, remove that entry before restarting. This release accepts YAML entries; with the default `safe-package-files` policy, eligible package-local YAML such as `config/sit/fppdb.yaml` needs no entry. Keep exact entries only when using `allowlist-only`.
 
+Inspection caching, the optional `server.inspection.warmup` settings, lifecycle behavior and metrics are specified in the [operations Reference](reference/ci-packaging-operations.md#studio-inspection-caches).
+
 The optional `server.inspection.configurationAdminRole` (default `ATT_ADMIN`) controls `includeAllFields=true` on Effective and Compare configuration views. In local-auth mode only a local `ADMIN` can request these views. The option adds non-secret DB properties, evidence SQL/parameters, and otherwise-masked DB operational settings; it is not a full-disclosure switch. Usernames, passwords, tokens, personal data, HTTP header maps, MQ evidence payloads, SSH connection details and identity-file paths, classified fields, and configured-sensitive values remain protected. Source remains a safe-source projection, while Declared reports declaration status and counts. Protected values stay hidden across the views. These responses are marked `Cache-Control: no-store` and audited.
 
 `server.security.checkCrossOrigin` defaults to `false` and controls the Origin-equality check on state-changing API requests. Setting it to `true` rejects mismatched Origins with `ATT-SERVER-ORIGIN-MISMATCH`. Disabling this check does not disable CSRF validation for local cookie-authenticated mutations, relax local login/bootstrap origin checks, enable CORS, or add wildcard headers. Behind a reverse proxy, configure Tomcat `RemoteIpValve` with trusted proxy addresses so the Servlet request exposes the external scheme, host, and port; the application does not trust arbitrary forwarded headers. The Server warns at startup when origin checking is disabled.
@@ -97,6 +99,14 @@ server:
     heapMaxMb: 512
     maxResponseBytes: 262144
     maxSourceBytes: 65536
+    # Optional asynchronous preload. Keep at most two keys per warmup Worker.
+    warmup:
+      enabled: false
+      workers: 1
+      keys: []
+      # keys:
+      #   - packageId: payments
+      #     environment: SIT
     sourceBrowsing:
       enabled: true
       policy: safe-package-files

@@ -38,6 +38,12 @@ public final class ApiServlet extends HttpServlet {
     private ServerRuntime runtime;
     @Override public void init() throws ServletException {Object r=getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(!(r instanceof ServerRuntime))throw new ServletException("ATT Server runtime did not initialize");runtime=(ServerRuntime)r;}
     @Override protected void service(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
+        long inspectionStarted=System.nanoTime();
+        boolean inspection=resourcePath(path(req))||configurationPath(path(req));
+        try { serviceRequest(req,res); }
+        finally { if(inspection)runtime.inspectionMetrics.record(att.metrics.InspectionMetrics.Stage.HTTP,System.nanoTime()-inspectionStarted); }
+    }
+    private void serviceRequest(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
         if(path(req).startsWith("/auth/")){super.service(req,res);return;}
         if("PATCH".equalsIgnoreCase(req.getMethod())){schedulePatch(req,res);return;}
         super.service(req,res);
@@ -153,7 +159,10 @@ public final class ApiServlet extends HttpServlet {
                     configurationAdmin=user!=null&&"ADMIN".equals(user.get("role"));
                 } else configurationAdmin=req.isUserInRole(runtime.config.inspection.configurationAdminRole);
                 res.setHeader("Cache-Control","no-store");
-                json(res,200,Map.of("configurationAdmin",configurationAdmin,"requestId",requestId));return;
+                @SuppressWarnings("unchecked") Map<String,String> session=(Map<String,String>)req.getAttribute(AuthService.SESSION);
+                String sessionKey=session==null?(req.getSession(false)==null?"container":req.getSession(false).getId()):session.getOrDefault("tokenHash","");
+                String cacheContext=runtime.inspectionCacheToken(java.util.Arrays.asList(login,configurationAdmin,sessionKey,runtime.config.inspection));
+                json(res,200,Map.of("configurationAdmin",configurationAdmin,"inspectionCacheContext",cacheContext,"requestId",requestId));return;
             }
             if(!runtime.auth.local(runtime.config)){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
             if("/auth/bootstrap/status".equals(path)){json(res,200,Map.of("required",runtime.auth.bootstrapRequired(),"requestId",requestId));return;}
@@ -367,6 +376,9 @@ public final class ApiServlet extends HttpServlet {
                     ?runtime.inspectDebugForm(packageId,kind,resourceId,req.getParameter("environment"),principal)
                     :"quick-load-form".equals(action)?runtime.inspectQuickLoadForm(packageId,kind,resourceId,req.getParameter("model"),req.getParameter("environment"),principal)
                     :runtime.inspectResource(packageId,action,kind,resourceId,query,limit,cursor,sort,direction,sourceOrigin,principal);
+            Object cacheRevision=result.remove("_cacheRevision");
+            if(cacheRevision instanceof String)res.setHeader("X-ATT-Inspection-Revision",(String)cacheRevision);
+            res.setHeader("Cache-Control","no-store");
             if("list".equals(action)) {
                 ResourceInspection.Page response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Page.class);
                 response.requestId=requestId;json(res,200,response);

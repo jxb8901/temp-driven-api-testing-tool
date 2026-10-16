@@ -53,6 +53,8 @@ public final class PackageConfigurationInspector {
 
     private final Path packageRoot;
     private final Path configPath;
+    private PackageConfigurationSnapshots snapshots;
+    private Object snapshotContext;
     private final PackageResourceResolver resources;
     private final int maxResponseBytes;
     private final boolean redactionEnabled;
@@ -81,6 +83,11 @@ public final class PackageConfigurationInspector {
         this.includeAllFields = includeAllFields;
         this.sensitivePaths = sensitivePaths == null ? Collections.<String>emptyList() : new ArrayList<String>(sensitivePaths);
         this.sensitiveFieldPatterns = sensitiveFieldPatterns == null ? Collections.<String>emptyList() : new ArrayList<String>(sensitiveFieldPatterns);
+    }
+
+    /** Share trusted parsed state, never safe response maps, across daemon requests. */
+    public PackageConfigurationInspector withSnapshots(PackageConfigurationSnapshots snapshots, Object context) {
+        this.snapshots=snapshots; this.snapshotContext=context; return this;
     }
 
     public Map<String, Object> inspect(String action, String environment, String otherEnvironment) throws Exception {
@@ -124,9 +131,10 @@ public final class PackageConfigurationInspector {
             throw new PackageResourceInspector.ResourceNotFoundException();
         if (limit < 1 || limit > 100) throw new IllegalArgumentException("limit must be between 1 and 100");
         String safeEnvironment = normalizedEnvironment(environment);
-        Map<?,?> raw = readConfig();
+        PackageConfigurationSnapshots.Snapshot cached = configurationSnapshot(safeEnvironment);
+        Map<?,?> raw = cached == null ? readConfig() : cached.raw;
         validateReferencedFiles(raw, safeEnvironment);
-        FrameworkConfig config = new FrameworkConfigLoader().load(configFile(), packageRoot, safeEnvironment);
+        FrameworkConfig config = cached == null ? new FrameworkConfigLoader().load(configFile(), packageRoot, safeEnvironment) : cached.config;
         TestdataDescriptor selected = null;
         String selectedSource = null;
         for (Path path : config.testdataDescriptors()) {
@@ -257,9 +265,10 @@ public final class PackageConfigurationInspector {
     private Map<String, Object> effective(String environment, String section, int offset, int limit, String query) {
         String safeEnvironment = normalizedEnvironment(environment);
         try {
-            Map<?, ?> raw = readConfig();
+            PackageConfigurationSnapshots.Snapshot cached = configurationSnapshot(safeEnvironment);
+            Map<?, ?> raw = cached == null ? readConfig() : cached.raw;
             validateReferencedFiles(raw, safeEnvironment);
-            FrameworkConfig config = new FrameworkConfigLoader().load(configFile(), packageRoot, safeEnvironment);
+            FrameworkConfig config = cached == null ? new FrameworkConfigLoader().load(configFile(), packageRoot, safeEnvironment) : cached.config;
             return snapshot(raw, config, "effective", section, offset, limit, query);
         } catch (ConfigurationLimitException exceeded) {
             throw exceeded;
@@ -833,12 +842,22 @@ public final class PackageConfigurationInspector {
         return section("testdata", "Testdata descriptors", source, entries);
     }
 
+    private PackageConfigurationSnapshots.Snapshot configurationSnapshot(String environment) throws Exception {
+        if(snapshots == null)return null;
+        try { return snapshots.get(packageRoot,configPath,environment,snapshotContext,true); }
+        catch(Exception unavailable) { return null; } // Cache failures preserve the original uncached validation path.
+    }
+
     private Map<?, ?> readConfig() throws Exception {
+        if(snapshots != null)try { return snapshots.get(packageRoot,configPath,null,snapshotContext,false).raw; }
+        catch(Exception unavailable) { /* Read and validate using the uncached path below. */ }
         PackageResourceResolver.PackageResource resource = configPath.isAbsolute()
                 ? resources.fromInternalPath(configPath, PackageResourceResolver.Kind.FILE)
                 : resources.resolvePackageRelative(configPath.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE);
         if (Files.size(resource.canonicalPath()) > MAX_CONFIG_BYTES) throw new ConfigurationLimitException();
+        long started=System.nanoTime();
         Object loaded = YamlSupport.load(resource.canonicalPath());
+        att.metrics.InspectionMetrics.JVM.record(att.metrics.InspectionMetrics.Stage.CONFIG_PARSE,System.nanoTime()-started);
         if (!(loaded instanceof Map)) throw new IllegalArgumentException("Configuration must be a YAML mapping");
         return (Map<?, ?>) loaded;
     }

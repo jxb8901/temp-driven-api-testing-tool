@@ -171,7 +171,7 @@ public final class ServerConfig {
 
     private static Inspection inspection(Object raw,Map<String,Path> packages) throws Exception {
         Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.inspection");
-        Set<String> allowed=Set.of("enabled","maxConcurrent","queuedLimit","timeoutMs","heapMaxMb","maxResponseBytes","maxSourceBytes","safeTextSources","sourceBrowsing","redaction","configurationAdminRole");
+        Set<String> allowed=Set.of("enabled","maxConcurrent","queuedLimit","timeoutMs","heapMaxMb","maxResponseBytes","maxSourceBytes","safeTextSources","sourceBrowsing","redaction","configurationAdminRole","warmup");
         for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))throw new IllegalArgumentException("server.inspection contains an unknown setting");
         boolean enabled=boolValue(values,"enabled",true);
         String configurationAdminRole=values.get("configurationAdminRole")==null?"ATT_ADMIN":string(values.get("configurationAdminRole"),"server.inspection.configurationAdminRole");
@@ -264,8 +264,25 @@ public final class ServerConfig {
             }
             safeSources.put(packageId,List.copyOf(checked));
         }
+        Map<?,?> warm=values.get("warmup")==null?Collections.emptyMap():map(values.get("warmup"),"server.inspection.warmup");
+        for(Object key:warm.keySet())if(!Set.of("enabled","workers","keys").contains(key))throw new IllegalArgumentException("server.inspection.warmup contains an unknown setting");
+        int warmWorkers=intValue(warm,"workers",1,1,concurrent);
+        List<WarmupKey> warmKeys=new java.util.ArrayList<>();
+        if(warm.get("keys")!=null)for(Object item:list(warm.get("keys"),"server.inspection.warmup.keys")) {
+            Map<?,?> key=map(item,"warmup key");
+            for(Object name:key.keySet())if(!Set.of("packageId","environment").contains(name))throw new IllegalArgumentException("Unknown warmup key setting");
+            String packageId=string(key.get("packageId"),"warmup packageId");
+            if(!packageId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))throw new IllegalArgumentException("Invalid warmup packageId");
+            String environment=key.get("environment")==null?null:string(key.get("environment"),"warmup environment");
+            if(environment!=null&&!environment.matches("[A-Za-z][A-Za-z0-9_-]{0,31}"))throw new IllegalArgumentException("Invalid warmup environment");
+            WarmupKey selected=new WarmupKey(packageId,environment);
+            if(warmKeys.contains(selected))throw new IllegalArgumentException("Duplicate warmup key");
+            warmKeys.add(selected);
+            if(warmKeys.size()>2*warmWorkers)throw new IllegalArgumentException("Warmup keys exceed two inspector entries per warmup Worker");
+        }
+        Warmup warmup=new Warmup(boolValue(warm,"enabled",false),warmWorkers,List.copyOf(warmKeys));
         return new Inspection(enabled,configurationAdminRole,concurrent,queued,timeout,heap,response,source,safeSources,externalRoots,externalSources,
-                sourceBrowsingEnabled,sourcePolicy,denyGlobs,redactionEnabled,sensitivePaths,sensitiveFieldPatterns);
+                sourceBrowsingEnabled,sourcePolicy,denyGlobs,redactionEnabled,sensitivePaths,sensitiveFieldPatterns,warmup);
     }
 
     private static Security security(Object raw) {
@@ -393,9 +410,13 @@ public final class ServerConfig {
         }
     }
 
+    public record WarmupKey(String packageId,String environment) { }
+    public record Warmup(boolean enabled,int workers,List<WarmupKey> keys) { }
+
     public static final class Inspection {
         public final boolean enabled;
         public final String configurationAdminRole;
+        public final Warmup warmup;
         public final int maxConcurrent,queuedLimit,timeoutMs,heapMaxMb,maxResponseBytes,maxSourceBytes;
         public final Map<String,List<String>> safeTextSources;
         public final List<String> externalSourceRoots;
@@ -404,7 +425,8 @@ public final class ServerConfig {
         public final String sourcePolicy;
         public final List<String> sourceDenyGlobs,sensitivePaths,sensitiveFieldPatterns;
         private Inspection(boolean enabled,String configurationAdminRole,int maxConcurrent,int queuedLimit,int timeoutMs,int heapMaxMb,int maxResponseBytes,int maxSourceBytes,Map<String,List<String>> safeTextSources,List<Path> externalSourceRoots,Map<String,List<String>> externalTextSources,
-                           boolean sourceBrowsingEnabled,String sourcePolicy,List<String> sourceDenyGlobs,boolean redactionEnabled,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) {
+                           boolean sourceBrowsingEnabled,String sourcePolicy,List<String> sourceDenyGlobs,boolean redactionEnabled,List<String> sensitivePaths,List<String> sensitiveFieldPatterns,Warmup warmup) {
+            this.warmup=warmup;
             this.enabled=enabled;this.configurationAdminRole=configurationAdminRole;this.maxConcurrent=maxConcurrent;this.queuedLimit=queuedLimit;this.timeoutMs=timeoutMs;this.heapMaxMb=heapMaxMb;this.maxResponseBytes=maxResponseBytes;this.maxSourceBytes=maxSourceBytes;
             this.safeTextSources=Collections.unmodifiableMap(new LinkedHashMap<>(safeTextSources));
             this.externalSourceRoots=externalSourceRoots.stream().map(Path::toString).toList();

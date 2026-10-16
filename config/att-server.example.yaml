@@ -24,6 +24,14 @@ server:
     heapMaxMb: 512
     maxResponseBytes: 262144
     maxSourceBytes: 65536
+    # Optional asynchronous preload. Keep at most two keys per warmup Worker.
+    warmup:
+      enabled: false
+      workers: 1
+      keys: []
+      # keys:
+      #   - packageId: payments
+      #     environment: SIT
     sourceBrowsing:
       enabled: true
       policy: safe-package-files

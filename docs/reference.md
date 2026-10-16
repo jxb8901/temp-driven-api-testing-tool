@@ -119,6 +119,7 @@ Status: Normative end-user documentation; generated from modular sources
 - [CI, packaging, and operations](#ci-packaging-and-operations)
   - [Development/release gates](#developmentrelease-gates)
   - [Runtime dependencies](#runtime-dependencies)
+  - [Studio inspection caches](#studio-inspection-caches)
   - [Documentation operations](#documentation-operations)
   - [CI and environment promotion](#ci-and-environment-promotion)
 - [Appendix A — schema and version matrix](#appendix-a-schema-and-version-matrix)
@@ -3069,6 +3070,20 @@ python3 tools/validate_reference_content.py
 ### Runtime dependencies
 
 The CLI, Engine, and Worker remain Java 8-compatible. The ATT Server WAR requires Java 17+ and external Tomcat 10.1+. ATT does not bundle JDBC drivers for CLI integrations; place required driver/dependency jars in `lib/`. IBM MQ is optional: the default CLI build remains usable without MQ client classes, while MQ deployments package the supported IBM client jar/profile.
+
+### Studio inspection caches
+
+Studio keeps Resource pages, Detail, safe Source, and ordinary Configuration projections in session memory. The shared cache retains at most 128 responses and 8 MiB of encoded payload, with a 1 MiB per-response admission limit. Entries remain fresh for 15 seconds; returning to an older view shows its cached projection while a background read refreshes it. In-flight reads are deduplicated, and aborting one consumer does not cancel another consumer's request. Search, sorting, pagination and scroll state remain available on view return.
+
+Every reusable read first checks the authenticated inspection context. Identity, session, role or inspection-policy changes discard previous responses. Package/environment selection, explicit refresh, logout, page suspension, a newly observed package revision, and stale-cursor or access errors invalidate the affected memory. Nothing stores Configuration or Source content in localStorage, IndexedDB, a service worker, or an HTTP cache. Auth/CSRF responses and `includeAllFields` administrator responses bypass the query cache. `Cache-Control: no-store` remains enforced on HTTP responses.
+
+Each inspection Worker still handles one request at a time and retains two Resource inspectors. Dispatch prefers an idle Worker already holding the same package/config/environment and policy key, then falls back to another idle Worker. Parsed Configuration snapshots have a separate four-entry LRU and a 32 MiB weighted retention budget per JVM; the configured Worker heap limit remains the hard JVM bound. Root configuration, selected Helper/Tool Group/Testdata dependencies, and the schema tree undergo bounded content reconciliation on reuse. Renames, deletions, same-timestamp replacements and unknown dependency changes therefore force a fresh load. Cache failures fall back to ordinary uncached validation. Every request constructs a fresh permission-checked projection; an administrator projection cannot enter the ordinary cache.
+
+Optional `server.inspection.warmup` defaults to `enabled: false`, `workers: 1`, `keys: []`. `workers` must be from 1 through `server.inspection.maxConcurrent`. Each key contains a `packageId` and optional Engine `environment`; configure no more than twice the warmup Worker count, with no duplicates. Omit `environment` to warm Explorer's package-default index. Keys are distributed among Workers with at most two per Worker. With no keys, each selected Worker warms the first registered package. Missing packages and preload failures do not block Tomcat startup. Warmup skips interactive demand, retries each key at most three times with backoff, reloads after a daemon replacement, and stops at shutdown. Interactive traffic can cancel a preload when every Worker is occupied.
+
+`GET /api/v1/metrics` follows the configured Server authentication policy and includes `inspection.server` and the latest bounded `inspection.workers` snapshots. Counters and total nanoseconds cover HTTP handling, queueing, process launch, dispatch, processing, Configuration load/parse, source requests, workbook/YAML parsing and index builds. They also report cache hits/misses/evictions, watcher invalidation/overflow counts, watched directories, retained keys, instrumented read bytes, protocol response bytes, heap-pool peaks, GC and process CPU. Up to 16 opaque package/environment aggregates retain request count, processing time, index builds, Configuration loads and instrumented read bytes per Worker. Package keys are hashed; counters never contain paths, configuration values or file contents. Byte counters cover instrumented inspection reads rather than OS-level physical I/O. Process-launch timing excludes JVM readiness; dispatch includes readiness and protocol transport. Benchmarks record sample p50/p95 separately. If optional inspection telemetry cannot fit within the configured response-byte budget, the Worker omits that snapshot and the Server clears its routing hint; metrics never relax the response limit or make an otherwise valid response exceed it.
+
+Display snapshots never authorize execution. Debug/Quick Load approval and Worker execution retain authoritative package revision checks, `ATT-SERVER-DRAFT-STALE`, principal-bound cursors and stale-cursor HTTP `409`. See [Server deployment](server-deployment.md) for the configuration example and [inspection benchmarks](system-design/web-ui-inspection-inline-jobs.md) for measurement procedures.
 
 ### Documentation operations
 

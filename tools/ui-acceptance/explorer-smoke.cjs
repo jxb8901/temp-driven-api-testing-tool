@@ -19,6 +19,10 @@ async function main() {
   let browser;
   let authFailure = false;
   let sourceCalls = 0;
+  let listCalls = 0;
+  let detailCalls = 0;
+  let capabilitiesCalls = 0;
+  let identityVersion = 1;
   let submittedInput;
   let submittedPrincipal;
   let submittedLoadScenario;
@@ -45,6 +49,13 @@ async function main() {
       const method = request.method();
       if (request.headers().authorization) authorizationHeaderSeen = true;
 
+      if (method === 'GET' && path === 'auth/capabilities') {
+        capabilitiesCalls++;
+        return jsonResponse(route, 200, {
+          configurationAdmin: false,
+          inspectionCacheContext: (identityVersion === 1 ? 'a' : 'b').repeat(43),
+        });
+      }
       if (authFailure && path.endsWith('/source')) {
         return jsonResponse(route, 401, { error: { code: 'UNAUTHORIZED', summary: 'authorization header rejected: canary-401-secret' } });
       }
@@ -73,6 +84,7 @@ async function main() {
         return jsonResponse(route, 200, { jobId: 'job-debug-99', packageId: 'payments', status: 'QUEUED', command: 'DEBUG' });
       }
       if (method === 'GET' && path === 'packages/payments/resources') {
+        listCalls++;
         return jsonResponse(route, 200, {
           items: [
             { type: 'template', resourceId: 'checkout', logicalId: 'checkout', name: 'checkout', state: 'ready', sourceAvailable: true },
@@ -82,6 +94,7 @@ async function main() {
       }
       const detailMatch = path.match(/^packages\/payments\/resources\/template\/(checkout|empty)$/);
       if (method === 'GET' && detailMatch) {
+        detailCalls++;
         const id = detailMatch[1];
         return jsonResponse(route, 200, {
           resource: { type: 'template', resourceId: id, logicalId: id, name: id, state: 'ready', sourceAvailable: true, references: [], referencedBy: [] },
@@ -96,7 +109,7 @@ async function main() {
           available: true,
           format: 'yaml',
           logicalPath: 'templates/checkout/template.yaml',
-          text: id === 'empty' ? '' : Array.from({ length: 5000 }, (_, index) => `step-${index + 1}: ${index === 0 ? '<img src=x onerror=alert(1)>' : 'safe'}`).join('\n') + '\npayload: &{./payloads/request.xml}\n',
+          text: id === 'empty' ? '' : Array.from({ length: 5000 }, (_, index) => `step-${index + 1}: ${index === 0 ? `identity-${identityVersion} ` + '<img src=x onerror=alert(1)>' : 'safe'}`).join('\n') + '\npayload: &{./payloads/request.xml}\n',
           fileReferences: id === 'empty' ? [] : [{ referenceId: resourceReferenceId, logicalPath: 'templates/checkout/payloads/request.xml', available: true }],
         });
       }
@@ -261,11 +274,40 @@ async function main() {
     await page.locator('.att-explorer-source .att-code-editor').getByRole('button', { name: 'Copy' }).click();
     await page.getByText('Copied displayed code.').waitFor();
     assert.equal((await page.evaluate(() => navigator.clipboard.readText())).includes('step-5000: safe'), true);
-    await page.getByRole('button', { name: 'Refresh source' }).click();
-    await page.getByRole('button', { name: 'Refresh source' }).waitFor();
-    await page.getByRole('button', { name: 'Refresh source' }).click();
-    await page.getByRole('button', { name: 'Refresh source' }).waitFor();
-    assert.equal(sourceCalls >= 3, true, 'source can be refreshed repeatedly');
+    // A completed revisit must hit session memory while still verifying capabilities.
+    const sourceBeforeRevisit = sourceCalls;
+    await page.getByRole('tab', { name: 'Definition', exact: true }).click();
+    const capabilityResponse = page.waitForResponse(response => response.url().endsWith('/api/v1/auth/capabilities'));
+    await page.getByRole('tab', { name: 'Source', exact: true }).click();
+    await capabilityResponse;
+    await page.getByRole('button', { name: 'Refresh source', exact: true }).waitFor();
+    assert.equal(sourceCalls, sourceBeforeRevisit, 'revisiting fresh source reuses the verified session cache');
+    assert.ok(capabilitiesCalls > 0, 'inspection reads verify the live capability token');
+
+    const unrelatedReads = { listCalls, detailCalls };
+    for (let refresh = 0; refresh < 2; refresh++) {
+      const expectedCalls = sourceCalls + 1;
+      // Register before clicking and await the actual GET response, then the idle UI.
+      const response = page.waitForResponse(response => response.url().endsWith('/resources/template/checkout/source') && response.request().method() === 'GET');
+      await page.getByRole('button', { name: 'Refresh source', exact: true }).click();
+      await (await response).finished();
+      await page.getByRole('button', { name: 'Refresh source', exact: true }).waitFor();
+      assert.equal(sourceCalls, expectedCalls, 'each deliberate refresh performs exactly one fresh source read');
+    }
+    assert.deepEqual({ listCalls, detailCalls }, unrelatedReads, 'source refresh preserves unrelated inspection responses');
+
+    // Simulate another tab changing the account: the next live capability check
+    // must replace the old session and fetch the same source for the new identity.
+    await page.getByRole('tab', { name: 'Definition', exact: true }).click();
+    identityVersion = 2;
+    const identityResponse = page.waitForResponse(response => response.url().endsWith('/resources/template/checkout/source'));
+    await page.getByRole('tab', { name: 'Source', exact: true }).click();
+    await (await identityResponse).finished();
+    await page.getByRole('button', { name: 'Refresh source', exact: true }).waitFor();
+    await page.locator('.att-explorer-source .att-code-goto input').fill('1');
+    await page.locator('.att-explorer-source .att-code-editor').getByRole('button', { name: 'Go' }).click();
+    await page.locator('.att-explorer-source .cm-line').filter({ hasText: 'identity-2' }).waitFor();
+    assert.equal(await page.locator('.att-explorer-source').innerText().then(text => text.includes('identity-1')), false, 'identity changes discard the previous source projection');
 
     await page.locator('.att-explorer-source .att-code-goto input').fill('5001');
     await page.locator('.att-explorer-source .att-code-editor').getByRole('button', { name: 'Go' }).click();

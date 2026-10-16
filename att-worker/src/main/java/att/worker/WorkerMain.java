@@ -1,6 +1,8 @@
 package att.worker;
 
 import att.api.*;
+import att.metrics.InspectionMetrics;
+import static att.metrics.InspectionMetrics.Stage.*;
 import att.resource.PackageResourceInspector;
 import att.resource.PackageConfigurationInspector;
 import att.resource.PackageConfigurationFileInspector;
@@ -28,8 +30,13 @@ public final class WorkerMain {
     private final PrintStream protocol;
     private final LinkedHashMap<InspectorKey,PackageResourceInspector> resourceInspectors =
             new LinkedHashMap<InspectorKey,PackageResourceInspector>(8,0.75f,true);
+    private final att.resource.PackageConfigurationSnapshots configurationSnapshots=new att.resource.PackageConfigurationSnapshots();
+    private final LinkedHashMap<String,Map<String,Object>> inspectionAggregates=new LinkedHashMap<String,Map<String,Object>>(16,.75f,true);
     private String jobId;
     private boolean inspectionDaemon;
+    private int inspectionResponseLimit=262144;
+    private long inspectionResponseBytes;
+    private Map<String,Object> lastInspectionMetrics;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
@@ -95,22 +102,33 @@ public final class WorkerMain {
     }
 
     private int executeRequest(JsonNode input) throws Exception {
+        inspectionResponseBytes=0;inspectionResponseLimit=262144;
         if(input==null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","A JSON request is required"); }
         if(input.hasNonNull("jobId")) jobId=input.get("jobId").asText();
         WorkerRequest request;
         emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
-        try { request=mapper.treeToValue(input,WorkerRequest.class); }
+        try { request=mapper.treeToValue(input,WorkerRequest.class); if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes; }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
         if(!PROTOCOL.equals(request.protocolVersion)) return fail("WORKER_PROTOCOL_UNSUPPORTED","Unsupported protocolVersion; expected "+PROTOCOL);
         if(inspectionDaemon&&!("inspect".equals(request.command))) return fail("WORKER_REQUEST_INVALID","Inspection Workers accept only inspect requests");
         jobId=request.jobId;
         if(jobId==null||jobId.trim().isEmpty()) return fail("WORKER_REQUEST_INVALID","jobId is required");
+        long processingStarted=System.nanoTime();
+        long buildsBefore=InspectionMetrics.JVM.count(INDEX_BUILD),loadsBefore=InspectionMetrics.JVM.count(CONFIG_LOAD),bytesBefore=InspectionMetrics.JVM.count(READ_BYTES);
         try {
             OperationResult result=dispatch(request);
+            if(inspectionDaemon) {
+                InspectionMetrics.JVM.record(PROCESSING,System.nanoTime()-processingStarted);
+                if("source".equals(request.inspectionAction)||"source-file".equals(request.inspectionAction))
+                    InspectionMetrics.JVM.record(SOURCE,System.nanoTime()-processingStarted);
+            }
+            recordInspectionAggregate(request,processingStarted,buildsBefore,loadsBefore,bytesBefore);
             Map<String,Object> payload=new LinkedHashMap<String,Object>(); payload.put("status",result.status()); payload.put("exitCode",result.exitCode()); payload.put("durationMs",result.durationMs()); payload.put("result",result.toMap());
             emitResult(payload);
             return result.exitCode();
         } catch(Exception error) {
+            if(inspectionDaemon)InspectionMetrics.JVM.record(PROCESSING,System.nanoTime()-processingStarted);
+            recordInspectionAggregate(request,processingStarted,buildsBefore,loadsBefore,bytesBefore);
             String code="WORKER_EXECUTION_FAILED", message=error.getMessage();
             int exit=3; String status="ERROR";
             if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
@@ -191,6 +209,7 @@ public final class WorkerMain {
                     PackageConfigurationInspector inspector = new PackageConfigurationInspector(root, config,
                             maxResponseBytes, Boolean.TRUE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns,
                             Boolean.TRUE.equals(r.inspectionIncludeAllFields));
+                    if(inspectionDaemon)inspector.withSnapshots(configurationSnapshots,att.server.api.internal.InspectionCacheIdentity.context(root,r));
                     inspected = inspector.inspect(r.inspectionAction,
                             r.inspectionEnvironment, r.inspectionOtherEnvironment, r.inspectionSection,
                             r.inspectionOffset == null ? 0 : r.inspectionOffset,
@@ -269,7 +288,7 @@ public final class WorkerMain {
         }
     }
 
-    private synchronized PackageResourceInspector resourceInspector(Path root,Path config,WorkerRequest request) {
+    private synchronized PackageResourceInspector resourceInspector(Path root,Path config,WorkerRequest request) throws Exception {
         List<String> safeSources=new ArrayList<String>();
         if(request.safeTextSources!=null)safeSources.addAll(request.safeTextSources);
         Collections.sort(safeSources);
@@ -285,8 +304,10 @@ public final class WorkerMain {
                 request.maxResponseBytes==null?262144:request.maxResponseBytes,
                 Boolean.TRUE.equals(request.sourceBrowsingEnabled),request.sourceBrowsingPolicy,
                 request.sourceDenyGlobs,Boolean.TRUE.equals(request.redactionEnabled),request.sensitivePaths,request.sensitiveFieldPatterns);
+        key.affinityKey=att.server.api.internal.InspectionCacheIdentity.resource(root,request);
         PackageResourceInspector inspector=resourceInspectors.get(key);
-        if(inspector!=null)return inspector;
+        if(inspector!=null){InspectionMetrics.JVM.add(INSPECTOR_HIT,1);return inspector;}
+        InspectionMetrics.JVM.add(INSPECTOR_MISS,1);
         inspector=new PackageResourceInspector(root,config,request.environment,safeSources,externalSources,externalRoots,
                 key.maxSourceBytes,key.maxResponseBytes,inspectionDaemon,key.sourceBrowsingEnabled,key.sourceBrowsingPolicy,
                 key.sourceDenyGlobs,key.redactionEnabled,key.sensitivePaths,key.sensitiveFieldPatterns);
@@ -294,6 +315,7 @@ public final class WorkerMain {
         while(resourceInspectors.size()>2) {
             Map.Entry<InspectorKey,PackageResourceInspector> eldest=resourceInspectors.entrySet().iterator().next();
             resourceInspectors.remove(eldest.getKey());
+            InspectionMetrics.JVM.add(INSPECTOR_EVICTION,1);
             eldest.getValue().close();
         }
         return inspector;
@@ -302,9 +324,11 @@ public final class WorkerMain {
     private synchronized void closeResourceInspectors() {
         for(PackageResourceInspector inspector:resourceInspectors.values())inspector.close();
         resourceInspectors.clear();
+        configurationSnapshots.clear();
     }
 
     private static final class InspectorKey {
+        String affinityKey;
         final String root,config,environment;
         final List<String> safeTextSources,externalTextSources,externalSourceRoots;
         final int maxSourceBytes,maxResponseBytes;
@@ -349,8 +373,86 @@ public final class WorkerMain {
                 ? WorkerEvent.Type.PROGRESS : WorkerEvent.Type.LOG;
         try { emit(type,data); } catch(Exception error) { throw new IllegalStateException(error); }
     }
-    private void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception { resourceTelemetry.sample();protocol.println(mapper.writeValueAsString(new WorkerEvent(type,jobId,DiagnosticSanitizer.sanitize(data)).toMap())); protocol.flush(); }
-    private void emitResult(Map<String,Object> payload) throws Exception {payload.put("workerMetrics",resourceTelemetry.snapshot());emit(WorkerEvent.Type.RESULT,payload);}
+    private void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception {
+        resourceTelemetry.sample();
+        Map<String,Object> safe;
+        if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&data.containsKey("inspectionMetrics")) {
+            Map<String,Object> content=new LinkedHashMap<String,Object>(data);
+            Object metrics=content.remove("inspectionMetrics");
+            safe=DiagnosticSanitizer.sanitize(content);
+            // These locally constructed metrics contain only fixed counters, numeric JMX
+            // samples, validated environment labels and opaque hashes. Repeated secret
+            // classification of every counter name adds work to every inspection read.
+            // Authored results, diagnostics and Worker telemetry still pass the sanitizer.
+            safe.put("inspectionMetrics",metrics);
+        } else safe=DiagnosticSanitizer.sanitize(data);
+        String line=mapper.writeValueAsString(new WorkerEvent(type,jobId,safe).toMap());
+        long bytes=line.getBytes(StandardCharsets.UTF_8).length+1L;
+        if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&safe.containsKey("inspectionMetrics")
+                &&inspectionResponseBytes+bytes>inspectionResponseLimit) {
+            // Optional telemetry must never make an otherwise valid bounded response fail.
+            safe.remove("inspectionMetrics");safe.remove("inspectionMetricsDelta");
+            lastInspectionMetrics=null;
+            line=mapper.writeValueAsString(new WorkerEvent(type,jobId,safe).toMap());
+            bytes=line.getBytes(StandardCharsets.UTF_8).length+1L;
+        }
+        protocol.println(line);protocol.flush();
+        if(inspectionDaemon)inspectionResponseBytes+=bytes;
+    }
+    private void recordInspectionAggregate(WorkerRequest request,long started,long buildsBefore,long loadsBefore,long bytesBefore) {
+        if(!inspectionDaemon)return;
+        try {
+            String context=att.server.api.internal.InspectionCacheIdentity.context(Paths.get(request.packageRoot),request);
+            String environment=request.inspectionEnvironment==null?request.environment:request.inspectionEnvironment;
+            String key=att.metrics.InspectionCacheKey.environment(context,environment,"aggregate");
+            Map<String,Object> values=inspectionAggregates.get(key);
+            if(values==null){values=new LinkedHashMap<String,Object>();inspectionAggregates.put(key,values);}
+            increment(values,"requests",1);increment(values,"totalNanos",System.nanoTime()-started);
+            increment(values,"indexBuilds",InspectionMetrics.JVM.count(INDEX_BUILD)-buildsBefore);
+            increment(values,"configLoads",InspectionMetrics.JVM.count(CONFIG_LOAD)-loadsBefore);
+            increment(values,"readBytes",InspectionMetrics.JVM.count(READ_BYTES)-bytesBefore);
+            while(inspectionAggregates.size()>16)inspectionAggregates.remove(inspectionAggregates.keySet().iterator().next());
+        } catch(Exception unavailable) { /* Instrumentation must not change request success or expose error details. */ }
+    }
+    private static void increment(Map<String,Object> values,String key,long delta) {
+        Object old=values.get(key);values.put(key,(old instanceof Number?((Number)old).longValue():0L)+Math.max(0L,delta));
+    }
+    private void emitResult(Map<String,Object> payload) throws Exception {
+            if(inspectionDaemon) {
+                Map<String,Object> metrics=InspectionMetrics.JVM.snapshot();
+                int directories=0;
+                for(PackageResourceInspector inspector:resourceInspectors.values())directories+=inspector.watchedDirectoryCount();
+                metrics.put("watchedDirectories",directories);
+                metrics.put("retainedInspectors",resourceInspectors.size());
+                List<Map<String,Object>> keys=new ArrayList<Map<String,Object>>();
+                for(InspectorKey key:resourceInspectors.keySet()) {
+                    Map<String,Object> safeKey=new LinkedHashMap<String,Object>();
+                    byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(key.root.getBytes(StandardCharsets.UTF_8));
+                    safeKey.put("packageKey",java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(digest));
+                    safeKey.put("environment",key.environment==null?"default":key.environment.matches("[A-Za-z][A-Za-z0-9_-]{0,31}")?key.environment:"other");
+                    keys.add(safeKey);
+                }
+                metrics.put("retainedInspectorKeys",keys);
+                List<String> affinity=new ArrayList<String>(configurationSnapshots.affinityKeys());
+                for(InspectorKey key:resourceInspectors.keySet())affinity.add(key.affinityKey);
+                metrics.put("retainedAffinityKeys",affinity);
+                Map<String,Map<String,Object>> aggregates=new LinkedHashMap<String,Map<String,Object>>();
+                for(Map.Entry<String,Map<String,Object>> entry:inspectionAggregates.entrySet())
+                    aggregates.put(entry.getKey(),new LinkedHashMap<String,Object>(entry.getValue()));
+                metrics.put("packageEnvironmentAggregates",aggregates);
+                metrics.put("retainedConfigSnapshots",configurationSnapshots.size());
+                metrics.put("retainedConfigWeightBytes",configurationSnapshots.retainedWeight());
+                if(lastInspectionMetrics==null)payload.put("inspectionMetrics",metrics);
+                else {
+                    Map<String,Object> changed=new LinkedHashMap<String,Object>();
+                    for(Map.Entry<String,Object> entry:metrics.entrySet())
+                        if(!java.util.Objects.equals(entry.getValue(),lastInspectionMetrics.get(entry.getKey())))changed.put(entry.getKey(),entry.getValue());
+                    payload.put("inspectionMetrics",changed);payload.put("inspectionMetricsDelta",Boolean.TRUE);
+                }
+                lastInspectionMetrics=metrics;
+            }
+        payload.put("workerMetrics",resourceTelemetry.snapshot());emit(WorkerEvent.Type.RESULT,payload);
+    }
     private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message)); emitResult(fields("status","INVALID","exitCode",2,"result",fields("executionId",null,"status","INVALID","exitCode",2))); return 2; }
     private static Map<String,Object> fields(Object... values) { Map<String,Object> map=new LinkedHashMap<String,Object>(); for(int i=0;i+1<values.length;i+=2)map.put(String.valueOf(values[i]),values[i+1]); return map; }
     private static boolean bool(Boolean value) { return Boolean.TRUE.equals(value); }
