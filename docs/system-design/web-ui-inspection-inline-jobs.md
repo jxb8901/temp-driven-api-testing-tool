@@ -156,13 +156,15 @@ The opt-in `att.server.PackageResourceInspectionPerformanceBenchmark` exercises 
 mvn -B -ntp -pl att-worker,att-server -am \
   -Dtest=PackageResourceInspectionPerformanceBenchmark \
   -Dsurefire.failIfNoSpecifiedTests=false \
-  -Datt.server.inspection.benchmark.warmups=1 \
+  -Datt.server.inspection.benchmark.warmups=2 \
   -Datt.server.inspection.benchmark.runs=15 \
+  -Datt.server.inspection.benchmark.concurrentWarmups=10 \
+  -Datt.server.inspection.benchmark.concurrentRuns=100 \
   -Datt.server.inspection.benchmark.workers=2 \
   -Datt.server.inspection.benchmark.packages=3 \
   -Datt.server.inspection.benchmark.pageSize=50 \
   -Datt.server.inspection.benchmark.revision="$(git rev-parse HEAD)" \
-  -Datt.server.inspection.benchmark.output=target/issue-176-resource-discovery-large.json \
+  -Datt.server.inspection.benchmark.output=target/issue-227-after-2-workers.json \
   test
 ```
 
@@ -179,6 +181,16 @@ The [4.1.0 capture](baselines/issue-176-resource-discovery-large-4.1.0.json) was
 | Tool source | 2.0 | 2.0 |
 
 The report preserves raw samples and package size. With five measured runs, p95 is the highest observed sample and is not a stable distribution estimate; timing results are descriptive, not portable pass/fail thresholds.
+
+### Issue #227 cache implementation and measurement
+
+Studio uses a shared bounded query cache for safe read projections and in-flight requests. Authentication context is verified before reuse; the opaque context covers identity, local session or existing container session, administrator capability, inspection policy and Server lifetime. Selection and session epochs reject responses from cancelled requests. Resource revisions are exposed only as HMAC tokens in `X-ATT-Inspection-Revision`; the private digest remains inside the Server. Stale responses trigger background revalidation and subscription updates. View metadata shares the session lifetime, and Explorer paints restored pages progressively.
+
+Workers retain two Resource inspectors and four trusted Configuration snapshots. Configuration snapshot reconciliation hashes bounded dependencies on every reuse, including schema files and selected profile overrides. This costs reads even on a hit, but avoids relying on timestamp precision or watcher delivery for Configuration correctness. Fresh request-local inspectors apply permissions and redaction. Resource affinity uses the same package/config/environment/policy identity in the Server and Worker; the Server replaces its routing hints with keys actually retained by the daemon, including eviction and error responses. Busy affinity Workers never prevent selection of another idle Worker. Optional warmup uses a single scheduler, bounded key assignments and retries, and can be cancelled by interactive demand.
+
+The baseline uses master `d291f8be` with the [instrumentation and benchmark patch](baselines/issue-227-baseline-instrumentation.patch.gz), without cache, affinity or warmup changes. To reproduce it, create a clean checkout of that commit and apply the decompressed patch with `gzip -dc issue-227-baseline-instrumentation.patch.gz | git apply`; use the same benchmark command, dataset, Worker count and run count for both revisions. The after capture identifies the implementation commit in `sourceRevision`. Run captures serially without a concurrent build. `warmups=2` excludes startup for steady-state scenarios; cold and second-request measurements are recorded separately. Concurrent samples complete `workers + 1` requests per batch, so batch latency is comparable only at the same Worker count. Heap peaks sum per-pool peaks rather than a simultaneous process maximum; instrumented read bytes and process CPU are cumulative for the captured workload.
+
+Only duplicate Template YAML parsing within one build is removed in Phase 4. Per-file incremental indexing remains benchmark-gated: it requires a complete dependency graph for sidecars, aliases, relations and the private revision digest. The current implementation preserves atomic full rebuilds for edits, unknown changes and watcher overflow, and preserves fresh authoritative rebuilds before draft approval and execution. The routing measurements below assess avoidable duplicate builds before adding that graph.
 
 The persistent inspector index also serves Debug form and draft validation requests. The execution Worker performs one fresh package revision check at the side-effect boundary. The opt-in `DebugDraftPipelinePerformanceBenchmark` measures form, draft creation, preview, submission, first-event, and completion latency against multiple Excel workbooks. Run it with `mvn -pl att-server -am -Dtest=DebugDraftPipelinePerformanceBenchmark -Datt.server.benchmark.debugDraft=true -Dsurefire.failIfNoSpecifiedTests=false test`; it writes JSON under `att-server/target/` by default. The recorded 4.1.0 baseline is [issue-176-debug-draft-pipeline-4.1.0.json](baselines/issue-176-debug-draft-pipeline-4.1.0.json). On its five-workbook, 1,500-Case fixture, three samples measured a p50 of 23.1 ms for draft creation, 0.31 ms for preview, 886 ms for submission, and 892 ms from draft creation through the first event (936 ms including form loading). The benchmark exercises ServerRuntime APIs without browser rendering; timings are descriptive for the recorded Mac OS X aarch64 / Java 26 host.
 
@@ -221,3 +233,70 @@ Debug validation failures include a top-level `diagnostics` array with safe `cod
 Each phase is a separate review PR. P1 and P3 form the critical discovery/Debug path; P2 may proceed after the shared inspection projection exists. P4 reuses P3 input projection. P5 reuses P4 composition and the inline Load contract. P6 closes the full #176 acceptance criteria.
 
 The test plan must cover contract serialization and strict field rejection; package containment, symlink, encoded traversal, and source-size limits; authorization; malformed and stale resources; secrets in source, errors, previews, logs, and diffs; concurrent principals and drafts; server restart expiry; package mutation between preview and submit; Worker input isolation; both Load models and all Engine semantic restrictions; queue admission, cancellation, and package immutability. These are implementation gates, not claims that tests already exist.
+
+### Issue #227 recorded comparison
+
+These captures use three registered packages and one or two Workers. Each package contains 1,500 Cases and 200 Templates. Normal scenarios use two warmups and 15 measured runs; concurrent clients use ten warmups and 100 measured batches. Cold means a new Worker/index, not an emptied operating-system file cache. Samples are descriptive; the 15-run p95 is the highest observation and does not establish a stable latency distribution.
+
+- 1 Worker(s): [before](baselines/issue-227-before-1-worker.json), [after](baselines/issue-227-after-1-worker.json).
+- 2 Worker(s): [before](baselines/issue-227-before-2-workers.json), [after](baselines/issue-227-after-2-workers.json).
+
+| Workers | Scenario | Before p50 / p95 (ms) | After p50 / p95 (ms) |
+| ---: | --- | ---: | ---: |
+| 1 | case-first-page | 26.10 / 35.63 | 25.28 / 29.07 |
+| 1 | case-page-n | 19.10 / 20.43 | 19.17 / 24.63 |
+| 1 | case-detail | 1.09 / 2.76 | 1.22 / 1.45 |
+| 1 | template-first-page | 22.64 / 44.53 | 23.01 / 38.66 |
+| 1 | template-page-n | 14.82 / 15.70 | 14.52 / 16.00 |
+| 1 | template-detail | 8.88 / 9.30 | 8.83 / 9.20 |
+| 1 | tool-source | 1.10 / 1.55 | 1.06 / 1.73 |
+| 1 | config-declared | 6.67 / 9.32 | 7.24 / 10.81 |
+| 1 | config-effective-SIT | 6.20 / 16.59 | 8.42 / 14.88 |
+| 1 | config-effective-UAT | 4.15 / 7.00 | 5.60 / 7.39 |
+| 1 | config-compare | 3.94 / 4.58 | 8.51 / 12.90 |
+| 1 | multi-package-churn | 483.83 / 546.83 | 459.54 / 486.77 |
+| 1 | concurrent-clients | 25.00 / 26.84 | 24.59 / 26.62 |
+| 2 | case-first-page | 27.16 / 35.90 | 19.84 / 23.97 |
+| 2 | case-page-n | 23.68 / 28.68 | 19.20 / 20.80 |
+| 2 | case-detail | 1.62 / 2.81 | 1.24 / 2.85 |
+| 2 | template-first-page | 26.03 / 33.70 | 23.57 / 29.59 |
+| 2 | template-page-n | 15.84 / 18.20 | 14.58 / 16.25 |
+| 2 | template-detail | 9.34 / 9.53 | 8.97 / 14.54 |
+| 2 | tool-source | 1.33 / 2.68 | 1.13 / 1.76 |
+| 2 | config-declared | 6.69 / 13.23 | 5.18 / 8.04 |
+| 2 | config-effective-SIT | 10.71 / 31.58 | 8.96 / 15.52 |
+| 2 | config-effective-UAT | 8.31 / 12.06 | 7.31 / 9.61 |
+| 2 | config-compare | 6.06 / 9.41 | 8.07 / 8.68 |
+| 2 | multi-package-churn | 498.27 / 577.82 | 59.71 / 160.36 |
+| 2 | concurrent-clients | 26.56 / 28.58 | 26.29 / 32.38 |
+
+| Metric | 1 Worker: before → after | 2 Workers: before → after |
+| --- | ---: | ---: |
+| Worker startups | 1 → 1 | 2 → 2 |
+| Index builds | 52 → 52 | 52 → 4 |
+| Configuration loads | 172 → 106 | 172 → 11 |
+| Configuration snapshot hits | 0 → 82 | 0 → 81 |
+| Instrumented reads (MiB) | 15.89 → 46.22 | 18.00 → 37.55 |
+| Worker CPU (seconds) | 24.60 → 24.14 | 36.10 → 20.99 |
+| Worker heap pool peaks, summed (MiB) | 204.72 → 203.03 | 369.08 → 262.68 |
+| Worker GC (ms) | 206 → 192 | 276 → 190 |
+| Cold Worker/index request (ms) | 1215.66 → 1194.64 | 1252.50 → 1217.33 |
+| Second same-package request (ms) | 46.15 → 42.18 | 1157.80 → 42.89 |
+| Concurrent completed requests / measured batch-second | 78.93 → 80.28 | 111.99 → 109.63 |
+
+The two-Worker routing benefit is concentrated in package churn and avoids duplicate builds. One Worker still thrashes when cycling three packages through a two-entry LRU; an incremental parser inside an evicted inspector would not retain that state. A separate cross-package parser cache would need a new bounded memory design before it could address this case. Configuration load counts fall, while some Configuration and tiny Source requests become slower: content reconciliation deliberately reads and hashes schema dependencies on each reuse. Those additional reads are included above. The browser cache avoids repeating successful inspection transports during its fresh window, as covered by the transport and view-restore regressions; these ServerRuntime timings do not measure that browser benefit.
+
+Concurrent throughput above is completed requests divided by the sum of measured batch durations, excluding warmups and inter-batch overhead. This synthetic sample is not a sustained-load capacity claim. Both Workers remain available to concurrent callers, as independently exercised by real-process routing tests.
+
+The earlier short concurrent capture is also retained: [one Worker before](baselines/issue-227-short-run/issue-227-before-1-worker.json.gz), [one Worker after](baselines/issue-227-short-run/issue-227-after-1-worker.json.gz), [two Workers before](baselines/issue-227-short-run/issue-227-before-2-workers.json.gz), and [two Workers after](baselines/issue-227-short-run/issue-227-after-2-workers.json.gz). It used two concurrent warmups and 15 measured batches. That small sample measured lower concurrent throughput after the change, which prompted extending both revisions to the identical ten-warmup/100-batch scenario above. Reproduce the short scenario with `concurrentWarmups=2` and `concurrentRuns=15`; its after capture identifies the earlier implementation revision before the longer concurrent scenario and metric-serialization optimization.
+
+
+The first 100-batch implementation captures, before removing redundant secret classification of fixed metrics, are retained for comparison: [one Worker](baselines/issue-227-pre-metric-optimization/issue-227-after-1-worker.json.gz) and [two Workers](baselines/issue-227-pre-metric-optimization/issue-227-after-2-workers.json.gz). They measured 78.03 and 107.93 requests per measured batch-second. Only the locally constructed numeric counters, validated labels and opaque hashes avoid repeated secret classification; authored results, diagnostics and Worker telemetry continue through the sanitizer.
+
+
+The subsequent full-metric-wire captures are retained too: [one Worker](baselines/issue-227-pre-metric-delta/issue-227-after-1-worker.json.gz) and [two Workers](baselines/issue-227-pre-metric-delta/issue-227-after-2-workers.json.gz). They measured 77.25 and 107.17 requests per measured batch-second. The final implementation sends changed metric fields over the private protocol and merges them atomically into the complete Server snapshot. Cache keys are updated on eviction, process replacement starts with a full snapshot, and omitting telemetry under a small response cap forces the next full snapshot. Counters remain current; this is transport compaction rather than sampling.
+
+
+The metric-delta-only captures are also retained: [one Worker](baselines/issue-227-pre-chunked-reader/issue-227-after-1-worker.json.gz) and [two Workers](baselines/issue-227-pre-chunked-reader/issue-227-after-2-workers.json.gz). They measured 78.31 and 108.08 requests per measured batch-second. The final inspection transport replaces synchronized per-character reads with an 8,192-character framing buffer. It retains the configured frame limit, total UTF-8 byte limit, CRLF behavior, oversized-frame draining and process watchdog. Job-log framing is unchanged.
+
+The final concurrent rates are 78.93 → 80.28 requests/second with one Worker and 111.99 → 109.63 with two. An exploratory block bootstrap of the 100 measured batches (consecutive blocks of ten, 10,000 independent before/after resamples, random seed 227, processing one Worker before two) gives throughput-change intervals of approximately +0.77% to +2.69% and -6.49% to +1.82%, respectively. The two-Worker sample does not establish a throughput improvement or strict equivalence; retain that limitation when assessing the gain in churn. Real-process tests independently verify that affinity does not serialize concurrent demand or starve the other Worker. Counter consistency checks also confirm that Server queue counts, merged Worker processing counts and package/environment request aggregates agree (463 requests for one Worker and 573 for two).
