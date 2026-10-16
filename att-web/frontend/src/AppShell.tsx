@@ -219,14 +219,21 @@ export function AppShell({
   const [keyboardMode, setKeyboardMode] = useState<'palette' | 'shortcuts' | null>(null);
   const [currentUser, setCurrentUser] = useState<Pick<LocalAuthUser,'loginId'|'displayName'|'role'>|null>(null);
   const [canRevealConfigurationFields, setCanRevealConfigurationFields] = useState(false);
+  const [inspectionRestoreEpoch, setInspectionRestoreEpoch] = useState(0);
   const inspectionSessionEpoch = useSyncExternalStore(inspectionCache.subscribeSession, () => inspectionCache.sessionEpoch);
   useLayoutEffect(() => { inspectionCache.select(selectedPackage, selectedEnvironment); }, [selectedPackage, selectedEnvironment]);
   useEffect(() => {
-    const clear = () => inspectionCache.clear();
-    const visibility = () => { if (document.hidden) clear(); };
-    window.addEventListener('pagehide', clear);
-    document.addEventListener('visibilitychange', visibility);
-    return () => { window.removeEventListener('pagehide', clear); document.removeEventListener('visibilitychange', visibility); };
+    // A hidden tab may have refilled while another tab changed the account.
+    // Reset both on suspension and restore, including back/forward cache restores.
+    const reset = () => { inspectionCache.clear(true); setInspectionRestoreEpoch(epoch => epoch + 1); };
+    window.addEventListener('pagehide', reset);
+    window.addEventListener('pageshow', reset);
+    document.addEventListener('visibilitychange', reset);
+    return () => {
+      window.removeEventListener('pagehide', reset);
+      window.removeEventListener('pageshow', reset);
+      document.removeEventListener('visibilitychange', reset);
+    };
   }, []);
   const [changePasswordOpen,setChangePasswordOpen]=useState(false);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
@@ -491,7 +498,7 @@ export function AppShell({
             </div>
           </div>
 
-          <main key={inspectionSessionEpoch} id="main-content" tabIndex={-1}>{children}</main>
+          <main key={inspectionSessionEpoch + ":" + (route.kind === 'package' || route.kind === 'configuration' ? inspectionRestoreEpoch : 0)} id="main-content" tabIndex={-1}>{children}</main>
           <footer className="page-footer"><span>ATT Server</span><span>API v{versionData?.apiVersion || '1'}</span></footer>
         </div>
         <DiscardChangesDialog navigation={navigation} />

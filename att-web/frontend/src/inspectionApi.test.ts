@@ -50,6 +50,25 @@ describe('inspection transport caching', () => {
     expect(reads).toHaveBeenCalledTimes(8);
   });
 
+  it('does not reuse an older permission probe after suspension or session invalidation', async () => {
+    let finishOld!: (value: Response) => void;
+    let checks = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: URL) => {
+      if (url.pathname.endsWith('/auth/capabilities')) {
+        if (++checks === 1) return new Promise<Response>(resolve => { finishOld = resolve; });
+        return json({ inspectionCacheContext: 'current account' });
+      }
+      return json({ items: [], total: 0 });
+    }));
+    const old = api.listResources('p', { type: 'all' });
+    const rejected = expect(old).rejects.toMatchObject({ name: 'AbortError' });
+    await Promise.resolve(); inspectionCache.clear(true);
+    expect(await api.listResources('p', { type: 'all' })).toEqual({ items: [], total: 0 });
+    finishOld(json({ inspectionCacheContext: 'prior account' }));
+    await rejected;
+    expect(checks).toBe(2);
+  });
+
   it('falls back to uncached transport with older Servers and keeps auth/session responses uncached', async () => {
     const fetcher = vi.fn(async () => json({ items: [], configurationAdmin: false })); vi.stubGlobal('fetch', fetcher);
     await api.listResources('p', { type: 'all' }); await api.listResources('p', { type: 'all' });

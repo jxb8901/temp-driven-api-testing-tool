@@ -41,17 +41,21 @@ function isInspectionQuery(path: string, init: RequestInit): boolean {
   return /^packages\/[^/]+\/resources(?:\/[^/]+\/[^/]+(?:\/(?:source|source-file))?)?$/.test(route)
     || /^packages\/[^/]+\/configuration(?:\/(?:effective|compare|files|source))?$/.test(route);
 }
-let capabilitiesFlight: Promise<void> | undefined;
+let capabilitiesFlight: { epoch: number; promise: Promise<void> } | undefined;
 async function verifyInspectionContext() {
-  if (!capabilitiesFlight) {
-    const epoch = inspectionCache.epoch;
-    capabilitiesFlight = transport<{ inspectionCacheContext?: string }>('auth/capabilities', { cache: 'no-store' }).then(result => {
+  const epoch = inspectionCache.epoch;
+  if (!capabilitiesFlight || capabilitiesFlight.epoch !== epoch) {
+    const flight = { epoch, promise: Promise.resolve() };
+    flight.promise = transport<{ inspectionCacheContext?: string }>('auth/capabilities', { cache: 'no-store' }).then(result => {
       if (inspectionCache.epoch !== epoch) throw new DOMException('Session changed', 'AbortError');
       if (result.inspectionCacheContext) inspectionCache.setContext(result.inspectionCacheContext);
       return result.inspectionCacheContext;
-    }).then(context => { if (!context) throw new Error('Inspection cache context unavailable'); }).finally(() => { capabilitiesFlight = undefined; });
+    }).then(context => { if (!context) throw new Error('Inspection cache context unavailable'); }).finally(() => {
+      if (capabilitiesFlight === flight) capabilitiesFlight = undefined;
+    });
+    capabilitiesFlight = flight;
   }
-  return capabilitiesFlight;
+  return capabilitiesFlight.promise;
 }
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!isInspectionQuery(path, init)) {

@@ -22,10 +22,11 @@ export class InspectionQueryCache {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   subscribeSession = (listener: () => void) => { this.sessionListeners.add(listener); return () => { this.sessionListeners.delete(listener); }; };
   private notify() { for (const listener of this.listeners) listener(); }
-  clear() {
+  clear(preserveViews = false) {
     this.generation++;
     for (const flight of this.flights.values()) flight.controller.abort();
-    this.flights.clear(); this.entries.clear(); this.views.clear(); this.revisions.clear(); this.bytes = 0;
+    this.flights.clear(); this.entries.clear(); this.revisions.clear(); this.bytes = 0;
+    if (!preserveViews) this.views.clear();
     this.notify();
   }
   resetSession() {

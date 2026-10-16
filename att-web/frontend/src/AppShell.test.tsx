@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
 import { api } from './api';
+import { inspectionCache } from './inspectionCache';
 import type { RouteState } from './router';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -17,6 +18,48 @@ describe('AppShell', () => {
     vi.restoreAllMocks();
     root = undefined;
     host = undefined;
+  });
+
+  it('discards refilled inspection state on tab and back-forward restores', async () => {
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    const navigation: RouteState = {
+      route: { kind: 'package', packageId: 'payments' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
+      navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn(),
+    };
+    act(() => root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{ status: 'loading' }} selectedPackage="payments" selectedEnvironment="SIT"
+      onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <input aria-label="Inspection projection" defaultValue="fresh mount" />
+    </AppShell>));
+    for (const event of ['pagehide', 'pageshow', 'visibilitychange']) {
+      inspectionCache.setView('filters', { search: 'echo', pages: 3, scrollTop: 120 });
+      await inspectionCache.query('page', async () => 'prior account');
+      const input = host.querySelector('input[aria-label="Inspection projection"]') as HTMLInputElement;
+      input.value = 'prior account';
+      act(() => (event === 'visibilitychange' ? document : window).dispatchEvent(new Event(event)));
+      expect((host.querySelector('input[aria-label="Inspection projection"]') as HTMLInputElement).value).toBe('fresh mount');
+      expect(inspectionCache.getView('filters')).toEqual({ search: 'echo', pages: 3, scrollTop: 120 });
+      expect(await inspectionCache.query('page', async () => 'current account')).toBe('current account');
+      act(() => inspectionCache.clear());
+    }
+  });
+
+  it('preserves an unfinished Load form when tab visibility changes', () => {
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    const navigation: RouteState = {
+      route: { kind: 'load' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
+      navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn(),
+    };
+    act(() => root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{ status: 'loading' }} selectedPackage="payments" selectedEnvironment="SIT"
+      onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <input aria-label="Unfinished Load form" defaultValue="" />
+    </AppShell>));
+    const input = host.querySelector('input[aria-label="Unfinished Load form"]') as HTMLInputElement;
+    input.value = 'unsaved workload';
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(host.querySelector('input[aria-label="Unfinished Load form"]')).toBe(input);
+    expect(input.value).toBe('unsaved workload');
   });
 
   it('renders accessible navigation, identity disclosure, context, and a feature mount', () => {
