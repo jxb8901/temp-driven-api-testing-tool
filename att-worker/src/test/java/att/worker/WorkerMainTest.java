@@ -37,13 +37,7 @@ class WorkerMainTest {
         Files.createDirectories(root.resolve("templates/SLOW"));
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("tools"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
-            for(Path source:(Iterable<Path>)paths::iterator) {
-                Path dest=root.resolve(source);
-                if(Files.isDirectory(source)) Files.createDirectories(dest);
-                else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING);
-            }
-        }
+        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
         Path parentStarted=root.resolve("tool-parent-started.marker");
         Path started=root.resolve("tool-descendant-started.marker"), completed=root.resolve("tool-descendant-completed.marker");
         String javaExecutable=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();
@@ -98,13 +92,7 @@ class WorkerMainTest {
         Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("load"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
-            for(Path source:(Iterable<Path>)paths::iterator) {
-                Path dest=root.resolve(source);
-                if(Files.isDirectory(source)) Files.createDirectories(dest);
-                else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING);
-            }
-        }
+        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
         Path config=root.resolve("config/config.yaml");
         Path template=root.resolve("templates/SIMPLE/template.yaml");
         Path scenario=root.resolve("load/long-running.yaml");
@@ -192,9 +180,7 @@ class WorkerMainTest {
     @Test void workerAndDirectApiReturnEquivalentDebugOutcomesAndKeepStdoutMachineReadable() throws Exception {
         Path root=temp.resolve("package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
-            for(Path source:(Iterable<Path>)paths::iterator) { Path dest=root.resolve(source); if(Files.isDirectory(source)) Files.createDirectories(dest); else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING); }
-        }
+        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: worker parity\nactions: {show: {type: log, message: 'amount=${EXEC.INPUT.amount}|seed=${EXEC.VARS.seed}'}}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SIMPLE/debug.yaml"),("schemaVersion: att-debug/v1.2\ninputs: {amount: 1}\nvars: {seed: default}\n").getBytes(StandardCharsets.UTF_8));
@@ -245,9 +231,7 @@ class WorkerMainTest {
         Path root=temp.resolve("debug-overrides-package");
         Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/flows/debug/echo"));
         Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
-            for(Path source:(Iterable<Path>)paths::iterator) { Path dest=root.resolve(source); if(Files.isDirectory(source)) Files.createDirectories(dest); else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING); }
-        }
+        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\n"
                 + "templates: {root: templates}\ntestcase: {root: testcase}\ntools:\n"
                 + "  echo:\n    name: Echo\n    description: Test echo tool\n    command: [echo, '${value}']\n"
@@ -319,9 +303,7 @@ class WorkerMainTest {
     @Test void workerAndDirectApiReturnEquivalentSmallLoadOutcomes() throws Exception {
         Path root=temp.resolve("load-package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("load"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
-            for(Path source:(Iterable<Path>)paths::iterator) { Path dest=root.resolve(source); if(Files.isDirectory(source)) Files.createDirectories(dest); else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING); }
-        }
+        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: worker load parity\nactions: {show: {type: log, message: worker-load-parity}}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("load/scenario.yaml"),("schemaVersion: att-load/v1.6\nworkloads:\n- id: worker-parity\n  target: {type: template, id: SIMPLE}\n  load: {users: 1, duration: 20ms}\n").getBytes(StandardCharsets.UTF_8));
@@ -351,9 +333,7 @@ class WorkerMainTest {
 
     @Test void cliWorkerAndDirectApiReturnEquivalentRunOutcomes() throws Exception {
         Path root=temp.resolve("run-package"); Files.createDirectories(root.resolve("config/tools")); Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools"));
-        try(java.util.stream.Stream<Path> paths=Files.walk(Paths.get("packages/default/schemas"))) {
-            for(Path source:(Iterable<Path>)paths::iterator) { Path dest=root.resolve(source); if(Files.isDirectory(source)) Files.createDirectories(dest); else Files.copy(source,dest,StandardCopyOption.REPLACE_EXISTING); }
-        }
+        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
         Files.copy(Paths.get("packages/default/testcase/quick_start.xlsx"),root.resolve("testcase/quick_start.xlsx"));
         Files.copy(Paths.get("packages/default/testcase/quick_start.yaml"),root.resolve("testcase/quick_start.yaml"));
         Files.copy(Paths.get("packages/default/testcase/quick_start.xml"),root.resolve("testcase/quick_start.xml"));
