@@ -43,6 +43,15 @@ final class LoadScheduleScheduler implements AutoCloseable {
             LoadSchedule schedule=original;
             if(!schedule.enabled||schedule.nextRunAt==null||schedule.nextRunInstant().isAfter(now))continue;
             Instant fire=schedule.nextRunInstant();ZoneId zone=ZoneId.of(schedule.timezone);
+            if(schedule.runAt!=null) {
+                String occurrenceId=occurrenceId(schedule.id,fire);
+                if(!store.advanceAndClaim(schedule,occurrenceId,null))continue;
+                long grace=Math.max(30L,config.pollIntervalSeconds*3L);
+                if(fire.isBefore(startedAt)||Duration.between(fire,now).getSeconds()>grace)
+                    store.updateOccurrence(occurrenceId,"skipped","misfire-no-backfill",null);
+                else submitOrSkip(schedule,occurrenceId);
+                continue;
+            }
             CronExpression cron=CronExpression.parse(schedule.cron,config.minimumIntervalMinutes);
             long grace=Math.max(30L,config.pollIntervalSeconds*3L);
             if(fire.isBefore(startedAt)||Duration.between(fire,now).getSeconds()>grace) {

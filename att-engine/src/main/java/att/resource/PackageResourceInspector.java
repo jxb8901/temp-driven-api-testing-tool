@@ -1096,6 +1096,9 @@ public final class PackageResourceInspector implements AutoCloseable {
         return bounded(result);
     }
 
+    /** Revision used to bind a validated functional selection to package content. */
+    public String executionRevisionDigest() throws Exception { return refreshedIndexForVerification().revisionDigest; }
+
     /** Checks a Server-issued draft revision without returning the digest to the caller. */
     public void verifyRevision(String expectedRevisionDigest) throws Exception {
         requireExpectedRevision(refreshedIndexForVerification(), expectedRevisionDigest);

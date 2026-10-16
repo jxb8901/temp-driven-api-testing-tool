@@ -23,6 +23,11 @@ if defined MISSING_CLASSES (
   echo Or use the local package produced by the release build. 1>&2
   exit /b 2
 )
+if defined ATT_PACKAGE_ROOT (
+  cd /d "%ATT_PACKAGE_ROOT%" || exit /b 2
+) else if exist "%ROOT_DIR%packages\default\" (
+  cd /d "%ROOT_DIR%packages\default" || exit /b 2
+)
 if not defined M2_REPO set "M2_REPO=%USERPROFILE%\.m2\repository"
 set "CP=%ROOT_DIR%att-cli\target\classes;%ROOT_DIR%att-engine\target\classes"
 set "CP=%CP%;%ROOT_DIR%att-remote\target\classes;%ROOT_DIR%att-server-api\target\classes;%ROOT_DIR%att-security\target\classes"

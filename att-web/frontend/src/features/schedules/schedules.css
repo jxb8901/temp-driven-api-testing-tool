@@ -30,6 +30,7 @@
 .att-schedule-state { display: inline-flex; align-items: center; gap: 0.3rem; min-height: 1.6rem; padding: 0.15rem 0.5rem; border: 1px solid var(--att-color-border); border-radius: 999px; background: var(--att-color-canvas); color: var(--att-color-text); font-size: 0.74rem; font-weight: 700; text-transform: capitalize; white-space: nowrap; }
 .att-schedule-state.is-enabled { border-color: color-mix(in srgb, var(--att-color-success) 52%, var(--att-color-border)); color: var(--att-color-success); }
 .att-schedule-state.is-paused { border-color: color-mix(in srgb, var(--att-color-warning) 52%, var(--att-color-border)); color: var(--att-color-warning); }
+.att-schedule-state.is-completed { border-color: color-mix(in srgb, var(--att-color-primary) 52%, var(--att-color-border)); color: var(--att-color-primary); }
 .att-schedule-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; min-width: 200px; }
 .att-schedule-actions button { min-height: 34px; padding: 0.3rem 0.5rem; border: 1px solid var(--att-color-border); border-radius: 0.42rem; background: var(--att-color-surface); color: var(--att-color-text); cursor: pointer; font-size: 0.72rem; font-weight: 650; }
 .att-schedule-actions button:hover:not(:disabled) { border-color: var(--att-color-primary); color: var(--att-color-primary); }

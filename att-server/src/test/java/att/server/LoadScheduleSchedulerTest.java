@@ -25,6 +25,32 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadScheduleSchedulerTest {
     @TempDir Path temp;
 
+    @Test void oneTimeRunAndLoadOccurrencesAreClaimedOnceAndMissesAreNotReplayed() throws Exception {
+        MutableClock clock=new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+        ServerConfig config=config("one-time",1,"continue",2);
+        AtomicInteger submitted=new AtomicInteger();
+        try(JobStore store=new JobStore(config);LoadScheduleScheduler scheduler=new LoadScheduleScheduler(config.scheduling,store,(schedule,id)->{
+            submitted.incrementAndGet();return Map.of("jobId","J0000000000000001");
+        },clock)) {
+            for(String type:List.of("run","load")) {
+                LoadSchedule once=schedule("SONCE"+type,clock.instant());once.jobType=type;once.cron=null;once.runAt=once.nextRunAt;store.saveSchedule(once);
+            }
+            scheduler.processDue();scheduler.processDue();
+            assertEquals(2,submitted.get());
+            for(String type:List.of("run","load")) {
+                LoadSchedule once=store.schedule("SONCE"+type);assertNull(once.nextRunAt);
+                assertEquals("once",store.scheduleExecutions(once.id,10).get(0).get("triggerType"));
+                assertEquals(1,store.scheduleExecutions(once.id,10).size());
+            }
+            LoadSchedule missed=schedule("SONCEMISSED",clock.instant().minusSeconds(60));missed.cron=null;missed.runAt=missed.nextRunAt;store.saveSchedule(missed);
+            scheduler.processDue();assertEquals(2,submitted.get());assertNull(store.schedule(missed.id).nextRunAt);
+            assertEquals("misfire-no-backfill",store.scheduleExecutions(missed.id,10).get(0).get("reason"));
+        }
+        try(JobStore store=new JobStore(config);LoadScheduleScheduler restarted=new LoadScheduleScheduler(config.scheduling,store,(schedule,id)->{submitted.incrementAndGet();return Map.of("jobId","unexpected");},clock)) {
+            restarted.processDue();assertEquals(2,submitted.get());
+        }
+    }
+
     @Test void skipsOverlappingRunsPerScheduleAndAcrossTheGlobalSchedulerCap() throws Exception {
         MutableClock clock=new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         ServerConfig config=config("overlap",1,"continue",1);

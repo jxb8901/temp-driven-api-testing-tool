@@ -164,7 +164,7 @@ class DebugDraftPipelinePerformanceBenchmark {
         Files.createDirectories(root.resolve("config"));
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("templates/FORM"));
-        copySchemas(Path.of("schemas"), root.resolve("schemas"));
+        copySchemas(Path.of("packages/default/schemas"), root.resolve("schemas"));
         Files.writeString(root.resolve("config/config.yaml"),
                 "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
                         + "testcase: {root: testcase}\ntemplates: {root: templates}\n", StandardCharsets.UTF_8);

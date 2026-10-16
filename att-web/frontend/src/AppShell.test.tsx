@@ -82,7 +82,7 @@ describe('AppShell', () => {
       <AppShell
         route={navigation.route}
         navigation={navigation}
-        serverVersion={{ status: 'ready', data: { apiVersion: '1', version: '4.2.0', inlineLoadEnabled: true } }}
+        serverVersion={{ status: 'ready', data: { apiVersion: '1', version: '4.2.1', inlineLoadEnabled: true } }}
         selectedPackage="payments"
         selectedEnvironment=""
         onPackageChange={vi.fn()}
@@ -117,7 +117,7 @@ describe('AppShell', () => {
       showScheduledLoad selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()}
       onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}><p>Schedules</p></AppShell>));
     expect(host.querySelector('[data-nav="scheduled-load"]')?.getAttribute('aria-current')).toBe('page');
-    expect(host.querySelector('#breadcrumbs')?.textContent).toContain('Scheduled Load');
+    expect(host.querySelector('#breadcrumbs')?.textContent).toContain('Schedules');
   });
 
   it('opens a searchable page palette and shortcut help from the keyboard', () => {
@@ -139,10 +139,10 @@ describe('AppShell', () => {
     const search = host.querySelector('#command-search') as HTMLInputElement;
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(search, 'Scheduled');
+      setter?.call(search, 'Schedules');
       search.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const command = [...host.querySelectorAll('.command-list button')].find(button => button.textContent?.includes('Scheduled Load'));
+    const command = [...host.querySelectorAll('.command-list button')].find(button => button.textContent?.includes('Schedules'));
     expect(command).not.toBeUndefined();
     act(() => command?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(navigation.navigate).toHaveBeenCalledWith({ kind: 'schedules' });

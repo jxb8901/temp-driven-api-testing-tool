@@ -55,14 +55,18 @@ class WindowsLauncherTest {
         assertTrue(binary.contains("<destName>att-local-${project.version}.jar</destName>"));
         assertTrue(binary.contains("<outputDirectory>packages/default/config</outputDirectory>"));
         assertTrue(binary.contains("<outputDirectory>packages/default/templates</outputDirectory>"));
-        assertTrue(binary.contains("<exclude>att-server.yaml</exclude>"));
+        assertTrue(binary.contains("../packages/default/config</directory>"));
+        assertTrue(binary.contains("../packages/default/schemas</directory>"));
+        assertTrue(binary.contains("../config/att-server.example.yaml</source>"));
+        assertFalse(binary.contains("../config/att-server.yaml"));
         assertTrue(source.contains("<include>att.bat</include>"));
+        assertTrue(source.contains("<include>packages/default/**</include>"));
         assertTrue(manifest.contains("mainWindows: att.bat"));
     }
 
     @Test @EnabledOnOs(OS.WINDOWS)
     void sourceTreeLauncherRunsCommandBackedToolWithoutNativeProcessDependency() throws Exception {
-        Path packageRoot = Paths.get("").toAbsolutePath();
+        Path packageRoot = Paths.get("").toAbsolutePath().resolve("packages/default");
         Path targetDirectory = packageRoot.resolve("target");
         Files.createDirectories(targetDirectory);
         Path temp = Files.createTempDirectory(targetDirectory, "windows-launcher-smoke-" + UUID.randomUUID() + "-");
@@ -91,6 +95,7 @@ class WindowsLauncherTest {
                 .directory(Paths.get("").toAbsolutePath().toFile())
                 .redirectOutput(output.toFile()).redirectError(error.toFile());
         builder.environment().put("M2_REPO", mavenRepository.toString());
+        builder.environment().put("ATT_PACKAGE_ROOT", packageRoot.toString());
         Process process = builder.start();
         try {
             assertTrue(process.waitFor(90, TimeUnit.SECONDS), "att.bat did not finish the command-backed Tool smoke test");
@@ -110,7 +115,7 @@ class WindowsLauncherTest {
     @Test @EnabledOnOs(OS.WINDOWS)
     void sourceAndPackagedLaunchersNeverCompileWithMavenPresentOrAbsent() throws Exception {
         Path workspace = Paths.get("").toAbsolutePath();
-        Path targetDirectory = workspace.resolve("target");
+        Path targetDirectory = workspace.resolve("packages/default/target");
         Files.createDirectories(targetDirectory);
         Path temp = Files.createTempDirectory(targetDirectory, "windows-launcher-run-only-");
         Path buildToolLog = temp.resolve("build-tools.log");
@@ -133,7 +138,7 @@ class WindowsLauncherTest {
             }
 
             for (Path root : roots) {
-                Path executionRoot = root.equals(sourceRoot) ? root : root.resolve("packages/default");
+                Path executionRoot = root.resolve("packages/default");
                 Path fixturePath = root.equals(sourceRoot) ? temp.resolve("source-debug-fixture")
                         : executionRoot.resolve("target/launcher-debug-smoke");
                 Path debugFixture = createDebugFixture(executionRoot, fixturePath);
@@ -180,6 +185,7 @@ class WindowsLauncherTest {
     private static Path createDebugFixture(Path root, Path fixture) throws Exception {
         Path template = fixture.resolve("templates/SIMPLE");
         Files.createDirectories(template);
+        copyTree(Paths.get("packages/default/schemas"), fixture.resolve("schemas"));
         String fixtureRelative = root.relativize(fixture).toString().replace(File.separatorChar, '/');
         Files.write(fixture.resolve("config.yaml"), ("schemaVersion: att-config/v2.11\n"
                 + "environment: SIT\noutputDirectory: " + fixtureRelative + "/output\n"
@@ -205,8 +211,9 @@ class WindowsLauncherTest {
         Files.createDirectories(packageRoot);
         Files.copy(Paths.get("att.bat"), root.resolve("att.bat"));
         createApplicationJar(lib.resolve("att-local-"+projectVersion()+".jar"));
+        Path sourcePackage = Paths.get("packages/default");
         for (String directory : new String[]{"config", "templates", "testcase", "load", "tools", "schemas"}) {
-            Path source = Paths.get(directory);
+            Path source = sourcePackage.resolve(directory);
             Path destination = packageRoot.resolve(directory);
             if (Files.isDirectory(source)) copyTree(source, destination);
             else Files.createDirectories(destination);

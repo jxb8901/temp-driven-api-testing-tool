@@ -15,6 +15,7 @@ export type AppRoute =
   | { kind: 'package'; packageId: string; resource?: ResourceRoute }
   | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab }
   | { kind: 'quick-load'; packageId: string; target: ResourceRoute; environment?: string }
+  | { kind: 'run'; packageId?: string }
   | { kind: 'jobs'; jobId?: string }
   | { kind: 'load'; packageId?: string }
   | { kind: 'schedules' }
@@ -73,9 +74,10 @@ export function parseRoute(hash: string): AppRoute {
       environment: query.has('environment') ? query.get('environment') || '' : undefined,
     };
   }
+  if (parts[0] === 'run') return { kind: 'run', packageId: parts[1] || undefined };
   if (parts[0] === 'jobs') return parts[1] ? { kind: 'jobs', jobId: parts[1] } : { kind: 'jobs' };
   if (parts[0] === 'advanced-load') return parts[1] ? { kind: 'load', packageId: parts[1] } : { kind: 'load' };
-  if (parts[0] === 'load-schedules' || parts[0] === 'scheduled-load') return { kind: 'schedules' };
+  if (parts[0] === 'schedules' || parts[0] === 'load-schedules' || parts[0] === 'scheduled-load') return { kind: 'schedules' };
   if (parts[0] === 'settings' && parts.length === 1) return { kind: 'settings' };
   return { kind: 'dashboard' };
 }
@@ -83,6 +85,7 @@ export function parseRoute(hash: string): AppRoute {
 export function formatRoute(route: AppRoute): string {
   switch (route.kind) {
     case 'dashboard': return '#/';
+    case 'run': return route.packageId ? '#/run/' + encodeURIComponent(route.packageId) : '#/run';
     case 'packages': return '#/packages';
     case 'package': {
       const root = '#/packages/' + encodeURIComponent(route.packageId);

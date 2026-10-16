@@ -8,6 +8,8 @@ public class WorkerRequest {
     public String protocolVersion;
     public String jobId;
     public String command;
+    /** Optional RUN diagnostic detail; null preserves legacy event behavior. */
+    public Boolean diagnosticMode;
     public String packageRoot;
     public String config;
     public String environment;

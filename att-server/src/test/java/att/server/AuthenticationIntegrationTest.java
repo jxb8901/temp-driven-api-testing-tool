@@ -76,6 +76,8 @@ class AuthenticationIntegrationTest {
                 String csrf=sendWithCookie(client,port,"GET","/att/api/v1/auth/me",cookie,null,null,null).headers().firstValue("X-ATT-CSRF").orElseThrow();
                 for(String token:List.of("","invalid"))
                     assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",cookie,gateway,token,"{}").statusCode());
+                assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/drafts/run",cookie,gateway,null,"{}").statusCode(),
+                        "RUN drafts require CSRF even when origin checking is disabled.");
                 if(strict)assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",cookie,"https://attacker.example",csrf,"{}").statusCode());
                 String basic="Basic "+Base64.getEncoder().encodeToString(("owner:"+password).getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 String basicCsrf=sendBasicViaTrustedProxy(client,port,"GET","/att/api/v1/auth/me",gateway,null,basic,null).headers().firstValue("X-ATT-CSRF").orElseThrow();
@@ -356,7 +358,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
             assertEquals(200,get(port,"/att/ui/app.js",null));
             assertEquals(200,get(port,"/att/api/v1/health",null));
-            assertEquals("4.2.0",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            assertEquals("4.2.1",getJson(port,"/att/api/v1/version",null).path("version").asText());
             assertEquals("debug",getJson(port,"/att/api/v1/packages/debug",null).path("packageId").asText());
             JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",null);
             String resourceId=resources.path("items").get(0).path("resourceId").asText();
@@ -819,7 +821,7 @@ class AuthenticationIntegrationTest {
     }
     private static Object field(Object target,String name)throws Exception {var field=target.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(target);}
     private static void copySchemas(Path packageRoot)throws Exception {
-        Path source=Path.of("schemas").toRealPath(),destination=packageRoot.resolve("schemas");
+        Path source=Path.of("packages/default/schemas").toRealPath(),destination=packageRoot.resolve("schemas");
         try(var paths=Files.walk(source)) {for(Path path:(Iterable<Path>)paths::iterator){Path target=destination.resolve(source.relativize(path));if(Files.isDirectory(path))Files.createDirectories(target);else{Files.createDirectories(target.getParent());Files.copy(path,target);}}}
     }
     private static void addModuleJar(Path lib,String name,Path classes)throws Exception {

@@ -218,7 +218,7 @@ public final class PackageValidator {
         if (cases == 0 && !"package".equals(options.validationScope())) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTION_EMPTY, Diagnostic.Severity.ERROR, "Case selection is empty", null, null, null, null, null, null));
         if ("selected".equals(options.validationScope())) diagnostics.add(new Diagnostic(DiagnosticCodes.SELECTED_SCOPE, Diagnostic.Severity.INFO, "Only the selected dependency closure was validated; unselected package content was not validated", null, null, null, null, null, null));
         Collections.sort(diagnostics);
-        return new ValidationSummary(options.validationScope(), suites.size(), cases, templates.size(), global.tools().size(), diagnostics);
+        return new ValidationSummary(options.validationScope(), suites.size(), cases, templates.size(), global.tools().size(), diagnostics, new ArrayList<String>(fullCaseIds.keySet()));
     }
 
     private void validateDebugSidecars(List<Diagnostic> diagnostics, StageTemplateLoader loader) throws Exception {
@@ -2579,7 +2579,12 @@ public final class PackageValidator {
         public final int suites, cases, templates, tools;
         public final String mode;
         public final List<Diagnostic> diagnostics;
+        public final List<String> selectedCaseIds;
         public ValidationSummary(String mode, int suites, int cases, int templates, int tools, List<Diagnostic> diagnostics) {
+            this(mode,suites,cases,templates,tools,diagnostics,Collections.<String>emptyList());
+        }
+        public ValidationSummary(String mode,int suites,int cases,int templates,int tools,List<Diagnostic> diagnostics,List<String> selectedCaseIds) {
+            this.selectedCaseIds=Collections.unmodifiableList(new ArrayList<String>(selectedCaseIds));
             this.mode = mode; this.suites = suites; this.cases = cases; this.templates = templates; this.tools = tools;
             this.diagnostics = Collections.unmodifiableList(new ArrayList<Diagnostic>(DiagnosticAggregator.aggregate(diagnostics)));
         }

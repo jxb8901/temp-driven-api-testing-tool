@@ -57,18 +57,20 @@ function routeLink(event: MouseEvent<HTMLAnchorElement>, action: () => void) {
 
 function routeTitle(route: AppRoute): string {
   if (route.kind === 'dashboard') return 'Dashboard';
+  if (route.kind === 'run') return 'Run';
   if (route.kind === 'packages') return 'Packages';
   if (route.kind === 'package') return route.resource ? route.resource.resourceId : route.packageId;
   if (route.kind === 'configuration') return route.filePath?.split('/').filter(Boolean).pop() || 'Configuration';
   if (route.kind === 'quick-load') return 'Quick Load';
   if (route.kind === 'jobs') return route.jobId ? 'Job ' + route.jobId : 'Jobs and results';
   if (route.kind === 'load') return route.packageId ? 'Advanced Load' : 'Load testing';
-  if (route.kind === 'schedules') return 'Scheduled Load';
+  if (route.kind === 'schedules') return 'Schedules';
   if (route.kind === 'settings') return 'Settings';
   return 'Dashboard';
 }
 
 function activeNavigation(route: AppRoute): string {
+  if (route.kind === 'run') return 'run';
   if (route.kind === 'packages') return 'packages';
   if (route.kind === 'package') return 'explorer';
   if (route.kind === 'configuration') return 'configuration';
@@ -97,9 +99,10 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, onClos
     { label: 'Packages', description: 'Configured packages', route: { kind: 'packages' } },
     { label: 'Explorer and Run', description: 'Browse package resources', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
     { label: 'Configuration', description: 'Inspect package configuration and Testdata', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
+    { label: 'Run', description: 'Validate a functional execution', route: { kind: 'run', packageId: selectedPackage || undefined } },
     { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
     { label: 'Jobs and results', description: 'Inspect recent jobs', route: { kind: 'jobs' } },
-    ...(showScheduledLoad ? [{ label: 'Scheduled Load', description: 'Manage recurring Load schedules', route: { kind: 'schedules' } as AppRoute }] : []),
+    ...(showScheduledLoad ? [{ label: 'Schedules', description: 'Manage RUN and LOAD schedules', route: { kind: 'schedules' } as AppRoute }] : []),
     { label: 'Settings', description: 'Appearance and keyboard help', route: { kind: 'settings' } },
   ];
   const matches = commands.filter(command => `${command.label} ${command.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
@@ -414,6 +417,9 @@ export function AppShell({
             <a className="nav-link" href={configurationHref} data-nav="configuration" aria-current={activeNav === 'configuration' ? 'page' : undefined} onClick={link(configurationHref)}>
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Configuration</span>
             </a>
+            <a className="nav-link" href={formatRoute({ kind: 'run', packageId: selectedPackage || undefined })} data-nav="run" aria-current={activeNav === 'run' ? 'page' : undefined} onClick={link(formatRoute({ kind: 'run', packageId: selectedPackage || undefined }))}>
+              <span className="nav-icon" aria-hidden="true">▷</span><span className="nav-label">Run</span>
+            </a>
             <a className="nav-link" href={loadHref} data-nav="load-testing" aria-current={activeNav === 'load-testing' ? 'page' : undefined} onClick={link(loadHref)}>
               <span className="nav-icon" aria-hidden="true">⌁</span><span className="nav-label">Load testing</span>
             </a>
@@ -421,13 +427,13 @@ export function AppShell({
               <span className="nav-icon" aria-hidden="true">▤</span><span className="nav-label">Jobs and results</span>
             </a>
             {showScheduledLoad && <a className="nav-link" href="#/load-schedules" data-nav="scheduled-load" aria-current={activeNav === 'scheduled-load' ? 'page' : undefined} onClick={link('#/load-schedules')}>
-              <span className="nav-icon" aria-hidden="true">◷</span><span className="nav-label">Scheduled Load</span>
+              <span className="nav-icon" aria-hidden="true">◷</span><span className="nav-label">Schedules</span>
             </a>}
             <a className="nav-link" href="#/settings" data-nav="settings" aria-current={activeNav === 'settings' ? 'page' : undefined} onClick={link('#/settings')}>
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span>
             </a>
           </nav>
-          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.0'}</span></div>
+          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.1'}</span></div>
         </aside>
 
         <div className="app-frame">
@@ -482,7 +488,7 @@ export function AppShell({
                   <Breadcrumb label="Jobs and results" href={route.jobId ? '#/jobs' : undefined} navigate={navigate} />
                   {route.jobId && <Breadcrumb label={'Job ' + route.jobId} navigate={navigate} />}
                 </>}
-                {route.kind === 'schedules' && <Breadcrumb label="Scheduled Load" navigate={navigate} />}
+                {route.kind === 'schedules' && <Breadcrumb label="Schedules" navigate={navigate} />}
                 {route.kind === 'settings' && <Breadcrumb label="Settings" navigate={navigate} />}
               </ol>
             </nav>

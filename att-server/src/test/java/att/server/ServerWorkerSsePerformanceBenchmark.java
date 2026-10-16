@@ -516,7 +516,7 @@ class ServerWorkerSsePerformanceBenchmark {
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("templates/BENCH_EVENT"));
         Files.createDirectories(root.resolve("load"));
-        copyTree(Path.of("schemas"), root.resolve("schemas"));
+        copyTree(Path.of("packages/default/schemas"), root.resolve("schemas"));
         Files.writeString(root.resolve("config/config.yaml"),
                 "schemaVersion: att-config/v2.12\noutputDirectory: output\nenvironment: BENCHMARK\n"
                         + "testcase: {root: testcase}\ntemplates: {root: templates}\n", StandardCharsets.UTF_8);

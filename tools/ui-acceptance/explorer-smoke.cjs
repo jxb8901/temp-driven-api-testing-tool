@@ -60,7 +60,7 @@ async function main() {
         return jsonResponse(route, 401, { error: { code: 'UNAUTHORIZED', summary: 'authorization header rejected: canary-401-secret' } });
       }
       if (method === 'GET' && path === 'version') {
-        return jsonResponse(route, 200, { apiVersion: '1', version: '4.2.0', inlineLoadEnabled: true, loadSchedulingEnabled: true });
+        return jsonResponse(route, 200, { apiVersion: '1', version: '4.2.1', inlineLoadEnabled: true, loadSchedulingEnabled: true });
       }
       if (method === 'GET' && path === 'load-schedules') {
         return jsonResponse(route, 200, { items: createdSchedule ? [createdSchedule] : [], total: createdSchedule ? 1 : 0 });
@@ -345,7 +345,7 @@ async function main() {
     assert.equal(comparisonText.includes('hidden') && comparisonText.includes('not declared'), true, 'configuration comparison distinguishes hidden from missing');
     await page.goto(`${base}#/packages/payments/resources/template/checkout`);
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
-    await page.getByRole('button', { name: 'Debug this target' }).click();
+    await page.getByRole('button', { name: 'Run this target' }).click();
     await page.getByText(/Hidden package-authored values are preserved/).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), false, 'a valid Debug form can create a validated snapshot schedule');
     await page.getByText('Scheduling keeps this validated Debug target, environment and input snapshot. Protected package defaults remain server-managed and are not saved as schedule values.').waitFor();
@@ -396,7 +396,7 @@ async function main() {
 
     await page.goBack();
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
-    await page.getByRole('button', { name: 'Debug this target' }).click();
+    await page.getByRole('button', { name: 'Run this target' }).click();
     await page.getByText(/Hidden package-authored values are preserved/).waitFor();
     await page.getByRole('checkbox', { name: /Keep hidden package default/ }).uncheck();
     await page.getByRole('combobox', { name: 'credential value type' }).selectOption('string');

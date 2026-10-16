@@ -197,6 +197,6 @@ public final class DefaultAttService implements AttService {
         observer.onEvent(new ExecutionEvent(ExecutionEvent.Type.LOG, runId, null, null, null,
                 null, null, message, attributes));
     }
-    private static Map<String,Object> validationMap(PackageValidator.ValidationSummary value) { Map<String,Object> m=new LinkedHashMap<String,Object>();m.put("mode",value.mode);m.put("suites",value.suites);m.put("cases",value.cases);m.put("templates",value.templates);m.put("tools",value.tools);m.put("errors",value.errors());m.put("warnings",value.warnings());return m; }
+    private static Map<String,Object> validationMap(PackageValidator.ValidationSummary value) { Map<String,Object> m=new LinkedHashMap<String,Object>();m.put("mode",value.mode);m.put("suites",value.suites);m.put("cases",value.cases);m.put("templates",value.templates);m.put("tools",value.tools);m.put("errors",value.errors());m.put("warnings",value.warnings());m.put("selectedCaseIds",value.selectedCaseIds);return m; }
     @SuppressWarnings("unchecked") private static Map<String,Object> map(Object value) { return value instanceof Map?(Map<String,Object>)value:Collections.<String,Object>emptyMap(); }
 }

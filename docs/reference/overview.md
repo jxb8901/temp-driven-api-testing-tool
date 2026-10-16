@@ -17,9 +17,9 @@ Testcase
 
 A **Testcase** is one authored, normalized workbook row. A **Case execution** is one Run execution of that Testcase; its full Case ID identifies the Testcase and is reused in execution results and evidence. Use *Testcase* when discussing workbook data and authoring, and *Case execution* when discussing runtime status, logs, reports, and artifacts. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper, MQHelper, HTTPHelper or SSHHelper used by Actions or permitted expression calls.
 
-## Execution modes are peers
+## RUN and LOAD execution models
 
-Run, Debug and Load adapt different inputs into the same execution-neutral Context and reusable components:
+RUN executes a functional target or Case selection once. Debug is an optional diagnostic mode; LOAD retains its performance engine. See [Unified RUN and schedules](execution-modes/unified-run.md). Legacy adapters retain their specialized inputs and reports:
 
 | Mode | Primary input | Reuses |
 |---|---|---|

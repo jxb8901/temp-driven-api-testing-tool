@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FppLandingTemplatesTest {
-    private final Path projectRoot = Paths.get("").toAbsolutePath().normalize();
+    private final Path projectRoot = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
 
     @Test void d3iTemplateCoversAllFiveBatchPhasesAndPollingContract() throws Exception {
         StageTemplate template = loader().load("FPP_D3I_BATCH_SIT");

@@ -4,6 +4,7 @@ import { AppShell, useAppShellContext } from './AppShell';
 import { DashboardPage, LoadLanding } from './DashboardPage';
 import { useNavigationGuard, useRouteState } from './router';
 import { appReducer, initialAppState, latestServerJobWindow, serverCapabilities } from './state';
+import { RunPage } from './features/run/RunPage';
 import { ExplorerPage } from './features/explorer/ExplorerPage';
 import './features/explorer/explorer.css';
 import type { ExplorerPageProps, ResourceSourceReference } from './features/explorer/types';
@@ -308,7 +309,7 @@ export default function App() {
   }, [navigation.navigate, loadJobs]);
   const capabilities = serverCapabilities(state);
   const currentRoute = navigation.route;
-  const selectedPackage = currentRoute.kind === 'package' || currentRoute.kind === 'load' || currentRoute.kind === 'configuration' || currentRoute.kind === 'quick-load'
+  const selectedPackage = currentRoute.kind === 'run' || currentRoute.kind === 'package' || currentRoute.kind === 'load' || currentRoute.kind === 'configuration' || currentRoute.kind === 'quick-load'
     ? currentRoute.packageId || ''
     : currentRoute.kind === 'jobs' && currentRoute.jobId && state.jobs.status === 'ready'
       ? state.jobs.data.find(job => job.jobId === currentRoute.jobId)?.packageId || ''
@@ -317,6 +318,8 @@ export default function App() {
   let content;
   if (navigation.route.kind === 'dashboard') {
     content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
+  } else if (navigation.route.kind === 'run') {
+    content = <RunPage key={navigation.route.packageId || ''} packageId={navigation.route.packageId} onAccepted={onJobAccepted} onSchedule={onSchedule} schedulingEnabled={capabilities.loadSchedulingEnabled} />;
   } else if (navigation.route.kind === 'packages') {
     content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {

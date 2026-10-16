@@ -88,4 +88,9 @@ for jar in \
   "$HOME"/.m2/repository/org/yaml/snakeyaml/2.2/snakeyaml-2.2.jar \
   "$HOME"/.m2/repository/org/apache/logging/log4j/log4j-api/2.21.1/log4j-api-2.21.1.jar; do CP="$CP:$jar"; done
 for jar in "$ROOT_DIR"/lib/*.jar; do [ -f "$jar" ] || continue; CP="$CP:$jar"; done
+PACKAGE_ROOT="${ATT_PACKAGE_ROOT:-}"
+if [ -z "$PACKAGE_ROOT" ] && [ -d "$ROOT_DIR/packages/default" ]; then
+  PACKAGE_ROOT="$ROOT_DIR/packages/default"
+fi
+if [ -n "$PACKAGE_ROOT" ]; then cd "$PACKAGE_ROOT"; fi
 exec java -Datt.home="$ATT_HOME" -cp "$CP" att.FrameworkRunner "$@"

@@ -1,4 +1,4 @@
-# ATT v4.2.0 quick start
+# ATT v4.2.1 quick start
 
 [中文快速入門](quick-start.zh.md) · [Reference Manual](reference.md)
 
@@ -19,14 +19,14 @@ Excel Testcase
          -> ordered Actions
 ```
 
-For this tutorial, the important files are already in the repository:
+For this tutorial, the important files are already in the default package:
 
 ```text
-testcase/quick_start.xlsx
-testcase/quick_start.yaml
-testcase/quick_start.xml
-templates/QUICK_START/template.yaml
-config/config.yaml
+packages/default/testcase/quick_start.xlsx
+packages/default/testcase/quick_start.yaml
+packages/default/testcase/quick_start.xml
+packages/default/templates/QUICK_START/template.yaml
+packages/default/config/config.yaml
 ```
 
 The workbook contains two Testcases:
@@ -40,7 +40,7 @@ You do not need to understand every ATT schema before running them.
 
 ## Check prerequisites
 
-ATT CLI, Engine, Remote, and Server API modules support Java 8 or later. A source checkout needs a JDK and Maven to build these modules explicitly; `att.sh` and `att.bat` only run prebuilt classes. The full 4.2.0 release build also includes the Java 17 Server module. Packaged releases contain their application JARs and need a Java runtime, not Maven.
+ATT CLI, Engine, Remote, and Server API modules support Java 8 or later. A source checkout needs a JDK and Maven to build these modules explicitly; `att.sh` and `att.bat` only run prebuilt classes. The full 4.2.1 release build also includes the Java 17 Server module. Packaged releases contain their application JARs and need a Java runtime, not Maven.
 
 1. On macOS/Linux, make the launcher executable if necessary:
    ```sh
@@ -298,4 +298,4 @@ Do not try to learn every ATT feature from this tutorial. Follow the Reference p
 
 For direct DB Actions specifically, remember the safety boundary: `query` may retry `ASSERTION`/`TIMEOUT`, while `update` supports `timeoutMs` but rejects automatic retry. See the [DBHelper Reference](reference/resources/dbhelper.md) for the full contract.
 
-For field-by-field supported behavior, use the generated [ATT V4.2.0 Reference Manual](reference.md) rather than extending this tutorial into a second manual.
+For field-by-field supported behavior, use the generated [ATT V4.2.1 Reference Manual](reference.md) rather than extending this tutorial into a second manual.

@@ -146,7 +146,7 @@ class MultiWorkloadScenarioTest {
     private Path write(String name, String content) throws Exception {
         Path file = temp.resolve(name); Files.write(file, content.getBytes(StandardCharsets.UTF_8)); return file;
     }
-    private static Path projectRoot() { return Paths.get("").toAbsolutePath().normalize(); }
+    private static Path projectRoot() { return Paths.get("").toAbsolutePath().normalize().resolve("packages/default"); }
     private static String message(Throwable value) {
         StringBuilder result = new StringBuilder();
         while (value != null) { if (value.getMessage() != null) result.append(value.getMessage()).append('\n'); value = value.getCause(); }

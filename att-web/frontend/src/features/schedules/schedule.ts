@@ -1,9 +1,9 @@
 import type { LoadSchedule, LoadScheduleInput } from './types';
 
-export type ScheduleRecurrence = 'daily' | 'weekly' | 'cron';
+export type ScheduleRecurrence = 'daily' | 'weekly' | 'cron' | 'once';
 
 export interface ScheduleDraft {
-  jobType: 'load' | 'debug';
+  jobType: 'load' | 'debug' | 'run';
   debugTargetType: string;
   debugTargetId: string;
   name: string;
@@ -18,6 +18,7 @@ export interface ScheduleDraft {
   timezone: string;
   recurrence: ScheduleRecurrence;
   timeOfDay: string;
+  runAt: string;
   dayOfWeek: string;
   cron: string;
   maxConcurrentRuns: string;
@@ -54,11 +55,12 @@ export function createScheduleDraft(timezone = localTimeZone()): ScheduleDraft {
   return {
     jobType: 'load', debugTargetType: '', debugTargetId: '',
     name: '', description: '', tags: '', packageId: '', scenario: '', inlineSnapshot: false, config: '', environment: '', timezone,
-    recurrence: 'daily', timeOfDay: '02:00', dayOfWeek: '1-5', cron: '', maxConcurrentRuns: '1', load: '{}', enabled: false,
+    recurrence: 'daily', runAt: '', timeOfDay: '02:00', dayOfWeek: '1-5', cron: '', maxConcurrentRuns: '1', load: '{}', enabled: false,
   };
 }
 
 export function cronForDraft(draft: ScheduleDraft): string {
+  if (draft.recurrence === 'once') return draft.runAt.trim();
   if (draft.recurrence === 'cron') return draft.cron.trim();
   const match = /^(?:[01]\d|2[0-3]):[0-5]\d$/.exec(draft.timeOfDay);
   if (!match) return '';
@@ -90,12 +92,12 @@ function cronTime(match: RegExpExecArray): string | null {
 
 export function draftFromSchedule(schedule: LoadSchedule): ScheduleDraft {
   return {
-    jobType: schedule.jobType === 'debug' ? 'debug' : 'load',
+    jobType: schedule.jobType === 'run' ? 'run' : schedule.jobType === 'debug' ? 'debug' : 'load',
     debugTargetType: schedule.debugTarget?.type || '', debugTargetId: schedule.debugTarget?.id || '',
     name: schedule.name || '', description: schedule.description || '', tags: (schedule.tags || []).join(', '),
     packageId: schedule.packageId || '', scenario: schedule.scenario || '', inlineSnapshot: schedule.inlineSnapshot === true, config: schedule.config || '',
     environment: schedule.environment || '', timezone: schedule.timezone || 'UTC',
-    ...recurrenceFromCron(schedule.cron || ''), cron: schedule.cron || '',
+    ...recurrenceFromCron(schedule.cron || ''), ...(schedule.runAt ? { recurrence: 'once' as const } : {}), runAt: schedule.runAt || '', cron: schedule.cron || '',
     maxConcurrentRuns: String(schedule.maxConcurrentRuns || 1), load: JSON.stringify(schedule.load || {}, null, 2),
     enabled: schedule.enabled === true,
   };
@@ -123,6 +125,11 @@ export function scheduleInputFromDraft(draft: ScheduleDraft): LoadScheduleInput 
     environment: draft.environment.trim(), timezone: draft.timezone.trim(), cron,
     load: load as Record<string, string>, maxConcurrentRuns, enabled: draft.enabled,
   };
+  if (draft.recurrence === 'once') {
+    if (!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(draft.runAt) || !Number.isFinite(Date.parse(draft.runAt))) throw new Error('Enter a one-time ISO-8601 instant with UTC offset.');
+    input.runAt = new Date(draft.runAt).toISOString(); delete input.cron;
+  }
+  if (draft.jobType === 'run') { delete (input as Partial<LoadScheduleInput>).load; delete (input as Partial<LoadScheduleInput>).config; }
   if (draft.inlineSnapshot) {
     if (draft.draftId) input.draftId = draft.draftId;
   } else if (draft.jobType === 'load') input.scenario = draft.scenario.trim();

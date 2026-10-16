@@ -154,7 +154,7 @@ class PackageResourceInspectionPerformanceBenchmark {
 
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("schemaVersion", "att-package-resource-discovery-benchmark/v3");
-        report.put("version", "4.2.0");
+        report.put("version", "4.2.1");
         report.put("workerStartups", startups.get());
         report.put("telemetry",telemetry);
         report.put("sourceRevision", System.getProperty("att.server.inspection.benchmark.revision", "unknown"));
@@ -263,7 +263,7 @@ class PackageResourceInspectionPerformanceBenchmark {
     }
 
     private void copySchemas(Path root) throws Exception {
-        Path source = Path.of("schemas").toAbsolutePath().normalize();
+        Path source = Path.of("packages/default/schemas").toAbsolutePath().normalize();
         try (var paths = Files.walk(source)) {
             for (Path path : (Iterable<Path>) paths::iterator) {
                 Path destination = root.resolve("schemas").resolve(source.relativize(path));

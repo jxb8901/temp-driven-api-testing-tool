@@ -122,8 +122,9 @@ class InspectionCacheRuntimeTest {
         Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("testcase"));Files.createDirectories(root.resolve("templates/echo"));
         Files.writeString(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n");
         Files.writeString(root.resolve("templates/echo/template.yaml"),"schemaVersion: att-template/v3.6\nname: Echo\ndescription: Safe\nactions:\n  note:\n    type: log\n    message: safe\n");
-        try(var paths=Files.walk(Path.of("schemas"))) {
-            for(Path path:paths.toList()) {Path target=root.resolve(path);if(Files.isDirectory(path))Files.createDirectories(target);else Files.copy(path,target);}
+        Path source=Path.of("packages/default/schemas");
+        try(var paths=Files.walk(source)) {
+            for(Path path:paths.toList()) {Path target=root.resolve("schemas").resolve(source.relativize(path));if(Files.isDirectory(path))Files.createDirectories(target);else Files.copy(path,target);}
         }
         return root;
     }

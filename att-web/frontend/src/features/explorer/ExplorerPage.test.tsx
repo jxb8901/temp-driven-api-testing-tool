@@ -340,7 +340,7 @@ describe('Explorer page integration', () => {
     expect(container.querySelector('[data-tab="source"]')?.getAttribute('aria-selected')).toBe('true');
     expect(getSafeSource).toHaveBeenCalled();
 
-    click(button('Debug this target'));
+    click(button('Run this target'));
     await settle();
     expect(container.textContent).toContain('Hidden package-authored values are preserved');
     expect(button('Schedule…').disabled).toBe(false);

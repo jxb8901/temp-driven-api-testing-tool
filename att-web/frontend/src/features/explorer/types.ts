@@ -257,9 +257,11 @@ export interface ExplorerApi {
   getConfigurationFileSource?(packageId: string, path: string, origin?: string, signal?: AbortSignal, referenceId?: string): Promise<SourceProjection>;
   getTestdataRecords?(packageId: string, descriptorId: string, query: { environment?: string; offset?: number; limit?: number; previewGenerated?: boolean }, signal?: AbortSignal): Promise<TestdataRecordsResponse>;
   getDebugForm(identity: ResourceIdentity, environment?: string, signal?: AbortSignal): Promise<DebugFormResponse>;
+  previewRun?(input: import('../run/RunPage').RunDefinition, signal?: AbortSignal): Promise<DraftResponse>;
+  submitRun?(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob>;
   previewDebug(input: DebugDraftRequest, signal?: AbortSignal): Promise<DraftResponse>;
   submitDebug(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob>;
-  runCase(input: { packageId: string; suite: string; caseId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob>;
+  runCase(input: { packageId: string; suite: string; caseId: string; environment?: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob>;
 }
 
 export interface ExplorerPageProps {
@@ -275,7 +277,7 @@ export interface ExplorerPageProps {
   onJobAccepted: (jobId: string) => void;
   onPrincipalLabelChange?: (label: string) => void;
   onOpenQuickLoad?: (identity: ResourceIdentity) => void;
-  onScheduleDebug?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string; jobType: 'debug'; target: { type: DebugResourceType; id: string } }) => void;
+  onScheduleDebug?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string; jobType: 'debug' | 'run'; target: { type: DebugResourceType; id: string } }) => void;
   onOpenConfiguration?: (identity: ResourceIdentity) => void;
   onOpenConfigurationFile?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
 }

@@ -39,7 +39,7 @@ class EnvironmentProfileTest {
 
     @Test
     void checkedInProfilesBindStableLogicalDbAndMqIdsToDifferentPhysicalDescriptors() throws Exception {
-        Path root = Paths.get("").toAbsolutePath().normalize();
+        Path root = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
         Map<?, ?> rootConfig = (Map<?, ?>) YamlSupport.load(root.resolve("config/config.yaml"));
         Map<?, ?> profiles = (Map<?, ?>) rootConfig.get("environments");
         Map<?, ?> sit = (Map<?, ?>) profiles.get("SIT");
@@ -64,7 +64,7 @@ class EnvironmentProfileTest {
 
     @Test
     void checkedInProfilesUseTheSameEffectiveContractInValidateDebugAndLoad() throws Exception {
-        Path root = Paths.get("").toAbsolutePath().normalize();
+        Path root = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
         String config = root.resolve("config/config.yaml").toString();
         for (String environment : Arrays.asList("SIT", "UAT")) {
             CliResult validation = runCli(root, "validate", "--config", config, "--env", environment,
@@ -79,7 +79,7 @@ class EnvironmentProfileTest {
         assertEquals(0, debug.exitCode, debug.stderr);
 
         Path loadOutput = temp.resolve("load-output");
-        CliResult load = runCli(root, "load", root.resolve("examples/load/closed-smoke.yaml").toString(),
+        CliResult load = runCli(root, "load", Paths.get("").toAbsolutePath().normalize().resolve("examples/load/closed-smoke.yaml").toString(),
                 "--config", config, "--env", "UAT", "--output-dir", loadOutput.toString(),
                 "--run-id", "profile-load", "--duration", "25ms", "--format", "json", "--quiet");
         assertEquals(0, load.exitCode, load.stderr);
@@ -107,7 +107,7 @@ class EnvironmentProfileTest {
 
         FrameworkConfig defaultConfig = new FrameworkConfigLoader().load(config, temp);
         FrameworkConfig uat = new FrameworkConfigLoader().load(config, temp, "uat");
-        JsonSchemaVerifier.verify(Paths.get("schemas/att-config-v2.12.schema.json"), YamlSupport.load(config));
+        JsonSchemaVerifier.verify(Paths.get("packages/default/schemas/att-config-v2.12.schema.json"), YamlSupport.load(config));
 
         assertEquals("SIT", defaultConfig.environment());
         assertEquals("jdbc:sit", defaultConfig.dbHelper("orders").url());

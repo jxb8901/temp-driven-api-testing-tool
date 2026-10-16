@@ -86,6 +86,7 @@ final class JobStore implements AutoCloseable {
                     // The scheduler advances nextRunAt without changing the schedule definition timestamp.
                     // Preserve that newer value when this edit leaves recurrence and enabled state unchanged.
                     if(java.util.Objects.equals(current.cron,schedule.cron)
+                            &&LoadSchedule.sameInstant(current.runAt,schedule.runAt)
                             &&java.util.Objects.equals(current.timezone,schedule.timezone)
                             &&current.enabled==schedule.enabled) schedule.nextRunAt=current.nextRunAt;
                     try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=?,enabled=?,next_run_at=?,updated_at=? WHERE schedule_id=?")) {
@@ -127,8 +128,8 @@ final class JobStore implements AutoCloseable {
                     try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=?,next_run_at=?,updated_at=? WHERE schedule_id=?")){
                         update.setString(1,ServerRuntime.JSON.writeValueAsString(schedule));update.setString(2,nextFire);update.setString(3,schedule.updatedAt);update.setString(4,expected.id);update.executeUpdate();
                     }
-                    try(PreparedStatement occurrence=c.prepareStatement("INSERT INTO load_schedule_executions(occurrence_id,schedule_id,scheduled_for,status,trigger_type,created_at) VALUES(?,?,?,'scheduled','cron',?)")){
-                        occurrence.setString(1,occurrenceId);occurrence.setString(2,expected.id);occurrence.setString(3,expected.nextRunAt);occurrence.setString(4,Instant.now().toString());occurrence.executeUpdate();
+                    try(PreparedStatement occurrence=c.prepareStatement("INSERT INTO load_schedule_executions(occurrence_id,schedule_id,scheduled_for,status,trigger_type,created_at) VALUES(?,?,?,'scheduled',?,?)")){
+                        occurrence.setString(1,occurrenceId);occurrence.setString(2,expected.id);occurrence.setString(3,expected.nextRunAt);occurrence.setString(4,expected.runAt==null?"cron":"once");occurrence.setString(5,Instant.now().toString());occurrence.executeUpdate();
                     }
                 }
             }
@@ -255,7 +256,7 @@ final class JobStore implements AutoCloseable {
     synchronized List<Map<String,Object>> listOwned(int limit,String login) throws Exception {
         List<String> scheduleOwners=new ArrayList<>();for(LoadSchedule schedule:schedules())if(login.equals(schedule.createdBy))scheduleOwners.add("load-schedule:"+schedule.id);
         String ownerPredicate=scheduleOwners.isEmpty()?"":" OR principal IN ("+String.join(",",java.util.Collections.nCopies(scheduleOwners.size(),"?"))+")";
-        List<Map<String,Object>> out=new ArrayList<>();try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code FROM jobs WHERE principal=?"+ownerPredicate+" ORDER BY created_at DESC LIMIT ?")){int index=1;p.setString(index++,login);for(String owner:scheduleOwners)p.setString(index++,owner);p.setInt(index,limit);try(ResultSet r=p.executeQuery()){while(r.next()){Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));out.add(m);}}}return out;
+        List<Map<String,Object>> out=new ArrayList<>();try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code FROM jobs WHERE principal=?"+ownerPredicate+" ORDER BY created_at DESC LIMIT ?")){int index=1;p.setString(index++,login);for(String owner:scheduleOwners)p.setString(index++,owner);p.setInt(index,limit);try(ResultSet r=p.executeQuery()){while(r.next()){Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));out.add(m);}}}return out;
     }
     synchronized void createAuthUser(String login,String display,String hash,String role,String csrf) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO auth_users(login_id,display_name,password_hash,role,active,updated_at,csrf_token) VALUES(?,?,?,?,TRUE,?,?)")){p.setString(1,login);p.setString(2,display);p.setString(3,hash);p.setString(4,role);p.setString(5,Instant.now().toString());p.setString(6,csrf);p.executeUpdate();}}
     void createBootstrapAdmin(String login,String display,String hash,String csrf) throws Exception {
@@ -375,13 +376,13 @@ final class JobStore implements AutoCloseable {
         String filter=principalSearch==null||principalSearch.isEmpty()?null:principalSearch;
         String sql="SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,result_json,diagnostic_json FROM jobs "+(filter==null?"":"WHERE LOCATE(LOWER(?),LOWER(principal))>0 ")+"ORDER BY created_at DESC LIMIT ?";
         try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)) {
-            int index=1;if(filter!=null)p.setString(index++,filter);p.setInt(index,limit);try(ResultSet r=p.executeQuery()){while(r.next()){var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));out.add(m);}}
+            int index=1;if(filter!=null)p.setString(index++,filter);p.setInt(index,limit);try(ResultSet r=p.executeQuery()){while(r.next()){var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));out.add(m);}}
         } return out;
     }
     // Job reads own their connection and result data; allow API polling alongside writes.
     java.util.Map<String,Object> get(String id) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json FROM jobs WHERE job_id=?")) {
-            p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next())return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));return m;}}
+            p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next())return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));return m;}}
     }
     private Connection connect() throws Exception{return DriverManager.getConnection(url,"sa","");}
     private static String text(Instant value){return value==null?null:value.toString();}
