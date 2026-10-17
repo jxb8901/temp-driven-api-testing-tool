@@ -251,7 +251,7 @@
 .att-evidence-impact { margin:0; padding:.65rem; border-inline-start:3px solid var(--att-color-warning,#b54708); background:color-mix(in srgb,var(--att-color-warning,#b54708) 8%,transparent); }
 .att-threshold-scope .att-code-editor,.att-evidence-form .att-code-editor { min-height:11rem; }
 @media(max-width:800px) { .att-threshold-row { grid-template-columns:repeat(2,minmax(0,1fr)); } .att-threshold-row strong { grid-column:1/-1; } }
-.att-load-catalog-filters{display:grid;grid-template-columns:minmax(220px,2fr) repeat(4,minmax(130px,1fr));gap:12px;margin:18px 0 22px}
+.att-load-catalog-filters{display:grid;grid-template-columns:minmax(220px,2fr) repeat(5,minmax(120px,1fr));gap:12px;margin:18px 0 22px}
 .att-load-catalog-filters label{display:grid;gap:6px;font-size:.82rem;font-weight:650}
 .att-load-catalog-filters input,.att-load-catalog-filters select{min-width:0;width:100%;padding:9px 11px;border:1px solid var(--border-color,#ccd2d6);border-radius:7px;background:var(--surface,#fff);color:inherit;font:inherit}
 .att-load-catalog-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,410px),1fr));gap:14px}
@@ -264,7 +264,8 @@
 .att-load-validation{background:#edf0f1;color:#465258}
 .att-load-catalog-card .att-quick-load-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
 .att-load-job-list{display:grid;gap:0}
-.att-load-job-row{display:grid;grid-template-columns:minmax(100px,1fr) minmax(90px,1fr) auto minmax(170px,1fr);align-items:center;gap:12px;padding:11px 4px;border-top:1px solid var(--border-color,#e1e5e7)}
+.att-load-job-row{display:grid;grid-template-columns:auto minmax(160px,1.5fr) minmax(120px,1fr) auto minmax(190px,1.2fr) auto;align-items:center;gap:12px;padding:11px 4px;border-top:1px solid var(--border-color,#e1e5e7)}
+.att-load-job-times{display:grid;gap:3px}
 .att-load-job-row time{color:var(--muted,#66727a);font-size:.82rem;text-align:right}
 .att-load-source-panel{position:relative}
 @media(max-width:850px){.att-load-catalog-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.att-load-catalog-filters label:first-child{grid-column:1/-1}}

@@ -106,6 +106,9 @@ export interface JobAccepted {
 
 export interface JobSummary {
   executionType?: string;
+  scenario?: string;
+  environment?: string;
+  model?: LoadModel | string;
   jobId: string;
   command: string;
   packageId: string;

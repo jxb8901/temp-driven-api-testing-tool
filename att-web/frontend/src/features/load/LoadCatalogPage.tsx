@@ -7,6 +7,14 @@ import './load.css';
 
 type ScheduleIntent = { packageId: string; environment?: string; scenario: string; executionType: 'load' };
 type CatalogApi = Pick<typeof api, 'listLoadCatalog' | 'getLoadSource' | 'submitLoadScenario' | 'listLoadJobs'>;
+type CatalogJob = JobSummary & { scenario?: string; environment?: string; model?: string };
+
+function jobDuration(job: CatalogJob): string | null {
+  if (!job.startedAt || !job.finishedAt) return null;
+  const milliseconds = Date.parse(job.finishedAt) - Date.parse(job.startedAt);
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
+  return milliseconds < 1000 ? `${milliseconds} ms` : `${(milliseconds / 1000).toFixed(1)} s`;
+}
 
 export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEnabled, environment, onEnvironmentChange,
   onNewLoad, onQuickLoad, onJobAccepted, onOpenJob, onSchedule }: {
@@ -28,7 +36,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const [actionKey, setActionKey] = useState('');
   const [notice, setNotice] = useState('');
   const [source, setSource] = useState<{ item: LoadCatalogItem; text: string; reason?: string } | null>(null);
-  const [jobs, setJobs] = useState<JobSummary[]>([]);
+  const [jobs, setJobs] = useState<CatalogJob[]>([]);
   const [jobsState, setJobsState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [jobsError, setJobsError] = useState('');
   const [jobsMore, setJobsMore] = useState<number | null>(null);
@@ -100,6 +108,19 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     finally { setActionKey(''); }
   }
 
+  async function validateItem(item: LoadCatalogItem) {
+    if (actionKey) return;
+    const key = `validate:${item.resourceId}`; setActionKey(key); setNotice('');
+    try {
+      const page = await api.listLoadCatalog(item.packageId, { query: item.path, limit: 100 });
+      const latest = page.items.find(candidate => candidate.path === item.path);
+      if (!latest) throw new Error('The YAML resource is no longer available in this package.');
+      setCatalog(current => current.map(candidate => candidate.packageId === item.packageId && candidate.resourceId === item.resourceId ? latest : candidate));
+      setNotice(`${item.path} validation refreshed: ${latest.validation}.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'The YAML resource could not be validated.'); }
+    finally { setActionKey(''); }
+  }
+
   const selectedPackage = packageFilter === 'all' ? packages.status === 'ready' ? packages.data[0]?.packageId : undefined : packageFilter;
   return <div className="page-content att-load-catalog">
     <header className="att-feature-header"><div><p className="att-eyebrow">Load resources and execution history</p><h1>LOAD Catalog</h1>
@@ -129,6 +150,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
             <span className={`att-load-validation validation-${item.validation}`}>{item.validation}</span></div>
           {item.diagnostic && <p className="att-help">{item.diagnostic}</p>}
           <div className="att-quick-load-actions">
+            <button type="button" disabled={Boolean(actionKey)} onClick={() => void validateItem(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>
             {item.kind === 'scenario' && <><button type="button" disabled={!item.runNow || Boolean(actionKey)} onClick={() => void runNow(item)}>{actionKey === item.resourceId ? 'Starting…' : 'Run Now'}</button>
               <button type="button" disabled={!item.schedule || !schedulingEnabled} title={!schedulingEnabled ? 'Schedules are disabled by Server policy.' : undefined}
                 onClick={() => onSchedule({ packageId: item.packageId, environment: environmentDraft || undefined, scenario: item.path, executionType: 'load' })}>Schedule</button></>}
@@ -146,8 +168,15 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
       {jobsState === 'error' && <p className="att-inline-error" role="alert">{jobsError}</p>}
       {jobsState === 'ready' && jobs.length === 0 && <p role="status">No LOAD jobs are available for this account.</p>}
       {jobs.length > 0 && <div className="att-load-job-list">{jobs.map(job => <div className="att-load-job-row" key={job.jobId}>
-        <button className="text-link" type="button" onClick={() => onOpenJob(job.jobId)}>{job.jobId}</button><span>{job.packageId}</span>
-        <span className={'status-badge status-' + String(job.status).toLowerCase()}>{job.status}</span><time>{job.createdAt ? new Date(job.createdAt).toLocaleString() : 'Time unavailable'}</time>
+        <button className="text-link" type="button" onClick={() => onOpenJob(job.jobId)}>{job.jobId}</button>
+        <span>{job.packageId}{job.scenario ? ` · ${job.scenario}` : ''}</span>
+        <span>{job.model || 'Model unavailable'}{job.environment ? ` · ${job.environment}` : ''}</span>
+        <span className={'status-badge status-' + String(job.status).toLowerCase()}>{job.status}</span>
+        <span className="att-load-job-times"><time title="Created">Created {job.createdAt ? new Date(job.createdAt).toLocaleString() : 'unavailable'}</time>
+          {job.startedAt && <time title="Started">Started {new Date(job.startedAt).toLocaleString()}</time>}
+          {job.finishedAt && <time title="Finished">Finished {new Date(job.finishedAt).toLocaleString()}</time>}
+          {jobDuration(job) && <span>Duration {jobDuration(job)}</span>}</span>
+        <button className="text-link" type="button" onClick={() => onOpenJob(job.jobId)}>View Results</button>
       </div>)}</div>}
       {jobsMore !== null && <button type="button" onClick={() => void loadJobs(jobsMore, true)} disabled={jobsState === 'loading'}>Load more LOAD jobs</button>}
     </section>

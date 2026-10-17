@@ -240,9 +240,8 @@ export const api = {
     return request<{ available: boolean; logicalPath?: string; text?: string; redacted?: boolean; reason?: string }>(
       'packages/' + encodeURIComponent(packageId) + '/load-catalog/source' + queryString({ resourceId }), { signal });
   },
-  async submitLoadScenario(input: { packageId: string; scenario: string; environment?: string }): Promise<LoadJobAccepted> {
-    const draft = await postJson<LoadDraftResponse>('drafts/load-catalog', input);
-    return postJson<LoadJobAccepted>('jobs/load', { packageId: input.packageId, draftId: draft.draftId });
+  submitLoadScenario(input: { packageId: string; scenario: string; environment?: string }): Promise<LoadJobAccepted> {
+    return postJson<LoadJobAccepted>('jobs/load', input);
   },
   getLoadPolicy(packageId: string, model: LoadModel, environment?: string, signal?: AbortSignal, templateId?: string): Promise<LoadPolicyResponse> {
     return request<LoadPolicyResponse>('packages/' + encodeURIComponent(packageId) + '/load-policy' + queryString({ model, environment, templateId }), { signal });

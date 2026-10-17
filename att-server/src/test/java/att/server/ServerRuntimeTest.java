@@ -125,14 +125,16 @@ class ServerRuntimeTest {
         ServerRuntime setupRuntime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
         String scheduleId,debugScheduleId;
         try {
-            Map<String,Object> catalogPage=setupRuntime.inspectLoadCatalog("p","",10,null,"alice");
-            assertTrue(catalogPage.toString().contains("load/scenario.yaml"));
-            com.fasterxml.jackson.databind.node.ObjectNode catalogDraftRequest=ServerRuntime.JSON.createObjectNode();
-            catalogDraftRequest.put("packageId","p");catalogDraftRequest.put("scenario","load/scenario.yaml");catalogDraftRequest.put("environment","SIT");
-            Map<String,Object> catalogDraft=setupRuntime.createCatalogLoadDraft(catalogDraftRequest,"alice");
-            String catalogDraftId=String.valueOf(catalogDraft.get("draftId"));
-            assertTrue(catalogDraftId.startsWith("A"));
-            assertThrows(ServerRuntime.NotFoundException.class,()->setupRuntime.getAdvancedLoadDraft(catalogDraftId,"bob"));
+            Map<String,Object> runNow=setupRuntime.submit("load",ServerRuntime.JSON.readTree(
+                    "{\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"environment\":\"SIT\"}"),"alice");
+            String runNowId=String.valueOf(runNow.get("jobId"));
+            long runNowDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);Map<String,Object> runNowRecord=setupRuntime.jobRecord(runNowId);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(runNowRecord.get("status"))&&System.nanoTime()<runNowDeadline) {
+                Thread.sleep(20);runNowRecord=setupRuntime.jobRecord(runNowId);
+            }
+            assertEquals("PASS",runNowRecord.get("status"));
+            Map<String,Object> runNowSummary=setupRuntime.loadJobsFor("alice",0,10).get(0);
+            assertEquals("load/scenario.yaml",runNowSummary.get("scenario"));assertEquals("SIT",runNowSummary.get("environment"));
 
             Map<String,Object> sensitiveWorkload=new java.util.LinkedHashMap<>();
             sensitiveWorkload.put("id","sensitive-snapshot");

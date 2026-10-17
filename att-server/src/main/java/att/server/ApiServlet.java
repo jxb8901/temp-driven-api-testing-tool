@@ -111,9 +111,9 @@ public final class ApiServlet extends HttpServlet {
         if(path.startsWith("/auth/")){authPost(req,res,path,requestId);return;}
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
-        boolean createRunDraft="/drafts/run".equals(path),createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path),createCatalogLoadDraft="/drafts/load-catalog".equals(path);
+        boolean createRunDraft="/drafts/run".equals(path),createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path);
         String command=path.startsWith("/jobs/")?path.substring("/jobs/".length()):"";
-        if(!createRunDraft&&!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!createCatalogLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        if(!createRunDraft&&!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try {
             if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
             if(!checkOrigin(req,res,requestId,false))return;
@@ -127,7 +127,6 @@ public final class ApiServlet extends HttpServlet {
             if(createDebugDraft){DebugDraft draft=ServerRuntime.JSON.convertValue(runtime.createDebugDraft(input,identity.authorizationPrincipal()),DebugDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
             if(createQuickLoadDraft){LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createQuickLoadDraft(input,identity.authorizationPrincipal()),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
             if(createAdvancedLoadDraft){LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createAdvancedLoadDraft(input,identity.authorizationPrincipal()),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
-            if(createCatalogLoadDraft){LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createCatalogLoadDraft(input,identity.authorizationPrincipal()),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
             JsonNode workerInput=RequestIdentity.withoutSubmittedPrincipal(input);
             if("run".equals(command)&&input.has("draftId")){
                 Map<String,Object> job=runtime.submitRunDraft(input,identity.authorizationPrincipal(),identity.persistedPrincipal());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);return;

@@ -193,7 +193,12 @@ final class ServerRuntime implements AutoCloseable {
             id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
             jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
             JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob);
-            Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;String summary=JSON.writeValueAsString(Map.of("command",command,"packageId",packageId));
+            Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
+            Map<String,Object> summaryFields=new LinkedHashMap<>();summaryFields.put("command",command);summaryFields.put("packageId",packageId);
+            if(request.scenario!=null)summaryFields.put("scenario",request.scenario);
+            if(request.environment!=null&&!request.environment.isBlank())summaryFields.put("environment",request.environment);
+            if(request.loadModel!=null)summaryFields.put("model",request.loadModel);
+            String summary=JSON.writeValueAsString(summaryFields);
             store.insert(job,summary);persisted=true;jobs.put(id,job);append(job,"status",Map.of("jobId",id,"status","QUEUED"));
             FutureTask<Void> task=new FutureTask<>(()->{execute(job,activeJobPath,lease);return null;});tasks.put(id,task);leases.put(id,lease);
             job.admittedNanos=System.nanoTime();
@@ -384,7 +389,7 @@ final class ServerRuntime implements AutoCloseable {
             @SuppressWarnings("unchecked") Map<String,Object> item=(Map<String,Object>)rawItem;
             boolean scenario="scenario".equals(item.get("kind"));
             boolean template="template".equals(item.get("kind"));
-            item.put("runNow",scenario&&config.inlineLoad.enabled);
+            item.put("runNow",scenario);
             item.put("schedule",scenario&&config.scheduling.enabled);
             item.put("createQuickLoad",template&&config.inlineLoad.enabled&&Boolean.TRUE.equals(item.get("createQuickLoad")));
         }
@@ -560,33 +565,6 @@ final class ServerRuntime implements AutoCloseable {
             checkDraftCapacity(principal);
             advancedLoadDrafts.put(draft.id,draft);
         }
-        return advancedLoadDraftView(draft);
-    }
-    Map<String,Object> createCatalogLoadDraft(JsonNode input,String principal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(!config.inspection.enabled)throw new NotFoundException();
-        requireInlineLoadEnabled();
-        requireObject(input,"A JSON object is required");requireOnlyFields(input,"packageId","environment","scenario");
-        String packageId=required(input,"packageId"),scenarioPath=required(input,"scenario");
-        if(scenarioPath.length()>1024)throw new IllegalArgumentException("scenario path is invalid");
-        Path relative=java.nio.file.Paths.get(scenarioPath.replace('\\','/')).normalize();
-        String lower=scenarioPath.toLowerCase(java.util.Locale.ROOT);
-        if(relative.isAbsolute()||relative.startsWith("..")||!relative.startsWith("load")
-                ||!lower.endsWith(".yaml")&&!lower.endsWith(".yml"))
-            throw new IllegalArgumentException("scenario must be a package-relative YAML file under load/");
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
-        WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction="load-scenario";request.inspectionPath=scenarioPath;
-        Map<String,Object> inspected=executeInspection(root,request);
-        Object rawScenario=inspected.remove("normalizedScenario"),rawDigest=inspected.remove("revisionDigest"),rawModel=inspected.get("model");
-        if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
-                ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel))
-            throw new IllegalStateException("Load scenario validation Worker returned an invalid response");
-        @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
-        enforceInlineLoadLimits(scenario);
-        AdvancedLoadDraftState draft=new AdvancedLoadDraftState("A"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
-                principal,packageId,environment,(String)rawModel,(String)rawDigest,scenario,inspected,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
-        synchronized(draftLock) { expireDrafts();checkDraftCapacity(principal);advancedLoadDrafts.put(draft.id,draft); }
         return advancedLoadDraftView(draft);
     }
     Map<String,Object> getDebugDraft(String id,String principal) {

@@ -34,6 +34,9 @@ describe('LoadCatalogPage', () => {
 
     expect(host.textContent).toContain('Executable Scenario');
     expect(host.textContent).toContain('Load Template');
+    const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!;
+    await act(async () => validate.click()); await flush();
+    expect(api.listLoadCatalog).toHaveBeenCalledWith('payments', { query: 'load/nightly.yaml', limit: 100 });
     const preview = [...host.querySelectorAll('button')].find(button => button.textContent === 'View YAML')!;
     await act(async () => preview.click()); await flush();
     expect(host.textContent).toContain('Redacted read-only YAML preview');
