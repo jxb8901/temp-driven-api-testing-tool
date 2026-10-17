@@ -440,7 +440,7 @@ describe('Explorer page integration', () => {
       })),
     });
     await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
-      initialMode="declared" />);
+      onEnvironmentChange={() => {}} initialMode="declared" />);
     await settle();
     click(button('Compare'));
     await settle();
@@ -463,7 +463,7 @@ describe('Explorer page integration', () => {
       })),
     });
     await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
-      initialMode="declared" />);
+      onEnvironmentChange={() => {}} initialMode="declared" />);
     click(button('Compare'));
     await settle();
     expect(container.textContent).toContain('Shared source: config/dbhelpers/shared.yaml');
@@ -484,7 +484,7 @@ describe('Explorer page integration', () => {
       compareConfiguration,
     });
     await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
-      initialMode="compare" />);
+      onEnvironmentChange={() => {}} initialMode="compare" />);
     await settle();
     expect(compareConfiguration.mock.calls[0][1]).toMatchObject({ left: 'left', right: 'right', section: 'dbhelpers', offset: 0, limit: 50 });
 
@@ -517,7 +517,7 @@ describe('Explorer page integration', () => {
       compareConfiguration,
     });
     await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
-      initialMode="compare" />);
+      onEnvironmentChange={() => {}} initialMode="compare" />);
     await settle();
     const section = [...container.querySelectorAll('label')].find(label => label.textContent?.startsWith('Compare section'))?.querySelector('select');
     setValue(section!, 'globals');
