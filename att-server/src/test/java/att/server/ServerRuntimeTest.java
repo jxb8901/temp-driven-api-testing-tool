@@ -413,9 +413,9 @@ class ServerRuntimeTest {
             assertEquals("declared",declared.get("state"));
             assertTrue(declared.toString().contains("SIT"));assertTrue(declared.toString().contains("UAT"));
             Map<String,Object> effective=runtime.inspectConfiguration("p","effective","SIT",null,"alice");
-            assertEquals("ready",effective.get("state"));assertEquals("SIT",effective.get("environment"));
+            assertEquals("ready",effective.get("state"),effective.toString());assertEquals("SIT",effective.get("environment"));
             Map<String,Object> defaultEffective=runtime.inspectConfiguration("p","effective",null,null,"globals",0,50,"alice");
-            assertEquals("ready",defaultEffective.get("state"));assertEquals("SIT",defaultEffective.get("environment"));
+            assertEquals("ready",defaultEffective.get("state"),defaultEffective.toString());assertEquals("SIT",defaultEffective.get("environment"));
             Map<String,Object> comparison=runtime.inspectConfiguration("p","compare","SIT","UAT","dbhelpers",0,50,"alice");
             assertEquals("ready",comparison.get("state"));
             @SuppressWarnings("unchecked") List<Map<String,Object>> fields=(List<Map<String,Object>>)comparison.get("fields");

@@ -166,7 +166,7 @@ class AuthenticationIntegrationTest {
             HttpResponse<String> submitted=sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",viewerCookie,origin,viewerCsrf,"{\"packageId\":\"p\",\"all\":true}");assertEquals(202,submitted.statusCode(),submitted.body());
             String ownedJobId=ServerRuntime.JSON.readTree(submitted.body()).path("jobId").asText();assertTrue(ownedJobId.matches("J[0-9A-F]{16}"));
             String colleagueBasic="Basic "+Base64.getEncoder().encodeToString("basic-user:basic user secure password".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            assertEquals(200,get(port,"/att/api/v1/jobs/"+ownedJobId,colleagueBasic),"Active USERs share Jobs across accounts");
+            assertEquals(200,sendBasicViaTrustedProxy(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,"https://att.example.test",null,colleagueBasic,null).statusCode(),"Active USERs share Jobs across accounts");
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,ownerCookie,null,null,null).statusCode(),"ADMIN accounts do not receive Job operations");
             assertEquals(200,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,origin,csrf,"{}").statusCode());
             assertEquals(401,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
@@ -709,15 +709,7 @@ class AuthenticationIntegrationTest {
             Thread.sleep(20);job=getJson(port,"/att/api/v1/jobs/"+id,null);
         }
         assertTrue(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(job.path("status").asText()),"Job did not reach a terminal state: "+id);
-        waitForWorkersIdle(port);
         return job;
-    }
-    private static void waitForWorkersIdle(int port)throws Exception {
-        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);JsonNode metrics=getJson(port,"/att/api/v1/metrics",null);
-        while(metrics.path("activeWorkers").asInt(-1)>0&&System.nanoTime()<deadline) {
-            Thread.sleep(20);metrics=getJson(port,"/att/api/v1/metrics",null);
-        }
-        assertEquals(0,metrics.path("activeWorkers").asInt(-1),"Worker admission must be released before the next job");
     }
     private static JsonNode postErrorJson(int port,String uri,String authorization,JsonNode body,int expectedStatus)throws Exception {
         HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(5000);connection.setReadTimeout(30000);

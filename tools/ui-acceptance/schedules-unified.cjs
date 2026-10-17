@@ -121,9 +121,12 @@ async function main() {
     await page.getByLabel('Debug diagnostics', { exact: true }).check();
     await page.getByRole('button', { name: 'Validate', exact: true }).click();
     await page.getByRole('button', { name: 'Schedule…', exact: true }).click();
-    await page.getByRole('dialog', { name: 'New Schedule', exact: true }).waitFor();
+    await page.getByRole('dialog').waitFor();
+    assert.match(await page.getByRole('dialog').innerText(), /Discard your changes\?/);
+    await page.getByRole('button', { name: 'Discard changes and continue', exact: true }).click();
+    await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Save schedule', exact: true }).click();
-    await page.getByRole('button', { name: 'Saved', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Run', exact: true }).waitFor();
     const created = mutations.find(item => item.method === 'POST' && item.path === '');
     assert.equal(created.body.executionType, 'run');
     assert.equal(created.body.draftId, 'R-FROZEN');

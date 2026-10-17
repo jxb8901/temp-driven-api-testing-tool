@@ -635,6 +635,10 @@ final class ServerRuntime implements AutoCloseable {
         String packageId=run.workerInput.path("packageId").asText();
         Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         ObjectNode input=run.workerInput.deepCopy();
+        // The request omits config when using the Server's shared runtime configuration.
+        // Persist its canonical reference in the immutable draft so scheduled RUNs can
+        // verify that the saved snapshot still targets the same configuration.
+        input.put("config","config/config.yaml");
         if(input.path("rerunFailed").asBoolean(false))resolveFailedCases(input,principal,packageId);
         Map<String,Object> preview;DebugDraft resourceDebugDraft=null;String revision;
         if(run.resourceTarget) {
@@ -1600,6 +1604,8 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId) throws Exception {
+        if("local".equals(config.authMode)&&!store.isActiveUser(schedule.createdBy))
+            throw new IllegalArgumentException("Schedule owner is no longer authorized");
         if("run".equals(schedule.effectiveJobType()))return submitScheduledRun(schedule,occurrenceId);
         return "debug".equals(schedule.effectiveJobType())
                 ? submitScheduledDebug(schedule,occurrenceId)
