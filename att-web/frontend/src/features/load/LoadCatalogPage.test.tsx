@@ -13,13 +13,17 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
-async function flush() { await act(async () => { await Promise.resolve(); await Promise.resolve(); }); }
+async function flush() { await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); }); }
+
+function unverifiedScenario(path = 'load/nightly.yaml') {
+  return { packageId: 'payments', resourceId: path, path, kind: 'scenario', validation: 'unverified', workloadCount: 1, sourceAvailable: true, runNow: false, schedule: false, createQuickLoad: false };
+}
 
 describe('LoadCatalogPage', () => {
   it('shows validated scenarios and policy templates, previews safe source, and schedules the selected package file', async () => {
     const api = {
       listLoadCatalog: vi.fn(async () => ({ items: [
-        { packageId: 'payments', resourceId: 'load/nightly.yaml', path: 'load/nightly.yaml', kind: 'scenario', validation: 'valid', model: 'virtualUsers', workloadCount: 1, sourceAvailable: true, runNow: true, schedule: true, createQuickLoad: false },
+        { ...unverifiedScenario(), validation: 'valid', validatedEnvironment: 'SIT', model: 'virtualUsers', runNow: true, schedule: true },
         { packageId: 'payments', resourceId: 'load/policy.yaml', path: 'load/policy.yaml', kind: 'template', validation: 'valid', model: 'arrivalRate', workloadCount: 0, sourceAvailable: true, runNow: false, schedule: false, createQuickLoad: true },
       ], total: 2 })),
       validateLoadCatalogScenario: vi.fn(async () => ({ validation: 'valid' })),
@@ -45,5 +49,74 @@ describe('LoadCatalogPage', () => {
     const schedule = [...host.querySelectorAll('button')].find(button => button.textContent === 'Schedule')!;
     await act(async () => schedule.click());
     expect(onSchedule).toHaveBeenCalledWith({ packageId: 'payments', environment: 'SIT', scenario: 'load/nightly.yaml', executionType: 'load' });
+  });
+
+  it('ignores stale validation results after the environment changes', async () => {
+    let resolveValidation: (value: { validation: string }) => void = () => {};
+    const api = {
+      listLoadCatalog: vi.fn(async () => ({ items: [unverifiedScenario()], total: 1 })),
+      validateLoadCatalogScenario: vi.fn(() => new Promise<{ validation: string }>(resolve => { resolveValidation = resolve; })),
+      getLoadSource: vi.fn(async () => ({ available: true, text: '', redacted: true })),
+      submitLoadScenario: vi.fn(async () => ({ jobId: 'JOB-LOAD' })),
+      listLoadJobs: vi.fn(async () => ({ items: [] })),
+    };
+    await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
+      inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
+    await flush();
+
+    const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate for Environment')!;
+    await act(async () => validate.click());
+    await flush();
+    const environmentInput = [...host.querySelectorAll('input')].find(input => input.value === 'SIT')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(environmentInput, 'UAT');
+      environmentInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => resolveValidation({ validation: 'valid' }));
+    await flush();
+
+    expect(api.validateLoadCatalogScenario).toHaveBeenCalledWith('payments', 'load/nightly.yaml', 'SIT');
+    const runNow = [...host.querySelectorAll('button')].find(button => button.textContent === 'Run Now')! as HTMLButtonElement;
+    expect(runNow.disabled).toBe(true);
+    expect(host.textContent).toContain('unverified');
+  });
+
+  it('aborts stale catalog appends when the search changes', async () => {
+    let appendSignal: AbortSignal | null = null;
+    let resolveAppend: ((page: unknown) => void) | undefined;
+    let resolveSearch: ((page: unknown) => void) | undefined;
+    const api = {
+      listLoadCatalog: vi.fn((_packageId: string, input: { query?: string; cursor?: string }, signal: AbortSignal) => {
+        if (input.cursor) {
+          appendSignal = signal;
+          return new Promise(resolve => { resolveAppend = resolve; });
+        }
+        if (input.query) return new Promise(resolve => { resolveSearch = resolve; });
+        return Promise.resolve({ items: [unverifiedScenario()], total: 1, nextCursor: 'next-a' });
+      }),
+      listLoadJobs: vi.fn(async () => ({ items: [] })),
+    };
+    await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
+      inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
+    await flush();
+    const loadMore = [...host.querySelectorAll('button')].find(button => button.textContent === 'Load more scenarios')!;
+    await act(async () => loadMore.click());
+    expect(appendSignal).not.toBeNull();
+
+    const searchInput = [...host.querySelectorAll('input')].find(input => input.type === 'search')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(searchInput, 'nightly');
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => resolveSearch!({ items: [unverifiedScenario('search-result.yaml')], total: 1 }));
+    await act(async () => resolveAppend!({ items: [{ ...unverifiedScenario('stale.yaml') }], total: 2, nextCursor: 'stale-cursor' }));
+    await flush();
+    expect(api.listLoadCatalog).toHaveBeenCalledWith('payments', { query: 'nightly', cursor: undefined, limit: 100 }, expect.anything());
+    expect(appendSignal!.aborted).toBe(true);
+    expect(host.textContent).toContain('search-result.yaml');
+    expect(host.textContent).not.toContain('stale.yaml');
+    expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Load more scenarios')).toBe(false);
   });
 });

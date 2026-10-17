@@ -29,6 +29,8 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const [catalogError, setCatalogError] = useState('');
   const [catalogCursors, setCatalogCursors] = useState<Record<string, string>>({});
   const catalogCursorsRef = useRef<Record<string, string>>({});
+  const catalogRequestRef = useRef<AbortController | null>(null);
+  const catalogGenerationRef = useRef(0);
   const [refreshKey, setRefreshKey] = useState(0);
   const [query, setQuery] = useState('');
   const [packageFilter, setPackageFilter] = useState('all');
@@ -37,15 +39,19 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const [validationFilter, setValidationFilter] = useState('all');
   const [environmentDraft, setEnvironmentDraft] = useState(environment);
   const [actionKey, setActionKey] = useState('');
+  const actionSequenceRef = useRef(0);
   const [notice, setNotice] = useState('');
   const [source, setSource] = useState<{ item: LoadCatalogItem; text: string; reason?: string } | null>(null);
   const [jobs, setJobs] = useState<CatalogJob[]>([]);
   const [jobsState, setJobsState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [jobsError, setJobsError] = useState('');
   const [jobsMore, setJobsMore] = useState<number | null>(null);
+  const environmentDraftRef = useRef(environmentDraft);
+  environmentDraftRef.current = environmentDraft;
 
   const loadCatalog = useCallback(async (signal: AbortSignal, append = false) => {
     if (packages.status !== 'ready') return;
+    const requestGeneration = ++catalogGenerationRef.current;
     if (append) setCatalogMoreLoading(true);
     else setCatalogState('loading');
     setCatalogError('');
@@ -57,17 +63,17 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
         const cursor = append ? currentCursors[pkg.packageId] : undefined;
         if (append && !cursor) continue;
         const page = await api.listLoadCatalog(pkg.packageId, { query: query.trim() || undefined, cursor, limit: 100 }, signal);
-        if (signal.aborted) return;
+        if (signal.aborted || requestGeneration !== catalogGenerationRef.current) return;
         gathered.push(...page.items);
         if (page.nextCursor) nextCursors[pkg.packageId] = page.nextCursor;
         else delete nextCursors[pkg.packageId];
       }
-      if (!signal.aborted) {
+      if (!signal.aborted && requestGeneration === catalogGenerationRef.current) {
         setCatalog(current => append ? [...current, ...gathered] : gathered);
         catalogCursorsRef.current = nextCursors; setCatalogCursors(nextCursors); setCatalogState('ready');
       }
     } catch (error) {
-      if (!signal.aborted) {
+      if (!signal.aborted && requestGeneration === catalogGenerationRef.current) {
         setCatalogError(error instanceof Error ? error.message : 'LOAD catalog could not be loaded.');
         if (!append) setCatalogState('error');
       }
@@ -79,8 +85,15 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   useEffect(() => {
     if (packages.status === 'loading') { setCatalogState('loading'); return; }
     if (packages.status === 'error') { setCatalogState('error'); setCatalogError('Configured packages could not be loaded.'); return; }
-    const controller = new AbortController(); void loadCatalog(controller.signal);
-    return () => controller.abort();
+    const controller = new AbortController();
+    catalogRequestRef.current?.abort();
+    catalogRequestRef.current = controller;
+    void loadCatalog(controller.signal);
+    return () => {
+      catalogRequestRef.current?.abort();
+      catalogGenerationRef.current += 1;
+      catalogRequestRef.current = null;
+    };
   }, [packages.status, packages.status === 'ready' ? packages.data : null, loadCatalog, refreshKey]);
 
   const loadJobs = useCallback(async (offset = 0, append = false, signal?: AbortSignal) => {
@@ -104,6 +117,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
 
   async function runNow(item: LoadCatalogItem) {
     if (!item.runNow || actionKey) return;
+    const actionToken = ++actionSequenceRef.current;
     const confirmation = `Run this package LOAD scenario now?\n\nPackage: ${item.packageId}\nScenario: ${item.path}\nEnvironment: ${environmentDraft || 'Package default'}\nModel: ${item.model || 'Validated by Server'}\nWorkloads: ${item.workloadCount}`;
     if (!window.confirm(confirmation)) return;
     setActionKey(item.resourceId); setNotice('');
@@ -111,36 +125,52 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
       const job = await api.submitLoadScenario({ packageId: item.packageId, scenario: item.path, ...(environmentDraft ? { environment: environmentDraft } : {}) });
       onJobAccepted(job.jobId);
     } catch (error) { setNotice(error instanceof Error ? error.message : 'The LOAD scenario could not be started.'); }
-    finally { setActionKey(''); }
+    finally { if (actionSequenceRef.current === actionToken) setActionKey(''); }
   }
 
   async function showSource(item: LoadCatalogItem) {
+    const actionToken = ++actionSequenceRef.current;
     setActionKey(`source:${item.resourceId}`); setNotice('');
     try {
       const result = await api.getLoadSource(item.packageId, item.resourceId);
       setSource({ item, text: result.text || '', reason: result.reason || (result.available ? undefined : 'Source is unavailable under the package visibility policy.') });
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Safe YAML preview is unavailable.'); }
-    finally { setActionKey(''); }
+    finally { if (actionSequenceRef.current === actionToken) setActionKey(''); }
   }
 
   async function validateItem(item: LoadCatalogItem) {
     if (actionKey) return;
+    const actionToken = ++actionSequenceRef.current;
     const key = `validate:${item.resourceId}`; setActionKey(key); setNotice('');
+    const requestedEnvironment = environmentDraftRef.current;
+    const requestedGeneration = catalogGenerationRef.current;
     try {
-      const result = await api.validateLoadCatalogScenario(item.packageId, item.resourceId, environmentDraft || undefined);
+      const result = await api.validateLoadCatalogScenario(item.packageId, item.resourceId, requestedEnvironment || undefined);
+      if (actionSequenceRef.current !== actionToken || environmentDraftRef.current !== requestedEnvironment
+        || catalogGenerationRef.current !== requestedGeneration) return;
       setCatalog(current => current.map(candidate => candidate.packageId === item.packageId && candidate.resourceId === item.resourceId
-        ? { ...candidate, validation: result.validation, model: result.model || candidate.model, diagnostic: undefined, runNow: true, schedule: schedulingEnabled }
+        ? { ...candidate, validation: result.validation, validatedEnvironment: requestedEnvironment, model: result.model || candidate.model, diagnostic: undefined, runNow: true, schedule: schedulingEnabled }
         : candidate));
-      setNotice(`${item.path} validation refreshed for ${environmentDraft || 'the package default'}: ${result.validation}.`);
+      setNotice(`${item.path} validation refreshed for ${requestedEnvironment || 'the package default'}: ${result.validation}.`);
     } catch (error) {
+      if (actionSequenceRef.current !== actionToken || environmentDraftRef.current !== requestedEnvironment
+        || catalogGenerationRef.current !== requestedGeneration) return;
       if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
         setCatalog(current => current.map(candidate => candidate.packageId === item.packageId && candidate.resourceId === item.resourceId
-          ? { ...candidate, validation: 'invalid', runNow: false, schedule: false, diagnostic: error.message }
+          ? { ...candidate, validation: 'invalid', validatedEnvironment: requestedEnvironment, runNow: false, schedule: false, diagnostic: error.message }
           : candidate));
       }
       setNotice(error instanceof Error ? error.message : 'The YAML resource could not be validated.');
     }
-    finally { setActionKey(''); }
+    finally { if (actionSequenceRef.current === actionToken) setActionKey(''); }
+  }
+
+  function changeEnvironment(value: string) {
+    catalogGenerationRef.current += 1;
+    setEnvironmentDraft(value); onEnvironmentChange(value);
+    setCatalog(current => current.map(item => item.kind === 'scenario'
+      ? { ...item, validation: 'unverified', validatedEnvironment: undefined, runNow: false, schedule: false, diagnostic: undefined }
+      : item));
   }
 
   const selectedPackage = packageFilter === 'all' ? packages.status === 'ready' ? packages.data[0]?.packageId : undefined : packageFilter;
@@ -159,7 +189,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
         <label>Kind<select value={kindFilter} onChange={event => setKindFilter(event.currentTarget.value)}><option value="all">All kinds</option><option value="scenario">Scenario</option><option value="template">Template</option><option value="invalid">Invalid</option></select></label>
         <label>Model<select value={modelFilter} onChange={event => setModelFilter(event.currentTarget.value)}><option value="all">All models</option><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select></label>
         <label>Validation<select value={validationFilter} onChange={event => setValidationFilter(event.currentTarget.value)}><option value="all">All validation states</option><option value="unverified">Unverified</option><option value="valid">Valid</option><option value="invalid">Invalid</option></select></label>
-        <label>Environment<input value={environmentDraft} onChange={event => { setEnvironmentDraft(event.currentTarget.value); onEnvironmentChange(event.currentTarget.value); }} placeholder="Package default" /></label>
+        <label>Environment<input value={environmentDraft} onChange={event => changeEnvironment(event.currentTarget.value)} placeholder="Package default" /></label>
       </div>
       {catalogState === 'loading' && <p role="status" aria-busy="true">Discovering package Load YAML resources…</p>}
       {catalogState === 'error' && <p className="att-inline-error" role="alert">{catalogError}</p>}
@@ -173,8 +203,8 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
           {item.diagnostic && <p className="att-help">{item.diagnostic}</p>}
           <div className="att-quick-load-actions">
             {item.kind === 'scenario' && <button type="button" disabled={Boolean(actionKey)} onClick={() => void validateItem(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate for Environment'}</button>}
-            {item.kind === 'scenario' && <><button type="button" disabled={!item.runNow || item.validation !== 'valid' || Boolean(actionKey)} onClick={() => void runNow(item)}>{actionKey === item.resourceId ? 'Starting…' : 'Run Now'}</button>
-              <button type="button" disabled={!item.schedule || item.validation !== 'valid' || !schedulingEnabled} title={!schedulingEnabled ? 'Schedules are disabled by Server policy.' : item.validation !== 'valid' ? 'Validate for the selected environment first.' : undefined}
+            {item.kind === 'scenario' && <><button type="button" disabled={!item.runNow || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || Boolean(actionKey)} onClick={() => void runNow(item)}>{actionKey === item.resourceId ? 'Starting…' : 'Run Now'}</button>
+              <button type="button" disabled={!item.schedule || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || !schedulingEnabled} title={!schedulingEnabled ? 'Schedules are disabled by Server policy.' : item.validatedEnvironment !== environmentDraft ? 'Validate for the selected environment first.' : undefined}
                 onClick={() => onSchedule({ packageId: item.packageId, environment: environmentDraft || undefined, scenario: item.path, executionType: 'load' })}>Schedule</button></>}
             {item.kind === 'template' && <button type="button" disabled={!item.createQuickLoad || !inlineLoadEnabled}
               onClick={() => onQuickLoad(item.packageId, item)}>Create Quick LOAD</button>}
@@ -183,7 +213,12 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
         </article>)}
       </div>}
       {Object.keys(catalogCursors).length > 0 && <button type="button" disabled={catalogMoreLoading || catalogState === 'loading'}
-        onClick={() => { const controller = new AbortController(); void loadCatalog(controller.signal, true); }}>
+        onClick={() => {
+          const controller = new AbortController();
+          catalogRequestRef.current?.abort();
+          catalogRequestRef.current = controller;
+          void loadCatalog(controller.signal, true);
+        }}>
         {catalogMoreLoading || catalogState === 'loading' ? 'Loading more…' : 'Load more scenarios'}
       </button>}
     </section>

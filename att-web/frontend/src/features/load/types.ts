@@ -23,6 +23,7 @@ export interface LoadCatalogItem {
   schedule: boolean;
   createQuickLoad: boolean;
   diagnostic?: string;
+  validatedEnvironment?: string;
 }
 
 export interface LoadCatalogPage {
