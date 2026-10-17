@@ -636,9 +636,9 @@ final class ServerRuntime implements AutoCloseable {
         Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         ObjectNode input=run.workerInput.deepCopy();
         // The request omits config when using the Server's shared runtime configuration.
-        // Persist its canonical reference in the immutable draft so scheduled RUNs can
-        // verify that the saved snapshot still targets the same configuration.
-        input.put("config","config/config.yaml");
+        // Persist its absolute canonical path so draft revision checks and scheduled RUNs
+        // keep resolving the same file outside the package root.
+        input.put("config",config.runtimeConfigPath.toString());
         if(input.path("rerunFailed").asBoolean(false))resolveFailedCases(input,principal,packageId);
         Map<String,Object> preview;DebugDraft resourceDebugDraft=null;String revision;
         if(run.resourceTarget) {
