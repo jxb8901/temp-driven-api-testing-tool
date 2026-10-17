@@ -8,7 +8,7 @@ import { RunPage } from './features/run/RunPage';
 import { ExplorerPage } from './features/explorer/ExplorerPage';
 import './features/explorer/explorer.css';
 import type { ExplorerPageProps, ResourceSourceReference } from './features/explorer/types';
-import { LoadPage } from './features/load/LoadPage';
+const LoadPage = lazy(() => import('./features/load/LoadPage').then(module => ({ default: module.LoadPage })));
 const JobsPage = lazy(() => import('./features/load/JobsPage').then(module => ({ default: module.JobsPage })));
 import type { LoadJobsApi, PackageOption } from './features/load/types';
 import { SettingsPage } from './SettingsPage';
@@ -33,6 +33,11 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
+  const [environments, setEnvironments] = useState<string[]>([]);
+  const [environmentState, setEnvironmentState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [environmentReload, setEnvironmentReload] = useState(0);
+  const selectedEnvironmentRef = useRef(workspace.selectedEnvironment);
+  selectedEnvironmentRef.current = workspace.selectedEnvironment;
   const onResourceRouteChange = useCallback((resource: ExplorerPageProps['resourceRoute']) => {
     navigation.navigate(resource
       ? { kind: 'package', packageId, resource }
@@ -51,14 +56,34 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
     onSchedule(input);
   }, [onSchedule]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    setEnvironmentState('loading');
+    api.getDeclaredConfiguration(packageId, controller.signal).then(configuration => {
+      if (controller.signal.aborted) return;
+      const names = (configuration.environments || []).filter(item => item.name && item.state === 'active').map(item => item.name);
+      setEnvironments(names);
+      setEnvironmentState('ready');
+      if (selectedEnvironmentRef.current && !names.includes(selectedEnvironmentRef.current)) {
+        workspace.onEnvironmentChange('');
+      }
+    }).catch(() => {
+      if (!controller.signal.aborted) { setEnvironments([]); setEnvironmentState('error'); }
+    });
+    return () => controller.abort();
+  }, [packageId, environmentReload, workspace.onEnvironmentChange]);
+
   return <ExplorerPage key={packageId}
     api={api}
     packageId={packageId}
     resourceRoute={resourceRoute}
     environment={workspace.selectedEnvironment}
+    environments={environments}
+    environmentState={environmentState}
     registerUnsavedChanges={navigation.registerUnsavedChanges}
     onResourceRouteChange={onResourceRouteChange}
     onEnvironmentChange={workspace.onEnvironmentChange}
+    onRetryEnvironments={() => setEnvironmentReload(value => value + 1)}
     onJobAccepted={onJobAccepted}
     onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
     onScheduleDebug={schedulingEnabled ? onScheduleDebug : undefined}
@@ -80,6 +105,7 @@ function LoadRouteView({ packageId, inlineLoadEnabled, schedulingEnabled, packag
   selectedEnvironment.current = workspace.selectedEnvironment;
   const [environments, setEnvironments] = useState<string[]>([]);
   const [environmentState, setEnvironmentState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [environmentReload, setEnvironmentReload] = useState(0);
   const onPackageChange = useCallback((nextPackageId: string) => {
     navigation.navigate({ kind: 'load', packageId: nextPackageId });
   }, [navigation.navigate]);
@@ -92,7 +118,7 @@ function LoadRouteView({ packageId, inlineLoadEnabled, schedulingEnabled, packag
     setEnvironmentState('loading');
     api.getDeclaredConfiguration(packageId, controller.signal).then(configuration => {
       if (controller.signal.aborted) return;
-      const names = (configuration.environments || []).map(profile => profile.name).filter(Boolean);
+      const names = (configuration.environments || []).filter(profile => profile.name && profile.state === 'active').map(profile => profile.name);
       setEnvironments(names);
       setEnvironmentState('ready');
       if (selectedEnvironment.current && !names.includes(selectedEnvironment.current)) {
@@ -105,22 +131,25 @@ function LoadRouteView({ packageId, inlineLoadEnabled, schedulingEnabled, packag
       }
     });
     return () => controller.abort();
-  }, [packageId, workspace.onEnvironmentChange]);
+  }, [packageId, environmentReload, workspace.onEnvironmentChange]);
 
-  return <LoadPage
-    api={loadJobsApi}
-    packages={packages}
-    selectedPackage={packageId}
-    selectedEnvironment={workspace.selectedEnvironment}
-    environments={environments}
-    environmentState={environmentState}
-    inlineLoadEnabled={inlineLoadEnabled}
-    schedulingEnabled={schedulingEnabled}
-    onPackageChange={onPackageChange}
-    onEnvironmentChange={workspace.onEnvironmentChange}
-    onJobAccepted={onJobAccepted}
-    onSchedule={onSchedule}
-  />;
+  return <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Load…</div>}>
+    <LoadPage
+      api={loadJobsApi}
+      packages={packages}
+      selectedPackage={packageId}
+      selectedEnvironment={workspace.selectedEnvironment}
+      environments={environments}
+      environmentState={environmentState}
+      inlineLoadEnabled={inlineLoadEnabled}
+      schedulingEnabled={schedulingEnabled}
+      onRetryEnvironments={() => setEnvironmentReload(value => value + 1)}
+      onPackageChange={onPackageChange}
+      onEnvironmentChange={workspace.onEnvironmentChange}
+      onJobAccepted={onJobAccepted}
+      onSchedule={onSchedule}
+    />
+  </Suspense>;
 }
 
 function ConfigurationRouteView({ route, packages }: {
@@ -176,6 +205,7 @@ function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSch
   const selectedEnvironment = route.environment ?? workspace.selectedEnvironment;
   const [environments, setEnvironments] = useState<string[]>([]);
   const [environmentState, setEnvironmentState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [environmentReload, setEnvironmentReload] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     api.getDeclaredConfiguration(route.packageId, controller.signal).then(configuration => {
@@ -184,7 +214,7 @@ function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSch
       setEnvironmentState('ready');
     }).catch(() => { if (!controller.signal.aborted) { setEnvironments([]); setEnvironmentState('error'); } });
     return () => controller.abort();
-  }, [route.packageId]);
+  }, [route.packageId, environmentReload]);
   const onEnvironmentChange = useCallback((environment: string) => {
     workspace.onEnvironmentChange(environment);
     navigation.navigate({ ...route, environment });
@@ -200,6 +230,7 @@ function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSch
     environmentState={environmentState}
     inlineLoadEnabled={inlineLoadEnabled}
     schedulingEnabled={schedulingEnabled}
+    onRetryEnvironments={() => setEnvironmentReload(value => value + 1)}
     onEnvironmentChange={onEnvironmentChange}
     onJobAccepted={onJobAccepted}
     onSchedule={onSchedule}

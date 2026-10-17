@@ -8,23 +8,40 @@ ATT 接受 att-load/v1.7 scenario。Scenario 有一個或多個 workload；每�
 
 ## 獨立 evidence 配額
 
-`att-load/v1.7` 新增有限的 success/failure 配額。沒有新欄位時，完整保留既有共用 `maxSamples` 行為，包括 `metrics`、`failures`、`samples` 及預設不設上限的 `all`。既有 v1.6 scenario 仍可載入，normalize 至 v1.7 時不會改變 evidence policy。
+`att-load/v1.7` 支援兩種配額模型。Legacy scenario 完全保留既有行為：明確 `maxSamples` 是整個 run 的單一合併上限；明確 `maxFailureSamples` 會啟用整次 run 共用的 success/failure 上限。兩者皆未設定時，亦保留既有 mode defaults，包括預設不設上限的 `all`。
+
+可選的 `evidence.quotaScope: perWorkload` 會啟用獨立模型。此為明確 opt-in，既有 scenario 不會被靜默重新解釋：
 
 ~~~yaml
 evidence:
-  mode: samples
+  quotaScope: perWorkload
   success: sample
   failure: full
-  sampleRate: 0.01
-  maxSuccessSamples: 500
-  maxFailureSamples: 2000
+  sampleRate: 0.1
+  defaults:
+    maxSuccessSamples: 10
+    maxFailureSamples: 20
+workloads:
+  - id: payment-api
+    target: {type: template, id: PAYMENT_INVOKE}
+    load: {users: 10, duration: 2m}
+  - id: mq-processing
+    target: {type: tool, id: sample.getAcDate}
+    load: {users: 5, duration: 2m}
+    evidence:
+      maxSuccessSamples: 5
+      maxFailureSamples: 30
 ~~~
 
-明確設定 `maxFailureSamples` 才會啟用獨立配額；兩個新欄位均為 0–1,000,000 的整數。Success 上限依次取 `maxSuccessSamples`、明確 `maxSamples`、或 **1,000**，即使 `mode: all` 亦同。`maxSuccessSamples` 必須配合 `maxFailureSamples`；同時提供 `maxSamples` 與 `maxSuccessSamples` 會被拒絕。保留 `maxSamples: 500` 再新增 `maxFailureSamples: 2000`，會把舊上限轉為 success-only 上限。0 表示不保留該類 evidence。`sampleRate` 只用於抽樣 PASS；FAIL/ERROR（包括操作層 TIMEOUT）直接使用 failure 配額。`failure: full` 受配額限制，不保證每個失敗都會保留。
+在此模式下，root `success`、`failure`、`sampleRate` 與 `resources` 仍是共用的 capture policy。`evidence.defaults` 提供每個 workload 預設的 `maxSuccessSamples` 與 `maxFailureSamples`；未設定的 default 為 **1,000**。`workloads[].evidence` 可覆寫任一 cap，且只接受這兩個 cap 欄位；只覆寫一項時，另一項繼承 default。Cap 為 0–1,000,000 的整數；0 表示該 workload 的該類別不保留 evidence。上例中，`payment-api` 為 10 success／20 failure，`mq-processing` 為 5 success／30 failure。
 
-共用的 run evidence store 分開計算 success/failure 已預留及已保留 slot，適用於多 workload 及兩種 scheduler。預選 success 後失敗的 iteration 會釋放 success slot，再申請 failure slot；未抽樣的失敗亦可申請 failure 容量。Success 用盡不會停止 failure log capture；failure 用盡不會停止 success sampling。Dropped／未開始 arrival 及未完成 iteration 不會建立一般 evidence。取消／拒絕 admission 或 workspace 缺失會釋放預留。Failure log 維持 65,536 字元 tail、強制 secret protection 及延後 resource formatting。
+Per-workload 模式不可與 root `maxSamples`、`maxSuccessSamples` 或 `maxFailureSamples` 混用；`evidence.defaults` 或任何 workload cap override 都必須配合 `quotaScope: perWorkload`。執行前，ATT 會驗證所有 effective success caps 的總和及所有 effective failure caps 的總和；任一總和不得超過 aggregate safety budget 1,000,000。這是 preflight allocation 上限，不是 runtime global allocator。
 
-`load-summary.json`／YAML、HTML report 及 Studio job result 會顯示有效 `evidence.policy`、`retainedSuccessCount`、`retainedFailureCount`、各類配額用盡旗標，以及因配額／缺失 evidence 而略過的計數。Failure 配額達上限時，report 與 Studio 會警告；aggregate metrics、thresholds 及 failure events 繼續完整統計。保留連結仍使用 `samples/`、`failures/`，並保留 EXEC.ID、case.log、case.yaml。Studio Evidence settings 會分別標示舊共用上限，獨立配額與 advanced JSON 同步。見[有界範例](../../../examples/load/independent-evidence.yaml)。
+每個 workload 各自擁有 cap。任一 workload 達到 success 或 failure cap，都不會預留其他 workload 的容量；未使用容量就是維持未使用。沒有 lending、borrowing、repayment、reclaiming、revocation 或由配額驅動的 artifact 刪除。只要 workload 自己的 cap 仍有空間，其第一個合格 success 或 failure 就會被接受，即使其他 workload 已全部額滿。保留的 evidence 在整個 run 內只增不減。取消、拒絕、PASS-to-FAIL 重新分類、dropped／未開始 arrival 或 evidence 缺失時，會釋放預留。Success 與 failure 容量互相獨立，一類用盡不會抑制另一類。
+
+`sampleRate` 只用於抽樣 PASS；FAIL/ERROR（包括操作層 TIMEOUT）直接使用 failure cap，不經抽樣。`failure: full` 受 effective failure cap 限制，不保證每個失敗都會保留。Failure log 維持 65,536 字元 tail、強制 secret protection 及延後 resource formatting。
+
+`load-summary.json`／YAML、HTML report 及 Studio job result 會顯示 resolved `evidence.policy`、aggregate retained counts、各類配額用盡旗標，以及因配額／缺失 evidence 而略過的計數。Per-workload coverage 包含 workload 與 target ID、effective `maxSuccessSamples` 與 `maxFailureSamples`、完成的 PASS iteration、因 sampling hash 而未選取的 PASS、已保留 sample、配額略過及缺失 evidence。任一或多個 failure 配額達上限時，report 與 Studio 會警告；aggregate metrics、thresholds 及 failure events 繼續完整統計。保留連結仍使用 `samples/`、`failures/`，並保留 EXEC.ID、case.log、case.yaml。Studio 會分開顯示 legacy／shared caps 與明確 per-workload scope、effective defaults 及 workload overrides，並與 advanced JSON 同步。見[per-workload 範例](../../../examples/load/independent-evidence.yaml)。
 
 
 ## 定義 Load scenario
@@ -166,7 +183,7 @@ Metrics-only iteration 雖有 `EXEC.ID`，但除非 operation 寫入 artifact �
 
 ## 選擇要保留的 iteration evidence
 
-`evidence.mode` 支援 `metrics`、`failures`、`samples`、`all`；預設為 `failures`。這些 mode 分別將 effective success/failure policy 預設為 `none/none`、`none/full`、`sample/full`、`full/full`。`evidence.success` 與 `evidence.failure` 可各自覆寫預設。`sampleRate` 與 `maxSamples` 限制保留 evidence。Dropped arrival 不建立 iteration evidence。
+`evidence.mode` 支援 `metrics`、`failures`、`samples`、`all`；預設為 `failures`。這些 mode 分別將 effective success/failure policy 預設為 `none/none`、`none/full`、`sample/full`、`full/full`。`evidence.success` 與 `evidence.failure` 可各自覆寫預設。`sampleRate` 與所選的 legacy／shared 或 per-workload caps 限制保留 evidence。Dropped arrival 不建立 iteration evidence。
 
 Case-log capture 依 effective success/failure policy 及剩餘 retention capacity 決定。Failure policy 為 `full` 且仍有 `maxSamples` slot 時，符合條件的 failure（包括 `samples` 中未被抽中的 success）會保留經 redaction 的 rolling log tail，上限為 65,536 個字符。ATT 只會在 failure 取得 retention slot 後 materialize failure log。Tail 被截斷時會加上 marker 標示較早事件已省略，並在末尾保留最新的 action 和 runtime failure details。容量耗盡後不再保留 failure log。Sampled success 和 full-success policy 會保留完整的 deferred log。例如 `mode: metrics, failure: full` 會在容量允許時進行有界 failure capture；`mode: failures, failure: none` 則會停用此功能。Implementation 和 storage 細節見 [Load scheduler design](../../system-design/load-scheduler.zh.md)。
 

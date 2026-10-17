@@ -20,7 +20,7 @@ describe('AppShell', () => {
     host = undefined;
   });
 
-  it('discards refilled inspection state on tab and back-forward restores', async () => {
+  it('invalidates refilled inspection state without remounting on tab and back-forward restores', async () => {
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     const navigation: RouteState = {
       route: { kind: 'package', packageId: 'payments' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
@@ -37,7 +37,8 @@ describe('AppShell', () => {
       const input = host.querySelector('input[aria-label="Inspection projection"]') as HTMLInputElement;
       input.value = 'prior account';
       act(() => (event === 'visibilitychange' ? document : window).dispatchEvent(new Event(event)));
-      expect((host.querySelector('input[aria-label="Inspection projection"]') as HTMLInputElement).value).toBe('fresh mount');
+      expect(host.querySelector('input[aria-label="Inspection projection"]')).toBe(input);
+      expect(input.value).toBe('prior account');
       expect(inspectionCache.getView('filters')).toEqual({ search: 'echo', pages: 3, scrollTop: 120 });
       expect(await inspectionCache.query('page', async () => 'current account')).toBe('current account');
       act(() => inspectionCache.clear());

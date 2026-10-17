@@ -193,6 +193,11 @@ class ServerWarUiIT {
             }
             assertTrue(entries.contains("att/server/ApiServlet.class"));
             assertTrue(entries.contains("att/server/api/ServerApi.class"));
+            assertTrue(entries.contains("att/metrics/InspectionMetrics.class"),
+                    "The combined Server jar must bundle the Inspector metrics classes the webapp instantiates");
+            assertTrue(entries.contains("att/metrics/InspectionMetrics$Stage.class"));
+            assertTrue(entries.contains("att/metrics/InspectionCacheKey.class"));
+            assertTrue(entries.contains("att/security/SecretProtection.class"));
             assertTrue(entries.contains("META-INF/resources/ui/index.html"));
             assertTrue(entries.stream().anyMatch(name -> name.matches("META-INF/resources/ui/assets/index-[^/]+\\.js")),
                     "The active Vite bundle must be packaged under Servlet static resources.");
@@ -202,6 +207,8 @@ class ServerWarUiIT {
             assertTrue(entries.contains("att-build.properties"));
             assertFalse(entries.contains("att/worker/WorkerMain.class"),
                     "Worker classes belong only in the Local runtime jar");
+            assertFalse(entries.stream().anyMatch(name -> name.startsWith("att/engine/") || name.startsWith("att/load/")),
+                    "Engine and Load runtime classes belong only in the Local runtime jar");
         }
     }
 

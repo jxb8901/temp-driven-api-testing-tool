@@ -15,6 +15,24 @@ import java.util.Map;
 final class JobStore implements AutoCloseable {
     private final String url;
     private final int scheduleHistoryLimit;
+    private static final String LOAD_SCHEDULE_PREFIX = "load-schedule:";
+    private static final String DEBUG_SCHEDULE_PREFIX = "debug-schedule:";
+
+    /** Returns the schedule id for a scheduled-job principal, or null for direct/other principals. */
+    private static String scheduledScheduleId(String principal) {
+        if (principal == null) return null;
+        if (principal.startsWith(LOAD_SCHEDULE_PREFIX) && principal.length() > LOAD_SCHEDULE_PREFIX.length())
+            return principal.substring(LOAD_SCHEDULE_PREFIX.length());
+        if (principal.startsWith(DEBUG_SCHEDULE_PREFIX) && principal.length() > DEBUG_SCHEDULE_PREFIX.length())
+            return principal.substring(DEBUG_SCHEDULE_PREFIX.length());
+        return null;
+    }
+
+    private boolean isLocalAdmin(String login) throws Exception {
+        Map<String,Object> user = login == null ? null : authUser(login);
+        return user != null && Boolean.TRUE.equals(user.get("active")) && "ADMIN".equals(user.get("role"));
+    }
+
     JobStore(ServerConfig config) throws Exception {
         Class.forName("org.h2.Driver");
         scheduleHistoryLimit=config.scheduling.maxExecutionsPerSchedule;
@@ -186,13 +204,24 @@ final class JobStore implements AutoCloseable {
     }
     synchronized List<Map<String,Object>> scheduleExecutions(String scheduleId,int limit) throws Exception {
         List<Map<String,Object>> out=new ArrayList<>();
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT occurrence_id,schedule_id,scheduled_for,status,reason,job_id,trigger_type,created_at FROM load_schedule_executions WHERE schedule_id=? ORDER BY scheduled_for DESC LIMIT ?")){
-            p.setString(1,scheduleId);p.setInt(2,limit);try(ResultSet r=p.executeQuery()){while(r.next()){Map<String,Object> row=new LinkedHashMap<>();row.put("occurrenceId",r.getString(1));row.put("scheduleId",r.getString(2));row.put("scheduledFor",r.getString(3));row.put("status",r.getString(4));row.put("reason",r.getString(5));row.put("jobId",r.getString(6));row.put("triggerType",r.getString(7));row.put("createdAt",r.getString(8));out.add(row);}}
+        String sql="SELECT e.occurrence_id,e.schedule_id,e.scheduled_for,e.status,e.reason,e.job_id,e.trigger_type,e.created_at,j.status "
+                +"FROM load_schedule_executions e LEFT JOIN jobs j ON j.job_id=e.job_id WHERE e.schedule_id=? ORDER BY e.scheduled_for DESC LIMIT ?";
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)){
+            p.setString(1,scheduleId);p.setInt(2,limit);
+            try(ResultSet r=p.executeQuery()){
+                while(r.next()){
+                    Map<String,Object> row=new LinkedHashMap<>();
+                    row.put("occurrenceId",r.getString(1));row.put("scheduleId",r.getString(2));row.put("scheduledFor",r.getString(3));
+                    row.put("status",r.getString(4));row.put("reason",r.getString(5));row.put("jobId",r.getString(6));
+                    row.put("triggerType",r.getString(7));row.put("createdAt",r.getString(8));row.put("jobStatus",r.getString(9));
+                    out.add(row);
+                }
+            }
         }return out;
     }
     synchronized Map<String,Object> scheduleExecution(String occurrenceId) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT occurrence_id,schedule_id,scheduled_for,status,reason,job_id,trigger_type,created_at FROM load_schedule_executions WHERE occurrence_id=?")){
-            p.setString(1,occurrenceId);try(ResultSet r=p.executeQuery()){if(!r.next())return null;Map<String,Object> row=new LinkedHashMap<>();row.put("occurrenceId",r.getString(1));row.put("scheduleId",r.getString(2));row.put("scheduledFor",r.getString(3));row.put("status",r.getString(4));row.put("reason",r.getString(5));row.put("jobId",r.getString(6));row.put("triggerType",r.getString(7));row.put("createdAt",r.getString(8));return row;}
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT e.occurrence_id,e.schedule_id,e.scheduled_for,e.status,e.reason,e.job_id,e.trigger_type,e.created_at,j.status FROM load_schedule_executions e LEFT JOIN jobs j ON j.job_id=e.job_id WHERE e.occurrence_id=?")){
+            p.setString(1,occurrenceId);try(ResultSet r=p.executeQuery()){if(!r.next())return null;Map<String,Object> row=new LinkedHashMap<>();row.put("occurrenceId",r.getString(1));row.put("scheduleId",r.getString(2));row.put("scheduledFor",r.getString(3));row.put("status",r.getString(4));row.put("reason",r.getString(5));row.put("jobId",r.getString(6));row.put("triggerType",r.getString(7));row.put("createdAt",r.getString(8));row.put("jobStatus",r.getString(9));return row;}
         }
     }
     synchronized int activeScheduledCount(String scheduleId) throws Exception {
@@ -252,11 +281,54 @@ final class JobStore implements AutoCloseable {
         List<Map<String,Object>> users=new ArrayList<>();try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT login_id,display_name,role,active,updated_at FROM auth_users ORDER BY login_id")){while(r.next()){Map<String,Object> u=new LinkedHashMap<>();u.put("loginId",r.getString(1));u.put("displayName",r.getString(2));u.put("role",r.getString(3));u.put("active",r.getBoolean(4));u.put("updatedAt",r.getString(5));users.add(u);}}return users;
     }
     synchronized long activeAdminCount() throws Exception {try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM auth_users WHERE role='ADMIN' AND active=TRUE")){r.next();return r.getLong(1);}}
-    boolean ownsJob(String id,String login) throws Exception {String owner;try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT principal FROM jobs WHERE job_id=?")){p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next())return false;owner=r.getString(1);}}if(login.equals(owner))return true;if(!owner.startsWith("load-schedule:"))return false;String scheduleId=owner.substring("load-schedule:".length());try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT schedule_json FROM load_schedules WHERE schedule_id=?")){p.setString(1,scheduleId);try(ResultSet r=p.executeQuery()){return r.next()&&login.equals(ServerRuntime.JSON.readValue(r.getString(1),LoadSchedule.class).createdBy);}}}
+    boolean ownsJob(String id,String login) throws Exception {
+        String owner;
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT principal FROM jobs WHERE job_id=?")) {
+            p.setString(1,id);
+            try(ResultSet r=p.executeQuery()) {
+                if(!r.next()) return false;
+                owner=r.getString(1);
+            }
+        }
+        if(login.equals(owner)) return true;
+        String scheduleId=scheduledScheduleId(owner);
+        if(scheduleId==null) return false;
+        // Schedule administration is ADMIN-only in local-auth mode, so any local
+        // ADMIN may read scheduled-job results even when another ADMIN created them.
+        if(isLocalAdmin(login)) return true;
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT schedule_json FROM load_schedules WHERE schedule_id=?")) {
+            p.setString(1,scheduleId);
+            try(ResultSet r=p.executeQuery()) {
+                return r.next()&&login.equals(ServerRuntime.JSON.readValue(r.getString(1),LoadSchedule.class).createdBy);
+            }
+        }
+    }
     synchronized List<Map<String,Object>> listOwned(int limit,String login) throws Exception {
-        List<String> scheduleOwners=new ArrayList<>();for(LoadSchedule schedule:schedules())if(login.equals(schedule.createdBy))scheduleOwners.add("load-schedule:"+schedule.id);
-        String ownerPredicate=scheduleOwners.isEmpty()?"":" OR principal IN ("+String.join(",",java.util.Collections.nCopies(scheduleOwners.size(),"?"))+")";
-        List<Map<String,Object>> out=new ArrayList<>();try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code FROM jobs WHERE principal=?"+ownerPredicate+" ORDER BY created_at DESC LIMIT ?")){int index=1;p.setString(index++,login);for(String owner:scheduleOwners)p.setString(index++,owner);p.setInt(index,limit);try(ResultSet r=p.executeQuery()){while(r.next()){Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));out.add(m);}}}return out;
+        boolean admin=isLocalAdmin(login);
+        List<String> schedulePrincipals=new ArrayList<>();
+        for(LoadSchedule schedule:schedules()) {
+            if(admin||login.equals(schedule.createdBy)) {
+                schedulePrincipals.add("load-schedule:"+schedule.id);
+                schedulePrincipals.add("debug-schedule:"+schedule.id);
+            }
+        }
+        String ownerPredicate=schedulePrincipals.isEmpty()?"":" OR principal IN ("+String.join(",",java.util.Collections.nCopies(schedulePrincipals.size(),"?"))+")";
+        List<Map<String,Object>> out=new ArrayList<>();
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code FROM jobs WHERE principal=?"+ownerPredicate+" ORDER BY created_at DESC LIMIT ?")) {
+            int index=1;p.setString(index++,login);
+            for(String owner:schedulePrincipals)p.setString(index++,owner);
+            p.setInt(index,limit);
+            try(ResultSet r=p.executeQuery()) {
+                while(r.next()) {
+                    Map<String,Object> m=new LinkedHashMap<>();
+                    m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));
+                    m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));
+                    m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));
+                    out.add(m);
+                }
+            }
+        }
+        return out;
     }
     synchronized void createAuthUser(String login,String display,String hash,String role,String csrf) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO auth_users(login_id,display_name,password_hash,role,active,updated_at,csrf_token) VALUES(?,?,?,?,TRUE,?,?)")){p.setString(1,login);p.setString(2,display);p.setString(3,hash);p.setString(4,role);p.setString(5,Instant.now().toString());p.setString(6,csrf);p.executeUpdate();}}
     void createBootstrapAdmin(String login,String display,String hash,String csrf) throws Exception {

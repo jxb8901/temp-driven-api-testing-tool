@@ -36,7 +36,7 @@ JOBS = [
         "packageId": "payments",
         "command": "run",
         "principal": "qa-smoke",
-        "status": "RUNNING",
+        "status": "PASS",
         "createdAt": "2026-10-13T09:42:00Z",
     },
     {
@@ -72,7 +72,8 @@ SCHEDULE = {
 }
 SCHEDULE_OCCURRENCES = [
     {"occurrenceId": "O-SKIPPED", "scheduleId": "SCHED-204", "scheduledFor": "2026-10-14T18:00:00Z", "triggerType": "scheduled", "status": "skipped", "reason": "schedule-overlap-limit"},
-    {"occurrenceId": "O-SUBMITTED", "scheduleId": "SCHED-204", "scheduledFor": "2026-10-13T18:00:00Z", "triggerType": "scheduled", "status": "submitted", "jobId": "JOB-4821"},
+    {"occurrenceId": "O-SUBMITTED", "scheduleId": "SCHED-204", "scheduledFor": "2026-10-13T18:00:00Z", "triggerType": "scheduled", "status": "submitted", "jobId": "JOB-4821", "jobStatus": "PASS"},
+    {"occurrenceId": "O-EXPIRED", "scheduleId": "SCHED-204", "scheduledFor": "2026-09-12T18:00:00Z", "triggerType": "scheduled", "status": "submitted", "jobId": "JOB-4477"},
 ]
 
 
@@ -157,7 +158,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(201, created)
                 return
             if resource.endswith("/trigger"):
-                occurrence = {"occurrenceId": "O-NOW", "scheduleId": resource.split("/")[1], "scheduledFor": "2026-10-14T10:00:00Z", "triggerType": "manual", "status": "submitted", "jobId": "JOB-4821"}
+                occurrence = {"occurrenceId": "O-NOW", "scheduleId": resource.split("/")[1], "scheduledFor": "2026-10-14T10:00:00Z", "triggerType": "manual", "status": "submitted", "jobId": "JOB-4821", "jobStatus": "QUEUED"}
                 self.server.schedule_occurrences.insert(0, occurrence)
                 self._json(202, occurrence)
                 return

@@ -134,7 +134,7 @@ async function main() {
     assert.equal(reconnected, true, 'EventSource should retry the stream after a connection ends');
 
     const tabs = [
-      ['Overview', 'Status'], ['Live logs', 'Live logs'], ['Events', 'Events'],
+      ['Overview', 'Status'], ['Live events', 'Live events'], ['Events', 'Events'],
       ['Results', 'Results'], ['Artifacts', 'Artifacts'], ['Metrics', 'Metrics'],
     ];
     for (const [name, content] of tabs) {

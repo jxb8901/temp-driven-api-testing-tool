@@ -27,6 +27,7 @@ public final class LoadWorkload {
     private final int maxConcurrent;
     private final String overloadPolicy;
     private final Map<String, Object> thresholds;
+    private final Map<String, Object> evidence;
     private final Map<String, Object> testdata;
     private final int sourceIndex;
     private final List<LoadMixEntry> mix;
@@ -72,12 +73,37 @@ public final class LoadWorkload {
                 thresholds, testdata, sourceIndex, Collections.<LoadMixEntry>emptyList());
     }
 
+    /** Workload with cap-only evidence overrides and no testdata/mix configuration. */
+    public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
+                        Map<String, Object> inputs, Map<String, Object> vars, LoadScenario.Model model, int users,
+                        double arrivalRatePerSecond, String arrivalRate, Duration warmup, Duration rampUp,
+                        Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
+                        int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds,
+                        Map<String, Object> evidence) {
+        this(id, targetType, targetId, targetArguments, inputs, vars, model, users, arrivalRatePerSecond,
+                arrivalRate, warmup, rampUp, duration, rampDown, thinkTimePolicy, maxConcurrent, overloadPolicy,
+                thresholds, evidence, Collections.<String, Object>emptyMap(), -1,
+                Collections.<LoadMixEntry>emptyList());
+    }
+
     public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
                         Map<String, Object> inputs, Map<String, Object> vars, LoadScenario.Model model, int users,
                         double arrivalRatePerSecond, String arrivalRate, Duration warmup, Duration rampUp,
                         Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
                         int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds,
                         Map<String, Object> testdata, int sourceIndex, List<LoadMixEntry> mix) {
+        this(id, targetType, targetId, targetArguments, inputs, vars, model, users, arrivalRatePerSecond,
+                arrivalRate, warmup, rampUp, duration, rampDown, thinkTimePolicy, maxConcurrent, overloadPolicy,
+                thresholds, Collections.<String, Object>emptyMap(), testdata, sourceIndex, mix);
+    }
+
+    public LoadWorkload(String id, String targetType, String targetId, Map<String, Object> targetArguments,
+                        Map<String, Object> inputs, Map<String, Object> vars, LoadScenario.Model model, int users,
+                        double arrivalRatePerSecond, String arrivalRate, Duration warmup, Duration rampUp,
+                        Duration duration, Duration rampDown, ThinkTimePolicy thinkTimePolicy,
+                        int maxConcurrent, String overloadPolicy, Map<String, Object> thresholds,
+                        Map<String, Object> evidence, Map<String, Object> testdata, int sourceIndex,
+                        List<LoadMixEntry> mix) {
         this.id = id;
         this.targetType = targetType;
         this.targetId = targetId;
@@ -96,6 +122,7 @@ public final class LoadWorkload {
         this.maxConcurrent = maxConcurrent;
         this.overloadPolicy = overloadPolicy;
         this.thresholds = immutable(thresholds);
+        this.evidence = immutable(evidence);
         this.testdata = immutable(testdata);
         this.sourceIndex = sourceIndex;
         this.mix = mix == null ? Collections.<LoadMixEntry>emptyList()
@@ -120,6 +147,8 @@ public final class LoadWorkload {
     public int maxConcurrent() { return maxConcurrent; }
     public String overloadPolicy() { return overloadPolicy; }
     public Map<String, Object> thresholds() { return thresholds; }
+    /** Cap-only per-workload evidence overrides from {@code workloads[].evidence}. */
+    public Map<String, Object> evidence() { return evidence; }
     public Map<String, Object> testdata() { return testdata; }
     /** Zero-based index in the source scenario, or -1 for in-memory promoted workloads. */
     public int sourceIndex() { return sourceIndex; }
@@ -130,7 +159,8 @@ public final class LoadWorkload {
         Map<String, Object> mergedVars = new LinkedHashMap<String, Object>(vars); mergedVars.putAll(entry.vars());
         return new LoadWorkload(id, entry.targetType(), entry.targetId(), entry.targetArguments(), mergedInputs,
                 mergedVars, model, users, arrivalRatePerSecond, arrivalRate, warmup, rampUp, duration, rampDown,
-                thinkTimePolicy, maxConcurrent, overloadPolicy, thresholds, testdata, sourceIndex);
+                thinkTimePolicy, maxConcurrent, overloadPolicy, thresholds, evidence, testdata, sourceIndex,
+                Collections.<LoadMixEntry>emptyList());
     }
 
     Map<String, Object> toMap(boolean includeExecutionData, boolean summary) {
@@ -170,6 +200,7 @@ public final class LoadWorkload {
             result.put("execution", execution);
         }
         if (!thresholds.isEmpty()) result.put("thresholds", thresholds);
+        if (!evidence.isEmpty()) result.put("evidence", evidence);
         return result;
     }
 

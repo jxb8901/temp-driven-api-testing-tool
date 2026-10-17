@@ -459,8 +459,10 @@ public final class LoadScenarioLoader {
             String policyFormat = rootExecution.containsKey("execIdFormat") ? string(rootExecution.get("execIdFormat"), "execution.execIdFormat") : "";
             try { LoadExecutionIdPattern.validate(policyFormat, parsePolicy("policy", rootLoad, workloadExecutionDefaults, rootThresholds).model()); }
             catch (IllegalArgumentException error) { throw failure("execution.execIdFormat", error.getMessage()); }
-            return new LoadScenario(source, String.valueOf(root.get("schemaVersion")), Collections.<LoadWorkload>emptyList(),
+            LoadScenario policyScenario = new LoadScenario(source, String.valueOf(root.get("schemaVersion")), Collections.<LoadWorkload>emptyList(),
                     policySeed, rootThresholds, policyEvidence, rootLoad, rootExecution, true, testdataDescriptors).withExecIdFormat(policyFormat);
+            validateEvidencePolicy(policyScenario, "evidence");
+            return policyScenario;
         }
         List<LoadWorkload> workloads = new ArrayList<LoadWorkload>();
         Set<String> ids = new HashSet<String>();
@@ -475,10 +477,11 @@ public final class LoadScenarioLoader {
             if (!ids.add(id)) throw failure(prefix + ".id", "duplicate workload id '" + id + "'");
             Map<String, Object> localThresholds = configMapOptional(map.get("thresholds"), prefix + ".thresholds");
             Map<String, Object> thresholds = localThresholds;
+            Map<String, Object> workloadEvidence = workloadEvidenceMap(map.get("evidence"), prefix + ".evidence");
             Map<String, Object> effective = new LinkedHashMap<String, Object>(map);
             effective.put("load", mergeMaps(rootLoad, configMapOptional(map.get("load"), prefix + ".load")));
             effective.put("execution", mergeMaps(workloadExecutionDefaults, configMapOptional(map.get("execution"), prefix + ".execution")));
-            LoadWorkload workload = parseWorkload(id, effective, prefix + ".", thresholds, sourceIsScenario ? i : -1, false);
+            LoadWorkload workload = parseWorkload(id, effective, prefix + ".", thresholds, sourceIsScenario ? i : -1, false, workloadEvidence);
             if (model == null) {
                 model = workload.model();
                 validateThresholds(model, rootThresholds, "thresholds");
@@ -501,9 +504,11 @@ public final class LoadScenarioLoader {
         String format = execution.containsKey("execIdFormat") ? string(execution.get("execIdFormat"), "execution.execIdFormat") : "";
         try { LoadExecutionIdPattern.validate(format, model); }
         catch (IllegalArgumentException error) { throw failure("execution.execIdFormat", error.getMessage()); }
-        return new LoadScenario(source, String.valueOf(root.get("schemaVersion")), workloads, seed, thresholds, evidence,
+        LoadScenario scenario = new LoadScenario(source, String.valueOf(root.get("schemaVersion")), workloads, seed, thresholds, evidence,
                 rootLoad, rootExecution, false, testdataDescriptors)
                 .withExecIdFormat(format);
+        validateEvidencePolicy(scenario, "evidence");
+        return scenario;
     }
 
     private LoadWorkload parsePolicy(String id, Map<String, Object> load, Map<String, Object> execution,
@@ -526,11 +531,17 @@ public final class LoadScenarioLoader {
 
     private LoadWorkload parseWorkload(String id, Map<String, Object> root, String prefix,
                                        Map<String, Object> thresholds, int sourceIndex) {
-        return parseWorkload(id, root, prefix, thresholds, sourceIndex, true);
+        return parseWorkload(id, root, prefix, thresholds, sourceIndex, true, Collections.<String, Object>emptyMap());
     }
 
     private LoadWorkload parseWorkload(String id, Map<String, Object> root, String prefix,
                                        Map<String, Object> thresholds, int sourceIndex, boolean validateThresholds) {
+        return parseWorkload(id, root, prefix, thresholds, sourceIndex, validateThresholds, Collections.<String, Object>emptyMap());
+    }
+
+    private LoadWorkload parseWorkload(String id, Map<String, Object> root, String prefix,
+                                       Map<String, Object> thresholds, int sourceIndex, boolean validateThresholds,
+                                       Map<String, Object> evidence) {
         List<LoadMixEntry> mix = new ArrayList<LoadMixEntry>();
         String type = null, targetId = null;
         Map<String, Object> arguments = Collections.emptyMap();
@@ -631,7 +642,7 @@ public final class LoadScenarioLoader {
         ThinkTimePolicy thinkTime = thinkTime(execution.get("thinkTime"), prefix + "execution.thinkTime");
         if (validateThresholds) validateThresholds(model, thresholds, prefix + "thresholds");
         return new LoadWorkload(id, type, targetId, arguments, inputs, vars, model, users, rate, rateText,
-                warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds, testdata, sourceIndex, mix);
+                warmup, rampUp, duration, rampDown, thinkTime, maxConcurrent, overload, thresholds, evidence, testdata, sourceIndex, mix);
     }
 
     private ThinkTimePolicy thinkTime(Object value, String field) {
@@ -793,6 +804,17 @@ public final class LoadScenarioLoader {
         try { LoadEvidencePolicy.validateQuotas(result); }
         catch(IllegalArgumentException invalid) { throw failure(field,invalid.getMessage()); }
         return result;
+    }
+    private static Map<String, Object> workloadEvidenceMap(Object value, String field) {
+        Map<String, Object> result = configMapOptional(value, field);
+        try { LoadEvidencePolicy.validateWorkloadEvidence(result, field); }
+        catch(IllegalArgumentException invalid) { throw failure(field, invalid.getMessage()); }
+        return result;
+    }
+    /** Resolves the effective policy once, before execution, so invalid or oversized caps fail preflight. */
+    private static void validateEvidencePolicy(LoadScenario scenario, String field) {
+        try { LoadEvidencePolicy.from(scenario); }
+        catch(IllegalArgumentException invalid) { throw failure(field, invalid.getMessage()); }
     }
     private static void removeDisabledKeys(Map<?, ?> value) {
         java.util.Iterator<?> keys = value.keySet().iterator();

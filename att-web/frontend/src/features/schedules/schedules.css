@@ -51,6 +51,12 @@
 .att-occurrence-table td { overflow-wrap: anywhere; }
 .att-occurrence-table code { font-size: 0.72rem; }
 .att-schedule-job-link { padding: 0; border: 0; background: transparent; color: var(--att-color-primary); cursor: pointer; font: inherit; font-weight: 700; text-decoration: underline; }
+.att-schedule-job-unavailable { color: var(--att-color-muted); font-size: 0.78rem; }
+.att-schedule-job-state { display: block; margin-top: 0.2rem; color: var(--att-color-muted); font-size: 0.74rem; font-weight: 700; }
+.att-schedule-job-state.is-enabled { color: var(--att-color-success); }
+.att-schedule-job-state.is-running { color: var(--att-color-primary); }
+.att-schedule-job-state.is-paused { color: var(--att-color-warning); }
+.att-schedule-job-state.is-failed { color: var(--att-color-danger); }
 .att-schedule-editor { scroll-margin-top: 90px; }
 .att-schedule-editor form { display: grid; gap: var(--att-space-4); }
 .att-schedule-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--att-space-4); }

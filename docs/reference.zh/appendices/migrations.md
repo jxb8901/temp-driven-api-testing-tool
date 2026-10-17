@@ -2,7 +2,7 @@
 
 ## Load 獨立 evidence 配額
 
-`evidence.maxFailureSamples` 及 `maxSuccessSamples` 須使用 `att-load/v1.7`。舊 scenario 沒有新欄位時，normalize 後仍保留共用上限。明確有限 failure cap 會啟用 split mode；success cap 預設 1,000，亦可用舊 `maxSamples` 作 migration alias，但不可同時提供 `maxSuccessSamples`。限制、並行 accounting 及配額警告見 [Load](../execution-modes/load.md#獨立-evidence-配額)。
+有限 Load evidence 配額須使用 `att-load/v1.7`。使用 `maxSamples`，或使用共用 `maxSuccessSamples`／`maxFailureSamples` 組合的 legacy scenario，均保留既有語義。Per-workload cap 必須明確設定 `evidence.quotaScope: perWorkload`。此模式下請設定 `evidence.defaults` 及可選的 cap-only `workloads[].evidence` override；不要加入 root `maxSamples`、`maxSuccessSamples` 或 `maxFailureSamples`。每個 workload 的 cap 互相獨立，不會出借、借用、收回容量，也不會因配額刪除已保留 artifact。限制、驗證及 reporting 見 [Load](../execution-modes/load.md#獨立-evidence-配額)。
 
 
 ## MQ request queue 路由

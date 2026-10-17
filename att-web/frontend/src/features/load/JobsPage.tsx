@@ -91,6 +91,11 @@ function EvidenceQuotaSummary({ payload }: { payload: JobResultResponse | null }
   const rawPolicy = evidence.policy;
   if (!rawPolicy || typeof rawPolicy !== 'object' || Array.isArray(rawPolicy)) return null;
   const policy = rawPolicy as Record<string, unknown>;
+  const workloadStats = evidence.workloads && typeof evidence.workloads === 'object' && !Array.isArray(evidence.workloads)
+    ? evidence.workloads as Record<string, Record<string, unknown>> : {};
+  const defaults = policy.defaults && typeof policy.defaults === 'object' && !Array.isArray(policy.defaults)
+    ? policy.defaults as Record<string, unknown> : {};
+  const perWorkload = policy.quotaMode === 'perWorkload';
   const labels: Record<string, string> = {
     maxSamples: 'Combined limit', maxSuccessSamples: 'Success limit', maxFailureSamples: 'Failure limit',
     retainedSuccessCount: 'Success samples retained', retainedFailureCount: 'Failure samples retained',
@@ -100,14 +105,34 @@ function EvidenceQuotaSummary({ payload }: { payload: JobResultResponse | null }
   };
   return <section aria-label="Retained evidence quotas">
     <h3>Retained evidence quotas</h3>
-    <p>{policy.quotaMode === 'independent' ? 'Independent success and failure quotas' : 'Legacy combined cap'}</p>
+    <p>{perWorkload ? 'Independent per-workload success and failure caps; unused capacity is never transferred or reclaimed.'
+      : policy.quotaMode === 'independent' ? 'Independent success and failure quotas shared across the run'
+        : 'Legacy combined cap'}</p>
     <dl>
+      {perWorkload && defaults.maxSuccessSamples != null && <div><dt>Default success cap</dt><dd>{displayValue(defaults.maxSuccessSamples)}</dd></div>}
+      {perWorkload && defaults.maxFailureSamples != null && <div><dt>Default failure cap</dt><dd>{displayValue(defaults.maxFailureSamples)}</dd></div>}
       {['maxSamples', 'maxSuccessSamples', 'maxFailureSamples'].filter(key => policy[key] != null)
         .map(key => <div key={key}><dt>{labels[key]}</dt><dd>{displayValue(policy[key])}</dd></div>)}
       {['retainedSuccessCount', 'retainedFailureCount', 'successQuotaExceeded', 'failureQuotaExceeded', 'skippedSuccessQuotaCount', 'skippedFailureQuotaCount', 'skippedMissingEvidenceCount']
         .filter(key => evidence[key] != null).map(key => <div key={key}><dt>{labels[key]}</dt><dd>{displayValue(evidence[key])}</dd></div>)}
     </dl>
     {typeof evidence.warning === 'string' && <p role="alert">{evidence.warning}</p>}
+    {Object.keys(workloadStats).length > 0 && <>
+      <h4>Evidence coverage by workload</h4>
+      <div className="att-table-scroll"><table><thead><tr><th>Workload</th><th>Target</th>{perWorkload && <><th>Success cap</th><th>Failure cap</th></>}<th>Eligible successes</th><th>Sampling ineligible</th><th>Success retained</th><th>Failure retained</th><th>Quota skips</th><th>Missing evidence</th></tr></thead>
+        <tbody>{Object.entries(workloadStats).map(([workload, stats]) => <tr key={workload}>
+          <th scope="row">{workload}</th>
+          <td>{displayValue(stats.targetId)}</td>
+          {perWorkload && <><td>{displayValue(stats.maxSuccessSamples)}</td><td>{displayValue(stats.maxFailureSamples)}</td></>}
+          <td>{displayValue(stats.eligibleSuccessCount)}</td>
+          <td>{displayValue(stats.samplingIneligibleSuccessCount)}</td>
+          <td>{displayValue(stats.retainedSuccessCount)}</td>
+          <td>{displayValue(stats.retainedFailureCount)}</td>
+          <td>Success: {displayValue(stats.skippedSuccessQuotaCount)} · Failure: {displayValue(stats.skippedFailureQuotaCount)}</td>
+          <td>{displayValue(stats.skippedMissingEvidenceCount)}</td>
+        </tr>)}</tbody>
+      </table></div>
+    </>}
   </section>;
 }
 

@@ -97,6 +97,9 @@
         "thresholds": {
           "$ref": "#/$defs/thresholds"
         },
+        "evidence": {
+          "$ref": "#/$defs/workloadEvidence"
+        },
         "mix": {
           "type": "array",
           "minItems": 1,
@@ -488,6 +491,14 @@
           "minimum": 0,
           "maximum": 1
         },
+        "quotaScope": {
+          "enum": [
+            "perWorkload"
+          ]
+        },
+        "defaults": {
+          "$ref": "#/$defs/perWorkloadCaps"
+        },
         "maxSamples": {
           "type": "integer",
           "minimum": 0
@@ -538,6 +549,46 @@
         {
           "if": {
             "required": [
+              "quotaScope"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "maxSamples"
+                  ]
+                },
+                {
+                  "required": [
+                    "maxSuccessSamples"
+                  ]
+                },
+                {
+                  "required": [
+                    "maxFailureSamples"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "defaults"
+            ]
+          },
+          "then": {
+            "required": [
+              "quotaScope"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
               "maxFailureSamples"
             ]
           },
@@ -550,6 +601,28 @@
           }
         }
       ]
+    },
+    "perWorkloadCaps": {
+      "type": "object",
+      "properties": {
+        "maxSuccessSamples": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "maxFailureSamples": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "workloadEvidence": {
+      "$ref": "#/$defs/perWorkloadCaps"
     },
     "mixEntry": {
       "type": "object",

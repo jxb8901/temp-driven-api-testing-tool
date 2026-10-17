@@ -16,7 +16,10 @@ const sampleSchedule: LoadSchedule = {
 const packages: AsyncState<PackageSummary[]> = { status: 'ready', data: [{ packageId: 'payments', name: 'Payments' }] };
 const occurrences: ScheduleOccurrence[] = [
   { occurrenceId: 'O-SKIPPED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-14T18:00:00Z', triggerType: 'scheduled', status: 'skipped', reason: 'schedule-overlap-limit' },
-  { occurrenceId: 'O-SUBMITTED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-13T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-204' },
+  { occurrenceId: 'O-SUBMITTED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-13T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-204', jobStatus: 'PASS' },
+  { occurrenceId: 'O-EXPIRED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-12T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-099', jobStatus: null },
+  { occurrenceId: 'O-FAILED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-11T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-207', jobStatus: 'FAIL' },
+  { occurrenceId: 'O-RUNNING', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-10T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-205', jobStatus: 'RUNNING' },
 ];
 
 if (!HTMLDialogElement.prototype.showModal) {
@@ -104,7 +107,32 @@ describe('ScheduledLoadPage', () => {
     expect(host.textContent).toContain('Skipped because this schedule already reached its concurrent-run limit.');
     await click([...host.querySelectorAll('.att-schedule-job-link')][0]);
     expect(onOpenJob).toHaveBeenCalledWith('JOB-204');
+    expect(host.textContent).toContain('JOB-099 · no longer available');
     expect(api.getLoadScheduleExecutions).toHaveBeenCalledWith(sampleSchedule.id, 100, expect.any(AbortSignal));
+  });
+
+  it('shows the job outcome next to the occurrence status and keeps expired jobs non-navigable', async () => {
+    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
+    await render(api);
+    await click(host.querySelector('[aria-label="History Nightly payments"]')!);
+    await advance(0);
+
+    const rowFor = (occurrenceId: string) => [...host.querySelectorAll('.att-occurrence-table tbody tr')]
+      .find(row => row.querySelector('code')?.textContent === occurrenceId)!;
+    const jobState = (occurrenceId: string) => rowFor(occurrenceId).querySelector('.att-schedule-job-state');
+
+    expect(rowFor('O-SUBMITTED').querySelector('.att-schedule-state')?.textContent).toBe('submitted');
+    expect(jobState('O-SUBMITTED')?.textContent).toBe('Job Passed');
+    expect(jobState('O-SUBMITTED')?.className).toContain('is-enabled');
+    expect(jobState('O-FAILED')?.textContent).toBe('Job Failed');
+    expect(jobState('O-FAILED')?.className).toContain('is-failed');
+    expect(jobState('O-RUNNING')?.textContent).toBe('Job Running');
+    expect(jobState('O-RUNNING')?.className).toContain('is-running');
+
+    const expired = rowFor('O-EXPIRED');
+    expect(expired.querySelector('.att-schedule-job-state')).toBeNull();
+    expect(expired.querySelector('button.att-schedule-job-link')).toBeNull();
+    expect(expired.querySelector('.att-schedule-job-unavailable')?.textContent).toContain('no longer available');
   });
 
   it('labels consumed one-time schedules as completed and filters them separately', async () => {
@@ -301,5 +329,55 @@ describe('ScheduledLoadPage', () => {
     await render(api);
     expect(host.textContent).toContain('Your account does not have the configured Schedules administrator role.');
     expect(host.querySelector('[role="status"]')).not.toBeNull();
+  });
+
+  it('refreshes an open History panel while a queued job is still active, then stops polling at its terminal state', async () => {
+    const queued: ScheduleOccurrence = { occurrenceId: 'O-QUEUED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-16T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-900', jobStatus: 'QUEUED' };
+    const getLoadScheduleExecutions = vi.fn()
+      .mockResolvedValueOnce({ items: [queued] })
+      .mockResolvedValue({ items: [{ ...queued, jobStatus: 'FAIL' }] });
+    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule] })), getLoadScheduleExecutions });
+    await render(api);
+
+    const jobState = () => host.querySelector('.att-schedule-job-state');
+    await click(host.querySelector('[aria-label="History Nightly payments"]')!);
+    await advance(0);
+    expect(jobState()?.textContent).toBe('Job Queued');
+    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(1);
+
+    // The active job keeps the panel current without the user reopening History.
+    await advance(5000);
+    expect(jobState()?.textContent).toBe('Job Failed');
+    expect(jobState()?.className).toContain('is-failed');
+    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(2);
+
+    // Once the occurrence is terminal the poll timer is cleared, so no further requests are issued.
+    await advance(20000);
+    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(2);
+  });
+
+  it('reloads History after Run Now even when the same schedule is already open', async () => {
+    let items: ScheduleOccurrence[] = occurrences;
+    const getLoadScheduleExecutions = vi.fn(async () => ({ items }));
+    const api = makeApi({
+      listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule] })),
+      getLoadScheduleExecutions,
+      triggerLoadSchedule: vi.fn(async () => ({ occurrenceId: 'O-NOW', scheduledFor: '2026-10-14T10:00:00Z', triggerType: 'manual', status: 'submitted', jobId: 'JOB-NOW', jobStatus: 'QUEUED' })),
+    });
+    await render(api);
+
+    await click(host.querySelector('[aria-label="History Nightly payments"]')!);
+    await advance(0);
+    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(1);
+    expect(host.textContent).not.toContain('O-NOW');
+
+    items = [{ occurrenceId: 'O-NOW', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-14T10:00:00Z', triggerType: 'manual', status: 'submitted', jobId: 'JOB-NOW', jobStatus: 'QUEUED' }, ...occurrences];
+    await click(host.querySelector('[aria-label="Run now Nightly payments"]')!);
+    await click([...host.querySelectorAll('.att-schedule-confirm button')].find(button => button.textContent === 'Confirm Run Now')!);
+    await advance(0);
+
+    expect(api.triggerLoadSchedule).toHaveBeenCalledWith(sampleSchedule.id);
+    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(2);
+    expect(host.textContent).toContain('O-NOW');
   });
 });

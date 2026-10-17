@@ -111,6 +111,10 @@ public final class LoadRunCoordinator implements AutoCloseable {
 
     public LoadRunResult run() throws Exception {
         resources.initializeExecutionNamespace(outputRoot.resolve("load").resolve(runId));
+        if (evidenceStore != null) {
+            for (LoadWorkload workload : scenario.workloads())
+                evidenceStore.registerWorkload(workload.id(), workload.targetId());
+        }
         final LoadSchedulerTiming timing = LoadSchedulerTiming.system();
         final long rateWindow = LoadPhase.totalMs(scenario);
         final LoadMetrics[] aggregateHolder = new LoadMetrics[1];
@@ -176,8 +180,11 @@ public final class LoadRunCoordinator implements AutoCloseable {
                 else ((FixedArrivalRateScheduler) scheduler).useSharedWorkers(sharedIterationWorkers);
                 schedulers.put(workload.id(), scheduler);
             }
-            for (Map.Entry<String, LoadScheduler> entry : schedulers.entrySet())
-                futures.put(entry.getKey(), coordinatorWorkers.submit(() -> entry.getValue().run()));
+            for (Map.Entry<String, LoadScheduler> entry : schedulers.entrySet()) {
+                final String workloadId = entry.getKey();
+                final LoadScheduler scheduler = entry.getValue();
+                futures.put(workloadId, coordinatorWorkers.submit(scheduler::run));
+            }
 
             startGate.awaitReady();
             final long startedAt = timing.now();

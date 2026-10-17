@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -123,6 +124,54 @@ class MultiWorkloadRuntimeTest {
         Path file = temp.resolve(name); Files.write(file, content.getBytes(StandardCharsets.UTF_8));
         return new LoadScenarioLoader(projectRoot()).load(file);
     }
+
+    @Test void coordinatedRunKeepsPerWorkloadSuccessCapsIndependent() throws Exception {
+        Path root = projectRoot();
+        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        LoadScenario scenario = load("evidence-per-workload.yaml",
+                "schemaVersion: att-load/v1.7\n"
+                + "evidence:\n"
+                + "  quotaScope: perWorkload\n"
+                + "  mode: samples\n"
+                + "  sampleRate: 1.0\n"
+                + "  defaults: {maxSuccessSamples: 2, maxFailureSamples: 8}\n"
+                + "workloads:\n"
+                + "- id: busy\n  target: {type: tool, id: sample.getAcDate}\n"
+                + "  load: {arrivalRate: 200/s, duration: 700ms, maxConcurrent: 12, overloadPolicy: drop}\n"
+                + "- id: slow\n  target: {type: tool, id: sample.getAcDate}\n"
+                + "  load: {arrivalRate: 2/s, duration: 700ms, maxConcurrent: 2, overloadPolicy: drop}\n");
+        LoadScenario first = scenario.forWorkload(scenario.workloads().get(0));
+        LoadTarget seedTarget = new LoadTargetResolver(root, config).resolve(first);
+        LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
+        try (LoadRunResources resources = new LoadRunResources(root, config)) {
+            IterationExecutor seed = new IterationExecutor(root, config, seedTarget, resources, temp.resolve("output"));
+            LoadRunCoordinator.runFrom(scenario, seed, "evidence-per-workload-run", evidence, temp.resolve("output"));
+        }
+
+        Map<String, Object> report = evidence.statistics();
+        Map<String, Object> busy = workload(report, "busy");
+        Map<String, Object> slow = workload(report, "slow");
+        assertEquals(2, busy.get("maxSuccessSamples"));
+        assertEquals(2, slow.get("maxSuccessSamples"));
+        assertEquals(2, busy.get("retainedSuccessCount"), "The busy workload stops at its own cap");
+        assertTrue(((Number) busy.get("eligibleSuccessCount")).longValue() > 2L);
+        assertTrue(((Number) busy.get("skippedSuccessQuotaCount")).longValue() > 0L);
+        assertTrue(((Number) slow.get("retainedSuccessCount")).intValue() >= 1,
+                "The slower workload keeps an independent allowance after the busy workload is full");
+        assertTrue(((Number) slow.get("retainedSuccessCount")).intValue() <= 2);
+        int retained = ((Number) busy.get("retainedSuccessCount")).intValue()
+                + ((Number) slow.get("retainedSuccessCount")).intValue();
+        assertEquals(retained, report.get("retainedSuccessCount"));
+        assertFalse(report.containsKey("borrowedSuccessCount"));
+        assertFalse(report.containsKey("revokedBorrowedSuccessCount"));
+        assertEquals(retained, evidence.events().size(), "Retained workload evidence is append-only");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> workload(Map<String, Object> report, String workloadId) {
+        return (Map<String, Object>) ((Map<String, Object>) report.get("workloads")).get(workloadId);
+    }
+
     private static Path projectRoot() { return Paths.get("").toAbsolutePath().normalize().resolve("packages/default"); }
     private static String message(Throwable value) {
         StringBuilder result = new StringBuilder();
