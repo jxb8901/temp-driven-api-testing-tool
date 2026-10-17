@@ -8,7 +8,7 @@ import { RunPage } from './features/run/RunPage';
 import { ExplorerPage } from './features/explorer/ExplorerPage';
 import './features/explorer/explorer.css';
 import type { ExplorerPageProps, ResourceSourceReference } from './features/explorer/types';
-import { LoadPage } from './features/load/LoadPage';
+const LoadPage = lazy(() => import('./features/load/LoadPage').then(module => ({ default: module.LoadPage })));
 const JobsPage = lazy(() => import('./features/load/JobsPage').then(module => ({ default: module.JobsPage })));
 import type { LoadJobsApi, PackageOption } from './features/load/types';
 import { SettingsPage } from './SettingsPage';
@@ -133,21 +133,23 @@ function LoadRouteView({ packageId, inlineLoadEnabled, schedulingEnabled, packag
     return () => controller.abort();
   }, [packageId, environmentReload, workspace.onEnvironmentChange]);
 
-  return <LoadPage
-    api={loadJobsApi}
-    packages={packages}
-    selectedPackage={packageId}
-    selectedEnvironment={workspace.selectedEnvironment}
-    environments={environments}
-    environmentState={environmentState}
-    inlineLoadEnabled={inlineLoadEnabled}
-    schedulingEnabled={schedulingEnabled}
-    onRetryEnvironments={() => setEnvironmentReload(value => value + 1)}
-    onPackageChange={onPackageChange}
-    onEnvironmentChange={workspace.onEnvironmentChange}
-    onJobAccepted={onJobAccepted}
-    onSchedule={onSchedule}
-  />;
+  return <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Load…</div>}>
+    <LoadPage
+      api={loadJobsApi}
+      packages={packages}
+      selectedPackage={packageId}
+      selectedEnvironment={workspace.selectedEnvironment}
+      environments={environments}
+      environmentState={environmentState}
+      inlineLoadEnabled={inlineLoadEnabled}
+      schedulingEnabled={schedulingEnabled}
+      onRetryEnvironments={() => setEnvironmentReload(value => value + 1)}
+      onPackageChange={onPackageChange}
+      onEnvironmentChange={workspace.onEnvironmentChange}
+      onJobAccepted={onJobAccepted}
+      onSchedule={onSchedule}
+    />
+  </Suspense>;
 }
 
 function ConfigurationRouteView({ route, packages }: {
