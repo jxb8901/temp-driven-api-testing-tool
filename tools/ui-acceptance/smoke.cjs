@@ -31,12 +31,13 @@ async function main() {
     assert.equal(dashboardPackageCount.trim(), '2',
       `the dashboard package total should load; API=${apiResponses.join(', ')}; page errors=${pageErrors.join(' | ')}`);
     await page.locator('#jobs-state').getByText(/recent job row/i).waitFor();
-    await page.getByText('payments', { exact: true }).first().waitFor();
     await page.getByText('JOB-4821', { exact: true }).waitFor();
     assert.equal(new URL(page.url()).pathname, '/att/ui/', 'the UI should retain its non-root path');
     await page.goto(`${base}#/packages`);
     await page.locator('.package-list li').first().waitFor();
     assert.equal(await page.locator('.package-list li').count(), 2, 'the Explorer package list should load');
+    assert.equal(await page.locator('.package-list li').filter({ hasText: 'payments' }).count(), 1,
+      'the Explorer list should include the payments Package');
 
     for (const [route, title, activeNav] of [
       ['#/packages', 'Explorer', 'explorer'],
