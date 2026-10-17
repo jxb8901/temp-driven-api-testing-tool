@@ -279,6 +279,7 @@ public final class PackageConfigurationInspector {
         } catch (ConfigurationLimitException exceeded) {
             throw exceeded;
         } catch (Exception invalid) {
+            if (Boolean.getBoolean("att.inspection.debugFailures")) invalid.printStackTrace(System.err);
             Map<String, Object> result = invalid("effective", safeEnvironment, "ATT-CONFIG-INVALID", "Selected configuration is unavailable or invalid");
             result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
             return result;

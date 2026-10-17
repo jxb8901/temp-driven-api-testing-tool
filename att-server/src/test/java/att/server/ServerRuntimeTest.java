@@ -406,6 +406,8 @@ class ServerRuntimeTest {
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{
             builder.environment().put("ORDERS_DB_USERNAME","inspection-test-user");builder.environment().put("ORDERS_DB_PASSWORD","inspection-test-password");
             builder.environment().put("PAYMENT_MQ_USERNAME","inspection-test-user");builder.environment().put("PAYMENT_MQ_PASSWORD","inspection-test-password");
+            builder.environment().put("JAVA_TOOL_OPTIONS","-Datt.inspection.debugFailures=true");
+            builder.redirectError(ProcessBuilder.Redirect.INHERIT);
             return builder.start();
         });
         try {
@@ -888,6 +890,8 @@ class ServerRuntimeTest {
             Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",allDraft.get("draftId"))),"alice","alice");
             Map<String,Object> allResult=awaitUnifiedJob(runtime,String.valueOf(accepted.get("jobId")));
             assertEquals("FAIL",((Map<?,?>)allResult.get("job")).get("status"),allResult.toString());
+            Path completedOutput=temp.resolve("unified-data").resolve("jobs").resolve(String.valueOf(accepted.get("jobId"))).resolve("output");
+            assertTrue(Files.isRegularFile(completedOutput.resolve("latest-run.yaml")),allResult+"; output="+listTree(completedOutput));
             var rerun=(com.fasterxml.jackson.databind.node.ObjectNode)all.deepCopy();rerun.set("selection",ServerRuntime.JSON.valueToTree(Map.of("rerunFailed",true)));
             Map<String,Object> failed=runtime.createRunDraft(rerun,"alice");assertEquals(List.of("cases.default.C2"),failed.get("selectedCaseIds"));
             Map<String,Object> stale=runtime.createRunDraft(selection,"alice");
@@ -934,6 +938,10 @@ class ServerRuntimeTest {
                 Path target=libs.resolve(candidate.getFileName());if(!Files.exists(target))try{Files.createSymbolicLink(target,candidate);}catch(Exception unsupported){Files.copy(candidate,target);}
             }
         }
+    }
+    private static List<String> listTree(Path root)throws Exception {
+        if(!Files.exists(root))return List.of("<missing>");
+        try(var files=Files.walk(root,4)){return files.map(root::relativize).collect(java.util.stream.Collectors.toList());}
     }
     private static final class MutableClock extends Clock {
         private Instant current=Instant.now();

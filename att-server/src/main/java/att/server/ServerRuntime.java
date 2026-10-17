@@ -1829,7 +1829,7 @@ final class ServerRuntime implements AutoCloseable {
         if(s.description!=null&&(s.description.length()>500||containsControl(s.description)))throw new IllegalArgumentException("description must be at most 500 characters without control characters");
         if(packageRoot(s.packageId)==null)throw new IllegalArgumentException("Unknown packageId");
         Path root=packageRoot(s.packageId);validatePackageRoot(root);
-        if(s.config!=null&&!("config/config.yaml".equals(s.config)||config.runtimeConfigPath.toString().equals(s.config)))
+        if(s.config!=null&&!s.config.isBlank()&&!("config/config.yaml".equals(s.config)||config.runtimeConfigPath.toString().equals(s.config)))
             throw new IllegalArgumentException("A schedule must use the shared runtime configuration");
         s.config="config/config.yaml";
         s.environment=s.environment==null||s.environment.isBlank()?null:safeText(s.environment,128,"environment");

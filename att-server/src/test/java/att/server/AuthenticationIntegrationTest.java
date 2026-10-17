@@ -348,7 +348,7 @@ class AuthenticationIntegrationTest {
             assertEquals("load",pathBasedStatus.path("command").asText(),"Disabling browser drafts must still admit the existing path-based Load API");
         } finally {inlineLoadDisabled.stop();inlineLoadDisabled.destroy();restore(old);}
 
-        Path openConfig=Files.writeString(temp.resolve("open-server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("open-data"))+"\n  authenticationRequired: false\n  authorization:\n    allowAnonymousOperations: true\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\n  inspection:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");System.setProperty("att.server.config",openConfig.toString());
+        Path openConfig=Files.writeString(temp.resolve("open-server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("open-data"))+"\n  authenticationRequired: false\n  authorization:\n    allowAnonymousOperations: true\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\n  inspection:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 3\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");System.setProperty("att.server.config",openConfig.toString());
         Tomcat open=start(users,appDirectory("anonymous"),true);
         String anonymousDraftToInvalidate=null;
         try {
