@@ -12,6 +12,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /** Loads and semantically validates current att-load/v1.7 descriptors and compatible historical scenarios. */
 public final class LoadScenarioLoader {
@@ -143,13 +145,17 @@ public final class LoadScenarioLoader {
         if (templateId == null || templateId.trim().isEmpty()) {
             source = projectRoot.resolve("load").resolve(filename).normalize();
         } else {
-            QuickLoadTemplate selected = null;
-            for (QuickLoadTemplate candidate : quickLoadTemplates().items) {
-                if (candidate.id.equals(templateId)) { selected = candidate; break; }
-            }
-            if (selected == null || !model.equals(selected.model))
+            Path relative = Paths.get(templateId.replace('\\','/')).normalize();
+            if (relative.isAbsolute() || relative.startsWith("..") || !relative.startsWith("load")
+                    || !(templateId.toLowerCase(java.util.Locale.ROOT).endsWith(".yaml")
+                    || templateId.toLowerCase(java.util.Locale.ROOT).endsWith(".yml")))
                 throw quickLoadFailure(null, "template", "The selected package Load template is unavailable or incompatible");
-            source = projectRoot.resolve(selected.id.replace('/', java.io.File.separatorChar)).normalize();
+            att.resource.PackageResourceResolver.PackageResource resource =
+                    new att.resource.PackageResourceResolver(projectRoot)
+                            .resolvePackageRelative(relative.toString(), att.resource.PackageResourceResolver.Kind.FILE);
+            if (!resource.logicalName().startsWith("load/"))
+                throw quickLoadFailure(null, "template", "The selected package Load template is unavailable or incompatible");
+            source = resource.canonicalPath();
         }
         Map<String, Object> policy;
         if (!Files.exists(source, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
@@ -192,20 +198,18 @@ public final class LoadScenarioLoader {
             }
             if (canonicalDirectory != null) {
                 List<Path> candidates = new ArrayList<Path>();
-                try (DirectoryStream<Path> entries = Files.newDirectoryStream(canonicalDirectory)) {
-                    int scanned = 0;
-                    for (Path candidate : entries) {
-                        if (scanned++ >= MAX_QUICK_LOAD_TEMPLATE_SCAN) { truncated = true; break; }
+                try (Stream<Path> paths = Files.walk(canonicalDirectory, 24)) {
+                    List<Path> scanned = paths.limit(MAX_QUICK_LOAD_TEMPLATE_SCAN + 1L)
+                            .collect(java.util.stream.Collectors.toList());
+                    if (scanned.size() > MAX_QUICK_LOAD_TEMPLATE_SCAN) truncated = true;
+                    for (Path candidate : scanned.subList(0, Math.min(scanned.size(), MAX_QUICK_LOAD_TEMPLATE_SCAN))) {
                         String name = candidate.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-                        if (!(name.endsWith(".yaml") || name.endsWith(".yml"))) continue;
-                        candidates.add(candidate);
+                        if (name.endsWith(".yaml") || name.endsWith(".yml")) candidates.add(candidate);
                     }
-                } catch (Exception unavailable) {
-                    candidates.clear();
-                }
+                } catch (Exception unavailable) { candidates.clear(); }
                 Collections.sort(candidates, new Comparator<Path>() {
                     @Override public int compare(Path left, Path right) {
-                        return left.getFileName().toString().compareTo(right.getFileName().toString());
+                        return left.toString().compareTo(right.toString());
                     }
                 });
                 if (candidates.size() > MAX_QUICK_LOAD_TEMPLATE_SCAN) {

@@ -291,24 +291,28 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   }, [editorOpen, view, editingId, history.status, loadState]);
 
   useEffect(() => {
-    if (!initialDraft?.draftId) return;
+    if (!initialDraft || (!initialDraft.draftId && !initialDraft.scenario)) return;
     const seeded = createScheduleDraft();
     seeded.executionType = initialDraft.executionType || 'load';
     seeded.legacyDebug = initialDraft.legacyDebug;
-    seeded.name = `Validated ${seeded.executionType === 'run' ? 'RUN' : 'LOAD'} snapshot`;
+    seeded.name = initialDraft.scenario ? `Schedule ${initialDraft.scenario.split('/').pop() || 'LOAD scenario'}`
+      : `Validated ${seeded.executionType === 'run' ? 'RUN' : 'LOAD'} snapshot`;
     seeded.packageId = initialDraft.packageId;
     seeded.environment = initialDraft.environment || '';
     seeded.debugTargetType = initialDraft.target?.type || '';
     seeded.debugTargetId = initialDraft.target?.id || '';
-    seeded.inlineSnapshot = true;
+    seeded.inlineSnapshot = Boolean(initialDraft.draftId);
     seeded.draftId = initialDraft.draftId;
+    seeded.scenario = initialDraft.scenario || '';
     setScenarioPreviewYaml(initialDraft.previewYaml || '');
     setDraft(seeded);
     setBaseline(JSON.stringify(seeded));
     setEditingId('');
     setEditingNextRunAt(undefined);
     setMutationError('');
-    setNotice(`Schedule form loaded from the validated ${seeded.executionType === 'run' ? 'RUN' : 'LOAD'} draft. Choose a recurrence and review the Server next-run preview.`);
+    setNotice(initialDraft.scenario
+      ? 'Schedule form loaded with the selected package scenario. Choose a recurrence; the Server validates the file before saving and before each run.'
+      : `Schedule form loaded from the validated ${seeded.executionType === 'run' ? 'RUN' : 'LOAD'} draft. Choose a recurrence and review the Server next-run preview.`);
     onInitialDraftConsumed?.();
   }, [initialDraft, onInitialDraftConsumed]);
 

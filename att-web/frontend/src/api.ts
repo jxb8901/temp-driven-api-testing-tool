@@ -7,7 +7,7 @@ import type {
 import type {
   JobAccepted as LoadJobAccepted, JobArtifact, JobEventHandlers, JobResultResponse,
   JobSummary as LoadJobSummary, JobView, LoadDraftInput, LoadDraftResponse, LoadModel,
-  LoadPolicyResponse, LoadTargetType, QuickLoadFormResponse, SubmitLoadDraftInput, TargetResource,
+  LoadPolicyResponse, LoadTargetType, QuickLoadFormResponse, SubmitLoadDraftInput, TargetResource, LoadCatalogPage,
 } from './features/load/types';
 import type { RunDefinition } from './features/run/RunPage';
 import { contextRelativeReturnTo } from './contextPaths';
@@ -43,6 +43,7 @@ function isInspectionQuery(path: string, init: RequestInit): boolean {
   const [route, query] = path.split('?');
   if (new URLSearchParams(query).has('includeAllFields')) return false;
   return /^packages\/[^/]+\/resources(?:\/[^/]+\/[^/]+(?:\/(?:source|source-file))?)?$/.test(route)
+    || /^packages\/[^/]+\/load-catalog(?:\/source)?$/.test(route)
     || /^packages\/[^/]+\/configuration(?:\/(?:effective|compare|files|source))?$/.test(route);
 }
 let capabilitiesFlight: { epoch: number; promise: Promise<void> } | undefined;
@@ -226,6 +227,25 @@ export const api = {
   },
   getJobs(signal?: AbortSignal): Promise<ApiEnvelope<JobSummary>> {
     return request<ApiEnvelope<JobSummary>>('jobs', { signal });
+  },
+  listLoadJobs(input: { offset?: number; limit?: number; signal?: AbortSignal } = {}) {
+    return request<{ items: JobSummary[]; nextOffset?: number | null }>('jobs' + queryString({ executionType: 'load', offset: input.offset, limit: input.limit }), { signal: input.signal });
+  },
+  async listLoadCatalog(packageId: string, input: { query?: string; cursor?: string; limit?: number } = {}, signal?: AbortSignal): Promise<LoadCatalogPage> {
+    const response = await request<Omit<LoadCatalogPage, 'items'> & { items: Array<Omit<LoadCatalogPage['items'][number], 'packageId'>> }>(
+      'packages/' + encodeURIComponent(packageId) + '/load-catalog' + queryString(input), { signal });
+    return { ...response, items: (response.items || []).map(item => ({ ...item, packageId })) };
+  },
+  validateLoadCatalogScenario(packageId: string, resourceId: string, environment?: string, signal?: AbortSignal) {
+    return request<{ validation: string; model?: 'virtualUsers' | 'arrivalRate'; previewYaml?: string }>(
+      'packages/' + encodeURIComponent(packageId) + '/load-catalog/validate' + queryString({ resourceId, environment }), { signal });
+  },
+  getLoadSource(packageId: string, resourceId: string, signal?: AbortSignal) {
+    return request<{ available: boolean; logicalPath?: string; text?: string; redacted?: boolean; reason?: string }>(
+      'packages/' + encodeURIComponent(packageId) + '/load-catalog/source' + queryString({ resourceId }), { signal });
+  },
+  submitLoadScenario(input: { packageId: string; scenario: string; environment?: string }): Promise<LoadJobAccepted> {
+    return postJson<LoadJobAccepted>('jobs/load', input);
   },
   getLoadPolicy(packageId: string, model: LoadModel, environment?: string, signal?: AbortSignal, templateId?: string): Promise<LoadPolicyResponse> {
     return request<LoadPolicyResponse>('packages/' + encodeURIComponent(packageId) + '/load-policy' + queryString({ model, environment, templateId }), { signal });

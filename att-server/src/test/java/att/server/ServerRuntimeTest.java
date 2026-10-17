@@ -25,6 +25,25 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerRuntimeTest {
     @TempDir Path temp;
 
+    @Test void loadInspectionConfigurationDiagnosticsKeepSafeActionableFields() throws Exception {
+        Path packageRoot=Files.createDirectories(temp.resolve("package/config"));
+        Path absoluteConfig=packageRoot.resolve("config.yaml");
+        Map<String,Object> raw=Map.of("code","ATT-CFG-001","summary","Required environment value is missing",
+                "detail","Supply the variable to the Tomcat process","field","dbhelpers.orders.url",
+                "file",absoluteConfig.toString(),"suggestion","Configure ORDERS_DB_URL in Tomcat.","environmentValue","do-not-return");
+
+        List<Map<String,Object>> diagnostics=ServerRuntime.safeInspectionDiagnostics(List.of(raw),packageRoot);
+        assertEquals(1,diagnostics.size());
+        assertEquals("ATT-CFG-001",diagnostics.get(0).get("code"));
+        assertEquals("Supply the variable to the Tomcat process",diagnostics.get(0).get("detail"));
+        assertEquals("dbhelpers.orders.url",diagnostics.get(0).get("field"));
+        assertEquals("Configure ORDERS_DB_URL in Tomcat.",diagnostics.get(0).get("suggestion"));
+        assertEquals("config.yaml",diagnostics.get(0).get("file"));
+        assertFalse(diagnostics.toString().contains("do-not-return"));
+        ServerRuntime.InspectionConfigurationException failure=new ServerRuntime.InspectionConfigurationException(diagnostics);
+        assertEquals("Required environment value is missing",failure.summary());
+    }
+
     @Test void enforcesAggregateInlineLoadCapsWithoutOverflow() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("inline-limits-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
         Path configFile=temp.resolve("inline-limits-server.yaml");Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
@@ -125,6 +144,24 @@ class ServerRuntimeTest {
         ServerRuntime setupRuntime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
         String scheduleId,debugScheduleId;
         try {
+            Map<String,Object> catalog=setupRuntime.inspectLoadCatalog("p",null,10,null,"alice");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> catalogItems=(List<Map<String,Object>>)catalog.get("items");
+            Map<String,Object> discovered=catalogItems.stream().filter(item->"load/scenario.yaml".equals(item.get("path"))).findFirst().orElseThrow();
+            assertEquals("unverified",discovered.get("validation"),"Catalog discovery should not resolve targets for every environment.");
+            Map<String,Object> environmentValidation=setupRuntime.validateLoadCatalogScenario("p","load/scenario.yaml","SIT","alice");
+            assertEquals("valid",environmentValidation.get("validation"));assertEquals("virtualUsers",environmentValidation.get("model"));
+            assertThrows(Exception.class,()->setupRuntime.validateLoadCatalogScenario("p","load/bad.yaml","SIT","alice"));
+            Map<String,Object> runNow=setupRuntime.submit("load",ServerRuntime.JSON.readTree(
+                    "{\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"environment\":\"SIT\"}"),"alice");
+            String runNowId=String.valueOf(runNow.get("jobId"));
+            long runNowDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);Map<String,Object> runNowRecord=setupRuntime.jobRecord(runNowId);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(runNowRecord.get("status"))&&System.nanoTime()<runNowDeadline) {
+                Thread.sleep(20);runNowRecord=setupRuntime.jobRecord(runNowId);
+            }
+            assertEquals("PASS",runNowRecord.get("status"));
+            Map<String,Object> runNowSummary=setupRuntime.loadJobsFor("alice",0,10).get(0);
+            assertEquals("load/scenario.yaml",runNowSummary.get("scenario"));assertEquals("SIT",runNowSummary.get("environment"));
+
             Map<String,Object> sensitiveWorkload=new java.util.LinkedHashMap<>();
             sensitiveWorkload.put("id","sensitive-snapshot");
             sensitiveWorkload.put("target",Map.of("type","template","id","SCHEDULED"));

@@ -193,7 +193,12 @@ final class ServerRuntime implements AutoCloseable {
             id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
             jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
             JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob);
-            Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;String summary=JSON.writeValueAsString(Map.of("command",command,"packageId",packageId));
+            Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
+            Map<String,Object> summaryFields=new LinkedHashMap<>();summaryFields.put("command",command);summaryFields.put("packageId",packageId);
+            if(request.scenario!=null)summaryFields.put("scenario",request.scenario);
+            if(request.environment!=null&&!request.environment.isBlank())summaryFields.put("environment",request.environment);
+            if(request.loadModel!=null)summaryFields.put("model",request.loadModel);
+            String summary=JSON.writeValueAsString(summaryFields);
             store.insert(job,summary);persisted=true;jobs.put(id,job);append(job,"status",Map.of("jobId",id,"status","QUEUED"));
             FutureTask<Void> task=new FutureTask<>(()->{execute(job,activeJobPath,lease);return null;});tasks.put(id,task);leases.put(id,lease);
             job.admittedNanos=System.nanoTime();
@@ -278,6 +283,12 @@ final class ServerRuntime implements AutoCloseable {
         if("local".equals(config.authMode)){List<Map<String,Object>> owned=store.listOwned(100,principal);if(search==null||search.isBlank())return owned;String q=search.toLowerCase(java.util.Locale.ROOT);return owned.stream().filter(row->String.valueOf(row.get("principal")).toLowerCase(java.util.Locale.ROOT).contains(q)).toList();}
         return store.list(100,search);
     }
+    List<Map<String,Object>> loadJobsFor(String principal,int offset,int limit) throws Exception {
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        if(offset<0||offset>1000000||limit<1||limit>100)throw new IllegalArgumentException("Load job pagination is invalid");
+        int fetch=limit==Integer.MAX_VALUE?limit:limit+1;
+        return "local".equals(config.authMode)?store.listOwnedLoad(fetch,offset,principal):store.listLoad(fetch,offset);
+    }
     Job job(String id){if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Job j=jobs.get(id);if(j==null)throw new NotFoundException();return j;}
     Map<String,Object> jobRecord(String id) throws Exception {
         if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
@@ -359,6 +370,54 @@ final class ServerRuntime implements AutoCloseable {
             if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,normalizedSort,normalizedDirection,((Number)next).intValue(),(String)revision,principal));
             else result.put("nextCursor",null);
         }
+        return result;
+    }
+    Map<String,Object> inspectLoadCatalog(String packageId,String query,int requestedLimit,String cursor,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String normalizedQuery=query==null?"":query.trim();
+        if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
+        int limit=requestedLimit==0?50:requestedLimit;if(limit<1||limit>100)throw new IllegalArgumentException("limit must be between 1 and 100");
+        Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,"load",normalizedQuery,"name","asc",principal);
+        WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-catalog";
+        request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
+        request.expectedRevisionDigest=prior==null?null:prior.revision;
+        Map<String,Object> result=executeInspection(root,request);
+        Object rawItems=result.get("items");
+        if(rawItems instanceof List)for(Object rawItem:(List<?>)rawItems)if(rawItem instanceof Map) {
+            @SuppressWarnings("unchecked") Map<String,Object> item=(Map<String,Object>)rawItem;
+            boolean scenario="scenario".equals(item.get("kind"));
+            boolean template="template".equals(item.get("kind"));
+            item.put("runNow",scenario);
+            item.put("schedule",scenario&&config.scheduling.enabled);
+            item.put("createQuickLoad",template&&config.inlineLoad.enabled&&Boolean.TRUE.equals(item.get("createQuickLoad")));
+        }
+        Object revision=result.remove("revisionDigest");Object next=result.remove("nextOffset");
+        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision)));
+        if(next instanceof Number&&revision instanceof String)
+            result.put("nextCursor",encodeCursor(packageId,"load",normalizedQuery,"name","asc",((Number)next).intValue(),(String)revision,principal));
+        else result.put("nextCursor",null);
+        return result;
+    }
+    Map<String,Object> inspectLoadSource(String packageId,String resourceId,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-source";request.inspectionPath=resourceId;
+        return executeInspection(root,request);
+    }
+    Map<String,Object> validateLoadCatalogScenario(String packageId,String resourceId,String environment,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
+        WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionAction="load-scenario";request.inspectionPath=resourceId;
+        Map<String,Object> result=executeInspection(root,request);
+        result.remove("normalizedScenario");result.remove("revisionDigest");result.remove("containsSensitiveValues");
+        result.put("validation","valid");
         return result;
     }
     Map<String,Object> inspectDebugForm(String packageId,String type,String resourceId,String environment,String principal) throws Exception {
@@ -1055,6 +1114,14 @@ final class ServerRuntime implements AutoCloseable {
         String workerError=(String)envelope.get("errorCode");
         if("ATT-RESOURCE-NOT-FOUND".equals(workerError))throw new NotFoundException();
         if("ATT-RESOURCE-CURSOR-STALE".equals(workerError))throw new StaleCursorException();
+        if(List.of("load-catalog","load-source").contains(request.inspectionAction)) {
+            Object rawDiagnostics=envelope.get("diagnostics");
+            List<Map<String,Object>> diagnostics=rawDiagnostics instanceof List
+                    ?safeInspectionDiagnostics((List<?>)rawDiagnostics,root):List.of();
+            if("ATT-CFG-001".equals(workerError)||diagnostics.stream().anyMatch(item -> "ATT-CFG-001".equals(item.get("code"))))
+                throw new InspectionConfigurationException(diagnostics.isEmpty()
+                        ?safeInspectionDiagnostics(List.of(),root):diagnostics);
+        }
         boolean draftInspection="run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                 ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction);
@@ -1104,6 +1171,23 @@ final class ServerRuntime implements AutoCloseable {
         JsonNode safe=projectInspectionPaths(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),root,"");
         @SuppressWarnings("unchecked") Map<String,Object> result=JSON.convertValue(safe,Map.class);
         return result;
+    }
+    static List<Map<String,Object>> safeInspectionDiagnostics(List<?> rawDiagnostics,Path root) {
+        List<Map<String,Object>> diagnostics=new ArrayList<>();
+        for(Object raw:rawDiagnostics)if(raw instanceof Map) {
+            @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
+            Map<String,Object> safe=new LinkedHashMap<>();
+            for(String key:List.of("code","summary","detail","field","file","suggestion")) {
+                Object item=value.get(key);
+                if(item instanceof String) {
+                    String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
+                    safe.put(key,att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,root));
+                }
+            }
+            if(!safe.isEmpty())diagnostics.add(safe);
+        }
+        if(diagnostics.isEmpty())diagnostics.add(Map.of("code","ATT-CFG-001","summary","Package configuration is invalid or incomplete."));
+        return diagnostics;
     }
     private JsonNode projectInspectionPaths(JsonNode value,Path root,String field) {
         if(value.isTextual() && "$attDebugKeepDefault".equals(field))return value;
@@ -1941,6 +2025,11 @@ final class ServerRuntime implements AutoCloseable {
     static final class NotFoundException extends RuntimeException {}
     static final class ScheduleConflictException extends RuntimeException {}
     static final class InspectionCapacityException extends RuntimeException {}
+    static final class InspectionConfigurationException extends RuntimeException {
+        final List<Map<String,Object>> diagnostics;
+        InspectionConfigurationException(List<Map<String,Object>> diagnostics){this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));}
+        String summary(){Object summary=diagnostics.get(0).get("summary");return summary instanceof String?(String)summary:"Package configuration is invalid or incomplete.";}
+    }
     static final class InspectionTimeoutException extends RuntimeException {}
     static final class InspectionResponseTooLargeException extends RuntimeException {}
     static final class StaleCursorException extends RuntimeException {}

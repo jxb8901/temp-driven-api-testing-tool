@@ -9,7 +9,10 @@ import './load.css';
 interface QuickLoadPageProps {
   api: LoadJobsApi;
   packageId: string;
-  target: { type: string; resourceId: string };
+  target?: { type: string; resourceId: string };
+  initialTemplateId?: string;
+  initialModel?: LoadModel;
+  backLabel?: string;
   environment: string;
   environments: string[];
   environmentState: 'loading' | 'ready' | 'error';
@@ -18,7 +21,7 @@ interface QuickLoadPageProps {
   onRetryEnvironments?: () => void;
   onEnvironmentChange(environment: string): void;
   onJobAccepted(jobId: string): void;
-  onSchedule?(input: { packageId: string; environment?: string; draftId: string; previewYaml?: string }): void;
+  onSchedule?(input: { packageId: string; environment?: string; draftId?: string; previewYaml?: string; scenario?: string }): void;
   onCancel(): void;
   registerUnsavedChanges(isDirty: boolean, description?: string): () => void;
 }
@@ -90,10 +93,14 @@ function makeScenario(policy: JsonObject, model: LoadModel, id: string, targetTy
   return scenario;
 }
 
-export function QuickLoadPage({ api, packageId, target, environment, environments, environmentState, inlineLoadEnabled, schedulingEnabled = false, onEnvironmentChange, onJobAccepted, onSchedule, onCancel, onRetryEnvironments, registerUnsavedChanges }: QuickLoadPageProps) {
-  const targetType = validTarget(target.type) ? target.type : null;
-  const [model, setModel] = useState<LoadModel>('virtualUsers');
-  const [templateId, setTemplateId] = useState('');
+export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', initialModel = 'virtualUsers', backLabel, environment, environments, environmentState, inlineLoadEnabled, schedulingEnabled = false, onEnvironmentChange, onJobAccepted, onSchedule, onCancel, onRetryEnvironments, registerUnsavedChanges }: QuickLoadPageProps) {
+  const [selectedTarget, setSelectedTarget] = useState<{ type: LoadTargetType; resourceId: string } | null>(target && validTarget(target.type) ? { type: target.type, resourceId: target.resourceId } : null);
+  const activeTarget = target ?? selectedTarget;
+  const targetType = activeTarget && validTarget(activeTarget.type) ? activeTarget.type : null;
+  const [targetOptions, setTargetOptions] = useState<Array<{ type: LoadTargetType; logicalId: string; state: string }>>([]);
+  const [targetListState, setTargetListState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [model, setModel] = useState<LoadModel>(initialModel);
+  const [templateId, setTemplateId] = useState(initialTemplateId);
   const [preset, setPreset] = useState('package-policy');
   const [policy, setPolicy] = useState<JsonObject | null>(null);
   const [templates, setTemplates] = useState<LoadPolicyTemplate[]>([]);
@@ -119,7 +126,7 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   const [logicalTargetId, setLogicalTargetId] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [resetKey, setResetKey] = useState(0);
-  const identityKey = `${packageId}:${target.type}:${target.resourceId}`;
+  const identityKey = activeTarget ? `${packageId}:${activeTarget.type}:${activeTarget.resourceId}` : `${packageId}:select-target`;
   const availableTemplates = templates;
   const previousIdentity = useRef(identityKey);
   const dirtyRef = useRef(false);
@@ -141,6 +148,16 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   const scenarioFingerprintRef = useRef(scenarioFingerprint);
   scenarioFingerprintRef.current = scenarioFingerprint;
   const [validatedFingerprint, setValidatedFingerprint] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (target || !inlineLoadEnabled) return;
+    const controller = new AbortController(); setTargetListState('loading');
+    Promise.all((['template', 'flow', 'tool'] as const).map(async type =>
+      (await api.listTargets(packageId, type, controller.signal)).map(item => ({ ...item, type }))))
+      .then(groups => { if (!controller.signal.aborted) { setTargetOptions(groups.flat()); setTargetListState('ready'); } })
+      .catch(() => { if (!controller.signal.aborted) { setTargetOptions([]); setTargetListState('error'); } });
+    return () => controller.abort();
+  }, [api, packageId, target, inlineLoadEnabled]);
 
   function invalidateDraft() {
     validationSequence.current++;
@@ -192,7 +209,8 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   useEffect(() => {
     if (!packageId || !targetType || !inlineLoadEnabled) return;
     const controller = new AbortController(); const request = ++sidecarSequence.current;
-    api.getTargetLoadForm(packageId, targetType, target.resourceId, model, environment || undefined, controller.signal).then(form => {
+    if (!activeTarget) return () => controller.abort();
+    api.getTargetLoadForm(packageId, targetType, activeTarget.resourceId, model, environment || undefined, controller.signal).then(form => {
       if (controller.signal.aborted || request !== sidecarSequence.current) return;
       const resolvedId = typeof form.target?.id === 'string' ? form.target.id : '';
       if (!resolvedId) throw new Error('The Server did not return a logical target ID.');
@@ -204,7 +222,7 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
       setMessage(form.redacted ? 'Safe target defaults loaded. Sensitive values remain protected by the Server.' : 'Target defaults loaded from the package debug sidecar.');
     }).catch(() => { if (!controller.signal.aborted && request === sidecarSequence.current) setMessage('No safe debug sidecar defaults were available. You can add inputs manually.'); });
     return () => controller.abort();
-  }, [api, packageId, targetType, target.resourceId, identityKey, model, environment, inlineLoadEnabled]);
+  }, [api, packageId, targetType, activeTarget?.resourceId, identityKey, model, environment, inlineLoadEnabled]);
 
   function change<T>(setter: (value: T) => void, value: T) { invalidateDraft(); setter(value); setPreset('custom'); dirtyRef.current = true; setDirty(true); }
   function selectTemplate(nextTemplateId: string) {
@@ -279,7 +297,7 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
   }
   const updateAdvanced = (key: keyof typeof advanced, value: string) => change(setAdvanced, { ...advanced, [key]: value });
   const groups = targetType === 'tool' ? [{ key: 'inputs', label: 'Inputs' }, { key: 'arguments', label: 'Tool arguments' }] : [{ key: 'inputs', label: 'Inputs' }, { key: 'vars', label: 'Variables' }];
-  const targetLabel = targetType ? `${targetType} · ${logicalTargetId || 'Resolving…'}` : `Unsupported target · ${target.type}`;
+  const targetLabel = targetType ? `${targetType} · ${logicalTargetId || 'Resolving…'}` : activeTarget ? `Unsupported target · ${activeTarget.type}` : 'Choose a Template, Flow, or Tool';
 
   function reviewDiagnostic(item: ServerDiagnostic) {
     const heading = document.getElementById('quick-load-review');
@@ -305,18 +323,30 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
 
   return <div className="att-load-page att-quick-load-page">
     <header className="att-feature-header"><div><p className="att-eyebrow">Single-target workload</p><h1>Quick Load</h1><p>Run a focused load check against one selected resource. Advanced Load supports multi-workload scenarios.</p></div>
-      <div className="att-quick-load-actions"><button type="button" onClick={onCancel}>Back to Explorer</button><button type="button"
+      <div className="att-quick-load-actions"><button type="button" onClick={onCancel}>{backLabel || 'Back to Explorer'}</button><button type="button"
         onClick={() => draft?.draftId && onSchedule?.({ packageId, environment: environment || undefined, draftId: draft.draftId, previewYaml: draft.previewYaml })}
         disabled={!schedulingEnabled || !draft?.draftId || draftState !== 'valid' || validatedFingerprint !== scenarioFingerprint || !onSchedule}
         title={!schedulingEnabled ? 'Scheduled Load is disabled by Server configuration.' : !draft?.draftId ? 'Validate the scenario before scheduling.' : undefined}>Schedule…</button></div>
     </header>
-    {!targetType && <p className="att-inline-error" role="alert">Quick Load supports one Template, Flow, or Tool target. This route has an unsupported target type.</p>}
+    {activeTarget && !targetType && <p className="att-inline-error" role="alert">Quick Load supports one Template, Flow, or Tool target. This route has an unsupported target type.</p>}
     {!inlineLoadEnabled && <p className="att-inline-error" role="alert">Browser-created Load drafts are disabled by Server configuration.</p>}
     <section className="att-load-section" aria-labelledby="quick-load-target">
-      <div className="att-section-heading"><div><h2 id="quick-load-target">Target</h2><p>The selected resource is fixed for this Quick Load.</p></div><strong>{targetLabel}</strong></div>
+      <div className="att-section-heading"><div><h2 id="quick-load-target">Target</h2><p>{activeTarget ? 'The selected resource is fixed for this Quick Load.' : 'Choose a target from this package to compose one workload.'}</p></div><strong>{targetLabel}</strong></div>
+      {!target && <label>Package target<select aria-label="Quick Load target" value={selectedTarget ? `${selectedTarget.type}:${selectedTarget.resourceId}` : ''}
+        onChange={event => {
+          const [type, ...id] = event.currentTarget.value.split(':');
+          const next = type && id.length && validTarget(type) ? { type, resourceId: id.join(':') } : null;
+          if (next?.type === selectedTarget?.type && next?.resourceId === selectedTarget?.resourceId) return;
+          if (dirtyRef.current && !window.confirm('Replace the current Quick Load settings and inputs with a new target?')) return;
+          invalidateDraft(); dirtyRef.current = false; setDirty(false);
+          setSelectedTarget(next); setBusiness({ inputs: {}, vars: {} }); setLogicalTargetId('');
+        }}>
+        <option value="">Select a Template, Flow, or Tool</option>{targetOptions.map(item => <option key={`${item.type}:${item.logicalId}`} value={`${item.type}:${item.logicalId}`}>{item.type} · {item.logicalId} · {item.state}</option>)}
+      </select>{targetListState === 'loading' && <small role="status">Loading package targets…</small>}{targetListState === 'error' && <small role="alert">Package targets could not be loaded. Retry from the Explorer.</small>}</label>}
       <div className="att-load-grid">
         <label>Load template / preset<select aria-label="Load template or preset" value={templateId} onChange={event => selectTemplate(event.currentTarget.value)} disabled={!policy || !inlineLoadEnabled}>
           <option value="">Model default</option>
+          {templateId && !availableTemplates.some(item => item.id === templateId) && <option value={templateId}>Selected package template · {templateId}</option>}
           {availableTemplates.map(item => <option key={item.id} value={item.id}>{item.name} · {item.model === 'virtualUsers' ? 'Virtual Users' : 'Arrival Rate'}{item.bundled ? ' · bundled' : ''}</option>)}
         </select><small className="att-help">Selecting a template loads its supported settings into this single-target draft. It never starts a job; validate before running.{templateCatalogTruncated ? ' The package template catalog reached its display limit.' : ''}</small></label>
         <label>Load model<select value={model} onChange={event => selectModel(event.currentTarget.value as LoadModel)} disabled={!inlineLoadEnabled}><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select></label>

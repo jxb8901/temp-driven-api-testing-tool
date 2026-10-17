@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { api } from './api';
 import { AppShell, useAppShellContext } from './AppShell';
-import { DashboardPage, LoadLanding } from './DashboardPage';
+import { DashboardPage } from './DashboardPage';
 import { useNavigationGuard, useRouteState } from './router';
 import { appReducer, initialAppState, latestServerJobWindow, serverCapabilities } from './state';
 import { RunPage } from './features/run/RunPage';
@@ -14,6 +14,7 @@ import type { LoadJobsApi, PackageOption } from './features/load/types';
 import { SettingsPage } from './SettingsPage';
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
 import { QuickLoadPage } from './features/load/QuickLoadPage';
+import { LoadCatalogPage } from './features/load/LoadCatalogPage';
 import type { ValidatedScheduleIntent } from './features/schedules/types';
 
 const ScheduledLoadPage = lazy(() => import('./features/schedules/ScheduledLoadPage').then(module => ({ default: module.ScheduledLoadPage })));
@@ -219,12 +220,17 @@ function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSch
     workspace.onEnvironmentChange(environment);
     navigation.navigate({ ...route, environment });
   }, [navigation.navigate, route, workspace.onEnvironmentChange]);
-  const onCancel = useCallback(() => navigation.navigate({ kind: 'package', packageId: route.packageId, resource: route.target }), [navigation.navigate, route.packageId, route.target]);
+  const onCancel = useCallback(() => navigation.navigate(route.target
+    ? { kind: 'package', packageId: route.packageId, resource: route.target }
+    : { kind: 'load' }), [navigation.navigate, route.packageId, route.target]);
   const onJobAccepted = useCallback((jobId: string) => workspace.onJobAccepted({ jobId, packageId: route.packageId }), [route.packageId, workspace.onJobAccepted]);
   return <QuickLoadPage
     api={loadJobsApi}
     packageId={route.packageId}
     target={route.target}
+    initialTemplateId={route.templateId}
+    initialModel={route.model}
+    backLabel={route.target ? 'Back to Explorer' : 'Back to LOAD Catalog'}
     environment={selectedEnvironment}
     environments={environments}
     environmentState={environmentState}
@@ -333,9 +339,6 @@ export default function App() {
   const onPackageChange = useCallback((packageId: string) => {
     navigation.navigate({ kind: 'package', packageId });
   }, [navigation.navigate]);
-  const onLoadPackageChange = useCallback((packageId: string) => {
-    navigation.navigate({ kind: 'load', packageId });
-  }, [navigation.navigate]);
   const onJobChange = useCallback((jobId: string) => {
     navigation.navigate({ kind: 'jobs', jobId });
   }, [navigation.navigate]);
@@ -381,7 +384,8 @@ export default function App() {
       : [];
     content = <ConfigurationRouteView route={navigation.route} packages={packageOptions} />;
   } else if (navigation.route.kind === 'quick-load') {
-    content = <QuickLoadRouteView route={navigation.route} inlineLoadEnabled={capabilities.inlineLoadEnabled}
+    content = <QuickLoadRouteView key={`${navigation.route.packageId}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.templateId || ''}:${navigation.route.model || ''}`}
+      route={navigation.route} inlineLoadEnabled={capabilities.inlineLoadEnabled}
       schedulingEnabled={capabilities.loadSchedulingEnabled} onSchedule={onSchedule} />;
   } else if (navigation.route.kind === 'package') {
     content = <ExplorerRouteView
@@ -398,7 +402,19 @@ export default function App() {
     content = navigation.route.packageId
       ? <LoadRouteView packageId={navigation.route.packageId} inlineLoadEnabled={capabilities.inlineLoadEnabled}
           schedulingEnabled={capabilities.loadSchedulingEnabled} packages={packageOptions} onSchedule={onSchedule} />
-      : <LoadLanding state={state.packages} enabled={capabilities.inlineLoadEnabled} onSelectPackage={onLoadPackageChange} />;
+      : <LoadCatalogPage api={api}
+          packages={state.packages.status === 'ready'
+            ? { status: 'ready', data: packageOptions }
+            : state.packages}
+          inlineLoadEnabled={capabilities.inlineLoadEnabled}
+          schedulingEnabled={capabilities.loadSchedulingEnabled}
+          environment={selectedEnvironment}
+          onEnvironmentChange={setSelectedEnvironment}
+          onNewLoad={packageId => navigation.navigate(packageId ? { kind: 'load', packageId } : { kind: 'load' })}
+          onQuickLoad={(packageId, template) => navigation.navigate({ kind: 'quick-load', packageId, templateId: template.resourceId, model: template.model || 'virtualUsers', environment: selectedEnvironment })}
+          onJobAccepted={jobId => onJobAccepted({ jobId, packageId: undefined })}
+          onOpenJob={onJobChange}
+          onSchedule={onSchedule} />;
   }
 
   return (

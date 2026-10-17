@@ -10,6 +10,28 @@ export interface PackageOption {
   displayName?: string;
 }
 
+export interface LoadCatalogItem {
+  packageId: string;
+  resourceId: string;
+  path: string;
+  kind: 'scenario' | 'template' | 'invalid' | string;
+  validation: string;
+  model?: LoadModel | null;
+  workloadCount: number;
+  sourceAvailable: boolean;
+  runNow: boolean;
+  schedule: boolean;
+  createQuickLoad: boolean;
+  diagnostic?: string;
+  validatedEnvironment?: string;
+}
+
+export interface LoadCatalogPage {
+  items: LoadCatalogItem[];
+  total: number;
+  nextCursor?: string | null;
+}
+
 export interface TargetResource {
   type: LoadTargetType;
   logicalId: string;
@@ -85,12 +107,15 @@ export interface JobAccepted {
 
 export interface JobSummary {
   executionType?: string;
+  scenario?: string;
+  environment?: string;
+  model?: LoadModel | string;
   jobId: string;
   command: string;
   packageId: string;
-  principal: string;
+  principal?: string;
   status: JobStatus;
-  createdAt: string;
+  createdAt?: string;
   startedAt?: string | null;
   finishedAt?: string | null;
   exitCode?: number | null;
@@ -137,6 +162,10 @@ export interface JobEventHandlers {
 
 /** Feature boundary. Shared api.ts implements these operations; components never build REST paths. */
 export interface LoadJobsApi {
+  listLoadCatalog?(packageId: string, input?: { query?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<LoadCatalogPage>;
+  getLoadSource?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<{ available: boolean; logicalPath?: string; text?: string; redacted?: boolean; reason?: string }>;
+  submitLoadScenario?(input: { packageId: string; scenario: string; environment?: string }): Promise<JobAccepted>;
+  listLoadJobs?(input?: { offset?: number; limit?: number; signal?: AbortSignal }): Promise<{ items: JobSummary[]; nextOffset?: number | null }>;
   getLoadPolicy(packageId: string, model: LoadModel, environment?: string, signal?: AbortSignal, templateId?: string): Promise<LoadPolicyResponse>;
   getTargetLoadForm(
     packageId: string,

@@ -330,6 +330,34 @@ final class JobStore implements AutoCloseable {
         }
         return out;
     }
+    synchronized List<Map<String,Object>> listOwnedLoad(int limitPlusOne,int offset,String login) throws Exception {
+        boolean admin=isLocalAdmin(login);List<String> schedulePrincipals=new ArrayList<>();
+        for(LoadSchedule schedule:schedules())if(admin||login.equals(schedule.createdBy))schedulePrincipals.add("load-schedule:"+schedule.id);
+        String ownerPredicate=schedulePrincipals.isEmpty()?"":" OR principal IN ("+String.join(",",java.util.Collections.nCopies(schedulePrincipals.size(),"?"))+")";
+        List<Map<String,Object>> out=new ArrayList<>();
+        String sql="SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary FROM jobs WHERE command='load' AND (principal=?"+ownerPredicate+") ORDER BY created_at DESC,job_id DESC LIMIT ? OFFSET ?";
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)){
+            int index=1;p.setString(index++,login);for(String owner:schedulePrincipals)p.setString(index++,owner);p.setInt(index++,limitPlusOne);p.setInt(index,offset);
+            try(ResultSet r=p.executeQuery()){while(r.next())out.add(jobSummary(r));}
+        }return out;
+    }
+    synchronized List<Map<String,Object>> listLoad(int limitPlusOne,int offset) throws Exception {
+        List<Map<String,Object>> out=new ArrayList<>();
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary FROM jobs WHERE command='load' ORDER BY created_at DESC,job_id DESC LIMIT ? OFFSET ?")){
+            p.setInt(1,limitPlusOne);p.setInt(2,offset);try(ResultSet r=p.executeQuery()){while(r.next())out.add(jobSummary(r));}
+        }return out;
+    }
+    private static Map<String,Object> jobSummary(ResultSet r) throws Exception {
+        Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));
+        m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));
+        m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));
+        String summary=r.getString(10);
+        if(summary!=null&&!summary.isBlank())try {
+            @SuppressWarnings("unchecked") Map<String,Object> details=ServerRuntime.JSON.readValue(summary,Map.class);
+            for(String key:List.of("scenario","environment","model"))if(details.get(key)!=null)m.put(key,details.get(key));
+        } catch(Exception ignored) { /* Older or malformed summaries do not make job history unavailable. */ }
+        return m;
+    }
     synchronized void createAuthUser(String login,String display,String hash,String role,String csrf) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO auth_users(login_id,display_name,password_hash,role,active,updated_at,csrf_token) VALUES(?,?,?,?,TRUE,?,?)")){p.setString(1,login);p.setString(2,display);p.setString(3,hash);p.setString(4,role);p.setString(5,Instant.now().toString());p.setString(6,csrf);p.executeUpdate();}}
     void createBootstrapAdmin(String login,String display,String hash,String csrf) throws Exception {
         try(Connection c=connect()) {

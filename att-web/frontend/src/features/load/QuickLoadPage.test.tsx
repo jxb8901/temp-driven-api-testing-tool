@@ -277,4 +277,48 @@ describe('QuickLoadPage', () => {
     expect(api.submitLoadDraft).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
+
+  it('keeps a selected nested policy visible when it is outside the bounded template list', async () => {
+    const api = {
+      getLoadPolicy: vi.fn(async () => ({ model: 'arrivalRate' as const, templates: [], templateCatalogTruncated: true,
+        policy: { schemaVersion: 'att-load/v1.6', load: { arrivalRate: '5/s', duration: '30s' } } })),
+      getTargetLoadForm: vi.fn(async () => ({ target: { type: 'flow' as const, id: 'checkout' }, model: 'arrivalRate' as const, input: { inputs: {}, vars: {} } })),
+    } as unknown as LoadJobsApi;
+    await act(async () => root.render(<QuickLoadPage api={api} packageId="payments" target={{ type: 'flow', resourceId: 'checkout' }}
+      initialTemplateId="load/nested/policy.yaml" initialModel="arrivalRate" environment="" environments={[]}
+      environmentState="ready" inlineLoadEnabled onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} onCancel={vi.fn()}
+      registerUnsavedChanges={() => () => {}} />));
+    await flush();
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Load template or preset"]')!;
+    expect(select.value).toBe('load/nested/policy.yaml');
+    expect([...select.options].find(option => option.value === select.value)?.textContent).toContain('Selected package template');
+    expect(api.getLoadPolicy).toHaveBeenCalledWith('payments', 'arrivalRate', undefined, expect.any(AbortSignal), 'load/nested/policy.yaml');
+  });
+
+  it('confirms before switching a package target after editing inputs', async () => {
+    const api = {
+      listTargets: vi.fn(async (_packageId: string, type: LoadTargetType) => type === 'template'
+        ? [{ logicalId: 'one', state: 'ready' }, { logicalId: 'two', state: 'ready' }] : []),
+      getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
+      getTargetLoadForm: vi.fn(async (_packageId: string, type: LoadTargetType, resourceId: string) => ({ target: { type, id: resourceId }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
+    } as unknown as LoadJobsApi;
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await act(async () => root.render(<QuickLoadPage api={api} packageId="payments" environment="" environments={[]}
+      environmentState="ready" inlineLoadEnabled onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} onCancel={vi.fn()}
+      registerUnsavedChanges={() => () => {}} />));
+    await flush();
+    const target = host.querySelector<HTMLSelectElement>('select[aria-label="Quick Load target"]')!;
+    await act(async () => { target.value = 'template:one'; target.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const duration = host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(duration, '2m');
+      duration.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { target.value = 'template:two'; target.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(target.value).toBe('template:one');
+    expect(duration.value).toBe('2m');
+    confirm.mockRestore();
+  });
 });

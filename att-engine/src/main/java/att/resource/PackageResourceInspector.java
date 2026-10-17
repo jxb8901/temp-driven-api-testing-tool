@@ -16,6 +16,8 @@ import att.template.TemplateAction;
 import att.template.HelperCallOperations;
 import att.template.FileExpressionResolver;
 import att.debug.DebugEngine;
+import att.load.LoadScenario;
+import att.load.LoadScenarioLoader;
 import att.config.YamlSupport;
 import att.metrics.InspectionMetrics;
 import static att.metrics.InspectionMetrics.Stage.*;
@@ -932,6 +934,122 @@ public final class PackageResourceInspector implements AutoCloseable {
         return validatedLoadScenario(index, config, engine, scenario);
     }
 
+    /** Lists bounded, validated YAML descriptors under load/ without exposing their authored contents. */
+    public Map<String, Object> inspectLoadCatalog(String query, int offset, int limit,
+                                                   String expectedRevisionDigest) throws Exception {
+        if (offset < 0 || limit < 1 || limit > MAX_PAGE_SIZE)
+            throw new IllegalArgumentException("Load catalog pagination is invalid");
+        String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        if (needle.length() > 200) throw new IllegalArgumentException("Load catalog query is too long");
+        Index index = index();
+        if (expectedRevisionDigest != null && !expectedRevisionDigest.equals(index.revisionDigest))
+            throw new StaleResourceCursorException();
+        Path loadRoot = packageRoot.resolve("load").normalize();
+        List<Path> candidates = new ArrayList<Path>();
+        if (Files.isDirectory(loadRoot, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(loadRoot)) {
+            PackageResourceResolver.PackageResource directory = resources.fromInternalPath(loadRoot, PackageResourceResolver.Kind.DIRECTORY);
+            try (Stream<Path> paths = Files.walk(directory.canonicalPath(), 32)) {
+                paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(path))
+                        .filter(path -> {
+                            String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+                            return name.endsWith(".yaml") || name.endsWith(".yml");
+                        }).limit(20001).forEach(candidates::add);
+            }
+        }
+        candidates.sort(Comparator.comparing(path -> path.toString().toLowerCase(Locale.ROOT)));
+        if (candidates.size() > 20000) throw new ResourceLimitException();
+        List<Path> matches = new ArrayList<Path>();
+        for (Path candidate : candidates) {
+            String logical = packageRoot.relativize(candidate).toString().replace('\\', '/');
+            if (needle.isEmpty() || logical.toLowerCase(Locale.ROOT).contains(needle)) matches.add(candidate);
+        }
+        if (offset > matches.size()) throw new IllegalArgumentException("Load catalog cursor is stale");
+        int end = Math.min(matches.size(), offset + limit);
+        List<Map<String,Object>> pageItems = new ArrayList<Map<String,Object>>();
+        LoadScenarioLoader loader = new LoadScenarioLoader(packageRoot);
+        for (Path candidate : matches.subList(offset, end)) {
+            PackageResourceResolver.PackageResource source;
+            try { source = resources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE); }
+            catch (Exception unsafe) { continue; }
+            String relative = source.logicalName();
+            Map<String, Object> item = new LinkedHashMap<String, Object>();
+            item.put("resourceId", relative);
+            item.put("path", relative);
+            item.put("workloadCount", 0);
+            item.put("sourceAvailable", loadSourceAllowed(source.canonicalPath(), relative));
+            try {
+                if (Files.size(source.canonicalPath()) > maxSourceBytes) throw new IllegalArgumentException("size-limit");
+                LoadScenario scenario = loader.load(source.canonicalPath());
+                boolean template = scenario.policyOnly() || !scenario.hasWorkloads();
+                String model = scenario.hasWorkloads()
+                        ? (scenario.model() == att.load.LoadScenario.Model.CLOSED ? "virtualUsers" : "arrivalRate")
+                        : policyModel(scenario.toMap());
+                item.put("kind", template ? "template" : "scenario");
+                // Target resolution depends on the selected environment and is performed by Validate/Run/Schedule.
+                item.put("validation", template ? "valid" : "unverified");
+                item.put("model", model);
+                item.put("workloadCount", scenario.workloads().size());
+                item.put("runNow", !template);
+                item.put("schedule", !template);
+                item.put("createQuickLoad", template && model != null);
+            } catch (Exception invalid) {
+                item.put("kind", "invalid");
+                item.put("validation", "invalid");
+                item.put("runNow", false); item.put("schedule", false); item.put("createQuickLoad", false);
+                item.put("diagnostic", safeLoadCatalogDiagnostic(invalid));
+            }
+            pageItems.add(item);
+        }
+        Map<String, Object> response = new LinkedHashMap<String, Object>();
+        response.put("items", pageItems);
+        response.put("total", matches.size());
+        response.put("nextOffset", end < matches.size() ? end : null);
+        response.put("revisionDigest", index.revisionDigest);
+        return bounded(response);
+    }
+
+    /** Returns a policy-redacted read-only YAML projection for an authorized catalog entry. */
+    public Map<String, Object> inspectLoadSource(String relativePath) throws Exception {
+        PackageResourceResolver.PackageResource source = resources.resolvePackageRelative(relativePath, PackageResourceResolver.Kind.FILE);
+        if (!source.logicalName().startsWith("load/")) throw new ResourceNotFoundException();
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("logicalPath", source.logicalName());
+        if (!loadSourceAllowed(source.canonicalPath(), source.logicalName())) {
+            result.put("available", Boolean.FALSE); result.put("reason", sourceBrowsingEnabled ? "visibility-policy" : "source-disabled");
+            return bounded(result);
+        }
+        try {
+            Object authored = loadYaml(source.canonicalPath(), maxSourceBytes);
+            Object safe = sourceYamlProjection(authored, "", source.logicalName());
+            result.put("available", Boolean.TRUE); result.put("format", "yaml");
+            result.put("text", dumpYaml(safe)); result.put("redacted", Boolean.valueOf(!deepEquals(authored, safe)));
+        } catch (Exception unavailable) {
+            result.put("available", Boolean.FALSE); result.put("reason", "unavailable");
+        }
+        return bounded(result);
+    }
+
+    private boolean loadSourceAllowed(Path path, String logicalPath) {
+        try { return sourceBrowsingEnabled && packageSourceAllowed(logicalPath, path) && !deniedSourcePath(logicalPath)
+                    && Files.size(path) <= maxSourceBytes && isUtf8Text(path); }
+        catch (Exception unavailable) { return false; }
+    }
+
+    private String safeLoadCatalogDiagnostic(Exception failure) {
+        String message = failure.getMessage();
+        if (message == null || message.trim().isEmpty()) return "Load YAML is invalid or unavailable.";
+        return scrubSensitiveValues(message).replaceAll("(?i)(password|token|secret|credential)(\\s*[:=]\\s*)[^\\s,}]+", "$1$2[REDACTED]")
+                .replaceAll("(?:[A-Za-z]:)?[/\\\\][^\\s:]+", "[package path]");
+    }
+
+    private String policyModel(Map<String, Object> scenario) {
+        Object raw = scenario.get("load");
+        if (!(raw instanceof Map)) return null;
+        Map<?, ?> load = (Map<?, ?>) raw;
+        boolean users = load.containsKey("users"), arrival = load.containsKey("arrivalRate");
+        return users == arrival ? null : users ? "virtualUsers" : "arrivalRate";
+    }
+
     private Map<String, Object> validatedLoadScenario(Index index, FrameworkConfig config, DebugEngine engine,
                                                        att.load.LoadScenario scenario) throws Exception {
         att.load.LoadRunCoordinator.resolveAndValidateTargets(packageRoot, config, scenario);
@@ -1208,9 +1326,8 @@ public final class PackageResourceInspector implements AutoCloseable {
         roots.recursive.add(configFile.getParent());
         Path loadDirectory = packageRoot.resolve("load").normalize();
         if (Files.isDirectory(loadDirectory, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(loadDirectory))
-            roots.direct.add(loadDirectory);
-        else
-            roots.direct.add(packageRoot);
+            addWatchRoot(loadDirectory, roots);
+        else roots.direct.add(packageRoot);
         FrameworkConfig config = new FrameworkConfigLoader().load(configFile, packageRoot, environment);
         Path templatesRoot = config.templatesRoot().isAbsolute()
                 ? config.templatesRoot() : packageRoot.resolve(config.templatesRoot());
@@ -2180,6 +2297,18 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private void indexQuickLoadPolicies(Index index) {
         try {
+            Path loadRoot=packageRoot.resolve("load").normalize();
+            if(Files.isDirectory(loadRoot,LinkOption.NOFOLLOW_LINKS)&&!Files.isSymbolicLink(loadRoot)) {
+                Path canonical=resources.fromInternalPath(loadRoot,PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
+                try(Stream<Path> paths=Files.walk(canonical,32)) {
+                    paths.filter(path->Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)&&!Files.isSymbolicLink(path))
+                            .filter(path->{String name=path.getFileName().toString().toLowerCase(Locale.ROOT);return name.endsWith(".yaml")||name.endsWith(".yml");})
+                            .limit(20001).forEach(path->{
+                                try {index.files.add(resources.fromInternalPath(path,PackageResourceResolver.Kind.FILE).canonicalPath());}
+                                catch(Exception ignored) { }
+                            });
+                }
+            }
             att.load.LoadScenarioLoader.QuickLoadTemplateCatalog catalog = new att.load.LoadScenarioLoader(packageRoot).quickLoadTemplates();
             for (att.load.LoadScenarioLoader.QuickLoadTemplate template : catalog.items) {
                 if (template.bundled) continue;
