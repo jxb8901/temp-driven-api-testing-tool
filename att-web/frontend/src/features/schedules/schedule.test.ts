@@ -3,16 +3,16 @@ import {
   createScheduleDraft, cronForDraft, draftFromSchedule, explainOccurrence,
   formatScheduleTime, isIanaTimeZone, recurrenceFromCron, scheduleInputFromDraft,
 } from './schedule';
-import type { LoadSchedule } from './types';
+import type { ScheduleDefinition } from './types';
 
 describe('Scheduled execution draft helpers', () => {
   it('preserves a one-time RUN snapshot without introducing cron or Load overrides', () => {
-    const draft = { ...createScheduleDraft('Asia/Hong_Kong'), name: 'Once', packageId: 'p', jobType: 'run' as const, draftId: 'R123', inlineSnapshot: true, recurrence: 'once' as const, runAt: '2026-11-01T02:30:00+08:00' };
+    const draft = { ...createScheduleDraft('Asia/Hong_Kong'), name: 'Once', packageId: 'p', executionType: 'run' as const, draftId: 'R123', inlineSnapshot: true, recurrence: 'once' as const, runAt: '2026-11-01T02:30:00+08:00' };
     const input = scheduleInputFromDraft(draft);
-    expect(input).toMatchObject({ jobType: 'run', draftId: 'R123', runAt: '2026-10-31T18:30:00.000Z' });
+    expect(input).toMatchObject({ executionType: 'run', draftId: 'R123', runAt: '2026-10-31T18:30:00.000Z' });
     expect(input).not.toHaveProperty('cron'); expect(input).not.toHaveProperty('load');
-    const restored = draftFromSchedule({ id: 'S1', name: 'Once', packageId: 'p', jobType: 'run', inlineSnapshot: true, timezone: 'UTC', runAt: input.runAt, maxConcurrentRuns: 1, enabled: false });
-    expect(restored).toMatchObject({ recurrence: 'once', jobType: 'run', runAt: input.runAt });
+    const restored = draftFromSchedule({ id: 'S1', name: 'Once', packageId: 'p', executionType: 'run', inlineSnapshot: true, timezone: 'UTC', runAt: input.runAt, maxConcurrentRuns: 1, enabled: false });
+    expect(restored).toMatchObject({ recurrence: 'once', executionType: 'run', runAt: input.runAt });
     expect(() => scheduleInputFromDraft({ ...draft, runAt: '2026-11-01T02:30:00' })).toThrow(/offset/);
   });
   it('converts daily, weekly, and cron recurrence drafts', () => {
@@ -26,7 +26,7 @@ describe('Scheduled execution draft helpers', () => {
     expect(recurrenceFromCron('60 10 * * 1-5').recurrence).toBe('cron');
     expect(recurrenceFromCron('59 23 * * *')).toMatchObject({ recurrence: 'daily', timeOfDay: '23:59' });
     const malformed = draftFromSchedule({
-      id: 'S-INVALID-CRON', name: 'Legacy schedule', packageId: 'payments', scenario: 'load/nightly.yaml',
+      executionType: 'load', id: 'S-INVALID-CRON', name: 'Legacy schedule', packageId: 'payments', scenario: 'load/nightly.yaml',
       timezone: 'UTC', cron: '99 99 * * *', maxConcurrentRuns: 1, enabled: false,
     });
     expect(scheduleInputFromDraft(malformed).cron).toBe('99 99 * * *');
@@ -52,8 +52,8 @@ describe('Scheduled execution draft helpers', () => {
   });
 
   it('maps existing schedules to editor drafts and explains skipped occurrences', () => {
-    const schedule: LoadSchedule = {
-      id: 'S-1', name: 'Morning', packageId: 'payments', scenario: 'load.yaml', timezone: 'UTC',
+    const schedule: ScheduleDefinition = {
+      executionType: 'load', id: 'S-1', name: 'Morning', packageId: 'payments', scenario: 'load.yaml', timezone: 'UTC',
       cron: '15 7 * * 1-5', maxConcurrentRuns: 2, enabled: true,
     };
     expect(draftFromSchedule(schedule)).toMatchObject({ recurrence: 'weekly', timeOfDay: '07:15', enabled: true, maxConcurrentRuns: '2' });

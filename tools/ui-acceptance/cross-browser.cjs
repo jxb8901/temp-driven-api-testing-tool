@@ -9,6 +9,68 @@ const visualBaselineDirectory = path.join(__dirname, 'visual-baselines', 'schedu
 const updateVisualBaselines = process.env.ATT_UI_UPDATE_VISUAL_BASELINES === '1';
 const visualDifferenceLimit = 0.04;
 const channelTolerance = 32;
+const reportJsonPath = path.join(outputDirectory, 'visual-differences.json');
+const reportMarkdownPath = path.join(outputDirectory, 'visual-differences.md');
+const expectedBrowsers = ['chromium', 'firefox', 'webkit'];
+const expectedWidths = [1280, 768, 390];
+const expectedThemes = ['light', 'dark'];
+
+function percent(ratio) {
+  return `${(ratio * 100).toFixed(2)}%`;
+}
+
+function expectedCaptureFiles() {
+  return expectedBrowsers.flatMap(browser => expectedWidths.flatMap(width =>
+    expectedThemes.map(theme => `${browser}-scheduled-${width}-${theme}.png`)));
+}
+
+async function appendStepSummary(markdown) {
+  if (!process.env.GITHUB_STEP_SUMMARY) return;
+  await fs.appendFile(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`);
+}
+
+function visualDifferenceMarkdown(differences) {
+  const rows = differences.map(difference =>
+    `| ${difference.browser} | ${difference.width}px | ${difference.theme} | ${difference.changedPixels} | ` +
+    `${percent(difference.changedRatio)} | ${percent(difference.maxChangedPixelRatio)} | ${difference.file} |`);
+  return [
+    '## Scheduled Load visual regression',
+    '',
+    `${differences.length} of 18 browser, viewport, and theme captures exceeded the ` +
+      `${percent(visualDifferenceLimit)} changed-pixel limit.`,
+    '',
+    '| Browser | Viewport | Theme | Changed pixels | Changed ratio | Limit | Capture |',
+    '| --- | ---: | --- | ---: | ---: | ---: | --- |',
+    ...rows,
+    '',
+    `Baseline directory: \`${path.relative(__dirname, visualBaselineDirectory)}\``,
+    `Actual captures: \`${path.relative(__dirname, outputDirectory)}\``,
+    `Machine-readable report: \`${path.relative(__dirname, reportJsonPath)}\``,
+    '',
+    'Review the actual captures against the baseline before changing any image. ' +
+      'Refresh a platform baseline only after confirming the difference is intentional.',
+    '',
+  ].join('\n');
+}
+
+async function validateBaselineManifest(baselineManifest) {
+  assert.equal(baselineManifest.platform, process.platform, `Schedules screenshots must use the ${process.platform} baseline, not another platform's captures.`);
+  const expectedFiles = expectedCaptureFiles();
+  assert.equal(baselineManifest.captures?.length, expectedFiles.length,
+    `The ${process.platform} baseline manifest must describe all ${expectedFiles.length} browser, viewport, and theme captures.`);
+  const declaredFiles = new Set((baselineManifest.captures ?? []).map(capture => capture.file));
+  const missingDeclarations = expectedFiles.filter(file => !declaredFiles.has(file));
+  assert.deepEqual(missingDeclarations, [],
+    `The ${process.platform} baseline manifest is missing: ${missingDeclarations.join(', ')}.`);
+  for (const file of expectedFiles) {
+    try {
+      await fs.access(path.join(visualBaselineDirectory, file));
+    } catch {
+      assert.fail(`Missing ${process.platform} screenshot baseline: ${path.join(visualBaselineDirectory, file)}. ` +
+        'Regenerate it on the matching platform and review the captures before committing.');
+    }
+  }
+}
 
 async function assertAxe(page, engine, theme, width) {
   await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
@@ -24,13 +86,16 @@ async function main() {
   if (!updateVisualBaselines) {
     assert.ok(['darwin', 'linux'].includes(process.platform), `No committed Schedules screenshot baseline exists for ${process.platform}.`);
     const baselineManifest = JSON.parse(await fs.readFile(path.join(visualBaselineDirectory, 'manifest.json'), 'utf8'));
-    assert.equal(baselineManifest.platform, process.platform, `Schedules screenshots must use the ${process.platform} baseline, not another platform's captures.`);
-    assert.equal(baselineManifest.captures?.length, 18, `The ${process.platform} baseline must describe all 18 browser, viewport, and theme captures.`);
+    await validateBaselineManifest(baselineManifest);
+  } else {
+    assert.match(process.env.ATT_UI_VISUAL_BASELINE_REASON ?? '', /\S/,
+      'Set ATT_UI_VISUAL_BASELINE_REASON to the reviewed visual change before updating screenshot baselines.');
   }
   await fs.mkdir(outputDirectory, { recursive: true });
   const fixture = await startFixture();
   const manifest = [];
   const visualDifferences = [];
+  const baselineReviewReason = (process.env.ATT_UI_VISUAL_BASELINE_REASON ?? '').trim();
   try {
     for (const engine of [chromium, firefox, webkit]) {
       const engineName = engine.name();
@@ -92,7 +157,20 @@ async function main() {
               const baseline = await fs.readFile(baselinePath);
               const comparison = comparePng(baseline, screenshot);
               if (comparison.changedRatio > visualDifferenceLimit) {
-                visualDifferences.push({ file, ...comparison });
+                visualDifferences.push({
+                  browser: engineName,
+                  browserVersion: browser.version(),
+                  width,
+                  height: 900,
+                  theme,
+                  route: '#/load-schedules',
+                  file,
+                  baseline: path.relative(__dirname, baselinePath),
+                  actual: path.relative(__dirname, path.join(outputDirectory, file)),
+                  maxChangedPixelRatio: visualDifferenceLimit,
+                  channelTolerance,
+                  ...comparison,
+                });
               }
             }
             manifest.push({ browser: engineName, version: browser.version(), width, height: 900, theme, route: '#/load-schedules', file });
@@ -112,15 +190,47 @@ async function main() {
         repositoryVersion: '4.2.1', generatedAt: new Date().toISOString(), platform: process.platform,
         architecture: process.arch,
         maxChangedPixelRatio: visualDifferenceLimit, channelTolerance, captures: manifest,
+        reviewReason: baselineReviewReason,
       }, null, 2)}\n`);
+      const updated = [
+        '## Scheduled Load visual baselines updated',
+        '',
+        `Updated ${manifest.length} ${process.platform} captures after review.`,
+        '',
+        `Review rationale: ${baselineReviewReason}`,
+        '',
+        `Baseline directory: \`${path.relative(__dirname, visualBaselineDirectory)}\``,
+        '',
+      ].join('\n');
+      await appendStepSummary(updated);
+      console.log(updated);
     }
     if (visualDifferences.length > 0) {
-      await fs.writeFile(path.join(outputDirectory, 'visual-differences.json'), `${JSON.stringify({
-        maxChangedPixelRatio: visualDifferenceLimit, differences: visualDifferences,
+      await fs.writeFile(reportJsonPath, `${JSON.stringify({
+        repositoryVersion: '4.2.1',
+        generatedAt: new Date().toISOString(),
+        platform: process.platform,
+        maxChangedPixelRatio: visualDifferenceLimit,
+        channelTolerance,
+        differences: visualDifferences,
       }, null, 2)}\n`);
-      assert.fail(`${visualDifferences.length} screenshot(s) exceeded the ${(visualDifferenceLimit * 100).toFixed(0)}% visual regression threshold. ` +
-        'Review tools/ui-acceptance/artifacts/scheduled-load/visual-differences.json and the uploaded screenshots.');
+      const markdown = visualDifferenceMarkdown(visualDifferences);
+      await fs.writeFile(reportMarkdownPath, markdown);
+      await appendStepSummary(markdown);
+      const details = visualDifferences.map(difference =>
+        `${difference.browser} ${difference.width}px ${difference.theme}: ${percent(difference.changedRatio)} changed (${difference.changedPixels} pixels)`);
+      assert.fail(`${visualDifferences.length} screenshot(s) exceeded the ${percent(visualDifferenceLimit)} visual regression threshold.\n` +
+        `${details.join('\n')}\n` +
+        `Review ${path.relative(__dirname, reportMarkdownPath)} and the uploaded screenshots.`);
     }
+    const passed = [
+      '## Scheduled Load visual comparison passed',
+      '',
+      `Compared ${manifest.length} browser, viewport, and theme captures against the ${process.platform} baseline.`,
+      `Limit: ${percent(visualDifferenceLimit)} changed pixels; channel tolerance: ${channelTolerance}.`,
+      '',
+    ].join('\n');
+    await appendStepSummary(passed);
     console.log(`Schedules cross-browser checks passed; captured ${manifest.length} screenshots.`);
   } finally {
     await stopFixture(fixture);

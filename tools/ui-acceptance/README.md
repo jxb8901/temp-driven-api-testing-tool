@@ -47,7 +47,48 @@ It exercises Chromium, Firefox, and WebKit at 1280, 768, and 390 pixels in light
 
 The hosted CI workflow runs on `ubuntu-latest`, which selects the committed `linux` baseline. Local macOS runs select `darwin`. The harness checks the selected baseline manifest's platform and requires all 18 captures; a missing or mismatched platform baseline fails instead of falling back to another platform. Baseline updates write only to the directory for the current Node.js platform.
 
-After an intentional Scheduled Load visual change, inspect the generated captures and update the 18 baselines for the current OS with `ATT_UI_UPDATE_VISUAL_BASELINES=1 npm run smoke:cross-browser`. Review the resulting PNGs and manifest before committing the matching platform directory under `tools/ui-acceptance/visual-baselines/scheduled-load/`.
+Failure output is split into three artifacts:
+
+- `visual-differences.json` records the browser, viewport, theme, changed pixel count, and changed ratio for each failed capture.
+- `visual-differences.md` renders the same table for review, and the same table is appended to the GitHub Actions job summary.
+- The capture directory keeps the actual PNGs beside the report so the baseline and current rendering can be compared directly.
+
+## Run the full matrix for a pull request
+
+Pull-request CI stays Chromium-only for fast feedback. To run the full
+Chromium/Firefox/WebKit matrix against a PR head **before merging**, use either
+supported path:
+
+1. Add the `full-browser-suite` label to the pull request. The label event
+   reruns CI on the current head with `FULL_BROWSER_SUITE=true`.
+2. Start **CI** from the Actions tab with **Run workflow**, select the PR branch,
+   and keep `full_browser_suite` enabled.
+
+The job summary always states whether the run used the quick Chromium smoke set
+or the full 18-capture matrix. A green quick PR job does not certify the full
+matrix; use one of the paths above for Schedules or shared UI-shell changes.
+
+## Review and refresh a baseline
+
+After an intentional Scheduled Load visual change, inspect the failure report
+and actual captures first. Then update the 18 baselines for the current OS with
+a review rationale:
+
+```sh
+ATT_UI_VISUAL_BASELINE_REASON="Describe the reviewed UI change" \
+ATT_UI_UPDATE_VISUAL_BASELINES=1 npm run smoke:cross-browser
+```
+
+Review the resulting PNGs and `manifest.json` before committing the matching
+platform directory under `tools/ui-acceptance/visual-baselines/scheduled-load/`.
+The manifest records the review rationale. Baseline updates without a reason
+fail instead of silently accepting visual drift.
+
+When Linux baselines must be refreshed, dispatch **CI** with
+`update_visual_baselines=true` and `full_browser_suite=true` on the branch under
+review. Download the `scheduled-load-visual-baselines-*` artifact, inspect every
+PNG against the previous baseline, and commit the reviewed Linux directory from
+that artifact. Do not copy captures from another platform.
 
 Run the screenshot capture separately:
 

@@ -66,3 +66,47 @@ reference generation, Maven, launcher verification, package validation,
 archive/smoke checks, publication, and total runtime (including failed
 builds). Compare the resulting CI timings instead of assuming the previous
 7m30s Maven baseline applies to new commits.
+
+### Resource-light local release builds
+
+Maven parallelism is controlled by `ATT_MAVEN_THREADS`, which defaults to the
+previous `1C` behavior and accepts a positive integer or a core multiple:
+
+```sh
+MAVEN_OPTS="-Xmx1024m" ATT_MAVEN_THREADS=1 ATT_CI_SKIP_COVERED_TESTS=true ./build.sh
+```
+
+The lower thread count reduces concurrent Maven and Node processes at the cost
+of a longer critical path. `MAVEN_OPTS` bounds the Maven JVM only; it is not a
+whole-build memory cap because npm, Vitest, and Surefire forks use separate
+processes. `ATT_CI_SKIP_COVERED_TESTS` skips selected test suites already
+covered by the Java 8, frontend, and Server-unit CI jobs. It does not skip
+compilation, TypeScript checking, the Vite production build, the bundle budget,
+WAR/archive assembly, schema/package validation, launcher checks, or packaged
+CLI smoke tests. Release confidence still requires a healthy full hosted CI run.
+
+`build.sh` reports the failed phase and prints focused rerun commands. For an
+`att-web` failure, run the module alone or invoke Vitest directly:
+
+```sh
+mvn -B -ntp -T 1 -pl att-web -am clean verify
+cd att-web/frontend && npm ci && npm test -- --reporter=verbose
+```
+
+Maven's final `npm test failed` line is its reactor summary. The first Vitest
+`FAIL`, timeout, or worker error earlier in the log is the actionable failure.
+`att-web/frontend/src/test/setup.ts` shims the `Range` geometry methods that
+jsdom omits; CodeMirror measures the Load YAML preview through them, and the
+missing methods otherwise surface as intermittent Vitest timeouts rather than a
+clear failure.
+
+### Full browser matrix on a pull-request head
+
+PR CI intentionally keeps the fast Chromium smoke suites. To run the complete
+Scheduled Load matrix before merge, either add the `full-browser-suite` label to
+the pull request or dispatch **CI** on the PR branch with `full_browser_suite`
+enabled. The job summary states which scope ran, and a failure publishes the
+browser, viewport, theme, changed-pixel ratio, and artifact links. A manual
+dispatch with `update_visual_baselines=true` uploads replacement captures for
+review instead of committing them. The Linux baseline must be refreshed from
+that artifact on the Linux runner, not copied from macOS.

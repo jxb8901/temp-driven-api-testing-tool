@@ -117,3 +117,20 @@ python3 tools/validate_reference_content.py
 ```
 
 `mvn clean verify` runs the full reactor: it tests the Engine, Server API, Remote, CLI, Worker, and Server modules, packages the Server WAR, and assembles separate local, Server, and source releases through `att-dist`. `build.sh` remains the release entry point, smoke-tests the extracted local package, and verifies that both binary archives are smaller than 25 MB. The local package contains the CLI and its runtime libraries; the Server package contains the WAR and deployment guides without a second copy of those libraries. The Server WAR requires Java 17 and external Tomcat 10.1+; CLI, Engine, Worker, Remote, and Server API remain Java 8-compatible. JDBC drivers are supplied in `lib/`; IBM MQ remains an optional runtime integration.
+
+`build.sh` uses Maven's `1C` thread setting by default. On a memory-constrained
+machine, bound Maven to one build thread and skip only the suites already covered
+by hosted CI:
+
+```sh
+MAVEN_OPTS="-Xmx1024m" ATT_MAVEN_THREADS=1 ATT_CI_SKIP_COVERED_TESTS=true ./build.sh
+```
+
+`ATT_MAVEN_THREADS` accepts a positive integer or a core multiple such as `1C`.
+The default remains `1C`. `ATT_CI_SKIP_COVERED_TESTS` skips the Java 8 module,
+frontend unit, and Server unit suites only; compilation, TypeScript checking,
+the production Vite build, bundle budget, WAR/archive assembly, schema and
+package validation, launcher checks, and packaged CLI smoke tests still run. A
+full local release still uses `./build.sh` without that variable. If Maven stops
+inside `att-web`, rerun its Vitest suite directly from `att-web/frontend`; the
+final `npm test failed` line is a reactor summary, not the failing stack trace.

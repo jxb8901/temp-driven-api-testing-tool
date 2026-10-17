@@ -18,7 +18,7 @@ export type AppRoute =
   | { kind: 'run'; packageId?: string }
   | { kind: 'jobs'; jobId?: string }
   | { kind: 'load'; packageId?: string }
-  | { kind: 'schedules' }
+  | { kind: 'schedules'; view?: 'new' | 'edit' | 'history'; scheduleId?: string; occurrenceId?: string }
   | { kind: 'settings' };
 
 export function parseRoute(hash: string): AppRoute {
@@ -77,7 +77,17 @@ export function parseRoute(hash: string): AppRoute {
   if (parts[0] === 'run') return { kind: 'run', packageId: parts[1] || undefined };
   if (parts[0] === 'jobs') return parts[1] ? { kind: 'jobs', jobId: parts[1] } : { kind: 'jobs' };
   if (parts[0] === 'advanced-load') return parts[1] ? { kind: 'load', packageId: parts[1] } : { kind: 'load' };
-  if (parts[0] === 'schedules' || parts[0] === 'load-schedules' || parts[0] === 'scheduled-load') return { kind: 'schedules' };
+  if (parts[0] === 'schedules' || parts[0] === 'load-schedules' || parts[0] === 'scheduled-load') {
+    if (parts[1] === 'new' && parts.length === 2) return { kind: 'schedules', view: 'new' };
+    if (parts[1] && parts[2] === 'edit' && parts.length === 3) return {
+      kind: 'schedules', view: 'edit', scheduleId: parts[1],
+    };
+    if (parts[1] && parts[2] === 'history' && (parts.length === 3 || parts.length === 4)) return {
+      kind: 'schedules', view: parts[2], scheduleId: parts[1],
+      ...(parts[2] === 'history' && parts[3] ? { occurrenceId: parts[3] } : {}),
+    };
+    return { kind: 'schedules' };
+  }
   if (parts[0] === 'settings' && parts.length === 1) return { kind: 'settings' };
   return { kind: 'dashboard' };
 }
@@ -119,7 +129,9 @@ export function formatRoute(route: AppRoute): string {
     }
     case 'jobs': return route.jobId ? '#/jobs/' + encodeURIComponent(route.jobId) : '#/jobs';
     case 'load': return route.packageId ? '#/advanced-load/' + encodeURIComponent(route.packageId) : '#/advanced-load';
-    case 'schedules': return '#/load-schedules';
+    case 'schedules': return '#/schedules' + (route.view === 'new' ? '/new'
+      : route.scheduleId && route.view ? '/' + encodeURIComponent(route.scheduleId) + '/' + route.view
+        + (route.view === 'history' && route.occurrenceId ? '/' + encodeURIComponent(route.occurrenceId) : '') : '');
     case 'settings': return '#/settings';
   }
 }

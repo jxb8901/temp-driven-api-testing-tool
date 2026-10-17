@@ -4,7 +4,7 @@ import { api } from '../../api';
 import { useNavigationGuard } from '../../router';
 import { CodeEditor } from '../code/CodeEditor';
 import type { DraftResponse, JsonObject } from '../explorer/types';
-import type { ValidatedLoadDraftIntent } from '../schedules/types';
+import type { ValidatedScheduleIntent } from '../schedules/types';
 
 export interface RunDefinition {
   schemaVersion: 'att-execution/v1'; executionType: 'run'; packageId: string; environment?: string;
@@ -13,7 +13,7 @@ export interface RunDefinition {
 }
 export function RunPage({ packageId: initialPackage = '', onAccepted, onSchedule, schedulingEnabled }: {
   packageId?: string; onAccepted(job: { jobId: string; packageId: string }): void;
-  onSchedule(intent: ValidatedLoadDraftIntent): void; schedulingEnabled: boolean;
+  onSchedule(intent: ValidatedScheduleIntent): void; schedulingEnabled: boolean;
 }) {
   const navigation = useNavigationGuard();
   const [packageId, setPackage] = useState(initialPackage);
@@ -88,7 +88,7 @@ export function RunPage({ packageId: initialPackage = '', onAccepted, onSchedule
       <p>Validation passed. Package changes require validation again.</p>
       <CodeEditor label="Validated RUN preview" language={draft.previewYaml ? 'yaml' : 'json'} value={draft.previewYaml || JSON.stringify(draft.preview || draft, null, 2)} readOnly />
       <button className="button button-primary" type="button" disabled={busy} onClick={() => void submit()}>Run Now</button>
-      {schedulingEnabled && <button className="button button-primary" type="button" disabled={busy} onClick={() => onSchedule({ packageId: definition.packageId, environment: definition.environment, draftId: draft.draftId, jobType: draft.draftId.startsWith('D') ? 'debug' : 'run', previewYaml: draft.previewYaml, target: definition.target })}>Schedule…</button>}
+      {schedulingEnabled && <button className="button button-primary" type="button" disabled={busy} onClick={() => onSchedule({ packageId: definition.packageId, environment: definition.environment, draftId: draft.draftId, executionType: 'run', legacyDebug: draft.draftId.startsWith('D'), previewYaml: draft.previewYaml || JSON.stringify(draft.preview || draft, null, 2), target: definition.target })}>Schedule…</button>}
     </section>}
   </section>;
 }

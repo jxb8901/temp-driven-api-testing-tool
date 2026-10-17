@@ -6,7 +6,21 @@ on:
       - master
       - load
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
+    inputs:
+      full_browser_suite:
+        description: Run the full Chromium, Firefox, and WebKit screenshot matrix
+        type: boolean
+        default: true
+      update_visual_baselines:
+        description: Capture replacement Linux baselines as an artifact for review
+        type: boolean
+        default: false
+      visual_baseline_reason:
+        description: Reviewed UI change that justifies a baseline refresh
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -16,8 +30,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Full browser matrix only on default branch or manual runs; PRs stay Chromium-only.
-  FULL_BROWSER_SUITE: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/load')) }}
+  # PRs stay Chromium-only unless the full-browser-suite label is added.
+  # Manual runs default to the full matrix and can opt out for a quick check.
+  FULL_BROWSER_SUITE: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.full_browser_suite != 'false') || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/load')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-browser-suite')) }}
+  ATT_UI_UPDATE_VISUAL_BASELINES: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.update_visual_baselines == 'true' && '1' || '0' }}
+  ATT_UI_VISUAL_BASELINE_REASON: ${{ github.event.inputs.visual_baseline_reason || '' }}
 
 jobs:
   java-8-compatibility:
@@ -233,6 +250,20 @@ jobs:
         run: npm ci
         working-directory: tools/ui-acceptance
 
+      - name: Report browser acceptance scope
+        run: |
+          echo "### Browser acceptance scope" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$FULL_BROWSER_SUITE" = "true" ]; then
+            echo "- **Full matrix:** Chromium, Firefox, and WebKit at 1280/768/390 px in light and dark themes (18 screenshot comparisons)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- **Quick smoke:** Chromium functional suites only. The 18-capture cross-browser comparison did not run." >> "$GITHUB_STEP_SUMMARY"
+            echo "- Run the full matrix before merge by adding the \`full-browser-suite\` label or dispatching **CI** on the PR branch." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$ATT_UI_UPDATE_VISUAL_BASELINES" = "1" ]; then
+            echo "- **Baseline refresh:** replacement captures will be uploaded for review; this run does not commit them." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "- Artifacts: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -252,12 +283,16 @@ jobs:
 
       - name: Run Chromium UI suites
         working-directory: tools/ui-acceptance
+        env:
+          ATT_UI_UPDATE_VISUAL_BASELINES: ${{ env.ATT_UI_UPDATE_VISUAL_BASELINES }}
+          ATT_UI_VISUAL_BASELINE_REASON: ${{ env.ATT_UI_VISUAL_BASELINE_REASON }}
         run: |
           npm run smoke
           npm run smoke:explorer
           npm run smoke:run
           npm run smoke:auth
           npm run smoke:scheduled-load
+          npm run smoke:schedules
           if [ "$FULL_BROWSER_SUITE" = "true" ]; then
             npm run smoke:cross-browser
             npm run screenshots
@@ -270,6 +305,15 @@ jobs:
           name: scheduled-load-browser-screenshots-${{ github.run_id }}
           path: tools/ui-acceptance/artifacts/scheduled-load/
           if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload reviewed visual baselines
+        if: success() && env.FULL_BROWSER_SUITE == 'true' && env.ATT_UI_UPDATE_VISUAL_BASELINES == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-load-visual-baselines-linux-${{ github.run_id }}
+          path: tools/ui-acceptance/visual-baselines/scheduled-load/linux/
+          if-no-files-found: error
           retention-days: 7
 
   windows-worker-process-tree:

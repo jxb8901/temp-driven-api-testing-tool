@@ -165,6 +165,8 @@ class ServerWarUiIT {
             assertEquals("tools/mq/check-queue.sh", toolSource.path("logicalPath").asText());
             assertTrue(toolSource.path("text").asText().contains("package-local script source"));
             assertFalse(toolSource.toString().contains(packageRoot.toString()), "Package filesystem paths remain private.");
+            apiJson(port, "POST", api + "/load-schedules", scheduleAdminAuth, origin,
+                    scheduleRequest("Packaged UI schedule", "load/scenario.yaml"), 201);
             if ("1".equals(System.getenv("ATT_UI_SERVER_PLAYWRIGHT"))) runServerUiPlaywright(origin);
         } finally {
             try { tomcat.stop(); } finally { tomcat.destroy(); }
