@@ -72,8 +72,9 @@ async function main() {
     });
     await page.getByRole('button', { name: 'Save schedule' }).click();
     await page.getByText('Automated UI schedule', { exact: true }).first().waitFor();
-    assert.ok(scheduleRequests.some(request => request.startsWith('POST') && request.endsWith('/schedules/preview')));
-    assert.ok(scheduleRequests.some(request => request === 'POST /att/api/v1/schedules'));
+    // This fixture advertises no unified RUN capability, so the client must stay on the legacy routes.
+    assert.ok(scheduleRequests.some(request => request.startsWith('POST') && request.endsWith('/load-schedules/preview')));
+    assert.ok(scheduleRequests.some(request => request === 'POST /att/api/v1/load-schedules'));
 
     await page.getByRole('button', { name: 'Pause Automated UI schedule' }).first().click();
     await page.getByRole('button', { name: 'Confirm state change' }).click();
