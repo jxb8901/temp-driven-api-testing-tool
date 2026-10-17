@@ -53,7 +53,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     if (packages.status !== 'ready') return;
     const requestGeneration = ++catalogGenerationRef.current;
     if (append) setCatalogMoreLoading(true);
-    else setCatalogState('loading');
+    else { setCatalogMoreLoading(false); setCatalogState('loading'); }
     setCatalogError('');
     try {
       const gathered: LoadCatalogItem[] = [];
@@ -78,7 +78,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
         if (!append) setCatalogState('error');
       }
     } finally {
-      if (append) setCatalogMoreLoading(false);
+      if (append && requestGeneration === catalogGenerationRef.current) setCatalogMoreLoading(false);
     }
   }, [api, packages.status, packages.status === 'ready' ? packages.data : null, query]);
 
