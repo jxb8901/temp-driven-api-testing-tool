@@ -121,8 +121,8 @@ function evidenceError(object: JsonObject, workloads: WorkloadEvidenceSettings[]
     return 'Resource output must be inherit or none.';
   if (perWorkload) {
     const defaults = parseObject(JSON.stringify(object.defaults ?? {})) || {};
-    let success = Number(defaults.maxSuccessSamples ?? PER_WORKLOAD_CAP);
-    let failure = Number(defaults.maxFailureSamples ?? PER_WORKLOAD_CAP);
+    let success = workloads.length === 0 ? Number(defaults.maxSuccessSamples ?? PER_WORKLOAD_CAP) : 0;
+    let failure = workloads.length === 0 ? Number(defaults.maxFailureSamples ?? PER_WORKLOAD_CAP) : 0;
     for (const workload of workloads) {
       const raw = parseObject(workload.evidenceJson);
       if (!raw) return 'Workload ' + workload.id + ' evidence must be a JSON object.';
@@ -302,6 +302,11 @@ function EvidenceEditor({ raw, workloads, selectedWorkloadId, onChange, onWorklo
     onChange(serialized); onValidityChange('');
   }
   function updateScope(value: string) {
+    if (value !== 'perWorkload' && workloads.some(workload =>
+      Object.keys(parseObject(workload.evidenceJson) || {}).length > 0)) {
+      onValidityChange('Clear each workload evidence cap override before switching to legacy quotas.');
+      return;
+    }
     const next = { ...draftObject };
     if (value === 'perWorkload') {
       delete next.maxSamples; delete next.maxSuccessSamples; delete next.maxFailureSamples;
