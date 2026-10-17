@@ -177,8 +177,19 @@ public final class LoadRunCoordinator implements AutoCloseable {
                 else ((FixedArrivalRateScheduler) scheduler).useSharedWorkers(sharedIterationWorkers);
                 schedulers.put(workload.id(), scheduler);
             }
-            for (Map.Entry<String, LoadScheduler> entry : schedulers.entrySet())
-                futures.put(entry.getKey(), coordinatorWorkers.submit(() -> entry.getValue().run()));
+            for (Map.Entry<String, LoadScheduler> entry : schedulers.entrySet()) {
+                final String workloadId = entry.getKey();
+                final LoadScheduler scheduler = entry.getValue();
+                futures.put(workloadId, coordinatorWorkers.submit(() -> {
+                    try {
+                        return scheduler.run();
+                    } finally {
+                        // A workload that stopped reserving releases its unused evidence share so a
+                        // still-running workload can use the remaining success budget.
+                        if (evidenceStore != null) evidenceStore.completeWorkload(workloadId);
+                    }
+                }));
+            }
 
             startGate.awaitReady();
             final long startedAt = timing.now();

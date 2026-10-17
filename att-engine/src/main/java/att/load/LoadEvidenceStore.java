@@ -20,10 +20,15 @@ import java.util.Set;
  * <p>In split-quota mode the success budget is shared across registered workloads:
  * each workload receives a deterministic minimum share (the global cap divided
  * evenly, with the remainder assigned to the earliest-registered workloads), then
- * once every workload has reached its minimum the remaining budget is allocated
- * opportunistically on a first-come basis. The configured global cap is always
- * enforced, including when the cap is smaller than the workload count. Failure
- * evidence remains independently bounded and is never starved by success quotas.</p>
+ * the capacity of workloads that have reached their minimum, or that can no longer
+ * request reservations because they completed, is allocated opportunistically on a
+ * first-come basis. Because the minimum shares exactly cover the configured cap, the
+ * opportunistic pool only exists through workloads that finished without using their
+ * share; {@link #completeWorkload(String)} is how a scheduler releases that unused
+ * capacity, so a busy workload never has to wait for the end of the run to borrow it.
+ * The configured global cap is always enforced, including when the cap is smaller than
+ * the workload count. Failure evidence remains independently bounded and is never
+ * starved by success quotas.</p>
  */
 public final class LoadEvidenceStore implements LoadEventListener {
     private static final String DEFAULT_WORKLOAD = "\u0000default";
@@ -34,6 +39,7 @@ public final class LoadEvidenceStore implements LoadEventListener {
     private final Set<String> successReservations = new LinkedHashSet<String>();
     private final Set<String> failureReservations = new LinkedHashSet<String>();
     private final Set<String> workloads = new LinkedHashSet<String>();
+    private final Set<String> completedWorkloads = new LinkedHashSet<String>();
     private final Map<String, String> successReservationBucket = new LinkedHashMap<String, String>();
     private final Map<String, Integer> successReservedByWorkload = new LinkedHashMap<String, Integer>();
     private final Map<String, Integer> successRetainedByWorkload = new LinkedHashMap<String, Integer>();
@@ -57,6 +63,18 @@ public final class LoadEvidenceStore implements LoadEventListener {
      */
     public synchronized void registerWorkload(String workloadId) {
         if (workloadId != null && !workloadId.isEmpty()) workloads.add(workloadId);
+    }
+
+    /**
+     * Signals that a registered workload can no longer request success reservations, for
+     * example because its scheduler has finished. The unused part of that workload's
+     * minimum share stops blocking other workloads, so the released slots become available
+     * first-come while the global success cap still binds. Retained evidence and in-flight
+     * reservations owned by the completed workload keep their slots, so a late outcome for
+     * an already admitted iteration is not lost.
+     */
+    public synchronized void completeWorkload(String workloadId) {
+        if (workloadId != null && !workloadId.isEmpty() && workloads.contains(workloadId)) completedWorkloads.add(workloadId);
     }
 
     private String bucketFor(String workloadId) {
@@ -89,9 +107,12 @@ public final class LoadEvidenceStore implements LoadEventListener {
                 + successReservedByWorkload.getOrDefault(bucket, 0);
     }
 
+    /** A completed workload can no longer claim its protected minimum share. */
+    private boolean shareIsHeld(String workload) { return !completedWorkloads.contains(workload); }
+
     private boolean successOverflowAllowed() {
-        for (String workload : workloads.isEmpty() ? java.util.Collections.singleton(DEFAULT_WORKLOAD) : workloads)
-            if (usedSuccess(workload) < successShareFor(workload)) return false;
+        for (String workload : workloads.isEmpty() ? Collections.singleton(DEFAULT_WORKLOAD) : workloads)
+            if (shareIsHeld(workload) && usedSuccess(workload) < successShareFor(workload)) return false;
         return true;
     }
 
@@ -281,6 +302,8 @@ public final class LoadEvidenceStore implements LoadEventListener {
             row.put("skippedSuccessQuotaCount",skippedQuotaByWorkload.getOrDefault(workload,0L));
             row.put("skippedFailureQuotaCount",skippedFailureQuotaByWorkload.getOrDefault(workload,0L));
             row.put("skippedMissingEvidenceCount",skippedMissingByWorkload.getOrDefault(workload,0L));
+            row.put("successShare",successShareFor(workload));
+            row.put("successShareReleased",completedWorkloads.contains(workload));
             byWorkload.put(DEFAULT_WORKLOAD.equals(workload)?"default":workload,row);
         }
         result.put("workloads",byWorkload);

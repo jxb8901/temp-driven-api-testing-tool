@@ -18,6 +18,8 @@ const occurrences: ScheduleOccurrence[] = [
   { occurrenceId: 'O-SKIPPED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-14T18:00:00Z', triggerType: 'scheduled', status: 'skipped', reason: 'schedule-overlap-limit' },
   { occurrenceId: 'O-SUBMITTED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-13T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-204', jobStatus: 'PASS' },
   { occurrenceId: 'O-EXPIRED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-12T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-099', jobStatus: null },
+  { occurrenceId: 'O-FAILED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-11T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-207', jobStatus: 'FAIL' },
+  { occurrenceId: 'O-RUNNING', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-10T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-205', jobStatus: 'RUNNING' },
 ];
 
 if (!HTMLDialogElement.prototype.showModal) {
@@ -107,6 +109,30 @@ describe('ScheduledLoadPage', () => {
     expect(onOpenJob).toHaveBeenCalledWith('JOB-204');
     expect(host.textContent).toContain('JOB-099 · no longer available');
     expect(api.getLoadScheduleExecutions).toHaveBeenCalledWith(sampleSchedule.id, 100, expect.any(AbortSignal));
+  });
+
+  it('shows the job outcome next to the occurrence status and keeps expired jobs non-navigable', async () => {
+    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
+    await render(api);
+    await click(host.querySelector('[aria-label="History Nightly payments"]')!);
+    await advance(0);
+
+    const rowFor = (occurrenceId: string) => [...host.querySelectorAll('.att-occurrence-table tbody tr')]
+      .find(row => row.querySelector('code')?.textContent === occurrenceId)!;
+    const jobState = (occurrenceId: string) => rowFor(occurrenceId).querySelector('.att-schedule-job-state');
+
+    expect(rowFor('O-SUBMITTED').querySelector('.att-schedule-state')?.textContent).toBe('submitted');
+    expect(jobState('O-SUBMITTED')?.textContent).toBe('Job Passed');
+    expect(jobState('O-SUBMITTED')?.className).toContain('is-enabled');
+    expect(jobState('O-FAILED')?.textContent).toBe('Job Failed');
+    expect(jobState('O-FAILED')?.className).toContain('is-failed');
+    expect(jobState('O-RUNNING')?.textContent).toBe('Job Running');
+    expect(jobState('O-RUNNING')?.className).toContain('is-running');
+
+    const expired = rowFor('O-EXPIRED');
+    expect(expired.querySelector('.att-schedule-job-state')).toBeNull();
+    expect(expired.querySelector('button.att-schedule-job-link')).toBeNull();
+    expect(expired.querySelector('.att-schedule-job-unavailable')?.textContent).toContain('no longer available');
   });
 
   it('labels consumed one-time schedules as completed and filters them separately', async () => {

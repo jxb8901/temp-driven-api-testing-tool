@@ -132,6 +132,62 @@ class LoadEvidencePolicyTest {
         assertEquals(2L,store.statistics().get("skippedSuccessQuotaCount"));
     }
 
+    @Test void completedWorkloadReleasesItsUnusedSuccessShareToBusyWorkloads() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",6,"maxFailureSamples",4));
+        store.registerWorkload("fast");
+        store.registerWorkload("slow");
+        assertTrue(store.reserveSuccessEvidence("fast-1","fast"));
+        assertTrue(store.reserveSuccessEvidence("fast-2","fast"));
+        assertTrue(store.reserveSuccessEvidence("fast-3","fast"));
+        // The still-running workload keeps its minimum share even before it produces anything.
+        assertFalse(store.reserveSuccessEvidence("fast-4","fast"));
+        assertTrue(store.reserveSuccessEvidence("slow-1","slow"));
+        assertFalse(store.reserveSuccessEvidence("fast-5","fast"));
+        // slow finished without eligible successes, so the slots it can no longer claim become
+        // available to the workload that is still running.
+        store.completeWorkload("slow");
+        assertTrue(store.reserveSuccessEvidence("fast-4","fast"),"A completed workload releases its unused share");
+        assertTrue(store.reserveSuccessEvidence("fast-5","fast"));
+        assertFalse(store.reserveSuccessEvidence("fast-6","fast"),"The configured global success cap still binds");
+
+        String[] fastIds={"fast-1","fast-2","fast-3","fast-4","fast-5"};
+        for(String id:fastIds)store.onEvent(event(id,"fast",ResultStatus.PASS));
+        store.onEvent(event("slow-1","slow",ResultStatus.PASS));
+        assertEquals(6,store.events().size());
+        assertEquals(6,store.statistics().get("retainedSuccessCount"));
+        assertEquals(3L,store.statistics().get("skippedSuccessQuotaCount"));
+        @SuppressWarnings("unchecked")
+        Map<String,Object> workloads=(Map<String,Object>)store.statistics().get("workloads");
+        assertEquals(3,((Map<?,?>)workloads.get("fast")).get("successShare"));
+        assertEquals(Boolean.FALSE,((Map<?,?>)workloads.get("fast")).get("successShareReleased"));
+        assertEquals(Boolean.TRUE,((Map<?,?>)workloads.get("slow")).get("successShareReleased"));
+    }
+
+    @Test void idleWorkloadShareIsReclaimedForTheOnlyActiveWorkload() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",4,"maxFailureSamples",4));
+        store.registerWorkload("busy");
+        store.registerWorkload("idle");
+        assertTrue(store.reserveSuccessEvidence("busy-1","busy"));
+        assertTrue(store.reserveSuccessEvidence("busy-2","busy"));
+        assertFalse(store.reserveSuccessEvidence("busy-3","busy"),"A registered workload protects its share while it can still reserve");
+        store.completeWorkload("idle");
+        assertTrue(store.reserveSuccessEvidence("busy-3","busy"));
+        assertTrue(store.reserveSuccessEvidence("busy-4","busy"));
+        assertFalse(store.reserveSuccessEvidence("busy-5","busy"),"Reclaimed capacity never exceeds the global cap");
+    }
+
+    @Test void successSharesBoundCapsSmallerThanTheWorkloadCountAndIgnoreUnknownWorkloads() {
+        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",2,"maxFailureSamples",1));
+        store.registerWorkload("a");store.registerWorkload("b");store.registerWorkload("c");
+        store.completeWorkload("unregistered");
+        store.completeWorkload(null);
+        assertTrue(store.reserveSuccessEvidence("a-1","a"));
+        assertTrue(store.reserveSuccessEvidence("b-1","b"));
+        assertFalse(store.reserveSuccessEvidence("c-1","c"),"A cap smaller than the workload count still bounds the total");
+        store.completeWorkload("a");store.completeWorkload("b");
+        assertFalse(store.reserveSuccessEvidence("c-1","c"),"Released shares cannot exceed the configured global cap");
+    }
+
     @Test void publicModesResolveToDistinctPolicies() {
         LoadEvidencePolicy metrics = policy("mode", "metrics");
         assertEquals(LoadEvidencePolicy.Success.NONE, metrics.success());

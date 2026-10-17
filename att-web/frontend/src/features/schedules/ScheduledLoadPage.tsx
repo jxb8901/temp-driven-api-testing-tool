@@ -144,6 +144,24 @@ function statusLabel(status: string): string {
   return status.replaceAll('-', ' ').replaceAll('_', ' ');
 }
 
+const JOB_STATUS_LABELS: Record<string, string> = {
+  QUEUED: 'Queued', PREPARING: 'Preparing', RUNNING: 'Running', CANCEL_REQUESTED: 'Cancelling',
+  CANCELLED: 'Cancelled', PASS: 'Passed', FAIL: 'Failed', ERROR: 'Error', INVALID: 'Invalid',
+};
+
+/** The job's own state, so a submitted occurrence never hides a failed result. */
+function jobStatusLabel(status: string): string {
+  return JOB_STATUS_LABELS[status.toUpperCase()] || statusLabel(status);
+}
+
+function jobStatusTone(status: string): string {
+  const normalized = status.toUpperCase();
+  if (normalized === 'PASS') return 'is-enabled';
+  if (normalized === 'FAIL' || normalized === 'ERROR' || normalized === 'INVALID') return 'is-failed';
+  if (normalized === 'QUEUED' || normalized === 'PREPARING' || normalized === 'RUNNING' || normalized === 'CANCEL_REQUESTED') return 'is-running';
+  return 'is-paused';
+}
+
 export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDraft, onInitialDraftConsumed, modal = false, onClose }: ScheduledLoadPageProps): React.JSX.Element {
   const navigation = useNavigationGuard();
   const [schedules, setSchedules] = useState<LoadSchedule[]>([]);
@@ -412,7 +430,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     try {
       if (pending.action === 'run') {
         const occurrence = await api.triggerLoadSchedule(pending.schedule.id);
-        setNotice(`Run Now recorded as ${statusLabel(occurrence.status)}${occurrence.jobId ? ` · job ${occurrence.jobId}` : ''}${occurrence.reason ? ` · ${explainOccurrence(occurrence.reason)}` : ''}.`);
+        setNotice(`Run Now recorded as ${statusLabel(occurrence.status)}${occurrence.jobId ? ` · job ${occurrence.jobId}${occurrence.jobStatus ? ` · ${jobStatusLabel(occurrence.jobStatus)}` : ''}` : ''}${occurrence.reason ? ` · ${explainOccurrence(occurrence.reason)}` : ''}.`);
         setHistorySchedule(pending.schedule);
       } else {
         await api.deleteLoadSchedule(pending.schedule.id);
@@ -535,9 +553,12 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
             <td data-label="Trigger">{statusLabel(item.triggerType)}</td><td data-label="Occurrence"><code>{item.occurrenceId}</code></td>
             <td data-label="Status"><span className={`att-schedule-state ${item.status === 'submitted' ? 'is-enabled' : item.status === 'skipped' || item.status === 'failed-to-submit' ? 'is-paused' : ''}`}>{statusLabel(item.status)}</span></td>
             <td data-label="Reason">{item.reason ? explainOccurrence(item.reason) : '—'}</td>
-            <td data-label="Job">{item.jobId ? (item.jobStatus
-              ? <button type="button" className="att-schedule-job-link" onClick={() => onOpenJob(item.jobId || '')}>{item.jobId}</button>
-              : <span className="att-schedule-job-unavailable">{item.jobId} · no longer available</span>) : 'No job submitted'}</td>
+            <td data-label="Job">{item.jobId ? <>
+              {item.jobStatus
+                ? <button type="button" className="att-schedule-job-link" onClick={() => onOpenJob(item.jobId || '')}>{item.jobId}</button>
+                : <span className="att-schedule-job-unavailable">{item.jobId} · no longer available</span>}
+              {item.jobStatus && <small className={`att-schedule-job-state ${jobStatusTone(item.jobStatus)}`}>Job {jobStatusLabel(item.jobStatus)}</small>}
+            </> : 'No job submitted'}</td>
           </tr>)}</tbody></table>
       </div>}
     </section>}
