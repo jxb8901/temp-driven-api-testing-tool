@@ -56,7 +56,8 @@ async function main() {
     }
 
     await page.goto(base);
-    await page.getByRole('button', { name: 'Open Explorer' }).first().click();
+    await page.getByRole('button', { name: 'Browse packages' }).click();
+    await page.getByRole('heading', { name: 'Explorer', exact: true }).waitFor();
     await page.locator('[data-nav="load-testing"]').click();
     await page.getByRole('heading', { name: 'LOAD Catalog', exact: true }).waitFor();
     await page.getByRole('heading', { name: 'Available Load YAML resources', exact: true }).waitFor();
