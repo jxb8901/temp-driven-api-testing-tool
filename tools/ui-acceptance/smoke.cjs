@@ -10,14 +10,28 @@ async function main() {
     await context.addInitScript(() => localStorage.setItem('att-ui-language', 'en'));
     const page = await context.newPage();
     const pageErrors = [];
+    const apiResponses = [];
     page.on('pageerror', error => pageErrors.push(error.message));
+    page.on('response', response => {
+      const url = new URL(response.url());
+      if (url.pathname.includes('/api/v1/')) apiResponses.push(`${response.status()} ${url.pathname}`);
+    });
     const base = `${fixture.origin}/att/ui/`;
 
     await selectFixture(context, fixture.origin, 'loaded');
     const indexResponse = await page.goto(base);
     assert.equal(indexResponse.status(), 200, 'the UI must serve below the non-root /att context');
-    await page.locator('.package-list li').first().waitFor();
-    assert.equal(await page.locator('.package-list li').count(), 2, 'the fixture packages should load');
+    await page.waitForFunction(() => {
+      const state = document.querySelector('#packages-state');
+      return state && state.getAttribute('aria-busy') !== 'true';
+    }, null, { timeout: 10000 }).catch(() => {});
+    const packageCount = await page.locator('.package-list li').count();
+    if (packageCount !== 2) {
+      const packageState = await page.locator('#packages-state').textContent().catch(() => null);
+      const mainContent = (await page.locator('main').innerText().catch(() => '')).trim();
+      assert.equal(packageCount, 2,
+        `the fixture packages should load; state=${JSON.stringify(packageState)}; main=${JSON.stringify(mainContent)}; API=${apiResponses.join(', ')}; page errors=${pageErrors.join(' | ')}`);
+    }
     await page.locator('#jobs-state').getByText(/recent job row/i).waitFor();
     await page.getByText('payments', { exact: true }).first().waitFor();
     await page.getByText('JOB-4821', { exact: true }).waitFor();

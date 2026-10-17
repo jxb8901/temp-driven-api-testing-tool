@@ -38,9 +38,10 @@ class ServerWarUiIT {
         assertServerApplicationJar(war);
 
         Path users = Files.writeString(temp.resolve("tomcat-users.xml"),
-                "<tomcat-users><role rolename=\"ATT_USER\"/>"
+                "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/>"
                         + "<user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/>"
-                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
+                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER\"/>"
+                        + "<user username=\"system-admin\" password=\"secret\" roles=\"ATT_ADMIN\"/></tomcat-users>");
         Path packages = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(packages.resolve("payments"));
         writeScheduledPackage(packageRoot, localHome);
@@ -78,6 +79,8 @@ class ServerWarUiIT {
                     "att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             String scheduleAdminAuth = "Basic " + Base64.getEncoder().encodeToString(
                     "schedule-admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String systemAdminAuth = "Basic " + Base64.getEncoder().encodeToString(
+                    "system-admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             assertEquals(401, get(port, "/tools/att/api/v1/load-schedules", null));
             assertEquals(200, get(port, "/tools/att/api/v1/load-schedules", auth),
                     "Every active USER may manage shared schedules");
@@ -133,7 +136,8 @@ class ServerWarUiIT {
             assertTrue(cachedPage.getHeaderField("X-ATT-Inspection-Revision").matches("[A-Za-z0-9_-]{43}"));
             try(var input=cachedPage.getInputStream()){String body=new String(input.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);assertFalse(body.contains("revisionDigest"));assertFalse(body.contains("_cacheRevision"));}
             cachedPage.disconnect();
-            JsonNode inspectionMetrics=getJson(port,api+"/metrics",auth).path("inspection");
+            assertEquals(403,get(port,api+"/metrics",auth),"System metrics are restricted to ADMIN accounts.");
+            JsonNode inspectionMetrics=getJson(port,api+"/metrics",systemAdminAuth).path("inspection");
             assertTrue(inspectionMetrics.path("server").path("HTTP").path("count").asLong()>0);
             assertTrue(inspectionMetrics.path("workers").isArray());
             assertFalse(inspectionMetrics.toString().contains(packageRoot.toString()));
@@ -523,7 +527,7 @@ class ServerWarUiIT {
                         + "testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  checkQueue:\n"
                         + "    name: Check queue\n    description: Nested Tool script default source\n"
                         + "    command: [bash, tools/mq/check-queue.sh]\n    stdoutFormat: text\n    arguments: {}\n");
-        Files.writeString(configRoot.resolve("source-references.yaml"), "payload: '&{tools/att-helper.sh}'\n");
+        Files.writeString(configRoot.resolve("source-references.yaml"), "payload: '&{config/tools/att-helper.sh}'\n");
         Path tools = Files.createDirectories(configRoot.resolve("tools"));
         Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\necho helper-secret\n");
         Files.writeString(nestedTool, "#!/bin/sh\n# package-local script source\necho safe\n");
