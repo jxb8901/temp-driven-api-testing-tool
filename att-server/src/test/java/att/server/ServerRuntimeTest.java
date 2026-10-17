@@ -941,7 +941,7 @@ class ServerRuntimeTest {
     }
     private static List<String> listTree(Path root)throws Exception {
         if(!Files.exists(root))return List.of("<missing>");
-        try(var files=Files.walk(root,4)){return files.map(root::relativize).collect(java.util.stream.Collectors.toList());}
+        try(var files=Files.walk(root,4)){return files.map(path->root.relativize(path).toString()).collect(java.util.stream.Collectors.toList());}
     }
     private static final class MutableClock extends Clock {
         private Instant current=Instant.now();
