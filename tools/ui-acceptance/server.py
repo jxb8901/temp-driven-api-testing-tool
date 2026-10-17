@@ -99,6 +99,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         resource = request.path.removeprefix("/att/api/v1/")
+        if resource == "schedules" or resource.startswith("schedules/"):
+            resource = "load-schedules" + resource[len("schedules"): ]
         length = int(self.headers.get("Content-Length", "0"))
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
@@ -203,6 +205,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         resource = request.path.removeprefix("/att/api/v1/")
+        if resource == "schedules" or resource.startswith("schedules/"):
+            resource = "load-schedules" + resource[len("schedules"): ]
         length = int(self.headers.get("Content-Length", "0"))
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
@@ -230,6 +234,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         resource = request.path.removeprefix("/att/api/v1/")
+        if resource == "schedules" or resource.startswith("schedules/"):
+            resource = "load-schedules" + resource[len("schedules"): ]
         scenario = self._fixture()
         if scenario in {"auth-admin", "auth-user"} and resource.startswith("auth/users/"):
             if self.headers.get("X-ATT-CSRF") != "csrf-fixture":
@@ -303,6 +309,8 @@ class Handler(BaseHTTPRequestHandler):
         if scenario == "authenticated" and self.headers.get("Authorization") != "Basic YXR0LWZpeHR1cmU6cGFzcw==":
             self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Fixture authentication is required."}})
             return
+        if resource == "schedules" or resource.startswith("schedules/"):
+            resource = "load-schedules" + resource[len("schedules"): ]
         parts = [unquote(part) for part in resource.strip("/").split("/") if part]
         if scenario in {"auth-admin", "auth-user"} and parts == ["auth", "me"]:
             user = self.server.auth_users[0 if scenario == "auth-admin" else 1]

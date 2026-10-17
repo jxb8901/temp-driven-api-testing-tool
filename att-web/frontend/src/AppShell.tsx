@@ -426,7 +426,7 @@ export function AppShell({
             <a className="nav-link" href="#/jobs" data-nav="jobs" aria-current={activeNav === 'jobs' ? 'page' : undefined} onClick={link('#/jobs')}>
               <span className="nav-icon" aria-hidden="true">▤</span><span className="nav-label">Jobs and results</span>
             </a>
-            {showScheduledLoad && <a className="nav-link" href="#/load-schedules" data-nav="scheduled-load" aria-current={activeNav === 'scheduled-load' ? 'page' : undefined} onClick={link('#/load-schedules')}>
+            {showScheduledLoad && <a className="nav-link" href="#/schedules" data-nav="scheduled-load" aria-current={activeNav === 'scheduled-load' ? 'page' : undefined} onClick={link('#/schedules')}>
               <span className="nav-icon" aria-hidden="true">◷</span><span className="nav-label">Schedules</span>
             </a>}
             <a className="nav-link" href="#/settings" data-nav="settings" aria-current={activeNav === 'settings' ? 'page' : undefined} onClick={link('#/settings')}>

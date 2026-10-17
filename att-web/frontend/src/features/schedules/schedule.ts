@@ -1,9 +1,10 @@
-import type { LoadSchedule, LoadScheduleInput } from './types';
+import type { ScheduleDefinition, ScheduleInput } from './types';
 
 export type ScheduleRecurrence = 'daily' | 'weekly' | 'cron' | 'once';
 
 export interface ScheduleDraft {
-  jobType: 'load' | 'debug' | 'run';
+  executionType: 'run' | 'load';
+  legacyDebug?: boolean;
   debugTargetType: string;
   debugTargetId: string;
   name: string;
@@ -53,7 +54,7 @@ export function isIanaTimeZone(value: string): boolean {
 
 export function createScheduleDraft(timezone = localTimeZone()): ScheduleDraft {
   return {
-    jobType: 'load', debugTargetType: '', debugTargetId: '',
+    executionType: 'load', debugTargetType: '', debugTargetId: '',
     name: '', description: '', tags: '', packageId: '', scenario: '', inlineSnapshot: false, config: '', environment: '', timezone,
     recurrence: 'daily', runAt: '', timeOfDay: '02:00', dayOfWeek: '1-5', cron: '', maxConcurrentRuns: '1', load: '{}', enabled: false,
   };
@@ -90,9 +91,9 @@ function cronTime(match: RegExpExecArray): string | null {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
-export function draftFromSchedule(schedule: LoadSchedule): ScheduleDraft {
+export function draftFromSchedule(schedule: ScheduleDefinition): ScheduleDraft {
   return {
-    jobType: schedule.jobType === 'run' ? 'run' : schedule.jobType === 'debug' ? 'debug' : 'load',
+    executionType: schedule.executionType, legacyDebug: schedule.legacyDebug,
     debugTargetType: schedule.debugTarget?.type || '', debugTargetId: schedule.debugTarget?.id || '',
     name: schedule.name || '', description: schedule.description || '', tags: (schedule.tags || []).join(', '),
     packageId: schedule.packageId || '', scenario: schedule.scenario || '', inlineSnapshot: schedule.inlineSnapshot === true, config: schedule.config || '',
@@ -103,7 +104,7 @@ export function draftFromSchedule(schedule: LoadSchedule): ScheduleDraft {
   };
 }
 
-export function scheduleInputFromDraft(draft: ScheduleDraft): LoadScheduleInput {
+export function scheduleInputFromDraft(draft: ScheduleDraft): ScheduleInput {
   const load: unknown = JSON.parse(draft.load || '{}');
   if (!load || typeof load !== 'object' || Array.isArray(load)) throw new Error('Load options must be a JSON object.');
   const entries = Object.entries(load as Record<string, unknown>);
@@ -119,9 +120,10 @@ export function scheduleInputFromDraft(draft: ScheduleDraft): LoadScheduleInput 
   const cron = cronForDraft(draft);
   if (!cron) throw new Error('Enter a valid local time before previewing this schedule.');
   if (!isIanaTimeZone(draft.timezone)) throw new Error('Enter a valid IANA timezone, such as Asia/Hong_Kong.');
-  const input: LoadScheduleInput = {
+  const input: ScheduleInput = {
     name: draft.name.trim(), description: draft.description.trim(), tags,
-    packageId: draft.packageId, jobType: draft.jobType, config: draft.config.trim(),
+    packageId: draft.packageId, executionType: draft.executionType, schemaVersion: 'att-schedule/v2',
+    ...(draft.legacyDebug ? { legacyDebug: true } : {}), config: draft.config.trim(),
     environment: draft.environment.trim(), timezone: draft.timezone.trim(), cron,
     load: load as Record<string, string>, maxConcurrentRuns, enabled: draft.enabled,
   };
@@ -129,10 +131,10 @@ export function scheduleInputFromDraft(draft: ScheduleDraft): LoadScheduleInput 
     if (!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(draft.runAt) || !Number.isFinite(Date.parse(draft.runAt))) throw new Error('Enter a one-time ISO-8601 instant with UTC offset.');
     input.runAt = new Date(draft.runAt).toISOString(); delete input.cron;
   }
-  if (draft.jobType === 'run') { delete (input as Partial<LoadScheduleInput>).load; delete (input as Partial<LoadScheduleInput>).config; }
+  if (draft.executionType === 'run') { delete input.load; delete input.config; }
   if (draft.inlineSnapshot) {
     if (draft.draftId) input.draftId = draft.draftId;
-  } else if (draft.jobType === 'load') input.scenario = draft.scenario.trim();
+  } else if (draft.executionType === 'load') input.scenario = draft.scenario.trim();
   return input;
 }
 

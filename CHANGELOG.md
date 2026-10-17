@@ -3,13 +3,16 @@
 # ATT 4.2.1 - 2026-10-16
 
 - Unify functional execution as RUN with optional Debug diagnostics, validated drafts, frozen Case selections, shared RUN/LOAD schedules and one-time triggers (#220).
-- Preserve legacy CLI, Debug, Case Run and Load schedule interfaces; add Studio Run and bilingual migration contracts.
-
-- 統一功能執行為 RUN，提供選用 Debug 診斷、固定 Case 選取，以及共用 RUN／LOAD 排程與單次觸發；保留舊 CLI／REST／報表契約，附繁體中文遷移說明。
+- Preserve legacy CLI, Debug, Case Run and Load schedule interfaces; add Studio Run and bilingual migration contracts (#220).
+- Fix Studio startup and scheduled-job ownership: lazy-load Load, keep unsaved Debug drafts across cache invalidation, list only active environments with retry, refresh occurrence status and history, and validate independent Load evidence caps (#231).
+- Open Schedules on a unified RUN/LOAD list with explicit New/Edit views, linked occurrence history, owner/type filters, guarded drafts, and confirmed actions; preserve validated execution snapshots and legacy schedule links (#235).
 
 # ATT 4.2.0 - 2026-10-14
 
 - Reuse bounded Studio query and Worker configuration caches, prefer idle inspectors with matching package state, and add optional asynchronous warm-up and inspection metrics (#227).
+- Add shared mandatory secret protection across Engine, Worker, API, Server results, logs, inspections, and textual downloads, plus exact trusted-origin handling for API and authentication paths (#224).
+- Add MQHelper v1.3 request-queue routing with single, round-robin, and random selection while preserving v1.2 descriptors (#225).
+- Add Load v1.7 independent per-workload success and failure evidence quotas with cancellation-safe accounting and report/Studio coverage (#226).
 
 - Add a standalone Configuration workspace and improve Explorer navigation, source browsing, Testdata inspection, and environment comparison (#216).
 - Improve Debug and Load authoring with editable sidecar defaults, threshold and evidence forms, Quick Load, and schedule entry points (#216).

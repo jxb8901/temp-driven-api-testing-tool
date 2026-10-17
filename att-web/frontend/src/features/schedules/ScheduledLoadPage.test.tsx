@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavigationGuardContext, type NavigationGuardApi } from '../../router';
 import { ApiError, type AsyncState, type PackageSummary } from '../../types';
 import { ScheduledLoadPage } from './ScheduledLoadPage';
-import type { LoadSchedule, ScheduleOccurrence, ScheduledLoadApi } from './types';
+import type { ScheduleDefinition, ScheduleOccurrence, SchedulesApi } from './types';
 
-const sampleSchedule: LoadSchedule = {
-  id: 'S-NIGHTLY', name: 'Nightly payments', description: 'Checkout soak', tags: ['nightly'],
+const sampleSchedule: ScheduleDefinition = {
+  executionType: 'load', id: 'S-NIGHTLY', name: 'Nightly payments', description: 'Checkout soak', tags: ['nightly'],
   packageId: 'payments', scenario: 'load/nightly.yaml', config: 'config/config.yaml', environment: 'SIT',
   timezone: 'Asia/Hong_Kong', cron: '0 2 * * *', load: {}, maxConcurrentRuns: 1, enabled: true,
   nextRunAt: '2026-10-15T18:00:00Z',
@@ -28,18 +28,18 @@ if (!HTMLDialogElement.prototype.showModal) {
 }
 if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
 
-function makeApi(overrides: Partial<ScheduledLoadApi> = {}): ScheduledLoadApi {
+function makeApi(overrides: Partial<SchedulesApi> = {}): SchedulesApi {
   return {
-    listLoadSchedules: vi.fn(async () => ({ items: [] })),
-    previewLoadSchedule: vi.fn(async input => ({ ...input, nextRunAt: '2026-10-15T18:00:00Z', nextOccurrences: [
+    listSchedules: vi.fn(async () => ({ items: [] })),
+    previewSchedule: vi.fn(async input => ({ ...input, nextRunAt: '2026-10-15T18:00:00Z', nextOccurrences: [
       '2026-10-15T18:00:00Z', '2026-10-16T18:00:00Z', '2026-10-17T18:00:00Z', '2026-10-18T18:00:00Z', '2026-10-19T18:00:00Z',
     ] })),
-    createLoadSchedule: vi.fn(async input => ({ ...sampleSchedule, ...input, id: 'S-CREATED' })),
-    updateLoadSchedule: vi.fn(async (id, input) => ({ ...sampleSchedule, ...input, id })),
-    setLoadScheduleEnabled: vi.fn(async (id, enabled) => ({ ...sampleSchedule, id, enabled })),
-    triggerLoadSchedule: vi.fn(async () => ({ occurrenceId: 'O-NOW', scheduledFor: '2026-10-14T10:00:00Z', triggerType: 'manual', status: 'submitted', jobId: 'JOB-NOW' })),
-    deleteLoadSchedule: vi.fn(async id => ({ scheduleId: id, status: 'DELETED' })),
-    getLoadScheduleExecutions: vi.fn(async () => ({ items: occurrences })),
+    createSchedule: vi.fn(async input => ({ ...sampleSchedule, ...input, id: 'S-CREATED' })),
+    updateSchedule: vi.fn(async (id, input) => ({ ...sampleSchedule, ...input, id })),
+    setScheduleEnabled: vi.fn(async (id, enabled) => ({ ...sampleSchedule, id, enabled })),
+    triggerSchedule: vi.fn(async () => ({ occurrenceId: 'O-NOW', scheduledFor: '2026-10-14T10:00:00Z', triggerType: 'manual', status: 'submitted', jobId: 'JOB-NOW' })),
+    deleteSchedule: vi.fn(async id => ({ scheduleId: id, status: 'DELETED' })),
+    getScheduleExecutions: vi.fn(async () => ({ items: occurrences })),
     ...overrides,
   };
 }
@@ -70,7 +70,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function render(api: ScheduledLoadApi, onOpenJob = vi.fn()) {
+async function render(api: SchedulesApi, onOpenJob = vi.fn()) {
   await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
     <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={onOpenJob} />
   </NavigationGuardContext.Provider>));
@@ -95,8 +95,94 @@ async function change(element: HTMLInputElement | HTMLTextAreaElement | HTMLSele
 }
 
 describe('ScheduledLoadPage', () => {
+  it('lands on definitions only, filters RUN/LOAD and owners, and opens a separate New view', async () => {
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [
+      { ...sampleSchedule, createdBy: 'alice' },
+      { ...sampleSchedule, id: 'S-RUN', name: 'Reconciliation', executionType: 'run' as const, inlineSnapshot: true,
+        debugTarget: { type: 'flow', id: 'reconcile' }, createdBy: 'bob', environment: 'UAT' },
+    ] })) });
+    await render(api);
+    expect(host.querySelector('form')).toBeNull();
+    expect(api.previewSchedule).not.toHaveBeenCalled();
+    expect(api.getScheduleExecutions).not.toHaveBeenCalled();
+    await change(host.querySelectorAll('.att-schedule-filters select')[0] as HTMLSelectElement, 'run');
+    expect(host.textContent).toContain('Reconciliation');
+    expect(host.textContent).not.toContain('Nightly payments');
+    await change(host.querySelectorAll('.att-schedule-filters select')[3] as HTMLSelectElement, 'alice');
+    expect(host.textContent).toContain('No schedules match');
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'New Schedule')!);
+    expect(host.querySelector('form')).not.toBeNull();
+    expect(host.querySelector('#schedule-list-heading')).toBeNull();
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Cancel')!);
+    expect(host.querySelector('form')).toBeNull();
+    expect(api.createSchedule).not.toHaveBeenCalled();
+  });
+
+  it('guards dirty Cancel and tab reload without writing browser storage', async () => {
+    const setStorage = vi.spyOn(Storage.prototype, 'setItem');
+    await render(makeApi());
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'New Schedule')!);
+    await change(host.querySelector('#schedule-name') as HTMLInputElement, 'Keep this');
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Cancel')!);
+    expect(host.querySelector('.att-schedule-discard')?.hasAttribute('open')).toBe(true);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Keep editing')!);
+    expect((host.querySelector('#schedule-name') as HTMLInputElement).value).toBe('Keep this');
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Back to Schedules')!);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Discard changes')!);
+    expect(host.querySelector('form')).toBeNull();
+    expect(setStorage).not.toHaveBeenCalled();
+  });
+
+  it.each(['run', 'load'] as const)('saves a validated %s draft ID without reconstructing its execution inputs', async executionType => {
+    const api = makeApi();
+    const initialDraft = { packageId: 'payments', environment: 'UAT', executionType, draftId: executionType === 'run' ? 'R-FROZEN' : 'A-FROZEN',
+      previewYaml: 'Safe server preview', target: { type: 'tool', id: 'send' } };
+    await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} modal initialDraft={initialDraft} />
+    </NavigationGuardContext.Provider>));
+    await advance(400);
+    expect(api.createSchedule).not.toHaveBeenCalled();
+    expect(api.triggerSchedule).not.toHaveBeenCalled();
+    await click(host.querySelector('button[type="submit"]')!);
+    expect(api.createSchedule).toHaveBeenCalledWith(expect.objectContaining({
+      executionType, draftId: initialDraft.draftId, environment: 'UAT', enabled: false, schemaVersion: 'att-schedule/v2',
+    }));
+    expect(vi.mocked(api.createSchedule).mock.calls[0][0]).not.toHaveProperty('scenario');
+    expect(api.triggerSchedule).not.toHaveBeenCalled();
+  });
+
+  it('loads an authorized edit deep link and keeps missing/forbidden definitions out of the form', async () => {
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
+    const show = async (id: string, source = api) => {
+      await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
+        <ScheduledLoadPage key={id} api={source} packages={packages} enabled onOpenJob={vi.fn()} route={{ kind: 'schedules', view: 'edit', scheduleId: id }} />
+      </NavigationGuardContext.Provider>));
+      await advance(300);
+    };
+    await show(sampleSchedule.id);
+    expect((host.querySelector('#schedule-name') as HTMLInputElement).value).toBe(sampleSchedule.name);
+    expect(host.querySelector('#schedule-list-heading')).toBeNull();
+    await show('missing');
+    expect(host.textContent).toContain('unavailable');
+    expect(host.querySelector('form')).toBeNull();
+    await show('forbidden', makeApi({ listSchedules: vi.fn(async () => { throw new ApiError('Forbidden', { status: 403 }); }) }));
+    expect(host.textContent).toContain('administrator role');
+    expect(host.querySelector('form')).toBeNull();
+  });
+
+  it('requires explicit confirmation before resuming a paused definition', async () => {
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [{ ...sampleSchedule, enabled: false }] })) });
+    await render(api);
+    await click(host.querySelector('[aria-label="Resume Nightly payments"]')!);
+    expect(api.setScheduleEnabled).not.toHaveBeenCalled();
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Confirm state change')!);
+    expect(api.setScheduleEnabled).toHaveBeenCalledWith(sampleSchedule.id, true);
+  });
   it('shows a configured schedule, explains skips, and links submitted jobs', async () => {
-    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
     const onOpenJob = await render(api);
     expect(host.querySelector('h1')?.textContent).toBe('Schedules');
     expect(host.textContent).toContain('Nightly payments');
@@ -108,11 +194,11 @@ describe('ScheduledLoadPage', () => {
     await click([...host.querySelectorAll('.att-schedule-job-link')][0]);
     expect(onOpenJob).toHaveBeenCalledWith('JOB-204');
     expect(host.textContent).toContain('JOB-099 · no longer available');
-    expect(api.getLoadScheduleExecutions).toHaveBeenCalledWith(sampleSchedule.id, 100, expect.any(AbortSignal));
+    expect(api.getScheduleExecutions).toHaveBeenCalledWith(sampleSchedule.id, 100, expect.any(AbortSignal));
   });
 
   it('shows the job outcome next to the occurrence status and keeps expired jobs non-navigable', async () => {
-    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
     await render(api);
     await click(host.querySelector('[aria-label="History Nightly payments"]')!);
     await advance(0);
@@ -136,11 +222,11 @@ describe('ScheduledLoadPage', () => {
   });
 
   it('labels consumed one-time schedules as completed and filters them separately', async () => {
-    const completed: LoadSchedule = {
+    const completed: ScheduleDefinition = {
       ...sampleSchedule, id: 'S-ONCE', name: 'One-time import', runAt: '2026-10-16T10:00:00Z',
       cron: undefined, nextRunAt: null,
     };
-    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule, completed] })) });
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule, completed] })) });
     await render(api);
     expect(host.textContent).toContain('One-time import');
     expect(host.querySelector('.att-schedule-table tbody tr:last-child [data-label="Status"]')?.textContent).toContain('Completed');
@@ -157,28 +243,28 @@ describe('ScheduledLoadPage', () => {
   });
 
   it('saves a consumed one-time schedule metadata edit without a new preview', async () => {
-    const completed: LoadSchedule = {
+    const completed: ScheduleDefinition = {
       ...sampleSchedule, id: 'S-ONCE', name: 'One-time import', runAt: '2026-10-16T10:00:00Z',
       cron: undefined, nextRunAt: null,
     };
-    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [completed] })) });
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [completed] })) });
     await render(api);
-    vi.mocked(api.previewLoadSchedule).mockClear();
+    vi.mocked(api.previewSchedule).mockClear();
 
     await click(host.querySelector('[aria-label="Edit One-time import"]')!);
     await advance(400);
     expect(host.textContent).toContain('Saved trigger unchanged');
     expect(host.textContent).not.toContain('Preview unavailable');
-    expect(api.previewLoadSchedule).not.toHaveBeenCalled();
+    expect(api.previewSchedule).not.toHaveBeenCalled();
 
     const save = [...host.querySelectorAll('button')].find(button => button.textContent === 'Save changes') as HTMLButtonElement;
     expect(save.disabled).toBe(false);
     await change(host.querySelector('#schedule-description') as HTMLInputElement, 'Post-mortem notes');
     await click(save);
     await advance(0);
-    expect(api.previewLoadSchedule).not.toHaveBeenCalled();
-    expect(api.updateLoadSchedule).toHaveBeenCalledTimes(1);
-    const payload = vi.mocked(api.updateLoadSchedule).mock.calls[0][1];
+    expect(api.previewSchedule).not.toHaveBeenCalled();
+    expect(api.updateSchedule).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(api.updateSchedule).mock.calls[0][1];
     expect(payload.name).toBe('One-time import');
     expect(payload.description).toBe('Post-mortem notes');
     expect(payload.runAt).toBe('2026-10-16T10:00:00.000Z');
@@ -186,11 +272,11 @@ describe('ScheduledLoadPage', () => {
   });
 
   it('switches an existing schedule between cron and a one-time trigger with a single trigger field', async () => {
-    const completed: LoadSchedule = {
+    const completed: ScheduleDefinition = {
       ...sampleSchedule, id: 'S-ONCE', name: 'One-time import', runAt: '2026-10-16T10:00:00Z',
       cron: undefined, nextRunAt: null,
     };
-    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule, completed] })) });
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule, completed] })) });
     await render(api);
 
     await click(host.querySelector('[aria-label="Edit Nightly payments"]')!);
@@ -199,8 +285,8 @@ describe('ScheduledLoadPage', () => {
     await advance(400);
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Save changes')!);
     await advance(0);
-    expect(api.updateLoadSchedule).toHaveBeenCalledTimes(1);
-    const cronToOnce = vi.mocked(api.updateLoadSchedule).mock.calls[0][1];
+    expect(api.updateSchedule).toHaveBeenCalledTimes(1);
+    const cronToOnce = vi.mocked(api.updateSchedule).mock.calls[0][1];
     expect(cronToOnce.runAt).toBe('2026-11-01T18:00:00.000Z');
     expect(cronToOnce.cron).toBeUndefined();
 
@@ -210,8 +296,8 @@ describe('ScheduledLoadPage', () => {
     await advance(400);
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Save changes')!);
     await advance(0);
-    expect(api.updateLoadSchedule).toHaveBeenCalledTimes(2);
-    const onceToCron = vi.mocked(api.updateLoadSchedule).mock.calls[1][1];
+    expect(api.updateSchedule).toHaveBeenCalledTimes(2);
+    const onceToCron = vi.mocked(api.updateSchedule).mock.calls[1][1];
     expect(onceToCron.cron).toBe('30 3 * * *');
     expect(onceToCron.runAt).toBeUndefined();
   });
@@ -219,9 +305,9 @@ describe('ScheduledLoadPage', () => {
   it('requires a server preview before creating a disabled schedule by default', async () => {
     const api = makeApi();
     await render(api);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'New Schedule')!);
     await change(host.querySelector('#schedule-timezone') as HTMLInputElement, 'Asia/Hong_Kong');
     await advance(300);
-    expect(host.textContent).toContain('No schedules have been created');
     expect(host.textContent).toContain('This preview calculates the next five occurrence times from timezone and cron. It does not validate the package or test snapshot.');
     expect(host.textContent).toContain('Oct 20, 2026');
     expect(host.querySelectorAll('.att-schedule-occurrence-preview li')).toHaveLength(5);
@@ -232,23 +318,20 @@ describe('ScheduledLoadPage', () => {
     await change(host.querySelector('#schedule-name') as HTMLInputElement, 'Nightly payments');
     await change(host.querySelector('#schedule-package') as HTMLSelectElement, 'payments');
     await change(host.querySelector('#schedule-scenario') as HTMLInputElement, 'load/nightly.yaml');
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Create schedule')!);
-    expect((host.querySelector('#schedule-name') as HTMLInputElement).value).toBe('Nightly payments');
-    expect(host.textContent).toContain('Save or clear the current schedule draft before starting another.');
     await click(save);
     await advance(0);
-    expect(api.createLoadSchedule).toHaveBeenCalledWith(expect.objectContaining({
+    expect(api.createSchedule).toHaveBeenCalledWith(expect.objectContaining({
       name: 'Nightly payments', packageId: 'payments', scenario: 'load/nightly.yaml', enabled: false,
       timezone: expect.any(String), cron: '0 2 * * *',
     }));
     expect(host.textContent).toContain('Saved Nightly payments. Next run:');
-    expect(api.previewLoadSchedule).toHaveBeenCalled();
-    expect(vi.mocked(api.previewLoadSchedule).mock.calls.at(-1)?.[0]).toEqual({ timezone: expect.any(String), cron: '0 2 * * *' });
+    expect(api.previewSchedule).toHaveBeenCalled();
+    expect(vi.mocked(api.previewSchedule).mock.calls.at(-1)?.[0]).toEqual({ timezone: expect.any(String), cron: '0 2 * * *' });
     expect(navigation.registerUnsavedChanges).toHaveBeenCalledWith(true, 'Schedules changes');
   });
 
   it('shows safe Worker validation diagnostics, package context, target, and request ID after a rejected save', async () => {
-    const api = makeApi({ createLoadSchedule: vi.fn(async () => {
+    const api = makeApi({ createSchedule: vi.fn(async () => {
       throw new ApiError('Load options must include a positive duration.', {
         status: 400, code: 'ATT-SERVER-INVALID-REQUEST', requestId: 'schedule-request-42',
         diagnostics: [{ code: 'WORKER_REQUEST_INVALID', summary: 'Load options must include a positive duration.',
@@ -257,6 +340,7 @@ describe('ScheduledLoadPage', () => {
       });
     }) });
     await render(api);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'New Schedule')!);
     await change(host.querySelector('#schedule-timezone') as HTMLInputElement, 'Asia/Hong_Kong');
     await advance(300);
     await change(host.querySelector('#schedule-name') as HTMLInputElement, 'Nightly payments');
@@ -291,7 +375,7 @@ describe('ScheduledLoadPage', () => {
     expect(host.querySelector('.att-schedule-snapshot-review pre')?.textContent).toBe('schemaVersion: att-load/v1.6\nworkloads: []\n');
     expect((host.querySelector('#schedule-environment') as HTMLInputElement).value).toBe('SIT');
     expect(navigation.navigate).not.toHaveBeenCalled();
-    expect(navigation.registerUnsavedChanges).not.toHaveBeenCalledWith(expect.any(Boolean), 'Schedules changes');
+    expect(navigation.registerUnsavedChanges).toHaveBeenCalledWith(false, 'Schedules changes');
 
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Cancel and return to editor')!);
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -301,31 +385,32 @@ describe('ScheduledLoadPage', () => {
   it('keeps Run Now and delete behind explicit confirmation', async () => {
     let present = true;
     const api = makeApi({
-      listLoadSchedules: vi.fn(async () => ({ items: present ? [sampleSchedule] : [] })),
-      deleteLoadSchedule: vi.fn(async id => { present = false; return { scheduleId: id, status: 'DELETED' }; }),
+      listSchedules: vi.fn(async () => ({ items: present ? [sampleSchedule] : [] })),
+      deleteSchedule: vi.fn(async id => { present = false; return { scheduleId: id, status: 'DELETED' }; }),
     });
     await render(api);
 
-    await click(host.querySelector('[aria-label="Run now Nightly payments"]')!);
+    await click(host.querySelector('[aria-label="Run Now Nightly payments"]')!);
     expect(host.querySelector('.att-schedule-confirm')?.hasAttribute('open')).toBe(true);
     await click(host.querySelector('.att-schedule-confirm button')!);
-    expect(api.triggerLoadSchedule).not.toHaveBeenCalled();
+    expect(api.triggerSchedule).not.toHaveBeenCalled();
 
-    await click(host.querySelector('[aria-label="Run now Nightly payments"]')!);
+    await click(host.querySelector('[aria-label="Run Now Nightly payments"]')!);
     await click([...host.querySelectorAll('.att-schedule-confirm button')].find(button => button.textContent === 'Confirm Run Now')!);
     await advance(0);
-    expect(api.triggerLoadSchedule).toHaveBeenCalledWith(sampleSchedule.id);
+    expect(api.triggerSchedule).toHaveBeenCalledWith(sampleSchedule.id);
     expect(host.textContent).toContain('Run Now recorded as submitted');
 
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Close history')!);
     await click(host.querySelector('[aria-label="Delete Nightly payments"]')!);
     await click([...host.querySelectorAll('.att-schedule-confirm button')].find(button => button.textContent === 'Confirm delete')!);
     await advance(0);
-    expect(api.deleteLoadSchedule).toHaveBeenCalledWith(sampleSchedule.id);
+    expect(api.deleteSchedule).toHaveBeenCalledWith(sampleSchedule.id);
     expect(host.textContent).toContain('Deleted Nightly payments');
   });
 
   it('communicates authentication and administrator permission failures', async () => {
-    const api = makeApi({ listLoadSchedules: vi.fn(async () => { throw Object.assign(new Error('forbidden'), { status: 403 }); }) });
+    const api = makeApi({ listSchedules: vi.fn(async () => { throw Object.assign(new Error('forbidden'), { status: 403 }); }) });
     await render(api);
     expect(host.textContent).toContain('Your account does not have the configured Schedules administrator role.');
     expect(host.querySelector('[role="status"]')).not.toBeNull();
@@ -333,51 +418,52 @@ describe('ScheduledLoadPage', () => {
 
   it('refreshes an open History panel while a queued job is still active, then stops polling at its terminal state', async () => {
     const queued: ScheduleOccurrence = { occurrenceId: 'O-QUEUED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-16T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-900', jobStatus: 'QUEUED' };
-    const getLoadScheduleExecutions = vi.fn()
+    const getScheduleExecutions = vi.fn()
       .mockResolvedValueOnce({ items: [queued] })
       .mockResolvedValue({ items: [{ ...queued, jobStatus: 'FAIL' }] });
-    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule] })), getLoadScheduleExecutions });
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })), getScheduleExecutions });
     await render(api);
 
     const jobState = () => host.querySelector('.att-schedule-job-state');
     await click(host.querySelector('[aria-label="History Nightly payments"]')!);
     await advance(0);
     expect(jobState()?.textContent).toBe('Job Queued');
-    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(1);
+    expect(getScheduleExecutions).toHaveBeenCalledTimes(1);
 
     // The active job keeps the panel current without the user reopening History.
     await advance(5000);
     expect(jobState()?.textContent).toBe('Job Failed');
     expect(jobState()?.className).toContain('is-failed');
-    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(2);
+    expect(getScheduleExecutions).toHaveBeenCalledTimes(2);
 
     // Once the occurrence is terminal the poll timer is cleared, so no further requests are issued.
     await advance(20000);
-    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(2);
+    expect(getScheduleExecutions).toHaveBeenCalledTimes(2);
   });
 
   it('reloads History after Run Now even when the same schedule is already open', async () => {
     let items: ScheduleOccurrence[] = occurrences;
-    const getLoadScheduleExecutions = vi.fn(async () => ({ items }));
+    const getScheduleExecutions = vi.fn(async () => ({ items }));
     const api = makeApi({
-      listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule] })),
-      getLoadScheduleExecutions,
-      triggerLoadSchedule: vi.fn(async () => ({ occurrenceId: 'O-NOW', scheduledFor: '2026-10-14T10:00:00Z', triggerType: 'manual', status: 'submitted', jobId: 'JOB-NOW', jobStatus: 'QUEUED' })),
+      listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })),
+      getScheduleExecutions,
+      triggerSchedule: vi.fn(async () => ({ occurrenceId: 'O-NOW', scheduledFor: '2026-10-14T10:00:00Z', triggerType: 'manual', status: 'submitted', jobId: 'JOB-NOW', jobStatus: 'QUEUED' })),
     });
     await render(api);
 
     await click(host.querySelector('[aria-label="History Nightly payments"]')!);
     await advance(0);
-    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(1);
+    expect(getScheduleExecutions).toHaveBeenCalledTimes(1);
     expect(host.textContent).not.toContain('O-NOW');
 
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Close history')!);
     items = [{ occurrenceId: 'O-NOW', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-14T10:00:00Z', triggerType: 'manual', status: 'submitted', jobId: 'JOB-NOW', jobStatus: 'QUEUED' }, ...occurrences];
-    await click(host.querySelector('[aria-label="Run now Nightly payments"]')!);
+    await click(host.querySelector('[aria-label="Run Now Nightly payments"]')!);
     await click([...host.querySelectorAll('.att-schedule-confirm button')].find(button => button.textContent === 'Confirm Run Now')!);
     await advance(0);
 
-    expect(api.triggerLoadSchedule).toHaveBeenCalledWith(sampleSchedule.id);
-    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(2);
+    expect(api.triggerSchedule).toHaveBeenCalledWith(sampleSchedule.id);
+    expect(getScheduleExecutions).toHaveBeenCalledTimes(2);
     expect(host.textContent).toContain('O-NOW');
   });
 });

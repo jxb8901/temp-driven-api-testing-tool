@@ -161,6 +161,24 @@ async function main() {
     assert.match(await quickLoadTarget.textContent(), /^flow · /, 'Quick Load should retain the selected Flow target');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     assert.equal(overflow, false, 'the live Configuration and Quick Load UI must fit a tablet viewport');
+
+    await page.goto(`${origin}/tools/att/ui/index.html#/schedules`);
+    await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
+    await page.getByText(/schedules shown\.$/).waitFor();
+    assert.equal(await page.locator('#schedule-name').count(), 0, 'the packaged Schedules landing must not render an editor');
+    await page.getByRole('button', { name: 'New Schedule', exact: true }).click();
+    await page.locator('#schedule-name').waitFor();
+    await page.locator('#schedule-name').fill('Unsaved packaged check');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+    await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.locator('.att-schedule-cards').isVisible(), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'Schedules must fit a phone viewport');
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    await page.locator('a[data-nav="scheduled-load"]').click();
+    await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
+    assert.match(page.url(), /#\/schedules$/, 'the packaged Schedules navigation must use the canonical route');
     const cspViolations = await page.evaluate(() => window.__attCspViolations);
     assert.deepEqual(cspViolations, [], `the live Studio must not violate its CSP: ${JSON.stringify(cspViolations)}`);
     assert.deepEqual(pageErrors, [], 'the live ATT Studio UI must not throw browser errors');

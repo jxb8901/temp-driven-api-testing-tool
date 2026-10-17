@@ -14,7 +14,7 @@ import type { LoadJobsApi, PackageOption } from './features/load/types';
 import { SettingsPage } from './SettingsPage';
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
 import { QuickLoadPage } from './features/load/QuickLoadPage';
-import type { ValidatedLoadDraftIntent } from './features/schedules/types';
+import type { ValidatedScheduleIntent } from './features/schedules/types';
 
 const ScheduledLoadPage = lazy(() => import('./features/schedules/ScheduledLoadPage').then(module => ({ default: module.ScheduledLoadPage })));
 
@@ -29,7 +29,7 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
   resourceRoute: ExplorerPageProps['resourceRoute'];
   inlineLoadEnabled: boolean;
   schedulingEnabled: boolean;
-  onSchedule(input: ValidatedLoadDraftIntent): void;
+  onSchedule(input: ValidatedScheduleIntent): void;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
@@ -97,7 +97,7 @@ function LoadRouteView({ packageId, inlineLoadEnabled, schedulingEnabled, packag
   inlineLoadEnabled: boolean;
   schedulingEnabled: boolean;
   packages: PackageOption[];
-  onSchedule(input: ValidatedLoadDraftIntent): void;
+  onSchedule(input: ValidatedScheduleIntent): void;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
@@ -198,7 +198,7 @@ function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSch
   route: Extract<ReturnType<typeof useRouteState>['route'], { kind: 'quick-load' }>;
   inlineLoadEnabled: boolean;
   schedulingEnabled: boolean;
-  onSchedule(input: ValidatedLoadDraftIntent): void;
+  onSchedule(input: ValidatedScheduleIntent): void;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
@@ -247,9 +247,9 @@ export default function App() {
   const jobsRefreshCount = useRef(0);
   const jobsRequestSequence = useRef(0);
   const [selectedEnvironment, setSelectedEnvironment] = useState('');
-  const [scheduleIntent, setScheduleIntent] = useState<ValidatedLoadDraftIntent | null>(null);
+  const [scheduleIntent, setScheduleIntent] = useState<ValidatedScheduleIntent | null>(null);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
-  const onSchedule = useCallback((intent: ValidatedLoadDraftIntent) => {
+  const onSchedule = useCallback((intent: ValidatedScheduleIntent) => {
     setScheduleIntent(intent);
     setScheduleDialogOpen(true);
   }, []);
@@ -258,6 +258,11 @@ export default function App() {
     setScheduleDialogOpen(false);
     setScheduleIntent(null);
   }, []);
+  const scheduleOriginRoute = useRef(navigation.route);
+  useEffect(() => {
+    if (scheduleOriginRoute.current !== navigation.route) closeScheduleDialog();
+    scheduleOriginRoute.current = navigation.route;
+  }, [navigation.route, closeScheduleDialog]);
   useEffect(() => {
     const routeEnvironment = navigation.route.kind === 'configuration' || navigation.route.kind === 'quick-load' ? navigation.route.environment : undefined;
     if (routeEnvironment !== undefined) setSelectedEnvironment(routeEnvironment);
@@ -358,8 +363,10 @@ export default function App() {
   } else if (navigation.route.kind === 'jobs') {
     content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage api={loadJobsApi} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} /></Suspense>;
   } else if (navigation.route.kind === 'schedules') {
-    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Scheduled Load…</div>}>
+    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Schedules…</div>}>
       <ScheduledLoadPage
+        key={`${navigation.route.view || 'list'}:${navigation.route.scheduleId || ''}`}
+        route={navigation.route}
         api={api}
         packages={state.packages}
         enabled={capabilities.loadSchedulingEnabled}

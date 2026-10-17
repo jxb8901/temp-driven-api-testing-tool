@@ -28,7 +28,10 @@ async function main() {
     const scheduleRequests = [];
     page.on('pageerror', error => pageErrors.push(error.message));
     page.on('request', request => {
-      if (request.url().includes('/api/v1/load-schedules')) scheduleRequests.push(`${request.method()} ${new URL(request.url()).pathname}`);
+      const path = new URL(request.url()).pathname;
+      if (path.includes('/api/v1/schedules') || path.includes('/api/v1/load-schedules')) {
+        scheduleRequests.push(`${request.method()} ${path}`);
+      }
     });
     await selectFixture(context, fixture.origin, 'scheduled-workspace');
     const base = `${fixture.origin}/att/ui/`;
@@ -53,7 +56,7 @@ async function main() {
     assert.match(page.url(), /#\/jobs\/JOB-4821$/);
     await page.goto(`${base}#/load-schedules`);
 
-    await page.getByRole('button', { name: 'Create schedule' }).click();
+    await page.getByRole('button', { name: 'New Schedule' }).click();
     await page.locator('#schedule-name').fill('Automated UI schedule');
     await page.locator('#schedule-package').selectOption('payments');
     await page.locator('#schedule-scenario').fill('load/ui.yaml');
@@ -69,24 +72,26 @@ async function main() {
     });
     await page.getByRole('button', { name: 'Save schedule' }).click();
     await page.getByText('Automated UI schedule', { exact: true }).first().waitFor();
-    assert.ok(scheduleRequests.some(request => request.startsWith('POST') && request.endsWith('/load-schedules/preview')));
-    assert.ok(scheduleRequests.some(request => request === 'POST /att/api/v1/load-schedules'));
+    assert.ok(scheduleRequests.some(request => request.startsWith('POST') && request.endsWith('/schedules/preview')));
+    assert.ok(scheduleRequests.some(request => request === 'POST /att/api/v1/schedules'));
 
     await page.getByRole('button', { name: 'Pause Automated UI schedule' }).first().click();
+    await page.getByRole('button', { name: 'Confirm state change' }).click();
     await page.getByRole('button', { name: 'Resume Automated UI schedule' }).first().waitFor();
     await page.getByRole('button', { name: 'Resume Automated UI schedule' }).first().click();
+    await page.getByRole('button', { name: 'Confirm state change' }).click();
     await page.getByRole('button', { name: 'Edit Automated UI schedule' }).first().click();
     await page.locator('#schedule-description').fill('Updated weekly run');
     await page.getByRole('button', { name: 'Save changes' }).click();
-    await page.getByText('Saved Automated UI schedule.', { exact: false }).waitFor();
+    await waitForScheduleList(page);
 
-    await page.getByRole('button', { name: 'Run now Automated UI schedule' }).first().click();
+    await page.getByRole('button', { name: 'Run Now Automated UI schedule' }).first().click();
     await page.getByRole('heading', { name: 'Run this schedule now?' }).waitFor();
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     assert.equal(scheduleRequests.filter(request => request.endsWith('/SCHED-CREATED/trigger')).length, 0, 'cancel should not start a Load job');
-    await page.getByRole('button', { name: 'Run now Automated UI schedule' }).first().click();
+    await page.getByRole('button', { name: 'Run Now Automated UI schedule' }).first().click();
     await page.getByRole('button', { name: 'Confirm Run Now' }).click();
-    await page.getByText(/Run Now recorded as submitted/).waitFor();
+    await page.waitForURL('**/#/schedules/SCHED-CREATED/history');
     await page.getByText('O-NOW', { exact: true }).waitFor();
     await page.locator('.att-occurrence-table tbody tr', { hasText: 'O-NOW' }).getByText('Job Queued', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'JOB-4821', exact: true }).last().click();

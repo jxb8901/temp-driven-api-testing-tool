@@ -359,7 +359,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, envir
     const expiresAt = currentDraft?.expiresAt ? Date.parse(currentDraft.expiresAt) : Number.NaN;
     if (!currentDraft || !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 15_000) currentDraft = await previewDebug();
     if (!currentDraft) return;
-    onScheduleDebug({ packageId, environment: environment || undefined, draftId: currentDraft.draftId, jobType: currentDraft.draftId.startsWith('R') ? 'run' : 'debug',
+    onScheduleDebug({ packageId, environment: environment || undefined, draftId: currentDraft.draftId, executionType: 'run', legacyDebug: !currentDraft.draftId.startsWith('R'),
       previewYaml: currentDraft.previewYaml, target: { type: debugForm.target.type, id: debugForm.target.id } });
   };
 

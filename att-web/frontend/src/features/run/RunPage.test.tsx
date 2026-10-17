@@ -38,7 +38,7 @@ it('validates before submit and clears review when the environment changes', asy
 it('schedules the reviewed snapshot and diagnostic changes do not execute', async () => {
   await change('Target type', 'flow'); await change('Target ID', 'payment.flow');
   await click('Validate'); await click('Schedule…');
-  expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'R123', jobType: 'run', target: { type: 'flow', id: 'payment.flow' } }));
+  expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'R123', executionType: 'run', target: { type: 'flow', id: 'payment.flow' } }));
   expect(api.submitRun).not.toHaveBeenCalled();
   await act(async () => (control('Debug diagnostics') as HTMLInputElement).click());
   expect(host.querySelector('[aria-label="Review RUN"]')).toBeNull();
@@ -48,5 +48,28 @@ it('schedules a mixed-version resource fallback as legacy Debug', async () => {
   vi.mocked(api.previewRun).mockResolvedValueOnce({ draftId: 'D123', preview: { target: { type: 'flow', id: 'payment.flow' } } });
   await change('Target type', 'flow'); await change('Target ID', 'payment.flow');
   await click('Validate'); await click('Schedule…');
-  expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'D123', jobType: 'debug' }));
+  expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'D123', executionType: 'run', legacyDebug: true }));
+});
+
+it.each(['case', 'template', 'flow', 'tool', 'batch'])('preserves the validated %s selection and Debug option when scheduling', async targetType => {
+  await change('Target type', targetType);
+  await change('Environment', 'SIT');
+  if (targetType !== 'batch') await change('Target ID', 'selected.target');
+  await act(async () => (control('Debug diagnostics') as HTMLInputElement).click());
+  if (targetType === 'batch') {
+    const selection = host.querySelector('textarea[aria-label="Case selection"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(selection, '{"suites":["payments"],"tags":["smoke"],"caseIds":["C1","C3"]}');
+      selection.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+  await click('Validate');
+  const validated = vi.mocked(api.previewRun).mock.calls.at(-1)![0];
+  expect(validated).toMatchObject({ executionType: 'run', environment: 'SIT', options: { debug: true } });
+  if (targetType === 'batch') expect(validated.selection).toEqual({ suites: ['payments'], tags: ['smoke'], caseIds: ['C1', 'C3'] });
+  else expect(validated.target).toEqual({ type: targetType, id: 'selected.target' });
+  await click('Schedule…');
+  expect(onSchedule).toHaveBeenLastCalledWith(expect.objectContaining({ executionType: 'run', draftId: 'R123', environment: 'SIT' }));
+  expect(api.previewRun).toHaveBeenCalledTimes(1);
+  expect(api.submitRun).not.toHaveBeenCalled();
 });

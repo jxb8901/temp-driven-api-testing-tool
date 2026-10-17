@@ -13,13 +13,15 @@ import type { RunDefinition } from './features/run/RunPage';
 import { contextRelativeReturnTo } from './contextPaths';
 import { inspectionCache } from './inspectionCache';
 import type {
-  DeleteScheduleResponse, LoadSchedule, LoadScheduleInput, ScheduleOccurrence, SchedulePreview,
+  DeleteScheduleResponse, ScheduleDefinition, ScheduleInput, ScheduleOccurrence, SchedulePreview,
   SchedulePreviewInput,
 } from './features/schedules/types';
+import { normalizeSchedule, scheduleTransport } from './features/schedules/types';
 
 let csrfToken = '';
 let localAuthMode = false;
 let unifiedRunSupported = false;
+const schedulesPath = () => unifiedRunSupported ? 'schedules' : 'load-schedules';
 
 /** Resolve the API below the current UI context (for example /att/ui/ -> /att/api/v1/). */
 export function apiBaseUrl(): URL {
@@ -360,34 +362,35 @@ export const api = {
     if (input.principal) body.principal = input.principal;
     return postJson<AcceptedJob>('jobs/run', body, signal);
   },
-  listLoadSchedules(signal?: AbortSignal): Promise<ApiEnvelope<LoadSchedule>> {
-    return request<ApiEnvelope<LoadSchedule>>('load-schedules', { signal });
+  async listSchedules(signal?: AbortSignal): Promise<ApiEnvelope<ScheduleDefinition>> {
+    const response = await request<ApiEnvelope<ScheduleDefinition>>(schedulesPath(), { signal });
+    return { ...response, items: response.items.map(normalizeSchedule) };
   },
-  previewLoadSchedule(input: SchedulePreviewInput, signal?: AbortSignal): Promise<SchedulePreview> {
-    return postJson<SchedulePreview>('load-schedules/preview', input, signal);
+  previewSchedule(input: SchedulePreviewInput, signal?: AbortSignal): Promise<SchedulePreview> {
+    return postJson<SchedulePreview>(schedulesPath() + '/preview', input, signal);
   },
-  createLoadSchedule(input: LoadScheduleInput, signal?: AbortSignal): Promise<LoadSchedule> {
-    return postJson<LoadSchedule>('load-schedules', input, signal);
+  createSchedule(input: ScheduleInput, signal?: AbortSignal): Promise<ScheduleDefinition> {
+    return postJson<ScheduleDefinition>(schedulesPath(), scheduleTransport(input, unifiedRunSupported), signal).then(normalizeSchedule);
   },
-  updateLoadSchedule(id: string, input: LoadScheduleInput, signal?: AbortSignal): Promise<LoadSchedule> {
-    return request<LoadSchedule>('load-schedules/' + encodeURIComponent(id), {
-      method: 'PATCH', body: JSON.stringify(input), signal,
-    });
+  updateSchedule(id: string, input: ScheduleInput, signal?: AbortSignal): Promise<ScheduleDefinition> {
+    return request<ScheduleDefinition>(schedulesPath() + '/' + encodeURIComponent(id), {
+      method: 'PATCH', body: JSON.stringify(scheduleTransport(input, unifiedRunSupported)), signal,
+    }).then(normalizeSchedule);
   },
-  setLoadScheduleEnabled(id: string, enabled: boolean, signal?: AbortSignal): Promise<LoadSchedule> {
-    return postJson<LoadSchedule>(
-      'load-schedules/' + encodeURIComponent(id) + (enabled ? '/resume' : '/pause'), {}, signal,
-    );
+  setScheduleEnabled(id: string, enabled: boolean, signal?: AbortSignal): Promise<ScheduleDefinition> {
+    return postJson<ScheduleDefinition>(
+      schedulesPath() + '/' + encodeURIComponent(id) + (enabled ? '/resume' : '/pause'), {}, signal,
+    ).then(normalizeSchedule);
   },
-  triggerLoadSchedule(id: string, signal?: AbortSignal): Promise<ScheduleOccurrence> {
-    return postJson<ScheduleOccurrence>('load-schedules/' + encodeURIComponent(id) + '/trigger', {}, signal);
+  triggerSchedule(id: string, signal?: AbortSignal): Promise<ScheduleOccurrence> {
+    return postJson<ScheduleOccurrence>(schedulesPath() + '/' + encodeURIComponent(id) + '/trigger', {}, signal);
   },
-  deleteLoadSchedule(id: string, signal?: AbortSignal): Promise<DeleteScheduleResponse> {
-    return request<DeleteScheduleResponse>('load-schedules/' + encodeURIComponent(id), { method: 'DELETE', signal });
+  deleteSchedule(id: string, signal?: AbortSignal): Promise<DeleteScheduleResponse> {
+    return request<DeleteScheduleResponse>(schedulesPath() + '/' + encodeURIComponent(id), { method: 'DELETE', signal });
   },
-  getLoadScheduleExecutions(id: string, limit = 100, signal?: AbortSignal): Promise<ApiEnvelope<ScheduleOccurrence>> {
+  getScheduleExecutions(id: string, limit = 100, signal?: AbortSignal): Promise<ApiEnvelope<ScheduleOccurrence>> {
     return request<ApiEnvelope<ScheduleOccurrence>>(
-      'load-schedules/' + encodeURIComponent(id) + '/executions' + queryString({ limit }),
+      schedulesPath() + '/' + encodeURIComponent(id) + '/executions' + queryString({ limit }),
       { signal },
     );
   },

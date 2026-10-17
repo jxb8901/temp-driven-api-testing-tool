@@ -352,7 +352,7 @@ describe('Explorer page integration', () => {
       packageId: 'payments', target: { type: 'template', id: 'checkout' }, input: debugInput,
     }));
     expect(onScheduleDebug).toHaveBeenCalledWith(expect.objectContaining({
-      packageId: 'payments', draftId: 'draft-1', jobType: 'debug',
+      packageId: 'payments', draftId: 'draft-1', executionType: 'run', legacyDebug: true,
       target: { type: 'template', id: 'checkout' },
     }));
     click(container.querySelector('.att-sidecar-keep-default input')!);
