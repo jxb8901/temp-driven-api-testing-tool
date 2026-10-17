@@ -247,7 +247,7 @@ h2 { margin: 0; font-size: 1.05rem; letter-spacing: -0.02em; }
 @media (max-width: 480px) {
   .topbar-status { display: none; }
   .topbar { gap: var(--att-space-1); }
-  .topbar-brand > span:last-child, .shortcut-help { display: none; }
+  .shortcut-help { display: none; }
   .att-current-user-menu { max-width: 3.1rem; }
   .att-current-user-menu summary { max-width: 3.1rem; padding-inline: .5rem; }
   .att-current-user-menu summary span:first-child { max-width: 1.25rem; }

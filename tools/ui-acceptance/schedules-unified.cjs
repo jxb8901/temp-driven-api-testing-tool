@@ -113,7 +113,9 @@ async function main() {
     await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
     assert.deepEqual(await page.evaluate(async () => (await window.axe.run(document, {
       runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag22aa'] },
-    })).violations.map(item => item.id)), []);
+    })).violations.map(({ id, impact, nodes }) => ({
+      id, impact, selectors: nodes.map(node => node.target),
+    }))), []);
     await page.goto(`${base}#/run/payments`);
     await page.getByLabel('Target type').selectOption('batch');
     await page.getByLabel('Debug diagnostics', { exact: true }).check();
