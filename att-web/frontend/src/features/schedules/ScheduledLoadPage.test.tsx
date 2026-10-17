@@ -141,7 +141,7 @@ describe('ScheduledLoadPage', () => {
     const initialDraft = { packageId: 'payments', environment: 'UAT', executionType, draftId: executionType === 'run' ? 'R-FROZEN' : 'A-FROZEN',
       previewYaml: 'Safe server preview', target: { type: 'tool', id: 'send' } };
     await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
-      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} initialDraft={initialDraft} />
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} route={{ kind: 'schedules', view: 'new' }} initialDraft={initialDraft} />
     </NavigationGuardContext.Provider>));
     await advance(400);
     expect(api.createSchedule).not.toHaveBeenCalled();
@@ -158,7 +158,7 @@ describe('ScheduledLoadPage', () => {
     const api = makeApi();
     const initialDraft = { packageId: 'payments', environment: 'UAT', draftId: 'A-FROZEN', previewYaml: 'Safe server preview' };
     await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
-      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} initialDraft={initialDraft} />
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} route={{ kind: 'schedules', view: 'new' }} initialDraft={initialDraft} />
     </NavigationGuardContext.Provider>));
     await advance(400);
     await click(host.querySelector('button[type="submit"]')!);
@@ -183,7 +183,7 @@ describe('ScheduledLoadPage', () => {
     expect(host.textContent).toContain('unavailable');
     expect(host.querySelector('form')).toBeNull();
     await show('forbidden', makeApi({ listSchedules: vi.fn(async () => { throw new ApiError('Forbidden', { status: 403 }); }) }));
-    expect(host.textContent).toContain('administrator role');
+    expect(host.textContent).toContain('Your account does not have operational access to Schedules.');
     expect(host.querySelector('form')).toBeNull();
   });
 
@@ -200,7 +200,7 @@ describe('ScheduledLoadPage', () => {
     const onOpenJob = await render(api);
     expect(host.querySelector('h1')?.textContent).toBe('Schedules');
     expect(host.textContent).toContain('Nightly payments');
-    expect(host.textContent).toContain('Missed runs are recorded as skipped');
+    expect(host.textContent).toContain('Missed runs are skipped without backfill.');
 
     await click(host.querySelector('[aria-label="History Nightly payments"]')!);
     await advance(0);
@@ -442,7 +442,7 @@ describe('ScheduledLoadPage', () => {
   it('communicates authentication and administrator permission failures', async () => {
     const api = makeApi({ listSchedules: vi.fn(async () => { throw Object.assign(new Error('forbidden'), { status: 403 }); }) });
     await render(api);
-    expect(host.textContent).toContain('Your account does not have the configured Schedules administrator role.');
+    expect(host.textContent).toContain('Your account does not have operational access to Schedules.');
     expect(host.querySelector('[role="status"]')).not.toBeNull();
   });
 

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { RunPage } from './RunPage';
 import { api } from '../../api';
 import { NavigationGuardContext, type NavigationGuardApi } from '../../router';
-vi.mock('../../api', () => ({ api: { previewRun: vi.fn(), submitRun: vi.fn() } }));
+vi.mock('../../api', () => ({ api: { previewRun: vi.fn(), submitRun: vi.fn(), getDeclaredConfiguration: vi.fn() } }));
 vi.mock('../code/CodeEditor', () => ({ CodeEditor: ({ label, value, readOnly, onChange }: { label: string; value: string; readOnly?: boolean; onChange?: (value: string) => void }) => <textarea aria-label={label} value={value} readOnly={readOnly} onChange={e => onChange?.(e.target.value)} /> }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement; let root: Root;
@@ -14,6 +14,7 @@ const guard = { registerUnsavedChanges: vi.fn(() => () => {}) } as unknown as Na
 beforeEach(async () => {
   vi.clearAllMocks(); vi.mocked(api.previewRun).mockResolvedValue({ draftId: 'R123', preview: { selectedCaseIds: ['cases.default.C1'] } });
   vi.mocked(api.submitRun).mockResolvedValue({ jobId: 'J123' });
+  vi.mocked(api.getDeclaredConfiguration).mockResolvedValue({ environments: [{ name: 'SIT', state: 'active' }, { name: 'UAT', state: 'active' }] });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<NavigationGuardContext.Provider value={guard}><RunPage packageId="payments" onAccepted={onAccepted} onSchedule={onSchedule} schedulingEnabled /></NavigationGuardContext.Provider>));
 });

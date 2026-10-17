@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
 import { api } from './api';
 import { inspectionCache } from './inspectionCache';
@@ -20,6 +20,13 @@ describe('AppShell', () => {
     host = undefined;
   });
 
+  beforeEach(() => {
+    vi.spyOn(api, 'getAuthCapabilities').mockResolvedValue({
+      configurationAdmin: true,
+      capabilities: { operate: true, accountManage: true, systemSettingsWrite: true, configurationAdmin: true },
+    });
+  });
+
   it('invalidates refilled inspection state without remounting on tab and back-forward restores', async () => {
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     const navigation: RouteState = {
@@ -27,10 +34,10 @@ describe('AppShell', () => {
       navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn(),
     };
     act(() => root?.render(<AppShell route={navigation.route} navigation={navigation}
-      serverVersion={{ status: 'loading' }} selectedPackage="payments" selectedEnvironment="SIT"
+      serverVersion={{ status: 'ready', data: { apiVersion: '1', inlineLoadEnabled: true } }} selectedPackage="payments" selectedEnvironment="SIT"
       onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
       <input aria-label="Inspection projection" defaultValue="fresh mount" />
-    </AppShell>));
+    </AppShell>); await Promise.resolve(); });
     for (const event of ['pagehide', 'pageshow', 'visibilitychange']) {
       inspectionCache.setView('filters', { search: 'echo', pages: 3, scrollTop: 120 });
       await inspectionCache.query('page', async () => 'prior account');
@@ -45,17 +52,17 @@ describe('AppShell', () => {
     }
   });
 
-  it('preserves an unfinished Load form when tab visibility changes', () => {
+  it('preserves an unfinished Load form when tab visibility changes', async () => {
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     const navigation: RouteState = {
       route: { kind: 'load' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
       navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn(),
     };
     act(() => root?.render(<AppShell route={navigation.route} navigation={navigation}
-      serverVersion={{ status: 'loading' }} selectedPackage="payments" selectedEnvironment="SIT"
+      serverVersion={{ status: 'ready', data: { apiVersion: '1', inlineLoadEnabled: true } }} selectedPackage="payments" selectedEnvironment="SIT"
       onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
       <input aria-label="Unfinished Load form" defaultValue="" />
-    </AppShell>));
+    </AppShell>); await Promise.resolve(); });
     const input = host.querySelector('input[aria-label="Unfinished Load form"]') as HTMLInputElement;
     input.value = 'unsaved workload';
     act(() => document.dispatchEvent(new Event('visibilitychange')));
@@ -63,7 +70,7 @@ describe('AppShell', () => {
     expect(input.value).toBe('unsaved workload');
   });
 
-  it('renders accessible navigation, identity disclosure, context, and a feature mount', () => {
+  it('renders accessible navigation, identity disclosure, context, and a feature mount', async () => {
     localStorage.setItem('att-ui-theme', 'light');
     host = document.createElement('div');
     document.body.append(host);
@@ -79,7 +86,7 @@ describe('AppShell', () => {
       cancelNavigation: vi.fn(),
     };
 
-    act(() => root?.render(
+    await act(async () => { root?.render(
       <AppShell
         route={navigation.route}
         navigation={navigation}
@@ -92,7 +99,7 @@ describe('AppShell', () => {
       >
         <p id="feature-mount">Feature content</p>
       </AppShell>,
-    ));
+    ); await Promise.resolve(); });
 
     expect(host.querySelector('nav[aria-label="Primary navigation"]')).not.toBeNull();
     expect(host.querySelector('[data-nav="explorer"]')?.getAttribute('aria-current')).toBe('page');
@@ -103,7 +110,7 @@ describe('AppShell', () => {
     expect(host.querySelector('#main-content #feature-mount')?.textContent).toBe('Feature content');
   });
 
-  it('gates Scheduled Load navigation on the advertised server capability', () => {
+  it('gates Scheduled Load navigation on the advertised server capability', async () => {
     localStorage.setItem('att-ui-theme', 'light');
     host = document.createElement('div');
     document.body.append(host);
@@ -112,16 +119,16 @@ describe('AppShell', () => {
       route: { kind: 'schedules' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
       navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn(),
     };
-    act(() => root?.render(<AppShell
+    await act(async () => { root?.render(<AppShell
       route={navigation.route} navigation={navigation}
       serverVersion={{ status: 'ready', data: { apiVersion: '1', inlineLoadEnabled: false, loadSchedulingEnabled: true } }}
       showScheduledLoad selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()}
-      onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}><p>Schedules</p></AppShell>));
+      onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}><p>Schedules</p></AppShell>); await Promise.resolve(); });
     expect(host.querySelector('[data-nav="scheduled-load"]')?.getAttribute('aria-current')).toBe('page');
     expect(host.querySelector('#breadcrumbs')?.textContent).toContain('Schedules');
   });
 
-  it('opens a searchable page palette and shortcut help from the keyboard', () => {
+  it('opens a searchable page palette and shortcut help from the keyboard', async () => {
     localStorage.setItem('att-ui-theme', 'light');
     host = document.createElement('div');
     document.body.append(host);
@@ -130,10 +137,10 @@ describe('AppShell', () => {
       route: { kind: 'dashboard' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
       navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn(),
     };
-    act(() => root?.render(<AppShell
+    await act(async () => { root?.render(<AppShell
       route={navigation.route} navigation={navigation} serverVersion={{ status: 'ready', data: { apiVersion: '1', inlineLoadEnabled: false } }}
       showScheduledLoad selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()}
-      onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}><p>Dashboard</p></AppShell>));
+      onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}><p>Dashboard</p></AppShell>); await Promise.resolve(); });
 
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })));
     expect(host.querySelector('.keyboard-dialog[open]')).not.toBeNull();

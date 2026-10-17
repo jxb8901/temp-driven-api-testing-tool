@@ -235,7 +235,7 @@ describe('Explorer page integration', () => {
     expect(container.querySelector('[aria-label="Resource details"]')?.hasAttribute('hidden')).toBe(true);
     expect(container.querySelector('[aria-label="Contextual actions"]')?.hasAttribute('hidden')).toBe(true);
     expect([...container.querySelectorAll('label')].some(label => label.textContent?.includes('Run, Debug, and Load environment'))).toBe(false);
-    expect(container.textContent).toContain('Package resources and counts are independent of runtime environment.');
+    expect(container.textContent).toContain('Choose an execution environment from the RUN or Quick LOAD editor.');
     expect(container.querySelector('.att-explorer-table')?.closest('.att-explorer-navigation')).not.toBeNull();
   });
 
