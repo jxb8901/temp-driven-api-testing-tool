@@ -99,10 +99,14 @@ async function main() {
     const mobileLayout = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
       viewport: window.innerWidth,
+      scrollX: window.scrollX,
       overflow: [...document.querySelectorAll('body *')].map(element => ({
         tag: element.tagName.toLowerCase(),
         className: typeof element.className === 'string' ? element.className : '',
+        left: Math.round(element.getBoundingClientRect().left),
         right: Math.round(element.getBoundingClientRect().right),
+        width: Math.round(element.getBoundingClientRect().width),
+        minWidth: getComputedStyle(element).minWidth,
       })).filter(item => item.right > window.innerWidth + 1).slice(0, 8),
     }));
     assert.ok(mobileLayout.scrollWidth <= mobileLayout.viewport, `History must fit a phone viewport: ${JSON.stringify(mobileLayout)}`);
