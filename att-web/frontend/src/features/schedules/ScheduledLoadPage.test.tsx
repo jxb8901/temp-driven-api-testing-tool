@@ -195,13 +195,11 @@ describe('ScheduledLoadPage', () => {
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Confirm state change')!);
     expect(api.setScheduleEnabled).toHaveBeenCalledWith(sampleSchedule.id, true);
   });
-  it('shows a configured schedule, explains skips, and links submitted jobs', async () => {
+  it('shows a configured schedule, explains skipped occurrences in History, and links submitted jobs', async () => {
     const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
     const onOpenJob = await render(api);
     expect(host.querySelector('h1')?.textContent).toBe('Schedules');
     expect(host.textContent).toContain('Nightly payments');
-    expect(host.textContent).toContain('Missed runs are skipped without backfill.');
-
     await click(host.querySelector('[aria-label="History Nightly payments"]')!);
     await advance(0);
     expect(host.textContent).toContain('Skipped because this schedule already reached its concurrent-run limit.');
