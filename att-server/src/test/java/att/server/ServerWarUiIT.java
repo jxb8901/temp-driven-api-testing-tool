@@ -316,7 +316,7 @@ class ServerWarUiIT {
             JsonNode referencedSource = getJson(port, referencedSourcePath, ordinary);
             assertTrue(referencedSource.path("available").asBoolean());
             assertEquals("config/tools/att-helper.sh", referencedSource.path("logicalPath").asText());
-            assertEquals("text", referencedSource.path("format").asText());
+            assertEquals("shell", referencedSource.path("format").asText());
             assertTrue(referencedSource.path("text").asText().contains("Safe configuration helper source"));
             assertFalse(referencedSource.path("text").asText().contains("helper-secret"),
                     "Safe source projection must scrub classified-looking password values before the UI receives them.");

@@ -154,7 +154,7 @@ async function main() {
     await page.locator('a[data-nav="explorer"]').click();
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
     await page.getByRole('button', { name: 'Reference Flow' }).click();
-    await page.getByRole('button', { name: 'Quick Load' }).click();
+    await page.locator('.att-explorer-detail-actions').getByRole('button', { name: 'Quick LOAD' }).click();
     await page.getByRole('heading', { name: 'Quick Load' }).waitFor();
     const quickLoadTarget = page.locator('.att-quick-load-page .att-section-heading strong');
     await quickLoadTarget.waitFor();
