@@ -529,7 +529,7 @@ class ServerWarUiIT {
                         + "    command: [bash, tools/mq/check-queue.sh]\n    stdoutFormat: text\n    arguments: {}\n");
         Files.writeString(configRoot.resolve("source-references.yaml"), "payload: '&{config/tools/att-helper.sh}'\n");
         Path tools = Files.createDirectories(configRoot.resolve("tools"));
-        Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\necho helper-secret\n");
+        Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\necho password=helper-secret\n");
         Files.writeString(nestedTool, "#!/bin/sh\n# package-local script source\necho safe\n");
         Path testdata = Files.createDirectories(packageRoot.resolve("testdata"));
         Files.writeString(testdata.resolve("generated.yaml"),
