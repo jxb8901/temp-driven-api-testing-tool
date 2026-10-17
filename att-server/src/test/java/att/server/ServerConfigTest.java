@@ -203,11 +203,32 @@ class ServerConfigTest {
         assertEquals(List.of("tools/safe.sh","config/sit/fppdb.yaml","config/nested/settings.yml"),config.inspection.safeTextSources("payments"));
     }
 
+    @Test void acceptsAllowlistedFilesFromTheSharedRuntimeConfiguration() throws Exception {
+        Path home=Files.createDirectory(temp.resolve("shared-inspection-home"));
+        Path runtimeConfig=Files.createDirectories(home.resolve("config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n");
+        Path sharedSource=Files.createDirectories(home.resolve("config/tools")).resolve("shared.sh");
+        Files.writeString(sharedSource,"#!/bin/sh\necho shared\n");
+        Path packages=Files.createDirectory(temp.resolve("shared-inspection-packages"));
+        Path pkg=Files.createDirectory(packages.resolve("payments"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path file=Files.writeString(temp.resolve("shared-inspection-server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("shared-inspection-data"))
+                +"\n  runtimeConfigPath: "+yaml(runtimeConfig)+"\n  javaExecutable: "+yaml(java)
+                +"\n  inspection:\n    safeTextSources:\n      payments:\n        - config/tools/shared.sh"
+                +"\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries:\n    payments: "+yaml(pkg)+"\n");
+        assertEquals(List.of("config/tools/shared.sh"),ServerConfig.load(file).inspection.safeTextSources("payments"));
+        Path packageShadow=Files.createDirectories(pkg.resolve("config/tools")).resolve("package-only.sh");
+        Files.writeString(packageShadow,"#!/bin/sh\necho package\n");
+        Path packageOnlyConfig=Files.writeString(temp.resolve("shared-inspection-package-only.yaml"),Files.readString(file).replace("shared.sh","package-only.sh"));
+        assertThrows(IllegalArgumentException.class,()->ServerConfig.load(packageOnlyConfig),
+                "config/ allowlist paths name the shared config tree and must not resolve from a Package");
+    }
+
     @Test void validatesConfigurationInspectorAdminRole() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("inspection-admin-allowed"));Path pkg=Files.createDirectory(allowed.resolve("default"));
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path valid=Files.writeString(temp.resolve("inspection-admin.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("inspection-admin-data"))+"\n  javaExecutable: "+yaml(java)
-                +"\n  inspection:\n    configurationAdminRole: ATT_CONFIG_ADMIN\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    default: "+yaml(pkg)+"\n");
+                +"\n  authorization:\n    adminRole: ATT_CONFIG_ADMIN\n  inspection:\n    configurationAdminRole: ATT_CONFIG_ADMIN\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    default: "+yaml(pkg)+"\n");
         assertEquals("ATT_CONFIG_ADMIN",ServerConfig.load(valid).inspection.configurationAdminRole);
         Path invalid=Files.writeString(temp.resolve("inspection-admin-invalid.yaml"),Files.readString(valid).replace("ATT_CONFIG_ADMIN","bad role"));
         assertThrows(IllegalArgumentException.class,()->ServerConfig.load(invalid));

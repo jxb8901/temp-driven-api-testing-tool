@@ -149,7 +149,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Sign in to manage Scheduled Load."}})
                 return
             if scenario == "schedule-forbidden":
-                self._json(403, {"error": {"code": "SCHEDULE_ADMIN_REQUIRED", "summary": "Scheduled Load administrator role required."}})
+                self._json(403, {"error": {"code": "ATT-SERVER-OPERATIONS-REQUIRED", "summary": "An active USER account with operational access is required."}})
                 return
             if resource == "load-schedules/preview":
                 self._json(200, {"timezone": body.get("timezone", "UTC"), "cron": body.get("cron", "0 2 * * *"), "nextRunAt": "2026-10-15T18:00:00Z"})
@@ -289,7 +289,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Sign in to manage Scheduled Load."}})
             return True
         if scenario == "schedule-forbidden":
-            self._json(403, {"error": {"code": "SCHEDULE_ADMIN_REQUIRED", "summary": "Scheduled Load administrator role required."}})
+            self._json(403, {"error": {"code": "ATT-SERVER-OPERATIONS-REQUIRED", "summary": "An active USER account with operational access is required."}})
             return True
         if scenario == "schedule-disabled":
             self._json(404, {"error": {"code": "SCHEDULING_DISABLED", "summary": "Scheduled Load is disabled."}})
@@ -308,6 +308,19 @@ class Handler(BaseHTTPRequestHandler):
             return
         if scenario == "authenticated" and self.headers.get("Authorization") != "Basic YXR0LWZpeHR1cmU6cGFzcw==":
             self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Fixture authentication is required."}})
+            return
+        if resource == "auth/capabilities":
+            admin = scenario == "auth-admin"
+            self._json(200, {
+                "capabilities": {
+                    "operate": True,
+                    "accountManage": admin,
+                    "systemSettingsWrite": admin,
+                    "configurationAdmin": admin,
+                },
+                "configurationAdmin": admin,
+                "inspectionCacheContext": "fixture",
+            })
             return
         if resource == "schedules" or resource.startswith("schedules/"):
             resource = "load-schedules" + resource[len("schedules"): ]

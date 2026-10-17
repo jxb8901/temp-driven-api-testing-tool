@@ -392,7 +392,8 @@ class ServerRuntimeTest {
         Path packageRoot=Path.of("").toRealPath().resolve("packages/default");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name"," ").toLowerCase().contains("win")?"java.exe":"java");
         Path configFile=temp.resolve("configuration-inspection-server.yaml");
-        Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("configuration-inspection-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(packageRoot)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
+        Path sharedRuntimeConfig=Path.of("config/config.yaml").toRealPath();
+        Files.writeString(configFile,"server:\n  runtimeConfigPath: "+yaml(sharedRuntimeConfig)+"\n  dataDir: "+yaml(temp.resolve("configuration-inspection-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(packageRoot)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("configuration-inspection-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
         addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
@@ -804,7 +805,7 @@ class ServerRuntimeTest {
         } finally {runtime.close();}
     }
 
-    @Test void scheduledJobsRecheckLocalOwnerAuthorityBeforeAnyWorkerStarts() throws Exception {
+    @Test void scheduledJobsRecheckActiveUserAuthorityBeforeAnyWorkerStarts() throws Exception {
         Path root=Files.createDirectories(temp.resolve("owner-package"));
         Path config=Files.writeString(temp.resolve("owner-server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("owner-data"))+"\n  auth: {mode: local}\n  scheduling: {enabled: true}\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(root)+"]\n  entries:\n    p: "+yaml(root)+"\n");
         try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(config),"")) {
@@ -812,12 +813,12 @@ class ServerRuntimeTest {
             runtime.store.createAuthUser("disabled","Disabled owner","unused","ADMIN","csrf");
             runtime.store.setAuthActive("disabled",false);
             runtime.store.createAuthUser("reader","Reader owner","unused","USER","csrf");
-            for(String type:List.of("run","load","debug"))for(String owner:List.of("missing","disabled","reader")) {
+            for(String type:List.of("run","load","debug"))for(String owner:List.of("missing","disabled")) {
                 LoadSchedule schedule=new LoadSchedule();schedule.id="S"+type+owner;schedule.name="Owner authority";schedule.jobType=type;
                 schedule.packageId="p";schedule.createdBy=owner;schedule.timezone="UTC";schedule.cron="0 2 * * *";
                 schedule.createdAt=Instant.now().toString();schedule.updatedAt=schedule.createdAt;
                 runtime.store.createSchedule(schedule,100);
-                Map<String,Object> occurrence=runtime.triggerLoadSchedule(schedule.id,"admin");
+                Map<String,Object> occurrence=runtime.triggerLoadSchedule(schedule.id,"reader");
                 assertEquals("failed-to-submit",occurrence.get("status"));
                 assertTrue(String.valueOf(occurrence.get("reason")).contains("no longer authorized"),occurrence.toString());
             }

@@ -6,7 +6,8 @@ async function main() {
   let browser;
   try {
     browser = await launchBrowser();
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, bypassCSP: true });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, bypassCSP: true, locale: 'en-US' });
+    await context.addInitScript(() => localStorage.setItem('att-ui-language', 'en'));
     const page = await context.newPage();
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.message));
@@ -15,14 +16,15 @@ async function main() {
     await selectFixture(context, fixture.origin, 'loaded');
     const indexResponse = await page.goto(base);
     assert.equal(indexResponse.status(), 200, 'the UI must serve below the non-root /att context');
-    await page.locator('#packages-state').getByText(/configured package/i).waitFor();
+    await page.locator('.package-list li').first().waitFor();
+    assert.equal(await page.locator('.package-list li').count(), 2, 'the fixture packages should load');
     await page.locator('#jobs-state').getByText(/recent job row/i).waitFor();
     await page.getByText('payments', { exact: true }).first().waitFor();
     await page.getByText('JOB-4821', { exact: true }).waitFor();
     assert.equal(new URL(page.url()).pathname, '/att/ui/', 'the UI should retain its non-root path');
 
     for (const [route, title, activeNav] of [
-      ['#/packages', 'Packages', 'packages'],
+      ['#/packages', 'Explorer', 'explorer'],
       ['#/jobs', 'Jobs', 'jobs'],
       ['#/advanced-load', 'Load testing', 'load-testing'],
       ['#/settings', 'Settings', 'settings'],
@@ -38,7 +40,7 @@ async function main() {
     }
 
     await page.goto(base);
-    await page.getByRole('button', { name: 'Open package' }).first().click();
+    await page.getByRole('button', { name: 'Open Explorer' }).first().click();
     await page.locator('[data-nav="load-testing"]').click();
     await page.getByRole('heading', { name: 'LOAD Catalog', exact: true }).waitFor();
     await page.getByRole('heading', { name: 'Available Load YAML resources', exact: true }).waitFor();
@@ -74,7 +76,8 @@ async function main() {
       await selectFixture(context, fixture.origin, scenario);
       await page.setExtraHTTPHeaders(headers);
       await page.goto(`${base}#/packages`);
-      await page.locator('#packages-state').getByText(/2 configured packages/).waitFor();
+      await page.locator('.package-list li').first().waitFor();
+      assert.equal(await page.locator('.package-list li').count(), 2, 'both configured packages should load');
       await page.goto(`${base}#/jobs`);
       await page.getByRole('heading', { name: 'Jobs', exact: true }).waitFor();
       await page.locator('.att-jobs-table tbody tr').first().waitFor();

@@ -23,7 +23,7 @@ const translations: Record<string, string> = {
   "Validation passed. Package changes require validation again.": "驗證通過。套件變更後須重新驗證。",
   "Manage recurring RUN and LOAD jobs and inspect the Server's recorded occurrences.": "管理重複 RUN 與 LOAD 工作，並檢視伺服器記錄的執行次數。",
   "Schedules is disabled by Server configuration. Ask the Server administrator to enable scheduling.": "伺服器設定已停用排程。請聯絡伺服器管理員啟用。",
-  "Your account does not have the configured Schedules administrator role.": "您的帳戶沒有已設定的排程管理員角色。",
+  "Your account does not have operational access to Schedules.": "您的帳戶沒有排程操作權限。",
   "Schedules is disabled by the Server or this schedule no longer exists.": "伺服器已停用排程，或此排程已不存在。",
 
   'Skip to main content': '跳至主要內容',

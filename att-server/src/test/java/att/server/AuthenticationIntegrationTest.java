@@ -131,16 +131,8 @@ class AuthenticationIntegrationTest {
             JsonNode ownerCapabilities=ServerRuntime.JSON.readTree(sendWithCookie(client,port,"GET","/att/api/v1/auth/capabilities",ownerCookie,null,null,null).body());
             assertTrue(ownerCapabilities.path("configurationAdmin").asBoolean());
             HttpResponse<String> adminConfiguration=sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration/effective?includeAllFields=true",ownerCookie,null,null,null);
-            assertEquals(200,adminConfiguration.statusCode(),adminConfiguration.body());
-            assertEquals("no-store",adminConfiguration.headers().firstValue("Cache-Control").orElse(""));
-            Class.forName("org.h2.Driver"); // Tomcat may deregister its webapp-loaded driver between embedded contexts.
-            try(java.sql.Connection audit=java.sql.DriverManager.getConnection("jdbc:h2:file:"+data.resolve("db/att-server"),"sa","");
-                java.sql.PreparedStatement query=audit.prepareStatement("SELECT COUNT(*) FROM audit WHERE principal=? AND action='CONFIGURATION_INCLUDE_ALL_FIELDS' AND package_id='p'")) {
-                query.setString(1,"owner");try(java.sql.ResultSet rows=query.executeQuery()){assertTrue(rows.next());assertEquals(1,rows.getInt(1));}
-            }
-            assertEquals(400,sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration?view=declared&includeAllFields=true",ownerCookie,null,null,null).statusCode(),
-                    "includeAllFields is meaningful only on Effective and Compare projections");
-            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
+            assertEquals(403,adminConfiguration.statusCode(),"ADMIN accounts manage the system and accounts but do not receive Package operations");
+            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
             HttpResponse<String> failedPasswordChange=sendWithCookie(client,port,"POST","/att/api/v1/auth/password",ownerCookie,origin,csrf,
                     "{\"currentPassword\":\"incorrect current password\",\"newPassword\":\"replacement secure password\"}");
             assertEquals(401,failedPasswordChange.statusCode());
@@ -167,16 +159,21 @@ class AuthenticationIntegrationTest {
             JsonNode viewerCapabilities=ServerRuntime.JSON.readTree(sendWithCookie(client,port,"GET","/att/api/v1/auth/capabilities",viewerCookie,null,null,null).body());
             assertFalse(viewerCapabilities.path("configurationAdmin").asBoolean());
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration/effective?includeAllFields=true",viewerCookie,null,null,null).statusCode());
-            HttpResponse<String> submitted=sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",ownerCookie,origin,csrf,"{\"packageId\":\"p\",\"all\":true}");assertEquals(202,submitted.statusCode(),submitted.body());
+            assertTrue(viewerCapabilities.path("capabilities").path("operate").asBoolean());
+            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration/effective",viewerCookie,null,null,null).statusCode(),"USER accounts can read safe Package configuration");
+            HttpResponse<String> viewerMe=sendWithCookie(client,port,"GET","/att/api/v1/auth/me",viewerCookie,null,null,null);
+            String viewerCsrf=viewerMe.headers().firstValue("X-ATT-CSRF").orElseThrow();
+            HttpResponse<String> submitted=sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",viewerCookie,origin,viewerCsrf,"{\"packageId\":\"p\",\"all\":true}");assertEquals(202,submitted.statusCode(),submitted.body());
             String ownedJobId=ServerRuntime.JSON.readTree(submitted.body()).path("jobId").asText();assertTrue(ownedJobId.matches("J[0-9A-F]{16}"));
+            String colleagueBasic="Basic "+Base64.getEncoder().encodeToString("basic-user:basic user secure password".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(200,get(port,"/att/api/v1/jobs/"+ownedJobId,colleagueBasic),"Active USERs share Jobs across accounts");
+            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,ownerCookie,null,null,null).statusCode(),"ADMIN accounts do not receive Job operations");
             assertEquals(200,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,origin,csrf,"{}").statusCode());
             assertEquals(401,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/auth/users",viewerCookie,null,null,null).statusCode());
             assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/packages",viewerCookie,null,null,null).statusCode());
-            assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,viewerCookie,null,null,null).statusCode(),"Known IDs must not expose another local user's job");
-            assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId+"/events",viewerCookie,null,null,null).statusCode(),"SSE must use the same local identity ownership check");
-            assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId+"/artifacts",viewerCookie,null,null,null).statusCode(),"Artifact listings must enforce the same local identity ownership check");
-            assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId+"/artifacts/result.json",viewerCookie,null,null,null).statusCode(),"Artifact downloads must enforce the same local identity ownership check");
+            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,viewerCookie,null,null,null).statusCode(),"The submitting USER can read the job");
+            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/jobs",viewerCookie,null,null,null).statusCode(),"USER job history is shared across accounts");
         } finally {try{tomcat.stop();}finally{tomcat.destroy();if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);}}
     }
 
@@ -245,7 +242,7 @@ class AuthenticationIntegrationTest {
             assertEquals(401,request(port,null));
             assertEquals(401,get(port,"/att/ui/index.html",null));
             String basic="Basic "+Base64.getEncoder().encodeToString("att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));assertEquals(200,request(port,basic));
-            String other="Basic "+Base64.getEncoder().encodeToString("other:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));assertEquals(200,request(port,other),"Any authenticated container principal has the same v1 API permissions");
+            String other="Basic "+Base64.getEncoder().encodeToString("other:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));assertEquals(403,request(port,other),"Only principals in the configured USER role receive operational API access");
             assertEquals(200,get(port,"/att/ui/index.html",basic));
             assertEquals(200,get(port,"/att/ui/app.js",basic));
             JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",basic);
@@ -260,7 +257,7 @@ class AuthenticationIntegrationTest {
             assertFalse(draft.toString().contains("123456789"));assertFalse(draft.toString().contains("violet-123"));
             String draftId=draft.path("draftId").asText();
             assertEquals(200,get(port,"/att/api/v1/drafts/"+draftId,basic));
-            assertEquals(404,get(port,"/att/api/v1/drafts/"+draftId,other),"Drafts must be isolated by the authenticated principal");
+            assertEquals(403,get(port,"/att/api/v1/drafts/"+draftId,other),"Non-USER container principals cannot access operational API resources");
             JsonNode loadPolicy=getJson(port,"/att/api/v1/packages/debug/load-policy?model=virtualUsers",basic);
             assertEquals("virtualUsers",loadPolicy.path("model").asText());
             assertTrue(getJson(port,"/att/api/v1/version",basic).path("inlineLoadEnabled").asBoolean(false));
@@ -272,7 +269,7 @@ class AuthenticationIntegrationTest {
                     ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","scenario",advancedScenario)));
             String advancedDraftId=advancedDraft.path("draftId").asText();assertTrue(advancedDraftId.startsWith("A"));
             assertEquals(200,get(port,"/att/api/v1/drafts/"+advancedDraftId,basic));
-            assertEquals(404,get(port,"/att/api/v1/drafts/"+advancedDraftId,other),"Advanced Load drafts must be isolated by the authenticated principal");
+            assertEquals(403,get(port,"/att/api/v1/drafts/"+advancedDraftId,other),"Non-USER container principals cannot access operational API resources");
             Map<String,Object> firstWorkload=Map.of("id","auth-load-one","load",Map.of("users",1),
                     "target",Map.of("type","template","id","FORM"),"inputs",Map.of("value","within-limit"));
             Map<String,Object> secondWorkload=Map.of("id","auth-load-two","load",Map.of("users",1),
@@ -351,7 +348,7 @@ class AuthenticationIntegrationTest {
             assertEquals("load",pathBasedStatus.path("command").asText(),"Disabling browser drafts must still admit the existing path-based Load API");
         } finally {inlineLoadDisabled.stop();inlineLoadDisabled.destroy();restore(old);}
 
-        Path openConfig=Files.writeString(temp.resolve("open-server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("open-data"))+"\n  authenticationRequired: false\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\n  inspection:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");System.setProperty("att.server.config",openConfig.toString());
+        Path openConfig=Files.writeString(temp.resolve("open-server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("open-data"))+"\n  authenticationRequired: false\n  authorization:\n    allowAnonymousOperations: true\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\n  inspection:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");System.setProperty("att.server.config",openConfig.toString());
         Tomcat open=start(users,appDirectory("anonymous"),true);
         String anonymousDraftToInvalidate=null;
         try {
@@ -532,7 +529,7 @@ class AuthenticationIntegrationTest {
         } finally {if(authenticated!=null){authenticated.stop();authenticated.destroy();}}
 
         Path anonymousConfig=Files.writeString(temp.resolve("inspection-anonymous.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("inspection-anonymous-data"))
-                +"\n  authenticationRequired: false\n  inspection:\n    enabled: true\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    debug: "+yaml(packageRoot)+"\n");
+                +"\n  authenticationRequired: false\n  authorization:\n    allowAnonymousOperations: true\n  inspection:\n    enabled: true\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    debug: "+yaml(packageRoot)+"\n");
         try {
             System.setProperty("att.server.config",anonymousConfig.toString());
             anonymous=start(users,appDirectory("inspection-anonymous"),true);

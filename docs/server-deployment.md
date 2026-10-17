@@ -96,7 +96,7 @@ Origins compare by scheme, case-insensitive hostname/IP, and effective port (`ht
 | `null`, malformed, or multiple Origins | Rejected | Origin check skipped | Rejected |
 | Missing Origin (REST/CLI compatibility) | Passes Origin policy | Passes Origin policy | Passes Origin policy |
 
-The shared policy applies to local and container authentication wherever Origin equality is checked. Rejection uses `ATT-SERVER-ORIGIN-MISMATCH` and an `ORIGIN_REJECT` audit record without raw Origin or credentials. Passing Origin policy grants no permissions: local cookie and Basic mutations still require `X-ATT-CSRF`; authentication, roles, HTTPS credential transport, rate limits, Secure/HttpOnly/SameSite cookies, and package/job ownership remain enforced. This does not configure CORS, send `Access-Control-Allow-Origin`, or enable cross-site cookies. True cross-site browser API access requires a separate CORS design.
+The shared policy applies to local and container authentication wherever Origin equality is checked. Rejection uses `ATT-SERVER-ORIGIN-MISMATCH` and an `ORIGIN_REJECT` audit record without raw Origin or credentials. Passing Origin policy grants no permissions: local cookie and Basic mutations still require `X-ATT-CSRF`; authentication, roles, HTTPS credential transport, rate limits, Secure/HttpOnly/SameSite cookies, and draft ownership remain enforced. Active USER accounts share eligible packages, runs, jobs, results, artifacts, and schedules. This does not configure CORS, send `Access-Control-Allow-Origin`, or enable cross-site cookies. True cross-site browser API access requires a separate CORS design.
 
 
 Browser-created Quick and Advanced Load drafts have a separate opt-in: `server.inlineLoad.enabled` defaults to `false`. When enabled, the Server enforces the configured workload, target, total Virtual User, aggregate Arrival Rate, per-workload and aggregate concurrency, and total timing-envelope caps after Engine validation and again before queue admission. The [Server configuration example](#configuration) sets conservative defaults. The duration cap is the sum of warmup, ramp-up, measured duration, and ramp-down; target count includes each fixed target and each VU mix entry. A disabled feature returns `403 ATT-SERVER-INLINE-LOAD-DISABLED`. An over-limit draft returns `400 ATT-SERVER-INLINE-LOAD-LIMIT` with a summary naming the exceeded setting. These limits apply to browser-created drafts; existing path-based Load submissions retain their compatibility behavior and continue to use `workers.maxConcurrentLoad` admission.
@@ -296,13 +296,13 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 | `GET` | `/jobs/{jobId}/artifacts` | List output files |
 | `GET` | `/jobs/{jobId}/artifacts/{path}` | Download one output file |
 | `DELETE` | `/jobs/{jobId}` | Cancel an active job; retain its history |
-| `GET`, `POST` | `/load-schedules` | List schedules or create one (administrator only) |
-| `POST` | `/load-schedules/preview` | Validate timezone/cron and preview occurrence times only (administrator only) |
-| `GET`, `PATCH`, `DELETE` | `/load-schedules/{scheduleId}` | Read, edit, or delete a schedule (administrator only) |
-| `POST` | `/load-schedules/{scheduleId}/pause`, `/resume`, `/trigger` | Pause, resume, or manually trigger (administrator only) |
+| `GET`, `POST` | `/load-schedules` | List schedules or create one (active USER operational access) |
+| `POST` | `/load-schedules/preview` | Validate timezone/cron and preview occurrence times only (active USER operational access) |
+| `GET`, `PATCH`, `DELETE` | `/load-schedules/{scheduleId}` | Read, edit, or delete a schedule (active USER operational access) |
+| `POST` | `/load-schedules/{scheduleId}/pause`, `/resume`, `/trigger` | Pause, resume, or manually trigger (active USER operational access) |
 | `GET` | `/load-schedules/{scheduleId}/executions?limit=100` | Read retained occurrence history with links to accepted jobs |
 
-Schedule routes are hidden with `404` while disabled. With scheduling enabled, authenticated callers need the configured `ATT_ADMIN` role by default. The browser/API state-changing origin checks also apply. A schedule creation request is a JSON object such as:
+Schedule routes are hidden with `404` while disabled. With scheduling enabled, authenticated callers need the configured `server.authorization.userRole` (default `ATT_USER`) or an active local `USER` account. `ADMIN` has no schedule operation access. The browser/API state-changing origin checks also apply. A schedule creation request is a JSON object such as:
 
 ```json
 {

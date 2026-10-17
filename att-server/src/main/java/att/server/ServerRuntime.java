@@ -1831,7 +1831,8 @@ final class ServerRuntime implements AutoCloseable {
             JsonNode snapshot=JSON.valueToTree(s.runInput);
             String expectedEnvironment=snapshot.path("environment").isTextual()?snapshot.path("environment").asText():null;
             String expectedConfig=snapshot.path("config").isTextual()?snapshot.path("config").asText():null;
-            if(!s.packageId.equals(snapshot.path("packageId").asText())||!java.util.Objects.equals(s.environment,expectedEnvironment)||!java.util.Objects.equals(s.config,expectedConfig))
+            boolean sameRuntimeConfig="config/config.yaml".equals(expectedConfig)||config.runtimeConfigPath.toString().equals(expectedConfig);
+            if(!s.packageId.equals(snapshot.path("packageId").asText())||!java.util.Objects.equals(s.environment,expectedEnvironment)||!sameRuntimeConfig)
                 throw new IllegalArgumentException("A RUN snapshot is immutable; create a new schedule for changed values");
             if(input.has("scenario")||s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("RUN schedules cannot use Load fields");
             validateScheduledRun(s);

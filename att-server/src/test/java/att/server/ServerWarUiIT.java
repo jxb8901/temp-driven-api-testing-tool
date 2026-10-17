@@ -38,9 +38,9 @@ class ServerWarUiIT {
         assertServerApplicationJar(war);
 
         Path users = Files.writeString(temp.resolve("tomcat-users.xml"),
-                "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_SCHEDULE_ADMIN\"/>"
+                "<tomcat-users><role rolename=\"ATT_USER\"/>"
                         + "<user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/>"
-                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER,ATT_SCHEDULE_ADMIN\"/></tomcat-users>");
+                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
         Path packages = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(packages.resolve("payments"));
         writeScheduledPackage(packageRoot, localHome);
@@ -79,10 +79,10 @@ class ServerWarUiIT {
             String scheduleAdminAuth = "Basic " + Base64.getEncoder().encodeToString(
                     "schedule-admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             assertEquals(401, get(port, "/tools/att/api/v1/load-schedules", null));
-            assertEquals(403, get(port, "/tools/att/api/v1/load-schedules", auth),
-                    "ordinary ATT_USER must not manage schedules");
+            assertEquals(200, get(port, "/tools/att/api/v1/load-schedules", auth),
+                    "Every active USER may manage shared schedules");
             assertEquals(200, get(port, "/tools/att/api/v1/load-schedules", scheduleAdminAuth),
-                    "the configured schedule-admin role may list schedules");
+                    "another active USER may list the same schedules");
             String previewPath = "/tools/att/api/v1/load-schedules/preview";
             String previewBody = "{\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}";
             assertEquals(403, postJson(port, previewPath, scheduleAdminAuth, "https://attacker.example", previewBody),
@@ -224,15 +224,15 @@ class ServerWarUiIT {
         Path packageRoot = Files.createDirectories(packages.resolve("payments"));
         writeScheduledPackage(packageRoot, localHome);
         Path users = Files.writeString(temp.resolve("scheduled-tomcat-users.xml"),
-                "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_SCHEDULE_ADMIN\"/>"
+                "<tomcat-users><role rolename=\"ATT_USER\"/>"
                         + "<user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/>"
-                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER,ATT_SCHEDULE_ADMIN\"/></tomcat-users>");
+                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
         Path javaBin = Path.of(System.getProperty("java.home"), "bin", System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
         Path config = Files.writeString(temp.resolve("scheduled-war-server.yaml"),
                 "server:\n  runtimeConfigPath: " + yaml(localHome.resolve("config/config.yaml")) + "\n  dataDir: " + yaml(temp.resolve("scheduled-war-data")) + "\n  javaExecutable: " + yaml(javaBin)
                         + "\n  authenticationRequired: true\n  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
                         + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh"
-                        + "\n  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n    minimumIntervalMinutes: 1\n    pollIntervalSeconds: 5\n    maxConcurrentRuns: 1"
+                        + "\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    pollIntervalSeconds: 5\n    maxConcurrentRuns: 1"
                         + "\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - " + yaml(packages)
                         + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
         String oldConfig = System.getProperty("att.server.config");
@@ -252,7 +252,7 @@ class ServerWarUiIT {
             int port = tomcat.getConnector().getLocalPort();
             String origin = "http://127.0.0.1:" + port;
             assertEquals(401, get(port, api + "/load-schedules", null));
-            assertEquals(403, get(port, api + "/load-schedules", ordinary));
+            assertEquals(200, get(port, api + "/load-schedules", ordinary), "Every active USER can read shared schedules");
             assertEquals(200, get(port, api + "/load-schedules", admin));
             String configurationFilesPath = api + "/packages/payments/configuration/files?path=config&limit=100";
             assertEquals(401, get(port, configurationFilesPath, null), "Configuration file listings retain the Tomcat authentication boundary.");
@@ -337,7 +337,8 @@ class ServerWarUiIT {
             Map<String,Object> runScheduleInput=Map.of("name","One-time functional RUN","packageId","payments",
                     "environment","SIT","executionType","run","draftId",runDraftId,"enabled",false,
                     "runAt",java.time.Instant.now().plusSeconds(3600).toString());
-            assertEquals(403,apiStatus(port,"POST",api+"/schedules",ordinary,origin,runScheduleInput));
+            assertEquals(404,apiStatus(port,"POST",api+"/schedules",ordinary,origin,runScheduleInput),
+                    "A USER has schedule access, while validated drafts remain scoped to their creator");
             JsonNode runSchedule=apiJson(port,"POST",api+"/schedules",admin,origin,runScheduleInput,201);
             assertEquals("att-schedule/v2",runSchedule.path("schemaVersion").asText());
             assertFalse(runSchedule.has("runInput"));
@@ -379,7 +380,8 @@ class ServerWarUiIT {
             Map<String, Object> invalid = new java.util.LinkedHashMap<>(scheduleRequest("Invalid scenario", "load/invalid.yaml"));
             invalid.put("environment", "SIT");
             assertEquals(401, apiStatus(port, "POST", api + "/load-schedules", null, origin, invalid));
-            assertEquals(403, apiStatus(port, "POST", api + "/load-schedules", ordinary, origin, invalid));
+            assertEquals(400, apiStatus(port, "POST", api + "/load-schedules", ordinary, origin, invalid),
+                    "A USER reaches schedule validation instead of being denied by role");
             JsonNode invalidSchedule = apiJsonResponse(port, "POST", api + "/load-schedules", admin, origin, invalid, 400);
             JsonNode invalidDiagnostic = invalidSchedule.path("diagnostics").path(0);
             assertEquals("ATT-LOAD-001", invalidDiagnostic.path("code").asText());
@@ -408,7 +410,8 @@ class ServerWarUiIT {
             secondScheduleId = second.path("id").asText();
 
             assertEquals(401, apiStatus(port, "POST", api + "/load-schedules/" + firstScheduleId + "/trigger", null, origin, null));
-            assertEquals(403, apiStatus(port, "POST", api + "/load-schedules/" + firstScheduleId + "/trigger", ordinary, origin, null));
+            assertEquals(200, get(port, api + "/load-schedules/" + firstScheduleId, ordinary),
+                    "Schedules created by another USER remain visible");
             assertEquals(200, apiStatus(port, "POST", api + "/load-schedules/" + firstScheduleId + "/pause", admin, origin, null));
             assertFalse(getJson(port, api + "/load-schedules/" + firstScheduleId, admin).path("enabled").asBoolean());
             assertEquals(200, apiStatus(port, "POST", api + "/load-schedules/" + firstScheduleId + "/resume", admin, origin, null));

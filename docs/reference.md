@@ -1023,7 +1023,7 @@ Use either five-field `cron` with an IANA timezone, or a single `runAt` instant 
 
 The shared scheduler records an occurrence before admission. Per-schedule/global overlap limits skip an occurrence at capacity; ordinary Worker and Load admission limits also apply. Late/restart misfires are skipped without backfill. Failed submissions follow `server.scheduling.failurePolicy`; there are no automatic execution retries. Cancelling a job cancels that occurrence, while pausing a schedule prevents future firings. Job and occurrence retention keep their existing Server limits.
 
-Schedule management requires the configured administrator role. Local-auth schedule owners must remain active administrators at firing time. Scheduled RUN jobs execute as the owner and record the occurrence and audit trail. Container-auth roles are checked on management requests; container administrators must pause schedules when externally managed identities lose access.
+Every active local `USER` or authenticated container principal in `server.authorization.userRole` can manage the shared RUN and LOAD schedules. `ADMIN` accounts have system and account administration only. A schedule's creator is retained for audit, but does not restrict which active USER can view, edit, pause, trigger, or delete it. Under local authentication, the creator must remain an active `USER` for scheduled RUN occurrences to submit. Container roles are checked for each management request; the background scheduler cannot query the external realm, so an operator must pause schedules when their creator loses the configured USER role. Scheduled RUN jobs keep the creator identity in their audit trail.
 
 #### Migrate existing clients
 

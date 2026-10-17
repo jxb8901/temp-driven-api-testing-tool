@@ -122,7 +122,7 @@ public final class ServerConfig {
         if("local".equals(authMode)&&!authenticationRequired)throw new IllegalArgumentException("server.authenticationRequired must be true when server.auth.mode is local");
         Security security=security(server.get("security"));
         Authorization authorization=authorization(server.get("authorization"),authenticationRequired);
-        Inspection inspection=inspection(server.get("inspection"),resolved,authorization.adminRole);
+        Inspection inspection=inspection(server.get("inspection"),resolved,runtimeConfig,authorization.adminRole);
         InlineLoad inlineLoad=inlineLoad(server.get("inlineLoad"));
         Scheduling scheduling=scheduling(server.get("scheduling"),authenticationRequired,load,inspection.enabled,authorization.adminRole);
         Path candidateData=canonicalFuturePath(data);
@@ -160,6 +160,15 @@ public final class ServerConfig {
         return Paths.get("config/config.yaml").toAbsolutePath().normalize();
     }
 
+    private static Path runtimeConfigRoot(Path runtimeConfigPath) {
+        Path absolute=runtimeConfigPath.toAbsolutePath().normalize();
+        Path parent=absolute.getParent();
+        for(Path current=parent;current!=null;current=current.getParent())
+            if(current.getFileName()!=null&&"config".equals(current.getFileName().toString())&&current.getParent()!=null)
+                return current.getParent();
+        return parent==null?Paths.get("").toAbsolutePath().normalize():parent;
+    }
+
     private static String firstNonBlank(String first,String second) {
         if(first!=null&&!first.isBlank())return first.trim();
         if(second!=null&&!second.isBlank())return second.trim();
@@ -194,7 +203,7 @@ public final class ServerConfig {
     private static Map<?,?> map(Object v,String field){ if(!(v instanceof Map<?,?> m)) throw new IllegalArgumentException(field+" must be a mapping"); return m; }
     private static List<?> list(Object v,String field){ if(!(v instanceof List<?> l)) throw new IllegalArgumentException(field+" must be a list"); return l; }
 
-    private static Inspection inspection(Object raw,Map<String,Path> packages,String systemAdminRole) throws Exception {
+    private static Inspection inspection(Object raw,Map<String,Path> packages,Path runtimeConfigPath,String systemAdminRole) throws Exception {
         Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.inspection");
         Set<String> allowed=Set.of("enabled","maxConcurrent","queuedLimit","timeoutMs","heapMaxMb","maxResponseBytes","maxSourceBytes","safeTextSources","sourceBrowsing","redaction","configurationAdminRole","warmup");
         for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))throw new IllegalArgumentException("server.inspection contains an unknown setting");
@@ -264,6 +273,9 @@ public final class ServerConfig {
         List<String> sensitivePaths=checkedSensitivePaths(redaction.get("sensitivePaths"));
         List<String> sensitiveFieldPatterns=checkedRegexes(redaction.get("sensitiveFieldPatterns"));
         Map<?,?> rawSources=values.get("safeTextSources")==null?Collections.emptyMap():map(values.get("safeTextSources"),"server.inspection.safeTextSources");
+        Path sharedConfigRoot=runtimeConfigRoot(runtimeConfigPath).resolve("config").normalize();
+        if(Files.isDirectory(sharedConfigRoot))sharedConfigRoot=sharedConfigRoot.toRealPath();
+        else sharedConfigRoot=null;
         Map<String,List<String>> safeSources=new LinkedHashMap<>();
         for(Map.Entry<?,?> entry:rawSources.entrySet()) {
             String packageId=string(entry.getKey(),"server.inspection.safeTextSources package ID");
@@ -276,15 +288,19 @@ public final class ServerConfig {
                 String authored=string(value,"server.inspection.safeTextSources entry");
                 Path relative=Paths.get(authored);
                 if(relative.isAbsolute()||authored.indexOf('\\')>=0||authored.indexOf('\0')>=0||!relative.normalize().equals(relative)||relative.startsWith(".."))
-                    throw new IllegalArgumentException("Inspection source paths must be normalized package-relative paths");
+                    throw new IllegalArgumentException("Inspection source paths must be normalized package-relative or shared-config-relative paths");
                 String logical=relative.toString().replace('\\','/');
                 String lower=logical.toLowerCase(java.util.Locale.ROOT);
                 if(!(lower.endsWith(".sh")||lower.endsWith(".bash")||lower.endsWith(".py")||lower.endsWith(".js")||lower.endsWith(".ts")||lower.endsWith(".sql")||lower.endsWith(".groovy")||lower.endsWith(".rb")||lower.endsWith(".pl")||lower.endsWith(".ps1")||lower.endsWith(".bat")||lower.endsWith(".cmd")||lower.endsWith(".txt")||lower.endsWith(".yaml")||lower.endsWith(".yml")||lower.endsWith(".json")||lower.endsWith(".xml")))
                     throw new IllegalArgumentException("Inspection source allowlist accepts supported UTF-8 text files only (scripts, YAML, JSON, XML, SQL, or TXT)");
-                Path candidate=packageRoot.resolve(relative).normalize();
-                if(!candidate.startsWith(packageRoot)||!Files.isRegularFile(candidate))throw new IllegalArgumentException("Inspection source must be an existing regular file inside its package");
-                Path canonical=candidate.toRealPath();
-                if(!canonical.startsWith(packageRoot))throw new IllegalArgumentException("Inspection source resolves outside its package");
+                boolean shared=logical.startsWith("config/");
+                Path allowedRoot=shared?sharedConfigRoot:packageRoot;
+                if(allowedRoot==null)throw new IllegalArgumentException("Inspection source must be an existing regular file inside its package or shared runtime configuration");
+                Path candidate=(shared?sharedConfigRoot.getParent():packageRoot).resolve(relative).normalize();
+                if(!candidate.startsWith(allowedRoot)||!Files.isRegularFile(candidate))
+                    throw new IllegalArgumentException("Inspection source must be an existing regular file inside its package or shared runtime configuration");
+                if(!candidate.toRealPath().startsWith(allowedRoot))
+                    throw new IllegalArgumentException(shared?"Inspection source resolves outside the shared runtime configuration":"Inspection source resolves outside its package");
                 if(!unique.add(logical))throw new IllegalArgumentException("Duplicate inspection source path: "+logical);
                 checked.add(logical);
             }
@@ -375,7 +391,6 @@ public final class ServerConfig {
         Object rawRole=values.get("adminRole");
         String role=rawRole==null?systemAdminRole:string(rawRole,"server.scheduling.adminRole");
         if(!role.matches("[A-Za-z][A-Za-z0-9._-]{0,63}"))throw new IllegalArgumentException("server.scheduling.adminRole is invalid");
-        if(!role.equals(systemAdminRole))throw new IllegalArgumentException("server.scheduling.adminRole must match server.authorization.adminRole");
         int schedules=intValue(values,"maxSchedules",100,1,10000);
         int minimum=intValue(values,"minimumIntervalMinutes",15,1,10080);
         int poll=intValue(values,"pollIntervalSeconds",10,1,300);
