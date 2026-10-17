@@ -33,7 +33,7 @@ describe('AppShell', () => {
       route: { kind: 'package', packageId: 'payments' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
       navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn(),
     };
-    act(() => root?.render(<AppShell route={navigation.route} navigation={navigation}
+    await act(async () => { root?.render(<AppShell route={navigation.route} navigation={navigation}
       serverVersion={{ status: 'ready', data: { apiVersion: '1', inlineLoadEnabled: true } }} selectedPackage="payments" selectedEnvironment="SIT"
       onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
       <input aria-label="Inspection projection" defaultValue="fresh mount" />
@@ -58,7 +58,7 @@ describe('AppShell', () => {
       route: { kind: 'load' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
       navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn(),
     };
-    act(() => root?.render(<AppShell route={navigation.route} navigation={navigation}
+    await act(async () => { root?.render(<AppShell route={navigation.route} navigation={navigation}
       serverVersion={{ status: 'ready', data: { apiVersion: '1', inlineLoadEnabled: true } }} selectedPackage="payments" selectedEnvironment="SIT"
       onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
       <input aria-label="Unfinished Load form" defaultValue="" />
