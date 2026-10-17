@@ -222,7 +222,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
 
   return <div className="page-content att-configuration-page">
     <header className="att-configuration-page-heading">
-      <div><p className="eyebrow">Package runtime configuration</p><h1>Configuration</h1><p>Inspect safe package source and resolved values. This workspace is read-only.</p></div>
+      <div><p className="eyebrow">Shared runtime configuration</p><h1>Configuration</h1><p>Inspect centrally managed configuration and package Testdata safely. This view is read-only.</p></div>
       <div className="att-configuration-context">
         <label>Package<select aria-label="Package" value={packageId} onChange={event => onPackageChange(event.currentTarget.value)}>
           <option value="">Choose a package</option>{packages.map(item => <option key={item.packageId} value={item.packageId}>{item.displayName || item.packageId}</option>)}
@@ -247,7 +247,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
           <span>{filePath ? <><span>config</span>{filePath.split('/').map(part => <span key={part}> / {part}</span>)}</> : 'config/'}</span>
           <button type="button" onClick={() => { setExpanded(new Set([''])); setSearchResults(null); }}>Collapse all</button>
         </div>
-        <p className="att-config-tree-note">Only files and folders under the registered package config root are listed.</p>
+        <p className="att-config-tree-note">Only files and folders under the ATT_HOME config directory are listed.</p>
         {treeError && !searchResults && <p className="att-error" role="alert">{treeError}</p>}
         {searchResults ? <ul role="tree" aria-label="Configuration file search results">
           {searchResults.map(node => <li role="none" key={node.path}><button type="button" role="treeitem" aria-current={node.kind === 'file' && filePath === node.path ? 'page' : undefined}

@@ -111,21 +111,18 @@ class InspectionCacheRuntimeTest {
     }
     private ServerConfig config(Path root,int workers,String warm)throws Exception {
         Path file=temp.resolve("server.yaml");
+        Path runtimeConfig=Files.createDirectories(temp.resolve("shared-config/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n");
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
-        Files.writeString(file,"server:\n  dataDir: "+yaml(temp.resolve("data"))+"\n  javaExecutable: "+yaml(java)
+        Files.writeString(file,"server:\n  runtimeConfigPath: "+yaml(runtimeConfig)+"\n  dataDir: "+yaml(temp.resolve("data"))+"\n  javaExecutable: "+yaml(java)
                 +"\n  inspection:\n    maxConcurrent: "+workers+"\n    timeoutMs: 10000\n"+warm
                 +"workers: {}\npackages:\n  allowedRoots: ["+yaml(temp)+"]\n  entries:\n    p: "+yaml(root)+"\n");
         return ServerConfig.load(file);
     }
     private Path fixture(String name)throws Exception {
         Path root=Files.createDirectories(temp.resolve(name));
-        Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("testcase"));Files.createDirectories(root.resolve("templates/echo"));
-        Files.writeString(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n");
+        Files.createDirectories(root.resolve("testcase"));Files.createDirectories(root.resolve("templates/echo"));
         Files.writeString(root.resolve("templates/echo/template.yaml"),"schemaVersion: att-template/v3.6\nname: Echo\ndescription: Safe\nactions:\n  note:\n    type: log\n    message: safe\n");
-        Path source=Path.of("packages/default/schemas");
-        try(var paths=Files.walk(source)) {
-            for(Path path:paths.toList()) {Path target=root.resolve("schemas").resolve(source.relativize(path));if(Files.isDirectory(path))Files.createDirectories(target);else Files.copy(path,target);}
-        }
         return root;
     }
     private Path libs()throws Exception {

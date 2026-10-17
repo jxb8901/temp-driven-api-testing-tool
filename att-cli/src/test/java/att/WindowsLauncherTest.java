@@ -53,10 +53,11 @@ class WindowsLauncherTest {
         assertTrue(binary.contains("<source>${project.basedir}/../att.bat</source>"));
         assertTrue(binary.contains("<destName>att.bat</destName>"));
         assertTrue(binary.contains("<destName>att-local-${project.version}.jar</destName>"));
-        assertTrue(binary.contains("<outputDirectory>packages/default/config</outputDirectory>"));
+        assertTrue(binary.contains("<outputDirectory>config</outputDirectory>"));
         assertTrue(binary.contains("<outputDirectory>packages/default/templates</outputDirectory>"));
-        assertTrue(binary.contains("../packages/default/config</directory>"));
-        assertTrue(binary.contains("../packages/default/schemas</directory>"));
+        assertTrue(binary.contains("<outputDirectory>packages/default/testdata</outputDirectory>"));
+        assertTrue(binary.contains("../config</directory>"));
+        assertTrue(binary.contains("../schemas</directory>"));
         assertTrue(binary.contains("../config/att-server.example.yaml</source>"));
         assertFalse(binary.contains("../config/att-server.yaml"));
         assertTrue(source.contains("<include>att.bat</include>"));
@@ -185,7 +186,7 @@ class WindowsLauncherTest {
     private static Path createDebugFixture(Path root, Path fixture) throws Exception {
         Path template = fixture.resolve("templates/SIMPLE");
         Files.createDirectories(template);
-        copyTree(Paths.get("packages/default/schemas"), fixture.resolve("schemas"));
+        copyTree(Paths.get("schemas"), fixture.resolve("schemas"));
         String fixtureRelative = root.relativize(fixture).toString().replace(File.separatorChar, '/');
         Files.write(fixture.resolve("config.yaml"), ("schemaVersion: att-config/v2.11\n"
                 + "environment: SIT\noutputDirectory: " + fixtureRelative + "/output\n"
@@ -212,14 +213,18 @@ class WindowsLauncherTest {
         Files.copy(Paths.get("att.bat"), root.resolve("att.bat"));
         createApplicationJar(lib.resolve("att-local-"+projectVersion()+".jar"));
         Path sourcePackage = Paths.get("packages/default");
-        for (String directory : new String[]{"config", "templates", "testcase", "load", "tools", "schemas"}) {
+        for (String directory : new String[]{"templates", "testcase", "load", "tools", "testdata", "sql"}) {
             Path source = sourcePackage.resolve(directory);
             Path destination = packageRoot.resolve(directory);
             if (Files.isDirectory(source)) copyTree(source, destination);
             else Files.createDirectories(destination);
         }
-        assertTrue(Files.isDirectory(packageRoot.resolve("config")));
-        assertFalse(Files.exists(root.resolve("config")));
+        for (String directory : new String[]{"config", "schemas"})
+            copyTree(Paths.get(directory), root.resolve(directory));
+        assertFalse(Files.exists(packageRoot.resolve("config")));
+        assertFalse(Files.exists(packageRoot.resolve("schemas")));
+        assertTrue(Files.isRegularFile(root.resolve("config/config.yaml")));
+        assertTrue(Files.isRegularFile(root.resolve("schemas/catalog.yaml")));
 
         Path mavenRepository = Paths.get(System.getProperty("user.home"), ".m2", "repository");
         String[] runtimeJars = {

@@ -251,8 +251,6 @@ export default function App() {
   const [state, dispatch] = useReducer(appReducer, initialAppState);
   const [jobsRefreshing, setJobsRefreshing] = useState(false);
   const [jobsUpdatedAt, setJobsUpdatedAt] = useState<string | null>(null);
-  const [workspaceRefreshing, setWorkspaceRefreshing] = useState(false);
-  const [workspaceRefreshError, setWorkspaceRefreshError] = useState('');
   const jobsRefreshCount = useRef(0);
   const jobsRequestSequence = useRef(0);
   const [selectedEnvironment, setSelectedEnvironment] = useState('');
@@ -284,20 +282,6 @@ export default function App() {
       if (!signal?.aborted) dispatch({ type: 'packages/error', error: asError(error) });
     }
   }, []);
-
-  const onRefreshWorkspaces = useCallback(async () => {
-    setWorkspaceRefreshing(true);
-    setWorkspaceRefreshError('');
-    try {
-      await api.refreshWorkspaces();
-      const [version] = await Promise.all([api.getVersion(), loadPackages()]);
-      dispatch({ type: 'version/ready', data: version });
-    } catch (error) {
-      setWorkspaceRefreshError(asError(error).message);
-    } finally {
-      setWorkspaceRefreshing(false);
-    }
-  }, [loadPackages]);
 
   const loadJobs = useCallback(async (signal?: AbortSignal) => {
     const requestSequence = ++jobsRequestSequence.current;
@@ -371,13 +355,13 @@ export default function App() {
 
   let content;
   if (navigation.route.kind === 'dashboard') {
-    content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} workspaceRefreshing={workspaceRefreshing} workspaceRefreshError={workspaceRefreshError} onRefreshWorkspaces={() => void onRefreshWorkspaces()} />;
+    content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'run') {
     content = <RunPage key={`${navigation.route.packageId || ''}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.environment || ''}`}
       packageId={navigation.route.packageId} initialTarget={navigation.route.target} initialEnvironment={navigation.route.environment ?? selectedEnvironment}
       onAccepted={onJobAccepted} onSchedule={onSchedule} schedulingEnabled={capabilities.loadSchedulingEnabled} />;
   } else if (navigation.route.kind === 'packages') {
-    content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} workspaceRefreshing={workspaceRefreshing} workspaceRefreshError={workspaceRefreshError} onRefreshWorkspaces={() => void onRefreshWorkspaces()} />;
+    content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {
     content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage api={loadJobsApi} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} /></Suspense>;
   } else if (navigation.route.kind === 'jobs') {

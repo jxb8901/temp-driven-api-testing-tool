@@ -110,6 +110,8 @@ class ServerConfigTest {
         Path home=Files.createDirectory(temp.resolve("install-home"));
         Path allowed=Files.createDirectories(home.resolve("packages"));
         Path pkg=Files.createDirectory(allowed.resolve("default"));
+        Path runtimeConfig=Files.createDirectories(home.resolve("config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n");
         Path data=home.resolve("data");
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path file=temp.resolve("home-data-server.yaml");

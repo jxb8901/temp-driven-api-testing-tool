@@ -43,11 +43,11 @@ class ServerWarUiIT {
                         + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER,ATT_SCHEDULE_ADMIN\"/></tomcat-users>");
         Path packages = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(packages.resolve("payments"));
-        writeScheduledPackage(packageRoot);
+        writeScheduledPackage(packageRoot, localHome);
         // Keep Flow-link inspection in this isolated browser fixture, away from the scheduler capacity fixture.
         writeReferenceFlowSource(packageRoot);
         Path config = Files.writeString(temp.resolve("server.yaml"),
-                "server:\n  dataDir: " + yaml(temp.resolve("data")) + "\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n"
+                "server:\n  runtimeConfigPath: " + yaml(localHome.resolve("config/config.yaml")) + "\n  dataDir: " + yaml(temp.resolve("data")) + "\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n"
                         + "  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
                         + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n"
                         + "  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n"
@@ -222,14 +222,14 @@ class ServerWarUiIT {
         Files.createDirectories(localHome.resolve("lib"));
         Path packages = Files.createDirectories(temp.resolve("scheduled-packages"));
         Path packageRoot = Files.createDirectories(packages.resolve("payments"));
-        writeScheduledPackage(packageRoot);
+        writeScheduledPackage(packageRoot, localHome);
         Path users = Files.writeString(temp.resolve("scheduled-tomcat-users.xml"),
                 "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_SCHEDULE_ADMIN\"/>"
                         + "<user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/>"
                         + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER,ATT_SCHEDULE_ADMIN\"/></tomcat-users>");
         Path javaBin = Path.of(System.getProperty("java.home"), "bin", System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
         Path config = Files.writeString(temp.resolve("scheduled-war-server.yaml"),
-                "server:\n  dataDir: " + yaml(temp.resolve("scheduled-war-data")) + "\n  javaExecutable: " + yaml(javaBin)
+                "server:\n  runtimeConfigPath: " + yaml(localHome.resolve("config/config.yaml")) + "\n  dataDir: " + yaml(temp.resolve("scheduled-war-data")) + "\n  javaExecutable: " + yaml(javaBin)
                         + "\n  authenticationRequired: true\n  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
                         + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh"
                         + "\n  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n    minimumIntervalMinutes: 1\n    pollIntervalSeconds: 5\n    maxConcurrentRuns: 1"
@@ -300,21 +300,21 @@ class ServerWarUiIT {
             assertTrue(configurationOrigin.path("available").asBoolean(), configurationOrigin.toString());
             JsonNode configurationReference = null;
             for (JsonNode item : configurationOrigin.path("fileReferences"))
-                if ("templates/SCHEDULED/payload/request.txt".equals(item.path("logicalPath").asText())) configurationReference = item;
+                if ("config/tools/att-helper.sh".equals(item.path("logicalPath").asText())) configurationReference = item;
             assertNotNull(configurationReference, configurationOrigin.toString());
             String referenceId = configurationReference.path("referenceId").asText();
             assertTrue(referenceId.matches("[A-Za-z0-9_-]{20,4096}"), "The public reference is an opaque Server token.");
             String referencedSourcePath = api + "/packages/payments/configuration/source?path="
-                    + java.net.URLEncoder.encode("templates/SCHEDULED/payload/request.txt", java.nio.charset.StandardCharsets.UTF_8)
+                    + java.net.URLEncoder.encode("config/tools/att-helper.sh", java.nio.charset.StandardCharsets.UTF_8)
                     + "&origin=" + java.net.URLEncoder.encode("config/source-references.yaml", java.nio.charset.StandardCharsets.UTF_8)
                     + "&referenceId=" + java.net.URLEncoder.encode(referenceId, java.nio.charset.StandardCharsets.UTF_8);
             assertEquals(401, get(port, referencedSourcePath, null), "Referenced package files retain the Server authentication boundary.");
             JsonNode referencedSource = getJson(port, referencedSourcePath, ordinary);
             assertTrue(referencedSource.path("available").asBoolean());
-            assertEquals("templates/SCHEDULED/payload/request.txt", referencedSource.path("logicalPath").asText());
+            assertEquals("config/tools/att-helper.sh", referencedSource.path("logicalPath").asText());
             assertEquals("text", referencedSource.path("format").asText());
-            assertTrue(referencedSource.path("text").asText().contains("request: payload"));
-            assertFalse(referencedSource.path("text").asText().contains("template-secret"),
+            assertTrue(referencedSource.path("text").asText().contains("Safe configuration helper source"));
+            assertFalse(referencedSource.path("text").asText().contains("helper-secret"),
                     "Safe source projection must scrub classified-looking password values before the UI receives them.");
             assertTrue(referencedSource.path("redacted").asBoolean());
             String unverifiedReferencePath = referencedSourcePath.substring(0, referencedSourcePath.indexOf("&referenceId="));
@@ -509,24 +509,22 @@ class ServerWarUiIT {
         return home;
     }
 
-    private static void writeScheduledPackage(Path packageRoot) throws Exception {
+    private static void writeScheduledPackage(Path packageRoot, Path localHome) throws Exception {
         Path templates = Files.createDirectories(packageRoot.resolve("templates/SCHEDULED"));
         Path loads = Files.createDirectories(packageRoot.resolve("load"));
         Files.createDirectories(packageRoot.resolve("testcase"));
-        Files.createDirectories(packageRoot.resolve("config"));
         Path nestedTool = Files.createDirectories(packageRoot.resolve("tools/mq")).resolve("check-queue.sh");
-        copySchemas(packageRoot);
-        Files.writeString(packageRoot.resolve("config/config.yaml"),
-                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [config/testdata/generated.yaml]\n"
+        Path configRoot = Files.createDirectories(localHome.resolve("config"));
+        Files.writeString(configRoot.resolve("config.yaml"),
+                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [testdata/generated.yaml]\n"
                         + "testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  checkQueue:\n"
                         + "    name: Check queue\n    description: Nested Tool script default source\n"
                         + "    command: [bash, tools/mq/check-queue.sh]\n    stdoutFormat: text\n    arguments: {}\n");
-        Files.writeString(packageRoot.resolve("config/source-references.yaml"),
-                "payload: '&{../templates/SCHEDULED/payload/request.txt}'\n");
+        Files.writeString(configRoot.resolve("source-references.yaml"), "payload: '&{tools/att-helper.sh}'\n");
+        Path tools = Files.createDirectories(configRoot.resolve("tools"));
+        Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\necho helper-secret\n");
         Files.writeString(nestedTool, "#!/bin/sh\n# package-local script source\necho safe\n");
-        Path testdata = Files.createDirectories(packageRoot.resolve("config/testdata"));
-        Path tools = Files.createDirectories(packageRoot.resolve("config/tools"));
-        Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\nexit 0\n");
+        Path testdata = Files.createDirectories(packageRoot.resolve("testdata"));
         Files.writeString(testdata.resolve("generated.yaml"),
                 "schemaVersion: att-testdata/v1.0\nid: generatedAccounts\nrecords:\n  generate:\n    seq:\n      from: 1000\n      to: 1120\n      format: '%06d'\n  record:\n    id: 'A-%{seq}'\n"
                         + "selection:\n  strategy: sequential\n  exhaustion: stop\n");
@@ -548,7 +546,7 @@ class ServerWarUiIT {
         String expression="&{./Pacs008.xml}";
         ProcessBuilder builder=new ProcessBuilder(Path.of(System.getProperty("java.home"),"bin","java").toString(),
                 "-Datt.home="+localHome,"-cp",localHome.resolve("lib").toString()+"/*","att.FrameworkRunner",
-                "debug","flow","diagnostic.fidelity.v1","--config",packageRoot.resolve("config/config.yaml").toString(),
+                "debug","flow","diagnostic.fidelity.v1","--config",localHome.resolve("config/config.yaml").toString(),
                 "--output-dir",temp.resolve("cli-diagnostic-output").toString(),"--format","json");
         builder.directory(packageRoot.toFile());
         builder.environment().put("ATT_PACKAGE_ROOT",packageRoot.toString());
@@ -614,7 +612,7 @@ class ServerWarUiIT {
     }
 
     private static void copySchemas(Path packageRoot) throws Exception {
-        Path source = Path.of("packages/default/schemas").toRealPath();
+        Path source = Path.of("schemas").toRealPath();
         Path destination = packageRoot.resolve("schemas");
         try (var paths = Files.walk(source)) {
             for (Path path : (Iterable<Path>) paths::iterator) {

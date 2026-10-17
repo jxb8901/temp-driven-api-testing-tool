@@ -89,12 +89,6 @@ final class ServerRuntime implements AutoCloseable {
     private final ConcurrentHashMap<String,RunDraft> runDrafts=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,QuickLoadDraft> quickLoadDrafts=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdvancedLoadDraftState> advancedLoadDrafts=new ConcurrentHashMap<>();
-    private record WorkspacePackage(Path root,String owner,String revision) { }
-    private volatile Map<String,WorkspacePackage> workspacePackages=Map.of();
-    private volatile String workspaceDiscoveryStatus="disabled";
-    private volatile String workspaceLastRefreshedAt;
-    private final Object workspaceRefreshLock=new Object();
-    private final AtomicLong lastManualWorkspaceRefreshNanos=new AtomicLong();
     private final List<InspectionWorker> inspectionWorkerPool=new ArrayList<>();
     private final ScheduledExecutorService inspectionWarmup;
     private volatile boolean closing;
@@ -125,12 +119,6 @@ final class ServerRuntime implements AutoCloseable {
                 ?java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-warmup");t.setDaemon(true);return t;}):null;
         recover();cleanupExpiredJobsSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
-        if(config.workspaceDiscovery.enabled) {
-            refreshWorkspacesInternal();
-            if("automatic".equals(config.workspaceDiscovery.refreshMode))
-                retention.scheduleWithFixedDelay(this::refreshWorkspacesSafely,config.workspaceDiscovery.intervalSeconds,
-                        config.workspaceDiscovery.intervalSeconds,TimeUnit.SECONDS);
-        }
         if(config.scheduling.enabled) {
             store.recoverScheduleExecutions();
             if(!config.authenticationRequired&&config.authorization.allowAnonymousOperations)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("ATT operations are enabled without authentication; anonymous clients share operational access");
@@ -186,12 +174,12 @@ final class ServerRuntime implements AutoCloseable {
         validatePackageRoot(root);
         WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
         request.protocolVersion="att-worker/v1";request.command=command;request.packageRoot=root.toString();
-        request.outputDirectory=null;request.config=safeRelative(request.config,"config");request.environment=safeText(request.environment,128,"environment");
+        request.outputDirectory=null;request.config=config.runtimeConfigPath.toString();request.environment=safeText(request.environment,128,"environment");
         request.runId=safeText(request.runId,128,"runId");request.debugId=safeText(request.debugId,128,"debugId");request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");
         request.scenario=safeRelative(request.scenario,"scenario");request.debugInput=safeRelative(request.debugInput,"debugInput");
         request.unsafeFailureDetails=false;
         request.suites=safePaths(request.suites,"suites");
-        validatePackagePath(root,request.config,"config");validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
+        validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
         validatePackagePath(root,request.scenario,"scenario");validatePackagePath(root,request.debugInput,"debugInput");
         if(request.suites!=null)for(String suite:request.suites)validatePackagePath(root,suite,"suites");
         if("debug".equals(command)||("run".equals(command)&&request.target!=null))validateTarget(request.target);
@@ -352,15 +340,8 @@ final class ServerRuntime implements AutoCloseable {
         Path root=packageRoot(id);if(root==null)throw new NotFoundException();return packageMetadata(id,root,principal);
     }
     private Map<String,Object> packageMetadata(String id,Path root,String principal) throws Exception {
-        WorkspacePackage workspace=workspacePackages.get(id);
         Map<String,Object> item=new LinkedHashMap<>();item.put("packageId",id);item.put("name",root.getFileName().toString());
-        item.put("packageType",workspace==null?"shared":"workspace");
         item.put("canExecute",isOperationalPrincipal(principal));
-        if(workspace!=null) {
-            item.put("workspaceOwner",workspace.owner());
-            item.put("discovery",Map.of("status","ready","lastRefreshedAt",workspaceLastRefreshedAt==null?"":workspaceLastRefreshedAt));
-            item.put("validation",Map.of("status","not-validated","revision",workspace.revision(),"lastValidatedAt","","errorCount",0,"warningCount",0));
-        }
         return item;
     }
     private boolean isOperationalPrincipal(String principal) throws Exception {
@@ -369,88 +350,10 @@ final class ServerRuntime implements AutoCloseable {
         return true; // The servlet layer has already verified the configured trusted USER role.
     }
     private Path packageRoot(String id) {
-        Path configured=config.packages.get(id);if(configured!=null)return configured;
-        WorkspacePackage workspace=workspacePackages.get(id);return workspace==null?null:workspace.root();
+        return config.packages.get(id);
     }
     private Map<String,Path> packageRoots() {
-        Map<String,Path> roots=new LinkedHashMap<>(config.packages);
-        workspacePackages.forEach((id,workspace)->roots.putIfAbsent(id,workspace.root()));
-        return roots;
-    }
-    Map<String,Object> refreshWorkspaces(String principal) throws Exception {
-        if(!config.workspaceDiscovery.enabled)throw new NotFoundException();
-        long now=System.nanoTime(),previous=lastManualWorkspaceRefreshNanos.get();
-        if(previous!=0L&&now-previous<TimeUnit.SECONDS.toNanos(2))throw new IllegalArgumentException("Workspace refresh was requested too recently; retry shortly");
-        if(!lastManualWorkspaceRefreshNanos.compareAndSet(previous,now))throw new IllegalArgumentException("A workspace refresh is already in progress; retry shortly");
-        try {refreshWorkspacesInternal();}
-        catch(Exception failure) {workspaceDiscoveryStatus="unavailable";throw failure;}
-        finally {lastManualWorkspaceRefreshNanos.set(System.nanoTime());}
-        return Map.of("status",workspaceDiscoveryStatus,"lastRefreshedAt",workspaceLastRefreshedAt,
-                "workspaceCount",workspacePackages.size());
-    }
-    String workspaceDiscoveryStatus(){return workspaceDiscoveryStatus;}
-    String workspaceLastRefreshedAt(){return workspaceLastRefreshedAt==null?"":workspaceLastRefreshedAt;}
-    private void refreshWorkspacesSafely() {
-        try {refreshWorkspacesInternal();}
-        catch(Exception failure) {
-            workspaceDiscoveryStatus="unavailable";
-            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Workspace discovery refresh failed; prior safe package snapshot retained");
-        }
-    }
-    private void refreshWorkspacesInternal() throws Exception {
-        if(!config.workspaceDiscovery.enabled)return;
-        synchronized(workspaceRefreshLock) {
-            workspaceDiscoveryStatus="refreshing";
-            Map<String,WorkspacePackage> discovered=new LinkedHashMap<>();
-            java.util.Set<String> activeAccounts=new java.util.HashSet<>();
-            if("local".equals(config.authMode))for(Map<String,Object> user:store.authUsers())
-                if(Boolean.TRUE.equals(user.get("active"))&&"USER".equals(user.get("role"))&&user.get("loginId") instanceof String)activeAccounts.add((String)user.get("loginId"));
-            Path root=config.workspaceDiscovery.root.toRealPath();
-            if(!root.equals(config.workspaceDiscovery.root)||config.allowedRoots.stream().noneMatch(root::startsWith))
-                throw new IllegalArgumentException("Workspace root no longer resolves within its approved package root");
-            int scanned=0;
-            try(java.nio.file.DirectoryStream<Path> entries=Files.newDirectoryStream(root)) {
-                for(Path candidate:entries) {
-                    if(++scanned>1000)throw new IllegalArgumentException("Workspace discovery candidate limit exceeded");
-                    String id=candidate.getFileName().toString();
-                    if(!id.matches("[a-z0-9][a-z0-9._-]{2,119}")||config.packages.containsKey(id))continue;
-                    if("local".equals(config.authMode)&&!activeAccounts.contains(id))continue;
-                    if(Files.isSymbolicLink(candidate)||!Files.isDirectory(candidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))continue;
-                    Path canonical=candidate.toRealPath();
-                    if(!canonical.getParent().equals(root)||!config.allowedRoots.stream().anyMatch(canonical::startsWith))continue;
-                    Path packageConfig=candidate.resolve("config/config.yaml");
-                    if(Files.isSymbolicLink(packageConfig)||!Files.isRegularFile(packageConfig,java.nio.file.LinkOption.NOFOLLOW_LINKS)||!Files.isReadable(packageConfig))continue;
-                    try {
-                        String revision=workspaceRevision(canonical);
-                        discovered.put(id,new WorkspacePackage(canonical,id,revision));
-                    } catch(Exception invalidWorkspace) {
-                        java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("Skipping an invalid discovered workspace");
-                    }
-                }
-            }
-            workspacePackages=java.util.Collections.unmodifiableMap(discovered);
-            workspaceLastRefreshedAt=clock.instant().toString();
-            workspaceDiscoveryStatus="ready";
-        }
-    }
-    private String workspaceRevision(Path root) throws Exception {
-        java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
-        List<Path> files;
-        try(var paths=Files.walk(root,24)) {
-            files=paths.limit(10001).sorted().toList();
-        }
-        if(files.size()>10000)throw new IllegalArgumentException("Workspace file limit exceeded");
-        long totalBytes=0;
-        for(Path path:files) {
-            if(path.equals(root))continue;
-            if(Files.isSymbolicLink(path))throw new IllegalArgumentException("Workspace symlinks are not allowed");
-            if(Files.isRegularFile(path,java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                totalBytes+=Files.size(path);if(totalBytes>268435456L)throw new IllegalArgumentException("Workspace revision size limit exceeded");
-                digest.update(root.relativize(path).toString().replace('\\','/').getBytes(StandardCharsets.UTF_8));digest.update((byte)0);
-                try(var input=Files.newInputStream(path)) {byte[] buffer=new byte[8192];int read;while((read=input.read(buffer))>=0)digest.update(buffer,0,read);}
-            }
-        }
-        return "sha256:"+java.util.HexFormat.of().formatHex(digest.digest());
+        return config.packages;
     }
     Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String principal) throws Exception {
         return inspectResource(packageId,action,type,resourceId,query,requestedLimit,cursor,"name","asc",null,principal);
@@ -746,7 +649,7 @@ final class ServerRuntime implements AutoCloseable {
             WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
             request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();
             request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.inspectionAction="run-input";
-            request.config=safeRelative(request.config,"config");validatePackagePath(root,request.config,"config");
+            request.config=config.runtimeConfigPath.toString();
             request.suites=safePaths(request.suites,"suites");if(request.suites!=null)for(String suite:request.suites)validatePackagePath(root,suite,"suites");
             request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
             if(request.environment!=null)request.environment=inspectionEnvironment(request.environment,"environment");
@@ -960,7 +863,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     private WorkerRequest inspectionRequest(String packageId,Path root,String environment) {
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";
-        request.packageRoot=root.toString();request.config="config/config.yaml";request.environment=environment;
+        request.packageRoot=root.toString();request.config=config.runtimeConfigPath.toString();request.environment=environment;
         request.maxResponseBytes=config.inspection.maxResponseBytes;request.maxSourceBytes=config.inspection.maxSourceBytes;
         request.safeTextSources=config.inspection.safeTextSources(packageId);
         request.externalTextSources=config.inspection.externalTextSources(packageId);
@@ -1697,10 +1600,6 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId) throws Exception {
-        if("local".equals(config.authMode)) {
-            Map<String,Object> owner=store.authUser(schedule.createdBy);
-            if(owner==null||!Boolean.TRUE.equals(owner.get("active"))||!"USER".equals(owner.get("role")))throw new IllegalArgumentException("Schedule owner is no longer authorized");
-        }
         if("run".equals(schedule.effectiveJobType()))return submitScheduledRun(schedule,occurrenceId);
         return "debug".equals(schedule.effectiveJobType())
                 ? submitScheduledDebug(schedule,occurrenceId)
@@ -1720,7 +1619,7 @@ final class ServerRuntime implements AutoCloseable {
         if(schedule.inlineDebugInput!=null)validateScheduledDebugInput(root,schedule);
         else {
             WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
-            if(schedule.config!=null){request.config=safeRelative(schedule.config,"config");validatePackagePath(root,request.config,"config");}
+            request.config=config.runtimeConfigPath.toString();
             request.inspectionAction="revision";request.expectedRevisionDigest=schedule.expectedRevisionDigest;
             try { executeInspection(root,request); }
             catch(StaleCursorException stale) {throw new StaleDraftException();}
@@ -1762,7 +1661,7 @@ final class ServerRuntime implements AutoCloseable {
                 ||!schedule.expectedRevisionDigest.matches("[a-f0-9]{64}"))
             throw new IllegalArgumentException("Scheduled Debug snapshot is incomplete");
         WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
-        if(schedule.config!=null){request.config=safeRelative(schedule.config,"config");validatePackagePath(root,request.config,"config");}
+        request.config=config.runtimeConfigPath.toString();
         request.inspectionAction="debug-input";request.inspectionType=schedule.debugTargetType;
         request.inspectionTargetId=schedule.debugTargetId;request.inlineDebugInput=deepMap(schedule.inlineDebugInput);
         Map<String,Object> inspected=executeInspection(root,request);
@@ -1812,7 +1711,7 @@ final class ServerRuntime implements AutoCloseable {
     private ValidatedScheduledScenario validateScheduledScenario(Path root,LoadSchedule schedule,Map<String,Object> scenario,
                                                                   boolean packageFile) throws Exception {
         WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
-        if(schedule.config!=null){request.config=safeRelative(schedule.config,"config");validatePackagePath(root,request.config,"config");}
+        request.config=config.runtimeConfigPath.toString();
         request.inspectionAction="load-scenario";request.inlineLoadScenario=scenario;
         if(packageFile)request.inspectionPath=schedule.scenario;
         Map<String,Object> inspected=executeInspection(root,request);
@@ -1924,7 +1823,9 @@ final class ServerRuntime implements AutoCloseable {
         if(s.description!=null&&(s.description.length()>500||containsControl(s.description)))throw new IllegalArgumentException("description must be at most 500 characters without control characters");
         if(packageRoot(s.packageId)==null)throw new IllegalArgumentException("Unknown packageId");
         Path root=packageRoot(s.packageId);validatePackageRoot(root);
-        s.config=safeRelative(s.config,"config");validatePackagePath(root,s.config,"config");
+        if(s.config!=null&&!("config/config.yaml".equals(s.config)||config.runtimeConfigPath.toString().equals(s.config)))
+            throw new IllegalArgumentException("A schedule must use the shared runtime configuration");
+        s.config="config/config.yaml";
         s.environment=s.environment==null||s.environment.isBlank()?null:safeText(s.environment,128,"environment");
         if("run".equals(s.effectiveJobType())) {
             JsonNode snapshot=JSON.valueToTree(s.runInput);

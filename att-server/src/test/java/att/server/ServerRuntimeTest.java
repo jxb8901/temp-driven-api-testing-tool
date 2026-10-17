@@ -118,19 +118,20 @@ class ServerRuntimeTest {
     @Test void persistedScheduleSubmitsAStandardLoadJobAfterRestartAndRejectsInvalidOrUnavailablePackages() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("scheduled-load-packages"));Path packageRoot=Files.createDirectory(allowed.resolve("p"));
         Path templates=Files.createDirectories(packageRoot.resolve("templates/SCHEDULED"));Path loads=Files.createDirectories(packageRoot.resolve("load"));
-        Files.createDirectories(packageRoot.resolve("testcase"));Files.createDirectories(packageRoot.resolve("config"));copySchemas(packageRoot);
-        Files.createDirectories(packageRoot.resolve("config/testdata"));
-        Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [config/testdata/edda.yaml]\n"
+        Files.createDirectories(packageRoot.resolve("testcase"));
+        Files.createDirectories(packageRoot.resolve("testdata"));
+        Path runtimeConfig=temp.resolve("scheduled-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [testdata/edda.yaml]\n"
                 +"testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
-        Files.writeString(packageRoot.resolve("config/testdata/edda.yaml"),"schemaVersion: att-testdata/v1.0\nid: edda\nrecords: [{currency: HKD}]\n");
+        Files.writeString(packageRoot.resolve("testdata/edda.yaml"),"schemaVersion: att-testdata/v1.0\nid: edda\nrecords: [{currency: HKD}]\n");
         Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: SCHEDULED\ndescription: scheduled Load smoke target\nactions:\n"
                 +"  message:\n    type: log\n    message: scheduled Load passed\n");
-        Files.writeString(templates.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ntestdata: [config/testdata/edda.yaml]\ninputs:\n  currency: '@{edda.currency}'\n  password: package-sidecar-secret\n");
+        Files.writeString(templates.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ntestdata: [testdata/edda.yaml]\ninputs:\n  currency: '@{edda.currency}'\n  password: package-sidecar-secret\n");
         Files.writeString(loads.resolve("scenario.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n  - id: scheduled-smoke\n    target:\n      type: template\n      id: SCHEDULED\n    load:\n      users: 1\n      duration: 1s\n");
         Files.writeString(loads.resolve("bad.yaml"),"schemaVersion: att-load/invalid\nworkloads: []\n");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path data=temp.resolve("scheduled-load-data");Path configFile=temp.resolve("scheduled-load-server.yaml");
-        Files.writeString(configFile,"server:\n  dataDir: "+yaml(data)+"\n  javaExecutable: "+yaml(javaBin)
+        Files.writeString(configFile,"server:\n  runtimeConfigPath: "+yaml(runtimeConfig)+"\n  dataDir: "+yaml(data)+"\n  javaExecutable: "+yaml(javaBin)
                 +"\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\n    redaction:\n      enabled: true\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    maxConcurrentRuns: 1\n  inlineLoad:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("scheduled-load-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
@@ -432,8 +433,8 @@ class ServerRuntimeTest {
     @Test void validatesDebugDraftsWithoutDisclosingDefaultsAndRejectsStalePrincipalBoundSubmissions() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("debug-draft-packages"));Path packageRoot=Files.createDirectory(allowed.resolve("p"));
         Path templates=Files.createDirectories(packageRoot.resolve("templates/FORM"));Files.createDirectories(packageRoot.resolve("testcase"));
-        Files.createDirectories(packageRoot.resolve("config"));copySchemas(packageRoot);
-        Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+        Path runtimeConfig=temp.resolve("debug-draft-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: debug form test\nactions:\n"
                 +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");
@@ -441,7 +442,7 @@ class ServerRuntimeTest {
                 +"  value: safe\n  payload:\n    account: 'customer account 123456789'\n    message: 'temporary credential violet-123'\n");
         byte[] originalSidecar=Files.readAllBytes(debugSidecar);
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
-        Path configFile=temp.resolve("debug-draft-server.yaml");Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("debug-draft-data"))+"\n  javaExecutable: "+yaml(javaBin)
+        Path configFile=temp.resolve("debug-draft-server.yaml");Files.writeString(configFile,"server:\n  runtimeConfigPath: "+yaml(runtimeConfig)+"\n  dataDir: "+yaml(temp.resolve("debug-draft-data"))+"\n  javaExecutable: "+yaml(javaBin)
                 +"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         Path libs=Files.createDirectory(temp.resolve("debug-draft-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
@@ -483,11 +484,11 @@ class ServerRuntimeTest {
     @Test void quickLoadDraftOmitsDebugImportsAndRunsOnlyExplicitLoadTestdata() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("quick-load-packages"));Path packageRoot=Files.createDirectory(allowed.resolve("p"));
         Path templates=Files.createDirectories(packageRoot.resolve("templates/FORM"));Files.createDirectories(packageRoot.resolve("testcase"));
-        Files.createDirectories(packageRoot.resolve("config"));copySchemas(packageRoot);
+        Path runtimeConfig=temp.resolve("quick-load-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
         Path toolScript=Files.createDirectories(packageRoot.resolve("tools")).resolve("check-load-inputs.sh");
         Files.writeString(toolScript,"#!/bin/sh\n[ \"$1\" = CORR-176 ] && [ \"$2\" = ARG-176 ]\n");
         toolScript.toFile().setExecutable(true);
-        Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n"
                 +"tools:\n  echo:\n    name: Echo\n    description: Echo typed Load values\n"
                 +"    command: [./tools/check-load-inputs.sh, \"${input.correlationId}\", \"${value}\"]\n    stdoutFormat: text\n"
@@ -502,13 +503,13 @@ class ServerRuntimeTest {
         Path debugSidecar=templates.resolve("debug.yaml");
         Files.writeString(debugSidecar,"schemaVersion: att-debug/v1.2\ntestdata: [debug-data/debug.yaml]\ninputs: {value: default}\nvars: {reference: REF001}\n");
         byte[] originalSidecar=Files.readAllBytes(debugSidecar);
-        Path toolSidecar=Files.createDirectories(packageRoot.resolve("config/tools")).resolve("echo.debug.yaml");
+        Path toolSidecar=Files.createDirectories(runtimeConfig.getParent().resolve("tools")).resolve("echo.debug.yaml");
         Files.writeString(toolSidecar,"schemaVersion: att-debug/v1.2\ninputs: {correlationId: CORR-176}\narguments: {value: ARG-176}\n");
         byte[] originalToolSidecar=Files.readAllBytes(toolSidecar);
         Path loadPolicy=Files.createDirectories(packageRoot.resolve("load")).resolve("load.visualuser.yaml");
         Files.writeString(loadPolicy,"schemaVersion: att-load/v1.6\nload: {users: 1, duration: 1s}\n");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
-        Path configFile=temp.resolve("quick-load-server.yaml");Files.writeString(configFile,"server:\n  dataDir: "+yaml(temp.resolve("quick-load-data"))+"\n  javaExecutable: "+yaml(javaBin)
+        Path configFile=temp.resolve("quick-load-server.yaml");Files.writeString(configFile,"server:\n  runtimeConfigPath: "+yaml(runtimeConfig)+"\n  dataDir: "+yaml(temp.resolve("quick-load-data"))+"\n  javaExecutable: "+yaml(javaBin)
                 +"\n  inlineLoad:\n    enabled: true\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
         Path libs=Files.createDirectory(temp.resolve("quick-load-WEB-INF-lib"));
         addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
@@ -825,11 +826,12 @@ class ServerRuntimeTest {
     }
 
     @Test void unifiedRunExecutesAllTargetsAndFreezesCaseSelectionsAcrossEnvironments() throws Exception {
-        Path root=Files.createDirectories(temp.resolve("unified-package"));copySchemas(root);
-        Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("testcase"));
+        Path root=Files.createDirectories(temp.resolve("unified-package"));
+        Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("templates/SIMPLE"));Files.createDirectories(root.resolve("templates/BAD"));Files.createDirectories(root.resolve("templates/flows/simple"));
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
-        Files.writeString(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools:\n  version:\n    name: Version\n    description: Local runtime version\n    command: ["+yaml(javaBin)+", '-version']\n    stdoutFormat: text\n    arguments: {}\n");
+        Path runtimeConfig=temp.resolve("unified-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools:\n  version:\n    name: Version\n    description: Local runtime version\n    command: ["+yaml(javaBin)+", '-version']\n    stdoutFormat: text\n    arguments: {}\n");
         Files.writeString(root.resolve("templates/SIMPLE/template.yaml"),"schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Unified RUN fixture\nactions:\n  show: {type: log, message: once}\n");
         Files.writeString(root.resolve("templates/BAD/template.yaml"),"schemaVersion: att-template/v3.6\nname: BAD\ndescription: Failed Case fixture\nactions:\n  check: {type: assert, assert: '#{1 == 2}'}\n");
         Files.writeString(root.resolve("templates/flows/simple/flow.yaml"),"schemaVersion: att-flow/v3.6\nid: simple.flow.v1\nname: Simple flow\ndescription: Unified RUN flow\nactions:\n  show: {type: log, message: once}\n");
@@ -841,9 +843,9 @@ class ServerRuntimeTest {
             book.write(out);
         }
         Files.writeString(root.resolve("testcase/cases.yaml"),"schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
-        new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(root,Path.of("config/config.yaml"),"SIT",List.of(workbook),null,java.util.Set.of(),false));
+        new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(root,runtimeConfig,"SIT",List.of(workbook),null,java.util.Set.of(),false));
         Path server=temp.resolve("unified-server.yaml");
-        Files.writeString(server,"server:\n  dataDir: "+yaml(temp.resolve("unified-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+yaml(root)+"]\n  entries:\n    p: "+yaml(root)+"\n");
+        Files.writeString(server,"server:\n  runtimeConfigPath: "+yaml(runtimeConfig)+"\n  dataDir: "+yaml(temp.resolve("unified-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+yaml(root)+"]\n  entries:\n    p: "+yaml(root)+"\n");
         Path libs=Files.createDirectory(temp.resolve("unified-libs"));
         for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))addModuleJar(libs,module,Path.of(module+"/target/classes"));
         addWorkerClasspathJars(libs);
@@ -942,7 +944,7 @@ class ServerRuntimeTest {
         void advance(Duration duration){current=current.plus(duration);}
     }
     private static void copySchemas(Path packageRoot)throws Exception {
-        Path source=Path.of("packages/default/schemas").toRealPath(),destination=packageRoot.resolve("schemas");
+        Path source=Path.of("schemas").toRealPath(),destination=packageRoot.resolve("schemas");
         try(var paths=Files.walk(source)) {
             for(Path path:(Iterable<Path>)paths::iterator) {
                 Path target=destination.resolve(source.relativize(path));

@@ -4,7 +4,7 @@ ATT Server 4.2.1 提供單節點控制平面，讓用戶透過版本化 REST API
 
 ## 準備部署
 
-1. 將 Local archive 解壓至安裝根目錄，並將 `ATT_HOME` 設為該目錄。升級時，先移除舊的 `lib/att-local-*.jar` 再解壓新 archive，確保 `ATT_HOME/lib` 只包含一個 runtime。預設 package root 為 `$ATT_HOME/packages/default`；其中包含自己的 `config/config.yaml`、`schemas/`、單數 `testcase/`、`templates/` 及頂層 `tools/`。ATT 4.2.1 source checkout 亦採用相同 package layout；根目錄 `config/att-server.example.yaml` 仍是獨立的 Server deployment 設定範本。
+1. 將 Local archive 解壓至安裝根目錄，並將 `ATT_HOME` 設為該目錄。升級時，先移除舊的 `lib/att-local-*.jar` 再解壓新 archive，確保 `ATT_HOME/lib` 只包含一個 runtime。Engine/Worker 共用設定位於 `$ATT_HOME/config/config.yaml`，受信任 schemas 由 ATT runtime 內嵌載入。Package root `$ATT_HOME/packages/default` 只包含業務資源，例如 `testcase/`、`templates/`、`load/`、Testdata 及 package-local scripts，不需要 `config/` 或 `schemas/`。`att-server.yaml` 是獨立的 Server deployment 設定。
 2. 將 package root 設於 allowed root 之下，並確保 Tomcat 服務帳戶可讀取。解壓後的 `$ATT_HOME/packages/default` 可直接註冊為 package root。
 3. 啟動前先建立 `server.dataDir`，並只允許 Tomcat 服務帳戶寫入。範例使用 `$ATT_HOME/data`；只要它與所有已註冊 package root 不相等、互不包含，即可使用。亦可使用 `/var/lib/att-server`。Server data 不可放入 package 內容。
 4. 將 `$ATT_HOME/config/att-server.example.yaml` 複製至 `$ATT_HOME/config/att-server.yaml` 或受保護的外部路徑，更新絕對路徑，並勿將憑證放入 package。升級時不可覆寫既有的 active config。
@@ -14,7 +14,7 @@ Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`�
 
 Server 依次尋找 JVM property `-Datt.server.config`、環境變數 `ATT_SERVER_CONFIG`，再尋找 `$ATT_HOME/config/att-server.yaml`。最後一個路徑的 `ATT_HOME` 先取自 `-Datt.home`，再取自 `ATT_HOME` 環境變數。若選定的 config 不存在、不可讀或無效，Server 會在診斷中指出其路徑並停止啟動，不會改用其他來源。沒有明確來源或可用的預設 config 時，啟動錯誤會提供設定指引。
 
-Tomcat 負責 listener、TLS、access log 及驗證。請讓服務帳戶可讀取 ATT_HOME 和 package root，並擁有或可寫入 `server.dataDir`。請設定 Realm、SSO 整合、用戶端憑證或其他容器支援的機制；驗證失敗時，Server 會保留容器回傳的 challenge 或 redirect。啟用 Scheduled Load 後，只有 `server.scheduling.adminRole`（預設 `ATT_ADMIN`）中的 Servlet 使用者可管理排程。若設定、Java 基線或 package mapping 無效，Server 會在啟動時失敗。
+Tomcat 負責 listener、TLS、access log 及驗證。請讓服務帳戶可讀取 ATT_HOME 和 package root，並擁有或可寫入 `server.dataDir`。請設定 Realm、SSO 整合、用戶端憑證或其他容器支援的機制；驗證失敗時，Server 會保留容器回傳的 challenge 或 redirect。啟用排程後，所有通過 `server.authorization.userRole` 驗證的 USER 均可管理共用排程；ADMIN role 不會授予 Package、Job 或 Schedule 操作權限。若設定、Java 基線或 package mapping 無效，Server 會在啟動時失敗。
 
 ## ATT_HOME 佈局與遷移
 
@@ -25,24 +25,27 @@ att/                              # ATT_HOME
   att.sh
   att.bat
   lib/
-  config/att-server.example.yaml  # 僅為範本
+  config/
+    att-server.example.yaml       # 僅為 Server 設定範本
+    config.yaml                   # 共用 Engine/Worker 設定
+    tools/                        # 共用 Tool 定義
+    dbhelpers/                    # 共用 helper descriptors
+  schemas/                        # source catalog；runtime 使用內嵌的受信任副本
   data/                           # 選用的 server.dataDir，由 Tomcat 管理
   packages/default/               # 完整 package root
-    config/config.yaml
-    config/tools/
-    schemas/
     testcase/
     templates/
-    tools/                        # Tool script
+    testdata/                     # package-local descriptor/data
+    tools/                        # package-local scripts
 ```
 
-遷移舊版平面 Local 安裝前先備份，並將新版 archive 解壓到暫存目錄。把舊版 `config/` 內容（排除 `att-server.example.yaml` 及 `att-server.yaml`）、`schemas/`、`testcase/`、`templates/`、頂層 `tools/` 及選用的 `sql/` 複製至相對應的 `packages/default/` 目錄。合併時保留目的地已存在的檔案；手動檢查 `config/config.yaml` 及自訂 package 檔案的衝突。請分開保留 `config/tools/`（Tool 設定）及頂層 `tools/`（script）。既有 active Server config 應留在 `ATT_HOME/config/att-server.yaml` 或受保護的外部路徑；不可複製到 package root 或在遷移時覆寫。在遷移後的 package 通過驗證及執行前，保留舊的平面目錄。將 Server registry entry 更新至新 package root，並為 Tomcat 設定 `ATT_HOME` 或 `-Datt.home`。Server state 必須留在 package root 以外，安裝替換或升級時須保留；Local archive 不包含 `data/` 或 active Server config。
+遷移舊版平面 Local 安裝前先備份，並將新版 archive 解壓到暫存目錄。保留一份經管理員審核的共用 `config/config.yaml`，並將共用 Tool/helper descriptors 放在 ATT_HOME 的 `config/`。若舊安裝的不同 package 使用不同設定，請先人工合併；ATT runtime 不會選擇或合併 package 內的設定。受信任 schema 移至 ATT_HOME `schemas/`。將 `testcase/`、`templates/`、`load/`、頂層 `tools/`、`sql/` 及 Testdata descriptors 放到各自已註冊的 Package。Package scripts 位於 `packages/<id>/tools/`，與 ATT_HOME `config/tools/` 的共用 Tool 定義分開。遷移 runtime 設定時排除 `att-server.example.yaml` 及 `att-server.yaml`。既有 active Server config 應留在 `ATT_HOME/config/att-server.yaml` 或受保護的外部路徑。在新 Package 通過驗證及執行前，保留舊的平面目錄。將 Server registry entries 更新至 Package root，並為 Tomcat 設定 `ATT_HOME` 或 `-Datt.home`。Server state 必須留在 Package root 以外；Local archive 不包含 `data/` 或 active Server config。
 
 ## 設定
 
-`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。`server.inspection` 以有界的常駐 Worker pool 獨立限制唯讀資源探索。Worker pool 的程序數不會超過 `maxConcurrent`，每個程序會依次處理請求，並快取最多兩個 package index；package 檔案變更事件會令快取失效。資源探索另設佇列、逾時、heap、source 及 response 上限。`sourceBrowsing.policy: safe-package-files` 預設允許合資格且非敏感的 package-local 文字，無須逐檔 allowlist，包括有界的 Template/Flow YAML 投影、Tool scripts、一般設定與 Testdata descriptor，以及由已授權 source 連結的合資格 `&{...}` targets。`config/` 是唯一可列出目錄的檔案樹。每個連結檔案都使用 Server 簽發、綁定 package 及 origin 的不透明 reference ID；caller 單靠路徑和 origin 不會獲得導覽權限。`allowlist-only` 會保留 `server.inspection.safeTextSources` 既有的 package-relative 精確路徑語義。External scripts 只會在 `sourceBrowsing.externalTextSources.<packageId>` 列出其 canonical 精確檔案，且檔案位於已設定的 canonical `externalSourceRoots` 目錄時提供；不接受 wildcard、不列出 external 檔案，回應亦不會洩露 filesystem path。敏感路徑、deny 檔案、binary、package root 以外的檔案及超大檔案仍不可用；憑證及個人資料在所有模式下都會受到保護。
+`server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。`server.inspection` 以有界的常駐 Worker pool 獨立限制唯讀資源探索。Worker pool 的程序數不會超過 `maxConcurrent`，每個程序會依次處理請求，並快取最多兩個 package index；package 檔案變更事件會令快取失效。資源探索另設佇列、逾時、heap、source 及 response 上限。`sourceBrowsing.policy: safe-package-files` 預設允許合資格且非敏感的 package-local 文字，無須逐檔 allowlist，包括有界的 Template/Flow YAML 投影、Tool scripts、一般設定與 Testdata descriptor，以及由已授權 source 連結的合資格 `&{...}` targets。`config/` 是唯一可列出目錄的檔案樹。每個連結檔案都使用 Server 簽發、綁定 package 及 origin 的不透明 reference ID；caller 單靠路徑和 origin 不會獲得導覽權限。`allowlist-only` 使用 `server.inspection.safeTextSources` 設定精確路徑；共用設定來源以 ATT_HOME-relative 路徑表示，Package 檔案仍以各自 root-relative 路徑表示。External scripts 只會在 `sourceBrowsing.externalTextSources.<packageId>` 列出其 canonical 精確檔案，且檔案位於已設定的 canonical `externalSourceRoots` 目錄時提供；不接受 wildcard、不列出 external 檔案，回應亦不會洩露 filesystem path。敏感路徑、deny 檔案、binary、package root 以外的檔案及超大檔案仍不可用；憑證及個人資料在所有模式下都會受到保護。
 
-舊版的 `server.inspection.safeTextSources` 若包含 YAML entry，可能令 Tomcat 因 `Inspection source allowlist accepts text script files only` 而無法啟動。如需先恢復舊版服務，請在重啟前移除該 entry。本版本已接受 YAML entry；預設 `safe-package-files` policy 會提供合資格的 package-local YAML（例如 `config/sit/fppdb.yaml`），無須逐檔設定。只有使用 `allowlist-only` 時才需保留精確路徑。
+舊版的 `server.inspection.safeTextSources` 若包含 YAML entry，可能令 Tomcat 因 `Inspection source allowlist accepts text script files only` 而無法啟動。如需先恢復舊版服務，請在重啟前移除該 entry。本版本已接受 YAML entry；預設 `safe-package-files` policy 會提供合資格的共用設定 YAML（例如 `config/tools/fpp.yaml`），無須逐檔設定。只有使用 `allowlist-only` 時才需保留精確路徑。
 
 `server.inspection.redaction.enabled` 預設為 `false`，會在安全 projection 中顯示一般 package 值。即使關閉遮蔽或匿名存取，憑證、認證資料、private key 及常見個人資料欄位仍會保護；啟用遮蔽後亦會套用設定的敏感路徑、欄位 pattern 及自由文字預設值。遮蔽關閉時 Server 會記錄啟動警告，UI 會顯示目前設定。共享或正式資料建議啟用遮蔽並要求登入；未遮蔽值只應用於隔離的 SIT 網絡。
 
@@ -77,7 +80,7 @@ Origin 以 scheme、忽略大小寫的 hostname/IP 及有效 port 精確比較�
 
 瀏覽器建立的 Quick Load 及 Advanced Load draft 另有獨立 opt-in：`server.inlineLoad.enabled` 預設為 `false`。啟用後，Server 會在 Engine 驗證後及進入佇列前，再次檢查 workload 數、target 數、Virtual User 總數、Arrival Rate 總和、每個 workload 及整體並行數上限，以及完整時間窗口上限。以下範例設定保守預設值。時間窗口上限為 warmup、ramp-up、duration、ramp-down 的總和；target 數包含固定 target 及每個 VU mix entry。功能停用時回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出設定上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。這些限制適用於瀏覽器建立的 draft；既有 path-based Load request 維持相容行為，並繼續受 `workers.maxConcurrentLoad` 限制。
 
-週期性 package-backed Load 排程另有獨立 opt-in：`server.scheduling.enabled` 預設為 `false`。啟用前請先選定管理員角色並檢視排程上限。已驗證部署需要 Servlet container role `server.scheduling.adminRole`（預設 `ATT_ADMIN`）；請在 Tomcat 將此 role 對應至可信操作人員。只有在 `authenticationRequired: false` 且排程已啟用時，`allowAnonymousManagement` 才預設為 `true`；設為 `false` 可保留 role 限制。匿名 caller 會共享排程管理權限，Server 會記錄明顯啟動警告；這只適用刻意隔離的測試部署，不建議用於共享或正式環境。此功能需要有界 package inspection。排程定義及執行歷史保存在 `server.dataDir` 的 H2 資料庫；請在同一 dataDir 只執行一個 Server 程序。每個排程預設保留最新 10,000 筆 terminal occurrence（`maxExecutionsPerSchedule` 可設為 100–100,000）；執行中及處理中的 occurrence 會保留。本 scheduler 不提供多節點 leader election。
+週期性 package-backed Load 排程另有獨立 opt-in：`server.scheduling.enabled` 預設為 `false`。所有已驗證的 USER 均可在共用操作範圍內管理 RUN/LOAD 排程；container-auth 使用 `server.authorization.userRole`，local-auth 要求 active `USER`。ADMIN role 不會取得排程操作權限。匿名操作只由 `server.authorization.allowAnonymousOperations` 控制，且僅在 `authenticationRequired: false` 時可用。舊版 `server.scheduling.adminRole` 及 `allowAnonymousManagement` 僅為設定相容性保留，不會改變權限。此功能需要有界 package inspection。排程定義及執行歷史保存在 `server.dataDir` 的 H2 資料庫；請在同一 dataDir 只執行一個 Server 程序。每個排程預設保留最新 10,000 筆 terminal occurrence（`maxExecutionsPerSchedule` 可設為 100–100,000）；執行中及處理中的 occurrence 會保留。本 scheduler 不提供多節點 leader election。
 
 排程可使用 package-relative Load scenario 檔案，或將有效的 Quick/Advanced Load draft 存成 snapshot。建立 draft snapshot 時，resolved principal、package 及 environment 必須與 draft 相同；Debug draft 不可排程。有界 Inspector 會在保存前及每次 occurrence 前驗證和正規化完整 scenario 及 target closure。Schedule 會私下保存 normalized scenario，只在 API view 回傳 `inlineSnapshot: true`，不包含 scenario 內容。Inline snapshot 不可直接替換或編輯，亦不可使用獨立 Load overrides；如需變更 workload，請以新的有效 draft 建立新排程。即使瀏覽器建立的 Load draft 停用，Server 的 Load users、rate、duration、workload 及 target 上限仍然適用。每個工作都經標準 Worker 和 Server Load admission 路徑提交；既有 Load concurrency 及 queue 上限仍然適用。不接受輸出路徑、package root、Worker 設定、憑證或 caller 提供的 principal。工作使用 Server 建立的 `load-schedule:<id>` principal。提交失敗會記錄且不重試。已接納工作的狀態與 evidence 維持標準 job 生命週期，與 schedule occurrence 分開。
 

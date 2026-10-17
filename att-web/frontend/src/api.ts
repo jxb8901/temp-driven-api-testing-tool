@@ -228,9 +228,6 @@ export const api = {
   getPackages(signal?: AbortSignal): Promise<ApiEnvelope<PackageSummary>> {
     return request<ApiEnvelope<PackageSummary>>('packages', { signal });
   },
-  refreshWorkspaces(signal?: AbortSignal): Promise<{ status: string; lastRefreshedAt?: string; workspaceCount?: number }> {
-    return postJson('workspaces/refresh', {}, signal);
-  },
   getJobs(signal?: AbortSignal): Promise<ApiEnvelope<JobSummary>> {
     return request<ApiEnvelope<JobSummary>>('jobs', { signal });
   },

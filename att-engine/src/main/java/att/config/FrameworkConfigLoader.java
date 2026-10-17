@@ -34,15 +34,22 @@ public final class FrameworkConfigLoader {
      * files remain unchanged and do not silently reinterpret --env.
      */
     public FrameworkConfig load(Path path, Path projectRoot, String selectedEnvironment) throws IOException {
-        return loadInternal(path,projectRoot,selectedEnvironment,null,false);
+        return load(path, projectRoot, projectRoot, selectedEnvironment);
+    }
+
+    /** Loads central runtime configuration while keeping package Testdata paths package-local. */
+    public FrameworkConfig load(Path path, Path runtimeConfigRoot, Path packageRoot,
+                                String selectedEnvironment) throws IOException {
+        return loadInternal(path,runtimeConfigRoot,packageRoot,selectedEnvironment,null,false);
     }
 
     /** Trusted parsed root for inspection snapshots; all schema and profile validation is unchanged. */
     public FrameworkConfig loadParsed(Path path, Path projectRoot, String selectedEnvironment, Object loaded) throws IOException {
-        return loadInternal(path,projectRoot,selectedEnvironment,loaded,true);
+        return loadInternal(path,projectRoot,projectRoot,selectedEnvironment,loaded,true);
     }
 
-    private FrameworkConfig loadInternal(Path path, Path projectRoot, String selectedEnvironment, Object parsed, boolean supplied) throws IOException {
+    private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
+                                         String selectedEnvironment, Object parsed, boolean supplied) throws IOException {
         long inspectionStarted=System.nanoTime();
         try {
             Object loaded=supplied?parsed:YamlSupport.load(path);
@@ -52,9 +59,9 @@ public final class FrameworkConfigLoader {
             boolean v210 = Version.CONFIG_SCHEMA.equals(schemaVersion)
                     || Version.PREVIOUS_CONFIG_SCHEMA.equals(schemaVersion);
             if (!v210) {
-                projectRoot = projectRoot.toAbsolutePath().normalize();
-                Path declaredSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion);
-                Path currentSchema = schema(projectRoot, "att-config-v2.12.schema.json");
+                runtimeConfigRoot = runtimeConfigRoot.toAbsolutePath().normalize();
+                Path declaredSchema = att.validation.SchemaFiles.resolveVersion(runtimeConfigRoot, schemaVersion);
+                Path currentSchema = schema(runtimeConfigRoot, "att-config-v2.12.schema.json");
                 att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, rawMap,
                         schemaVersion, Version.CONFIG_SCHEMA);
                 throw new IllegalArgumentException("Unsupported config schemaVersion '" + schemaVersion
@@ -67,14 +74,15 @@ public final class FrameworkConfigLoader {
             boolean v26 = false;
             boolean v25 = false;
             boolean v22 = false;
-            projectRoot = projectRoot.toAbsolutePath().normalize();
+            runtimeConfigRoot = runtimeConfigRoot.toAbsolutePath().normalize();
+            packageRoot = packageRoot.toAbsolutePath().normalize();
             String schemaName = v210 ? null : v29 ? "att-config-v2.9.schema.json" : v28 ? "att-config-v2.8.schema.json" : v27 ? "att-config-v2.7.schema.json" : v26 ? "att-config-v2.6.schema.json" : v25 ? "att-config-v2.5.schema.json" : v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json";
             Path schema = v210 ? (Version.CONFIG_SCHEMA.equals(schemaVersion)
-                    ? schema(projectRoot, "att-config-v2.12.schema.json")
-                    : att.validation.SchemaFiles.resolveVersion(projectRoot, schemaVersion))
-                    : schema(projectRoot, schemaName);
+                    ? schema(runtimeConfigRoot, "att-config-v2.12.schema.json")
+                    : att.validation.SchemaFiles.resolveVersion(runtimeConfigRoot, schemaVersion))
+                    : schema(runtimeConfigRoot, schemaName);
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    schema(projectRoot, "att-config-v2.12.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
+                    schema(runtimeConfigRoot, "att-config-v2.12.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
             SchemaSupport.rejectUnknown(rawMap, "config", v28
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata", "ssh", "tools", "environments"}
                     : v29
@@ -91,38 +99,38 @@ public final class FrameworkConfigLoader {
             Map<String, Object> map = resolveEnvironment(rawMap, v29 || v28 || v27 || v26, v29 || v28 || v27,
                     v29 || v28, selectedEnvironment);
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    schema(projectRoot, "att-config-v2.12.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
+                    schema(runtimeConfigRoot, "att-config-v2.12.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
             Map<String, SshHelperConfig> sshHelpers = (v29 || v28 || v27)
-                    ? new SshHelperConfigLoader().load(map.get("sshhelpers"), projectRoot)
+                    ? new SshHelperConfigLoader().load(map.get("sshhelpers"), runtimeConfigRoot)
                     : Collections.<String, SshHelperConfig>emptyMap();
             Map<String, HttpHelperConfig> httpHelpers = (v29 || v28)
-                    ? new HttpHelperConfigLoader().load(map.get("httphelpers"), projectRoot)
+                    ? new HttpHelperConfigLoader().load(map.get("httphelpers"), runtimeConfigRoot)
                     : Collections.<String, HttpHelperConfig>emptyMap();
             SshConfig globalSsh = ssh(map.get("ssh"), "config.ssh");
             try {
                 addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "", "", "tools", path,
                         v29 || v28 || v27 || v26, !(v29 || v28 || v27 || v26), v29, v210);
-                if (v29 || v28 || v27 || v26 || v25 || v22) addToolGroups(map.get("toolGroups"), projectRoot, tools, sshHelpers);
+                if (v29 || v28 || v27 || v26 || v25 || v22) addToolGroups(map.get("toolGroups"), runtimeConfigRoot, tools, sshHelpers);
             } catch (Exception e) {
                 throw att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.TOOL_INVALID,
                         "Invalid tool configuration", e, path.toString(), "tools/toolGroups",
                         "Check the qualified tool/group name, required metadata, declared arguments, command placeholders, and executable path.");
             }
             Map<String, DbHelperConfig> dbHelpers = (v29 || v28 || v27 || v26 || v25)
-                    ? new DbHelperConfigLoader().load(map.get("dbhelpers"), projectRoot)
+                    ? new DbHelperConfigLoader().load(map.get("dbhelpers"), runtimeConfigRoot)
                     : Collections.<String, DbHelperConfig>emptyMap();
             Map<String, MqHelperConfig> mqHelpers = (v29 || v28 || v27 || v26)
-                    ? new MqHelperConfigLoader().load(map.get("mqhelpers"), projectRoot)
+                    ? new MqHelperConfigLoader().load(map.get("mqhelpers"), runtimeConfigRoot)
                     : Collections.<String, MqHelperConfig>emptyMap();
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
                     map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 10000, "timeoutMs"),
                     templatesRoot(map), testcasesRoot(map), tools, dbHelpers, mqHelpers, sshHelpers, httpHelpers, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map),
-                    descriptorPaths(map.get("testdata"), projectRoot, "config.environments." + String.valueOf(map.get("environment")) + ".testdata"));
+                    descriptorPaths(map.get("testdata"), packageRoot, "config.environments." + String.valueOf(map.get("environment")) + ".testdata"));
         } catch (att.validation.DiagnosticException e) {
-            throw YamlSupport.locate(e, path, e.field()).forPackage(projectRoot);
+            throw YamlSupport.locate(e, path, e.field()).forPackage(packageRoot);
         } catch (Exception e) {
             att.validation.JsonSchemaVerifier.SchemaValidationException schema = att.validation.JsonSchemaVerifier.SchemaValidationException.find(e);
             String field = schema == null ? "config" : schema.field();
@@ -132,9 +140,9 @@ public final class FrameworkConfigLoader {
                     e.getMessage(), path.toString(), field, null, null, null, null, null,
                     toolField
                             ? "Check the qualified tool/group name, descriptor fields, argument declarations, and command argv contract."
-                            : "Compare the reported field with the strict config schema and correct its name, type, or value.", e);
+                    : "Compare the reported field with the strict config schema and correct its name, type, or value.", e);
             throw (schema == null ? YamlSupport.locate(diagnostic, path, field)
-                    : YamlSupport.locateSchema(diagnostic, path, schema.structuredViolations())).forPackage(projectRoot);
+                    : YamlSupport.locateSchema(diagnostic, path, schema.structuredViolations())).forPackage(packageRoot);
         } finally {
             att.metrics.InspectionMetrics.JVM.record(att.metrics.InspectionMetrics.Stage.CONFIG_LOAD,System.nanoTime()-inspectionStarted);
         }
@@ -574,6 +582,8 @@ public final class FrameworkConfigLoader {
             if (value == null) throw new IllegalArgumentException("toolGroups paths must be non-blank strings");
             Path relative = relativePath(value, null, "toolGroups path");
             Path logical = root.resolve(relative).normalize();
+            if (!logical.startsWith(root.resolve("config")))
+                throw new IllegalArgumentException("tool group files must remain inside shared config/");
             if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe tool group file: " + value);
             Path file = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
             if (!Files.isRegularFile(file)) throw new IllegalArgumentException("Missing/unsafe tool group file: " + value);

@@ -3,6 +3,7 @@
 # Copy to ATT_HOME/config/att-server.yaml or a protected external path.
 server:
   dataDir: /opt/att/data
+  runtimeConfigPath: /opt/att/config/config.yaml
   auth:
     # container preserves Tomcat Realm/SSO; local enables ATT login and local accounts.
     mode: container
@@ -103,13 +104,5 @@ workers:
 packages:
   allowedRoots:
     - /opt/att/packages
-  # Optional, read-only discovery of active user workspaces directly below this root.
-  # This root must also be inside one of packages.allowedRoots.
-  workspaceDiscovery:
-    enabled: false
-    # root: /opt/att/packages/workspaces
-    refresh:
-      mode: manual # automatic or manual
-      intervalSeconds: 300
   entries:
     default: /opt/att/packages/default

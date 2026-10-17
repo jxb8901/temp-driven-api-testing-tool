@@ -36,13 +36,16 @@ class DebugDraftPipelinePerformanceBenchmark {
         Path packageRoots = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(packageRoots.resolve("benchmark"));
         installPackage(packageRoot, workbookCount, casesPerWorkbook);
+        Path runtimeConfig = Files.createDirectories(temp.resolve("runtime-home/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n",StandardCharsets.UTF_8);
 
         Path javaBin = Path.of(System.getProperty("java.home"), "bin",
                 System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java");
         Path serverYaml = temp.resolve("server.yaml");
         Path dataDir = temp.resolve("server-data");
         Files.writeString(serverYaml,
-                "server:\n  dataDir: " + yaml(dataDir) + "\n  javaExecutable: " + yaml(javaBin)
+                "server:\n  runtimeConfigPath: " + yaml(runtimeConfig) + "\n  dataDir: " + yaml(dataDir) + "\n  javaExecutable: " + yaml(javaBin)
                         + "\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 60000\n    heapMaxMb: 512\n"
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\n"
                         + "packages:\n  allowedRoots:\n    - " + yaml(packageRoots) + "\n  entries:\n    benchmark: " + yaml(packageRoot) + "\n",
@@ -161,13 +164,8 @@ class DebugDraftPipelinePerformanceBenchmark {
     }
 
     private void installPackage(Path root, int workbookCount, int casesPerWorkbook) throws Exception {
-        Files.createDirectories(root.resolve("config"));
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("templates/FORM"));
-        copySchemas(Path.of("packages/default/schemas"), root.resolve("schemas"));
-        Files.writeString(root.resolve("config/config.yaml"),
-                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
-                        + "testcase: {root: testcase}\ntemplates: {root: templates}\n", StandardCharsets.UTF_8);
         Files.writeString(root.resolve("templates/FORM/template.yaml"),
                 "schemaVersion: att-template/v3.6\nname: FORM\ndescription: Multi-workbook draft benchmark\nactions:\n"
                         + "  log:\n    type: log\n    message: \"${EXEC.INPUT.value}\"\n", StandardCharsets.UTF_8);

@@ -673,7 +673,6 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
       </div>}
       {route?.occurrenceId && history.status === 'ready' && !history.items.some(item => item.occurrenceId === route.occurrenceId) && <p role="status">This occurrence is outside the latest 100 retained records or is no longer available.</p>}
     </section>}
-    </>}
 
     {editorOpen && loadState === 'ready' && (view !== 'edit' || editingId) && <section className="att-schedule-panel att-schedule-editor" aria-labelledby="schedule-editor-heading">
       <div className="att-schedule-section-heading"><div><h2 id="schedule-editor-heading" tabIndex={-1}>{editingId ? `Edit schedule: ${draft.name || editingId}` : 'New Schedule'}</h2>

@@ -13,8 +13,6 @@ import static org.junit.jupiter.api.Assertions.*;
 class PackageValidatorTest {
     @TempDir Path tempDir;
 
-    @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(tempDir); }
-
     @Test void retryConditionUsesCompletedAttemptScopeAndRejectsForbiddenCalls() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
                 Collections.<String, ToolConfig>emptyMap(), null, null);
@@ -670,6 +668,8 @@ class PackageValidatorTest {
     @Test void packageRootDoesNotRequireInstallationLaunchers() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
                 Collections.<String, ToolConfig>emptyMap(), null, null);
+        assertFalse(Files.exists(tempDir.resolve("config")));
+        assertFalse(Files.exists(tempDir.resolve("schemas")));
         PackageValidator validator = new PackageValidator(tempDir, config);
         java.lang.reflect.Method layout = PackageValidator.class.getDeclaredMethod("validatePackageLayout", List.class);
         layout.setAccessible(true);
@@ -678,7 +678,9 @@ class PackageValidatorTest {
         layout.invoke(validator, diagnostics);
 
         assertFalse(diagnostics.stream().anyMatch(d -> d.message().contains("Missing required package path: att.sh")
-                || d.message().contains("Missing required package path: att.bat")), diagnostics.toString());
+                || d.message().contains("Missing required package path: att.bat")
+                || d.message().contains("config/config.yaml")
+                || d.message().contains("schemas/catalog.yaml")), diagnostics.toString());
     }
 
     @Test void windowsPackageValidationPublishesSkippedShellWarning() throws Exception {

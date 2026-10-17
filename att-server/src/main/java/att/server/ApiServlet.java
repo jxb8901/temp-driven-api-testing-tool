@@ -53,7 +53,7 @@ public final class ApiServlet extends HttpServlet {
         try {
             if(path.startsWith("/auth/")){authGet(req,res,path,requestId);return;}
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
-            if("/version".equals(path)){Map<String,Object> version=new LinkedHashMap<>();version.put("version",ServerBuildInfo.PRODUCT);version.put("apiVersion",ServerApi.VERSION);version.put("buildTime",ServerBuildInfo.BUILD_TIME);version.put("gitCommit",ServerBuildInfo.GIT_COMMIT);version.put("javaMinimum",17);version.put("inlineLoadEnabled",runtime.config.inlineLoad.enabled);version.put("loadSchedulingEnabled",runtime.config.scheduling.enabled);version.put("unifiedRunVersion",RunDefinition.VERSION);version.put("authMode",runtime.config.authMode);version.put("workspaceDiscoveryEnabled",runtime.config.workspaceDiscovery.enabled);version.put("workspaceRefreshMode",runtime.config.workspaceDiscovery.refreshMode);version.put("workspaceRefreshIntervalSeconds",runtime.config.workspaceDiscovery.intervalSeconds);version.put("workspaceDiscoveryStatus",runtime.workspaceDiscoveryStatus());version.put("workspaceLastRefreshedAt",runtime.workspaceLastRefreshedAt());version.put("requestId",requestId);json(res,200,version);return;}
+            if("/version".equals(path)){Map<String,Object> version=new LinkedHashMap<>();version.put("version",ServerBuildInfo.PRODUCT);version.put("apiVersion",ServerApi.VERSION);version.put("buildTime",ServerBuildInfo.BUILD_TIME);version.put("gitCommit",ServerBuildInfo.GIT_COMMIT);version.put("javaMinimum",17);version.put("inlineLoadEnabled",runtime.config.inlineLoad.enabled);version.put("loadSchedulingEnabled",runtime.config.scheduling.enabled);version.put("unifiedRunVersion",RunDefinition.VERSION);version.put("authMode",runtime.config.authMode);version.put("requestId",requestId);json(res,200,version);return;}
             boolean resourceRequest=resourcePath(path);
             boolean loadCatalogRequest=path.matches("/packages/[^/]+/load-catalog(?:/(?:source|validate))?");
             boolean configurationRequest=configurationPath(path);
@@ -112,15 +112,6 @@ public final class ApiServlet extends HttpServlet {
         String requestId=requestId(req,res),path=path(req);String authorizationPrincipal=principal(req);
         if(path.startsWith("/auth/")){authPost(req,res,path,requestId);return;}
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
-        if("/workspaces/refresh".equals(path)) {
-            if(!requireOperator(req,res,requestId))return;
-            if(!checkOrigin(req,res,requestId,false))return;
-            try {Map<String,Object> result=runtime.refreshWorkspaces(authorizationPrincipal);result.put("requestId",requestId);json(res,200,result);}
-            catch(IllegalArgumentException e){error(res,429,"ATT-SERVER-WORKSPACE-REFRESH-LIMIT",safeDetail(e),requestId);}
-            catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","Workspace discovery is not enabled",requestId);}
-            catch(Exception e){error(res,503,"ATT-SERVER-WORKSPACE-REFRESH-FAILED","Workspace discovery could not be refreshed",requestId);}
-            return;
-        }
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
         if(!requireOperator(req,res,requestId))return;
         boolean createRunDraft="/drafts/run".equals(path),createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path);
@@ -236,7 +227,7 @@ public final class ApiServlet extends HttpServlet {
     }
     private boolean requireAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
         String login=principal(req);if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;}
-        try{Map<String,Object> user=runtime.store.authUser(login);if(user==null||!"ADMIN".equals(user.get("role"))){error(res,403,"ATT-SERVER-FORBIDDEN","Administrator access is required",requestId);return false;}return true;}
+        try{Map<String,Object> user=runtime.store.authUser(login);if(user==null||!Boolean.TRUE.equals(user.get("active"))||!"ADMIN".equals(user.get("role"))){error(res,403,"ATT-SERVER-FORBIDDEN","Administrator access is required",requestId);return false;}return true;}
         catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authentication request could not be completed",requestId);return false;}
     }
     private boolean requireSystemAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {

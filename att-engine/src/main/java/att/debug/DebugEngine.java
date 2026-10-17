@@ -2,6 +2,7 @@ package att.debug;
 
 import att.Version;
 import att.config.FrameworkConfig;
+import att.config.RuntimeConfigPath;
 import att.config.SchemaSupport;
 import att.config.ToolConfig;
 import att.config.YamlSupport;
@@ -45,26 +46,35 @@ import java.util.Map;
 public final class DebugEngine {
     private static final String KEEP_DEFAULT_MARKER = "$attDebugKeepDefault";
     private final Path projectRoot;
+    private final Path runtimeConfigPath;
     private final FrameworkConfig config;
     private final att.exec.MqTransport.Factory mqTransportFactory;
     private final boolean redactionEnabled;
     private final List<String> sensitivePaths, sensitiveFieldPatterns;
 
     public DebugEngine(Path projectRoot, FrameworkConfig config) {
-        this(projectRoot, config, new att.exec.IbmMqClientFactory(), true,
+        this(projectRoot, RuntimeConfigPath.infer(projectRoot, config), config, new att.exec.IbmMqClientFactory(), true,
                 java.util.Collections.<String>emptyList(), java.util.Collections.<String>emptyList());
     }
 
     /** Injectable transport boundary for repeatable Debug integration tests. */
     public DebugEngine(Path projectRoot, FrameworkConfig config, att.exec.MqTransport.Factory mqTransportFactory) {
-        this(projectRoot, config, mqTransportFactory, true,
+        this(projectRoot, RuntimeConfigPath.infer(projectRoot, config), config, mqTransportFactory, true,
                 java.util.Collections.<String>emptyList(), java.util.Collections.<String>emptyList());
     }
 
     public DebugEngine(Path projectRoot, FrameworkConfig config, att.exec.MqTransport.Factory mqTransportFactory,
                        boolean redactionEnabled, List<String> sensitivePaths, List<String> sensitiveFieldPatterns) {
+        this(projectRoot, RuntimeConfigPath.infer(projectRoot, config), config,
+                mqTransportFactory, redactionEnabled, sensitivePaths, sensitiveFieldPatterns);
+    }
+
+    public DebugEngine(Path projectRoot, Path runtimeConfigPath, FrameworkConfig config,
+                       att.exec.MqTransport.Factory mqTransportFactory, boolean redactionEnabled,
+                       List<String> sensitivePaths, List<String> sensitiveFieldPatterns) {
         if (mqTransportFactory == null) throw new IllegalArgumentException("MQ transport factory is required");
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
+        this.runtimeConfigPath = RuntimeConfigPath.resolve(runtimeConfigPath, this.projectRoot);
         this.config = config;
         this.mqTransportFactory = mqTransportFactory;
         this.redactionEnabled = redactionEnabled;
@@ -224,7 +234,7 @@ public final class DebugEngine {
             att.core.ExecutionBootstrapVariables.validate(input.vars, bootstrapEngine, input.inputs, input.path,
                     "vars", DiagnosticCodes.DEBUG_INVALID, att.core.ExecutionBootstrapVariables.Scope.DEBUG);
         }
-        new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
+        new PackageValidator(projectRoot, config, runtimeConfigPath).validateDebugTarget(resolved.template, testCase, stage,
                 resolved.flows, input.path, "debug", input.inputs, input.vars, input.testdataDescriptors);
     }
 
@@ -385,7 +395,7 @@ public final class DebugEngine {
     }
 
     private ExecutionOptions targetOptions(String command, String type, String id) {
-        return ExecutionOptions.forApi(command, projectRoot.resolve("config/config.yaml"), config.environment(),
+        return ExecutionOptions.forApi(command, runtimeConfigPath, config.environment(),
                 Collections.<Path>emptyList(), null, Collections.<String>emptySet(), Collections.<String>emptySet(),
                 Collections.<String>emptySet(), null, false, false, false, false, null, "selected", type, id,
                 null, false, null, null, null, null, null, null, null, null, null, null,
@@ -475,7 +485,7 @@ public final class DebugEngine {
 
             long validationPhase = performanceProfile == null ? 0L : performanceProfile.begin();
             try {
-                new PackageValidator(projectRoot, config).validateDebugTarget(resolved.template, testCase, stage,
+                new PackageValidator(projectRoot, config, runtimeConfigPath).validateDebugTarget(resolved.template, testCase, stage,
                         resolved.flows, input.path, "debug", testCase.caseData(), input.vars, input.testdataDescriptors);
             } finally { if (performanceProfile != null) performanceProfile.end("debugValidationMs", validationPhase); }
 
@@ -619,7 +629,7 @@ public final class DebugEngine {
         action.put("type", "tool");
         action.put("call", call(tool.key(), input.arguments));
         List<TemplateAction> actions = Collections.singletonList(new TemplateAction("debugTool", action, Version.TEMPLATE_SCHEMA));
-        Path source = tool.sourceFile() == null ? projectRoot.resolve("config/config.yaml") : tool.sourceFile();
+        Path source = tool.sourceFile() == null ? runtimeConfigPath : tool.sourceFile();
         return new ResolvedTarget(new StageTemplate(tool.name(), source.getParent(), actions, Version.TEMPLATE_SCHEMA, source), flows);
     }
 
@@ -805,7 +815,7 @@ public final class DebugEngine {
         ToolConfig tool = findTool(id);
         if (tool == null) throw debugError("Unknown Tool '" + id + "'", "Define the Tool before creating its debug.yaml sidecar.");
         String group = tool.groupId().isEmpty() ? tool.localKey() : tool.groupId();
-        return projectRoot.resolve("config/tools").resolve(group + ".debug.yaml");
+        return RuntimeConfigPath.root(runtimeConfigPath).resolve("config/tools").resolve(group + ".debug.yaml");
     }
 
     private Path safeAutoInput(String type, String id) throws Exception {
@@ -813,6 +823,10 @@ public final class DebugEngine {
         if (Files.isSymbolicLink(candidate))
             throw debugError("Debug input sidecar must not be a symbolic link", "Use a regular package-local debug.yaml file.");
         try {
+            if ("tool".equals(type)) {
+                Path configRoot = RuntimeConfigPath.root(runtimeConfigPath);
+                return new att.resource.PackageResourceResolver(configRoot).internalCandidate(candidate);
+            }
             return new att.resource.PackageResourceResolver(projectRoot).internalCandidate(candidate);
         } catch (IllegalArgumentException unsafe) {
             throw debugError("Debug input sidecar is outside the package root or unavailable",

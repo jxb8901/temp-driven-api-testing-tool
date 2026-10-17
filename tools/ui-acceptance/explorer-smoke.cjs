@@ -147,9 +147,6 @@ async function main() {
         ] : requested === 'config' ? [
           { name: 'application.yaml', path: 'config/application.yaml', kind: 'file', format: 'yaml', sourceAvailable: true, sizeBytes: 248 },
           { name: 'restricted.yaml', path: 'config/restricted.yaml', kind: 'file', format: 'yaml', sourceAvailable: false, reason: 'visibility-policy' },
-          { name: 'testdata', path: 'config/testdata', kind: 'directory' },
-        ] : requested === 'config/testdata' ? [
-          { name: 'accounts.yaml', path: 'config/testdata/accounts.yaml', kind: 'file', format: 'yaml', sourceAvailable: true, sizeBytes: 156 },
         ] : [];
         return jsonResponse(route, 200, { path: requested, items, total: items.length, nextOffset: null, truncated: false });
       }
@@ -157,13 +154,13 @@ async function main() {
         assert.equal(url.searchParams.get('path'), 'config/application.yaml');
         return jsonResponse(route, 200, {
           available: true, logicalPath: 'config/application.yaml', format: 'yaml',
-          text: 'server:\n  environment: dev\n# descriptor: config/testdata/accounts.yaml\n',
+          text: 'server:\n  environment: dev\n# descriptor: testdata/accounts.yaml\n',
         });
       }
       if (method === 'GET' && path === 'packages/payments/configuration/effective') {
         const section = url.searchParams.get('section') || 'globals';
         const entries = section === 'testdata' ? [{
-          id: 'accounts', source: 'config/testdata/accounts.yaml', generated: false,
+          id: 'accounts', source: 'testdata/accounts.yaml', generated: false,
           fields: {
             recordCount: { state: 'visible', value: 3 },
             'selection.strategy': { state: 'visible', value: 'roundRobin' },
@@ -176,7 +173,7 @@ async function main() {
           globals: { baseDir: { state: 'visible', value: 'config' } },
           sections: [{ id: 'testdata', title: 'Testdata', entries: [
             ...entries,
-            { id: 'generatedAccounts', source: 'config/testdata/generated.yaml', generated: true, fields: {
+            { id: 'generatedAccounts', source: 'testdata/generated.yaml', generated: true, fields: {
               generated: { state: 'visible', value: true },
               recordCount: { state: 'visible', value: 120 },
               'selection.strategy': { state: 'visible', value: 'sequential' },

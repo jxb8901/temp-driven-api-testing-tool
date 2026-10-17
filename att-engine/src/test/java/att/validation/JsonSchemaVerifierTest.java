@@ -10,17 +10,17 @@ class JsonSchemaVerifierTest {
         Path root = java.nio.file.Paths.get("").toAbsolutePath();
         String flow = "{\"schemaVersion\":\"att-flow/v3.0\",\"id\":\"common.one.v1\",\"name\":\"One\",\"description\":\"One\",\"actions\":{\"copy\":{\"type\":\"assign\",\"name\":\"value\",\"expression\":\"${CASE.value}\"}}}";
         String template = "{\"schemaVersion\":\"att-template/v3.0\",\"description\":\"V3\",\"actions\":{\"call\":{\"type\":\"flow\",\"use\":\"common.one.v1\",\"runWhen\":\"${CASE.enabled} == true\"}}}";
-        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-flow-v3.0.schema.json"), flow));
-        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-template-v3.0.schema.json"), template));
-        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-flow-v3.0.schema.json"), flow.replace("\"actions\":", "\"inputs\":{},\"actions\":")));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-flow-v3.0.schema.json"), flow));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-template-v3.0.schema.json"), template));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-flow-v3.0.schema.json"), flow.replace("\"actions\":", "\"inputs\":{},\"actions\":")));
         String legacyOutput = "{\"schemaVersion\":\"att-flow/v3.0\",\"id\":\"common.one.v1\",\"name\":\"One\",\"description\":\"One\",\"actions\":{\"copy\":{\"type\":\"log\",\"message\":\"ok\"}},\"outputs\":{}}";
-        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-flow-v3.0.schema.json"), legacyOutput));
-        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-template-v3.0.schema.json"), template.replace("\"runWhen\":", "\"with\":{},\"runWhen\":")));
-        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-template-v3.0.schema.json"), template.replace("common.one.v1", "${CASE.flow}")));
-        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-template-v2.6.schema.json"), template.replace("att-template/v3.0", "att-template/v2.6")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-flow-v3.0.schema.json"), legacyOutput));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-template-v3.0.schema.json"), template.replace("\"runWhen\":", "\"with\":{},\"runWhen\":")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-template-v3.0.schema.json"), template.replace("common.one.v1", "${CASE.flow}")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-template-v2.6.schema.json"), template.replace("att-template/v3.0", "att-template/v2.6")));
     }
     @Test void v32TemplateUsesCommonResultAndRejectsLegacyFields() throws Exception {
-        Path schema = java.nio.file.Paths.get("").toAbsolutePath().resolve("packages/default/schemas/history/att-template-v3.2.schema.json");
+        Path schema = java.nio.file.Paths.get("").toAbsolutePath().resolve("schemas/history/att-template-v3.2.schema.json");
         String valid = "{\"schemaVersion\":\"att-template/v3.2\",\"description\":\"result\",\"actions\":{" +
                 "\"render\":{\"type\":\"render\",\"payload\":\"requests/*.xml\",\"result\":{\"format\":\"text\",\"path\":\"rendered/{filename}\"}}," +
                 "\"tool\":{\"type\":\"tool\",\"call\":\"#{upper('ok')}\",\"result\":{\"format\":\"text\"}}}}";
@@ -35,13 +35,13 @@ class JsonSchemaVerifierTest {
 
     @Test void currentTemplateAndFlowLogsAcceptSqlplusAndRequireValueWithFormat() throws Exception {
         Path root = Paths.get("").toAbsolutePath();
-        Path templateSchema = root.resolve("packages/default/schemas/att-template-v3.6.schema.json");
+        Path templateSchema = root.resolve("schemas/att-template-v3.6.schema.json");
         String template = "{\"schemaVersion\":\"att-template/v3.6\",\"name\":\"T\",\"description\":\"x\",\"actions\":{\"log\":{\"type\":\"log\",\"value\":\"${EXEC.INPUT.result}\",\"format\":\"sqlplus\"}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(templateSchema, template));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(templateSchema,
                 template.replace("\"value\":\"${EXEC.INPUT.result}\",", "\"message\":\"summary\",")));
 
-        Path flowSchema = root.resolve("packages/default/schemas/att-flow-v3.6.schema.json");
+        Path flowSchema = root.resolve("schemas/att-flow-v3.6.schema.json");
         String flow = "{\"schemaVersion\":\"att-flow/v3.6\",\"id\":\"common.log.v1\",\"name\":\"Log\",\"description\":\"x\",\"actions\":{\"log\":{\"type\":\"log\",\"value\":\"${EXEC.INPUT.result}\",\"format\":\"sqlplus\"}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(flowSchema, flow));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(flowSchema,
@@ -50,8 +50,8 @@ class JsonSchemaVerifierTest {
 
     @Test void currentTemplateRemovesDirectDbActionContractButHistoryRetainsIt() throws Exception {
         Path root = Paths.get("").toAbsolutePath();
-        Path current = root.resolve("packages/default/schemas/att-template-v3.6.schema.json");
-        Path historical = root.resolve("packages/default/schemas/history/att-template-v3.5.schema.json");
+        Path current = root.resolve("schemas/att-template-v3.6.schema.json");
+        Path historical = root.resolve("schemas/history/att-template-v3.5.schema.json");
         String directDb = "{\"schemaVersion\":\"att-template/v3.5\",\"description\":\"x\",\"actions\":{\"query\":{\"type\":\"db\",\"db\":\"orders\",\"query\":{\"sqlFile\":\"sql/orders.sql\"}}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(historical, directDb));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(current,
@@ -74,14 +74,14 @@ class JsonSchemaVerifierTest {
         assertEquals("a\t\b\f\u0001z", JsonSupport.mapper().readTree(json).get("value").asText());
     }
     @Test void productionTemplateSchemaAcceptsToolTimeoutAndRejectsParseRetry() throws Exception {
-        Path schema=Paths.get("packages/default/schemas/history/att-template-v2.3.schema.json");
+        Path schema=Paths.get("schemas/history/att-template-v2.3.schema.json");
         String valid="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"call\":{\"type\":\"tool\",\"call\":\"#{send()}\",\"saveAs\":\"${CASE.caseId}.json\",\"overwrite\":false,\"assert\":\"${output.result} != null\",\"timeoutMs\":1,\"retry\":{\"retryOn\":[\"EXIT_CODE\"]}}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,valid));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,valid.replace("EXIT_CODE","OUTPUT_PARSE")));
     }
 
     @Test void v25TemplateSchemaAcceptsDbTextSaveAsAndRejectsRaw() throws Exception {
-        Path schema = Paths.get("packages/default/schemas/history/att-template-v2.5.schema.json");
+        Path schema = Paths.get("schemas/history/att-template-v2.5.schema.json");
         String valid = "{\"schemaVersion\":\"att-template/v2.5\",\"description\":\"x\",\"actions\":{\"query\":{\"type\":\"db\",\"db\":\"orders\",\"query\":{\"sql\":\"select 1\"},\"saveAs\":{\"path\":\"orders.txt\",\"format\":\"text\"}}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema, valid));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,
@@ -89,7 +89,7 @@ class JsonSchemaVerifierTest {
     }
 
     @Test void v26TemplateSchemaUsesAssertionAndTimeoutRetryOnly() throws Exception {
-        Path schema = Paths.get("packages/default/schemas/history/att-template-v2.6.schema.json");
+        Path schema = Paths.get("schemas/history/att-template-v2.6.schema.json");
         String valid = "{\"schemaVersion\":\"att-template/v2.6\",\"description\":\"x\",\"actions\":{\"poll\":{\"type\":\"tool\",\"call\":\"#{send()}\",\"assert\":\"${output.result} == 'done'\",\"expected\":\"done\",\"actual\":\"${output.result}\",\"retry\":{\"maxAttempts\":3,\"intervalMs\":0,\"retryOn\":[\"ASSERTION\",\"TIMEOUT\"]}}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema, valid));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema, valid.replace("ASSERTION", "EXIT_CODE")));
@@ -97,7 +97,7 @@ class JsonSchemaVerifierTest {
     }
 
     @Test void v3TemplateSchemaAcceptsNamedDbParametersAndRejectsMixedBindingStyles() throws Exception {
-        Path schema = Paths.get("packages/default/schemas/history/att-template-v3.0.schema.json");
+        Path schema = Paths.get("schemas/history/att-template-v3.0.schema.json");
         String named = "{\"schemaVersion\":\"att-template/v3.0\",\"description\":\"x\",\"actions\":{\"query\":{\"type\":\"db\",\"db\":\"orders\",\"query\":{\"sql\":\"select * from t where id=:id\",\"parameters\":{\"id\":\"${CASE.id}\"}}}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema, named));
         String mixed = named.replace("\"parameters\":", "\"params\":[\"${CASE.id}\"],\"parameters\":");
@@ -105,7 +105,7 @@ class JsonSchemaVerifierTest {
     }
 
     @Test void v22SidecarSchemaRejectsTimeoutOwnership() throws Exception {
-        Path schema = Paths.get("packages/default/schemas/att-sidecar-v2.2.schema.json");
+        Path schema = Paths.get("schemas/att-sidecar-v2.2.schema.json");
         String valid = "{\"schemaVersion\":\"att-sidecar/v2.2\",\"id\":\"payments\",\"excel\":{\"sheet\":\"Cases\",\"caseId\":\"Case ID\",\"tags\":\"Tags\"},\"stages\":[{\"key\":\"invoke\",\"template\":\"Template\"}]}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema, valid));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,
@@ -113,7 +113,7 @@ class JsonSchemaVerifierTest {
     }
 
     @Test void v23TemplateSchemaEnforcesCanonicalRenderAndAssertFields() throws Exception {
-        Path schema=Paths.get("packages/default/schemas/history/att-template-v2.3.schema.json");
+        Path schema=Paths.get("schemas/history/att-template-v2.3.schema.json");
         String render="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"render\":{\"type\":\"render\",\"payload\":\"data/*.json\",\"renderAs\":\"json\"}}}";
         String assertion="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"check\":{\"type\":\"assert\",\"assert\":\"true\",\"expected\":\"yes\",\"actual\":\"yes\"}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,render));
@@ -128,7 +128,7 @@ class JsonSchemaVerifierTest {
     }
 
     @Test void v23TemplateSchemaAcceptsOnlyCanonicalAssignContract() throws Exception {
-        Path schema=Paths.get("packages/default/schemas/history/att-template-v2.3.schema.json");
+        Path schema=Paths.get("schemas/history/att-template-v2.3.schema.json");
         String assign="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"seq\":{\"type\":\"assign\",\"name\":\"txnSeq\",\"expression\":\"ATT#{sysdate('yyyyMMdd')}\",\"assert\":\"${output.result} != ''\"}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,assign));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(schema,assign.replace("\"txnSeq\"","\"txn.seq\"")));
@@ -137,7 +137,7 @@ class JsonSchemaVerifierTest {
     }
 
     @Test void v23TemplateSchemaAllowsLogMessageOrFile() throws Exception {
-        Path schema=Paths.get("packages/default/schemas/history/att-template-v2.3.schema.json");
+        Path schema=Paths.get("schemas/history/att-template-v2.3.schema.json");
         String fileOnly="{\"schemaVersion\":\"att-template/v2.3\",\"description\":\"x\",\"actions\":{\"response\":{\"type\":\"log\",\"file\":\"${ACTIONS.call.output.targetFiles[0]}\"}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,fileOnly));
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(schema,fileOnly.replace("\"file\":\"${ACTIONS.call.output.targetFiles[0]}\"","\"message\":\"done\"")));
@@ -146,26 +146,26 @@ class JsonSchemaVerifierTest {
     }
 
     @Test void productionV22SchemasAcceptArgvGroupsAndRejectMalformedSsh() throws Exception {
-        Path config = Paths.get("packages/default/schemas/history/att-config-v2.2.schema.json");
+        Path config = Paths.get("schemas/history/att-config-v2.2.schema.json");
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"toolGroups\":[\"config/tools/db.yaml\"],\"tools\":{\"echo\":{\"name\":\"Echo\",\"description\":\"Echo\",\"command\":[\"echo\",\"${value}\"],\"arguments\":{\"value\":{\"name\":\"Value\",\"description\":\"Value\",\"required\":false,\"argName\":\"--value\"}}}}}"));
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"tools\":{\"echo\":{\"name\":\"Echo\",\"description\":\"Echo\",\"command\":[\"echo\",\"${value}\"],\"arguments\":{\"value\":{\"name\":\"Value\",\"description\":\"Value\",\"required\":false,\"argName\":\"\"}}}}}"));
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"tools\":{\"capture\":{\"name\":\"Capture\",\"description\":\"Capture\",\"command\":[\"capture\",\"${keywords}\",\"${types}\"],\"arguments\":{\"keywords\":{\"name\":\"Keywords\",\"description\":\"Keywords\",\"required\":true,\"delimit\":\",\",\"argName\":\"--keyword\",\"argNameMode\":\"repeat\"},\"types\":{\"name\":\"Types\",\"description\":\"Types\",\"required\":true,\"delimit\":\"|\",\"argName\":\"--types\",\"argNameMode\":\"once\"}}}}}"));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"tools\":{\"echo\":{\"name\":\"Echo\",\"description\":\"Echo\",\"command\":[\"echo\"],\"arguments\":{\"value\":{\"name\":\"Value\",\"description\":\"Value\",\"required\":false,\"argName\":\"--bad name\"}}}}}"));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"tools\":{\"echo\":{\"name\":\"Echo\",\"description\":\"Echo\",\"command\":[\"echo\",\"${value}\"],\"arguments\":{\"value\":{\"name\":\"Value\",\"description\":\"Value\",\"required\":false,\"argName\":\"--value\",\"argNameMode\":\"sometimes\"}}}}}"));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(config, "{\"schemaVersion\":\"att-config/v2.2\",\"ssh\":{\"host\":\"x\",\"user\":\"u\",\"password\":\"secret\"}}"));
-        Path group = Paths.get("packages/default/schemas/history/att-tool-group-v2.2.schema.json");
+        Path group = Paths.get("schemas/history/att-tool-group-v2.2.schema.json");
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(group, "{\"schemaVersion\":\"att-tool-group/v2.2\",\"id\":\"db\",\"name\":\"DB\",\"description\":\"DB tools\",\"script\":[\"dispatch\"],\"tools\":{\"select\":{\"name\":\"Select\",\"description\":\"Select\",\"command\":[\"query\",\"${id}\"],\"arguments\":{\"id\":{\"name\":\"ID\",\"description\":\"ID\",\"required\":true,\"argName\":\"--id\"}}}}}"));
     }
 
     @Test void v26SchemasSeparateCommandAndCallBackedTools() throws Exception {
-        Path config = Paths.get("packages/default/schemas/history/att-config-v2.6.schema.json");
+        Path config = Paths.get("schemas/history/att-config-v2.6.schema.json");
         String call = "{\"schemaVersion\":\"att-config/v2.6\",\"tools\":{\"find\":{\"name\":\"Find\",\"description\":\"Find\",\"call\":\"#{db.orders.query(sql='select 1')}\",\"cache\":{\"scope\":\"case\"},\"arguments\":{}}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(config, call));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(config,
                 call.replace("\"cache\":{\"scope\":\"case\"},", "\"command\":[\"echo\"],")));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(config,
                 call.replace("\"cache\":{\"scope\":\"case\"},", "\"output\":\"json\",")));
-        Path group = Paths.get("packages/default/schemas/history/att-tool-group-v2.6.schema.json");
+        Path group = Paths.get("schemas/history/att-tool-group-v2.6.schema.json");
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(group,
                 "{\"schemaVersion\":\"att-tool-group/v2.6\",\"id\":\"orders\",\"name\":\"Orders\",\"description\":\"Orders\",\"tools\":{\"find\":{\"name\":\"Find\",\"description\":\"Find\",\"call\":\"#{db.orders.scalar(sql='select 1')}\"}}}"));
     }
@@ -173,22 +173,22 @@ class JsonSchemaVerifierTest {
     @Test void v34SchemasAcceptEvidenceAndMqHelperContracts() throws Exception {
         Path root = Paths.get("");
         String template = "{\"schemaVersion\":\"att-template/v3.0\",\"description\":\"x\",\"actions\":{\"call\":{\"type\":\"tool\",\"call\":\"#{sample()}\",\"evidence\":{\"snapshot\":{\"call\":\"#{capture(value=${output.result})}\",\"timeoutMs\":3000,\"onFailure\":\"continue\"}},\"assert\":\"${output.result} != null\"}}}";
-        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-template-v3.0.schema.json"), template));
-        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-template-v2.6.schema.json"), template.replace("att-template/v3.0", "att-template/v2.6")));
-        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-template-v3.0.schema.json"), template.replace("\"type\":\"tool\"", "\"type\":\"log\"")));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-template-v3.0.schema.json"), template));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-template-v2.6.schema.json"), template.replace("att-template/v3.0", "att-template/v2.6")));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-template-v3.0.schema.json"), template.replace("\"type\":\"tool\"", "\"type\":\"log\"")));
 
         String mq = "{\"schemaVersion\":\"att-mqhelper/v1.0\",\"id\":\"broker\",\"name\":\"Broker\",\"description\":\"MQ\",\"connection\":{\"queueManager\":\"QM1\",\"host\":\"localhost\",\"port\":1414,\"channel\":\"APP.SVRCONN\"},\"message\":{\"ccsid\":1208,\"format\":\"MQSTR\",\"persistence\":\"asQueue\"},\"requestReply\":{\"waitMs\":1000},\"evidence\":{\"payload\":\"metadata\"}}";
-        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-mqhelper-v1.0.schema.json"), mq));
-        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-mqhelper-v1.0.schema.json"), mq.replace("\"port\":1414", "\"port\":0")));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-mqhelper-v1.0.schema.json"), mq));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-mqhelper-v1.0.schema.json"), mq.replace("\"port\":1414", "\"port\":0")));
 
         String issue59Mq = mq.replace("\"ccsid\":1208,\"format\":\"MQSTR\",\"persistence\":\"asQueue\"",
                 "\"charset\":1208,\"encoding\":273,\"format\":\"\",\"persistence\":0,\"expiry\":-1,\"requestQueue\":\"REQUEST.Q\",\"replyQueue\":\"REPLY.Q\"");
-        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-mqhelper-v1.0.schema.json"), issue59Mq));
-        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-mqhelper-v1.0.schema.json"), issue59Mq.replace("\"encoding\":273", "\"encoding\":999")));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-mqhelper-v1.0.schema.json"), issue59Mq));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-mqhelper-v1.0.schema.json"), issue59Mq.replace("\"encoding\":273", "\"encoding\":999")));
         String mqV11 = "{\"schemaVersion\":\"att-mqhelper/v1.1\",\"id\":\"payment\",\"name\":\"Payment\",\"description\":\"MQ\",\"defaults\":{\"connection\":{\"queueManager\":\"QM1\",\"host\":\"localhost\",\"port\":1414,\"channel\":\"APP.SVRCONN\"}},\"instances\":[{\"id\":\"payment-a\"},{\"id\":\"payment-b\",\"message\":{\"replyQueue\":\"REPLY.B\"}}],\"selection\":{\"strategy\":\"roundRobin\"}}";
-        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-mqhelper-v1.1.schema.json"), mqV11));
-        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-mqhelper-v1.1.schema.json"), mqV11.replace("roundRobin", "invalid")));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-mqhelper-v1.1.schema.json"), mqV11));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-mqhelper-v1.1.schema.json"), mqV11.replace("roundRobin", "invalid")));
         String pathlessSave = "{\"schemaVersion\":\"att-template/v3.0\",\"description\":\"x\",\"actions\":{\"reply\":{\"type\":\"tool\",\"call\":\"#{mq.broker.receive(queue='REPLY.Q')}\",\"saveAs\":{\"format\":\"json\"}}}}";
-        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("packages/default/schemas/history/att-template-v3.0.schema.json"), pathlessSave));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(root.resolve("schemas/history/att-template-v3.0.schema.json"), pathlessSave));
     }
 }

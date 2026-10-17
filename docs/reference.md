@@ -184,7 +184,7 @@ SSHHelper --/
 
 ### Package boundaries
 
-A normal package contains `config/`, `testcase/`, `templates/`, `tools/`, `schemas/` and generated `output/`. Paths and identifiers are validated before execution. Credentials belong in environment variables or external secret handling, not committed YAML.
+Each Package contains its business resources, such as `testcase/`, `templates/`, package-local `tools/`, `testdata/`, and generated `output/`. All Packages use the shared runtime configuration under `ATT_HOME/config/`; trusted schemas are bundled with ATT. A Package does not need its own `config/` or `schemas/` directory. Paths and identifiers are validated before execution. Credentials belong in environment variables or external secret handling, not committed YAML.
 
 For a guided package build, use [Quick Start](quick-start.md). The rest of this manual is normative lookup documentation.
 
@@ -1993,7 +1993,7 @@ See [Actions and Typed Values](reference/actions.md) for the shared typed-result
 
 Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
 
-The machine-readable field constraints remain in [the active MQ schema](../packages/default/schemas/att-mqhelper-v1.3.schema.json).
+The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.3.schema.json).
 
 DB/MQ/HTTP share the optional `evidence.output: {format: json, maxChars: 10000}` presentation policy. Supported formats are `text`, `json`, `yaml`, `xml`, and `sqlplus`; `sqlplus` requires a DB query/update result. `maxChars` defaults to 10000 and accepts 1–1000000. Credentials are redacted before deterministic character truncation; snapshots contain `format`, `text`, and `truncated`. Formatting failure adds only a bounded `outputError` and changes neither typed `output.result` nor operation status. Normal Run/Debug invocations automatically include the snapshot in Action evidence and the Case log, without an extra Log Action; SQL, parameters, MQ payload metadata, and HTTP status/header diagnostics keep their own contracts. Load defers formatting until an iteration is retained, then materializes `resource-output.yaml`; `evidence.resources.output: none` skips it entirely. Presentation never introduces credential values into evidence.
 
@@ -2293,7 +2293,7 @@ Direct `update` Actions support `timeoutMs` but deliberately reject `retry`. A t
 
 ## Configuration and environments
 
-This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../packages/default/schemas) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
+This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../schemas) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
 
 ### Find a configuration task
 
@@ -2308,11 +2308,10 @@ This page is the authoritative reading reference for author-authored configurati
 
 | Layer | Source | Owns |
 |---|---|---|
-| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
-| Tool group | configured YAML path | group identity, optional script/SSH, grouped tools |
-| Dbhelper | configured `dbhelpers` YAML path | one database identity, connection, statement timeout, transaction, limits, and evidence policy |
-| SSHHelper | configured `sshhelpers` YAML path | logical SSH ID, physical instances, defaults, selection and fan-out cap |
-| HTTPHelper | configured `httphelpers` YAML path | logical HTTP ID, base URL, defaults, pool, auth and TLS |
+| Shared runtime | `ATT_HOME/config/config.yaml` | output/environment/runtime defaults, package template roots, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
+| Tool group | `ATT_HOME/config/` YAML path | group identity, optional script/SSH, grouped tools |
+| DB/MQ/SSH/HTTP helper | configured YAML under `ATT_HOME/config/` | logical resource identity, endpoint, connection, pool, timeout, and evidence policy |
+| Package Testdata | package-relative `testdata/` path | package-local Testdata descriptors registered by the selected environment |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
 | Template | `template.yaml` | template identity and ordered actions |
 | CLI | command options | selection, Run ID, output override, presentation, CI formats |
@@ -2364,16 +2363,22 @@ ATT selects an environment through one common `att-config/v2.12` file. It does n
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
 ```
 
-The supported package layout is:
+The shared configuration and Package resources have separate roots:
 
 ```text
-config/
-├── config.yaml
-├── dbhelpers/{sit,uat}/orders.yaml
-└── mqhelpers/{sit,uat}/payment.yaml
+ATT_HOME/
+├── config/
+│   ├── config.yaml
+│   ├── tools/*.yaml
+│   ├── dbhelpers/{sit,uat}/orders.yaml
+│   └── mqhelpers/{sit,uat}/payment.yaml
+└── packages/<id>/
+    ├── testcase/
+    ├── templates/
+    └── testdata/accounts.yaml
 ```
 
-The common config keeps the existing templates, testcase roots, run/execution/report settings, `toolGroups`, and global `tools` registry. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
+The common config keeps package-relative Template and Testcase roots, run/execution/report settings, `toolGroups`, and the global `tools` registry. Tool/helper descriptors are resolved under `ATT_HOME/config/`; Testdata descriptors are resolved under the selected Package. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
 
 ```yaml
 # config/config.yaml
@@ -2389,7 +2394,7 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
-    testdata: [config/testdata/accounts.yaml]
+    testdata: [testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
@@ -2461,7 +2466,7 @@ Use profiles when the same test package is promoted across environments and only
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../packages/default/schemas/catalog.yaml) is authoritative for active schema registrations. Package validation checks registrations; archived schemas do not become active runtime contracts. See the complete matrix in [Schema and Version Matrix](reference/appendices/schema-matrix.md).
+[`schemas/catalog.yaml`](../schemas/catalog.yaml) is authoritative for active schema registrations. Package validation checks registrations; archived schemas do not become active runtime contracts. See the complete matrix in [Schema and Version Matrix](reference/appendices/schema-matrix.md).
 
 ### Set package-wide options
 
@@ -2493,11 +2498,11 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
-    testdata: [config/testdata/accounts.yaml]
+    testdata: [testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
-    testdata: [config/testdata/accounts.yaml]
+    testdata: [testdata/accounts.yaml]
 ```
 
 #### Set runtime and package paths
@@ -3066,7 +3071,7 @@ Run this after every workbook, sidecar, template, helper, or tool change:
 
 For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. ATT validates descriptors against the active schemas in the [Schema and Version Matrix](reference/appendices/schema-matrix.md). Superseded schema files under `schemas/history/` are historical references, not runtime compatibility contracts. Update the declared `schemaVersion` and migrate fields to the active contract before validation. Diagnostics retain the original violation, file, and YAML field location and provide migration guidance; they never rewrite descriptors. For example, replace a historical Render Action with an Assign using `&{path}` and pass the resulting String as described in [Actions and Typed Values](reference/actions.md). Unsupported versions fail before execution.
 
-Current schemas are in [`schemas/`](../packages/default/schemas); older definitions are under [`schemas/history/`](../packages/default/schemas/history). `validate --package` checks every catalog-registered schema resource, even when the package does not use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. Validation never rewrites YAML. Review the migration guidance, update the file, then rerun package validation for each selected `--env`.
+Current schemas are in [`schemas/`](../schemas); older definitions are under [`schemas/history/`](../schemas/history). `validate --package` checks every catalog-registered schema resource, even when the package does not use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. Validation never rewrites YAML. Review the migration guidance, update the file, then rerun package validation for each selected `--env`.
 
 Package validation also discovers existing Template, Flow and grouped or ungrouped Tool `debug.yaml` sidecars using the same discovery and schema/input validation as Debug execution. Historical schema versions and invalid current-schema structure are reported before invoking `att debug`; optional missing sidecars remain valid.
 

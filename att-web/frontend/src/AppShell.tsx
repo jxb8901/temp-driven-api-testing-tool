@@ -96,7 +96,7 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, access
   const closeRef = useRef<HTMLButtonElement>(null);
   const [query, setQuery] = useState('');
   const commands: Array<{ label: string; description: string; route: AppRoute }> = accessCapabilities.operate ? [
-    { label: 'Dashboard', description: 'Workspace overview', route: { kind: 'dashboard' } },
+    { label: 'Dashboard', description: 'Dashboard overview', route: { kind: 'dashboard' } },
     { label: 'Explorer', description: 'Choose a package, browse resources, and run targets', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
     { label: 'Configuration', description: 'Inspect package configuration and Testdata', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
     { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
@@ -416,7 +416,7 @@ export function AppShell({
             </button>
           </div>
           <nav id="primary-navigation" className="primary-navigation" aria-label="Primary navigation">
-            {accessCapabilities.operate && <><p className="nav-group-label">Workspace</p>
+            {accessCapabilities.operate && <><p className="nav-group-label">Operations</p>
             <a className="nav-link" href="#/" data-nav="dashboard" aria-current={activeNav === 'dashboard' ? 'page' : undefined} onClick={link('#/')}>
               <span className="nav-icon" aria-hidden="true">⌂</span><span className="nav-label">Dashboard</span>
             </a>

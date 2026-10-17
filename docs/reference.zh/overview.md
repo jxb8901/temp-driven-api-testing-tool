@@ -43,7 +43,7 @@ SSHHelper --/
 
 ## Package 邊界
 
-一般 package 包含 `config/`、`testcase/`、`templates/`、`tools/`、`schemas/` 和生成的 `output/`。ATT 在執行前驗證 path 與 identifier。Credential 應放在環境變數或外部 secrets 管理，不應提交到 YAML。
+每個 Package 包含自己的 business files，例如 `testcase/`、`templates/`、package-local `tools/`、`testdata/` 及生成的 `output/`。所有 Package 共用 `ATT_HOME/config/` 下的 runtime configuration；受信任 schemas 由 ATT 內嵌載入。Package 不需要自己的 `config/` 或 `schemas/` 目錄。ATT 會在執行前驗證 path 與 identifier。Credential 應放在環境變數或外部 secrets 管理，不應提交到 YAML。
 
 需要逐步建立一個可工作的 package，請使用 `docs/quick-start.md`；本 Reference 其餘內容是規範性查閱文件。
 

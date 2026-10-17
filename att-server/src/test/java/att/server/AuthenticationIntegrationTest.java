@@ -226,8 +226,9 @@ class AuthenticationIntegrationTest {
         System.setProperty("att.home",localHome.toString());
         Path packages=Files.createDirectory(temp.resolve("packages"));Files.createDirectory(packages.resolve("p"));
         Path debugPackage=Files.createDirectory(packages.resolve("debug"));Path template=Files.createDirectories(debugPackage.resolve("templates/FORM"));
-        Files.createDirectories(debugPackage.resolve("testcase"));Files.createDirectories(debugPackage.resolve("config"));copySchemas(debugPackage);
-        Files.writeString(debugPackage.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+        Files.createDirectories(debugPackage.resolve("testcase"));
+        Path runtimeConfig=Files.createDirectories(localHome.resolve("config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: authenticated debug form\nactions:\n"
                 +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");
@@ -475,9 +476,10 @@ class AuthenticationIntegrationTest {
         String oldConfig=System.getProperty("att.server.config");
         Path packages=Files.createDirectory(temp.resolve("inspection-packages"));Path packageRoot=Files.createDirectory(packages.resolve("debug"));
         Path template=Files.createDirectories(packageRoot.resolve("templates/FORM"));
-        Files.createDirectories(packageRoot.resolve("testcase"));Files.createDirectories(packageRoot.resolve("config"));
-        Files.createDirectories(packageRoot.resolve("load"));Files.createDirectories(packageRoot.resolve("testdata"));Files.createDirectories(packageRoot.resolve("payloads"));copySchemas(packageRoot);
-        Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+        Files.createDirectories(packageRoot.resolve("testcase"));
+        Files.createDirectories(packageRoot.resolve("load"));Files.createDirectories(packageRoot.resolve("testdata"));Files.createDirectories(packageRoot.resolve("payloads"));
+        Path runtimeConfig=Files.createDirectories(localHome.resolve("config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments:\n  SIT:\n    testdata: [testdata/customers.yaml]\n  UAT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         Files.writeString(packageRoot.resolve("testdata/customers.yaml"),"schemaVersion: att-testdata/v1.0\nid: customers\nrecords:\n"
                 +"  - accountId: A-1001\n    status: ACTIVE\n    email: customer@example.test\n  - accountId: A-1002\n    status: CLOSED\n    email: other@example.test\nselection:\n  strategy: sequential\n");
@@ -568,6 +570,9 @@ class AuthenticationIntegrationTest {
     private Path createLocalRuntime() throws Exception {
         Path home=Files.createDirectory(temp.resolve("local-runtime"));
         Path lib=Files.createDirectories(home.resolve("lib"));
+        Path runtimeConfig=Files.createDirectories(home.resolve("config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
         Set<String> added=new HashSet<>();
         try(JarOutputStream jar=new JarOutputStream(Files.newOutputStream(lib.resolve("att-local-"+ServerBuildInfo.PRODUCT+".jar")))) {
             for(String module:List.of("att-security","att-cli","att-engine","att-remote","att-server-api","att-worker")) {
@@ -821,7 +826,7 @@ class AuthenticationIntegrationTest {
     }
     private static Object field(Object target,String name)throws Exception {var field=target.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(target);}
     private static void copySchemas(Path packageRoot)throws Exception {
-        Path source=Path.of("packages/default/schemas").toRealPath(),destination=packageRoot.resolve("schemas");
+        Path source=Path.of("schemas").toRealPath(),destination=packageRoot.resolve("schemas");
         try(var paths=Files.walk(source)) {for(Path path:(Iterable<Path>)paths::iterator){Path target=destination.resolve(source.relativize(path));if(Files.isDirectory(path))Files.createDirectories(target);else{Files.createDirectories(target.getParent());Files.copy(path,target);}}}
     }
     private static void addModuleJar(Path lib,String name,Path classes)throws Exception {

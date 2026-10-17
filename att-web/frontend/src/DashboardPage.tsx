@@ -1,5 +1,5 @@
 import type { AppState } from './state';
-import type { AsyncState, JobSummary, PackageSummary, ServerVersion } from './types';
+import type { AsyncState, JobSummary, PackageSummary } from './types';
 
 export type DashboardView = 'dashboard' | 'packages' | 'jobs';
 
@@ -12,9 +12,6 @@ interface DashboardPageProps {
   onRetryJobs(): void;
   jobsRefreshing?: boolean;
   jobsUpdatedAt?: string | null;
-  workspaceRefreshing?: boolean;
-  workspaceRefreshError?: string;
-  onRefreshWorkspaces?(): void;
 }
 
 function ErrorText({ error }: { error: Error }) {
@@ -22,16 +19,12 @@ function ErrorText({ error }: { error: Error }) {
 }
 
 function PackagePanel({
-  state, onPackageChange, onRetry, serverVersion, workspaceRefreshing = false, workspaceRefreshError, onRefreshWorkspaces,
-  heading = 'Packages', description = 'Browse a package workspace and inspect its resources.',
+  state, onPackageChange, onRetry,
+  heading = 'Packages', description = 'Browse registered Packages and inspect their resources.',
 }: {
   state: AsyncState<PackageSummary[]>;
   onPackageChange(packageId: string): void;
   onRetry(): void;
-  serverVersion?: AsyncState<ServerVersion>;
-  workspaceRefreshing?: boolean;
-  workspaceRefreshError?: string;
-  onRefreshWorkspaces?(): void;
   heading?: string;
   description?: string;
 }) {
@@ -39,21 +32,8 @@ function PackagePanel({
     <section id="home-packages-section" className="panel" aria-labelledby="packages-heading">
       <div className="section-heading">
         <div><h2 id="packages-heading">{heading}</h2><p className="section-description">{description}</p></div>
-        <div className="package-refresh-actions">
-          {state.status === 'error' && <button id="retry-packages" className="button button-quiet" type="button" onClick={onRetry}>Retry</button>}
-          {serverVersion?.status === 'ready' && serverVersion.data.workspaceDiscoveryEnabled && <>
-            <span className="section-description" role="status" aria-live="polite">
-              Workspace discovery · {serverVersion.data.workspaceRefreshMode === 'automatic'
-                ? `automatic${serverVersion.data.workspaceRefreshIntervalSeconds ? ` · every ${serverVersion.data.workspaceRefreshIntervalSeconds}s` : ''}` : 'manual'}
-              {serverVersion.data.workspaceLastRefreshedAt ? ` · updated ${new Date(serverVersion.data.workspaceLastRefreshedAt).toLocaleString()}` : ''}
-            </span>
-            {serverVersion.data.workspaceRefreshMode === 'manual' && onRefreshWorkspaces && <button className="button button-quiet" type="button" onClick={onRefreshWorkspaces} disabled={workspaceRefreshing}>
-              {workspaceRefreshing ? 'Refreshing workspaces…' : 'Refresh workspaces'}
-            </button>}
-          </>}
-        </div>
+        {state.status === 'error' && <button id="retry-packages" className="button button-quiet" type="button" onClick={onRetry}>Retry</button>}
       </div>
-      {workspaceRefreshError && <p role="alert" className="state-error">{workspaceRefreshError}</p>}
       <PackageState state={state} onPackageChange={onPackageChange} />
     </section>
   );
@@ -70,9 +50,7 @@ function PackageState({ state, onPackageChange }: { state: AsyncState<PackageSum
         {state.data.map(item => (
           <li className="package-row" key={item.packageId}>
             <div className="package-mark" aria-hidden="true">P</div>
-            <div className="package-copy"><strong>{item.name || item.packageId}</strong><span>{item.name ? item.packageId : 'Package workspace'}</span>
-              {item.packageType === 'workspace' && <small>Workspace · shared for active USER accounts · {item.workspaceOwner || item.packageId}</small>}
-              {item.packageType === 'workspace' && item.validation && <small>Validation · {item.validation.status || 'not validated'}{item.validation.revision ? ` · ${item.validation.revision.slice(0, 19)}` : ''}</small>}
+            <div className="package-copy"><strong>{item.name || item.packageId}</strong><span>{item.packageId}</span>
             </div>
             <button className="button button-quiet" type="button" onClick={() => onPackageChange(item.packageId)}>Open Explorer</button>
           </li>
@@ -163,7 +141,6 @@ function SummaryCards({ state }: { state: AppState }) {
 
 export function DashboardPage({
   view, state, onPackageChange, onJobChange, onRetryPackages, onRetryJobs, jobsRefreshing = false, jobsUpdatedAt = null,
-  workspaceRefreshing, workspaceRefreshError, onRefreshWorkspaces,
 }: DashboardPageProps) {
   const title = view === 'dashboard' ? 'Dashboard' : view === 'packages' ? 'Explorer' : 'Jobs and results';
   const description = view === 'dashboard' ? 'Monitor recent ATT activity.'
@@ -172,14 +149,13 @@ export function DashboardPage({
   return (
     <div className="page-content">
       <div className="page-heading">
-        <div><p className="eyebrow">Workspace</p><h1 id="home-title">{title}</h1><p className="page-description">{description}</p></div>
+        <div><p className="eyebrow">ATT Studio</p><h1 id="home-title">{title}</h1><p className="page-description">{description}</p></div>
       </div>
       {view === 'dashboard' && <SummaryCards state={state} />}
       {view === 'dashboard'
         ? <JobPanel state={state.jobs} onJobChange={onJobChange} onRetry={onRetryJobs} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />
         : view === 'packages'
-          ? <PackagePanel state={state.packages} onPackageChange={onPackageChange} onRetry={onRetryPackages}
-              serverVersion={state.serverVersion} workspaceRefreshing={workspaceRefreshing} workspaceRefreshError={workspaceRefreshError} onRefreshWorkspaces={onRefreshWorkspaces} />
+          ? <PackagePanel state={state.packages} onPackageChange={onPackageChange} onRetry={onRetryPackages} />
           : <JobPanel state={state.jobs} onJobChange={onJobChange} onRetry={onRetryJobs} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />}
     </div>
   );
@@ -196,7 +172,7 @@ export function LoadLanding({
   return (
     <div className="page-content">
       <div className="page-heading">
-        <div><p className="eyebrow">Workspace</p><h1 id="home-title">{packageId ? 'Advanced Load' : 'Load testing'}</h1><p className="page-description">Choose a configured package to build a Load scenario.</p></div>
+        <div><p className="eyebrow">ATT Studio</p><h1 id="home-title">{packageId ? 'Advanced Load' : 'Load testing'}</h1><p className="page-description">Choose a configured package to build a Load scenario.</p></div>
       </div>
       <section className="panel" aria-labelledby="load-selection-heading">
         <div className="section-heading"><div><h2 id="load-selection-heading">Select a package</h2><p className="section-description">Load availability follows the Server capability response.</p></div></div>
@@ -212,7 +188,7 @@ export function PackageLanding({ packageId, resourceId, enabled }: { packageId: 
   return (
     <div className="page-content">
       <div className="page-heading">
-        <div><p className="eyebrow">Package workspace</p><h1 id="home-title">{resourceId || packageId}</h1><p className="page-description">{resourceId ? 'Selected package resource' : 'Package resources and Run actions are available from this route.'}</p></div>
+        <div><p className="eyebrow">Package resources</p><h1 id="home-title">{resourceId || packageId}</h1><p className="page-description">{resourceId ? 'Selected package resource' : 'Package resources and Run actions are available from this route.'}</p></div>
       </div>
       <section className="panel feature-placeholder">
         <span className="section-icon" aria-hidden="true">▦</span>

@@ -5,7 +5,11 @@
 - Unify functional execution as RUN with optional Debug diagnostics, validated drafts, frozen Case selections, shared RUN/LOAD schedules and one-time triggers (#220).
 - Preserve legacy CLI, Debug, Case Run and Load schedule interfaces; add Studio Run and bilingual migration contracts (#220).
 - Fix Studio startup and scheduled-job ownership: lazy-load Load, keep unsaved Debug drafts across cache invalidation, list only active environments with retry, refresh occurrence status and history, and validate independent Load evidence caps (#231).
-- Open Schedules on a unified RUN/LOAD list with explicit New/Edit views, linked occurrence history, owner/type filters, guarded drafts, and confirmed actions; preserve validated execution snapshots and legacy schedule links (#235).
+- Open Schedules on a unified RUN/LOAD list with explicit New/Edit views, linked occurrence history, shared USER access, guarded drafts, and confirmed actions; preserve validated execution snapshots and legacy schedule links (#235, #246).
+- Redesign Explorer and Run around a full-width resource catalog with separate resource, RUN, and Quick LOAD pages; remove duplicate navigation while preserving batch execution and deep links (#245).
+- Use one ordinary Package model with explicit Server registration, strict package-local business-resource resolution, and shared runtime configuration and trusted schemas outside package roots (#232).
+- Separate ADMIN system and account management from USER operations; allow active USERs to share eligible packages, jobs, results, artifacts, and schedules (#246).
+- Add the LOAD Catalog for executable scenarios and Quick LOAD templates, with safe previews, validation, scheduling, and shared job history (#242 / #234).
 - Diagnose Scheduled Load screenshot drift against the current browser, viewport, theme, and changed-pixel ratios, publish a job-summary report with artifact links, and provide label/manual full-matrix runs for PR heads while keeping the fast Chromium PR gate (#240).
 - Refresh platform visual baselines only with a recorded review rationale, and add a validated `ATT_MAVEN_THREADS` setting, low-resource release guidance, focused Maven failure diagnostics, and jsdom Range geometry plus timeout fixes for local Vitest failures (#240).
 

@@ -20,6 +20,7 @@ import att.report.HtmlReportGenerator;
 import att.report.CiReportWriter;
 import att.Version;
 import att.validation.JsonSchemaVerifier;
+import att.validation.SchemaFiles;
 import org.yaml.snakeyaml.Yaml;
 
 import java.nio.file.Files;
@@ -498,7 +499,7 @@ public class FrameworkEngine {
         }
         history.put("cases", cases);
         Map<String, Object> outputs = new LinkedHashMap<String, Object>(); outputs.put("html", "report/index.html"); if (options.ciOutputs().contains("json")) outputs.put("json", "ci/summary.json"); if (options.ciOutputs().contains("junit")) { outputs.put("junit", "ci/junit.xml"); outputs.put("junitHtml", "report/junit.html"); } history.put("outputs", outputs);
-        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-run-v2.1.schema.json"), history);
+        JsonSchemaVerifier.verify(SchemaFiles.resolve(projectRoot, "att-run-v2.1.schema.json"), history);
         byte[] bytes = new Yaml().dump(history).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         Files.write(runDirectory.resolve("run.yaml"), bytes);
     }

@@ -8,6 +8,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import att.config.RuntimeConfigPath;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.Set;
 /** Validated, immutable deployment configuration for the single-node control plane. */
 public final class ServerConfig {
     public final Path dataDir;
+    public final Path runtimeConfigPath;
     public final Path javaExecutable;
     public final int maxConcurrent, queuedLimit, maxConcurrentLoad, gracefulStopMs, jobRetentionDays;
     public final int workerHeapInitialMb, workerHeapMaxMb;
@@ -32,13 +34,12 @@ public final class ServerConfig {
     public final InlineLoad inlineLoad;
     public final Scheduling scheduling;
     public final Authorization authorization;
-    public final WorkspaceDiscovery workspaceDiscovery;
 
-    private ServerConfig(Path dataDir, Path javaExecutable, int maxConcurrent, int queuedLimit,
+    private ServerConfig(Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, WorkspaceDiscovery workspaceDiscovery) {
-        this.dataDir=dataDir; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization) {
+        this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
         this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;this.authMode=authMode;this.security=security;
@@ -49,7 +50,6 @@ public final class ServerConfig {
         this.inlineLoad=inlineLoad;
         this.scheduling=scheduling;
         this.authorization=authorization;
-        this.workspaceDiscovery=workspaceDiscovery;
     }
 
     public static ServerConfig load(Path file) throws Exception {
@@ -76,6 +76,13 @@ public final class ServerConfig {
         Path data=Paths.get(string(server.get("dataDir"),"server.dataDir"));
         if(!data.isAbsolute())throw new IllegalArgumentException("server.dataDir must be an absolute path");
         data=data.toAbsolutePath().normalize();
+        Path runtimeConfig=server.get("runtimeConfigPath")==null
+                ?RuntimeConfigPath.serverDefault(configFile)
+                :Paths.get(string(server.get("runtimeConfigPath"),"server.runtimeConfigPath"));
+        if(!runtimeConfig.isAbsolute())throw new IllegalArgumentException("server.runtimeConfigPath must be an absolute path");
+        runtimeConfig=runtimeConfig.toAbsolutePath().normalize();
+        if(Files.isSymbolicLink(runtimeConfig)||!Files.isRegularFile(runtimeConfig)||!Files.isReadable(runtimeConfig))
+            throw new IllegalArgumentException("server.runtimeConfigPath must be a readable regular file: "+runtimeConfig);
         if (Files.exists(data) && !Files.isDirectory(data)) throw new IllegalArgumentException("server.dataDir must be a directory");
         Path java=server.get("javaExecutable")==null?Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java"):
                 Paths.get(string(server.get("javaExecutable"),"server.javaExecutable"));
@@ -94,12 +101,12 @@ public final class ServerConfig {
             Path packageRoot=canonicalRequired(string(e.getValue(),"packages.entries."+id),"packages.entries."+id,true);
             if(allowed.stream().noneMatch(packageRoot::startsWith)) throw new IllegalArgumentException("Package root is outside packages.allowedRoots: "+id);
             if(packageRoot.startsWith(data)||data.startsWith(packageRoot)) throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
+            Path configDirectory=runtimeConfig.getParent();
+            if(runtimeConfig.startsWith(packageRoot)||configDirectory.startsWith(packageRoot)||packageRoot.startsWith(configDirectory))
+                throw new IllegalArgumentException("server.runtimeConfigPath and its config directory must be outside registered package roots");
             resolved.put(id,packageRoot);
         }
-        WorkspaceDiscovery workspaceDiscovery=workspaceDiscovery(packagesNode.get("workspaceDiscovery"),allowed,data);
-        if(workspaceDiscovery.enabled&&resolved.values().stream().anyMatch(workspaceDiscovery.root::startsWith))
-            throw new IllegalArgumentException("packages.workspaceDiscovery.root must not be inside a configured package root");
-        if(resolved.isEmpty()&&!workspaceDiscovery.enabled) throw new IllegalArgumentException("packages.entries must define at least one package ID unless workspace discovery is enabled");
+        if(resolved.isEmpty()) throw new IllegalArgumentException("packages.entries must define at least one package ID");
         java.util.ArrayList<Path> workerLibraries=new java.util.ArrayList<>();
         for(Object entry:libraryDirs){Path library=canonicalRequired(string(entry,"workers.libraryDirs entry"),"workers.libraryDirs entry",true);if(!Files.isReadable(library))throw new IllegalArgumentException("workers.libraryDirs entry must be readable: "+library);workerLibraries.add(library);}
         int max=intValue(workers,"maxConcurrent",8,1,256), queue=intValue(workers,"queuedLimit",100,0,100000),
@@ -122,16 +129,12 @@ public final class ServerConfig {
         Path candidateData=canonicalFuturePath(data);
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(candidateData)||candidateData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
-        if(workspaceDiscovery.enabled&&(workspaceDiscovery.root.startsWith(candidateData)||candidateData.startsWith(workspaceDiscovery.root)))
-            throw new IllegalArgumentException("server.dataDir must be separate from the workspace discovery root");
         Files.createDirectories(data);
         Path realData=data.toRealPath();
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
-        if(workspaceDiscovery.enabled&&(workspaceDiscovery.root.startsWith(realData)||realData.startsWith(workspaceDiscovery.root)))
-            throw new IllegalArgumentException("server.dataDir must be separate from the workspace discovery root");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,workspaceDiscovery);
+        return new ServerConfig(realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization);
     }
 
     public static Path configPath() {
@@ -389,41 +392,11 @@ public final class ServerConfig {
         return new Authorization(adminRole,userRole,anonymous);
     }
 
-    private static WorkspaceDiscovery workspaceDiscovery(Object raw,List<Path> allowedRoots,Path dataDir) throws Exception {
-        Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"packages.workspaceDiscovery");
-        Set<String> allowed=Set.of("enabled","root","refresh");
-        for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))
-            throw new IllegalArgumentException("packages.workspaceDiscovery contains an unknown setting");
-        boolean enabled=boolValue(values,"enabled",false);
-        if(!enabled)return new WorkspaceDiscovery(false,null,"manual",300);
-        Path root=canonicalRequired(string(values.get("root"),"packages.workspaceDiscovery.root"),"packages.workspaceDiscovery.root",true);
-        if(!Files.isDirectory(root)||!Files.isReadable(root))throw new IllegalArgumentException("packages.workspaceDiscovery.root must be a readable directory");
-        if(allowedRoots.stream().noneMatch(root::startsWith))throw new IllegalArgumentException("packages.workspaceDiscovery.root must be within packages.allowedRoots");
-        if(root.startsWith(dataDir)||dataDir.startsWith(root))throw new IllegalArgumentException("server.dataDir must be separate from packages.workspaceDiscovery.root");
-        Map<?,?> refresh=values.get("refresh")==null?Collections.emptyMap():map(values.get("refresh"),"packages.workspaceDiscovery.refresh");
-        for(Object key:refresh.keySet())if(!(key instanceof String)||!Set.of("mode","intervalSeconds").contains(key))
-            throw new IllegalArgumentException("packages.workspaceDiscovery.refresh contains an unknown setting");
-        String mode=refresh.get("mode")==null?"manual":string(refresh.get("mode"),"packages.workspaceDiscovery.refresh.mode").toLowerCase(Locale.ROOT);
-        if(!Set.of("automatic","manual").contains(mode))throw new IllegalArgumentException("packages.workspaceDiscovery.refresh.mode must be automatic or manual");
-        int interval=intValue(refresh,"intervalSeconds",300,15,86400);
-        return new WorkspaceDiscovery(true,root,mode,interval);
-    }
-
     public static final class Authorization {
         public final String adminRole,userRole;
         public final boolean allowAnonymousOperations;
         private Authorization(String adminRole,String userRole,boolean allowAnonymousOperations) {
             this.adminRole=adminRole;this.userRole=userRole;this.allowAnonymousOperations=allowAnonymousOperations;
-        }
-    }
-
-    public static final class WorkspaceDiscovery {
-        public final boolean enabled;
-        public final Path root;
-        public final String refreshMode;
-        public final int intervalSeconds;
-        private WorkspaceDiscovery(boolean enabled,Path root,String refreshMode,int intervalSeconds) {
-            this.enabled=enabled;this.root=root;this.refreshMode=refreshMode;this.intervalSeconds=intervalSeconds;
         }
     }
 
