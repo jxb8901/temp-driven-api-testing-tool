@@ -103,8 +103,8 @@ for required in config/config.yaml schemas/catalog.yaml packages/default/testcas
     *) echo "Source archive is missing required path: $required" >&2; exit 2 ;;
   esac
 done
-if printf '%s\n' "$SOURCE_ENTRIES" | grep -E "^$SOURCE_PACKAGE_NAME/(config/config.yaml|config/(dbhelpers|environments|mqhelpers|testdata|tools)/|testcase/|templates/|schemas/|sql/)" >/dev/null; then
-  echo "Source archive still contains package assets at their former top-level paths: $SOURCE_ARCHIVE" >&2; exit 2
+if printf '%s\n' "$SOURCE_ENTRIES" | grep -E "^$SOURCE_PACKAGE_NAME/packages/default/(config|schemas)/" >/dev/null; then
+  echo "Source archive still contains package-local runtime config or schema assets: $SOURCE_ARCHIVE" >&2; exit 2
 fi
 for archive in "$LOCAL_ARCHIVE" "$SOURCE_ARCHIVE"; do
   if tar -tzf "$archive" | grep -E '(^|/)node_modules(/|$)' >/dev/null; then
