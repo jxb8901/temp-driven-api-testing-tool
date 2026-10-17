@@ -37,6 +37,20 @@ async function main() {
       assert.equal(await page.locator('#breadcrumbs [aria-current="page"]').count(), 1);
     }
 
+    await page.goto(base);
+    await page.getByRole('button', { name: 'Open package' }).first().click();
+    await page.locator('[data-nav="load-testing"]').click();
+    await page.getByRole('heading', { name: 'LOAD Catalog', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Available Load YAML resources', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Recent LOAD Jobs', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'New LOAD', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'New LOAD', exact: true }).click();
+    await page.getByRole('heading', { name: /New LOAD/i }).waitFor();
+    await page.locator('[data-nav="load-testing"]').click();
+    await page.getByRole('heading', { name: 'LOAD Catalog', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Available Load YAML resources', exact: true }).waitFor();
+
+    await page.goto(`${base}#/settings`);
     await page.getByRole('radio', { name: /Dark/ }).check();
     assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark', 'Settings should apply the selected theme');
     await page.reload();

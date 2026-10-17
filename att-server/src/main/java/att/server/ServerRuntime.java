@@ -1114,6 +1114,14 @@ final class ServerRuntime implements AutoCloseable {
         String workerError=(String)envelope.get("errorCode");
         if("ATT-RESOURCE-NOT-FOUND".equals(workerError))throw new NotFoundException();
         if("ATT-RESOURCE-CURSOR-STALE".equals(workerError))throw new StaleCursorException();
+        if(List.of("load-catalog","load-source").contains(request.inspectionAction)) {
+            Object rawDiagnostics=envelope.get("diagnostics");
+            List<Map<String,Object>> diagnostics=rawDiagnostics instanceof List
+                    ?safeInspectionDiagnostics((List<?>)rawDiagnostics,root):List.of();
+            if("ATT-CFG-001".equals(workerError)||diagnostics.stream().anyMatch(item -> "ATT-CFG-001".equals(item.get("code"))))
+                throw new InspectionConfigurationException(diagnostics.isEmpty()
+                        ?safeInspectionDiagnostics(List.of(),root):diagnostics);
+        }
         boolean draftInspection="run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                 ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction);
@@ -1163,6 +1171,23 @@ final class ServerRuntime implements AutoCloseable {
         JsonNode safe=projectInspectionPaths(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),root,"");
         @SuppressWarnings("unchecked") Map<String,Object> result=JSON.convertValue(safe,Map.class);
         return result;
+    }
+    static List<Map<String,Object>> safeInspectionDiagnostics(List<?> rawDiagnostics,Path root) {
+        List<Map<String,Object>> diagnostics=new ArrayList<>();
+        for(Object raw:rawDiagnostics)if(raw instanceof Map) {
+            @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
+            Map<String,Object> safe=new LinkedHashMap<>();
+            for(String key:List.of("code","summary","detail","field","file","suggestion")) {
+                Object item=value.get(key);
+                if(item instanceof String) {
+                    String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
+                    safe.put(key,att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,root));
+                }
+            }
+            if(!safe.isEmpty())diagnostics.add(safe);
+        }
+        if(diagnostics.isEmpty())diagnostics.add(Map.of("code","ATT-CFG-001","summary","Package configuration is invalid or incomplete."));
+        return diagnostics;
     }
     private JsonNode projectInspectionPaths(JsonNode value,Path root,String field) {
         if(value.isTextual() && "$attDebugKeepDefault".equals(field))return value;
@@ -2000,6 +2025,11 @@ final class ServerRuntime implements AutoCloseable {
     static final class NotFoundException extends RuntimeException {}
     static final class ScheduleConflictException extends RuntimeException {}
     static final class InspectionCapacityException extends RuntimeException {}
+    static final class InspectionConfigurationException extends RuntimeException {
+        final List<Map<String,Object>> diagnostics;
+        InspectionConfigurationException(List<Map<String,Object>> diagnostics){this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));}
+        String summary(){Object summary=diagnostics.get(0).get("summary");return summary instanceof String?(String)summary:"Package configuration is invalid or incomplete.";}
+    }
     static final class InspectionTimeoutException extends RuntimeException {}
     static final class InspectionResponseTooLargeException extends RuntimeException {}
     static final class StaleCursorException extends RuntimeException {}

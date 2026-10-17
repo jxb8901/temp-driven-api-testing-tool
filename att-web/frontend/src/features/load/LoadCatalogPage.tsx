@@ -8,6 +8,14 @@ import './load.css';
 type ScheduleIntent = { packageId: string; environment?: string; scenario: string; executionType: 'load' };
 type CatalogApi = Pick<typeof api, 'listLoadCatalog' | 'validateLoadCatalogScenario' | 'getLoadSource' | 'submitLoadScenario' | 'listLoadJobs'>;
 type CatalogJob = JobSummary & { scenario?: string; environment?: string; model?: string };
+type CatalogFailure = { message: string; suggestion?: string; cursor?: string; retrying?: boolean };
+
+function catalogFailure(error: unknown, cursor?: string): CatalogFailure {
+  const first = error instanceof ApiError && Array.isArray(error.diagnostics) ? error.diagnostics[0] : undefined;
+  const suggestion = first && typeof first === 'object' && 'suggestion' in first && typeof first.suggestion === 'string'
+    ? first.suggestion : undefined;
+  return { message: error instanceof Error ? error.message : 'LOAD catalog could not be loaded.', suggestion, cursor };
+}
 
 function jobDuration(job: CatalogJob): string | null {
   if (!job.startedAt || !job.finishedAt) return null;
@@ -27,6 +35,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const [catalogState, setCatalogState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [catalogMoreLoading, setCatalogMoreLoading] = useState(false);
   const [catalogError, setCatalogError] = useState('');
+  const [catalogFailures, setCatalogFailures] = useState<Record<string, CatalogFailure>>({});
   const [catalogCursors, setCatalogCursors] = useState<Record<string, string>>({});
   const catalogCursorsRef = useRef<Record<string, string>>({});
   const catalogRequestRef = useRef<AbortController | null>(null);
@@ -56,31 +65,60 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     else { setCatalogMoreLoading(false); setCatalogState('loading'); }
     setCatalogError('');
     try {
-      const gathered: LoadCatalogItem[] = [];
-      const currentCursors = catalogCursorsRef.current;
-      const nextCursors: Record<string, string> = append ? { ...currentCursors } : {};
-      for (const pkg of packages.data) {
-        const cursor = append ? currentCursors[pkg.packageId] : undefined;
-        if (append && !cursor) continue;
+    const gathered: LoadCatalogItem[] = [];
+    const currentCursors = catalogCursorsRef.current;
+    const nextCursors: Record<string, string> = append ? { ...currentCursors } : {};
+    const failures: Record<string, CatalogFailure> = {};
+    for (const pkg of packages.data) {
+      const cursor = append ? currentCursors[pkg.packageId] : undefined;
+      if (append && !cursor) continue;
+      try {
         const page = await api.listLoadCatalog(pkg.packageId, { query: query.trim() || undefined, cursor, limit: 100 }, signal);
         if (signal.aborted || requestGeneration !== catalogGenerationRef.current) return;
         gathered.push(...page.items);
         if (page.nextCursor) nextCursors[pkg.packageId] = page.nextCursor;
         else delete nextCursors[pkg.packageId];
+      } catch (error) {
+        if (signal.aborted || requestGeneration !== catalogGenerationRef.current) return;
+        failures[pkg.packageId] = catalogFailure(error, cursor);
       }
-      if (!signal.aborted && requestGeneration === catalogGenerationRef.current) {
-        setCatalog(current => append ? [...current, ...gathered] : gathered);
-        catalogCursorsRef.current = nextCursors; setCatalogCursors(nextCursors); setCatalogState('ready');
-      }
-    } catch (error) {
-      if (!signal.aborted && requestGeneration === catalogGenerationRef.current) {
-        setCatalogError(error instanceof Error ? error.message : 'LOAD catalog could not be loaded.');
-        if (!append) setCatalogState('error');
-      }
+    }
+    if (!signal.aborted && requestGeneration === catalogGenerationRef.current) {
+      setCatalog(current => append ? [...current, ...gathered] : gathered);
+      catalogCursorsRef.current = nextCursors; setCatalogCursors(nextCursors); setCatalogFailures(failures); setCatalogState('ready');
+    }
     } finally {
       if (append && requestGeneration === catalogGenerationRef.current) setCatalogMoreLoading(false);
     }
   }, [api, packages.status, packages.status === 'ready' ? packages.data : null, query]);
+
+  const retryCatalogPackage = useCallback(async (packageId: string) => {
+    const failure = catalogFailures[packageId];
+    if (!failure || Object.values(catalogFailures).some(item => item.retrying)) return;
+    catalogRequestRef.current?.abort();
+    const controller = new AbortController();
+    catalogRequestRef.current = controller;
+    const requestGeneration = ++catalogGenerationRef.current;
+    setCatalogFailures(current => ({ ...current, [packageId]: { ...failure, retrying: true } }));
+    try {
+      const page = await api.listLoadCatalog(packageId, { query: query.trim() || undefined, cursor: failure.cursor, limit: 100 }, controller.signal);
+      if (controller.signal.aborted || requestGeneration !== catalogGenerationRef.current) return;
+      setCatalog(current => failure.cursor
+        ? [...current, ...page.items]
+        : [...current.filter(item => item.packageId !== packageId), ...page.items]);
+      const cursors = { ...catalogCursorsRef.current };
+      if (page.nextCursor) cursors[packageId] = page.nextCursor;
+      else delete cursors[packageId];
+      catalogCursorsRef.current = cursors; setCatalogCursors(cursors);
+      setCatalogFailures(current => { const next = { ...current }; delete next[packageId]; return next; });
+    } catch (error) {
+      if (!controller.signal.aborted && requestGeneration === catalogGenerationRef.current) {
+        setCatalogFailures(current => ({ ...current, [packageId]: { ...catalogFailure(error, failure.cursor), retrying: false } }));
+      }
+    } finally {
+      if (requestGeneration === catalogGenerationRef.current) setCatalogMoreLoading(false);
+    }
+  }, [api, catalogFailures, query]);
 
   useEffect(() => {
     if (packages.status === 'loading') { setCatalogState('loading'); return; }
@@ -193,6 +231,9 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
       </div>
       {catalogState === 'loading' && <p role="status" aria-busy="true">Discovering package Load YAML resources…</p>}
       {catalogState === 'error' && <p className="att-inline-error" role="alert">{catalogError}</p>}
+      {Object.entries(catalogFailures).map(([packageId, failure]) => <div className="att-inline-error" role="alert" key={packageId}>
+        {packageId}: {failure.message}{failure.suggestion ? ` ${failure.suggestion}` : ''} <button type="button" disabled={Object.values(catalogFailures).some(item => item.retrying)} onClick={() => void retryCatalogPackage(packageId)}>{failure.retrying ? 'Retrying…' : `Retry ${packageId}`}</button>
+      </div>)}
       {notice && <p role="status" className="att-inline-error">{notice}</p>}
       {catalogState === 'ready' && visible.length === 0 && <p role="status">No Load YAML resources match these filters.</p>}
       {catalogState === 'ready' && visible.length > 0 && <div className="att-load-catalog-list" aria-label="Available Load YAML resources">

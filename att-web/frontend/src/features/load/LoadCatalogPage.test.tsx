@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoadCatalogPage } from './LoadCatalogPage';
+import { ApiError } from '../../types';
 
 vi.mock('../code/CodeEditor', () => ({ CodeEditor: ({ value }: { value: string }) => <pre>{value}</pre> }));
 
@@ -118,5 +119,33 @@ describe('LoadCatalogPage', () => {
     expect(host.textContent).toContain('search-result.yaml');
     expect(host.textContent).not.toContain('stale.yaml');
     expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Load more scenarios')).toBe(false);
+  });
+
+  it('keeps healthy package resources and recent jobs available when one package fails, with package retry', async () => {
+    let brokenAttempts = 0;
+    const api = {
+      listLoadCatalog: vi.fn(async (packageId: string) => {
+        if (packageId === 'broken' && brokenAttempts++ === 0) throw new ApiError('Worker configuration is missing', {
+          status: 422, code: 'ATT-CFG-001', diagnostics: [{ code: 'ATT-CFG-001', suggestion: 'Configure required Tomcat environment variables.' }],
+        });
+        return { items: [{ ...unverifiedScenario('load/healthy.yaml'), packageId }], total: 1 };
+      }),
+      listLoadJobs: vi.fn(async () => ({ items: [{ jobId: 'JOB-LOAD-1', packageId: 'healthy', status: 'SUCCESS', createdAt: '2026-01-01T00:00:00Z' }] })),
+    };
+    await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'broken' }, { packageId: 'healthy' }] }}
+      inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
+    await flush();
+
+    expect(host.textContent).toContain('load/healthy.yaml');
+    expect(host.textContent).toContain('JOB-LOAD-1');
+    expect(host.textContent).toContain('broken: Worker configuration is missing');
+    expect(host.textContent).toContain('Configure required Tomcat environment variables.');
+    const retry = [...host.querySelectorAll('button')].find(button => button.textContent === 'Retry broken')!;
+    await act(async () => retry.click());
+    await flush();
+    expect(api.listLoadCatalog).toHaveBeenCalledTimes(3);
+    expect(api.listLoadCatalog.mock.calls.map(([packageId]) => packageId)).toEqual(['broken', 'healthy', 'broken']);
+    expect(host.textContent).not.toContain('Retry broken');
   });
 });

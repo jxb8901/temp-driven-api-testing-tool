@@ -25,6 +25,25 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerRuntimeTest {
     @TempDir Path temp;
 
+    @Test void loadInspectionConfigurationDiagnosticsKeepSafeActionableFields() throws Exception {
+        Path packageRoot=Files.createDirectories(temp.resolve("package/config"));
+        Path absoluteConfig=packageRoot.resolve("config.yaml");
+        Map<String,Object> raw=Map.of("code","ATT-CFG-001","summary","Required environment value is missing",
+                "detail","Supply the variable to the Tomcat process","field","dbhelpers.orders.url",
+                "file",absoluteConfig.toString(),"suggestion","Configure ORDERS_DB_URL in Tomcat.","environmentValue","do-not-return");
+
+        List<Map<String,Object>> diagnostics=ServerRuntime.safeInspectionDiagnostics(List.of(raw),packageRoot);
+        assertEquals(1,diagnostics.size());
+        assertEquals("ATT-CFG-001",diagnostics.get(0).get("code"));
+        assertEquals("Supply the variable to the Tomcat process",diagnostics.get(0).get("detail"));
+        assertEquals("dbhelpers.orders.url",diagnostics.get(0).get("field"));
+        assertEquals("Configure ORDERS_DB_URL in Tomcat.",diagnostics.get(0).get("suggestion"));
+        assertEquals("config.yaml",diagnostics.get(0).get("file"));
+        assertFalse(diagnostics.toString().contains("do-not-return"));
+        ServerRuntime.InspectionConfigurationException failure=new ServerRuntime.InspectionConfigurationException(diagnostics);
+        assertEquals("Required environment value is missing",failure.summary());
+    }
+
     @Test void enforcesAggregateInlineLoadCapsWithoutOverflow() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("inline-limits-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
         Path configFile=temp.resolve("inline-limits-server.yaml");Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");

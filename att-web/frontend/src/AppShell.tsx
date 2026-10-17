@@ -367,7 +367,7 @@ export function AppShell({
     setMobileNavigationOpen(false);
   });
   const packageHref = selectedPackage ? '#/packages/' + encodeURIComponent(selectedPackage) : '#/packages';
-  const loadHref = selectedPackage ? '#/advanced-load/' + encodeURIComponent(selectedPackage) : '#/advanced-load';
+  const loadHref = '#/advanced-load';
   const configurationHref = formatRoute(selectedPackage
     ? { kind: 'configuration', packageId: selectedPackage, environment: selectedEnvironment }
     : { kind: 'configuration' });
