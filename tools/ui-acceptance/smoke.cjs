@@ -29,7 +29,10 @@ async function main() {
     ]) {
       await page.goto(`${base}${route}`);
       if (route === '#/jobs' || route === '#/settings') await page.getByRole('heading', { name: title, exact: true }).waitFor();
-      else await page.locator('#home-title').getByText(title, { exact: true }).waitFor();
+      else if (route === '#/advanced-load') {
+        await page.getByRole('heading', { name: 'LOAD Catalog', exact: true }).waitFor();
+        await page.getByRole('heading', { name: 'Available Load YAML resources', exact: true }).waitFor();
+      } else await page.locator('#home-title').getByText(title, { exact: true }).waitFor();
       assert.equal(await page.locator(`[data-nav="${activeNav}"]`).getAttribute('aria-current'), 'page');
       assert.equal(await page.locator('#breadcrumbs [aria-current="page"]').count(), 1);
     }

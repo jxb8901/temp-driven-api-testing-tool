@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AsyncState, JobSummary } from '../../types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ApiError, type AsyncState, type JobSummary } from '../../types';
 import type { LoadCatalogItem, PackageOption } from './types';
 import type { api } from '../../api';
 import { CodeEditor } from '../code/CodeEditor';
 import './load.css';
 
 type ScheduleIntent = { packageId: string; environment?: string; scenario: string; executionType: 'load' };
-type CatalogApi = Pick<typeof api, 'listLoadCatalog' | 'getLoadSource' | 'submitLoadScenario' | 'listLoadJobs'>;
+type CatalogApi = Pick<typeof api, 'listLoadCatalog' | 'validateLoadCatalogScenario' | 'getLoadSource' | 'submitLoadScenario' | 'listLoadJobs'>;
 type CatalogJob = JobSummary & { scenario?: string; environment?: string; model?: string };
 
 function jobDuration(job: CatalogJob): string | null {
@@ -25,7 +25,10 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
 }) {
   const [catalog, setCatalog] = useState<LoadCatalogItem[]>([]);
   const [catalogState, setCatalogState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [catalogMoreLoading, setCatalogMoreLoading] = useState(false);
   const [catalogError, setCatalogError] = useState('');
+  const [catalogCursors, setCatalogCursors] = useState<Record<string, string>>({});
+  const catalogCursorsRef = useRef<Record<string, string>>({});
   const [refreshKey, setRefreshKey] = useState(0);
   const [query, setQuery] = useState('');
   const [packageFilter, setPackageFilter] = useState('all');
@@ -41,25 +44,37 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const [jobsError, setJobsError] = useState('');
   const [jobsMore, setJobsMore] = useState<number | null>(null);
 
-  const loadCatalog = useCallback(async (signal: AbortSignal) => {
+  const loadCatalog = useCallback(async (signal: AbortSignal, append = false) => {
     if (packages.status !== 'ready') return;
-    setCatalogState('loading'); setCatalogError('');
+    if (append) setCatalogMoreLoading(true);
+    else setCatalogState('loading');
+    setCatalogError('');
     try {
       const gathered: LoadCatalogItem[] = [];
+      const currentCursors = catalogCursorsRef.current;
+      const nextCursors: Record<string, string> = append ? { ...currentCursors } : {};
       for (const pkg of packages.data) {
-        let cursor: string | undefined;
-        do {
-          const page = await api.listLoadCatalog(pkg.packageId, { query: query.trim() || undefined, cursor, limit: 100 }, signal);
-          if (signal.aborted) return;
-          gathered.push(...page.items);
-          cursor = page.nextCursor || undefined;
-        } while (cursor);
+        const cursor = append ? currentCursors[pkg.packageId] : undefined;
+        if (append && !cursor) continue;
+        const page = await api.listLoadCatalog(pkg.packageId, { query: query.trim() || undefined, cursor, limit: 100 }, signal);
+        if (signal.aborted) return;
+        gathered.push(...page.items);
+        if (page.nextCursor) nextCursors[pkg.packageId] = page.nextCursor;
+        else delete nextCursors[pkg.packageId];
       }
-      if (!signal.aborted) { setCatalog(gathered); setCatalogState('ready'); }
+      if (!signal.aborted) {
+        setCatalog(current => append ? [...current, ...gathered] : gathered);
+        catalogCursorsRef.current = nextCursors; setCatalogCursors(nextCursors); setCatalogState('ready');
+      }
     } catch (error) {
-      if (!signal.aborted) { setCatalogError(error instanceof Error ? error.message : 'LOAD catalog could not be loaded.'); setCatalogState('error'); }
+      if (!signal.aborted) {
+        setCatalogError(error instanceof Error ? error.message : 'LOAD catalog could not be loaded.');
+        if (!append) setCatalogState('error');
+      }
+    } finally {
+      if (append) setCatalogMoreLoading(false);
     }
-  }, [api, packages, query]);
+  }, [api, packages.status, packages.status === 'ready' ? packages.data : null, query]);
 
   useEffect(() => {
     if (packages.status === 'loading') { setCatalogState('loading'); return; }
@@ -112,31 +127,38 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     if (actionKey) return;
     const key = `validate:${item.resourceId}`; setActionKey(key); setNotice('');
     try {
-      const page = await api.listLoadCatalog(item.packageId, { query: item.path, limit: 100 });
-      const latest = page.items.find(candidate => candidate.path === item.path);
-      if (!latest) throw new Error('The YAML resource is no longer available in this package.');
-      setCatalog(current => current.map(candidate => candidate.packageId === item.packageId && candidate.resourceId === item.resourceId ? latest : candidate));
-      setNotice(`${item.path} validation refreshed: ${latest.validation}.`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'The YAML resource could not be validated.'); }
+      const result = await api.validateLoadCatalogScenario(item.packageId, item.resourceId, environmentDraft || undefined);
+      setCatalog(current => current.map(candidate => candidate.packageId === item.packageId && candidate.resourceId === item.resourceId
+        ? { ...candidate, validation: result.validation, model: result.model || candidate.model, diagnostic: undefined, runNow: true, schedule: schedulingEnabled }
+        : candidate));
+      setNotice(`${item.path} validation refreshed for ${environmentDraft || 'the package default'}: ${result.validation}.`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+        setCatalog(current => current.map(candidate => candidate.packageId === item.packageId && candidate.resourceId === item.resourceId
+          ? { ...candidate, validation: 'invalid', runNow: false, schedule: false, diagnostic: error.message }
+          : candidate));
+      }
+      setNotice(error instanceof Error ? error.message : 'The YAML resource could not be validated.');
+    }
     finally { setActionKey(''); }
   }
 
   const selectedPackage = packageFilter === 'all' ? packages.status === 'ready' ? packages.data[0]?.packageId : undefined : packageFilter;
   return <div className="page-content att-load-catalog">
     <header className="att-feature-header"><div><p className="att-eyebrow">Load resources and execution history</p><h1>LOAD Catalog</h1>
-      <p>Browse validated package scenarios and Quick LOAD policies, then run or schedule from the selected resource.</p></div>
+      <p>Browse package scenarios and Quick LOAD policies. Validate scenarios for the selected environment before running or scheduling.</p></div>
       <div className="att-quick-load-actions"><button className="button button-primary" type="button" onClick={() => onNewLoad(selectedPackage)}>New LOAD</button></div>
     </header>
     {!inlineLoadEnabled && <p className="callout callout-warning" role="status">Quick LOAD composition is disabled by Server policy. Valid package scenarios may still be run directly when Server execution policy allows.</p>}
     <section className="att-load-section" aria-labelledby="load-catalog-heading">
-      <div className="att-section-heading"><div><h2 id="load-catalog-heading">Available Load YAML resources</h2><p>Scenario and policy/template definitions are validated on the Server. Execution actions remain permission and policy gated.</p></div>
+      <div className="att-section-heading"><div><h2 id="load-catalog-heading">Available Load YAML resources</h2><p>Scenario syntax is discovered in bounded pages; validate a scenario for the selected environment before running or scheduling.</p></div>
         <button type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={catalogState === 'loading'}>{catalogState === 'loading' ? 'Refreshing…' : 'Refresh'}</button></div>
       <div className="att-load-catalog-filters">
         <label>Search resources<input type="search" value={query} onChange={event => setQuery(event.currentTarget.value)} placeholder="Package-relative YAML path" /></label>
         <label>Package<select value={packageFilter} onChange={event => setPackageFilter(event.currentTarget.value)}><option value="all">All packages</option>{packages.status === 'ready' && packages.data.map(pkg => <option key={pkg.packageId} value={pkg.packageId}>{pkg.displayName || pkg.packageId}</option>)}</select></label>
         <label>Kind<select value={kindFilter} onChange={event => setKindFilter(event.currentTarget.value)}><option value="all">All kinds</option><option value="scenario">Scenario</option><option value="template">Template</option><option value="invalid">Invalid</option></select></label>
         <label>Model<select value={modelFilter} onChange={event => setModelFilter(event.currentTarget.value)}><option value="all">All models</option><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select></label>
-        <label>Validation<select value={validationFilter} onChange={event => setValidationFilter(event.currentTarget.value)}><option value="all">All validation states</option><option value="valid">Valid</option><option value="invalid">Invalid</option></select></label>
+        <label>Validation<select value={validationFilter} onChange={event => setValidationFilter(event.currentTarget.value)}><option value="all">All validation states</option><option value="unverified">Unverified</option><option value="valid">Valid</option><option value="invalid">Invalid</option></select></label>
         <label>Environment<input value={environmentDraft} onChange={event => { setEnvironmentDraft(event.currentTarget.value); onEnvironmentChange(event.currentTarget.value); }} placeholder="Package default" /></label>
       </div>
       {catalogState === 'loading' && <p role="status" aria-busy="true">Discovering package Load YAML resources…</p>}
@@ -150,9 +172,9 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
             <span className={`att-load-validation validation-${item.validation}`}>{item.validation}</span></div>
           {item.diagnostic && <p className="att-help">{item.diagnostic}</p>}
           <div className="att-quick-load-actions">
-            <button type="button" disabled={Boolean(actionKey)} onClick={() => void validateItem(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>
-            {item.kind === 'scenario' && <><button type="button" disabled={!item.runNow || Boolean(actionKey)} onClick={() => void runNow(item)}>{actionKey === item.resourceId ? 'Starting…' : 'Run Now'}</button>
-              <button type="button" disabled={!item.schedule || !schedulingEnabled} title={!schedulingEnabled ? 'Schedules are disabled by Server policy.' : undefined}
+            {item.kind === 'scenario' && <button type="button" disabled={Boolean(actionKey)} onClick={() => void validateItem(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate for Environment'}</button>}
+            {item.kind === 'scenario' && <><button type="button" disabled={!item.runNow || item.validation !== 'valid' || Boolean(actionKey)} onClick={() => void runNow(item)}>{actionKey === item.resourceId ? 'Starting…' : 'Run Now'}</button>
+              <button type="button" disabled={!item.schedule || item.validation !== 'valid' || !schedulingEnabled} title={!schedulingEnabled ? 'Schedules are disabled by Server policy.' : item.validation !== 'valid' ? 'Validate for the selected environment first.' : undefined}
                 onClick={() => onSchedule({ packageId: item.packageId, environment: environmentDraft || undefined, scenario: item.path, executionType: 'load' })}>Schedule</button></>}
             {item.kind === 'template' && <button type="button" disabled={!item.createQuickLoad || !inlineLoadEnabled}
               onClick={() => onQuickLoad(item.packageId, item)}>Create Quick LOAD</button>}
@@ -160,6 +182,10 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
           </div>
         </article>)}
       </div>}
+      {Object.keys(catalogCursors).length > 0 && <button type="button" disabled={catalogMoreLoading || catalogState === 'loading'}
+        onClick={() => { const controller = new AbortController(); void loadCatalog(controller.signal, true); }}>
+        {catalogMoreLoading || catalogState === 'loading' ? 'Loading more…' : 'Load more scenarios'}
+      </button>}
     </section>
     <section className="att-load-section" aria-labelledby="recent-load-jobs-heading">
       <div className="att-section-heading"><div><h2 id="recent-load-jobs-heading">Recent LOAD Jobs</h2><p>Execution history returned by the Server's authorized LOAD-only query.</p></div>

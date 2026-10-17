@@ -112,8 +112,6 @@ public final class PackageResourceInspector implements AutoCloseable {
     private final boolean cacheEnabled;
     private volatile Index cachedIndex;
     private volatile long cachedIndexVersion = Long.MIN_VALUE;
-    private volatile List<Map<String,Object>> cachedLoadCatalog;
-    private volatile String cachedLoadCatalogRevision;
     private volatile PackageWatch packageWatch;
     private volatile boolean cacheUnavailable;
     private volatile long indexBuildCount;
@@ -946,9 +944,6 @@ public final class PackageResourceInspector implements AutoCloseable {
         Index index = index();
         if (expectedRevisionDigest != null && !expectedRevisionDigest.equals(index.revisionDigest))
             throw new StaleResourceCursorException();
-        List<Map<String,Object>> all = cachedLoadCatalogRevision != null && cachedLoadCatalogRevision.equals(index.revisionDigest)
-                ? cachedLoadCatalog : null;
-        if (all == null) {
         Path loadRoot = packageRoot.resolve("load").normalize();
         List<Path> candidates = new ArrayList<Path>();
         if (Files.isDirectory(loadRoot, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(loadRoot)) {
@@ -963,9 +958,16 @@ public final class PackageResourceInspector implements AutoCloseable {
         }
         candidates.sort(Comparator.comparing(path -> path.toString().toLowerCase(Locale.ROOT)));
         if (candidates.size() > 20000) throw new ResourceLimitException();
-        all = new ArrayList<Map<String, Object>>();
-        LoadScenarioLoader loader = new LoadScenarioLoader(packageRoot);
+        List<Path> matches = new ArrayList<Path>();
         for (Path candidate : candidates) {
+            String logical = packageRoot.relativize(candidate).toString().replace('\\', '/');
+            if (needle.isEmpty() || logical.toLowerCase(Locale.ROOT).contains(needle)) matches.add(candidate);
+        }
+        if (offset > matches.size()) throw new IllegalArgumentException("Load catalog cursor is stale");
+        int end = Math.min(matches.size(), offset + limit);
+        List<Map<String,Object>> pageItems = new ArrayList<Map<String,Object>>();
+        LoadScenarioLoader loader = new LoadScenarioLoader(packageRoot);
+        for (Path candidate : matches.subList(offset, end)) {
             PackageResourceResolver.PackageResource source;
             try { source = resources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE); }
             catch (Exception unsafe) { continue; }
@@ -982,10 +984,9 @@ public final class PackageResourceInspector implements AutoCloseable {
                 String model = scenario.hasWorkloads()
                         ? (scenario.model() == att.load.LoadScenario.Model.CLOSED ? "virtualUsers" : "arrivalRate")
                         : policyModel(scenario.toMap());
-                if (!template) att.load.LoadRunCoordinator.resolveAndValidateTargets(packageRoot,
-                        new FrameworkConfigLoader().load(configPath.isAbsolute() ? configPath : packageRoot.resolve(configPath), packageRoot, environment), scenario);
                 item.put("kind", template ? "template" : "scenario");
-                item.put("validation", "valid");
+                // Target resolution depends on the selected environment and is performed by Validate/Run/Schedule.
+                item.put("validation", template ? "valid" : "unverified");
                 item.put("model", model);
                 item.put("workloadCount", scenario.workloads().size());
                 item.put("runNow", !template);
@@ -997,17 +998,9 @@ public final class PackageResourceInspector implements AutoCloseable {
                 item.put("runNow", false); item.put("schedule", false); item.put("createQuickLoad", false);
                 item.put("diagnostic", safeLoadCatalogDiagnostic(invalid));
             }
-            all.add(item);
+            pageItems.add(item);
         }
-        cachedLoadCatalog = all; cachedLoadCatalogRevision = index.revisionDigest;
-        }
-        List<Map<String,Object>> matches = new ArrayList<Map<String,Object>>();
-        for(Map<String,Object> item:all)if(needle.isEmpty()||String.valueOf(item.get("path")).toLowerCase(Locale.ROOT).contains(needle))matches.add(item);
-        if (offset > matches.size()) throw new IllegalArgumentException("Load catalog cursor is stale");
-        int end = Math.min(matches.size(), offset + limit);
         Map<String, Object> response = new LinkedHashMap<String, Object>();
-        List<Map<String,Object>> pageItems = new ArrayList<Map<String,Object>>();
-        for (Map<String,Object> item : matches.subList(offset, end)) pageItems.add(new LinkedHashMap<String,Object>(item));
         response.put("items", pageItems);
         response.put("total", matches.size());
         response.put("nextOffset", end < matches.size() ? end : null);
@@ -1044,7 +1037,7 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private String safeLoadCatalogDiagnostic(Exception failure) {
         String message = failure.getMessage();
-        if (message == null || message.isBlank()) return "Load YAML is invalid or unavailable.";
+        if (message == null || message.trim().isEmpty()) return "Load YAML is invalid or unavailable.";
         return scrubSensitiveValues(message).replaceAll("(?i)(password|token|secret|credential)(\\s*[:=]\\s*)[^\\s,}]+", "$1$2[REDACTED]")
                 .replaceAll("(?:[A-Za-z]:)?[/\\\\][^\\s:]+", "[package path]");
     }

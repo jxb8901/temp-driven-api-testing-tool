@@ -333,12 +333,20 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
     <section className="att-load-section" aria-labelledby="quick-load-target">
       <div className="att-section-heading"><div><h2 id="quick-load-target">Target</h2><p>{activeTarget ? 'The selected resource is fixed for this Quick Load.' : 'Choose a target from this package to compose one workload.'}</p></div><strong>{targetLabel}</strong></div>
       {!target && <label>Package target<select aria-label="Quick Load target" value={selectedTarget ? `${selectedTarget.type}:${selectedTarget.resourceId}` : ''}
-        onChange={event => { invalidateDraft(); const [type, ...id] = event.currentTarget.value.split(':'); setSelectedTarget(type && id.length && validTarget(type) ? { type, resourceId: id.join(':') } : null); setBusiness({ inputs: {}, vars: {} }); setLogicalTargetId(''); }}>
+        onChange={event => {
+          const [type, ...id] = event.currentTarget.value.split(':');
+          const next = type && id.length && validTarget(type) ? { type, resourceId: id.join(':') } : null;
+          if (next?.type === selectedTarget?.type && next?.resourceId === selectedTarget?.resourceId) return;
+          if (dirtyRef.current && !window.confirm('Replace the current Quick Load settings and inputs with a new target?')) return;
+          invalidateDraft(); dirtyRef.current = false; setDirty(false);
+          setSelectedTarget(next); setBusiness({ inputs: {}, vars: {} }); setLogicalTargetId('');
+        }}>
         <option value="">Select a Template, Flow, or Tool</option>{targetOptions.map(item => <option key={`${item.type}:${item.logicalId}`} value={`${item.type}:${item.logicalId}`}>{item.type} · {item.logicalId} · {item.state}</option>)}
       </select>{targetListState === 'loading' && <small role="status">Loading package targets…</small>}{targetListState === 'error' && <small role="alert">Package targets could not be loaded. Retry from the Explorer.</small>}</label>}
       <div className="att-load-grid">
         <label>Load template / preset<select aria-label="Load template or preset" value={templateId} onChange={event => selectTemplate(event.currentTarget.value)} disabled={!policy || !inlineLoadEnabled}>
           <option value="">Model default</option>
+          {templateId && !availableTemplates.some(item => item.id === templateId) && <option value={templateId}>Selected package template · {templateId}</option>}
           {availableTemplates.map(item => <option key={item.id} value={item.id}>{item.name} · {item.model === 'virtualUsers' ? 'Virtual Users' : 'Arrival Rate'}{item.bundled ? ' · bundled' : ''}</option>)}
         </select><small className="att-help">Selecting a template loads its supported settings into this single-target draft. It never starts a job; validate before running.{templateCatalogTruncated ? ' The package template catalog reached its display limit.' : ''}</small></label>
         <label>Load model<select value={model} onChange={event => selectModel(event.currentTarget.value as LoadModel)} disabled={!inlineLoadEnabled}><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select></label>

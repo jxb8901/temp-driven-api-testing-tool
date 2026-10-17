@@ -39,7 +39,7 @@ public final class ApiServlet extends HttpServlet {
     @Override public void init() throws ServletException {Object r=getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(!(r instanceof ServerRuntime))throw new ServletException("ATT Server runtime did not initialize");runtime=(ServerRuntime)r;}
     @Override protected void service(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
         long inspectionStarted=System.nanoTime();
-        boolean inspection=resourcePath(path(req))||configurationPath(path(req))||path(req).matches("/packages/[^/]+/load-catalog(?:/source)?");
+        boolean inspection=resourcePath(path(req))||configurationPath(path(req))||path(req).matches("/packages/[^/]+/load-catalog(?:/(?:source|validate))?");
         try { serviceRequest(req,res); }
         finally { if(inspection)runtime.inspectionMetrics.record(att.metrics.InspectionMetrics.Stage.HTTP,System.nanoTime()-inspectionStarted); }
     }
@@ -55,7 +55,7 @@ public final class ApiServlet extends HttpServlet {
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
             if("/version".equals(path)){json(res,200,Map.of("version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"buildTime",ServerBuildInfo.BUILD_TIME,"gitCommit",ServerBuildInfo.GIT_COMMIT,"javaMinimum",17,"inlineLoadEnabled",runtime.config.inlineLoad.enabled,"loadSchedulingEnabled",runtime.config.scheduling.enabled,"unifiedRunVersion",RunDefinition.VERSION,"authMode",runtime.config.authMode,"requestId",requestId));return;}
             boolean resourceRequest=resourcePath(path);
-            boolean loadCatalogRequest=path.matches("/packages/[^/]+/load-catalog(?:/source)?");
+            boolean loadCatalogRequest=path.matches("/packages/[^/]+/load-catalog(?:/(?:source|validate))?");
             boolean configurationRequest=configurationPath(path);
             boolean loadPolicyRequest=loadPolicyPath(path);
             if(loadSchedulePath(path)){scheduleGet(req,res,path,requestId);return;}
@@ -424,6 +424,7 @@ public final class ApiServlet extends HttpServlet {
             if(parts.length<4||parts.length>5||!"packages".equals(parts[1])||parts[2].isEmpty()||!"load-catalog".equals(parts[3]))throw new ServerRuntime.NotFoundException();
             Map<String,Object> result;
             if(parts.length==5&&"source".equals(parts[4])) result=runtime.inspectLoadSource(parts[2],req.getParameter("resourceId"),principal);
+            else if(parts.length==5&&"validate".equals(parts[4])) result=runtime.validateLoadCatalogScenario(parts[2],req.getParameter("resourceId"),req.getParameter("environment"),principal);
             else if(parts.length==4) result=runtime.inspectLoadCatalog(parts[2],req.getParameter("query"),parseLimit(req.getParameter("limit")),req.getParameter("cursor"),principal);
             else throw new ServerRuntime.NotFoundException();
             Object cacheRevision=result.remove("_cacheRevision");

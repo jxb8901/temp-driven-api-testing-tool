@@ -236,6 +236,10 @@ export const api = {
       'packages/' + encodeURIComponent(packageId) + '/load-catalog' + queryString(input), { signal });
     return { ...response, items: (response.items || []).map(item => ({ ...item, packageId })) };
   },
+  validateLoadCatalogScenario(packageId: string, resourceId: string, environment?: string, signal?: AbortSignal) {
+    return request<{ validation: string; model?: 'virtualUsers' | 'arrivalRate'; previewYaml?: string }>(
+      'packages/' + encodeURIComponent(packageId) + '/load-catalog/validate' + queryString({ resourceId, environment }), { signal });
+  },
   getLoadSource(packageId: string, resourceId: string, signal?: AbortSignal) {
     return request<{ available: boolean; logicalPath?: string; text?: string; redacted?: boolean; reason?: string }>(
       'packages/' + encodeURIComponent(packageId) + '/load-catalog/source' + queryString({ resourceId }), { signal });

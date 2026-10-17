@@ -22,6 +22,7 @@ describe('LoadCatalogPage', () => {
         { packageId: 'payments', resourceId: 'load/nightly.yaml', path: 'load/nightly.yaml', kind: 'scenario', validation: 'valid', model: 'virtualUsers', workloadCount: 1, sourceAvailable: true, runNow: true, schedule: true, createQuickLoad: false },
         { packageId: 'payments', resourceId: 'load/policy.yaml', path: 'load/policy.yaml', kind: 'template', validation: 'valid', model: 'arrivalRate', workloadCount: 0, sourceAvailable: true, runNow: false, schedule: false, createQuickLoad: true },
       ], total: 2 })),
+      validateLoadCatalogScenario: vi.fn(async () => ({ validation: 'valid' })),
       getLoadSource: vi.fn(async () => ({ available: true, text: 'schemaVersion: att-load/v1.6\n', redacted: true })),
       submitLoadScenario: vi.fn(async () => ({ jobId: 'JOB-LOAD' })),
       listLoadJobs: vi.fn(async () => ({ items: [] })),
@@ -34,9 +35,9 @@ describe('LoadCatalogPage', () => {
 
     expect(host.textContent).toContain('Executable Scenario');
     expect(host.textContent).toContain('Load Template');
-    const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!;
+    const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate for Environment')!;
     await act(async () => validate.click()); await flush();
-    expect(api.listLoadCatalog).toHaveBeenCalledWith('payments', { query: 'load/nightly.yaml', limit: 100 });
+    expect(api.validateLoadCatalogScenario).toHaveBeenCalledWith('payments', 'load/nightly.yaml', 'SIT');
     const preview = [...host.querySelectorAll('button')].find(button => button.textContent === 'View YAML')!;
     await act(async () => preview.click()); await flush();
     expect(host.textContent).toContain('Redacted read-only YAML preview');

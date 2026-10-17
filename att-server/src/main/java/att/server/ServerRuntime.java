@@ -408,6 +408,18 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-source";request.inspectionPath=resourceId;
         return executeInspection(root,request);
     }
+    Map<String,Object> validateLoadCatalogScenario(String packageId,String resourceId,String environment,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
+        WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionAction="load-scenario";request.inspectionPath=resourceId;
+        Map<String,Object> result=executeInspection(root,request);
+        result.remove("normalizedScenario");result.remove("revisionDigest");result.remove("containsSensitiveValues");
+        result.put("validation","valid");
+        return result;
+    }
     Map<String,Object> inspectDebugForm(String packageId,String type,String resourceId,String environment,String principal) throws Exception {
         Map<String,Object> result=inspectDebugFormInternal(packageId,type,resourceId,environment,principal);
         result.remove("revisionDigest");

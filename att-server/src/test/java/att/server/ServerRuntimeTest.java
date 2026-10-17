@@ -125,6 +125,13 @@ class ServerRuntimeTest {
         ServerRuntime setupRuntime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
         String scheduleId,debugScheduleId;
         try {
+            Map<String,Object> catalog=setupRuntime.inspectLoadCatalog("p",null,10,null,"alice");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> catalogItems=(List<Map<String,Object>>)catalog.get("items");
+            Map<String,Object> discovered=catalogItems.stream().filter(item->"load/scenario.yaml".equals(item.get("path"))).findFirst().orElseThrow();
+            assertEquals("unverified",discovered.get("validation"),"Catalog discovery should not resolve targets for every environment.");
+            Map<String,Object> environmentValidation=setupRuntime.validateLoadCatalogScenario("p","load/scenario.yaml","SIT","alice");
+            assertEquals("valid",environmentValidation.get("validation"));assertEquals("virtualUsers",environmentValidation.get("model"));
+            assertThrows(Exception.class,()->setupRuntime.validateLoadCatalogScenario("p","load/bad.yaml","SIT","alice"));
             Map<String,Object> runNow=setupRuntime.submit("load",ServerRuntime.JSON.readTree(
                     "{\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"environment\":\"SIT\"}"),"alice");
             String runNowId=String.valueOf(runNow.get("jobId"));
