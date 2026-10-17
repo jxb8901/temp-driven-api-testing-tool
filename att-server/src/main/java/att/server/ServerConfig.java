@@ -8,7 +8,6 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import att.config.RuntimeConfigPath;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -77,7 +76,7 @@ public final class ServerConfig {
         if(!data.isAbsolute())throw new IllegalArgumentException("server.dataDir must be an absolute path");
         data=data.toAbsolutePath().normalize();
         Path runtimeConfig=server.get("runtimeConfigPath")==null
-                ?RuntimeConfigPath.serverDefault(configFile)
+                ?runtimeConfigDefault(configFile)
                 :Paths.get(string(server.get("runtimeConfigPath"),"server.runtimeConfigPath"));
         if(!runtimeConfig.isAbsolute())throw new IllegalArgumentException("server.runtimeConfigPath must be an absolute path");
         runtimeConfig=runtimeConfig.toAbsolutePath().normalize();
@@ -148,6 +147,17 @@ public final class ServerConfig {
         if(configured!=null)return Paths.get(configured).toAbsolutePath().normalize();
         String attHome=firstNonBlank(attHomeProperty,attHomeEnvironment);
         return attHome==null?null:Paths.get(attHome,"config","att-server.yaml").toAbsolutePath().normalize();
+    }
+
+    private static Path runtimeConfigDefault(Path serverConfigFile) {
+        String attHome=firstNonBlank(System.getProperty("att.home"),System.getenv("ATT_HOME"));
+        if(attHome!=null)return Paths.get(attHome,"config","config.yaml").toAbsolutePath().normalize();
+        if(serverConfigFile!=null) {
+            Path parent=serverConfigFile.toAbsolutePath().normalize().getParent();
+            if(parent!=null&&parent.getFileName()!=null&&"config".equals(parent.getFileName().toString())&&parent.getParent()!=null)
+                return parent.getParent().resolve("config/config.yaml");
+        }
+        return Paths.get("config/config.yaml").toAbsolutePath().normalize();
     }
 
     private static String firstNonBlank(String first,String second) {

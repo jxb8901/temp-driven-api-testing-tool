@@ -92,23 +92,23 @@ class EnvironmentProfileTest {
         Path config = write("config.yaml", "schemaVersion: att-config/v2.12\n"
                 + "environment: SIT\n"
                 + "templates: {root: templates}\n"
-                + "dbhelpers: [db/common.yaml]\n"
-                + "mqhelpers: [mq/common.yaml]\n"
+                + "dbhelpers: [config/db/common.yaml]\n"
+                + "mqhelpers: [config/mq/common.yaml]\n"
                 + "environments:\n"
                 + "  SIT:\n"
-                + "    dbhelpers: [db/sit.yaml]\n"
+                + "    dbhelpers: [config/db/sit.yaml]\n"
                 + "  UAT:\n"
-                + "    dbhelpers: [db/uat.yaml]\n"
-                + "    mqhelpers: [mq/uat.yaml]\n");
-        write("db/sit.yaml", db("orders", "jdbc:sit"));
-        write("db/uat.yaml", db("orders", "jdbc:uat"));
-        write("db/common.yaml", db("audit", "jdbc:common"));
-        write("mq/common.yaml", mq("payment", "sit-mq"));
-        write("mq/uat.yaml", mq("payment", "uat-mq"));
+                + "    dbhelpers: [config/db/uat.yaml]\n"
+                + "    mqhelpers: [config/mq/uat.yaml]\n");
+        write("config/db/sit.yaml", db("orders", "jdbc:sit"));
+        write("config/db/uat.yaml", db("orders", "jdbc:uat"));
+        write("config/db/common.yaml", db("audit", "jdbc:common"));
+        write("config/mq/common.yaml", mq("payment", "sit-mq"));
+        write("config/mq/uat.yaml", mq("payment", "uat-mq"));
 
         FrameworkConfig defaultConfig = new FrameworkConfigLoader().load(config, temp);
         FrameworkConfig uat = new FrameworkConfigLoader().load(config, temp, "uat");
-        JsonSchemaVerifier.verify(Paths.get("schemas/att-config-v2.12.schema.json"), YamlSupport.load(config));
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(temp, "att-config-v2.12.schema.json"), YamlSupport.load(config));
 
         assertEquals("SIT", defaultConfig.environment());
         assertEquals("jdbc:sit", defaultConfig.dbHelper("orders").url());

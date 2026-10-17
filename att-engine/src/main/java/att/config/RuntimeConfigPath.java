@@ -19,8 +19,10 @@ public final class RuntimeConfigPath {
     public static Path root(Path configFile) {
         Path absolute = configFile.toAbsolutePath().normalize();
         Path parent = absolute.getParent();
-        if (parent != null && parent.getFileName() != null && "config".equals(parent.getFileName().toString())
-                && parent.getParent() != null) return parent.getParent();
+        for (Path current = parent; current != null; current = current.getParent()) {
+            if (current.getFileName() != null && "config".equals(current.getFileName().toString())
+                    && current.getParent() != null) return current.getParent();
+        }
         return parent == null ? Paths.get("").toAbsolutePath().normalize() : parent;
     }
 

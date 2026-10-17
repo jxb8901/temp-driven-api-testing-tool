@@ -171,7 +171,7 @@ public final class FrameworkRunner {
                         ((Number) counts.get("templates")).intValue(), ((Number) counts.get("tools")).intValue(), result.diagnostics());
                 if ("json".equals(options.format())) {
                     String json = validation.toJson();
-                    att.validation.JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-validation-v2.1.schema.json"), json);
+                    att.validation.JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(root, "att-validation-v2.1.schema.json"), json);
                     System.out.println(json);
                 }
                 else {
