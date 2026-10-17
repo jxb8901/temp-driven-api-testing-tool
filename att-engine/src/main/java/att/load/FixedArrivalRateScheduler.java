@@ -170,7 +170,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                             request = request.withEvidenceRetention(false, false);
                         }
                         if (evidenceStore != null)
-                            request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence());
+                            request = request.withFailureLogCapture(
+                                    evidenceStore.retainsFailureEvidence(scenario.workloadId()));
                         IterationResult result = executor.execute(request);
                         if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(id, scenario.workloadId())) {
                             result = result.materializeEvidence();

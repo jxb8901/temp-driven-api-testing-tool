@@ -125,47 +125,46 @@ class MultiWorkloadRuntimeTest {
         return new LoadScenarioLoader(projectRoot()).load(file);
     }
 
-    /**
-     * A coordinated run shares one timing envelope, so both workloads keep executing until that
-     * envelope ends. The workload that produces no eligible success therefore still holds its
-     * scheduler after the busy workload exhausted its own minimum share, and the store has to lend
-     * the unused capacity instead of waiting for the end of the run.
-     */
-    @Test void coordinatedRunLendsAnUnusedSuccessMinimumToTheBusyWorkload() throws Exception {
+    @Test void coordinatedRunKeepsPerWorkloadSuccessCapsIndependent() throws Exception {
         Path root = projectRoot();
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
-        LoadScenario scenario = load("evidence-lending.yaml",
+        LoadScenario scenario = load("evidence-per-workload.yaml",
                 "schemaVersion: att-load/v1.7\n"
-                + "evidence: {mode: samples, sampleRate: 1.0, maxSuccessSamples: 6, maxFailureSamples: 12}\n"
+                + "evidence:\n"
+                + "  quotaScope: perWorkload\n"
+                + "  mode: samples\n"
+                + "  sampleRate: 1.0\n"
+                + "  defaults: {maxSuccessSamples: 2, maxFailureSamples: 8}\n"
                 + "workloads:\n"
                 + "- id: busy\n  target: {type: tool, id: sample.getAcDate}\n"
-                + "  load: {arrivalRate: 80/s, duration: 500ms, maxConcurrent: 12, overloadPolicy: drop}\n"
-                // QUICK_START fails its amount assertion, so this workload completes iterations
-                // without ever producing an eligible success.
-                + "- id: quiet\n  target: {type: template, id: QUICK_START}\n"
-                + "  inputs: {amount: 1, expected: 2, useTool: false}\n"
-                + "  load: {arrivalRate: 20/s, duration: 500ms, maxConcurrent: 4, overloadPolicy: drop}\n");
+                + "  load: {arrivalRate: 200/s, duration: 700ms, maxConcurrent: 12, overloadPolicy: drop}\n"
+                + "- id: slow\n  target: {type: tool, id: sample.getAcDate}\n"
+                + "  load: {arrivalRate: 2/s, duration: 700ms, maxConcurrent: 2, overloadPolicy: drop}\n");
         LoadScenario first = scenario.forWorkload(scenario.workloads().get(0));
         LoadTarget seedTarget = new LoadTargetResolver(root, config).resolve(first);
         LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
         try (LoadRunResources resources = new LoadRunResources(root, config)) {
             IterationExecutor seed = new IterationExecutor(root, config, seedTarget, resources, temp.resolve("output"));
-            LoadRunCoordinator.runFrom(scenario, seed, "evidence-lending-run", evidence, temp.resolve("output"));
+            LoadRunCoordinator.runFrom(scenario, seed, "evidence-per-workload-run", evidence, temp.resolve("output"));
         }
 
         Map<String, Object> report = evidence.statistics();
         Map<String, Object> busy = workload(report, "busy");
-        Map<String, Object> quiet = workload(report, "quiet");
-        assertEquals(6, report.get("retainedSuccessCount"), "The coordinated run uses the whole success cap");
-        assertTrue(((Number) busy.get("eligibleSuccessCount")).longValue() > 6L,
-                "The busy workload produced more eligible successes than its own minimum share");
-        assertEquals(6, busy.get("retainedSuccessCount"));
-        assertEquals(3, busy.get("borrowedSuccessCount"), "It borrowed the minimum the failing workload never used");
-        assertEquals(0L, quiet.get("eligibleSuccessCount"), "The failing workload never produced an eligible success");
-        assertEquals(0, quiet.get("retainedSuccessCount"));
-        assertEquals(Boolean.TRUE, quiet.get("successShareReleased"));
-        assertEquals(0L, report.get("revokedBorrowedSuccessCount"),
-                "A workload that never completes an eligible success cannot reclaim borrowed capacity");
+        Map<String, Object> slow = workload(report, "slow");
+        assertEquals(2, busy.get("maxSuccessSamples"));
+        assertEquals(2, slow.get("maxSuccessSamples"));
+        assertEquals(2, busy.get("retainedSuccessCount"), "The busy workload stops at its own cap");
+        assertTrue(((Number) busy.get("eligibleSuccessCount")).longValue() > 2L);
+        assertTrue(((Number) busy.get("skippedSuccessQuotaCount")).longValue() > 0L);
+        assertTrue(((Number) slow.get("retainedSuccessCount")).intValue() >= 1,
+                "The slower workload keeps an independent allowance after the busy workload is full");
+        assertTrue(((Number) slow.get("retainedSuccessCount")).intValue() <= 2);
+        int retained = ((Number) busy.get("retainedSuccessCount")).intValue()
+                + ((Number) slow.get("retainedSuccessCount")).intValue();
+        assertEquals(retained, report.get("retainedSuccessCount"));
+        assertFalse(report.containsKey("borrowedSuccessCount"));
+        assertFalse(report.containsKey("revokedBorrowedSuccessCount"));
+        assertEquals(retained, evidence.events().size(), "Retained workload evidence is append-only");
     }
 
     @SuppressWarnings("unchecked")

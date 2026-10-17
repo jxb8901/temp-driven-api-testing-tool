@@ -112,9 +112,8 @@ public final class LoadRunCoordinator implements AutoCloseable {
     public LoadRunResult run() throws Exception {
         resources.initializeExecutionNamespace(outputRoot.resolve("load").resolve(runId));
         if (evidenceStore != null) {
-            // Bounds the revocation cleanup of a borrowed capture to this run's evidence tree.
-            evidenceStore.setEvidenceRoot(outputRoot.resolve("load"));
-            for (LoadWorkload workload : scenario.workloads()) evidenceStore.registerWorkload(workload.id());
+            for (LoadWorkload workload : scenario.workloads())
+                evidenceStore.registerWorkload(workload.id(), workload.targetId());
         }
         final LoadSchedulerTiming timing = LoadSchedulerTiming.system();
         final long rateWindow = LoadPhase.totalMs(scenario);
@@ -184,15 +183,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
             for (Map.Entry<String, LoadScheduler> entry : schedulers.entrySet()) {
                 final String workloadId = entry.getKey();
                 final LoadScheduler scheduler = entry.getValue();
-                futures.put(workloadId, coordinatorWorkers.submit(() -> {
-                    try {
-                        return scheduler.run();
-                    } finally {
-                        // Terminal release: the store already lends a workload's unused share while the
-                        // run is in progress, and this guarantees a finished scheduler holds nothing.
-                        if (evidenceStore != null) evidenceStore.completeWorkload(workloadId);
-                    }
-                }));
+                futures.put(workloadId, coordinatorWorkers.submit(scheduler::run));
             }
 
             startGate.awaitReady();

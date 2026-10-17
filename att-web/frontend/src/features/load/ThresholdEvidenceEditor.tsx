@@ -5,14 +5,15 @@ import './load.css';
 
 type JsonObject = Record<string, unknown>;
 type Scope = 'aggregate' | 'workload';
-interface WorkloadThreshold { id: string; thresholdsJson: string }
+interface WorkloadEvidenceSettings { id: string; thresholdsJson: string; evidenceJson: string }
 interface Props {
   model: LoadModel;
   aggregate: string;
-  workloads: WorkloadThreshold[];
+  workloads: WorkloadEvidenceSettings[];
   evidence: string;
   onAggregateChange(value: string): void;
   onWorkloadChange(id: string, value: string): void;
+  onWorkloadEvidenceChange(id: string, value: string): void;
   onEvidenceChange(value: string): void;
   onValidityChange(key: string, message: string): void;
 }
@@ -63,7 +64,25 @@ function thresholdError(object: JsonObject, metrics: Array<{ key: string; label:
   }
   return '';
 }
-function evidenceError(object: JsonObject): string {
+const PER_WORKLOAD_CAP = 1000;
+const MAX_AGGREGATE_CAP = 1_000_000;
+function capError(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 1_000_000)
+    return 'must be an integer from 0 to 1,000,000.';
+  return '';
+}
+function perWorkloadCapsError(value: unknown, label: string): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return label + ' must be a JSON object.';
+  const caps = value as JsonObject;
+  const unknown = Object.keys(caps).filter(key => key !== 'maxSuccessSamples' && key !== 'maxFailureSamples');
+  if (unknown.length) return label + ' supports only maxSuccessSamples and maxFailureSamples.';
+  for (const key of ['maxSuccessSamples', 'maxFailureSamples']) {
+    const error = caps[key] == null ? '' : capError(caps[key]);
+    if (error) return label + '.' + key + ' ' + error;
+  }
+  return '';
+}
+function evidenceError(object: JsonObject, workloads: WorkloadEvidenceSettings[] = []): string {
   const allowed = {
     mode: ['metrics', 'failures', 'samples', 'all'],
     success: ['none', 'sample', 'full'],
@@ -71,6 +90,17 @@ function evidenceError(object: JsonObject): string {
   } as Record<string, string[]>;
   for (const [field, choices] of Object.entries(allowed))
     if (object[field] != null && !choices.includes(String(object[field]))) return 'Evidence ' + field + ' must be one of ' + choices.join(', ') + '.';
+  const quotaScope = object.quotaScope == null ? '' : String(object.quotaScope);
+  if (quotaScope && quotaScope !== 'perWorkload')
+    return 'Evidence quotaScope supports only perWorkload.';
+  const perWorkload = quotaScope === 'perWorkload';
+  if (object.defaults != null) {
+    if (!perWorkload) return 'Evidence defaults requires quotaScope: perWorkload.';
+    const error = perWorkloadCapsError(object.defaults, 'Evidence defaults');
+    if (error) return error;
+  }
+  if (perWorkload && ['maxSamples', 'maxSuccessSamples', 'maxFailureSamples'].some(key => object[key] != null))
+    return 'Per-workload quotas replace root maxSamples/maxSuccessSamples/maxFailureSamples; use defaults and workload overrides.';
   if (object.maxSamples != null && (!Number.isInteger(Number(object.maxSamples)) || Number(object.maxSamples) < 0))
     return 'Maximum retained samples must be a non-negative integer.';
   if (object.maxSuccessSamples != null && object.maxFailureSamples == null)
@@ -80,11 +110,31 @@ function evidenceError(object: JsonObject): string {
   for (const key of ['maxSuccessSamples', 'maxFailureSamples', ...(object.maxFailureSamples == null ? [] : ['maxSamples'])])
     if (object[key] != null && (typeof object[key] !== 'number' || !Number.isInteger(object[key]) || Number(object[key]) < 0 || Number(object[key]) > 1_000_000))
       return key + ' must be an integer from 0 to 1,000,000.';
+  if (!perWorkload) {
+    const override = workloads.find(item => Object.keys(parseObject(item.evidenceJson) || {}).length);
+    if (override) return 'Workload ' + override.id + ' evidence overrides require quotaScope: perWorkload.';
+  }
   if (object.sampleRate != null && (!Number.isFinite(Number(object.sampleRate)) || Number(object.sampleRate) < 0 || Number(object.sampleRate) > 1))
     return 'Success sample rate must be between 0 and 1.';
   const resources = parseObject(JSON.stringify(object.resources ?? {})) || {};
   if (resources.output != null && !['inherit', 'none'].includes(String(resources.output)))
     return 'Resource output must be inherit or none.';
+  if (perWorkload) {
+    const defaults = parseObject(JSON.stringify(object.defaults ?? {})) || {};
+    let success = Number(defaults.maxSuccessSamples ?? PER_WORKLOAD_CAP);
+    let failure = Number(defaults.maxFailureSamples ?? PER_WORKLOAD_CAP);
+    for (const workload of workloads) {
+      const raw = parseObject(workload.evidenceJson);
+      if (!raw) return 'Workload ' + workload.id + ' evidence must be a JSON object.';
+      const error = perWorkloadCapsError(raw, 'Workload ' + workload.id + ' evidence');
+      if (error) return error;
+      success += Number(raw.maxSuccessSamples ?? defaults.maxSuccessSamples ?? PER_WORKLOAD_CAP);
+      failure += Number(raw.maxFailureSamples ?? defaults.maxFailureSamples ?? PER_WORKLOAD_CAP);
+    }
+    if (success > MAX_AGGREGATE_CAP || failure > MAX_AGGREGATE_CAP)
+      return 'The sum of effective per-workload caps (success ' + success + ', failure ' + failure
+        + ') exceeds the aggregate safety budget of 1,000,000 per outcome.';
+  }
   return '';
 }
 
@@ -171,12 +221,53 @@ function ThresholdScopeEditor({ scope, raw, model, onChange, onValidityChange }:
   </section>;
 }
 
-function EvidenceEditor({ raw, onChange, onValidityChange }: { raw: string; onChange(value: string): void; onValidityChange(message: string): void }) {
+function WorkloadEvidenceControls({ workload, defaults, onChange, onValidityChange }: {
+  workload: WorkloadEvidenceSettings;
+  defaults: JsonObject;
+  onChange(value: string): void;
+  onValidityChange(message: string): void;
+}) {
+  const object = useMemo(() => parseObject(workload.evidenceJson) || {}, [workload.evidenceJson]);
+  const update = (key: string, value: unknown) => {
+    const next = { ...object };
+    if (value === '') delete next[key]; else next[key] = value;
+    const error = perWorkloadCapsError(next, 'Workload ' + workload.id + ' evidence');
+    if (error) { onValidityChange(error); return; }
+    onValidityChange(''); onChange(JSON.stringify(next, null, 2));
+  };
+  const success = object.maxSuccessSamples == null
+    ? defaults.maxSuccessSamples ?? PER_WORKLOAD_CAP : object.maxSuccessSamples;
+  const failure = object.maxFailureSamples == null
+    ? defaults.maxFailureSamples ?? PER_WORKLOAD_CAP : object.maxFailureSamples;
+  return <fieldset className="att-evidence-controls" aria-label={`Evidence caps for ${workload.id}`}>
+    <legend><h4>Workload cap override: {workload.id}</h4></legend>
+    <div className="att-load-grid">
+      <label>Success cap override<input type="number" min="0" max="1000000" step="1"
+        value={object.maxSuccessSamples == null ? '' : String(object.maxSuccessSamples)}
+        placeholder={`Inherit default (${defaults.maxSuccessSamples ?? PER_WORKLOAD_CAP})`}
+        onChange={event => update('maxSuccessSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
+      <label>Failure cap override<input type="number" min="0" max="1000000" step="1"
+        value={object.maxFailureSamples == null ? '' : String(object.maxFailureSamples)}
+        placeholder={`Inherit default (${defaults.maxFailureSamples ?? PER_WORKLOAD_CAP})`}
+        onChange={event => update('maxFailureSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
+    </div>
+    <p className="att-help">Effective caps for {workload.id}: success {String(success)}, failure {String(failure)}. Unused capacity is never transferred to another workload.</p>
+  </fieldset>;
+}
+
+function EvidenceEditor({ raw, workloads, selectedWorkloadId, onChange, onWorkloadEvidenceChange, onValidityChange }: {
+  raw: string;
+  workloads: WorkloadEvidenceSettings[];
+  selectedWorkloadId: string;
+  onChange(value: string): void;
+  onWorkloadEvidenceChange(id: string, value: string): void;
+  onValidityChange(message: string): void;
+}) {
   const [advancedDraft, setAdvancedDraft] = useState(raw);
   const object = useMemo(() => parseObject(raw) || {}, [raw]);
   const advancedObject = useMemo(() => parseObject(advancedDraft || '{}'), [advancedDraft]);
   const draftObject = advancedObject || object;
-  const validationMessage = advancedObject ? evidenceError(advancedObject) : 'Evidence settings must be a JSON object.';
+  const validationMessage = advancedObject ? evidenceError(advancedObject, workloads) : 'Evidence settings must be a JSON object.';
   const validityRef = useRef(onValidityChange);
   useEffect(() => { validityRef.current = onValidityChange; }, [onValidityChange]);
   useEffect(() => { validityRef.current(validationMessage); }, [validationMessage]);
@@ -184,6 +275,9 @@ function EvidenceEditor({ raw, onChange, onValidityChange }: { raw: string; onCh
   const success = String(draftObject.success ?? '');
   const failure = String(draftObject.failure ?? '');
   const resources = parseObject(JSON.stringify(draftObject.resources ?? {})) || {};
+  const defaults = parseObject(JSON.stringify(draftObject.defaults ?? {})) || {};
+  const perWorkload = String(draftObject.quotaScope ?? '') === 'perWorkload';
+  const selectedWorkload = workloads.find(item => item.id === selectedWorkloadId) || workloads[0];
   useEffect(() => { setAdvancedDraft(raw); }, [raw]);
   function update(key: string, value: unknown, nested = false) {
     const next = { ...draftObject };
@@ -193,7 +287,30 @@ function EvidenceEditor({ raw, onChange, onValidityChange }: { raw: string; onCh
       if (Object.keys(current).length) next.resources = current; else delete next.resources;
     } else if (value === '') delete next[key]; else next[key] = value;
     const serialized = JSON.stringify(next, null, 2); setAdvancedDraft(serialized);
-    const error = evidenceError(next);
+    const error = evidenceError(next, workloads);
+    if (error) { onValidityChange(error); return; }
+    onChange(serialized); onValidityChange('');
+  }
+  function updateDefault(key: string, value: unknown) {
+    const nextDefaults = { ...defaults };
+    if (value === '') delete nextDefaults[key]; else nextDefaults[key] = value;
+    const next = { ...draftObject };
+    if (Object.keys(nextDefaults).length) next.defaults = nextDefaults; else delete next.defaults;
+    const serialized = JSON.stringify(next, null, 2); setAdvancedDraft(serialized);
+    const error = evidenceError(next, workloads);
+    if (error) { onValidityChange(error); return; }
+    onChange(serialized); onValidityChange('');
+  }
+  function updateScope(value: string) {
+    const next = { ...draftObject };
+    if (value === 'perWorkload') {
+      delete next.maxSamples; delete next.maxSuccessSamples; delete next.maxFailureSamples;
+      next.quotaScope = 'perWorkload';
+    } else {
+      delete next.quotaScope; delete next.defaults;
+    }
+    const serialized = JSON.stringify(next, null, 2); setAdvancedDraft(serialized);
+    const error = evidenceError(next, workloads);
     if (error) { onValidityChange(error); return; }
     onChange(serialized); onValidityChange('');
   }
@@ -201,7 +318,7 @@ function EvidenceEditor({ raw, onChange, onValidityChange }: { raw: string; onCh
     setAdvancedDraft(text);
     const parsed = parseObject(text || '{}');
     if (!parsed) { onValidityChange('Evidence settings must be a JSON object.'); return; }
-    const error = evidenceError(parsed);
+    const error = evidenceError(parsed, workloads);
     if (error) { onValidityChange(error); return; }
     onValidityChange(''); onChange(JSON.stringify(parsed, null, 2));
   }
@@ -211,6 +328,9 @@ function EvidenceEditor({ raw, onChange, onValidityChange }: { raw: string; onCh
     <fieldset className="att-evidence-controls">
     <legend><h3>Evidence capture</h3></legend>
     <div className="att-load-grid">
+      <label>Quota scope<select value={perWorkload ? 'perWorkload' : 'legacy'} onChange={event => updateScope(event.currentTarget.value)}>
+        <option value="legacy">Legacy and shared caps</option><option value="perWorkload">Independent per workload</option>
+      </select></label>
       <label>Capture mode<select value={mode} onChange={event => update('mode', event.currentTarget.value)}>
         <option value="">Server default (failures)</option><option value="metrics">Metrics only</option><option value="failures">Failures</option><option value="samples">Sample successes and failures</option><option value="all">All iterations</option>
       </select></label>
@@ -220,18 +340,27 @@ function EvidenceEditor({ raw, onChange, onValidityChange }: { raw: string; onCh
       <label>Failed iterations<select value={failure} onChange={event => update('failure', event.currentTarget.value)}>
         <option value="">Use mode default</option><option value="none">None</option><option value="full">Full</option>
       </select></label>
-      <label>{draftObject.maxFailureSamples == null ? 'Legacy combined cap' : 'Success cap (legacy key)'}<input type="number" min="0" step="1" value={draftObject.maxSamples == null ? '' : String(draftObject.maxSamples)} placeholder="Server default (1,000)" onChange={event => update('maxSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
-      <label>Independent success quota<input type="number" min="0" max="1000000" step="1" value={draftObject.maxSuccessSamples == null ? '' : String(draftObject.maxSuccessSamples)} placeholder="Split default (1,000)" onChange={event => update('maxSuccessSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
-      <label>Independent failure quota<input type="number" min="0" max="1000000" step="1" value={draftObject.maxFailureSamples == null ? '' : String(draftObject.maxFailureSamples)} placeholder="Unset: use legacy combined cap" onChange={event => update('maxFailureSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
+      {perWorkload ? <>
+        <label>Default success cap<input type="number" min="0" max="1000000" step="1" value={defaults.maxSuccessSamples == null ? '' : String(defaults.maxSuccessSamples)} placeholder="Per-workload default (1,000)" onChange={event => updateDefault('maxSuccessSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
+        <label>Default failure cap<input type="number" min="0" max="1000000" step="1" value={defaults.maxFailureSamples == null ? '' : String(defaults.maxFailureSamples)} placeholder="Per-workload default (1,000)" onChange={event => updateDefault('maxFailureSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
+      </> : <>
+        <label>{draftObject.maxFailureSamples == null ? 'Legacy combined cap' : 'Success cap (legacy key)'}<input type="number" min="0" step="1" value={draftObject.maxSamples == null ? '' : String(draftObject.maxSamples)} placeholder="Server default (1,000)" onChange={event => update('maxSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
+        <label>Independent success quota<input type="number" min="0" max="1000000" step="1" value={draftObject.maxSuccessSamples == null ? '' : String(draftObject.maxSuccessSamples)} placeholder="Split default (1,000)" onChange={event => update('maxSuccessSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
+        <label>Independent failure quota<input type="number" min="0" max="1000000" step="1" value={draftObject.maxFailureSamples == null ? '' : String(draftObject.maxFailureSamples)} placeholder="Unset: use legacy combined cap" onChange={event => update('maxFailureSamples', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>
+      </>}
       {samplingActive && <label>Success sample rate<input type="number" min="0" max="1" step="0.01" value={object.sampleRate == null ? '' : String(object.sampleRate)} placeholder="Server default (0.01)" onChange={event => update('sampleRate', event.currentTarget.value === '' ? '' : Number(event.currentTarget.value))} /></label>}
       <label>Resource output<select value={String(resources.output ?? '')} onChange={event => update('output', event.currentTarget.value, true)}>
         <option value="">Inherit default</option><option value="inherit">Include when evidence is retained</option><option value="none">Skip resource-output snapshots</option>
       </select></label>
     </div>
-    {fullCapture && <p className="att-evidence-impact" role="note">Full capture can increase disk use and report size. Set a finite legacy combined cap or independent quotas for bounded storage.</p>}
-    {draftObject.maxFailureSamples != null && <p className="att-help">Independent quotas: successes are capped at {String(draftObject.maxSuccessSamples ?? draftObject.maxSamples ?? 1000)}; failures are capped at {String(draftObject.maxFailureSamples)}. Failure full capture stops retaining iteration evidence when its quota is reached; aggregate metrics remain complete.</p>}
+    {fullCapture && <p className="att-evidence-impact" role="note">Full capture can increase disk use and report size. Set a finite cap for bounded storage.{perWorkload ? ' Each workload has its own independent cap; unused capacity is not shared.' : ''}</p>}
+    {perWorkload && <p className="att-help">Defaults apply to every workload unless that workload sets a cap-only override. Reaching one workload's cap never reserves, lends, reclaims or deletes evidence for another workload.</p>}
+    {!perWorkload && draftObject.maxFailureSamples != null && <p className="att-help">Independent shared quotas: successes are capped at {String(draftObject.maxSuccessSamples ?? draftObject.maxSamples ?? 1000)}; failures are capped at {String(draftObject.maxFailureSamples)}. Failure full capture stops retaining iteration evidence when its quota is reached; aggregate metrics remain complete.</p>}
     {samplingActive && <p className="att-help">Sampling retains selected successful iterations; failures follow the selected failure policy. Dropped arrivals do not create iteration evidence.</p>}
     </fieldset>
+    {perWorkload && selectedWorkload && <WorkloadEvidenceControls key={selectedWorkload.id} workload={selectedWorkload}
+      defaults={defaults} onChange={value => onWorkloadEvidenceChange(selectedWorkload.id, value)}
+      onValidityChange={onValidityChange} />}
     {validationMessage && <p className="att-inline-error" role="alert">{validationMessage} Correct the value in the form or Advanced JSON before submitting.</p>}
     <details className="att-advanced-settings"><summary>Advanced JSON</summary>
       <label>Complete evidence settings object</label>
@@ -240,7 +369,8 @@ function EvidenceEditor({ raw, onChange, onValidityChange }: { raw: string; onCh
   </section>;
 }
 
-export function ThresholdEvidenceEditor({ model, aggregate, workloads, evidence, onAggregateChange, onWorkloadChange, onEvidenceChange, onValidityChange }: Props) {
+export function ThresholdEvidenceEditor({ model, aggregate, workloads, evidence, onAggregateChange, onWorkloadChange,
+  onWorkloadEvidenceChange, onEvidenceChange, onValidityChange }: Props) {
   const [scope, setScope] = useState<Scope>('aggregate');
   const [workloadId, setWorkloadId] = useState(workloads[0]?.id || '');
   const [editorErrors, setEditorErrors] = useState<Record<string, string>>({});
@@ -262,6 +392,8 @@ export function ThresholdEvidenceEditor({ model, aggregate, workloads, evidence,
       : selectedWorkload ? <ThresholdScopeEditor key={selectedWorkload.id} scope={`Workload ${selectedWorkload.id}`} raw={selectedWorkload.thresholdsJson} model={model}
         onChange={value => onWorkloadChange(selectedWorkload.id, value)} onValidityChange={message => reportValidity(`threshold-workload-${selectedWorkload.id}`, message)} />
         : <p className="att-threshold-empty">Add a workload before configuring per-workload thresholds.</p>}
-    <EvidenceEditor raw={evidence} onChange={onEvidenceChange} onValidityChange={message => reportValidity('evidence', message)} />
+    <EvidenceEditor raw={evidence} workloads={workloads} selectedWorkloadId={selectedWorkload?.id || ''}
+      onChange={onEvidenceChange} onWorkloadEvidenceChange={onWorkloadEvidenceChange}
+      onValidityChange={message => reportValidity('evidence', message)} />
   </div>;
 }

@@ -15,6 +15,7 @@
 | multi-closed.yaml | 多個獨立 closed VU workload。 |
 | mixed-closed.yaml | 單一 closed workload 在兩個預先驗證 Tool targets 間按權重選擇。 |
 | multi-arrival.yaml | 多個獨立 arrival-rate workload。 |
+| independent-evidence.yaml | 每個 workload 各自獨立的 success/failure evidence caps，含 defaults 與 cap-only override。 |
 | tool.yaml | 呼叫包內 deterministic Tool 的短範例。 |
 | testdata-generated.yaml | 從 Load-local generated testdata 依 iteration 順序載入 QUICK_START Template；records 用盡時停止 workload。 |
 | quick-profile.yaml | 僅含 Load policy 的 Quick Load profile；複製到 `load/load.yaml` 後使用。 |
@@ -94,6 +95,8 @@ execution:
 ## Evidence 與路徑
 
 evidence.mode 支援 metrics、failures、samples、all；預設 failures。Metrics-only iteration 不建立目錄。保留的成功 sample 位於 samples/<EXEC.ID>/，failure 位於 failures/<EXEC.ID>/；workspace 含 case.log 與 case.yaml。Report 顯示 EXEC.ID，有保留 log 時提供連結。evidence.resources.output 可設 none，略過 resource output 格式化與檔案寫入；typed runtime result 與 transport parsing 不受影響。
+
+需要每個 workload 各自擁有硬上限時，設定 `evidence.quotaScope: perWorkload`，以 `evidence.defaults` 提供預設 caps，再以 `workloads[].evidence` 只覆寫該 workload 的 success/failure cap。未使用容量不會轉移；系統不會出借、借用、收回或刪除已保留 evidence。Legacy `maxSamples` 及共用 `maxSuccessSamples`／`maxFailureSamples` 語義保持不變，且不可與 per-workload 語法混用。見 `independent-evidence.yaml`。
 
 ~~~text
 output/load/<RUN_ID>/

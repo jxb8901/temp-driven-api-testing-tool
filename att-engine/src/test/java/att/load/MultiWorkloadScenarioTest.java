@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -97,6 +98,58 @@ class MultiWorkloadScenarioTest {
         assertEquals(LoadScenario.Model.CLOSED, scenario.model());
         assertEquals("payment", scenario.workloads().get(0).id());
         assertTrue(scenario.workloads().get(1).thinkTimePolicy().randomized());
+    }
+
+    @Test void parsesPerWorkloadEvidenceDefaultsAndCapOverrides() throws Exception {
+        LoadScenario scenario = load("per-workload-evidence.yaml",
+                "schemaVersion: att-load/v1.7\n"
+                + "evidence:\n"
+                + "  quotaScope: perWorkload\n"
+                + "  success: sample\n"
+                + "  failure: full\n"
+                + "  sampleRate: 0.25\n"
+                + "  defaults: {maxSuccessSamples: 10, maxFailureSamples: 20}\n"
+                + "workloads:\n"
+                + "- id: payment\n  target: {type: tool, id: sample.getAcDate}\n  load: {users: 1, duration: 1s}\n"
+                + "- id: queue\n  target: {type: tool, id: sample.getAcDate}\n  load: {users: 1, duration: 1s}\n"
+                + "  evidence: {maxSuccessSamples: 5, maxFailureSamples: 30}\n"
+                + "- id: partial\n  target: {type: tool, id: sample.getAcDate}\n  load: {users: 1, duration: 1s}\n"
+                + "  evidence: {maxSuccessSamples: 0}\n");
+        LoadEvidencePolicy policy = LoadEvidencePolicy.from(scenario);
+        assertTrue(policy.perWorkloadQuotas());
+        assertEquals(10, policy.successCapFor("payment"));
+        assertEquals(20, policy.failureCapFor("payment"));
+        assertEquals(5, policy.successCapFor("queue"));
+        assertEquals(30, policy.failureCapFor("queue"));
+        assertEquals(0, policy.successCapFor("partial"));
+        assertEquals(20, policy.failureCapFor("partial"));
+        assertEquals("perWorkload", policy.toMap().get("quotaMode"));
+        assertEquals(5, scenario.workloads().get(1).evidence().get("maxSuccessSamples"));
+        @SuppressWarnings("unchecked")
+        java.util.List<Map<String,Object>> workloads=(java.util.List<Map<String,Object>>)scenario.toMap().get("workloads");
+        assertEquals(5, ((Map<?,?>)workloads.get(1).get("evidence")).get("maxSuccessSamples"));
+    }
+
+    @Test void rejectsMixedOrAmbiguousPerWorkloadEvidenceSyntax() throws Exception {
+        String workloads = "workloads:\n"
+                + "- id: one\n  target: {type: tool, id: sample.getAcDate}\n  load: {users: 1, duration: 1s}\n";
+        assertInvalid("mixed-evidence-cap.yaml", "schemaVersion: att-load/v1.7\n" + workloads
+                + "evidence: {quotaScope: perWorkload, maxFailureSamples: 1}\n", "evidence");
+        assertInvalid("defaults-without-scope.yaml", "schemaVersion: att-load/v1.7\n" + workloads
+                + "evidence: {defaults: {maxSuccessSamples: 1}}\n", "evidence");
+        assertInvalid("workload-evidence-without-scope.yaml", "schemaVersion: att-load/v1.7\n"
+                + "workloads:\n- id: one\n  target: {type: tool, id: sample.getAcDate}\n"
+                + "  load: {users: 1, duration: 1s}\n  evidence: {maxSuccessSamples: 1}\n", "perWorkload");
+        assertInvalid("invalid-workload-evidence.yaml", "schemaVersion: att-load/v1.7\n"
+                + "evidence: {quotaScope: perWorkload}\n"
+                + "workloads:\n- id: one\n  target: {type: tool, id: sample.getAcDate}\n"
+                + "  load: {users: 1, duration: 1s}\n  evidence: {mode: all}\n", "evidence");
+        assertInvalid("oversized-per-workload-evidence.yaml", "schemaVersion: att-load/v1.7\n"
+                + "evidence: {quotaScope: perWorkload, defaults: {maxSuccessSamples: 600000, maxFailureSamples: 1}}\n"
+                + "workloads:\n"
+                + "- {id: one, target: {type: tool, id: sample.getAcDate}, load: {users: 1, duration: 1s}}\n"
+                + "- {id: two, target: {type: tool, id: sample.getAcDate}, load: {users: 1, duration: 1s}}\n",
+                "aggregate safety budget");
     }
 
     @Test void rejectsDuplicateIdsMixedModelsAndDifferentTimingEnvelopes() throws Exception {

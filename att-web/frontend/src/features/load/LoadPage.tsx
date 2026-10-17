@@ -25,6 +25,7 @@ type WorkloadDraft = {
   structure: 'single' | 'mix';
   testdataJson: string;
   thresholdsJson: string;
+  evidenceJson: string;
   mixDefaultsJson: string;
   mixDefaultsValid: boolean;
   target: TargetDraft;
@@ -53,6 +54,7 @@ function newWorkload(id: number, policy: JsonObject = {}): WorkloadDraft {
     structure: 'single',
     testdataJson: '{}',
     thresholdsJson: '{}',
+    evidenceJson: '{}',
     mixDefaultsJson: '{\n  "inputs": {},\n  "vars": {}\n}',
     mixDefaultsValid: true,
     target: newTarget(),
@@ -137,8 +139,10 @@ function makeScenario(
     row.load = load;
     const testdata = parseObjectJson(workload.testdataJson, `Workload ${row.id} Testdata`);
     const thresholds = parseObjectJson(workload.thresholdsJson, `Workload ${row.id} thresholds`);
+    const evidence = parseObjectJson(workload.evidenceJson, `Workload ${row.id} evidence`);
     if (Object.keys(testdata).length) row.testdata = testdata;
     if (Object.keys(thresholds).length) row.thresholds = thresholds;
+    if (Object.keys(evidence).length) row.evidence = evidence;
     if (model === 'virtualUsers' && workload.structure === 'mix') {
       if (!workload.mix.length) throw new Error(`Workload ${row.id} needs at least one mix target.`);
       if (!workload.mixDefaultsValid) throw new Error(`Workload ${row.id} has invalid mix defaults.`);
@@ -182,7 +186,8 @@ function makeScenario(
   if (testdata.length) scenario.testdata = testdata; else delete scenario.testdata;
   if (Object.keys(thresholds).length) scenario.thresholds = thresholds; else delete scenario.thresholds;
   if (Object.keys(evidence).length) scenario.evidence = evidence; else delete scenario.evidence;
-  if (evidence.maxFailureSamples != null || evidence.maxSuccessSamples != null) scenario.schemaVersion = 'att-load/v1.7';
+  if (evidence.maxFailureSamples != null || evidence.maxSuccessSamples != null
+      || evidence.quotaScope != null || evidence.defaults != null) scenario.schemaVersion = 'att-load/v1.7';
   if (advanced.seed.trim()) {
     const seed = Number(advanced.seed);
     if (!Number.isSafeInteger(seed)) throw new Error('Seed must be a safe integer.');
@@ -501,10 +506,11 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         <ThresholdEvidenceEditor
           model={model}
           aggregate={advanced.thresholds}
-          workloads={workloads.map(item => ({ id: item.id, thresholdsJson: item.thresholdsJson }))}
+          workloads={workloads.map(item => ({ id: item.id, thresholdsJson: item.thresholdsJson, evidenceJson: item.evidenceJson }))}
           evidence={advanced.evidence}
           onAggregateChange={value => updateAdvanced('thresholds', value)}
           onWorkloadChange={(id, value) => updateWorkload(id, current => ({ ...current, thresholdsJson: value }))}
+          onWorkloadEvidenceChange={(id, value) => updateWorkload(id, current => ({ ...current, evidenceJson: value }))}
           onEvidenceChange={value => updateAdvanced('evidence', value)}
           onValidityChange={updateThresholdEditorValidity}
         />

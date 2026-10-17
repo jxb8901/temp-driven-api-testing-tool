@@ -1132,6 +1132,10 @@
           "type": "object",
           "additionalProperties": true
         },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "mix": {
           "type": "array",
           "minItems": 1,

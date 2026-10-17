@@ -180,7 +180,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
         Path evidenceRoot = evidenceOutputRoot(iterationId);
         if (evidenceRoot != null) request = request.withOutputDirectory(evidenceRoot).withEvidenceRetention(true, false);
         else if (evidenceStore != null) request = request.withEvidenceRetention(false, false);
-        if (evidenceStore != null) request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence());
+        if (evidenceStore != null)
+            request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence(scenario.workloadId()));
         if (selectedMix != null) request = request.withMixIdentity(selectedMix.id(), selectedMix.targetType(), selectedMix.targetId());
         final IterationRequest iterationRequest = request;
         final TaskHandle taskHandle = new TaskHandle();

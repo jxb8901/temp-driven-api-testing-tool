@@ -109,160 +109,153 @@ class LoadEvidencePolicyTest {
         assertEquals(0,store.statistics().get("reservedSuccessCount"));assertEquals(0,store.statistics().get("reservedFailureCount"));
     }
 
-    @Test void successQuotaIsSharedFairlyAcrossRegisteredWorkloads() throws Exception {
-        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",4,"maxFailureSamples",4));
-        store.registerWorkload("fast");
-        store.registerWorkload("slow");
-        // A faster workload may not consume the whole success budget before a
-        // slower eligible workload has had its minimum share.
-        assertTrue(store.reserveSuccessEvidence("fast-1","fast"));
-        assertTrue(store.reserveSuccessEvidence("fast-2","fast"));
-        assertFalse(store.reserveSuccessEvidence("fast-3","fast"));
-        assertTrue(store.reserveSuccessEvidence("slow-1","slow"));
-        assertTrue(store.reserveSuccessEvidence("slow-2","slow"));
-        assertFalse(store.reserveSuccessEvidence("slow-3","slow"));
-        store.onEvent(event("fast-1","fast",ResultStatus.PASS));
-        store.onEvent(event("slow-1","slow",ResultStatus.PASS));
-        assertEquals(2,store.events().size());
-        assertEquals(2,store.events().stream().map(LoadEvent::workloadId).distinct().count());
-        @SuppressWarnings("unchecked")
-        Map<String,Object> workloads=(Map<String,Object>)store.statistics().get("workloads");
-        assertEquals(1,((Map<?,?>)workloads.get("fast")).get("retainedSuccessCount"));
-        assertEquals(1,((Map<?,?>)workloads.get("slow")).get("retainedSuccessCount"));
-        assertEquals(2L,store.statistics().get("skippedSuccessQuotaCount"));
-    }
-
-    @Test void completedWorkloadReleasesItsUnusedSuccessShareToBusyWorkloads() throws Exception {
-        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",6,"maxFailureSamples",4));
-        store.registerWorkload("fast");
-        store.registerWorkload("slow");
-        assertTrue(store.reserveSuccessEvidence("fast-1","fast"));
-        assertTrue(store.reserveSuccessEvidence("fast-2","fast"));
-        assertTrue(store.reserveSuccessEvidence("fast-3","fast"));
-        // The still-running workload keeps its minimum share even before it produces anything.
-        assertFalse(store.reserveSuccessEvidence("fast-4","fast"));
-        assertTrue(store.reserveSuccessEvidence("slow-1","slow"));
-        assertFalse(store.reserveSuccessEvidence("fast-5","fast"));
-        // slow finished without eligible successes, so the slots it can no longer claim become
-        // available to the workload that is still running.
-        store.completeWorkload("slow");
-        assertTrue(store.reserveSuccessEvidence("fast-4","fast"),"A completed workload releases its unused share");
-        assertTrue(store.reserveSuccessEvidence("fast-5","fast"));
-        assertFalse(store.reserveSuccessEvidence("fast-6","fast"),"The configured global success cap still binds");
-
-        String[] fastIds={"fast-1","fast-2","fast-3","fast-4","fast-5"};
-        for(String id:fastIds)store.onEvent(event(id,"fast",ResultStatus.PASS));
-        store.onEvent(event("slow-1","slow",ResultStatus.PASS));
-        assertEquals(6,store.events().size());
-        assertEquals(6,store.statistics().get("retainedSuccessCount"));
-        assertEquals(3L,store.statistics().get("skippedSuccessQuotaCount"));
-        @SuppressWarnings("unchecked")
-        Map<String,Object> workloads=(Map<String,Object>)store.statistics().get("workloads");
-        assertEquals(3,((Map<?,?>)workloads.get("fast")).get("successShare"));
-        assertEquals(Boolean.FALSE,((Map<?,?>)workloads.get("fast")).get("successShareReleased"));
-        assertEquals(Boolean.TRUE,((Map<?,?>)workloads.get("slow")).get("successShareReleased"));
-    }
-
-    @Test void idleWorkloadShareIsReclaimedForTheOnlyActiveWorkload() throws Exception {
-        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",4,"maxFailureSamples",4));
-        store.registerWorkload("busy");
-        store.registerWorkload("idle");
+    @Test void perWorkloadSuccessCapsNeverBlockOrReclaimAnotherWorkloadsFirstSuccess() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(perWorkloadPolicy(2,2,
+                "busy",Collections.<String,Object>emptyMap(),"slow",Collections.<String,Object>emptyMap()));
+        store.registerWorkload("busy");store.registerWorkload("slow");
         assertTrue(store.reserveSuccessEvidence("busy-1","busy"));
         assertTrue(store.reserveSuccessEvidence("busy-2","busy"));
-        assertFalse(store.reserveSuccessEvidence("busy-3","busy"),"A registered workload protects its share while it can still reserve");
-        store.completeWorkload("idle");
-        assertTrue(store.reserveSuccessEvidence("busy-3","busy"));
-        assertTrue(store.reserveSuccessEvidence("busy-4","busy"));
-        assertFalse(store.reserveSuccessEvidence("busy-5","busy"),"Reclaimed capacity never exceeds the global cap");
-    }
-
-    @Test void workloadWithoutEligibleSuccessesLendsItsUnusedMinimumWhileItIsStillRunning() throws Exception {
-        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",6,"maxFailureSamples",6));
-        store.registerWorkload("fast");
-        store.registerWorkload("quiet");
-        assertTrue(store.reserveSuccessEvidence("fast-1","fast"));
-        assertTrue(store.reserveSuccessEvidence("fast-2","fast"));
-        assertTrue(store.reserveSuccessEvidence("fast-3","fast"));
-        // Both workloads are still starting up: the quiet workload keeps its minimum until its
-        // first iteration completes, exactly as two schedulers behave at the beginning of a run.
-        assertFalse(store.reserveSuccessEvidence("fast-4","fast"));
-        // quiet is running and fails, so it will never use a success sample.
-        store.onEvent(event("quiet-1","quiet",ResultStatus.FAIL));
-        assertTrue(store.reserveSuccessEvidence("fast-4","fast"),"A workload that completed iterations without an eligible success lends its unused minimum");
-        assertTrue(store.reserveSuccessEvidence("fast-5","fast"));
-        assertTrue(store.reserveSuccessEvidence("fast-6","fast"));
-        assertFalse(store.reserveSuccessEvidence("fast-7","fast"),"The configured global success cap still binds");
-
-        for(String id:new String[]{"fast-1","fast-2","fast-3","fast-4","fast-5","fast-6"})
-            store.onEvent(event(id,"fast",ResultStatus.PASS));
-        Map<String,Object> report=store.statistics();
-        assertEquals(6,report.get("retainedSuccessCount"));
-        assertEquals(3,report.get("borrowedSuccessCount"),"The busy workload borrowed exactly the repaid minimum");
-        assertEquals(0L,report.get("revokedBorrowedSuccessCount"));
-        assertEquals(3,row(report,"fast").get("borrowedSuccessCount"));
-        assertEquals(Boolean.FALSE,row(report,"fast").get("successShareReleased"));
-        Map<String,Object> quiet=row(report,"quiet");
-        assertEquals(0,quiet.get("retainedSuccessCount"));
-        assertEquals(0L,quiet.get("eligibleSuccessCount"));
-        assertEquals(Boolean.TRUE,quiet.get("successShareReleased"),"A workload with no eligible success stops holding capacity it does not use");
-    }
-
-    @Test void borrowedCapacityIsReturnedWhenTheQuietWorkloadBecomesEligible() throws Exception {
-        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",6,"maxFailureSamples",6));
-        store.setEvidenceRoot(temp);
-        store.registerWorkload("fast");
-        store.registerWorkload("slow");
-        assertTrue(store.reserveSuccessEvidence("fast-1","fast"));
-        assertTrue(store.reserveSuccessEvidence("fast-2","fast"));
-        assertTrue(store.reserveSuccessEvidence("fast-3","fast"));
-        store.onEvent(event("slow-0","slow",ResultStatus.FAIL));
-        for(String id:new String[]{"fast-4","fast-5","fast-6"})assertTrue(store.reserveSuccessEvidence(id,"fast"));
-        for(String id:new String[]{"fast-1","fast-2","fast-3","fast-4","fast-5","fast-6"})
-            store.onEvent(event(id,"fast",ResultStatus.PASS));
-        assertEquals(3,store.statistics().get("borrowedSuccessCount"));
-
-        // The slow workload returns with real demand: the newest borrowed capture is reclaimed so it
-        // is no longer starved by capacity that was lent out while it looked inactive.
-        assertFalse(store.reserveSuccessEvidence("slow-1","slow"),"A workload without an eligible success cannot reclaim capacity yet");
+        assertFalse(store.reserveSuccessEvidence("busy-3","busy"));
+        store.onEvent(event("busy-1","busy",ResultStatus.PASS));
+        store.onEvent(event("busy-2","busy",ResultStatus.PASS));
+        // The busy workload is at its own cap. The slow workload's late first success still
+        // has its full independent allowance and no retained busy evidence is revoked.
+        assertTrue(store.reserveSuccessEvidence("slow-1","slow"));
         store.onEvent(event("slow-1","slow",ResultStatus.PASS));
-        assertTrue(store.reserveSuccessEvidence("slow-2","slow"),"A workload below its minimum reclaims one borrowed slot once it proves demand");
-        store.onEvent(event("slow-2","slow",ResultStatus.PASS));
-        assertTrue(store.reserveSuccessEvidence("slow-3","slow"));
-        store.onEvent(event("slow-3","slow",ResultStatus.PASS));
-        assertTrue(store.reserveSuccessEvidence("slow-4","slow"));
-        store.onEvent(event("slow-4","slow",ResultStatus.PASS));
-        // fast is over its own minimum while slow still needs its share, so it may not take it back.
-        assertFalse(store.reserveSuccessEvidence("fast-7","fast"));
-        assertFalse(store.reserveSuccessEvidence("slow-5","slow"),"Every workload reached its minimum");
-
+        assertEquals(3,store.events().size());
+        assertTrue(store.events().stream().anyMatch(value->"busy-1".equals(value.iterationId())));
+        assertTrue(store.events().stream().anyMatch(value->"busy-2".equals(value.iterationId())));
+        assertTrue(store.events().stream().anyMatch(value->"slow-1".equals(value.iterationId())));
         Map<String,Object> report=store.statistics();
-        assertEquals(6,report.get("retainedSuccessCount"),"Reclaiming never exceeds the global cap");
-        assertEquals(3L,report.get("revokedBorrowedSuccessCount"));
-        assertEquals(0,report.get("borrowedSuccessCount"));
-        assertEquals(3,row(report,"fast").get("retainedSuccessCount"));
-        assertEquals(3L,row(report,"fast").get("borrowedSuccessRevokedCount"));
-        assertEquals(3,row(report,"slow").get("retainedSuccessCount"));
-        assertEquals(3L,report.get("skippedSuccessQuotaCount"),
-                "Only the unproven first success and the two attempts after every minimum was reached are reported as quota misses");
-        assertTrue(store.events().stream().noneMatch(value->"fast-6".equals(value.iterationId())),
-                "A revoked borrowed capture is no longer reported");
-        assertTrue(store.events().stream().noneMatch(value->"fast-5".equals(value.iterationId())));
-        for(String revoked:new String[]{"fast-4","fast-5","fast-6"})
-            assertFalse(Files.exists(temp.resolve(revoked)),"Reclaimed sample artifacts are removed: "+revoked);
-        for(String own:new String[]{"fast-1","fast-2","fast-3"})
-            assertTrue(Files.isDirectory(temp.resolve(own)),"Own-minimum captures are never revoked: "+own);
+        assertEquals(2,row(report,"busy").get("retainedSuccessCount"));
+        assertEquals(2,row(report,"busy").get("maxSuccessSamples"));
+        assertEquals(1,row(report,"slow").get("retainedSuccessCount"));
+        assertEquals(2,row(report,"slow").get("maxSuccessSamples"));
+        assertEquals(1L,report.get("skippedSuccessQuotaCount"));
+        assertEquals(Boolean.TRUE,report.get("successQuotaExceeded"));
     }
 
-    @Test void successSharesBoundCapsSmallerThanTheWorkloadCountAndIgnoreUnknownWorkloads() {
-        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",2,"maxFailureSamples",1));
-        store.registerWorkload("a");store.registerWorkload("b");store.registerWorkload("c");
-        store.completeWorkload("unregistered");
-        store.completeWorkload(null);
-        assertTrue(store.reserveSuccessEvidence("a-1","a"));
-        assertTrue(store.reserveSuccessEvidence("b-1","b"));
-        assertFalse(store.reserveSuccessEvidence("c-1","c"),"A cap smaller than the workload count still bounds the total");
-        store.completeWorkload("a");store.completeWorkload("b");
-        assertFalse(store.reserveSuccessEvidence("c-1","c"),"Released shares cannot exceed the configured global cap");
+    @Test void perWorkloadSuccessAndFailureCapsAreIndependent() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(perWorkloadPolicy(1,1,
+                "payment",Collections.<String,Object>emptyMap(),"queue",Collections.<String,Object>emptyMap()));
+        store.registerWorkload("payment");store.registerWorkload("queue");
+        assertTrue(store.claimFailureEvidence("payment-failure","payment"));
+        store.onEvent(event("payment-failure","payment",ResultStatus.ERROR));
+        assertFalse(store.claimFailureEvidence("payment-failure-2","payment"));
+        assertFalse(store.retainsFailureEvidence("payment"));
+        assertTrue(store.retainsFailureEvidence("queue"),"One workload's failure cap does not affect another");
+        assertTrue(store.reserveSuccessEvidence("payment-success","payment"),"Failure exhaustion does not consume success capacity");
+        store.onEvent(event("payment-success","payment",ResultStatus.PASS));
+        assertTrue(store.claimFailureEvidence("queue-failure","queue"));
+        store.onEvent(event("queue-failure","queue",ResultStatus.ERROR));
+        assertEquals(3,store.events().size());
+        assertEquals(1L,store.statistics().get("skippedFailureQuotaCount"));
+        assertEquals(Boolean.TRUE,row(store.statistics(),"payment").get("failureQuotaExceeded"));
+        assertEquals(Boolean.FALSE,row(store.statistics(),"queue").get("failureQuotaExceeded"));
+    }
+
+    @Test void perWorkloadDefaultsPartialOverridesAndZeroCapsResolveIndependently() {
+        LoadEvidencePolicy policy=perWorkloadPolicy(3,4,
+                "inherits",Collections.<String,Object>emptyMap(),
+                "partial",Collections.<String,Object>singletonMap("maxSuccessSamples",0),
+                "override",new LinkedHashMap<String,Object>() {{
+                    put("maxSuccessSamples",9);put("maxFailureSamples",0);
+                }});
+        assertTrue(policy.perWorkloadQuotas());
+        assertEquals(3,policy.successCapFor("inherits"));
+        assertEquals(4,policy.failureCapFor("inherits"));
+        assertEquals(0,policy.successCapFor("partial"));
+        assertEquals(4,policy.failureCapFor("partial"),"A partial override inherits the other default");
+        assertEquals(9,policy.successCapFor("override"));
+        assertEquals(0,policy.failureCapFor("override"));
+        assertEquals(3,policy.defaultSuccessCap());
+        assertEquals(4,policy.defaultFailureCap());
+        assertEquals("perWorkload",policy.toMap().get("quotaMode"));
+    }
+
+    @Test void perWorkloadRejectsMixedSyntaxAndOversizedAggregatePreflight() {
+        assertThrows(IllegalArgumentException.class,()->perWorkloadPolicy(1,1,
+                "bad",Collections.<String,Object>singletonMap("mode","all")));
+        Map<String,Object> rootCaps=new LinkedHashMap<String,Object>();
+        rootCaps.put("quotaScope","perWorkload");rootCaps.put("maxFailureSamples",1);
+        assertThrows(IllegalArgumentException.class,()->LoadEvidencePolicy.validateQuotas(rootCaps));
+        assertThrows(IllegalArgumentException.class,()->policy("quotaScope","perWorkload","defaults",
+                Collections.<String,Object>singletonMap("mode","all")));
+        assertThrows(IllegalArgumentException.class,()->policy("quotaScope","run","defaults",
+                Collections.<String,Object>singletonMap("maxSuccessSamples",1)));
+        assertThrows(IllegalArgumentException.class,()->perWorkloadPolicy(1,1,
+                "legacy-override",Collections.<String,Object>singletonMap("maxSamples",1)));
+        assertThrows(IllegalArgumentException.class,()->perWorkloadPolicy(
+                LoadEvidencePolicy.MAX_AGGREGATE_CAP,1,"a",Collections.<String,Object>emptyMap(),
+                "b",Collections.<String,Object>emptyMap()));
+    }
+
+    @Test void perWorkloadReservationsReleaseOnMissingEvidenceDropsAndReclassification() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(perWorkloadPolicy(1,1,
+                "one",Collections.<String,Object>emptyMap()));
+        store.registerWorkload("one");
+        assertTrue(store.reserveSuccessEvidence("missing","one"));
+        store.onEvent(LoadEvent.completed("run","closed","STEADY","missing","VU-1",1,0,0,1,
+                ResultStatus.PASS,null));
+        assertTrue(store.reserveSuccessEvidence("dropped","one"));
+        store.onEvent(LoadEvent.dropped("run","arrivalRate","STEADY","dropped",1,0,1));
+        assertTrue(store.reserveSuccessEvidence("reclassified","one"));
+        assertTrue(store.claimFailureEvidence("reclassified","one"));
+        store.onEvent(event("reclassified","one",ResultStatus.FAIL));
+        assertTrue(store.reserveSuccessEvidence("actual","one"));
+        store.onEvent(event("actual","one",ResultStatus.PASS));
+        Map<String,Object> report=store.statistics();
+        assertEquals(1,report.get("retainedSuccessCount"));
+        assertEquals(0,report.get("reservedSuccessCount"));
+        assertEquals(0,report.get("reservedFailureCount"));
+        assertEquals(1L,report.get("skippedMissingEvidenceCount"));
+    }
+
+    @Test void perWorkloadConcurrentReservationsRespectEachCaps() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(perWorkloadPolicy(7,11,
+                "first",Collections.<String,Object>emptyMap(),"second",Collections.<String,Object>emptyMap()));
+        store.registerWorkload("first");store.registerWorkload("second");
+        ExecutorService workers=Executors.newFixedThreadPool(12);List<Future<?>> tasks=new ArrayList<Future<?>>();
+        try {
+            for(int i=0;i<800;i++) {
+                final int n=i;
+                tasks.add(workers.submit(()->{
+                    String workload=n%2==0?"first":"second";
+                    String id=workload+"-"+n;boolean failure=n%4>=2;
+                    boolean admitted=failure?store.claimFailureEvidence(id,workload)
+                            :store.reserveSuccessEvidence(id,workload);
+                    if(admitted)store.onEvent(event(id,workload,failure?ResultStatus.ERROR:ResultStatus.PASS));
+                    else store.releaseEvidence(id);
+                    return null;
+                }));
+            }
+            for(Future<?> task:tasks)task.get();
+        } finally {workers.shutdownNow();}
+        Map<String,Object> report=store.statistics();
+        assertEquals(14,report.get("retainedSuccessCount"));
+        assertEquals(22,report.get("retainedFailureCount"));
+        assertEquals(7,row(report,"first").get("retainedSuccessCount"));
+        assertEquals(11,row(report,"first").get("retainedFailureCount"));
+        assertEquals(7,row(report,"second").get("retainedSuccessCount"));
+        assertEquals(11,row(report,"second").get("retainedFailureCount"));
+        assertEquals(0,report.get("reservedSuccessCount"));
+        assertEquals(0,report.get("reservedFailureCount"));
+    }
+
+    @Test void perWorkloadCoverageReportsTargetAndSamplingIneligibility() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(perWorkloadPolicy(0.0,2,2,
+                "payment",Collections.<String,Object>emptyMap()));
+        store.registerWorkload("payment","PAYMENT_TEMPLATE");
+        store.onEvent(event("pass-1","payment",ResultStatus.PASS));
+        store.onEvent(event("pass-2","payment",ResultStatus.PASS));
+
+        Map<String,Object> payment=row(store.statistics(),"payment");
+        assertEquals("PAYMENT_TEMPLATE",payment.get("targetId"));
+        assertEquals(2L,payment.get("eligibleSuccessCount"));
+        assertEquals(2L,payment.get("samplingIneligibleSuccessCount"));
+        assertEquals(0,payment.get("retainedSuccessCount"));
+        assertEquals(0L,payment.get("skippedSuccessQuotaCount"),
+                "a success rejected by the sampling hash is not also reported as a cap skip");
     }
 
     @Test void publicModesResolveToDistinctPolicies() {
@@ -377,6 +370,34 @@ class LoadEvidencePolicyTest {
 
     private static LoadEvidencePolicy policy(Object... values) {
         return LoadEvidencePolicy.from(scenario(values));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static LoadEvidencePolicy perWorkloadPolicy(int successCap, int failureCap, Object... overrides) {
+        return perWorkloadPolicy(1.0, successCap, failureCap, overrides);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static LoadEvidencePolicy perWorkloadPolicy(double sampleRate, int successCap, int failureCap,
+                                                        Object... overrides) {
+        Map<String,Object> defaults=new LinkedHashMap<String,Object>();
+        defaults.put("maxSuccessSamples",successCap);
+        defaults.put("maxFailureSamples",failureCap);
+        Map<String,Object> evidence=new LinkedHashMap<String,Object>();
+        evidence.put("quotaScope","perWorkload");evidence.put("mode","samples");evidence.put("sampleRate",sampleRate);
+        evidence.put("defaults",defaults);
+        List<LoadWorkload> workloads=new ArrayList<LoadWorkload>();
+        for(int i=0;i<overrides.length;i+=2) {
+            String id=String.valueOf(overrides[i]);
+            Map<String,Object> workloadEvidence=(Map<String,Object>)overrides[i+1];
+            workloads.add(new LoadWorkload(id,"template","TARGET",Collections.<String,Object>emptyMap(),
+                    Collections.<String,Object>emptyMap(),Collections.<String,Object>emptyMap(),
+                    LoadScenario.Model.CLOSED,1,0.0,null,Duration.ZERO,Duration.ZERO,
+                    Duration.ofSeconds(1L),Duration.ZERO,ThinkTimePolicy.fixed(Duration.ZERO),0,"drop",
+                    Collections.<String,Object>emptyMap(),workloadEvidence));
+        }
+        return LoadEvidencePolicy.from(new LoadScenario(Paths.get("evidence.yaml"),"att-load/v1.7",
+                workloads,1L,Collections.<String,Object>emptyMap(),evidence));
     }
 
     private static LoadScenario scenario(Object... values) {

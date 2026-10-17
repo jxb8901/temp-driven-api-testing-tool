@@ -83,7 +83,8 @@ function makeScenario(policy: JsonObject, model: LoadModel, id: string, targetTy
   if (testdata.length) scenario.testdata = testdata; else delete scenario.testdata;
   if (Object.keys(thresholds).length) scenario.thresholds = thresholds; else delete scenario.thresholds;
   if (Object.keys(evidence).length) scenario.evidence = evidence; else delete scenario.evidence;
-  if (evidence.maxFailureSamples != null || evidence.maxSuccessSamples != null) scenario.schemaVersion = 'att-load/v1.7';
+  if (evidence.maxFailureSamples != null || evidence.maxSuccessSamples != null
+      || evidence.quotaScope != null || evidence.defaults != null) scenario.schemaVersion = 'att-load/v1.7';
   if (advanced.seed.trim()) { const seed = Number(advanced.seed); if (!Number.isSafeInteger(seed)) throw new Error('Seed must be a safe integer.'); scenario.seed = seed; }
   else delete scenario.seed;
   return scenario;

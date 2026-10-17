@@ -3,8 +3,18 @@ workloads:
   - id: independent-evidence
     target: {type: tool, id: sample.getAcDate}
     load: {users: 2, duration: 2s}
+    evidence:
+      maxSuccessSamples: 5
+      maxFailureSamples: 10
+  - id: policy-defaults
+    target: {type: tool, id: sample.getAcDate}
+    load: {users: 1, duration: 2s}
 evidence:
+  quotaScope: perWorkload
   mode: samples
-  sampleRate: 0.01
-  maxSuccessSamples: 500
-  maxFailureSamples: 2000
+  sampleRate: 0.1
+  defaults:
+    maxSuccessSamples: 10
+    maxFailureSamples: 20
+# Each workload has its own hard caps. No capacity is lent, borrowed, reclaimed
+# or used to delete retained evidence.

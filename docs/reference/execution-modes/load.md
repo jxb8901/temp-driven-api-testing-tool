@@ -8,23 +8,40 @@ Run `./att.sh load` with no scenario to discover valid full Load descriptors und
 
 ## Independent evidence quotas
 
-`att-load/v1.7` adds finite success/failure quotas. Scenarios without either new key retain the exact legacy combined `maxSamples` behavior, including `metrics`, `failures`, `samples`, and uncapped-by-default `all`. Existing v1.6 scenarios remain accepted and normalize to v1.7 without changing their evidence policy.
+`att-load/v1.7` supports two quota models. Legacy scenarios keep their exact previous behavior: an explicit `maxSamples` is one combined run cap, and an explicit `maxFailureSamples` enables shared success/failure caps across the whole run. A scenario that omits both keys also keeps the existing mode defaults, including uncapped-by-default `all`.
+
+The optional `evidence.quotaScope: perWorkload` selects the independent model. It is explicit so an existing scenario is never silently reinterpreted:
 
 ~~~yaml
 evidence:
-  mode: samples
+  quotaScope: perWorkload
   success: sample
   failure: full
-  sampleRate: 0.01
-  maxSuccessSamples: 500
-  maxFailureSamples: 2000
+  sampleRate: 0.1
+  defaults:
+    maxSuccessSamples: 10
+    maxFailureSamples: 20
+workloads:
+  - id: payment-api
+    target: {type: template, id: PAYMENT_INVOKE}
+    load: {users: 10, duration: 2m}
+  - id: mq-processing
+    target: {type: tool, id: sample.getAcDate}
+    load: {users: 5, duration: 2m}
+    evidence:
+      maxSuccessSamples: 5
+      maxFailureSamples: 30
 ~~~
 
-An explicit `maxFailureSamples` enables independent quotas; both new values are integers from 0 to 1,000,000. The success cap is `maxSuccessSamples`, else an explicit `maxSamples`, else **1,000**, even with `mode: all`. `maxSuccessSamples` requires `maxFailureSamples`; supplying both `maxSamples` and `maxSuccessSamples` is rejected. Keeping `maxSamples: 500` and adding `maxFailureSamples: 2000` migrates the old cap into a success-only cap. Zero disables retention for that category. `sampleRate` applies only to sampled PASS iterations; FAIL/ERROR (including operational TIMEOUT) use the failure quota without sampling. `failure: full` is bounded by its quota and does not guarantee that every failure is retained.
+In this mode root `success`, `failure`, `sampleRate` and `resources` remain the shared capture policy. `evidence.defaults` supplies each workload's default `maxSuccessSamples` and `maxFailureSamples`; an omitted default is **1,000**. A `workloads[].evidence` object may override either cap, and it accepts only those two cap keys. A partial override inherits the other default. Caps are integers from 0 to 1,000,000; 0 reserves no evidence for that workload and category. In the example, `payment-api` receives 10 success / 20 failure and `mq-processing` receives 5 success / 30 failure.
 
-The shared run evidence store accounts for reserved and retained success/failure slots separately across workloads and both scheduler models. In split-quota mode every registered workload holds a deterministic minimum share of the success budget (the global cap divided evenly, with the remainder assigned to the workloads registered first), so one workload cannot consume the whole budget before the others have their minimum. A workload holds that minimum while it competes for success evidence: while it has reservations in flight, while it already produced an eligible success, and until its first iteration completes. A workload that completed iterations without a single eligible success, or whose scheduler finished, therefore releases the unused part of its minimum while the run is still in progress instead of holding it until the shared timing envelope ends, and the released capacity is allocated first-come. The loan is reclaimed when the lender needs it: once a workload that is still below its minimum has produced an eligible success, its next reservation revokes the most recent borrowed capture of another workload and removes that capture's sample artifacts, so a workload that becomes eligible after a quiet start is not starved by capacity lent out earlier; a workload that never produced an eligible success cannot reclaim borrowed capacity. Only borrowed captures are revocable, a capture inside its own minimum is never revoked, and no capture or revocation can exceed the configured global cap, including when the cap is smaller than the workload count, so a workload that completes without eligible successes does not strand success quota. A preselected success that fails releases its success reservation and must claim a failure slot. Unsampled failures may claim failure capacity. Success exhaustion never suppresses failure log capture; failure exhaustion never suppresses success sampling. Dropped/unstarted arrivals and incomplete iterations create no normal evidence. Cancelled/rejected admissions and missing workspaces release reservations. Failure log capture keeps the existing 65,536-character tail, mandatory secret protection and deferred resource formatting.
+Per-workload mode must not be mixed with root `maxSamples`, `maxSuccessSamples` or `maxFailureSamples`, and `evidence.defaults` or any workload cap override requires `quotaScope: perWorkload`. Before execution, ATT validates the sum of all effective success caps and the sum of all effective failure caps; either sum may not exceed the aggregate safety budget of 1,000,000. This is a preflight allocation bound, not a runtime global allocator.
 
-`load-summary.json` / YAML, the HTML report, and Studio job results expose the resolved `evidence.policy`, `retainedSuccessCount`, `retainedFailureCount`, category exhaustion flags and skipped quota/missing-evidence counters. Per-workload coverage lists each workload's eligible successes, retained samples and quota/missing-evidence skips, and the machine-readable summary also records its protected `successShare`, whether that share is currently released to other workloads (`successShareReleased`), its borrowed captures (`borrowedSuccessCount`) and how many borrowed captures it lost to a reclaim (`borrowedSuccessRevokedCount`); the aggregate record exposes the live `borrowedSuccessCount` and the cumulative `revokedBorrowedSuccessCount`, so a workload without samples is explainable instead of silent. The report and Studio warn when the failure quota is reached; aggregate metrics, thresholds and failure events continue. Retained links remain under `samples/` and `failures/` with EXEC.ID, case.log and case.yaml. Studio Evidence settings labels the legacy combined cap separately and synchronizes independent quotas with advanced JSON. See [the bounded example](../../../examples/load/independent-evidence.yaml).
+Each workload owns its caps. Reaching one workload's success or failure cap never reserves capacity from another workload, and unused capacity stays unused. There is no lending, borrowing, repayment, reclaiming, revocation or quota-driven artifact deletion. A workload's first eligible success or failure is accepted whenever its own cap has room, even if every other workload is already full. Retained evidence is append-only for the run. Reservations are released on cancellation, rejection, PASS-to-FAIL reclassification, dropped/unstarted arrivals or missing evidence. Success and failure capacity remain independent, and exhaustion of one category never suppresses the other.
+
+`sampleRate` applies only to sampled PASS iterations; FAIL/ERROR (including operational TIMEOUT) use the failure cap without sampling. `failure: full` is bounded by the effective failure cap and does not guarantee that every failure is retained. Failure log capture keeps the existing 65,536-character tail, mandatory secret protection and deferred resource formatting.
+
+`load-summary.json` / YAML, the HTML report and Studio job results expose the resolved `evidence.policy`, aggregate retained counts, category exhaustion flags and skipped quota/missing-evidence counters. Per-workload coverage includes the workload and target IDs, effective `maxSuccessSamples` and `maxFailureSamples`, completed PASS iterations, PASS iterations excluded by the sampling hash, retained samples, quota skips and missing evidence. The report and Studio warn when one or more failure quotas are reached; aggregate metrics, thresholds and failure events continue. Retained links remain under `samples/` and `failures/` with EXEC.ID, case.log and case.yaml. Studio separates legacy/shared caps from the explicit per-workload scope, shows effective defaults and workload overrides, and keeps advanced JSON synchronized. See [the per-workload example](../../../examples/load/independent-evidence.yaml).
 
 
 ## Define a Load scenario
@@ -166,7 +183,7 @@ A metrics-only iteration still has `EXEC.ID` but does not create a per-iteration
 
 ## Choose which iteration evidence to retain
 
-`evidence.mode` accepts `metrics`, `failures`, `samples` or `all`; the default is `failures`. These modes set the default effective success/failure policies to `none/none`, `none/full`, `sample/full` and `full/full`, respectively. Explicit `evidence.success` and `evidence.failure` values override those defaults independently. `sampleRate` and `maxSamples` bound retained evidence. Dropped arrivals do not create iteration evidence.
+`evidence.mode` accepts `metrics`, `failures`, `samples` or `all`; the default is `failures`. These modes set the default effective success/failure policies to `none/none`, `none/full`, `sample/full` and `full/full`, respectively. Explicit `evidence.success` and `evidence.failure` values override those defaults independently. `sampleRate` and the selected legacy/shared or per-workload caps bound retained evidence. Dropped arrivals do not create iteration evidence.
 
 Case-log capture follows the effective success/failure policies and remaining retention capacity. With failure policy `full` and a `maxSamples` slot available, eligible failures—including unselected successes under `samples`—retain a redacted rolling log tail of at most 65,536 characters. ATT materializes the failure log only when the failure claims a retention slot. If the tail is truncated, a marker identifies the omitted earlier events, and the latest action and runtime failure details remain at the end. Failure logs are not retained after capacity is exhausted. Sampled successes and full-success policies retain full deferred logs. For example, `mode: metrics, failure: full` enables bounded failure capture while capacity remains, while `mode: failures, failure: none` disables it. See [Load scheduler design](../../system-design/load-scheduler.md) for implementation and storage details.
 

@@ -2,7 +2,7 @@
 
 ## Independent Load evidence quotas
 
-Use `att-load/v1.7` for `evidence.maxFailureSamples` and `maxSuccessSamples`. Older scenarios without these keys preserve their legacy combined cap after normalization. An explicit finite failure cap activates split mode; the success cap defaults to 1,000 or uses the old `maxSamples` as a migration alias. Do not combine that alias with `maxSuccessSamples`. See [Load](../execution-modes/load.md#independent-evidence-quotas) for limits, concurrency and exhaustion warnings.
+Use `att-load/v1.7` for finite Load evidence quotas. Legacy scenarios with `maxSamples`, or with the shared `maxSuccessSamples` / `maxFailureSamples` pair, keep their existing semantics. Per-workload caps require the explicit `evidence.quotaScope: perWorkload` discriminator. In that mode configure `evidence.defaults` and optional cap-only `workloads[].evidence` overrides; do not add root `maxSamples`, `maxSuccessSamples` or `maxFailureSamples`. Each workload's caps are independent and no capacity is lent, borrowed, reclaimed or used to delete retained artifacts. See [Load](../execution-modes/load.md#independent-evidence-quotas) for limits, validation and reporting.
 
 
 ## MQ request queue routing

@@ -108,6 +108,48 @@ describe('JobsPage React feature', () => {
     expect(host.querySelector('#job-panel-live')?.textContent).toContain('connected');
   });
 
+  it('shows effective per-workload evidence caps without borrowing fields', async () => {
+    const perWorkloadResult: JobResultResponse = {
+      ...sampleResult,
+      result: {
+        ...sampleResult.result,
+        evidence: {
+          policy: {
+            quotaMode: 'perWorkload',
+            defaults: { maxSuccessSamples: 10, maxFailureSamples: 20 },
+          },
+          retainedSuccessCount: 12,
+          retainedFailureCount: 23,
+          workloads: {
+            payment: {
+              targetId: 'PAYMENT_TEMPLATE', maxSuccessSamples: 10, maxFailureSamples: 20,
+              eligibleSuccessCount: 15, samplingIneligibleSuccessCount: 2, retainedSuccessCount: 10,
+              retainedFailureCount: 20, skippedSuccessQuotaCount: 5, skippedFailureQuotaCount: 0, skippedMissingEvidenceCount: 1,
+            },
+            queue: {
+              targetId: 'QUEUE_TEMPLATE', maxSuccessSamples: 5, maxFailureSamples: 30,
+              eligibleSuccessCount: 7, samplingIneligibleSuccessCount: 1, retainedSuccessCount: 2, retainedFailureCount: 3,
+            },
+          },
+        },
+      },
+    };
+    const api = makeApi({ getJobResult: vi.fn(async () => perWorkloadResult) });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    await act(async () => { await Promise.resolve(); });
+
+    const summary = host.querySelector('[aria-label="Retained evidence quotas"]')!;
+    expect(summary.textContent).toContain('Independent per-workload success and failure caps');
+    expect(summary.textContent).toContain('Default success cap10');
+    expect(summary.textContent).toContain('Success cap');
+    const paymentRow = [...summary.querySelectorAll('tbody tr')].find(row => row.textContent?.includes('payment'))!;
+    expect([...paymentRow.querySelectorAll('td')].map(cell => cell.textContent)).toEqual([
+      'PAYMENT_TEMPLATE', '10', '20', '15', '2', '10', '20', 'Success: 5 · Failure: 0', '1',
+    ]);
+    expect(summary.textContent).not.toContain('borrowed');
+    expect(summary.textContent).not.toContain('reclaimed borrow');
+  });
+
   it('keeps active list filters through an asynchronous refresh and bounds results to the returned rows', async () => {
     const next = deferred<JobSummary[]>();
     const listJobs = vi.fn<LoadJobsApi['listJobs']>()

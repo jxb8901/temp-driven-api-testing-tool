@@ -42,7 +42,9 @@ class LoadReportTest {
         evidence.put("count", 1);
         evidence.put("policy", Collections.<String,Object>singletonMap("quotaMode", "independent"));
         evidence.put("workloads", Collections.<String,Object>singletonMap("payments", new LinkedHashMap<String,Object>() {{
-            put("eligibleSuccessCount", 7); put("retainedSuccessCount", 2); put("retainedFailureCount", 1);
+            put("targetId", "PAYMENTS_TEMPLATE");
+            put("eligibleSuccessCount", 7); put("samplingIneligibleSuccessCount", 1);
+            put("retainedSuccessCount", 2); put("retainedFailureCount", 1);
             put("skippedSuccessQuotaCount", 3); put("skippedFailureQuotaCount", 0); put("skippedMissingEvidenceCount", 1);
         }}));
         evidence.put("items", Collections.<Map<String, Object>>singletonList(new LinkedHashMap<String, Object>() {{
@@ -75,7 +77,9 @@ class LoadReportTest {
         String htmlReport = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
         assertTrue(htmlReport.contains("Evidence coverage by workload"));
         assertTrue(htmlReport.contains("payments"));
+        assertTrue(htmlReport.contains("PAYMENTS_TEMPLATE"));
         assertTrue(htmlReport.contains("Eligible successes"));
+        assertTrue(htmlReport.contains("Sampling ineligible"));
 
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper()
                 .readValue(runDirectory.resolve("load-summary.json").toFile(), Map.class);

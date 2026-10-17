@@ -41,17 +41,21 @@ async function setInput(input: HTMLInputElement, value: string) {
 function renderEditor(model: LoadModel, callbacks: {
   onAggregateChange?: (value: string) => void;
   onEvidenceChange?: (value: string) => void;
+  onWorkloadEvidenceChange?: (id: string, value: string) => void;
   onValidityChange?: (key: string, value: string) => void;
   aggregate?: string;
   evidence?: string;
+  workloads?: Array<{ id: string; thresholdsJson: string; evidenceJson: string }>;
 } = {}) {
   const onAggregateChange = callbacks.onAggregateChange || vi.fn();
   const onEvidenceChange = callbacks.onEvidenceChange || vi.fn();
+  const onWorkloadEvidenceChange = callbacks.onWorkloadEvidenceChange || vi.fn();
   const onValidityChange = callbacks.onValidityChange || vi.fn();
   return {
-    onAggregateChange, onEvidenceChange, onValidityChange,
-    element: <ThresholdEvidenceEditor model={model} aggregate={callbacks.aggregate ?? '{}'} workloads={[]} evidence={callbacks.evidence ?? '{}'}
-      onAggregateChange={onAggregateChange} onWorkloadChange={vi.fn()} onEvidenceChange={onEvidenceChange} onValidityChange={onValidityChange} />,
+    onAggregateChange, onEvidenceChange, onWorkloadEvidenceChange, onValidityChange,
+    element: <ThresholdEvidenceEditor model={model} aggregate={callbacks.aggregate ?? '{}'} workloads={callbacks.workloads ?? []} evidence={callbacks.evidence ?? '{}'}
+      onAggregateChange={onAggregateChange} onWorkloadChange={vi.fn()} onWorkloadEvidenceChange={onWorkloadEvidenceChange}
+      onEvidenceChange={onEvidenceChange} onValidityChange={onValidityChange} />,
   };
 }
 
@@ -91,6 +95,32 @@ describe('ThresholdEvidenceEditor', () => {
     expect(view.onValidityChange).toHaveBeenCalledWith('evidence', expect.stringContaining('not both'));
     await setTextArea('Evidence settings advanced JSON', '{"maxFailureSamples":1000001}');
     expect(view.onValidityChange).toHaveBeenCalledWith('evidence', expect.stringContaining('1,000,000'));
+  });
+
+  it('edits per-workload defaults and cap-only overrides with effective values', async () => {
+    const view = renderEditor('virtualUsers', {
+      evidence: '{"quotaScope":"perWorkload","success":"sample","sampleRate":1,"defaults":{"maxSuccessSamples":10,"maxFailureSamples":20}}',
+      workloads: [{ id: 'payment', thresholdsJson: '{}', evidenceJson: '{}' }],
+    });
+    await act(async () => root.render(view.element));
+    expect(host.textContent).toContain('Effective caps for payment: success 10, failure 20');
+    const success = [...host.querySelectorAll<HTMLInputElement>('.att-evidence-form input')]
+      .find(input => input.closest('label')?.textContent?.includes('Success cap override'))!;
+    await setInput(success, '0');
+    expect(view.onWorkloadEvidenceChange).toHaveBeenCalledWith('payment', JSON.stringify({ maxSuccessSamples: 0 }, null, 2));
+  });
+
+  it('rejects mixed legacy and per-workload quota syntax before updating evidence', async () => {
+    const view = renderEditor('virtualUsers', {
+      evidence: '{"quotaScope":"perWorkload"}',
+      workloads: [{ id: 'payment', thresholdsJson: '{}', evidenceJson: '{}' }],
+    });
+    await act(async () => root.render(view.element));
+    await setTextArea('Evidence settings advanced JSON', '{"quotaScope":"perWorkload","maxFailureSamples":2}');
+    expect(view.onEvidenceChange).not.toHaveBeenCalled();
+    expect(view.onValidityChange).toHaveBeenCalledWith('evidence', expect.stringContaining('replace root'));
+    await setTextArea('Evidence settings advanced JSON', '{"defaults":{"maxSuccessSamples":2}}');
+    expect(view.onValidityChange).toHaveBeenCalledWith('evidence', expect.stringContaining('quotaScope'));
   });
 
   it('rejects invalid evidence values without replacing the last valid settings', async () => {
