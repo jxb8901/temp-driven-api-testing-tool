@@ -198,14 +198,14 @@ public final class ClosedVuScheduler implements LoadScheduler {
             } else {
                 try {
                     IterationResult result = executor.execute(iterationRequest);
-                    if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(iterationId))
+                    if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(iterationId, scenario.workloadId()))
                         result = result.materializeEvidence();
                     else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) evidenceStore.releaseEvidence(iterationId);
                     if (result.evidenceRef() == null) result.discardTransientWorkspace();
                     if (result.testdataStopRequested()) cancelled.set(true);
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                 } catch (RuntimeException failure) {
-                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(iterationId)) evidenceStore.releaseEvidence(iterationId);
+                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(iterationId, scenario.workloadId())) evidenceStore.releaseEvidence(iterationId);
                     status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR";
                 }
             }
@@ -277,7 +277,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
     }
     private long remainingRunMillis(long startedAt) { return LoadPhase.totalMs(scenario) - (timing.now() - startedAt); }
     private Path evidenceOutputRoot(String iterationId) {
-        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId)) return null;
+        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId, scenario.workloadId())) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
         return scenario.legacyV10() ? root : root.resolve(safe(scenario.workloadId()));
     }

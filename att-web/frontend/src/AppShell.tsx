@@ -222,13 +222,13 @@ export function AppShell({
   const [keyboardMode, setKeyboardMode] = useState<'palette' | 'shortcuts' | null>(null);
   const [currentUser, setCurrentUser] = useState<Pick<LocalAuthUser,'loginId'|'displayName'|'role'>|null>(null);
   const [canRevealConfigurationFields, setCanRevealConfigurationFields] = useState(false);
-  const [inspectionRestoreEpoch, setInspectionRestoreEpoch] = useState(0);
   const inspectionSessionEpoch = useSyncExternalStore(inspectionCache.subscribeSession, () => inspectionCache.sessionEpoch);
   useLayoutEffect(() => { inspectionCache.select(selectedPackage, selectedEnvironment); }, [selectedPackage, selectedEnvironment]);
   useEffect(() => {
     // A hidden tab may have refilled while another tab changed the account.
-    // Reset both on suspension and restore, including back/forward cache restores.
-    const reset = () => { inspectionCache.clear(true); setInspectionRestoreEpoch(epoch => epoch + 1); };
+    // Invalidate cached projections on suspension and restore without remounting
+    // the page: remounting also discards unsaved Debug form state.
+    const reset = () => { inspectionCache.clear(true); };
     window.addEventListener('pagehide', reset);
     window.addEventListener('pageshow', reset);
     document.addEventListener('visibilitychange', reset);
@@ -504,7 +504,7 @@ export function AppShell({
             </div>
           </div>
 
-          <main key={inspectionSessionEpoch + ":" + (route.kind === 'package' || route.kind === 'configuration' ? inspectionRestoreEpoch : 0)} id="main-content" tabIndex={-1}>{children}</main>
+          <main key={inspectionSessionEpoch} id="main-content" tabIndex={-1}>{children}</main>
           <footer className="page-footer"><span>ATT Server</span><span>API v{versionData?.apiVersion || '1'}</span></footer>
         </div>
         <DiscardChangesDialog navigation={navigation} />

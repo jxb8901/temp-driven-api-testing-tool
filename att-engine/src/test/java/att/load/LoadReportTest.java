@@ -40,6 +40,11 @@ class LoadReportTest {
                 new ThresholdResult("p95", "<= 100ms", "50.000ms", true, null)));
         Map<String, Object> evidence = new LinkedHashMap<String, Object>();
         evidence.put("count", 1);
+        evidence.put("policy", Collections.<String,Object>singletonMap("quotaMode", "independent"));
+        evidence.put("workloads", Collections.<String,Object>singletonMap("payments", new LinkedHashMap<String,Object>() {{
+            put("eligibleSuccessCount", 7); put("retainedSuccessCount", 2); put("retainedFailureCount", 1);
+            put("skippedSuccessQuotaCount", 3); put("skippedFailureQuotaCount", 0); put("skippedMissingEvidenceCount", 1);
+        }}));
         evidence.put("items", Collections.<Map<String, Object>>singletonList(new LinkedHashMap<String, Object>() {{
             put("workloadId", "payments<&"); put("execId", "exec-1"); put("iterationId", "steady-1");
             put("status", "SAMPLE"); put("path", "samples/00001-deadbeef.json"); put("caseLog", "executions/exec-1/case log<&.log");
@@ -67,6 +72,10 @@ class LoadReportTest {
         assertTrue(Files.isRegularFile(runDirectory.resolve("load-summary.json")));
         assertTrue(Files.isRegularFile(runDirectory.resolve("load-summary.yaml")));
         assertTrue(Files.isRegularFile(report));
+        String htmlReport = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+        assertTrue(htmlReport.contains("Evidence coverage by workload"));
+        assertTrue(htmlReport.contains("payments"));
+        assertTrue(htmlReport.contains("Eligible successes"));
 
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper()
                 .readValue(runDirectory.resolve("load-summary.json").toFile(), Map.class);

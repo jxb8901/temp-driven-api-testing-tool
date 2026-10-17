@@ -245,6 +245,19 @@ public final class LoadReportWriter {
             } else html.append("Legacy combined cap: ").append(escape(String.valueOf(policy.get("maxSamples"))));
             html.append(".</p>");
             if(evidence.get("warning")!=null)html.append("<p class=\"warning\" role=\"alert\">").append(escape(String.valueOf(evidence.get("warning")))).append("</p>");
+            Object workloadValue=evidence.get("workloads");
+            if(workloadValue instanceof Map && !((Map<?,?>)workloadValue).isEmpty()) {
+                html.append("<h3>Evidence coverage by workload</h3><div class=\"scroll\"><table><thead><tr><th>Workload</th><th>Eligible successes</th><th>Success retained</th><th>Failure retained</th><th>Success quota skips</th><th>Failure quota skips</th><th>Missing evidence</th></tr></thead><tbody>");
+                for(Map.Entry<?,?> entry:((Map<?,?>)workloadValue).entrySet()) {
+                    if(!(entry.getValue() instanceof Map))continue;
+                    Map<?,?> row=(Map<?,?>)entry.getValue();
+                    html.append("<tr><td>").append(escape(String.valueOf(entry.getKey()))).append("</td>");
+                    for(String key:new String[]{"eligibleSuccessCount","retainedSuccessCount","retainedFailureCount","skippedSuccessQuotaCount","skippedFailureQuotaCount","skippedMissingEvidenceCount"})
+                        html.append("<td>").append(escape(display(row.get(key)))).append("</td>");
+                    html.append("</tr>");
+                }
+                html.append("</tbody></table></div>");
+            }
         }
         Object itemsValue = evidence == null ? null : evidence.get("items");
         if (!(itemsValue instanceof List) || ((List<?>) itemsValue).isEmpty()) { html.append("<p class=\"empty\">No failure or sampled-success evidence was retained.</p></section>"); return; }

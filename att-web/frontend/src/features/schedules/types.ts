@@ -70,6 +70,7 @@ export interface ScheduleOccurrence {
   status: string;
   reason?: string | null;
   jobId?: string | null;
+  jobStatus?: string | null;
   createdAt?: string;
 }
 

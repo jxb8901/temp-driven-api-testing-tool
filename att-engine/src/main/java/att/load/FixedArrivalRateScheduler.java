@@ -172,7 +172,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                         if (evidenceStore != null)
                             request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence());
                         IterationResult result = executor.execute(request);
-                        if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(id)) {
+                        if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(id, scenario.workloadId())) {
                             result = result.materializeEvidence();
                         } else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) {
                             evidenceStore.releaseEvidence(id);
@@ -182,7 +182,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                         status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                     }
                 } catch (RuntimeException error) {
-                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(id)) evidenceStore.releaseEvidence(id);
+                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(id, scenario.workloadId())) evidenceStore.releaseEvidence(id);
                     status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR";
                 }
                 finally {
@@ -232,7 +232,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 scenario.workloadId(), scenario.targetType(), scenario.targetId());
     }
     private Path evidenceOutputRoot(String iterationId) {
-        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId)) return null;
+        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId, scenario.workloadId())) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
         return scenario.legacyV10() ? root : root.resolve(safe(scenario.workloadId()));
     }

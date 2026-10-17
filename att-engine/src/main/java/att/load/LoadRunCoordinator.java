@@ -111,6 +111,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
 
     public LoadRunResult run() throws Exception {
         resources.initializeExecutionNamespace(outputRoot.resolve("load").resolve(runId));
+        if (evidenceStore != null) for (LoadWorkload workload : scenario.workloads()) evidenceStore.registerWorkload(workload.id());
         final LoadSchedulerTiming timing = LoadSchedulerTiming.system();
         final long rateWindow = LoadPhase.totalMs(scenario);
         final LoadMetrics[] aggregateHolder = new LoadMetrics[1];

@@ -535,7 +535,9 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
             <td data-label="Trigger">{statusLabel(item.triggerType)}</td><td data-label="Occurrence"><code>{item.occurrenceId}</code></td>
             <td data-label="Status"><span className={`att-schedule-state ${item.status === 'submitted' ? 'is-enabled' : item.status === 'skipped' || item.status === 'failed-to-submit' ? 'is-paused' : ''}`}>{statusLabel(item.status)}</span></td>
             <td data-label="Reason">{item.reason ? explainOccurrence(item.reason) : '—'}</td>
-            <td data-label="Job">{item.jobId ? <button type="button" className="att-schedule-job-link" onClick={() => onOpenJob(item.jobId || '')}>{item.jobId}</button> : 'No job submitted'}</td>
+            <td data-label="Job">{item.jobId ? (item.jobStatus
+              ? <button type="button" className="att-schedule-job-link" onClick={() => onOpenJob(item.jobId || '')}>{item.jobId}</button>
+              : <span className="att-schedule-job-unavailable">{item.jobId} · no longer available</span>) : 'No job submitted'}</td>
           </tr>)}</tbody></table>
       </div>}
     </section>}

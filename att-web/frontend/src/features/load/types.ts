@@ -168,6 +168,7 @@ export interface LoadFeatureProps {
   inlineLoadEnabled: boolean;
   schedulingEnabled?: boolean;
   principal?: string;
+  onRetryEnvironments?: () => void;
   onPackageChange: (packageId: string) => void;
   onEnvironmentChange: (environment: string) => void;
   onJobAccepted: (jobId: string) => void;

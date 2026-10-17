@@ -204,7 +204,7 @@ function initialTiming(policy: JsonObject): TimingDraft {
 export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const {
     api, packages, selectedPackage, selectedEnvironment, environments = [], environmentState, inlineLoadEnabled,
-    schedulingEnabled = false, principal, onPackageChange, onEnvironmentChange, onJobAccepted, onSchedule, confirmStart,
+    schedulingEnabled = false, principal, onPackageChange, onEnvironmentChange, onJobAccepted, onSchedule, confirmStart, onRetryEnvironments,
   } = props;
   const [model, setModel] = useState<LoadModel>('virtualUsers');
   const [policy, setPolicy] = useState<JsonObject | null>(null);
@@ -463,7 +463,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
           </label>
         </div>
         {environmentState === 'loading' && <p className="att-help" role="status" aria-busy="true">Loading declared package environments…</p>}
-        {environmentState === 'error' && <p className="att-inline-error" role="status">Package environments could not be loaded. Only the Server default environment is available in this view.</p>}
+        {environmentState === 'error' && <p className="att-inline-error" role="status">Package environments could not be loaded. Only the Server default environment is available in this view.{onRetryEnvironments && <> <button type="button" onClick={onRetryEnvironments}>Retry</button></>}</p>}
         <fieldset className="att-timing-fieldset">
           <legend>Shared timing envelope</legend>
           <DurationField label="Warm-up" value={timing.warmup} onChange={value => setTiming(current => ({ ...current, warmup: value }))} />

@@ -6,6 +6,7 @@ import { ExplorerPage } from './ExplorerPage';
 import { SourceViewer, sourceViewerLimits } from './SourceViewer';
 import { ConfigurationExplorer } from './ConfigurationExplorer';
 import { TypedSidecarForm } from './TypedSidecarForm';
+import { inspectionCache } from '../../inspectionCache';
 import type { ConfigurationResponse, ExplorerApi, JsonObject, ResourceIdentity, ResourceSummary } from './types';
 
 vi.mock('../code/CodeEditor', () => ({
@@ -378,6 +379,44 @@ describe('Explorer page integration', () => {
     expect(submitDebug).toHaveBeenCalledWith(expect.objectContaining({ packageId: 'payments', principal: 'anonymous-run-42' }));
     expect(onJobAccepted).toHaveBeenCalledWith('job-99');
     expect(dirtyTransitions.at(-1)).toBe(false);
+  });
+
+  it('keeps an open Debug form and authored edits across tab visibility restores', async () => {
+    const template = resource('template', 'checkout');
+    const getDebugForm = vi.fn(async () => ({
+      target: { type: 'template' as const, id: 'checkout' },
+      input: { inputs: { credential: 'package-default' } },
+    }));
+    const api = apiWith({
+      listResources: vi.fn(async () => ({ items: [template], total: 1, nextCursor: null })),
+      getResource: vi.fn(async () => ({ resource: template, definition: { template: 'checkout' } })),
+      getDebugForm,
+    });
+    await render(<ExplorerPage api={api} packageId="payments"
+      resourceRoute={{ type: 'template' as const, resourceId: 'checkout' }} environment=""
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}}
+      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+    await settle();
+
+    click(button('Run this target'));
+    await settle();
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="credential value"]');
+    expect(input).not.toBeNull();
+    setValue(input!, 'edited-value');
+    click(button('Validate and preview'));
+    await settle();
+    expect(container.textContent).toContain('accepted: true');
+
+    // Mirror AppShell's suspension handler: clear cached projections, then let the
+    // Explorer drop only the validated draft while retaining the authored form.
+    act(() => { inspectionCache.clear(true); document.dispatchEvent(new Event('visibilitychange')); });
+    await settle();
+
+    const after = container.querySelector<HTMLInputElement>('input[aria-label="credential value"]');
+    expect(after).not.toBeNull();
+    expect(after!.value).toBe('edited-value');
+    expect(container.textContent).toContain('Run');
+    expect(container.textContent).not.toContain('accepted: true');
   });
 
   it('shows anonymous unauthorized resource errors in the page without exposing the response body', async () => {

@@ -16,7 +16,8 @@ const sampleSchedule: LoadSchedule = {
 const packages: AsyncState<PackageSummary[]> = { status: 'ready', data: [{ packageId: 'payments', name: 'Payments' }] };
 const occurrences: ScheduleOccurrence[] = [
   { occurrenceId: 'O-SKIPPED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-14T18:00:00Z', triggerType: 'scheduled', status: 'skipped', reason: 'schedule-overlap-limit' },
-  { occurrenceId: 'O-SUBMITTED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-13T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-204' },
+  { occurrenceId: 'O-SUBMITTED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-13T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-204', jobStatus: 'PASS' },
+  { occurrenceId: 'O-EXPIRED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-12T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-099', jobStatus: null },
 ];
 
 if (!HTMLDialogElement.prototype.showModal) {
@@ -104,6 +105,7 @@ describe('ScheduledLoadPage', () => {
     expect(host.textContent).toContain('Skipped because this schedule already reached its concurrent-run limit.');
     await click([...host.querySelectorAll('.att-schedule-job-link')][0]);
     expect(onOpenJob).toHaveBeenCalledWith('JOB-204');
+    expect(host.textContent).toContain('JOB-099 · no longer available');
     expect(api.getLoadScheduleExecutions).toHaveBeenCalledWith(sampleSchedule.id, 100, expect.any(AbortSignal));
   });
 

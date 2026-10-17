@@ -15,6 +15,7 @@ interface QuickLoadPageProps {
   environmentState: 'loading' | 'ready' | 'error';
   inlineLoadEnabled: boolean;
   schedulingEnabled?: boolean;
+  onRetryEnvironments?: () => void;
   onEnvironmentChange(environment: string): void;
   onJobAccepted(jobId: string): void;
   onSchedule?(input: { packageId: string; environment?: string; draftId: string; previewYaml?: string }): void;
@@ -88,7 +89,7 @@ function makeScenario(policy: JsonObject, model: LoadModel, id: string, targetTy
   return scenario;
 }
 
-export function QuickLoadPage({ api, packageId, target, environment, environments, environmentState, inlineLoadEnabled, schedulingEnabled = false, onEnvironmentChange, onJobAccepted, onSchedule, onCancel, registerUnsavedChanges }: QuickLoadPageProps) {
+export function QuickLoadPage({ api, packageId, target, environment, environments, environmentState, inlineLoadEnabled, schedulingEnabled = false, onEnvironmentChange, onJobAccepted, onSchedule, onCancel, onRetryEnvironments, registerUnsavedChanges }: QuickLoadPageProps) {
   const targetType = validTarget(target.type) ? target.type : null;
   const [model, setModel] = useState<LoadModel>('virtualUsers');
   const [templateId, setTemplateId] = useState('');
@@ -324,7 +325,7 @@ export function QuickLoadPage({ api, packageId, target, environment, environment
         {model === 'arrivalRate' && <label>Maximum concurrent<input type="number" min="1" step="1" value={maxConcurrent} onChange={event => change(setMaxConcurrent, event.currentTarget.value)} /></label>}
         <label>Duration<input value={duration} onChange={event => change(setDuration, event.currentTarget.value)} placeholder="e.g. 30s or 5m" /></label>
       </div>
-      {environmentState === 'loading' && <p role="status">Loading package environments…</p>}{environmentState === 'error' && <p className="att-help">Environment profiles are unavailable; the package default remains selectable.</p>}
+      {environmentState === 'loading' && <p role="status">Loading package environments…</p>}{environmentState === 'error' && <p className="att-help">Environment profiles are unavailable; the package default remains selectable.{onRetryEnvironments && <> <button type="button" onClick={onRetryEnvironments}>Retry</button></>}</p>}
       <p className="att-help">{policyMessage}</p>
     </section>
     <section className="att-load-section" aria-labelledby="quick-load-inputs">

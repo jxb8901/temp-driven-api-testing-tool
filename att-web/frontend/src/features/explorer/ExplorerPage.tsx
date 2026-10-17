@@ -83,8 +83,9 @@ function ExplorerReference({ reference, onOpen }: { reference: ResourceReference
     <span>{reference.resolution === 'unresolved' ? 'Unresolved reference' : reference.type || reference.resolution || 'unresolved'}</span></li>;
 }
 
-export function ExplorerPage({ api, packageId, resourceRoute, environment, principalLabel = '', onResourceRouteChange,
-  onEnvironmentChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad, onScheduleDebug, onOpenConfiguration, onOpenConfigurationFile, registerUnsavedChanges }: ExplorerPageProps) {
+export function ExplorerPage({ api, packageId, resourceRoute, environment, environments = [], environmentState = 'ready',
+  principalLabel = '', onResourceRouteChange, onEnvironmentChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
+  onScheduleDebug, onOpenConfiguration, onOpenConfigurationFile, onRetryEnvironments, registerUnsavedChanges }: ExplorerPageProps) {
   const initialListState = useRef(savedExplorerList(packageId)).current;
   const [query, setQuery] = useState(initialListState.query);
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
@@ -126,6 +127,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   const dirtyRef = useRef(false);
   const debugValidationGeneration = useRef(0);
   const unregisterDirtyRef = useRef<(() => void) | null>(null);
+  const detailIdentityKey = useRef('');
   const selectedRouteKey = resourceRouteKey(resourceRoute);
   const identity = useMemo<ResourceIdentity | null>(() => resourceRoute && isResourceType(resourceRoute.type)
     ? { packageId, type: resourceRoute.type, resourceId: resourceRoute.resourceId } : null,
@@ -161,6 +163,20 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   useEffect(() => {
     setPrincipal(principalLabel);
   }, [principalLabel]);
+
+  useEffect(() => {
+    // Preserve authored Debug inputs across suspension/resume, but drop validated
+    // previews that may reference a stale projection or session.
+    const invalidateDraft = () => { debugValidationGeneration.current++; setDraft(null); };
+    window.addEventListener('pagehide', invalidateDraft);
+    window.addEventListener('pageshow', invalidateDraft);
+    document.addEventListener('visibilitychange', invalidateDraft);
+    return () => {
+      window.removeEventListener('pagehide', invalidateDraft);
+      window.removeEventListener('pageshow', invalidateDraft);
+      document.removeEventListener('visibilitychange', invalidateDraft);
+    };
+  }, []);
 
   useEffect(() => {
     setResources([]); setCursor(null); setResourceError(''); setResourceStatus('Loading package resources…');
@@ -268,9 +284,15 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
   };
 
   useEffect(() => {
-    if (!identity) { setDetail(null); setDefinition(null); setDetailError(''); return; }
+    if (!identity) { detailIdentityKey.current = ''; setDetail(null); setDefinition(null); setDetailError(''); return; }
     const controller = new AbortController();
-    setDetailLoading(true); setDetailError(''); setDetail(null); setDefinition(null);
+    // Revalidation refreshes a projection in place, but clearing detail on every
+    // cache invalidation would drop the open Debug form and its authored inputs.
+    const identityKey = `${identity.packageId}:${identity.type}:${identity.resourceId}`;
+    const identityChanged = detailIdentityKey.current !== identityKey;
+    detailIdentityKey.current = identityKey;
+    setDetailLoading(true); setDetailError('');
+    if (identityChanged) { setDetail(null); setDefinition(null); }
     api.getResource(identity, controller.signal).then(response => {
       if (controller.signal.aborted) return;
       setDetail(response.resource); setDefinition(response.definition ?? {}); setDetailError('');
@@ -419,7 +441,13 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, princ
       <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>Package Explorer</h1>
         <p>Package resources and counts are independent of runtime environment. Select an environment only when inspecting or running a resource.</p></div>
       {identity && <label>Run, Debug, and Load environment
-        <input value={environment} maxLength={128} onChange={event => changeEnvironment(event.currentTarget.value)} placeholder="Package default" />
+        <select value={environment} onChange={event => changeEnvironment(event.currentTarget.value)} disabled={environmentState === 'loading'}>
+          <option value="">Package default</option>
+          {environment && !environments.includes(environment) && <option value={environment}>{environment}</option>}
+          {environments.map(name => <option key={name} value={name}>{name}</option>)}
+        </select>
+        {environmentState === 'loading' && <span className="att-help" role="status" aria-busy="true">Loading package environments…</span>}
+        {environmentState === 'error' && <span className="att-error" role="alert">Package environments could not be loaded.{onRetryEnvironments && <> <button type="button" onClick={onRetryEnvironments}>Retry</button></>}</span>}
       </label>}
     </header>
 

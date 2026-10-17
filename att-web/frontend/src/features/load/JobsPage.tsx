@@ -91,6 +91,8 @@ function EvidenceQuotaSummary({ payload }: { payload: JobResultResponse | null }
   const rawPolicy = evidence.policy;
   if (!rawPolicy || typeof rawPolicy !== 'object' || Array.isArray(rawPolicy)) return null;
   const policy = rawPolicy as Record<string, unknown>;
+  const workloadStats = evidence.workloads && typeof evidence.workloads === 'object' && !Array.isArray(evidence.workloads)
+    ? evidence.workloads as Record<string, Record<string, unknown>> : {};
   const labels: Record<string, string> = {
     maxSamples: 'Combined limit', maxSuccessSamples: 'Success limit', maxFailureSamples: 'Failure limit',
     retainedSuccessCount: 'Success samples retained', retainedFailureCount: 'Failure samples retained',
@@ -108,6 +110,19 @@ function EvidenceQuotaSummary({ payload }: { payload: JobResultResponse | null }
         .filter(key => evidence[key] != null).map(key => <div key={key}><dt>{labels[key]}</dt><dd>{displayValue(evidence[key])}</dd></div>)}
     </dl>
     {typeof evidence.warning === 'string' && <p role="alert">{evidence.warning}</p>}
+    {Object.keys(workloadStats).length > 0 && <>
+      <h4>Evidence coverage by workload</h4>
+      <div className="att-table-scroll"><table><thead><tr><th>Workload</th><th>Eligible successes</th><th>Success retained</th><th>Failure retained</th><th>Quota skips</th><th>Missing evidence</th></tr></thead>
+        <tbody>{Object.entries(workloadStats).map(([workload, stats]) => <tr key={workload}>
+          <th scope="row">{workload}</th>
+          <td>{displayValue(stats.eligibleSuccessCount)}</td>
+          <td>{displayValue(stats.retainedSuccessCount)}</td>
+          <td>{displayValue(stats.retainedFailureCount)}</td>
+          <td>Success: {displayValue(stats.skippedSuccessQuotaCount)} · Failure: {displayValue(stats.skippedFailureQuotaCount)}</td>
+          <td>{displayValue(stats.skippedMissingEvidenceCount)}</td>
+        </tr>)}</tbody>
+      </table></div>
+    </>}
   </section>;
 }
 

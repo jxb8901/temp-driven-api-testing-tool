@@ -10,6 +10,9 @@
     <description>Single-node ATT control plane for external Jakarta Servlet containers.</description>
     <dependencies>
         <dependency><groupId>att</groupId><artifactId>att-server-api</artifactId><version>${project.version}</version></dependency>
+        <!-- ServerRuntime directly uses att.metrics/att.security classes, so keep the
+             dependency explicit: the application-jar assembly only bundles direct deps. -->
+        <dependency><groupId>att</groupId><artifactId>att-security</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>att</groupId><artifactId>att-cli</artifactId><version>${project.version}</version><scope>test</scope></dependency>
         <dependency><groupId>att</groupId><artifactId>att-remote</artifactId><version>${project.version}</version><scope>test</scope></dependency>
         <dependency><groupId>att</groupId><artifactId>att-web</artifactId><version>${project.version}</version></dependency>

@@ -109,6 +109,29 @@ class LoadEvidencePolicyTest {
         assertEquals(0,store.statistics().get("reservedSuccessCount"));assertEquals(0,store.statistics().get("reservedFailureCount"));
     }
 
+    @Test void successQuotaIsSharedFairlyAcrossRegisteredWorkloads() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",4,"maxFailureSamples",4));
+        store.registerWorkload("fast");
+        store.registerWorkload("slow");
+        // A faster workload may not consume the whole success budget before a
+        // slower eligible workload has had its minimum share.
+        assertTrue(store.reserveSuccessEvidence("fast-1","fast"));
+        assertTrue(store.reserveSuccessEvidence("fast-2","fast"));
+        assertFalse(store.reserveSuccessEvidence("fast-3","fast"));
+        assertTrue(store.reserveSuccessEvidence("slow-1","slow"));
+        assertTrue(store.reserveSuccessEvidence("slow-2","slow"));
+        assertFalse(store.reserveSuccessEvidence("slow-3","slow"));
+        store.onEvent(event("fast-1","fast",ResultStatus.PASS));
+        store.onEvent(event("slow-1","slow",ResultStatus.PASS));
+        assertEquals(2,store.events().size());
+        assertEquals(2,store.events().stream().map(LoadEvent::workloadId).distinct().count());
+        @SuppressWarnings("unchecked")
+        Map<String,Object> workloads=(Map<String,Object>)store.statistics().get("workloads");
+        assertEquals(1,((Map<?,?>)workloads.get("fast")).get("retainedSuccessCount"));
+        assertEquals(1,((Map<?,?>)workloads.get("slow")).get("retainedSuccessCount"));
+        assertEquals(2L,store.statistics().get("skippedSuccessQuotaCount"));
+    }
+
     @Test void publicModesResolveToDistinctPolicies() {
         LoadEvidencePolicy metrics = policy("mode", "metrics");
         assertEquals(LoadEvidencePolicy.Success.NONE, metrics.success());
@@ -269,5 +292,9 @@ class LoadEvidencePolicyTest {
         Files.write(caseLog, Collections.singletonList("evidence"));
         return LoadEvent.completed("run", "closed", "STEADY", id, "VU-1", 1,
                 0L, 0L, 1L, status, new EvidenceRef(workspace, caseLog, null));
+    }
+
+    private LoadEvent event(String id, String workload, ResultStatus status) throws Exception {
+        return event(id, status).withWorkloadId(workload);
     }
 }
