@@ -147,6 +147,8 @@ public final class WorkerMain {
                     ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                     ||"quick-load-policy".equals(request.inspectionAction)
                     ||"load-scenario".equals(request.inspectionAction)
+                    ||"load-catalog".equals(request.inspectionAction)
+                    ||"load-source".equals(request.inspectionAction)
                     ||"run-input".equals(request.inspectionAction));
             if(draftInspection) {
                 String safeMessage=DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message);
@@ -284,6 +286,17 @@ public final class WorkerMain {
                 Map<String,Object> inspected=r.inspectionPath==null
                         ?inspector.validateLoadScenario(r.inlineLoadScenario)
                         :inspector.validateLoadScenarioFile(r.inspectionPath);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
+            if("load-catalog".equals(r.inspectionAction)) {
+                Map<String,Object> inspected=inspector.inspectLoadCatalog(r.inspectionQuery,
+                        r.inspectionOffset==null?0:r.inspectionOffset,r.inspectionLimit==null?50:r.inspectionLimit,r.expectedRevisionDigest);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
+            if("load-source".equals(r.inspectionAction)) {
+                Map<String,Object> inspected=inspector.inspectLoadSource(r.inspectionPath);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }

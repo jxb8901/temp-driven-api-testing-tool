@@ -278,6 +278,12 @@ final class ServerRuntime implements AutoCloseable {
         if("local".equals(config.authMode)){List<Map<String,Object>> owned=store.listOwned(100,principal);if(search==null||search.isBlank())return owned;String q=search.toLowerCase(java.util.Locale.ROOT);return owned.stream().filter(row->String.valueOf(row.get("principal")).toLowerCase(java.util.Locale.ROOT).contains(q)).toList();}
         return store.list(100,search);
     }
+    List<Map<String,Object>> loadJobsFor(String principal,int offset,int limit) throws Exception {
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        if(offset<0||offset>1000000||limit<1||limit>100)throw new IllegalArgumentException("Load job pagination is invalid");
+        int fetch=limit==Integer.MAX_VALUE?limit:limit+1;
+        return "local".equals(config.authMode)?store.listOwnedLoad(fetch,offset,principal):store.listLoad(fetch,offset);
+    }
     Job job(String id){if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Job j=jobs.get(id);if(j==null)throw new NotFoundException();return j;}
     Map<String,Object> jobRecord(String id) throws Exception {
         if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
@@ -360,6 +366,42 @@ final class ServerRuntime implements AutoCloseable {
             else result.put("nextCursor",null);
         }
         return result;
+    }
+    Map<String,Object> inspectLoadCatalog(String packageId,String query,int requestedLimit,String cursor,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String normalizedQuery=query==null?"":query.trim();
+        if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
+        int limit=requestedLimit==0?50:requestedLimit;if(limit<1||limit>100)throw new IllegalArgumentException("limit must be between 1 and 100");
+        Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,"load",normalizedQuery,"name","asc",principal);
+        WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-catalog";
+        request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
+        request.expectedRevisionDigest=prior==null?null:prior.revision;
+        Map<String,Object> result=executeInspection(root,request);
+        Object rawItems=result.get("items");
+        if(rawItems instanceof List)for(Object rawItem:(List<?>)rawItems)if(rawItem instanceof Map) {
+            @SuppressWarnings("unchecked") Map<String,Object> item=(Map<String,Object>)rawItem;
+            boolean scenario="scenario".equals(item.get("kind"));
+            boolean template="template".equals(item.get("kind"));
+            item.put("runNow",scenario&&config.inlineLoad.enabled);
+            item.put("schedule",scenario&&config.scheduling.enabled);
+            item.put("createQuickLoad",template&&config.inlineLoad.enabled&&Boolean.TRUE.equals(item.get("createQuickLoad")));
+        }
+        Object revision=result.remove("revisionDigest");Object next=result.remove("nextOffset");
+        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision)));
+        if(next instanceof Number&&revision instanceof String)
+            result.put("nextCursor",encodeCursor(packageId,"load",normalizedQuery,"name","asc",((Number)next).intValue(),(String)revision,principal));
+        else result.put("nextCursor",null);
+        return result;
+    }
+    Map<String,Object> inspectLoadSource(String packageId,String resourceId,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-source";request.inspectionPath=resourceId;
+        return executeInspection(root,request);
     }
     Map<String,Object> inspectDebugForm(String packageId,String type,String resourceId,String environment,String principal) throws Exception {
         Map<String,Object> result=inspectDebugFormInternal(packageId,type,resourceId,environment,principal);
@@ -518,6 +560,33 @@ final class ServerRuntime implements AutoCloseable {
             checkDraftCapacity(principal);
             advancedLoadDrafts.put(draft.id,draft);
         }
+        return advancedLoadDraftView(draft);
+    }
+    Map<String,Object> createCatalogLoadDraft(JsonNode input,String principal) throws Exception {
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        if(!config.inspection.enabled)throw new NotFoundException();
+        requireInlineLoadEnabled();
+        requireObject(input,"A JSON object is required");requireOnlyFields(input,"packageId","environment","scenario");
+        String packageId=required(input,"packageId"),scenarioPath=required(input,"scenario");
+        if(scenarioPath.length()>1024)throw new IllegalArgumentException("scenario path is invalid");
+        Path relative=java.nio.file.Paths.get(scenarioPath.replace('\\','/')).normalize();
+        String lower=scenarioPath.toLowerCase(java.util.Locale.ROOT);
+        if(relative.isAbsolute()||relative.startsWith("..")||!relative.startsWith("load")
+                ||!lower.endsWith(".yaml")&&!lower.endsWith(".yml"))
+            throw new IllegalArgumentException("scenario must be a package-relative YAML file under load/");
+        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
+        WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction="load-scenario";request.inspectionPath=scenarioPath;
+        Map<String,Object> inspected=executeInspection(root,request);
+        Object rawScenario=inspected.remove("normalizedScenario"),rawDigest=inspected.remove("revisionDigest"),rawModel=inspected.get("model");
+        if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
+                ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel))
+            throw new IllegalStateException("Load scenario validation Worker returned an invalid response");
+        @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
+        enforceInlineLoadLimits(scenario);
+        AdvancedLoadDraftState draft=new AdvancedLoadDraftState("A"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
+                principal,packageId,environment,(String)rawModel,(String)rawDigest,scenario,inspected,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
+        synchronized(draftLock) { expireDrafts();checkDraftCapacity(principal);advancedLoadDrafts.put(draft.id,draft); }
         return advancedLoadDraftView(draft);
     }
     Map<String,Object> getDebugDraft(String id,String principal) {

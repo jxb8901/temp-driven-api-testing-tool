@@ -65,7 +65,8 @@ export interface SchedulePreview extends SchedulePreviewInput {
 export interface ValidatedScheduleIntent {
   packageId: string;
   environment?: string;
-  draftId: string;
+  draftId?: string;
+  scenario?: string;
   previewYaml?: string;
   executionType?: 'run' | 'load';
   legacyDebug?: boolean;

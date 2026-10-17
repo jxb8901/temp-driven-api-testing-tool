@@ -14,7 +14,7 @@ export type AppRoute =
   | { kind: 'packages' }
   | { kind: 'package'; packageId: string; resource?: ResourceRoute }
   | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab }
-  | { kind: 'quick-load'; packageId: string; target: ResourceRoute; environment?: string }
+  | { kind: 'quick-load'; packageId: string; target?: ResourceRoute; environment?: string; templateId?: string; model?: 'virtualUsers' | 'arrivalRate' }
   | { kind: 'run'; packageId?: string }
   | { kind: 'jobs'; jobId?: string }
   | { kind: 'load'; packageId?: string }
@@ -68,10 +68,14 @@ export function parseRoute(hash: string): AppRoute {
       tab,
     };
   }
-  if (parts[0] === 'quick-load' && parts[1] && parts[2] && parts[3]) {
+  if (parts[0] === 'quick-load' && parts[1]) {
+    const model = query.get('model');
     return {
-      kind: 'quick-load', packageId: parts[1], target: { type: parts[2], resourceId: parts[3] },
+      kind: 'quick-load', packageId: parts[1],
+      ...(parts[2] && parts[3] ? { target: { type: parts[2], resourceId: parts[3] } } : {}),
       environment: query.has('environment') ? query.get('environment') || '' : undefined,
+      ...(query.get('templateId') ? { templateId: query.get('templateId')! } : {}),
+      ...(model === 'virtualUsers' || model === 'arrivalRate' ? { model } : {}),
     };
   }
   if (parts[0] === 'run') return { kind: 'run', packageId: parts[1] || undefined };
@@ -123,9 +127,12 @@ export function formatRoute(route: AppRoute): string {
     case 'quick-load': {
       const query = new URLSearchParams();
       if (route.environment !== undefined) query.set('environment', route.environment);
+      if (route.templateId) query.set('templateId', route.templateId);
+      if (route.model) query.set('model', route.model);
       const suffix = query.toString();
-      return '#/quick-load/' + encodeURIComponent(route.packageId) + '/' + encodeURIComponent(route.target.type)
-        + '/' + encodeURIComponent(route.target.resourceId) + (suffix ? '?' + suffix : '');
+      return '#/quick-load/' + encodeURIComponent(route.packageId)
+        + (route.target ? '/' + encodeURIComponent(route.target.type) + '/' + encodeURIComponent(route.target.resourceId) : '')
+        + (suffix ? '?' + suffix : '');
     }
     case 'jobs': return route.jobId ? '#/jobs/' + encodeURIComponent(route.jobId) : '#/jobs';
     case 'load': return route.packageId ? '#/advanced-load/' + encodeURIComponent(route.packageId) : '#/advanced-load';

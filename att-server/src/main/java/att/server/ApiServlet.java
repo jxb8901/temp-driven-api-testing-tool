@@ -39,7 +39,7 @@ public final class ApiServlet extends HttpServlet {
     @Override public void init() throws ServletException {Object r=getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(!(r instanceof ServerRuntime))throw new ServletException("ATT Server runtime did not initialize");runtime=(ServerRuntime)r;}
     @Override protected void service(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
         long inspectionStarted=System.nanoTime();
-        boolean inspection=resourcePath(path(req))||configurationPath(path(req));
+        boolean inspection=resourcePath(path(req))||configurationPath(path(req))||path(req).matches("/packages/[^/]+/load-catalog(?:/source)?");
         try { serviceRequest(req,res); }
         finally { if(inspection)runtime.inspectionMetrics.record(att.metrics.InspectionMetrics.Stage.HTTP,System.nanoTime()-inspectionStarted); }
     }
@@ -55,6 +55,7 @@ public final class ApiServlet extends HttpServlet {
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
             if("/version".equals(path)){json(res,200,Map.of("version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"buildTime",ServerBuildInfo.BUILD_TIME,"gitCommit",ServerBuildInfo.GIT_COMMIT,"javaMinimum",17,"inlineLoadEnabled",runtime.config.inlineLoad.enabled,"loadSchedulingEnabled",runtime.config.scheduling.enabled,"unifiedRunVersion",RunDefinition.VERSION,"authMode",runtime.config.authMode,"requestId",requestId));return;}
             boolean resourceRequest=resourcePath(path);
+            boolean loadCatalogRequest=path.matches("/packages/[^/]+/load-catalog(?:/source)?");
             boolean configurationRequest=configurationPath(path);
             boolean loadPolicyRequest=loadPolicyPath(path);
             if(loadSchedulePath(path)){scheduleGet(req,res,path,requestId);return;}
@@ -62,6 +63,7 @@ public final class ApiServlet extends HttpServlet {
             String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
             if("/metrics".equals(path)){Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
             if(resourceRequest){resourceGet(req,res,path,requestId,principal);return;}
+            if(loadCatalogRequest){loadCatalogGet(req,res,path,requestId,principal);return;}
             if(configurationRequest){configurationGet(req,res,path,requestId,principal);return;}
             if(loadPolicyRequest){loadPolicyGet(req,res,path,requestId,principal);return;}
             if(draftRequest){
@@ -74,7 +76,16 @@ public final class ApiServlet extends HttpServlet {
             }
             if("/packages".equals(path)){json(res,200,Map.of("items",runtime.packages(),"requestId",requestId));return;}
             if(path.startsWith("/packages/")){String id=segment(path,2);json(res,200,runtime.packageView(id));return;}
-            if("/jobs".equals(path)){json(res,200,Map.of("items",runtime.jobsFor(principal,principalSearch(req)),"requestId",requestId));return;}
+            if("/jobs".equals(path)){
+                if("load".equals(req.getParameter("executionType"))) {
+                    int limit=parseConfigurationLimit(req.getParameter("limit")),offset=parseOffset(req.getParameter("offset"));
+                    List<Map<String,Object>> items=runtime.loadJobsFor(principal,offset,limit);
+                    Integer next=items.size()>limit?Integer.valueOf(offset+limit):null;
+                    if(next!=null)items=items.subList(0,limit);
+                    Map<String,Object> response=new LinkedHashMap<>();response.put("items",items);response.put("nextOffset",next);response.put("requestId",requestId);json(res,200,response);
+                } else json(res,200,Map.of("items",runtime.jobsFor(principal,principalSearch(req)),"requestId",requestId));
+                return;
+            }
             if(path.startsWith("/jobs/"))runtime.requireJobOwner(segment(path,2),principal);
             if(path.matches("/jobs/[^/]+/events")){sse(req,res,segment(path,2));return;}
             if(path.startsWith("/jobs/")&&path.contains("/artifacts/")){String prefix=path.substring(0,path.indexOf("/artifacts/"));String id=segment(prefix,2);String relative=path.substring(path.indexOf("/artifacts/")+11);sendArtifact(res,id,runtime.artifact(id,relative));return;}
@@ -100,9 +111,9 @@ public final class ApiServlet extends HttpServlet {
         if(path.startsWith("/auth/")){authPost(req,res,path,requestId);return;}
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
-        boolean createRunDraft="/drafts/run".equals(path),createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path);
+        boolean createRunDraft="/drafts/run".equals(path),createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path),createCatalogLoadDraft="/drafts/load-catalog".equals(path);
         String command=path.startsWith("/jobs/")?path.substring("/jobs/".length()):"";
-        if(!createRunDraft&&!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        if(!createRunDraft&&!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!createCatalogLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try {
             if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
             if(!checkOrigin(req,res,requestId,false))return;
@@ -116,6 +127,7 @@ public final class ApiServlet extends HttpServlet {
             if(createDebugDraft){DebugDraft draft=ServerRuntime.JSON.convertValue(runtime.createDebugDraft(input,identity.authorizationPrincipal()),DebugDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
             if(createQuickLoadDraft){LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createQuickLoadDraft(input,identity.authorizationPrincipal()),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
             if(createAdvancedLoadDraft){LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createAdvancedLoadDraft(input,identity.authorizationPrincipal()),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
+            if(createCatalogLoadDraft){LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createCatalogLoadDraft(input,identity.authorizationPrincipal()),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
             JsonNode workerInput=RequestIdentity.withoutSubmittedPrincipal(input);
             if("run".equals(command)&&input.has("draftId")){
                 Map<String,Object> job=runtime.submitRunDraft(input,identity.authorizationPrincipal(),identity.persistedPrincipal());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);return;
@@ -404,6 +416,25 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionTimeoutException e){throw e;}
           catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
           catch(ServerRuntime.InlineLoadDisabledException e){throw e;}
+          catch(IllegalArgumentException e){throw e;}
+          catch(Exception e){throw new IOException(e);}
+    }
+    private void loadCatalogGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
+        String[] parts=path.split("/");
+        try {
+            if(parts.length<4||parts.length>5||!"packages".equals(parts[1])||parts[2].isEmpty()||!"load-catalog".equals(parts[3]))throw new ServerRuntime.NotFoundException();
+            Map<String,Object> result;
+            if(parts.length==5&&"source".equals(parts[4])) result=runtime.inspectLoadSource(parts[2],req.getParameter("resourceId"),principal);
+            else if(parts.length==4) result=runtime.inspectLoadCatalog(parts[2],req.getParameter("query"),parseLimit(req.getParameter("limit")),req.getParameter("cursor"),principal);
+            else throw new ServerRuntime.NotFoundException();
+            Object cacheRevision=result.remove("_cacheRevision");
+            if(cacheRevision instanceof String)res.setHeader("X-ATT-Inspection-Revision",(String)cacheRevision);
+            res.setHeader("Cache-Control","no-store");result.put("requestId",requestId);json(res,200,result);
+        } catch(ServerRuntime.NotFoundException e){throw e;}
+          catch(ServerRuntime.StaleCursorException e){throw e;}
+          catch(ServerRuntime.InspectionCapacityException e){throw e;}
+          catch(ServerRuntime.InspectionTimeoutException e){throw e;}
+          catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
           catch(IllegalArgumentException e){throw e;}
           catch(Exception e){throw new IOException(e);}
     }

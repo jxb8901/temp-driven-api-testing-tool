@@ -90,6 +90,23 @@ class PackageResourceInspectorTest {
         assertThrows(IllegalArgumentException.class,()->inspector.inspect("list","template",null,null,0,3,null,null,"unknown","asc"));
     }
 
+    @Test void loadCatalogDistinguishesPolicyTemplatesAndInvalidYamlAndRestrictsSourcePaths() throws Exception {
+        Path root=packageWithTemplate("load-catalog", "PAYMENT", "description: catalog test");
+        Path load=Files.createDirectories(root.resolve("load/nested"));
+        writeUtf8(load.resolve("policy.yaml"),"schemaVersion: att-load/v1.6\nload: {users: 2, duration: 10s}\n");
+        writeUtf8(load.resolve("broken.yaml"),"schemaVersion: [not-valid\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144);
+        @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspectLoadCatalog("",0,100,null);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
+        Map<String,Object> policy=items.stream().filter(item->"load/nested/policy.yaml".equals(item.get("path"))).findFirst().orElseThrow();
+        Map<String,Object> broken=items.stream().filter(item->"load/nested/broken.yaml".equals(item.get("path"))).findFirst().orElseThrow();
+        assertEquals("template",policy.get("kind"));assertEquals("valid",policy.get("validation"));
+        assertEquals(Boolean.TRUE,policy.get("createQuickLoad"));assertEquals(Boolean.FALSE,policy.get("runNow"));
+        assertEquals("invalid",broken.get("kind"));assertEquals(Boolean.FALSE,broken.get("schedule"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,()->inspector.inspectLoadSource("templates/PAYMENT/template.yaml"));
+    }
+
     @Test void neverReadsToolSourceWithoutAnExplicitServerAllowlist() throws Exception {
         PackageResourceInspector inspector=inspector();
         @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspect("list","tool",null,null,0,100);

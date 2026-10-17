@@ -270,7 +270,9 @@ export function AppShell({
   const action = route.kind === 'load' && route.packageId
     ? { label: 'Open package', target: '#/packages/' + encodeURIComponent(route.packageId), hidden: false }
     : route.kind === 'quick-load'
-      ? { label: 'Return to Explorer', target: formatRoute({ kind: 'package', packageId: route.packageId, resource: route.target }), hidden: false }
+      ? route.target
+        ? { label: 'Return to Explorer', target: formatRoute({ kind: 'package', packageId: route.packageId, resource: route.target }), hidden: false }
+        : { label: 'Back to LOAD Catalog', target: '#/advanced-load', hidden: false }
       : route.kind === 'configuration' && route.packageId
         ? { label: 'Open Explorer', target: '#/packages/' + encodeURIComponent(route.packageId), hidden: false }
         : route.kind === 'package' && versionData?.inlineLoadEnabled === true
