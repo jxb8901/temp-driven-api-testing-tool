@@ -154,6 +154,20 @@ describe('ScheduledLoadPage', () => {
     expect(api.triggerSchedule).not.toHaveBeenCalled();
   });
 
+  it('defaults a validated Load or Quick Load intent to a LOAD schedule', async () => {
+    const api = makeApi();
+    const initialDraft = { packageId: 'payments', environment: 'UAT', draftId: 'A-FROZEN', previewYaml: 'Safe server preview' };
+    await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} modal initialDraft={initialDraft} />
+    </NavigationGuardContext.Provider>));
+    await advance(400);
+    await click(host.querySelector('button[type="submit"]')!);
+    expect(api.createSchedule).toHaveBeenCalledWith(expect.objectContaining({
+      executionType: 'load', draftId: 'A-FROZEN', environment: 'UAT', enabled: false, schemaVersion: 'att-schedule/v2',
+    }));
+    expect(api.triggerSchedule).not.toHaveBeenCalled();
+  });
+
   it('loads an authorized edit deep link and keeps missing/forbidden definitions out of the form', async () => {
     const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
     const show = async (id: string, source = api) => {
