@@ -12,6 +12,29 @@ fi
 BUILD_STARTED_AT="$(date +%s)"
 BUILD_PHASE_STARTED_AT="$BUILD_STARTED_AT"
 BUILD_PHASE_NAME="Preflight"
+build_failure_hint() {
+  case "$1" in
+    "Maven clean verify")
+      cat >&2 <<EOF
+[ATT BUILD] Maven reactor failed. The final "npm test failed" line is a reactor summary,
+[ATT BUILD] not the Vitest stack trace. Inspect the first FAIL or exception above it.
+[ATT BUILD] Rerun only the web module:
+[ATT BUILD]   cd att-web/frontend && npm ci && npm test -- --reporter=verbose
+[ATT BUILD]   mvn -B -ntp -T "${ATT_MAVEN_THREADS:-1C}" -pl att-web -am clean verify
+[ATT BUILD] Resource-light full package build:
+[ATT BUILD]   ATT_MAVEN_THREADS=1 ATT_CI_SKIP_COVERED_TESTS=true ./build.sh
+[ATT BUILD] ATT_CI_SKIP_COVERED_TESTS skips tests only; compilation, typecheck,
+[ATT BUILD] Vite build, bundle budget, archives, schema/package checks and smoke tests still run.
+EOF
+      ;;
+    "Archive checks, repack and smoke tests")
+      cat >&2 <<'EOF'
+[ATT BUILD] Release archive or packaged smoke validation failed. Inspect the reported
+[ATT BUILD] archive path and the extracted tree under target/release before rerunning ./build.sh.
+EOF
+      ;;
+  esac
+}
 build_timer_next() {
   now="$(date +%s)"
   printf '[ATT BUILD TIME] %s: %ss\n' "$BUILD_PHASE_NAME" "$((now - BUILD_PHASE_STARTED_AT))" >&2
@@ -23,6 +46,9 @@ build_timer_finish() {
   now="$(date +%s)"
   printf '[ATT BUILD TIME] %s: %ss%s\n' "$BUILD_PHASE_NAME" "$((now - BUILD_PHASE_STARTED_AT))" "$([ "$status" -eq 0 ] && printf '' || printf ' (FAILED)')" >&2
   printf '[ATT BUILD TIME] Total: %ss (exit %s)\n' "$((now - BUILD_STARTED_AT))" "$status" >&2
+  if [ "$status" -ne 0 ]; then
+    build_failure_hint "$BUILD_PHASE_NAME"
+  fi
 }
 trap 'build_timer_finish' 0
 for required in pom.xml att-security/pom.xml att-security/src/main/java att-engine/pom.xml att-engine/src/main/java att-cli/pom.xml att-cli/src/main/java att-worker/pom.xml att-worker/src/main/java att-web/pom.xml att-web/frontend/index.html att-server/pom.xml att-dist/pom.xml att-dist/src/assembly/local.xml att-dist/src/assembly/server.xml att-server/src/assembly/server-app.xml att-dist/src/release/local/RELEASE_MANIFEST.txt att-dist/src/release/server/RELEASE_MANIFEST.txt config packages/default/config packages/default/templates packages/default/tools packages/default/testcase packages/default/schemas packages/default/sql tools att.sh att.bat README.md CHANGELOG.md docs/server-deployment.md docs/server-deployment.zh.md docs/att-server-web-ui.md docs/att-server-web-ui.zh.md; do
@@ -44,6 +70,15 @@ for command in mvn python3 tar; do
   if ! command -v "$command" >/dev/null 2>&1; then echo "$command is required to execute the ATT release gate" >&2; exit 2; fi
 done
 GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+ATT_MAVEN_THREADS="${ATT_MAVEN_THREADS:-1C}"
+case "$ATT_MAVEN_THREADS" in
+  [1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9]C|[1-9][0-9]C|[1-9][0-9][0-9]C) ;;
+  *)
+    echo "Invalid ATT_MAVEN_THREADS='$ATT_MAVEN_THREADS'. Use a positive integer (for example 1) or a core multiple (for example 1C)." >&2
+    exit 2
+    ;;
+esac
+printf '[ATT BUILD] Maven threads: %s\n' "$ATT_MAVEN_THREADS" >&2
 build_timer_next "Reference manual"
 (cd "$ROOT_DIR" && python3 tools/build_reference_manual.py)
 set -- "-Datt.gitCommit=$GIT_COMMIT"
@@ -51,7 +86,7 @@ if [ "${ATT_CI_SKIP_COVERED_TESTS:-false}" = true ]; then
   set -- "$@" -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true
 fi
 build_timer_next "Maven clean verify"
-(cd "$ROOT_DIR" && mvn -B -ntp -T 1C "$@" clean verify)
+(cd "$ROOT_DIR" && mvn -B -ntp -T "$ATT_MAVEN_THREADS" "$@" clean verify)
 build_timer_next "Source launcher checks"
 (cd "$ROOT_DIR" && ./scripts/verify-source-launcher.sh)
 build_timer_next "Source package validation"
