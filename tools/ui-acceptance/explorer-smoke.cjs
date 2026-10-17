@@ -485,7 +485,7 @@ async function main() {
     await scheduleDialog.getByRole('heading', { name: 'New Schedule', level: 2 }).waitFor();
     await page.getByText(/^Next run:/).waitFor();
     await page.getByRole('button', { name: 'Save schedule' }).click();
-    await page.getByText(/Saved Validated Load snapshot\. Next run:/).waitFor();
+    await page.getByText(/Saved Validated LOAD snapshot\. Next run:/).waitFor();
     assert.equal(submittedScheduleInput.draftId, 'LOAD-DRAFT-QUICK-99');
     assert.equal(Object.hasOwn(submittedScheduleInput, 'scenario'), false, 'inline scheduling submits the validated draft ID, not a scenario path');
     await scheduleDialog.getByRole('button', { name: 'Return to editor', exact: true }).click();
