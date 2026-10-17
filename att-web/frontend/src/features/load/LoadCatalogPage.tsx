@@ -41,6 +41,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const catalogCursorsRef = useRef<Record<string, string>>({});
   const catalogRequestRef = useRef<AbortController | null>(null);
   const catalogGenerationRef = useRef(0);
+  const validationGenerationRef = useRef(0);
   const [refreshKey, setRefreshKey] = useState(0);
   const [query, setQuery] = useState('');
   const queryRef = useRef(query);
@@ -60,6 +61,20 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const [jobsMore, setJobsMore] = useState<number | null>(null);
   const environmentDraftRef = useRef(environmentDraft);
   environmentDraftRef.current = environmentDraft;
+
+  const invalidateEnvironmentValidation = useCallback((value: string) => {
+    validationGenerationRef.current += 1;
+    environmentDraftRef.current = value;
+    setEnvironmentDraft(value);
+    if (actionKey.startsWith('validate:')) setActionKey('');
+    setCatalog(current => current.map(item => item.kind === 'scenario'
+      ? { ...item, validation: 'unverified', validatedEnvironment: undefined, runNow: false, schedule: false, diagnostic: undefined }
+      : item));
+  }, [actionKey]);
+
+  useEffect(() => {
+    if (environment !== environmentDraftRef.current) invalidateEnvironmentValidation(environment);
+  }, [environment, invalidateEnvironmentValidation]);
 
   const loadCatalog = useCallback(async (signal: AbortSignal, append = false) => {
     if (packages.status !== 'ready') return;
@@ -195,18 +210,18 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     const actionToken = ++actionSequenceRef.current;
     const key = `validate:${item.resourceId}`; setActionKey(key); setNotice('');
     const requestedEnvironment = environmentDraftRef.current;
-    const requestedGeneration = catalogGenerationRef.current;
+    const requestedGeneration = validationGenerationRef.current;
     try {
       const result = await api.validateLoadCatalogScenario(item.packageId, item.resourceId, requestedEnvironment || undefined);
       if (actionSequenceRef.current !== actionToken || environmentDraftRef.current !== requestedEnvironment
-        || catalogGenerationRef.current !== requestedGeneration) return;
+        || validationGenerationRef.current !== requestedGeneration) return;
       setCatalog(current => current.map(candidate => candidate.packageId === item.packageId && candidate.resourceId === item.resourceId
         ? { ...candidate, validation: result.validation, validatedEnvironment: requestedEnvironment, model: result.model || candidate.model, diagnostic: undefined, runNow: true, schedule: schedulingEnabled }
         : candidate));
       setNotice(`${item.path} validation refreshed for ${requestedEnvironment || 'the package default'}: ${result.validation}.`);
     } catch (error) {
       if (actionSequenceRef.current !== actionToken || environmentDraftRef.current !== requestedEnvironment
-        || catalogGenerationRef.current !== requestedGeneration) return;
+        || validationGenerationRef.current !== requestedGeneration) return;
       if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
         setCatalog(current => current.map(candidate => candidate.packageId === item.packageId && candidate.resourceId === item.resourceId
           ? { ...candidate, validation: 'invalid', validatedEnvironment: requestedEnvironment, runNow: false, schedule: false, diagnostic: error.message }
@@ -217,12 +232,28 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     finally { if (actionSequenceRef.current === actionToken) setActionKey(''); }
   }
 
+  async function validateTemplate(item: LoadCatalogItem) {
+    if (actionKey) return;
+    const actionToken = ++actionSequenceRef.current;
+    setActionKey(`validate:${item.resourceId}`); setNotice('');
+    try {
+      const page = await api.listLoadCatalog(item.packageId, { query: item.path, limit: 100 });
+      const refreshed = page.items.find(candidate => candidate.resourceId === item.resourceId);
+      if (actionSequenceRef.current !== actionToken) return;
+      if (!refreshed) throw new Error('This Load Template is no longer present in the current package catalog. Refresh the catalog.');
+      setCatalog(current => current.map(candidate => candidate.packageId === item.packageId && candidate.resourceId === item.resourceId
+        ? refreshed : candidate));
+      setNotice(`${item.path} policy validation refreshed: ${refreshed.validation}.`);
+    } catch (error) {
+      if (actionSequenceRef.current === actionToken) setNotice(error instanceof Error ? error.message : 'The Load Template could not be validated.');
+    } finally {
+      if (actionSequenceRef.current === actionToken) setActionKey('');
+    }
+  }
+
   function changeEnvironment(value: string) {
-    catalogGenerationRef.current += 1;
-    setEnvironmentDraft(value); onEnvironmentChange(value);
-    setCatalog(current => current.map(item => item.kind === 'scenario'
-      ? { ...item, validation: 'unverified', validatedEnvironment: undefined, runNow: false, schedule: false, diagnostic: undefined }
-      : item));
+    invalidateEnvironmentValidation(value);
+    onEnvironmentChange(value);
   }
 
   const selectedPackage = packageFilter === 'all' ? packages.status === 'ready' ? packages.data[0]?.packageId : undefined : packageFilter;
@@ -261,6 +292,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
           {item.diagnostic && <p className="att-help">{item.diagnostic}</p>}
           <div className="att-quick-load-actions">
             {item.kind === 'scenario' && <button type="button" disabled={Boolean(actionKey)} onClick={() => void validateItem(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate for Environment'}</button>}
+            {item.kind === 'template' && <button type="button" disabled={Boolean(actionKey)} onClick={() => void validateTemplate(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>}
             {item.kind === 'scenario' && <><button type="button" disabled={!item.runNow || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || Boolean(actionKey)} onClick={() => void runNow(item)}>{actionKey === item.resourceId ? 'Starting…' : 'Run Now'}</button>
               <button type="button" disabled={!item.schedule || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || !schedulingEnabled} title={!schedulingEnabled ? 'Schedules are disabled by Server policy.' : item.validatedEnvironment !== environmentDraft ? 'Validate for the selected environment first.' : undefined}
                 onClick={() => onSchedule({ packageId: item.packageId, environment: environmentDraft || undefined, scenario: item.path, executionType: 'load' })}>Schedule</button></>}
