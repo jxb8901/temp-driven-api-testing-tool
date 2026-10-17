@@ -436,8 +436,7 @@ class ServerWarUiIT {
             assertEquals("skipped", rejected.path("status").asText(),
                     "A concurrent scheduled run must occupy global capacity; occurrence=" + rejected
                             + " job=" + getJson(port, api + "/jobs/" + jobId, admin)
-                            + " result=" + firstJobResult
-                            + " metrics=" + getJson(port, api + "/metrics", admin));
+                            + " result=" + firstJobResult);
             assertEquals("global-scheduled-load-capacity", rejected.path("reason").asText());
             JsonNode secondHistory = getJson(port, api + "/load-schedules/" + secondScheduleId + "/executions", admin);
             assertEquals("global-scheduled-load-capacity", secondHistory.path("items").get(0).path("reason").asText());
