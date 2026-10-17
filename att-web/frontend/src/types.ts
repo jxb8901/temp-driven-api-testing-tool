@@ -37,6 +37,11 @@ export interface ServerVersion {
   inlineLoadEnabled: boolean;
   loadSchedulingEnabled?: boolean;
   authMode?: 'container' | 'local';
+  workspaceDiscoveryEnabled?: boolean;
+  workspaceRefreshMode?: 'automatic' | 'manual';
+  workspaceRefreshIntervalSeconds?: number;
+  workspaceDiscoveryStatus?: 'disabled' | 'ready' | 'refreshing' | 'unavailable' | string;
+  workspaceLastRefreshedAt?: string;
 }
 
 export interface LocalAuthUser {
@@ -50,6 +55,11 @@ export interface LocalAuthUser {
 export interface PackageSummary {
   packageId: string;
   name?: string;
+  packageType?: 'shared' | 'workspace' | string;
+  canExecute?: boolean;
+  workspaceOwner?: string;
+  discovery?: { status?: string; lastRefreshedAt?: string };
+  validation?: { status?: string; revision?: string; lastValidatedAt?: string; errorCount?: number; warningCount?: number };
 }
 
 export type JobStatus =

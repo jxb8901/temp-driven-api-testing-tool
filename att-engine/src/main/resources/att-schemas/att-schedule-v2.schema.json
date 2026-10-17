@@ -1,0 +1,175 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:att:schema:schedule:v2",
+  "title": "ATT canonical scheduled execution creation request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "executionType",
+    "name",
+    "packageId"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "att-schedule/v2"
+    },
+    "executionType": {
+      "enum": [
+        "run",
+        "load"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 500
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "packageId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "draftId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "scenario": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "config": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "environment": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "timezone": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "cron": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "runAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "load": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "maxConcurrentRuns": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "enabled": {
+      "type": "boolean"
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "cron",
+        "timezone"
+      ],
+      "not": {
+        "required": [
+          "runAt"
+        ]
+      }
+    },
+    {
+      "required": [
+        "runAt"
+      ],
+      "not": {
+        "required": [
+          "cron"
+        ]
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "executionType": {
+            "const": "run"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "draftId"
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "scenario"
+              ]
+            },
+            {
+              "required": [
+                "load"
+              ]
+            }
+          ]
+        }
+      },
+      "else": {
+        "oneOf": [
+          {
+            "required": [
+              "draftId"
+            ],
+            "not": {
+              "required": [
+                "scenario"
+              ]
+            }
+          },
+          {
+            "required": [
+              "scenario"
+            ],
+            "not": {
+              "required": [
+                "draftId"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

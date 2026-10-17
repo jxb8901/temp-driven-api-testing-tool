@@ -31,11 +31,13 @@ public final class ServerConfig {
     public final Inspection inspection;
     public final InlineLoad inlineLoad;
     public final Scheduling scheduling;
+    public final Authorization authorization;
+    public final WorkspaceDiscovery workspaceDiscovery;
 
     private ServerConfig(Path dataDir, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, WorkspaceDiscovery workspaceDiscovery) {
         this.dataDir=dataDir; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
@@ -46,6 +48,8 @@ public final class ServerConfig {
         this.inspection=inspection;
         this.inlineLoad=inlineLoad;
         this.scheduling=scheduling;
+        this.authorization=authorization;
+        this.workspaceDiscovery=workspaceDiscovery;
     }
 
     public static ServerConfig load(Path file) throws Exception {
@@ -79,7 +83,7 @@ public final class ServerConfig {
         if (!Files.isRegularFile(java) || !Files.isExecutable(java)) throw new IllegalArgumentException("server.javaExecutable must be an executable Java runtime");
         List<?> roots=list(packagesNode.get("allowedRoots"),"packages.allowedRoots");
         List<?> libraryDirs=workers.get("libraryDirs")==null?List.of():list(workers.get("libraryDirs"),"workers.libraryDirs");
-        Map<?,?> entries=map(packagesNode.get("entries"),"packages.entries");
+        Map<?,?> entries=packagesNode.get("entries")==null?Collections.emptyMap():map(packagesNode.get("entries"),"packages.entries");
         java.util.ArrayList<Path> allowed=new java.util.ArrayList<>();
         for(Object r:roots) allowed.add(canonicalRequired(string(r,"packages.allowedRoots entry"),"packages.allowedRoots entry",true));
         if(allowed.isEmpty()) throw new IllegalArgumentException("packages.allowedRoots must contain at least one directory");
@@ -92,7 +96,10 @@ public final class ServerConfig {
             if(packageRoot.startsWith(data)||data.startsWith(packageRoot)) throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
             resolved.put(id,packageRoot);
         }
-        if(resolved.isEmpty()) throw new IllegalArgumentException("packages.entries must define at least one package ID");
+        WorkspaceDiscovery workspaceDiscovery=workspaceDiscovery(packagesNode.get("workspaceDiscovery"),allowed,data);
+        if(workspaceDiscovery.enabled&&resolved.values().stream().anyMatch(workspaceDiscovery.root::startsWith))
+            throw new IllegalArgumentException("packages.workspaceDiscovery.root must not be inside a configured package root");
+        if(resolved.isEmpty()&&!workspaceDiscovery.enabled) throw new IllegalArgumentException("packages.entries must define at least one package ID unless workspace discovery is enabled");
         java.util.ArrayList<Path> workerLibraries=new java.util.ArrayList<>();
         for(Object entry:libraryDirs){Path library=canonicalRequired(string(entry,"workers.libraryDirs entry"),"workers.libraryDirs entry",true);if(!Files.isReadable(library))throw new IllegalArgumentException("workers.libraryDirs entry must be readable: "+library);workerLibraries.add(library);}
         int max=intValue(workers,"maxConcurrent",8,1,256), queue=intValue(workers,"queuedLimit",100,0,100000),
@@ -108,18 +115,23 @@ public final class ServerConfig {
         if(!Set.of("container","local").contains(authMode))throw new IllegalArgumentException("server.auth.mode must be container or local");
         if("local".equals(authMode)&&!authenticationRequired)throw new IllegalArgumentException("server.authenticationRequired must be true when server.auth.mode is local");
         Security security=security(server.get("security"));
-        Inspection inspection=inspection(server.get("inspection"),resolved);
+        Authorization authorization=authorization(server.get("authorization"),authenticationRequired);
+        Inspection inspection=inspection(server.get("inspection"),resolved,authorization.adminRole);
         InlineLoad inlineLoad=inlineLoad(server.get("inlineLoad"));
-        Scheduling scheduling=scheduling(server.get("scheduling"),authenticationRequired,load,inspection.enabled);
+        Scheduling scheduling=scheduling(server.get("scheduling"),authenticationRequired,load,inspection.enabled,authorization.adminRole);
         Path candidateData=canonicalFuturePath(data);
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(candidateData)||candidateData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
+        if(workspaceDiscovery.enabled&&(workspaceDiscovery.root.startsWith(candidateData)||candidateData.startsWith(workspaceDiscovery.root)))
+            throw new IllegalArgumentException("server.dataDir must be separate from the workspace discovery root");
         Files.createDirectories(data);
         Path realData=data.toRealPath();
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
+        if(workspaceDiscovery.enabled&&(workspaceDiscovery.root.startsWith(realData)||realData.startsWith(workspaceDiscovery.root)))
+            throw new IllegalArgumentException("server.dataDir must be separate from the workspace discovery root");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling);
+        return new ServerConfig(realData,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,workspaceDiscovery);
     }
 
     public static Path configPath() {
@@ -169,13 +181,14 @@ public final class ServerConfig {
     private static Map<?,?> map(Object v,String field){ if(!(v instanceof Map<?,?> m)) throw new IllegalArgumentException(field+" must be a mapping"); return m; }
     private static List<?> list(Object v,String field){ if(!(v instanceof List<?> l)) throw new IllegalArgumentException(field+" must be a list"); return l; }
 
-    private static Inspection inspection(Object raw,Map<String,Path> packages) throws Exception {
+    private static Inspection inspection(Object raw,Map<String,Path> packages,String systemAdminRole) throws Exception {
         Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.inspection");
         Set<String> allowed=Set.of("enabled","maxConcurrent","queuedLimit","timeoutMs","heapMaxMb","maxResponseBytes","maxSourceBytes","safeTextSources","sourceBrowsing","redaction","configurationAdminRole","warmup");
         for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))throw new IllegalArgumentException("server.inspection contains an unknown setting");
         boolean enabled=boolValue(values,"enabled",true);
-        String configurationAdminRole=values.get("configurationAdminRole")==null?"ATT_ADMIN":string(values.get("configurationAdminRole"),"server.inspection.configurationAdminRole");
+        String configurationAdminRole=values.get("configurationAdminRole")==null?systemAdminRole:string(values.get("configurationAdminRole"),"server.inspection.configurationAdminRole");
         if(!configurationAdminRole.matches("[A-Za-z][A-Za-z0-9._-]{0,63}"))throw new IllegalArgumentException("server.inspection.configurationAdminRole is invalid");
+        if(!configurationAdminRole.equals(systemAdminRole))throw new IllegalArgumentException("server.inspection.configurationAdminRole must match server.authorization.adminRole");
         int concurrent=intValue(values,"maxConcurrent",2,1,16);
         int queued=intValue(values,"queuedLimit",16,0,1024);
         int timeout=intValue(values,"timeoutMs",30000,100,300000);
@@ -337,7 +350,7 @@ public final class ServerConfig {
         return new InlineLoad(enabled,workloads,targets,users,rate,concurrent,totalConcurrent,duration);
     }
 
-    private static Scheduling scheduling(Object raw,boolean authenticationRequired,int maxConcurrentLoad,boolean inspectionEnabled) {
+    private static Scheduling scheduling(Object raw,boolean authenticationRequired,int maxConcurrentLoad,boolean inspectionEnabled,String systemAdminRole) {
         Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.scheduling");
         Set<String> allowed=Set.of("enabled","allowAnonymousManagement","adminRole","maxSchedules",
                 "minimumIntervalMinutes","pollIntervalSeconds","maxConcurrentRuns","failurePolicy","maxExecutionsPerSchedule");
@@ -347,8 +360,9 @@ public final class ServerConfig {
         boolean allowAnonymous=boolValue(values,"allowAnonymousManagement",!authenticationRequired&&enabled);
         if(enabled&&!inspectionEnabled)throw new IllegalArgumentException("server.inspection.enabled must be true when server.scheduling.enabled is true");
         Object rawRole=values.get("adminRole");
-        String role=rawRole==null?"ATT_ADMIN":string(rawRole,"server.scheduling.adminRole");
+        String role=rawRole==null?systemAdminRole:string(rawRole,"server.scheduling.adminRole");
         if(!role.matches("[A-Za-z][A-Za-z0-9._-]{0,63}"))throw new IllegalArgumentException("server.scheduling.adminRole is invalid");
+        if(!role.equals(systemAdminRole))throw new IllegalArgumentException("server.scheduling.adminRole must match server.authorization.adminRole");
         int schedules=intValue(values,"maxSchedules",100,1,10000);
         int minimum=intValue(values,"minimumIntervalMinutes",15,1,10080);
         int poll=intValue(values,"pollIntervalSeconds",10,1,300);
@@ -359,6 +373,60 @@ public final class ServerConfig {
         if(!Set.of("continue","pauseAfterSubmitFailure").contains(failurePolicy))throw new IllegalArgumentException("server.scheduling.failurePolicy must be continue or pauseAfterSubmitFailure");
         return new Scheduling(enabled,allowAnonymous,role,schedules,minimum,poll,concurrent,failurePolicy,history);
     }
+
+    private static Authorization authorization(Object raw,boolean authenticationRequired) {
+        Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.authorization");
+        Set<String> allowed=Set.of("adminRole","userRole","allowAnonymousOperations");
+        for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))
+            throw new IllegalArgumentException("server.authorization contains an unknown setting");
+        String adminRole=values.get("adminRole")==null?"ATT_ADMIN":string(values.get("adminRole"),"server.authorization.adminRole");
+        String userRole=values.get("userRole")==null?"ATT_USER":string(values.get("userRole"),"server.authorization.userRole");
+        if(!adminRole.matches("[A-Za-z][A-Za-z0-9._-]{0,63}"))throw new IllegalArgumentException("server.authorization.adminRole is invalid");
+        if(!userRole.matches("[A-Za-z][A-Za-z0-9._-]{0,63}"))throw new IllegalArgumentException("server.authorization.userRole is invalid");
+        if(adminRole.equals(userRole))throw new IllegalArgumentException("server.authorization.adminRole and userRole must be different");
+        boolean anonymous=boolValue(values,"allowAnonymousOperations",false);
+        if(anonymous&&authenticationRequired)throw new IllegalArgumentException("server.authorization.allowAnonymousOperations requires server.authenticationRequired=false");
+        return new Authorization(adminRole,userRole,anonymous);
+    }
+
+    private static WorkspaceDiscovery workspaceDiscovery(Object raw,List<Path> allowedRoots,Path dataDir) throws Exception {
+        Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"packages.workspaceDiscovery");
+        Set<String> allowed=Set.of("enabled","root","refresh");
+        for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))
+            throw new IllegalArgumentException("packages.workspaceDiscovery contains an unknown setting");
+        boolean enabled=boolValue(values,"enabled",false);
+        if(!enabled)return new WorkspaceDiscovery(false,null,"manual",300);
+        Path root=canonicalRequired(string(values.get("root"),"packages.workspaceDiscovery.root"),"packages.workspaceDiscovery.root",true);
+        if(!Files.isDirectory(root)||!Files.isReadable(root))throw new IllegalArgumentException("packages.workspaceDiscovery.root must be a readable directory");
+        if(allowedRoots.stream().noneMatch(root::startsWith))throw new IllegalArgumentException("packages.workspaceDiscovery.root must be within packages.allowedRoots");
+        if(root.startsWith(dataDir)||dataDir.startsWith(root))throw new IllegalArgumentException("server.dataDir must be separate from packages.workspaceDiscovery.root");
+        Map<?,?> refresh=values.get("refresh")==null?Collections.emptyMap():map(values.get("refresh"),"packages.workspaceDiscovery.refresh");
+        for(Object key:refresh.keySet())if(!(key instanceof String)||!Set.of("mode","intervalSeconds").contains(key))
+            throw new IllegalArgumentException("packages.workspaceDiscovery.refresh contains an unknown setting");
+        String mode=refresh.get("mode")==null?"manual":string(refresh.get("mode"),"packages.workspaceDiscovery.refresh.mode").toLowerCase(Locale.ROOT);
+        if(!Set.of("automatic","manual").contains(mode))throw new IllegalArgumentException("packages.workspaceDiscovery.refresh.mode must be automatic or manual");
+        int interval=intValue(refresh,"intervalSeconds",300,15,86400);
+        return new WorkspaceDiscovery(true,root,mode,interval);
+    }
+
+    public static final class Authorization {
+        public final String adminRole,userRole;
+        public final boolean allowAnonymousOperations;
+        private Authorization(String adminRole,String userRole,boolean allowAnonymousOperations) {
+            this.adminRole=adminRole;this.userRole=userRole;this.allowAnonymousOperations=allowAnonymousOperations;
+        }
+    }
+
+    public static final class WorkspaceDiscovery {
+        public final boolean enabled;
+        public final Path root;
+        public final String refreshMode;
+        public final int intervalSeconds;
+        private WorkspaceDiscovery(boolean enabled,Path root,String refreshMode,int intervalSeconds) {
+            this.enabled=enabled;this.root=root;this.refreshMode=refreshMode;this.intervalSeconds=intervalSeconds;
+        }
+    }
+
     private static int inlineIntValue(Map<?,?> values,String key,int fallback,int min,int max) {
         Object raw=values.get(key);
         if(raw==null)return fallback;

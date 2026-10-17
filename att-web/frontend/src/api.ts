@@ -200,7 +200,10 @@ export const api = {
   getCurrentUser(signal?: AbortSignal): Promise<{ loginId: string; displayName: string; role: 'ADMIN' | 'USER'; csrfToken?: string }> {
     return request('auth/me', { signal });
   },
-  getAuthCapabilities(signal?: AbortSignal): Promise<{ configurationAdmin: boolean }> {
+  getAuthCapabilities(signal?: AbortSignal): Promise<{
+    configurationAdmin: boolean;
+    capabilities?: { operate?: boolean; accountManage?: boolean; systemSettingsWrite?: boolean; configurationAdmin?: boolean };
+  }> {
     return request('auth/capabilities', { signal });
   },
   logout(): Promise<{ loggedOut: boolean }> {
@@ -224,6 +227,9 @@ export const api = {
   },
   getPackages(signal?: AbortSignal): Promise<ApiEnvelope<PackageSummary>> {
     return request<ApiEnvelope<PackageSummary>>('packages', { signal });
+  },
+  refreshWorkspaces(signal?: AbortSignal): Promise<{ status: string; lastRefreshedAt?: string; workspaceCount?: number }> {
+    return postJson('workspaces/refresh', {}, signal);
   },
   getJobs(signal?: AbortSignal): Promise<ApiEnvelope<JobSummary>> {
     return request<ApiEnvelope<JobSummary>>('jobs', { signal });

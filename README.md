@@ -88,7 +88,7 @@ packages/default/
   testcase/     xlsx + yaml sidecar + generated xml snapshot
   templates/    Template directories and reusable Flows
   tools/        process-backed integration scripts/programs
-  schemas/      published ATT schemas
+  schemas/      source catalog for the ATT runtime schemas
   sql/          package SQL resources
   output/       run/debug/load evidence and reports
 config/         ATT_HOME Server deployment template
@@ -97,7 +97,7 @@ tools/          repository build, documentation, benchmark, and QA automation
 
 The source checkout and Local archive use the same `packages/default/` package root. `./att.sh` runs commands against that package; `att.sh`, `att.bat`, Maven modules, and `lib/` stay at the repository or `ATT_HOME` root. In the archive, ATT Server can register `$ATT_HOME/packages/default` directly. Its `server.dataDir` can be `$ATT_HOME/data` when that path is disjoint from every registered package root; the archive does not include Server data or an active `config/att-server.yaml`. See the [Server deployment guide](docs/server-deployment.md) for config discovery and migration from earlier flat source checkouts.
 
-ATT 4.2.1 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.3`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.7`. Current schemas live under `packages/default/schemas/`; previous and older definitions are historical references under `packages/default/schemas/history/`, not current runtime contracts.
+ATT 4.2.1 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.3`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.7`. `packages/default/schemas/` is the source catalog used to build ATT's trusted, bundled schema registry. Runtime validation resolves schemas only from that registry; package-local catalogs and schema files cannot replace the runtime definitions, and custom packages do not need to provide a `schemas/` directory.
 
 ## Build and validation
 

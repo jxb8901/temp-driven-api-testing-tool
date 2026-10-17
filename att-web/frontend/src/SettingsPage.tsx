@@ -10,7 +10,7 @@ const themeOptions: Array<{ value: ThemePreference; label: string; description: 
 ];
 
 export function SettingsPage() {
-  const { themePreference, onThemePreferenceChange, uiLocale, uiLocalePreference, onUiLocaleChange } = useAppShellContext();
+  const { themePreference, onThemePreferenceChange, uiLocale, uiLocalePreference, onUiLocaleChange, accessCapabilities } = useAppShellContext();
   const locale = uiLocale;
 
   return (
@@ -23,7 +23,7 @@ export function SettingsPage() {
         </div>
       </header>
 
-      <UserManagementPanel />
+      {accessCapabilities.accountManage && <UserManagementPanel />}
 
       <section className="panel att-settings-section" aria-labelledby="appearance-title">
         <div className="att-settings-section-heading">

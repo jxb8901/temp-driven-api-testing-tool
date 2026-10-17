@@ -321,7 +321,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
     heading?.focus();
   }
 
-  return <div className="att-load-page att-quick-load-page">
+  return <div className="page-content att-load-page att-quick-load-page">
     <header className="att-feature-header"><div><p className="att-eyebrow">Single-target workload</p><h1>Quick Load</h1><p>Run a focused load check against one selected resource. Advanced Load supports multi-workload scenarios.</p></div>
       <div className="att-quick-load-actions"><button type="button" onClick={onCancel}>{backLabel || 'Back to Explorer'}</button><button type="button"
         onClick={() => draft?.draftId && onSchedule?.({ packageId, environment: environment || undefined, draftId: draft.draftId, previewYaml: draft.previewYaml })}

@@ -721,25 +721,12 @@ public final class PackageValidator {
     @SuppressWarnings("unchecked")
     private void validatePackageLayout(List<Diagnostic> diagnostics) {
         // Launchers live at ATT_HOME; package roots may be external or mounted independently.
-        for (String required : new String[]{"config/config.yaml", "testcase", "templates", "tools", "schemas/catalog.yaml"}) {
+        for (String required : new String[]{"config/config.yaml", "testcase", "templates", "tools"}) {
             Path path = projectRoot.resolve(required);
             if (!Files.exists(path)) diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, new IllegalArgumentException("Missing required package path: " + required), path));
         }
         try { att.validation.SchemaFiles.validateCatalog(projectRoot); }
-        catch (Exception error) { diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, error, projectRoot.resolve("schemas/catalog.yaml"))); }
-        Path catalog = projectRoot.resolve("schemas/catalog.yaml");
-        if (Files.isRegularFile(catalog)) try {
-            Object loaded = att.config.YamlSupport.parser().load(new String(Files.readAllBytes(catalog), java.nio.charset.StandardCharsets.UTF_8));
-            if (!(loaded instanceof Map) || !"att-schema-catalog/v3.0".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion")))) throw new IllegalArgumentException("Invalid schema catalog version");
-            Object schemas = ((Map<?, ?>) loaded).get("schemas"); if (!(schemas instanceof Map)) throw new IllegalArgumentException("Schema catalog requires schemas map");
-            for (Object value : ((Map<?, ?>) schemas).values()) {
-                Path schema = projectRoot.resolve("schemas").resolve(String.valueOf(value)).normalize();
-                if (!schema.startsWith(projectRoot.resolve("schemas").normalize()) || !Files.isRegularFile(schema) || Files.isSymbolicLink(schema)) throw new IllegalArgumentException("Missing/unsafe schema file: " + value);
-                if (schema.getFileName().toString().endsWith(".json")) att.validation.JsonSchemaVerifier.compile(schema);
-                else if (schema.getFileName().toString().endsWith(".xsd")) { javax.xml.validation.SchemaFactory factory = javax.xml.validation.SchemaFactory.newInstance(javax.xml.XMLConstants.W3C_XML_SCHEMA_NS_URI); factory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, ""); factory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, ""); factory.newSchema(schema.toFile()); }
-                else throw new IllegalArgumentException("Unsupported catalog schema file: " + value);
-            }
-        } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, e, catalog)); }
+        catch (Exception error) { diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, error, null)); }
         try {
             Path output = projectRoot.resolve(global.outputDirectory()).normalize();
             Path ancestor = output; while (ancestor != null && !Files.exists(ancestor)) ancestor = ancestor.getParent();

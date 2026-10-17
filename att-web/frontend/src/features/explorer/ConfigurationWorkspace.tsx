@@ -220,7 +220,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
   ];
   const refs = selectedFile?.references || [];
 
-  return <div className="att-configuration-page">
+  return <div className="page-content att-configuration-page">
     <header className="att-configuration-page-heading">
       <div><p className="eyebrow">Package runtime configuration</p><h1>Configuration</h1><p>Inspect safe package source and resolved values. This workspace is read-only.</p></div>
       <div className="att-configuration-context">

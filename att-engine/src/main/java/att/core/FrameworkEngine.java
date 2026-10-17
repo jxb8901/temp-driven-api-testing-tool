@@ -167,11 +167,11 @@ public class FrameworkEngine {
         profile.end("inputHashMs", phaseStarted);
         phaseStarted = profile.begin();
         new CiReportWriter().write(runDirectory, runId, config.environment(), summary, runStarted, runEnded, config.report().junitCaseLogEmbedThresholdBytes(), inputManifestHash, validationDiagnostics, options.ciOutputs());
-        if (options.ciOutputs().contains("json")) JsonSchemaVerifier.verifyJson(projectRoot.resolve("schemas/att-ci-summary-v2.1.schema.json"), runDirectory.resolve("ci/summary.json"));
+        if (options.ciOutputs().contains("json")) JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(projectRoot, "att-ci-summary-v2.1.schema.json"), runDirectory.resolve("ci/summary.json"));
         if (options.ciOutputs().contains("junit")) {
             javax.xml.validation.SchemaFactory schemaFactory = javax.xml.validation.SchemaFactory.newInstance(javax.xml.XMLConstants.W3C_XML_SCHEMA_NS_URI);
             schemaFactory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, ""); schemaFactory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-            javax.xml.validation.Validator validator = schemaFactory.newSchema(projectRoot.resolve("schemas/att-junit-v2.1.xsd").toFile()).newValidator();
+            javax.xml.validation.Validator validator = schemaFactory.newSchema(att.validation.SchemaFiles.resolve(projectRoot, "att-junit-v2.1.xsd").toFile()).newValidator();
             validator.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, ""); validator.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
             validator.validate(new javax.xml.transform.stream.StreamSource(runDirectory.resolve("ci/junit.xml").toFile()));
         }
@@ -498,7 +498,7 @@ public class FrameworkEngine {
         }
         history.put("cases", cases);
         Map<String, Object> outputs = new LinkedHashMap<String, Object>(); outputs.put("html", "report/index.html"); if (options.ciOutputs().contains("json")) outputs.put("json", "ci/summary.json"); if (options.ciOutputs().contains("junit")) { outputs.put("junit", "ci/junit.xml"); outputs.put("junitHtml", "report/junit.html"); } history.put("outputs", outputs);
-        JsonSchemaVerifier.verify(projectRoot.resolve("schemas/att-run-v2.1.schema.json"), history);
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-run-v2.1.schema.json"), history);
         byte[] bytes = new Yaml().dump(history).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         Files.write(runDirectory.resolve("run.yaml"), bytes);
     }
@@ -551,8 +551,6 @@ public class FrameworkEngine {
                 addInput(inputs, "mqhelper", helper.sourceFile());
             }
         }
-        Path schemas = projectRoot.resolve("schemas");
-        if (Files.isDirectory(schemas)) try (java.util.stream.Stream<Path> files = Files.walk(schemas)) { java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).sorted().iterator(); while (iterator.hasNext()) addInput(inputs, "schema", iterator.next()); }
         return inputs;
     }
     private void addToolFileExpressionInputs(List<Map<String, Object>> inputs,

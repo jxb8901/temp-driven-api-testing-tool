@@ -11,6 +11,7 @@ import { ChangePasswordDialog } from './ChangePasswordDialog';
 import type { LocalAuthUser } from './types';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
+export interface AccessCapabilities { operate: boolean; accountManage: boolean; systemSettingsWrite: boolean; configurationAdmin: boolean }
 
 export interface AppShellProps {
   route: AppRoute;
@@ -33,6 +34,7 @@ export interface AppShellContextValue {
   uiLocalePreference: UiLocalePreference;
   authMode?: 'container' | 'local';
   currentUser: Pick<LocalAuthUser,'loginId'|'displayName'|'role'> | null;
+  accessCapabilities: AccessCapabilities;
   canRevealConfigurationFields: boolean;
   onPackageChange(packageId: string): void;
   onEnvironmentChange(environment: string): void;
@@ -58,7 +60,7 @@ function routeLink(event: MouseEvent<HTMLAnchorElement>, action: () => void) {
 function routeTitle(route: AppRoute): string {
   if (route.kind === 'dashboard') return 'Dashboard';
   if (route.kind === 'run') return 'Run';
-  if (route.kind === 'packages') return 'Packages';
+  if (route.kind === 'packages') return 'Explorer';
   if (route.kind === 'package') return route.resource ? route.resource.resourceId : route.packageId;
   if (route.kind === 'configuration') return route.filePath?.split('/').filter(Boolean).pop() || 'Configuration';
   if (route.kind === 'quick-load') return 'Quick Load';
@@ -70,9 +72,7 @@ function routeTitle(route: AppRoute): string {
 }
 
 function activeNavigation(route: AppRoute): string {
-  if (route.kind === 'run') return 'run';
-  if (route.kind === 'packages') return 'packages';
-  if (route.kind === 'package') return 'explorer';
+  if (route.kind === 'run' || route.kind === 'packages' || route.kind === 'package') return 'explorer';
   if (route.kind === 'configuration') return 'configuration';
   if (route.kind === 'quick-load') return 'load-testing';
   if (route.kind === 'jobs') return 'jobs';
@@ -82,11 +82,12 @@ function activeNavigation(route: AppRoute): string {
   return 'dashboard';
 }
 
-function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, onClose, onNavigate }: {
+function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, accessCapabilities, onClose, onNavigate }: {
   open: boolean;
   mode: 'palette' | 'shortcuts';
   showScheduledLoad: boolean;
   selectedPackage: string;
+  accessCapabilities: AccessCapabilities;
   onClose(): void;
   onNavigate(route: AppRoute): void;
 }) {
@@ -94,17 +95,17 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, onClos
   const searchRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [query, setQuery] = useState('');
-  const commands: Array<{ label: string; description: string; route: AppRoute }> = [
+  const commands: Array<{ label: string; description: string; route: AppRoute }> = accessCapabilities.operate ? [
     { label: 'Dashboard', description: 'Workspace overview', route: { kind: 'dashboard' } },
-    { label: 'Packages', description: 'Configured packages', route: { kind: 'packages' } },
-    { label: 'Explorer and Run', description: 'Browse package resources', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
+    { label: 'Explorer', description: 'Choose a package, browse resources, and run targets', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
     { label: 'Configuration', description: 'Inspect package configuration and Testdata', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
-    { label: 'Run', description: 'Validate a functional execution', route: { kind: 'run', packageId: selectedPackage || undefined } },
     { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
     { label: 'Jobs and results', description: 'Inspect recent jobs', route: { kind: 'jobs' } },
     ...(showScheduledLoad ? [{ label: 'Schedules', description: 'Manage RUN and LOAD schedules', route: { kind: 'schedules' } as AppRoute }] : []),
     { label: 'Settings', description: 'Appearance and keyboard help', route: { kind: 'settings' } },
-  ];
+  ] : accessCapabilities.accountManage ? [
+    { label: 'Settings', description: 'Manage accounts and administration settings', route: { kind: 'settings' } },
+  ] : [];
   const matches = commands.filter(command => `${command.label} ${command.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
 
   useEffect(() => {
@@ -222,6 +223,8 @@ export function AppShell({
   const [keyboardMode, setKeyboardMode] = useState<'palette' | 'shortcuts' | null>(null);
   const [currentUser, setCurrentUser] = useState<Pick<LocalAuthUser,'loginId'|'displayName'|'role'>|null>(null);
   const [canRevealConfigurationFields, setCanRevealConfigurationFields] = useState(false);
+  const [accessCapabilities, setAccessCapabilities] = useState<AccessCapabilities>({ operate: false, accountManage: false, systemSettingsWrite: false, configurationAdmin: false });
+  const [capabilitiesResolved, setCapabilitiesResolved] = useState(false);
   const inspectionSessionEpoch = useSyncExternalStore(inspectionCache.subscribeSession, () => inspectionCache.sessionEpoch);
   useLayoutEffect(() => { inspectionCache.select(selectedPackage, selectedEnvironment); }, [selectedPackage, selectedEnvironment]);
   useEffect(() => {
@@ -248,8 +251,9 @@ export function AppShell({
     : serverVersion.status === 'error' ? 'Unavailable' : 'Connecting…';
   const versionData = serverVersion.status === 'ready' ? serverVersion.data : null;
   useEffect(() => {
-    if (!versionData) { setCurrentUser(null); setCanRevealConfigurationFields(false); return; }
+    if (!versionData) { setCurrentUser(null); setCanRevealConfigurationFields(false); setAccessCapabilities({ operate: false, accountManage: false, systemSettingsWrite: false, configurationAdmin: false }); setCapabilitiesResolved(false); return; }
     const controller = new AbortController();
+    setCapabilitiesResolved(false);
     if (versionData.authMode === 'local') api.getCurrentUser(controller.signal).then(user => { if (!controller.signal.aborted) setCurrentUser(user); }).catch(() => {
         if (controller.signal.aborted) return;
         const returnTo = contextRelativeReturnTo(location.pathname, location.search, location.hash);
@@ -257,10 +261,18 @@ export function AppShell({
       });
     else setCurrentUser(null);
     api.getAuthCapabilities(controller.signal).then(result => {
-      if (!controller.signal.aborted) setCanRevealConfigurationFields(result.configurationAdmin === true);
-    }).catch(() => { if (!controller.signal.aborted) setCanRevealConfigurationFields(false); });
+      if (!controller.signal.aborted) {
+        const caps=result.capabilities || {};
+        const next={operate:caps.operate===true,accountManage:caps.accountManage===true,systemSettingsWrite:caps.systemSettingsWrite===true,configurationAdmin:result.configurationAdmin===true||caps.configurationAdmin===true};
+        setCanRevealConfigurationFields(next.configurationAdmin);setAccessCapabilities(next);setCapabilitiesResolved(true);
+      }
+    }).catch(() => { if (!controller.signal.aborted) {setCanRevealConfigurationFields(false);setAccessCapabilities({ operate: false, accountManage: false, systemSettingsWrite: false, configurationAdmin: false });setCapabilitiesResolved(true);} });
     return () => controller.abort();
   }, [versionData?.authMode, versionData?.apiVersion, inspectionSessionEpoch]);
+  useEffect(() => {
+    if(!capabilitiesResolved)return;
+    if(accessCapabilities.accountManage&&!accessCapabilities.operate&&route.kind!=='settings')navigation.navigate({kind:'settings'});
+  },[capabilitiesResolved,accessCapabilities.accountManage,accessCapabilities.operate,route.kind,navigation.navigate]);
   async function signOut() {
     try { await api.logout(); } finally {
       const login = new URL('login.html', document.baseURI);
@@ -275,9 +287,7 @@ export function AppShell({
         : { label: 'Back to LOAD Catalog', target: '#/advanced-load', hidden: false }
       : route.kind === 'configuration' && route.packageId
         ? { label: 'Open Explorer', target: '#/packages/' + encodeURIComponent(route.packageId), hidden: false }
-        : route.kind === 'package' && versionData?.inlineLoadEnabled === true
-          ? { label: 'Start Load', target: '#/advanced-load/' + encodeURIComponent(route.packageId), hidden: false }
-          : route.kind === 'load' || route.kind === 'jobs'
+        : route.kind === 'load' || route.kind === 'jobs' || route.kind === 'package'
             ? { label: 'Browse packages', target: '#/packages', hidden: false }
             : { label: 'Browse packages', target: '#/packages', hidden: false };
 
@@ -390,7 +400,7 @@ export function AppShell({
 
   return (
     <NavigationGuardContext.Provider value={navigation}>
-      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, currentUser, canRevealConfigurationFields, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
+      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, currentUser, accessCapabilities, canRevealConfigurationFields, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
       <div className={'app-layout' + (collapsed ? ' is-collapsed' : '') + (mobileNavigationOpen ? ' mobile-nav-open' : '')} data-page={currentPage}>
         <a className="skip-link" href="#main-content">Skip to main content</a>
         <button className="sidebar-backdrop" type="button" aria-label="Close navigation" aria-hidden={!mobileNavigationOpen} onClick={() => setMobileNavigationOpen(false)} tabIndex={-1} />
@@ -406,21 +416,15 @@ export function AppShell({
             </button>
           </div>
           <nav id="primary-navigation" className="primary-navigation" aria-label="Primary navigation">
-            <p className="nav-group-label">Workspace</p>
+            {accessCapabilities.operate && <><p className="nav-group-label">Workspace</p>
             <a className="nav-link" href="#/" data-nav="dashboard" aria-current={activeNav === 'dashboard' ? 'page' : undefined} onClick={link('#/')}>
               <span className="nav-icon" aria-hidden="true">⌂</span><span className="nav-label">Dashboard</span>
             </a>
-            <a className="nav-link" href="#/packages" data-nav="packages" aria-current={activeNav === 'packages' ? 'page' : undefined} onClick={link('#/packages')}>
-              <span className="nav-icon" aria-hidden="true">▦</span><span className="nav-label">Packages</span>
-            </a>
             <a className="nav-link" href={packageHref} data-nav="explorer" aria-current={activeNav === 'explorer' ? 'page' : undefined} onClick={link(packageHref)}>
-              <span className="nav-icon" aria-hidden="true">⌕</span><span className="nav-label">Explorer and Run</span>
+              <span className="nav-icon" aria-hidden="true">⌕</span><span className="nav-label">Explorer</span>
             </a>
             <a className="nav-link" href={configurationHref} data-nav="configuration" aria-current={activeNav === 'configuration' ? 'page' : undefined} onClick={link(configurationHref)}>
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Configuration</span>
-            </a>
-            <a className="nav-link" href={formatRoute({ kind: 'run', packageId: selectedPackage || undefined })} data-nav="run" aria-current={activeNav === 'run' ? 'page' : undefined} onClick={link(formatRoute({ kind: 'run', packageId: selectedPackage || undefined }))}>
-              <span className="nav-icon" aria-hidden="true">▷</span><span className="nav-label">Run</span>
             </a>
             <a className="nav-link" href={loadHref} data-nav="load-testing" aria-current={activeNav === 'load-testing' ? 'page' : undefined} onClick={link(loadHref)}>
               <span className="nav-icon" aria-hidden="true">⌁</span><span className="nav-label">Load testing</span>
@@ -431,9 +435,10 @@ export function AppShell({
             {showScheduledLoad && <a className="nav-link" href="#/schedules" data-nav="scheduled-load" aria-current={activeNav === 'scheduled-load' ? 'page' : undefined} onClick={link('#/schedules')}>
               <span className="nav-icon" aria-hidden="true">◷</span><span className="nav-label">Schedules</span>
             </a>}
-            <a className="nav-link" href="#/settings" data-nav="settings" aria-current={activeNav === 'settings' ? 'page' : undefined} onClick={link('#/settings')}>
+            </>}
+            {(accessCapabilities.operate||accessCapabilities.accountManage) && <a className="nav-link" href="#/settings" data-nav="settings" aria-current={activeNav === 'settings' ? 'page' : undefined} onClick={link('#/settings')}>
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span>
-            </a>
+            </a>}
           </nav>
           <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.1'}</span></div>
         </aside>
@@ -502,16 +507,18 @@ export function AppShell({
                   ? <><strong>{currentUser?.displayName || currentUser?.loginId || 'Loading identity…'}</strong><small>{currentUser ? `${currentUser.loginId} · ${currentUser.role}` : 'Loading authenticated identity'}</small></>
                   : <><strong>Server managed</strong><small>not exposed by API</small></>}
               </div>
-              <a className="button button-primary context-action" href={action.target} hidden={action.hidden} onClick={link(action.target)}>{action.label}</a>
+              <a className="button button-primary context-action" href={action.target} hidden={action.hidden || !accessCapabilities.operate} onClick={link(action.target)}>{action.label}</a>
             </div>
           </div>
 
-          <main key={inspectionSessionEpoch} id="main-content" tabIndex={-1}>{children}</main>
+          <main key={inspectionSessionEpoch} id="main-content" tabIndex={-1}>
+            {capabilitiesResolved ? children : <div className="page-content" role="status" aria-busy="true">Checking ATT access…</div>}
+          </main>
           <footer className="page-footer"><span>ATT Server</span><span>API v{versionData?.apiVersion || '1'}</span></footer>
         </div>
         <DiscardChangesDialog navigation={navigation} />
         <ChangePasswordDialog open={changePasswordOpen} locale={uiLocale} onClose={()=>setChangePasswordOpen(false)} />
-        <KeyboardDialog open={keyboardMode !== null} mode={keyboardMode || 'palette'} showScheduledLoad={showScheduledLoad} selectedPackage={selectedPackage}
+        <KeyboardDialog open={keyboardMode !== null} mode={keyboardMode || 'palette'} showScheduledLoad={showScheduledLoad&&accessCapabilities.operate} selectedPackage={selectedPackage} accessCapabilities={accessCapabilities}
           onClose={() => setKeyboardMode(null)} onNavigate={target => { navigate(target); setKeyboardMode(null); setMobileNavigationOpen(false); }} />
       </div>
       </AppShellContext.Provider>

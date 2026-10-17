@@ -25,9 +25,9 @@
 .att-feature-header h1 { margin: 0; font-size: clamp(1.6rem, 3vw, 2.15rem); }
 .att-feature-header p:not(.att-eyebrow) { max-width: 70ch; color: var(--att-color-muted, #637087); }
 
-.att-load-page button,
-.att-jobs-page button,
-.att-job-detail button,
+.att-load-page button:not(.button),
+.att-jobs-page button:not(.button),
+.att-job-detail button:not(.button),
 .att-load-page select,
 .att-jobs-page select,
 .att-job-detail select,
@@ -46,18 +46,18 @@
   font: inherit;
 }
 
-.att-load-page button,
-.att-jobs-page button,
-.att-job-detail button { cursor: pointer; }
-.att-load-page button:hover:not(:disabled),
-.att-jobs-page button:hover:not(:disabled),
-.att-job-detail button:hover:not(:disabled) { border-color: var(--att-color-primary, #3157c8); }
+.att-load-page button:not(.button),
+.att-jobs-page button:not(.button),
+.att-job-detail button:not(.button) { cursor: pointer; }
+.att-load-page button:not(.button):hover:not(:disabled),
+.att-jobs-page button:not(.button):hover:not(:disabled),
+.att-job-detail button:not(.button):hover:not(:disabled) { border-color: var(--att-color-primary, #3157c8); }
 .att-load-page :focus-visible,
 .att-jobs-page :focus-visible,
 .att-job-detail :focus-visible { outline: 0; box-shadow: var(--att-focus-ring, 0 0 0 3px rgba(49, 87, 200, .28)); }
-.att-load-page button:disabled,
-.att-jobs-page button:disabled,
-.att-job-detail button:disabled { cursor: not-allowed; opacity: .58; }
+.att-load-page button:not(.button):disabled,
+.att-jobs-page button:not(.button):disabled,
+.att-job-detail button:not(.button):disabled { cursor: not-allowed; opacity: .58; }
 
 .att-section-nav,
 .att-job-tabs {
@@ -226,13 +226,12 @@
   .att-load-page *, .att-jobs-page *, .att-job-detail * { scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
 
-.att-quick-load-page { max-width: 86rem; margin: 0 auto; padding: var(--att-space-5, 1.25rem); }
 .att-quick-load-actions { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; }
 .att-quick-load-page .att-quick-load-disclosure { width:100%; text-align:left; font-size:1.1rem; font-weight:700; }
 .att-quick-load-page .att-code-editor { min-height:12rem; }
 .att-quick-load-schedule-note { padding:.75rem; border:1px solid var(--att-color-border,#dce2ec); border-radius:var(--att-radius-card,.9rem); background:var(--att-color-surface,#fff); }
 .att-quick-load-schedule-note summary { cursor:pointer; font-weight:700; }
-@media(max-width:700px) { .att-quick-load-page { padding:.75rem; } .att-quick-load-actions button { flex:1 1 auto; } }
+@media(max-width:700px) { .att-quick-load-actions button { flex:1 1 auto; } }
 
 .att-threshold-evidence-editor { display:grid; gap:1rem; }
 .att-threshold-scope-picker { display:flex; flex-wrap:wrap; gap:.75rem; }

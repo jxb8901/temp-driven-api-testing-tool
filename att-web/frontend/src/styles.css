@@ -98,7 +98,7 @@ button:focus-visible, a:focus-visible, [tabindex="-1"]:focus-visible { outline: 
 .theme-toggle:hover { border-color: var(--att-color-primary); }
 .theme-icon { color: var(--att-color-primary); font-size: 1.1rem; }
 .mobile-menu-button { display: none; }
-.page-chrome { padding: var(--att-space-4) clamp(1rem, 3vw, 2.5rem) 0; }
+.page-chrome { width: min(100%, 1480px); margin-inline: auto; padding: var(--att-space-4) clamp(1rem, 3vw, 2.5rem) 0; }
 .breadcrumbs ol { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0; padding: 0; list-style: none; color: var(--att-color-muted); font-size: 0.8rem; }
 .breadcrumbs li + li::before { margin-right: 0.4rem; color: var(--att-color-border); content: "/"; }
 .breadcrumbs [aria-current="page"] { color: var(--att-color-text); font-weight: 650; }
@@ -140,6 +140,8 @@ h2 { margin: 0; font-size: 1.05rem; letter-spacing: -0.02em; }
 .dashboard-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--att-space-5); }
 .panel { min-width: 0; padding: var(--att-space-5); }
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--att-space-3); }
+.package-refresh-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--att-space-2); }
+.package-refresh-actions > .section-description { margin: 0; }
 .job-refresh-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--att-space-2); }
 .section-description { margin: var(--att-space-2) 0 0; color: var(--att-color-muted); font-size: 0.82rem; line-height: 1.5; }
 .section-state { min-height: 1.5rem; margin: var(--att-space-4) 0 0; color: var(--att-color-muted); font-size: 0.84rem; line-height: 1.5; }
@@ -150,6 +152,7 @@ h2 { margin: 0; font-size: 1.05rem; letter-spacing: -0.02em; }
 .package-copy, .job-copy { display: grid; min-width: 0; flex: 1; gap: 0.15rem; }
 .package-copy strong, .job-id { overflow: hidden; color: var(--att-color-text); font-size: 0.84rem; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .package-copy span, .job-copy > span { overflow: hidden; color: var(--att-color-muted); font-size: 0.72rem; text-overflow: ellipsis; white-space: nowrap; }
+.package-copy small { color: var(--att-color-muted); font-size: 0.7rem; line-height: 1.4; overflow-wrap: anywhere; }
 .text-link { padding: 0; border: 0; background: transparent; cursor: pointer; }
 .text-link:hover { color: var(--att-color-primary); text-decoration: underline; }
 .status-badge { display: inline-flex; align-items: center; padding: 0.25rem 0.5rem; border-radius: 999px; background: var(--att-color-canvas); color: var(--att-color-muted); font-size: 0.68rem; font-weight: 740; text-transform: capitalize; white-space: nowrap; }
