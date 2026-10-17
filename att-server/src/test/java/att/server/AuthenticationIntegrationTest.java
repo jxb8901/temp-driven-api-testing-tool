@@ -457,7 +457,9 @@ class AuthenticationIntegrationTest {
         }
         finally {open.stop();open.destroy();restore(old);}
 
-        Files.writeString(openConfig,Files.readString(openConfig).replace("authenticationRequired: false","authenticationRequired: true"));
+        Files.writeString(openConfig,Files.readString(openConfig)
+                .replace("authenticationRequired: false","authenticationRequired: true")
+                .replace("allowAnonymousOperations: true","allowAnonymousOperations: false"));
         System.setProperty("att.server.config",openConfig.toString());
         Tomcat restarted=start(users,appDirectory("anonymous-restart-authenticated"));
         try {

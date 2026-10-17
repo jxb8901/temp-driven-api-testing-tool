@@ -406,8 +406,6 @@ class ServerRuntimeTest {
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{
             builder.environment().put("ORDERS_DB_USERNAME","inspection-test-user");builder.environment().put("ORDERS_DB_PASSWORD","inspection-test-password");
             builder.environment().put("PAYMENT_MQ_USERNAME","inspection-test-user");builder.environment().put("PAYMENT_MQ_PASSWORD","inspection-test-password");
-            builder.environment().put("JAVA_TOOL_OPTIONS","-Datt.inspection.debugFailures=true");
-            builder.redirectError(ProcessBuilder.Redirect.INHERIT);
             return builder.start();
         });
         try {
@@ -416,6 +414,7 @@ class ServerRuntimeTest {
             assertTrue(declared.toString().contains("SIT"));assertTrue(declared.toString().contains("UAT"));
             Map<String,Object> effective=runtime.inspectConfiguration("p","effective","SIT",null,"alice");
             assertEquals("ready",effective.get("state"),effective.toString());assertEquals("SIT",effective.get("environment"));
+            assertTrue(effective.toString().contains("config/dbhelpers/sit/orders.yaml"),effective.toString());
             Map<String,Object> defaultEffective=runtime.inspectConfiguration("p","effective",null,null,"globals",0,50,"alice");
             assertEquals("ready",defaultEffective.get("state"),defaultEffective.toString());assertEquals("SIT",defaultEffective.get("environment"));
             Map<String,Object> comparison=runtime.inspectConfiguration("p","compare","SIT","UAT","dbhelpers",0,50,"alice");
@@ -430,6 +429,7 @@ class ServerRuntimeTest {
             assertTrue(publicData.contains("jdbc:postgresql://sit-db.example.internal:5432/orders"));
             assertTrue(publicData.contains("jdbc:postgresql://uat-db.example.internal:5432/orders"));
             assertFalse(publicData.contains("inspection-test-password"));assertFalse(publicData.contains(packageRoot.toString()));
+            assertFalse(publicData.contains(sharedRuntimeConfig.toString()));
         } finally {runtime.close();}
     }
 
@@ -853,6 +853,7 @@ class ServerRuntimeTest {
         for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))addModuleJar(libs,module,Path.of(module+"/target/classes"));
         addWorkerClasspathJars(libs);
         try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(server),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
             for(String environment:List.of("SIT","UAT"))for(String type:List.of("case","template","flow","tool")) {
                 var body=ServerRuntime.JSON.createObjectNode();body.put("schemaVersion",RunDefinition.VERSION);body.put("executionType","run");body.put("packageId","p");body.put("environment",environment);
                 String id=switch(type){case "case"->"cases.default.C1";case "template"->"SIMPLE";case "flow"->"simple.flow.v1";default->"version";};
@@ -891,7 +892,7 @@ class ServerRuntimeTest {
             Map<String,Object> allResult=awaitUnifiedJob(runtime,String.valueOf(accepted.get("jobId")));
             assertEquals("FAIL",((Map<?,?>)allResult.get("job")).get("status"),allResult.toString());
             Path completedOutput=temp.resolve("unified-data").resolve("jobs").resolve(String.valueOf(accepted.get("jobId"))).resolve("output");
-            assertTrue(Files.isRegularFile(completedOutput.resolve("latest-run.yaml")),allResult+"; output="+listTree(completedOutput));
+            assertTrue(Files.isRegularFile(completedOutput.resolve("latest-run.yaml")),allResult.toString());
             var rerun=(com.fasterxml.jackson.databind.node.ObjectNode)all.deepCopy();rerun.set("selection",ServerRuntime.JSON.valueToTree(Map.of("rerunFailed",true)));
             Map<String,Object> failed=runtime.createRunDraft(rerun,"alice");assertEquals(List.of("cases.default.C2"),failed.get("selectedCaseIds"));
             Map<String,Object> stale=runtime.createRunDraft(selection,"alice");
@@ -938,10 +939,6 @@ class ServerRuntimeTest {
                 Path target=libs.resolve(candidate.getFileName());if(!Files.exists(target))try{Files.createSymbolicLink(target,candidate);}catch(Exception unsupported){Files.copy(candidate,target);}
             }
         }
-    }
-    private static List<String> listTree(Path root)throws Exception {
-        if(!Files.exists(root))return List.of("<missing>");
-        try(var files=Files.walk(root,4)){return files.map(path->root.relativize(path).toString()).collect(java.util.stream.Collectors.toList());}
     }
     private static final class MutableClock extends Clock {
         private Instant current=Instant.now();

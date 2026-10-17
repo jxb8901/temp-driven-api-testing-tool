@@ -279,7 +279,6 @@ public final class PackageConfigurationInspector {
         } catch (ConfigurationLimitException exceeded) {
             throw exceeded;
         } catch (Exception invalid) {
-            if (Boolean.getBoolean("att.inspection.debugFailures")) invalid.printStackTrace(System.err);
             Map<String, Object> result = invalid("effective", safeEnvironment, "ATT-CONFIG-INVALID", "Selected configuration is unavailable or invalid");
             result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
             return result;
@@ -1044,7 +1043,9 @@ public final class PackageConfigurationInspector {
 
     private void logicalSource(Map<String, Object> entry, Path path) throws Exception {
         if (path == null) return;
-        PackageResourceResolver.PackageResource resource = resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE);
+        Path canonical=path.toRealPath();
+        PackageResourceResolver resolver=canonical.startsWith(packageRoot)?resources:configResources;
+        PackageResourceResolver.PackageResource resource = resolver.fromInternalPath(canonical, PackageResourceResolver.Kind.FILE);
         entry.put("source", resource.logicalName());
     }
 
