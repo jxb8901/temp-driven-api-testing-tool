@@ -685,7 +685,8 @@ class PackageValidatorTest {
 
     @Test void windowsPackageValidationPublishesSkippedShellWarning() throws Exception {
         Path root = java.nio.file.Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
-        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        Path home = java.nio.file.Paths.get("").toAbsolutePath().normalize();
+        FrameworkConfig config = new FrameworkConfigLoader().load(home.resolve("config/config.yaml"), home, root, "SIT");
         PackageValidator.ValidationSummary summary = new PackageValidator(root, config, true)
                 .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
         List<Diagnostic> warnings = new ArrayList<Diagnostic>();

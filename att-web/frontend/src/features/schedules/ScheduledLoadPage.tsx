@@ -78,7 +78,7 @@ function focusDiagnosticField(field: string): void {
   const value = field.toLowerCase();
   const exact: Array<[RegExp, string]> = [
     [/^name(?:\.|$)/, 'schedule-name'], [/^packageid(?:\.|$)/, 'schedule-package'],
-    [/^scenario(?:\.|$)/, 'schedule-scenario'], [/^config(?:\.|$)/, 'schedule-config'],
+    [/^scenario(?:\.|$)/, 'schedule-scenario'],
     [/^environment(?:\.|$)/, 'schedule-environment'], [/^timezone(?:\.|$)/, 'schedule-timezone'],
     [/^(?:cron|recurrence)(?:\.|$)/, 'schedule-cron'], [/^maxconcurrentruns(?:\.|$)/, 'schedule-overlap'],
   ];
@@ -676,7 +676,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
 
     {editorOpen && loadState === 'ready' && (view !== 'edit' || editingId) && <section className="att-schedule-panel att-schedule-editor" aria-labelledby="schedule-editor-heading">
       <div className="att-schedule-section-heading"><div><h2 id="schedule-editor-heading" tabIndex={-1}>{editingId ? `Edit schedule: ${draft.name || editingId}` : 'New Schedule'}</h2>
-        <p>{draft.inlineSnapshot ? `This schedule stores the immutable ${draft.executionType === 'run' ? 'RUN definition' : 'LOAD scenario'} snapshot from your validated draft. The editor stays open behind this form.` : 'Scenario and config paths are package-relative. The next-run preview checks recurrence times only; the Server validates the package scenario before saving and again before each scheduled run.'}</p></div>
+        <p>{draft.inlineSnapshot ? `This schedule uses the immutable ${draft.executionType === 'run' ? 'RUN definition' : 'LOAD scenario'} snapshot from your validated draft.` : 'Scenario paths are package-relative. The next-run preview checks recurrence times only; the Server validates the package scenario before saving and again before each scheduled run.'}</p></div>
         <button type="button" className="button button-quiet" onClick={closeEditor} disabled={saving}>Cancel</button>
       </div>
       <p><strong>{draft.executionType.toUpperCase()}</strong>{draft.legacyDebug ? ' · Debug mode' : ''} · {draft.inlineSnapshot ? 'Immutable validated snapshot' : 'Package scenario'}. Saving never triggers a job immediately.</p>
@@ -738,9 +738,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
           {draft.executionType === 'load' && <label htmlFor="schedule-scenario">{draft.inlineSnapshot ? 'Scenario source' : 'Scenario path'} <span className="att-schedule-hint">{draft.inlineSnapshot ? 'Immutable validated snapshot' : 'Package-relative'}</span>
             <input id="schedule-scenario" value={draft.inlineSnapshot ? 'Validated Load snapshot' : draft.scenario} onChange={event => updateDraft('scenario', event.currentTarget.value)} maxLength={512} placeholder="load/scenario.yaml" required={!draft.inlineSnapshot} disabled={draft.inlineSnapshot} />
           </label>}
-          {draft.executionType === 'load' && <label htmlFor="schedule-config">Config path <span className="att-schedule-hint">Optional, package-relative</span>
-            <input id="schedule-config" value={draft.config} onChange={event => updateDraft('config', event.currentTarget.value)} maxLength={512} placeholder="config/config.yaml" disabled={draft.inlineSnapshot} />
-          </label>}
+          {draft.executionType === 'load' && <p className="att-schedule-hint">Uses the shared ATT_HOME runtime configuration.</p>}
           <label htmlFor="schedule-environment">Environment <span className="att-schedule-hint">Optional</span>
             <input id="schedule-environment" value={draft.environment} onChange={event => updateDraft('environment', event.currentTarget.value)} maxLength={128} placeholder="SIT" disabled={draft.inlineSnapshot} />
           </label>

@@ -58,7 +58,7 @@ class WindowsLauncherTest {
         assertTrue(binary.contains("<outputDirectory>packages/default/testdata</outputDirectory>"));
         assertTrue(binary.contains("../config</directory>"));
         assertTrue(binary.contains("../schemas</directory>"));
-        assertTrue(binary.contains("../config/att-server.example.yaml</source>"));
+        assertTrue(manifest.contains("config/att-server.example.yaml"));
         assertFalse(binary.contains("../config/att-server.yaml"));
         assertTrue(source.contains("<include>att.bat</include>"));
         assertTrue(source.contains("<include>packages/default/**</include>"));

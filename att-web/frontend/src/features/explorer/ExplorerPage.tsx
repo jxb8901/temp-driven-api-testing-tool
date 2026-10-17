@@ -83,9 +83,9 @@ function ExplorerReference({ reference, onOpen }: { reference: ResourceReference
     <span>{reference.resolution === 'unresolved' ? 'Unresolved reference' : reference.type || reference.resolution || 'unresolved'}</span></li>;
 }
 
-export function ExplorerPage({ api, packageId, resourceRoute, environment, environments = [], environmentState = 'ready',
-  principalLabel = '', onResourceRouteChange, onEnvironmentChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
-  onRunTarget, onScheduleDebug, onOpenConfigurationFile, onRetryEnvironments, registerUnsavedChanges }: ExplorerPageProps) {
+export function ExplorerPage({ api, packageId, resourceRoute, environment,
+  principalLabel = '', onResourceRouteChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
+  onRunTarget, onScheduleDebug, onOpenConfigurationFile, registerUnsavedChanges }: ExplorerPageProps) {
   const initialListState = useRef(savedExplorerList(packageId)).current;
   const [query, setQuery] = useState(initialListState.query);
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
@@ -400,13 +400,6 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, envir
       updateDirty(false); onJobAccepted(accepted.jobId);
     } catch (error) { setDetailError(userError(error, 'case run')); }
     finally { setDetailLoading(false); }
-  };
-
-  const changeEnvironment = (next: string) => {
-    if (next === environment) return;
-    if (dirtyRef.current && !window.confirm('Changing the environment will discard unsaved Debug edits. Continue?')) return;
-    if (dirtyRef.current) { resetDebug(); }
-    onEnvironmentChange(next);
   };
 
   const changePrincipal = (next: string) => {

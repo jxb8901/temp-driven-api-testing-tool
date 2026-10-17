@@ -141,7 +141,7 @@ describe('ScheduledLoadPage', () => {
     const initialDraft = { packageId: 'payments', environment: 'UAT', executionType, draftId: executionType === 'run' ? 'R-FROZEN' : 'A-FROZEN',
       previewYaml: 'Safe server preview', target: { type: 'tool', id: 'send' } };
     await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
-      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} modal initialDraft={initialDraft} />
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} initialDraft={initialDraft} />
     </NavigationGuardContext.Provider>));
     await advance(400);
     expect(api.createSchedule).not.toHaveBeenCalled();
@@ -158,7 +158,7 @@ describe('ScheduledLoadPage', () => {
     const api = makeApi();
     const initialDraft = { packageId: 'payments', environment: 'UAT', draftId: 'A-FROZEN', previewYaml: 'Safe server preview' };
     await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
-      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} modal initialDraft={initialDraft} />
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} initialDraft={initialDraft} />
     </NavigationGuardContext.Provider>));
     await advance(400);
     await click(host.querySelector('button[type="submit"]')!);
@@ -373,34 +373,34 @@ describe('ScheduledLoadPage', () => {
     expect(alert?.textContent).toContain('schedule-request-42');
   });
 
-  it('opens a validated Load snapshot in a dialog and returns to the still-mounted Load editor on cancel', async () => {
+  it('opens a validated Load snapshot in the full-page schedule editor and returns on cancel', async () => {
     const api = makeApi();
-    const onClose = vi.fn();
+    const onCancel = vi.fn();
     await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
-      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} modal onClose={onClose}
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} route={{ kind: 'schedules', view: 'new' }} onCancel={onCancel}
         initialDraft={{ packageId: 'payments', environment: 'SIT', draftId: 'A0123456789ABCDEF0123456789ABCDEF',
           previewYaml: 'schemaVersion: att-load/v1.6\nworkloads: []\n' }} />
     </NavigationGuardContext.Provider>));
     await advance(300);
 
-    const dialog = host.querySelector<HTMLDialogElement>('.att-schedule-create-dialog');
-    expect(dialog?.open).toBe(true);
+    expect(host.querySelector('.att-schedule-create-dialog')).toBeNull();
+    expect(host.querySelector('#schedule-editor-heading')?.textContent).toBe('New Schedule');
     expect(host.querySelector('#schedule-list-heading')).toBeNull();
     expect(host.querySelector('.att-schedule-snapshot-review pre')?.textContent).toBe('schemaVersion: att-load/v1.6\nworkloads: []\n');
     expect((host.querySelector('#schedule-environment') as HTMLInputElement).value).toBe('SIT');
     expect(navigation.navigate).not.toHaveBeenCalled();
     expect(navigation.registerUnsavedChanges).toHaveBeenCalledWith(false, 'Schedules changes');
 
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Cancel and return to editor')!);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Cancel')!);
+    expect(onCancel).toHaveBeenCalledTimes(1);
     expect(navigation.navigate).not.toHaveBeenCalled();
   });
 
-  it('keeps Return to editor available after saving a validated Load snapshot', async () => {
+  it('returns to the source page after saving a validated Load snapshot', async () => {
     const api = makeApi();
-    const onClose = vi.fn();
+    const onSaved = vi.fn();
     await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
-      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} modal onClose={onClose}
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} route={{ kind: 'schedules', view: 'new' }} onSaved={onSaved}
         initialDraft={{ packageId: 'payments', environment: 'SIT', draftId: 'A0123456789ABCDEF0123456789ABCDEF',
           previewYaml: 'schemaVersion: att-load/v1.6\nworkloads: []\n' }} />
     </NavigationGuardContext.Provider>));
@@ -409,11 +409,7 @@ describe('ScheduledLoadPage', () => {
     await click(host.querySelector('.att-schedule-form-actions button[type="submit"]')!);
     await advance(0);
     expect(api.createSchedule).toHaveBeenCalledTimes(1);
-    const returnToEditor = [...host.querySelectorAll('button')]
-      .find(button => button.textContent === 'Return to editor') as HTMLButtonElement;
-    expect(returnToEditor.disabled).toBe(false);
-    await click(returnToEditor);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
   it('keeps Run Now and delete behind explicit confirmation', async () => {

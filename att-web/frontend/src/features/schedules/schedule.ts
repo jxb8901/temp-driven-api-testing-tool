@@ -123,7 +123,7 @@ export function scheduleInputFromDraft(draft: ScheduleDraft): ScheduleInput {
   const input: ScheduleInput = {
     name: draft.name.trim(), description: draft.description.trim(), tags,
     packageId: draft.packageId, executionType: draft.executionType, schemaVersion: 'att-schedule/v2',
-    ...(draft.legacyDebug ? { legacyDebug: true } : {}), config: draft.config.trim(),
+    ...(draft.legacyDebug ? { legacyDebug: true } : {}), config: 'config/config.yaml',
     environment: draft.environment.trim(), timezone: draft.timezone.trim(), cron,
     load: load as Record<string, string>, maxConcurrentRuns, enabled: draft.enabled,
   };

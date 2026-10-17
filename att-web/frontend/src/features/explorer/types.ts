@@ -271,13 +271,9 @@ export interface ExplorerPageProps {
   /** Route values are untrusted URL segments; Explorer validates the type before API use. */
   resourceRoute: { type: string; resourceId: string; logicalId?: string; tab?: 'definition' | 'source' | 'relations' } | null;
   environment: string;
-  environments?: string[];
-  environmentState?: 'loading' | 'ready' | 'error';
   principalLabel?: string;
   onResourceRouteChange: (route: (Omit<ResourceIdentity, 'packageId'> & { logicalId?: string; tab?: 'definition' | 'source' | 'relations' }) | null) => void;
   onRunTarget?: (target: { type: string; resourceId: string; logicalId?: string }) => void;
-  onEnvironmentChange: (environment: string) => void;
-  onRetryEnvironments?: () => void;
   onJobAccepted: (jobId: string) => void;
   onPrincipalLabelChange?: (label: string) => void;
   onOpenQuickLoad?: (identity: ResourceIdentity) => void;

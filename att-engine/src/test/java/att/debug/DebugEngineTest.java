@@ -456,7 +456,7 @@ class DebugEngineTest {
         Files.createDirectories(descriptor.getParent());
         Files.write(descriptor, "schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: 42}]\n"
                 .getBytes(StandardCharsets.UTF_8));
-        Path environmentDescriptor = project.resolve("config/testdata/environment-accounts.yaml");
+        Path environmentDescriptor = project.resolve("testdata/environment-accounts.yaml");
         Files.createDirectories(environmentDescriptor.getParent());
         Files.write(environmentDescriptor, "schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: 17}]\n"
                 .getBytes(StandardCharsets.UTF_8));

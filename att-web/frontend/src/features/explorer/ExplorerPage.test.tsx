@@ -228,7 +228,7 @@ describe('Explorer page integration', () => {
     const onResourceRouteChange = vi.fn();
     await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="SIT"
       registerUnsavedChanges={() => () => {}} onResourceRouteChange={onResourceRouteChange}
-      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+      onJobAccepted={() => {}} />);
     await settle();
 
     expect(container.querySelector('.att-explorer-workspace')?.classList.contains('is-list-first')).toBe(true);
@@ -289,7 +289,7 @@ describe('Explorer page integration', () => {
     const onResourceRouteChange = vi.fn();
     await render(<ExplorerPage api={api} packageId="payments" resourceRoute={{ type: 'flow', resourceId: 'payment-flow', tab: 'relations' }} environment="SIT"
       registerUnsavedChanges={() => () => {}} onResourceRouteChange={onResourceRouteChange}
-      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+      onJobAccepted={() => {}} />);
     await settle();
 
     expect(container.querySelector('[data-tab="relations"]')?.getAttribute('aria-selected')).toBe('true');
@@ -301,7 +301,7 @@ describe('Explorer page integration', () => {
     }), definition: {} })) });
     await render(<ExplorerPage api={helperApi} packageId="payments" resourceRoute={{ type: 'flow', resourceId: 'helper-caller', tab: 'relations' }} environment="SIT"
       registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}}
-      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+      onJobAccepted={() => {}} />);
     await settle();
     expect(container.textContent).toContain('This call resolves through the package Helper configuration.');
     expect(container.textContent).toContain('It is not a separate Tool resource');
@@ -395,7 +395,7 @@ describe('Explorer page integration', () => {
     await render(<ExplorerPage api={api} packageId="payments"
       resourceRoute={{ type: 'template' as const, resourceId: 'checkout' }} environment=""
       registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}}
-      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+      onJobAccepted={() => {}} />);
     await settle();
 
     click(button('Run this target'));
@@ -422,7 +422,7 @@ describe('Explorer page integration', () => {
   it('shows anonymous unauthorized resource errors in the page without exposing the response body', async () => {
     const api = apiWith({ listResources: vi.fn(async () => { throw Object.assign(new Error('authorization header rejected'), { status: 401 }); }) });
     await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment=""
-      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
     await settle();
     expect(container.textContent).toContain('Your session has expired.');
     expect(container.textContent).not.toContain('authorization header rejected');
@@ -440,7 +440,7 @@ describe('Explorer page integration', () => {
       })),
     });
     await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
-      onEnvironmentChange={() => {}} initialMode="declared" />);
+      initialMode="declared" />);
     await settle();
     click(button('Compare'));
     await settle();
@@ -463,7 +463,7 @@ describe('Explorer page integration', () => {
       })),
     });
     await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
-      onEnvironmentChange={() => {}} initialMode="declared" />);
+      initialMode="declared" />);
     click(button('Compare'));
     await settle();
     expect(container.textContent).toContain('Shared source: config/dbhelpers/shared.yaml');
@@ -484,7 +484,7 @@ describe('Explorer page integration', () => {
       compareConfiguration,
     });
     await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
-      onEnvironmentChange={() => {}} initialMode="compare" />);
+      initialMode="compare" />);
     await settle();
     expect(compareConfiguration.mock.calls[0][1]).toMatchObject({ left: 'left', right: 'right', section: 'dbhelpers', offset: 0, limit: 50 });
 
@@ -517,7 +517,7 @@ describe('Explorer page integration', () => {
       compareConfiguration,
     });
     await render(<ConfigurationExplorer api={api} packageId="payments" environment=""
-      onEnvironmentChange={() => {}} initialMode="compare" />);
+      initialMode="compare" />);
     await settle();
     const section = [...container.querySelectorAll('label')].find(label => label.textContent?.startsWith('Compare section'))?.querySelector('select');
     setValue(section!, 'globals');

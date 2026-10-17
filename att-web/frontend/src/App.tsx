@@ -34,11 +34,6 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
-  const [environments, setEnvironments] = useState<string[]>([]);
-  const [environmentState, setEnvironmentState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [environmentReload, setEnvironmentReload] = useState(0);
-  const selectedEnvironmentRef = useRef(workspace.selectedEnvironment);
-  selectedEnvironmentRef.current = workspace.selectedEnvironment;
   const onResourceRouteChange = useCallback((resource: ExplorerPageProps['resourceRoute']) => {
     navigation.navigate(resource
       ? { kind: 'package', packageId, resource }
@@ -58,36 +53,15 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
     onSchedule(input);
   }, [onSchedule]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    setEnvironmentState('loading');
-    api.getDeclaredConfiguration(packageId, controller.signal).then(configuration => {
-      if (controller.signal.aborted) return;
-      const names = (configuration.environments || []).filter(item => item.name && item.state === 'active').map(item => item.name);
-      setEnvironments(names);
-      setEnvironmentState('ready');
-      if (selectedEnvironmentRef.current && !names.includes(selectedEnvironmentRef.current)) {
-        workspace.onEnvironmentChange('');
-      }
-    }).catch(() => {
-      if (!controller.signal.aborted) { setEnvironments([]); setEnvironmentState('error'); }
-    });
-    return () => controller.abort();
-  }, [packageId, environmentReload, workspace.onEnvironmentChange]);
-
   return <ExplorerPage key={packageId}
     api={api}
     packageId={packageId}
     resourceRoute={resourceRoute}
     environment={workspace.selectedEnvironment}
-    environments={environments}
-    environmentState={environmentState}
     registerUnsavedChanges={navigation.registerUnsavedChanges}
     onResourceRouteChange={onResourceRouteChange}
-    onEnvironmentChange={workspace.onEnvironmentChange}
-    onRetryEnvironments={() => setEnvironmentReload(value => value + 1)}
     onJobAccepted={onJobAccepted}
-    onRunTarget={onRunTarget}
+    onRunTarget={target => onRunTarget({ packageId, ...target })}
     onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
     onScheduleDebug={schedulingEnabled ? onScheduleDebug : undefined}
     onOpenConfigurationFile={(path, origin, sourceReference) => navigation.navigate({ kind: 'configuration', packageId, environment: workspace.selectedEnvironment, filePath: path, fileOrigin: origin, sourceReference, tab: 'source' })}
