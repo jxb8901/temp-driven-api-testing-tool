@@ -99,8 +99,9 @@ class PackageResourceInspectorTest {
                 Collections.<String>emptyList(),65536,262144);
         @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspectLoadCatalog("",0,100,null);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
-        Map<String,Object> policy=items.stream().filter(item->"load/nested/policy.yaml".equals(item.get("path"))).findFirst().orElseThrow();
-        Map<String,Object> broken=items.stream().filter(item->"load/nested/broken.yaml".equals(item.get("path"))).findFirst().orElseThrow();
+        Map<String,Object> policy=items.stream().filter(item->"load/nested/policy.yaml".equals(item.get("path"))).findFirst().orElse(null);
+        Map<String,Object> broken=items.stream().filter(item->"load/nested/broken.yaml".equals(item.get("path"))).findFirst().orElse(null);
+        assertNotNull(policy);assertNotNull(broken);
         assertEquals("template",policy.get("kind"));assertEquals("valid",policy.get("validation"));
         assertEquals(Boolean.TRUE,policy.get("createQuickLoad"));assertEquals(Boolean.FALSE,policy.get("runNow"));
         assertEquals("invalid",broken.get("kind"));assertEquals(Boolean.FALSE,broken.get("schedule"));
