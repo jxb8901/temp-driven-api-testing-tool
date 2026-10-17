@@ -21,7 +21,7 @@ build_failure_hint() {
 [ATT BUILD] If that module is ATT Web UI, the final "npm test failed" line is only a
 [ATT BUILD] reactor summary, not the Vitest stack trace. Rerun only the web module:
 [ATT BUILD]   cd att-web/frontend && npm ci && npm test -- --reporter=verbose
-[ATT BUILD]   mvn -B -ntp -T "${ATT_MAVEN_THREADS:-1C}" -pl att-web -am clean verify
+[ATT BUILD]   mvn -B -ntp -U -T "${ATT_MAVEN_THREADS:-1C}" -pl att-web -am clean verify
 [ATT BUILD] Rerun a single failed module, or use the resource-light full package build:
 [ATT BUILD]   ATT_MAVEN_THREADS=1 ATT_CI_SKIP_COVERED_TESTS=true ./build.sh
 [ATT BUILD] ATT_CI_SKIP_COVERED_TESTS skips tests only; compilation, typecheck,
@@ -87,7 +87,7 @@ if [ "${ATT_CI_SKIP_COVERED_TESTS:-false}" = true ]; then
   set -- "$@" -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true
 fi
 build_timer_next "Maven clean verify"
-(cd "$ROOT_DIR" && mvn -B -ntp -T "$ATT_MAVEN_THREADS" "$@" clean verify)
+(cd "$ROOT_DIR" && mvn -B -ntp -U -T "$ATT_MAVEN_THREADS" "$@" clean verify)
 build_timer_next "Source launcher checks"
 (cd "$ROOT_DIR" && ./scripts/verify-source-launcher.sh)
 build_timer_next "Source package validation"
