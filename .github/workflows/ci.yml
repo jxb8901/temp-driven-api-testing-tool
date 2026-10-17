@@ -292,6 +292,7 @@ jobs:
           npm run smoke:run
           npm run smoke:auth
           npm run smoke:scheduled-load
+          npm run smoke:schedules
           if [ "$FULL_BROWSER_SUITE" = "true" ]; then
             npm run smoke:cross-browser
             npm run screenshots

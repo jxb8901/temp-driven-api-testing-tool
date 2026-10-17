@@ -355,10 +355,10 @@ async function main() {
     assert.equal(await page.locator('body').innerText().then(text => text.includes('real-secret')), false, 'secret defaults are not exposed');
     await page.getByRole('button', { name: 'Schedule…' }).click();
     const debugScheduleDialog = page.getByRole('dialog');
-    await debugScheduleDialog.getByRole('heading', { name: 'Create schedule', level: 2 }).waitFor();
-    await page.getByText('Schedule form loaded from the validated Debug draft. Choose a recurrence and review the Server next-run preview.').waitFor();
+    await debugScheduleDialog.getByRole('heading', { name: 'New Schedule', level: 2 }).waitFor();
+    await page.getByText('Schedule form loaded from the validated RUN draft. Choose a recurrence and review the Server next-run preview.').waitFor();
     assert.equal(await debugScheduleDialog.locator('#schedule-debug-target').inputValue(), 'template · checkout');
-    await debugScheduleDialog.getByText('Review the validated Debug input snapshot').click();
+    await debugScheduleDialog.getByText('Review the validated RUN definition snapshot').click();
     assert.match(await debugScheduleDialog.locator('.att-schedule-snapshot-review pre').textContent(), /target: checkout/);
     await debugScheduleDialog.getByText(/^Next run:/).waitFor();
     assert.equal(await debugScheduleDialog.getByRole('button', { name: 'Save schedule' }).isDisabled(), false);
@@ -463,7 +463,7 @@ async function main() {
     const quickLoadUrl = page.url();
     await page.getByRole('button', { name: 'Schedule…' }).click();
     let scheduleDialog = page.getByRole('dialog');
-    await scheduleDialog.getByRole('heading', { name: 'Create schedule', level: 2 }).waitFor();
+    await scheduleDialog.getByRole('heading', { name: 'New Schedule', level: 2 }).waitFor();
     await page.getByText('Schedule form loaded from the validated Load draft.').waitFor();
     assert.equal(page.url(), quickLoadUrl, 'Schedule should open without leaving the Quick Load route');
     assert.equal(await page.locator('#schedule-scenario').inputValue(), 'Validated Load snapshot');
@@ -482,7 +482,7 @@ async function main() {
 
     await page.getByRole('button', { name: 'Schedule…' }).click();
     scheduleDialog = page.getByRole('dialog');
-    await scheduleDialog.getByRole('heading', { name: 'Create schedule', level: 2 }).waitFor();
+    await scheduleDialog.getByRole('heading', { name: 'New Schedule', level: 2 }).waitFor();
     await page.getByText(/^Next run:/).waitFor();
     await page.getByRole('button', { name: 'Save schedule' }).click();
     await page.getByText(/Saved Validated Load snapshot\. Next run:/).waitFor();

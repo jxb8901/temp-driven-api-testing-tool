@@ -279,9 +279,9 @@ Object.assign(translations, {
 
   // Schedules and recurring Load/Debug jobs.
   'Manage recurring Load and Debug jobs and inspect the Server\'s recorded occurrences.': '管理重複的 Load 和 Debug 工作，並檢視伺服器記錄的執行次數。',
-  'Schedules': '排程', 'Schedule list': '排程清單', 'Create schedule': '建立排程', 'Refresh schedules': '重新整理排程',
+  'Schedules': '排程', 'Schedule list': '排程清單', 'New Schedule': '新增排程', 'Refresh schedules': '重新整理排程',
   'Retry schedule list': '重試載入排程清單', 'Filter schedules': '篩選排程', 'Search schedules': '搜尋排程',
-  'No schedules have been created. Use Create schedule to add the first one.': '尚未建立排程。請使用「建立排程」新增第一個排程。',
+  'No schedules have been created. Use New Schedule to add the first one.': '尚未建立排程。請使用「新增排程」新增第一個排程。',
   'No schedules match these filters.': '沒有排程符合這些篩選條件。', 'Schedule form loaded from the validated': '排程表單已從已驗證的',
   'draft. Choose a recurrence and review the Server next-run preview.': '草稿載入。請選取重複規則並檢視伺服器提供的下次執行預覽。',
   'Schedule preview': '排程預覽', 'Loading occurrence history': '正在載入執行記錄', 'Loading occurrence history…': '正在載入執行記錄…',
