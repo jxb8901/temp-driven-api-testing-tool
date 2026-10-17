@@ -54,10 +54,12 @@ async function main() {
     await page.getByText('3 of 3 schedules shown.').waitFor();
     assert.equal(await page.locator('#schedule-name').count(), 0);
     assert.equal(mutations.length, 0, 'landing must not preview or create');
-    await page.getByLabel('Execution type', { exact: true }).selectOption('run');
+    const filters = page.getByRole('group', { name: 'Filter schedules' });
+    // Implicit labels include their option text in the accessible name, so match the label prefix.
+    await filters.getByLabel('Execution type').selectOption('run');
     await page.getByText('2 of 3 schedules shown.').waitFor();
     assert.equal(await page.getByText('Performance checks', { exact: true }).count(), 0);
-    await page.getByLabel('Owner', { exact: true }).selectOption('bob');
+    await filters.getByLabel('Owner').selectOption('bob');
     await page.getByText('No schedules match these filters.').waitFor();
     await page.getByRole('button', { name: 'New Schedule', exact: true }).click();
     await page.waitForURL('**/#/schedules/new');
@@ -100,7 +102,7 @@ async function main() {
       runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag22aa'] },
     })).violations.map(item => item.id)), []);
     await page.goto(`${base}#/run/payments`);
-    await page.getByLabel('Target type', { exact: true }).selectOption('batch');
+    await page.getByLabel('Target type').selectOption('batch');
     await page.getByLabel('Debug diagnostics', { exact: true }).check();
     await page.getByRole('button', { name: 'Validate', exact: true }).click();
     await page.getByRole('button', { name: 'Schedule…', exact: true }).click();

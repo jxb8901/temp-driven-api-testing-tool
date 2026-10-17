@@ -173,6 +173,7 @@ async function main() {
     await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
     await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('.att-schedule-cards').waitFor({ state: 'visible' });
     assert.equal(await page.locator('.att-schedule-cards').isVisible(), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'Schedules must fit a phone viewport');
     await page.getByRole('button', { name: 'Open navigation' }).click();
