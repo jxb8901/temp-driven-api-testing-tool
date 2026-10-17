@@ -123,12 +123,14 @@ describe('LoadCatalogPage', () => {
 
   it('keeps healthy package resources and recent jobs available when one package fails, with package retry', async () => {
     let brokenAttempts = 0;
+    let healthyPages = 0;
     const api = {
       listLoadCatalog: vi.fn(async (packageId: string) => {
         if (packageId === 'broken' && brokenAttempts++ === 0) throw new ApiError('Worker configuration is missing', {
           status: 422, code: 'ATT-CFG-001', diagnostics: [{ code: 'ATT-CFG-001', suggestion: 'Configure required Tomcat environment variables.' }],
         });
-        return { items: [{ ...unverifiedScenario('load/healthy.yaml'), packageId }], total: 1 };
+        return { items: [{ ...unverifiedScenario(healthyPages++ ? 'load/healthy-next.yaml' : 'load/healthy.yaml'), packageId }], total: 1,
+          ...(packageId === 'healthy' && healthyPages === 1 ? { nextCursor: 'healthy-next' } : {}) };
       }),
       listLoadJobs: vi.fn(async () => ({ items: [{ jobId: 'JOB-LOAD-1', packageId: 'healthy', status: 'SUCCESS', createdAt: '2026-01-01T00:00:00Z' }] })),
     };
@@ -141,11 +143,48 @@ describe('LoadCatalogPage', () => {
     expect(host.textContent).toContain('JOB-LOAD-1');
     expect(host.textContent).toContain('broken: Worker configuration is missing');
     expect(host.textContent).toContain('Configure required Tomcat environment variables.');
+    const loadMore = [...host.querySelectorAll('button')].find(button => button.textContent === 'Load more scenarios')!;
+    await act(async () => loadMore.click());
+    await flush();
+    expect(host.textContent).toContain('broken: Worker configuration is missing');
+    expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Retry broken')).toBe(true);
     const retry = [...host.querySelectorAll('button')].find(button => button.textContent === 'Retry broken')!;
     await act(async () => retry.click());
     await flush();
-    expect(api.listLoadCatalog).toHaveBeenCalledTimes(3);
-    expect(api.listLoadCatalog.mock.calls.map(([packageId]) => packageId)).toEqual(['broken', 'healthy', 'broken']);
+    expect(api.listLoadCatalog).toHaveBeenCalledTimes(4);
+    expect(api.listLoadCatalog.mock.calls.map(([packageId]) => packageId)).toEqual(['broken', 'healthy', 'healthy', 'broken']);
     expect(host.textContent).not.toContain('Retry broken');
+  });
+
+  it('clears old-query retry controls and ignores a detached retry while the new search is loading', async () => {
+    let resolveSearchPackage: ((page: unknown) => void) | undefined;
+    let brokenAttempts = 0;
+    const api = {
+      listLoadCatalog: vi.fn((packageId: string, input: { query?: string }) => {
+        if (!input.query && packageId === 'broken' && brokenAttempts++ === 0) return Promise.reject(new Error('Old query failed'));
+        if (input.query === 'nightly' && packageId === 'broken') return new Promise(resolve => { resolveSearchPackage = resolve; });
+        return Promise.resolve({ items: [{ ...unverifiedScenario(input.query ? 'load/nightly-healthy.yaml' : 'load/healthy.yaml'), packageId }], total: 1 });
+      }),
+      listLoadJobs: vi.fn(async () => ({ items: [] })),
+    };
+    await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'broken' }, { packageId: 'healthy' }] }}
+      inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
+    await flush();
+    const staleRetry = [...host.querySelectorAll('button')].find(button => button.textContent === 'Retry broken')!;
+    const search = host.querySelector('input[type="search"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(search, 'nightly');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Retry broken')).toBe(false);
+    const callsBeforeStaleRetry = api.listLoadCatalog.mock.calls.length;
+    await act(async () => staleRetry.click());
+    expect(api.listLoadCatalog.mock.calls).toHaveLength(callsBeforeStaleRetry);
+    await act(async () => resolveSearchPackage!({ items: [{ ...unverifiedScenario('load/nightly.yaml'), packageId: 'broken' }], total: 1 }));
+    await flush();
+    expect(host.textContent).toContain('load/nightly.yaml');
+    expect(host.textContent).toContain('load/nightly-healthy.yaml');
+    expect(api.listLoadCatalog.mock.calls.filter(([, input]) => input.query === 'nightly').map(([packageId]) => packageId)).toEqual(['broken', 'healthy']);
   });
 });
