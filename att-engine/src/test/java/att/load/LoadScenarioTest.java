@@ -298,6 +298,8 @@ class LoadScenarioTest {
         assertEquals("load/a-arrival.yaml", bounded.items.get(0).id);
         assertEquals("load/policy-062.yaml", bounded.items.get(63).id);
         assertEquals(LoadScenarioLoader.BUNDLED_QUICK_SMOKE, bounded.items.get(64).id);
+        assertEquals("1", String.valueOf(((Map<?, ?>)loader.loadQuickLoadPolicy("virtualUsers","load/policy-064.yaml").get("load")).get("users")),
+                "A valid nested/catalog policy remains selectable even beyond the compact Quick LOAD picker page.");
     }
 
     @Test void previousV14QuickLoadPolicyIsAcceptedWithoutWorkloads() throws Exception {

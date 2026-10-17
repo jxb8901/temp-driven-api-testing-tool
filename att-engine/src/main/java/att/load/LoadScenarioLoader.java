@@ -12,6 +12,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -144,13 +145,17 @@ public final class LoadScenarioLoader {
         if (templateId == null || templateId.trim().isEmpty()) {
             source = projectRoot.resolve("load").resolve(filename).normalize();
         } else {
-            QuickLoadTemplate selected = null;
-            for (QuickLoadTemplate candidate : quickLoadTemplates().items) {
-                if (candidate.id.equals(templateId)) { selected = candidate; break; }
-            }
-            if (selected == null || !model.equals(selected.model))
+            Path relative = Paths.get(templateId.replace('\\','/')).normalize();
+            if (relative.isAbsolute() || relative.startsWith("..") || !relative.startsWith("load")
+                    || !(templateId.toLowerCase(java.util.Locale.ROOT).endsWith(".yaml")
+                    || templateId.toLowerCase(java.util.Locale.ROOT).endsWith(".yml")))
                 throw quickLoadFailure(null, "template", "The selected package Load template is unavailable or incompatible");
-            source = projectRoot.resolve(selected.id.replace('/', java.io.File.separatorChar)).normalize();
+            att.resource.PackageResourceResolver.PackageResource resource =
+                    new att.resource.PackageResourceResolver(projectRoot)
+                            .resolvePackageRelative(relative.toString(), att.resource.PackageResourceResolver.Kind.FILE);
+            if (!resource.logicalName().startsWith("load/"))
+                throw quickLoadFailure(null, "template", "The selected package Load template is unavailable or incompatible");
+            source = resource.canonicalPath();
         }
         Map<String, Object> policy;
         if (!Files.exists(source, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
