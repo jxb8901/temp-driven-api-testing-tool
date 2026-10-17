@@ -820,6 +820,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
           <p className="att-schedule-hint">This preview calculates the next five occurrence times from timezone and cron. It does not validate the package or test snapshot. The Server validates the full schedule when you save and validates it again before submitting each occurrence; it applies timezone and DST rules and records actual occurrences in UTC. Saving an unchanged trigger keeps the schedule the Server already holds, so a completed one-time schedule can still be renamed or re-described.</p>
         </section>
         <label className="att-schedule-enable"><input type="checkbox" checked={draft.enabled} onChange={event => updateDraft('enabled', event.currentTarget.checked)} /> Enable after saving</label>
+        </fieldset>
         <div className="att-schedule-form-actions">
           <button className="button button-primary" type="submit" disabled={saving || saved || !previewIsCurrent || packages.status !== 'ready' || packageItems.length === 0}>
             {saving ? 'Saving…' : saved ? 'Saved' : editingId ? 'Save changes' : 'Save schedule'}
@@ -827,7 +828,6 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
           {modal && <button className="button button-quiet" type="button" onClick={closeEditor} disabled={saving}>Return to editor</button>}
           {dirty && <span role="status">Unsaved schedule changes</span>}
         </div>
-        </fieldset>
       </form>}
     </section>}
 

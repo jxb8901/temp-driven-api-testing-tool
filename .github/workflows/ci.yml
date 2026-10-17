@@ -308,7 +308,7 @@ jobs:
           retention-days: 7
 
       - name: Upload reviewed visual baselines
-        if: always() && env.FULL_BROWSER_SUITE == 'true' && env.ATT_UI_UPDATE_VISUAL_BASELINES == '1'
+        if: success() && env.FULL_BROWSER_SUITE == 'true' && env.ATT_UI_UPDATE_VISUAL_BASELINES == '1'
         uses: actions/upload-artifact@v4
         with:
           name: scheduled-load-visual-baselines-linux-${{ github.run_id }}

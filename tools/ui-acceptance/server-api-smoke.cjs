@@ -164,7 +164,7 @@ async function main() {
 
     await page.goto(`${origin}/tools/att/ui/index.html#/schedules`);
     await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
-    await page.getByText(/schedules shown\.$/).waitFor();
+    await page.getByText('1 of 1 schedules shown.', { exact: true }).waitFor();
     assert.equal(await page.locator('#schedule-name').count(), 0, 'the packaged Schedules landing must not render an editor');
     await page.getByRole('button', { name: 'New Schedule', exact: true }).click();
     await page.locator('#schedule-name').waitFor();

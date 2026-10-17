@@ -16,12 +16,13 @@ build_failure_hint() {
   case "$1" in
     "Maven clean verify")
       cat >&2 <<EOF
-[ATT BUILD] Maven reactor failed. The final "npm test failed" line is a reactor summary,
-[ATT BUILD] not the Vitest stack trace. Inspect the first FAIL or exception above it.
-[ATT BUILD] Rerun only the web module:
+[ATT BUILD] Maven reactor failed. The module marked FAILURE above is the failing one;
+[ATT BUILD] inspect the first ERROR or exception after it, not the summary at the end.
+[ATT BUILD] If that module is ATT Web UI, the final "npm test failed" line is only a
+[ATT BUILD] reactor summary, not the Vitest stack trace. Rerun only the web module:
 [ATT BUILD]   cd att-web/frontend && npm ci && npm test -- --reporter=verbose
 [ATT BUILD]   mvn -B -ntp -T "${ATT_MAVEN_THREADS:-1C}" -pl att-web -am clean verify
-[ATT BUILD] Resource-light full package build:
+[ATT BUILD] Rerun a single failed module, or use the resource-light full package build:
 [ATT BUILD]   ATT_MAVEN_THREADS=1 ATT_CI_SKIP_COVERED_TESTS=true ./build.sh
 [ATT BUILD] ATT_CI_SKIP_COVERED_TESTS skips tests only; compilation, typecheck,
 [ATT BUILD] Vite build, bundle budget, archives, schema/package checks and smoke tests still run.

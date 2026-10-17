@@ -396,6 +396,26 @@ describe('ScheduledLoadPage', () => {
     expect(navigation.navigate).not.toHaveBeenCalled();
   });
 
+  it('keeps Return to editor available after saving a validated Load snapshot', async () => {
+    const api = makeApi();
+    const onClose = vi.fn();
+    await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} modal onClose={onClose}
+        initialDraft={{ packageId: 'payments', environment: 'SIT', draftId: 'A0123456789ABCDEF0123456789ABCDEF',
+          previewYaml: 'schemaVersion: att-load/v1.6\nworkloads: []\n' }} />
+    </NavigationGuardContext.Provider>));
+    await advance(300);
+
+    await click(host.querySelector('.att-schedule-form-actions button[type="submit"]')!);
+    await advance(0);
+    expect(api.createSchedule).toHaveBeenCalledTimes(1);
+    const returnToEditor = [...host.querySelectorAll('button')]
+      .find(button => button.textContent === 'Return to editor') as HTMLButtonElement;
+    expect(returnToEditor.disabled).toBe(false);
+    await click(returnToEditor);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps Run Now and delete behind explicit confirmation', async () => {
     let present = true;
     const api = makeApi({
