@@ -330,4 +330,54 @@ describe('ScheduledLoadPage', () => {
     expect(host.textContent).toContain('Your account does not have the configured Schedules administrator role.');
     expect(host.querySelector('[role="status"]')).not.toBeNull();
   });
+
+  it('refreshes an open History panel while a queued job is still active, then stops polling at its terminal state', async () => {
+    const queued: ScheduleOccurrence = { occurrenceId: 'O-QUEUED', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-16T18:00:00Z', triggerType: 'scheduled', status: 'submitted', jobId: 'JOB-900', jobStatus: 'QUEUED' };
+    const getLoadScheduleExecutions = vi.fn()
+      .mockResolvedValueOnce({ items: [queued] })
+      .mockResolvedValue({ items: [{ ...queued, jobStatus: 'FAIL' }] });
+    const api = makeApi({ listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule] })), getLoadScheduleExecutions });
+    await render(api);
+
+    const jobState = () => host.querySelector('.att-schedule-job-state');
+    await click(host.querySelector('[aria-label="History Nightly payments"]')!);
+    await advance(0);
+    expect(jobState()?.textContent).toBe('Job Queued');
+    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(1);
+
+    // The active job keeps the panel current without the user reopening History.
+    await advance(5000);
+    expect(jobState()?.textContent).toBe('Job Failed');
+    expect(jobState()?.className).toContain('is-failed');
+    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(2);
+
+    // Once the occurrence is terminal the poll timer is cleared, so no further requests are issued.
+    await advance(20000);
+    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(2);
+  });
+
+  it('reloads History after Run Now even when the same schedule is already open', async () => {
+    let items: ScheduleOccurrence[] = occurrences;
+    const getLoadScheduleExecutions = vi.fn(async () => ({ items }));
+    const api = makeApi({
+      listLoadSchedules: vi.fn(async () => ({ items: [sampleSchedule] })),
+      getLoadScheduleExecutions,
+      triggerLoadSchedule: vi.fn(async () => ({ occurrenceId: 'O-NOW', scheduledFor: '2026-10-14T10:00:00Z', triggerType: 'manual', status: 'submitted', jobId: 'JOB-NOW', jobStatus: 'QUEUED' })),
+    });
+    await render(api);
+
+    await click(host.querySelector('[aria-label="History Nightly payments"]')!);
+    await advance(0);
+    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(1);
+    expect(host.textContent).not.toContain('O-NOW');
+
+    items = [{ occurrenceId: 'O-NOW', scheduleId: sampleSchedule.id, scheduledFor: '2026-10-14T10:00:00Z', triggerType: 'manual', status: 'submitted', jobId: 'JOB-NOW', jobStatus: 'QUEUED' }, ...occurrences];
+    await click(host.querySelector('[aria-label="Run now Nightly payments"]')!);
+    await click([...host.querySelectorAll('.att-schedule-confirm button')].find(button => button.textContent === 'Confirm Run Now')!);
+    await advance(0);
+
+    expect(api.triggerLoadSchedule).toHaveBeenCalledWith(sampleSchedule.id);
+    expect(getLoadScheduleExecutions).toHaveBeenCalledTimes(2);
+    expect(host.textContent).toContain('O-NOW');
+  });
 });

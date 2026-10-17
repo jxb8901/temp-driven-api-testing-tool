@@ -162,6 +162,14 @@ function jobStatusTone(status: string): string {
   return 'is-paused';
 }
 
+/** Job states that still move on their own, so an open History panel keeps them current. */
+const ACTIVE_JOB_STATUSES = ['QUEUED', 'PREPARING', 'RUNNING', 'CANCEL_REQUESTED'];
+const HISTORY_REFRESH_MS = 5000;
+
+function hasActiveJob(items: ScheduleOccurrence[]): boolean {
+  return items.some(item => Boolean(item.jobStatus) && ACTIVE_JOB_STATUSES.includes(String(item.jobStatus).toUpperCase()));
+}
+
 export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDraft, onInitialDraftConsumed, modal = false, onClose }: ScheduledLoadPageProps): React.JSX.Element {
   const navigation = useNavigationGuard();
   const [schedules, setSchedules] = useState<LoadSchedule[]>([]);
@@ -187,6 +195,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const [actionPending, setActionPending] = useState('');
   const [historySchedule, setHistorySchedule] = useState<LoadSchedule | null>(null);
   const [history, setHistory] = useState<HistoryState>({ status: 'idle', items: [] });
+  const [historyRefresh, setHistoryRefresh] = useState(0);
   const listController = useRef<AbortController | null>(null);
   const listSequence = useRef(0);
   const historyController = useRef<AbortController | null>(null);
@@ -317,21 +326,42 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     } else if (!pendingConfirmation && dialog.open) dialog.close();
   }, [pendingConfirmation]);
 
+  const refreshHistory = useCallback(async (schedule: LoadSchedule) => {
+    historyController.current?.abort();
+    const controller = new AbortController();
+    historyController.current = controller;
+    try {
+      const response = await api.getLoadScheduleExecutions(schedule.id, 100, controller.signal);
+      if (controller.signal.aborted) return;
+      setHistory({ status: 'ready', items: response.items || [] });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      // A failed background refresh keeps the occurrences already on screen and offers a manual retry.
+      setHistory(current => current.items.length > 0
+        ? { ...current, error: errorMessage(error, 'Refreshing occurrence history') }
+        : { status: 'error', items: [], error: errorMessage(error, 'Loading occurrence history') });
+    }
+  }, [api]);
+
   useEffect(() => {
     if (!historySchedule) {
       historyController.current?.abort();
       setHistory({ status: 'idle', items: [] });
       return;
     }
-    historyController.current?.abort();
-    const controller = new AbortController();
-    historyController.current = controller;
     setHistory({ status: 'loading', items: [] });
-    api.getLoadScheduleExecutions(historySchedule.id, 100, controller.signal)
-      .then(response => { if (!controller.signal.aborted) setHistory({ status: 'ready', items: response.items || [] }); })
-      .catch(error => { if (!controller.signal.aborted) setHistory({ status: 'error', items: [], error: errorMessage(error, 'Loading occurrence history') }); });
-    return () => controller.abort();
-  }, [api, historySchedule]);
+    void refreshHistory(historySchedule);
+    return () => historyController.current?.abort();
+  }, [historySchedule, historyRefresh, refreshHistory]);
+
+  // A submitted occurrence stays visually current while its job is still queued or running, so the
+  // panel follows the queued-to-terminal transition without the user closing and reopening History.
+  const hasActiveHistoryJob = history.status === 'ready' && hasActiveJob(history.items);
+  useEffect(() => {
+    if (!historySchedule || !hasActiveHistoryJob) return;
+    const timer = window.setInterval(() => void refreshHistory(historySchedule), HISTORY_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [historySchedule, hasActiveHistoryJob, refreshHistory]);
 
   const visibleSchedules = useMemo(() => {
     const query = filter.trim().toLocaleLowerCase();
@@ -432,6 +462,9 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
         const occurrence = await api.triggerLoadSchedule(pending.schedule.id);
         setNotice(`Run Now recorded as ${statusLabel(occurrence.status)}${occurrence.jobId ? ` · job ${occurrence.jobId}${occurrence.jobStatus ? ` · ${jobStatusLabel(occurrence.jobStatus)}` : ''}` : ''}${occurrence.reason ? ` · ${explainOccurrence(occurrence.reason)}` : ''}.`);
         setHistorySchedule(pending.schedule);
+        // Reload even when the same schedule is already selected, so the new occurrence appears
+        // immediately instead of after the next automatic refresh.
+        setHistoryRefresh(value => value + 1);
       } else {
         await api.deleteLoadSchedule(pending.schedule.id);
         setSchedules(current => current.filter(item => item.id !== pending.schedule.id));
@@ -540,11 +573,15 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     </section>
 
     {historySchedule && <section className="att-schedule-panel att-schedule-history" aria-labelledby="schedule-history-heading">
-      <div className="att-schedule-section-heading"><div><h2 id="schedule-history-heading" tabIndex={-1}>Execution history · {historySchedule.name}</h2><p>Latest 100 occurrences. Skips and submission failures remain visible even when no job was created.</p></div>
-        <button className="button button-quiet" type="button" onClick={() => setHistorySchedule(null)}>Close history</button>
+      <div className="att-schedule-section-heading"><div><h2 id="schedule-history-heading" tabIndex={-1}>Execution history · {historySchedule.name}</h2><p>Latest 100 occurrences. Skips and submission failures remain visible even when no job was created. Occurrences whose job is still queued or running refresh automatically.</p></div>
+        <div className="att-schedule-actions">
+          <button className="button button-quiet" type="button" disabled={history.status === 'loading'} onClick={() => setHistoryRefresh(value => value + 1)}>Refresh history</button>
+          <button className="button button-quiet" type="button" onClick={() => setHistorySchedule(null)}>Close history</button>
+        </div>
       </div>
       {history.status === 'loading' && <p role="status" aria-busy="true">Loading occurrence history…</p>}
       {history.status === 'error' && <p className="att-schedule-error" role="alert">{history.error}</p>}
+      {history.status === 'ready' && history.error && <p className="att-schedule-error" role="alert">{history.error}</p>}
       {history.status === 'ready' && history.items.length === 0 && <p className="att-schedule-empty">No executions have been recorded for this schedule.</p>}
       {history.status === 'ready' && history.items.length > 0 && <div className="att-schedule-table-wrap">
         <table className="att-schedule-table att-occurrence-table"><thead><tr><th scope="col">Scheduled for · {historySchedule.timezone}</th><th scope="col">Trigger</th><th scope="col">Occurrence</th><th scope="col">Status</th><th scope="col">Reason</th><th scope="col">Job</th></tr></thead>

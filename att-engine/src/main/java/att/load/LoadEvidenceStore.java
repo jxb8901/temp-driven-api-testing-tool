@@ -19,16 +19,28 @@ import java.util.Set;
  *
  * <p>In split-quota mode the success budget is shared across registered workloads:
  * each workload receives a deterministic minimum share (the global cap divided
- * evenly, with the remainder assigned to the earliest-registered workloads), then
- * the capacity of workloads that have reached their minimum, or that can no longer
- * request reservations because they completed, is allocated opportunistically on a
- * first-come basis. Because the minimum shares exactly cover the configured cap, the
- * opportunistic pool only exists through workloads that finished without using their
- * share; {@link #completeWorkload(String)} is how a scheduler releases that unused
- * capacity, so a busy workload never has to wait for the end of the run to borrow it.
- * The configured global cap is always enforced, including when the cap is smaller than
- * the workload count. Failure evidence remains independently bounded and is never
- * starved by success quotas.</p>
+ * evenly, with the remainder assigned to the earliest-registered workloads), then the
+ * capacity of workloads that have reached their minimum, or that currently cannot use
+ * it, is allocated opportunistically on a first-come basis. Because the minimum shares
+ * exactly cover the configured cap, the opportunistic pool only exists through
+ * workloads that are not using their share. A workload holds its minimum while it
+ * competes for success evidence: it has reservations in flight, it already produced an
+ * eligible success, or it has not completed an iteration yet. A workload that completed
+ * iterations without any eligible success, and {@link #completeWorkload(String)} for a
+ * workload whose scheduler finished, therefore release their unused minimum while the
+ * run is still in progress, so a busy workload does not have to wait for the end of the
+ * run to borrow it.</p>
+ *
+ * <p>The loan is reclaimed when the lender needs its minimum back: as soon as a
+ * workload that is still below its minimum requests capacity while the global cap is
+ * full, the most recent borrowed capture of another workload is revoked and its sample
+ * artifacts are removed, so a workload that becomes eligible after a quiet start is not
+ * starved by capacity lent out earlier. Only borrowed captures are revocable; a capture
+ * that fits inside its own minimum is never revoked.</p>
+ *
+ * <p>The configured global cap is always enforced, including when the cap is smaller
+ * than the workload count, and no capture ever exceeds it. Failure evidence remains
+ * independently bounded and is never starved by success quotas.</p>
  */
 public final class LoadEvidenceStore implements LoadEventListener {
     private static final String DEFAULT_WORKLOAD = "\u0000default";
@@ -40,6 +52,12 @@ public final class LoadEvidenceStore implements LoadEventListener {
     private final Set<String> failureReservations = new LinkedHashSet<String>();
     private final Set<String> workloads = new LinkedHashSet<String>();
     private final Set<String> completedWorkloads = new LinkedHashSet<String>();
+    private final Set<String> borrowedSuccessReservations = new LinkedHashSet<String>();
+    private final Map<String, LoadEvent> borrowedRetained = new LinkedHashMap<String, LoadEvent>();
+    private final Map<String, String> borrowedRetainedBucket = new LinkedHashMap<String, String>();
+    private final Map<String, Integer> borrowedRetainedByWorkload = new LinkedHashMap<String, Integer>();
+    private final Map<String, Long> revokedBorrowedByWorkload = new LinkedHashMap<String, Long>();
+    private final Map<String, Long> completedIterationsByWorkload = new LinkedHashMap<String, Long>();
     private final Map<String, String> successReservationBucket = new LinkedHashMap<String, String>();
     private final Map<String, Integer> successReservedByWorkload = new LinkedHashMap<String, Integer>();
     private final Map<String, Integer> successRetainedByWorkload = new LinkedHashMap<String, Integer>();
@@ -50,6 +68,8 @@ public final class LoadEvidenceStore implements LoadEventListener {
     private final Map<String, Long> skippedMissingByWorkload = new LinkedHashMap<String, Long>();
     private int retainedSuccessCount, retainedFailureCount;
     private long skippedSuccessQuotaCount, skippedFailureQuotaCount, skippedMissingEvidenceCount;
+    private long revokedBorrowedSuccessCount;
+    private Path evidenceRoot;
     public LoadEvidenceStore(LoadEvidencePolicy policy) { this(policy, null); }
     public LoadEvidenceStore(LoadEvidencePolicy policy, LoadEventListener observer) {
         this.policy = policy;
@@ -75,6 +95,16 @@ public final class LoadEvidenceStore implements LoadEventListener {
      */
     public synchronized void completeWorkload(String workloadId) {
         if (workloadId != null && !workloadId.isEmpty() && workloads.contains(workloadId)) completedWorkloads.add(workloadId);
+    }
+
+    /**
+     * Declares the directory tree that holds captured iteration evidence, for example
+     * {@code <outputRoot>/load}. Only used to remove the sample artifacts of a revoked borrowed
+     * capture: a path outside this root is never deleted, and revoked artifacts are left in
+     * place while no root is configured.
+     */
+    public synchronized void setEvidenceRoot(Path root) {
+        this.evidenceRoot = root == null ? null : root.toAbsolutePath().normalize();
     }
 
     private String bucketFor(String workloadId) {
@@ -107,8 +137,19 @@ public final class LoadEvidenceStore implements LoadEventListener {
                 + successReservedByWorkload.getOrDefault(bucket, 0);
     }
 
-    /** A completed workload can no longer claim its protected minimum share. */
-    private boolean shareIsHeld(String workload) { return !completedWorkloads.contains(workload); }
+    /**
+     * A workload holds its protected minimum share while it competes for success evidence:
+     * a completed workload never does, and a running workload keeps its minimum while it has
+     * reservations in flight, while it already produced an eligible success, or until its first
+     * iteration completes. A workload that completed iterations without any eligible success has
+     * demonstrated that it cannot use its minimum right now, so the unused part is lent out.
+     */
+    private boolean shareIsHeld(String workload) {
+        if (completedWorkloads.contains(workload)) return false;
+        if (successReservedByWorkload.getOrDefault(workload, 0) > 0) return true;
+        if (eligibleSuccessByWorkload.getOrDefault(workload, 0L) > 0L) return true;
+        return completedIterationsByWorkload.getOrDefault(workload, 0L) == 0L;
+    }
 
     private boolean successOverflowAllowed() {
         for (String workload : workloads.isEmpty() ? Collections.singleton(DEFAULT_WORKLOAD) : workloads)
@@ -123,8 +164,57 @@ public final class LoadEvidenceStore implements LoadEventListener {
 
     private void releaseSuccessReservation(String iterationId) {
         if (!successReservations.remove(iterationId)) return;
+        borrowedSuccessReservations.remove(iterationId);
         String bucket = successReservationBucket.remove(iterationId);
         if (bucket != null) successReservedByWorkload.merge(bucket, -1, Integer::sum);
+    }
+
+    /**
+     * Reclaims one borrowed slot for a workload that is still below its own minimum share, so a
+     * workload that becomes eligible again cannot be starved by capacity lent out while it looked
+     * inactive. The most recent borrowed capture of another workload is revoked; own-minimum
+     * captures are never revoked.
+     */
+    private boolean rebalanceFor(String requester) {
+        if (usedSuccess(requester) >= successShareFor(requester)) return false;
+        // Only a workload that already produced an eligible success can show that it needs the
+        // capacity back. A workload that never produced one would otherwise reclaim a slot on every
+        // iteration and release it again on failure.
+        if (eligibleSuccessByWorkload.getOrDefault(requester, 0L) <= 0L) return false;
+        List<String> borrowed = new ArrayList<String>(borrowedRetained.keySet());
+        for (int index = borrowed.size() - 1; index >= 0; index--) {
+            String iterationId = borrowed.get(index);
+            String owner = borrowedRetainedBucket.get(iterationId);
+            if (owner == null || owner.equals(requester)) continue;
+            revokeBorrowed(iterationId, owner);
+            return true;
+        }
+        return false;
+    }
+
+    private void revokeBorrowed(String iterationId, String owner) {
+        LoadEvent event = borrowedRetained.remove(iterationId);
+        borrowedRetainedBucket.remove(iterationId);
+        borrowedRetainedByWorkload.merge(owner, -1, Integer::sum);
+        if (event == null || !retained.remove(event)) return;
+        retainedSuccessCount--;
+        successRetainedByWorkload.merge(owner, -1, Integer::sum);
+        revokedBorrowedSuccessCount++;
+        revokedBorrowedByWorkload.merge(owner, 1L, Long::sum);
+        discardEvidence(event);
+    }
+
+    /** Removes the sample artifacts of a revoked capture; the public EXEC.ID execution copy is kept. */
+    private void discardEvidence(LoadEvent event) {
+        Path root = evidenceRoot;
+        if (root == null || event.evidence() == null || event.evidence().workspace() == null) return;
+        Path workspace = event.evidence().workspace().toAbsolutePath().normalize();
+        if (!workspace.startsWith(root) || workspace.equals(root)) return;
+        try (java.util.stream.Stream<Path> paths = Files.walk(workspace)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try { Files.deleteIfExists(path); } catch (IOException ignored) { }
+            });
+        } catch (IOException ignored) { }
     }
 
     /** Returns whether an unreserved slot remains for a failure, so the scheduler can avoid needless log capture. */
@@ -145,11 +235,14 @@ public final class LoadEvidenceStore implements LoadEventListener {
         if(policy.splitQuotas()) {
             if(iterationId==null||successReservations.contains(iterationId)||failureReservations.contains(iterationId)||!policy.retainSuccess(iterationId))return false;
             String bucket=bucketFor(workloadId);
-            if((long)retainedSuccessCount+successReservations.size()>=policy.maxSuccessSamples()){skipSuccessQuota(bucket);return false;}
-            if(usedSuccess(bucket)>=successShareFor(bucket)&&!successOverflowAllowed()){skipSuccessQuota(bucket);return false;}
+            boolean ownShare=usedSuccess(bucket)<successShareFor(bucket);
+            if((long)retainedSuccessCount+successReservations.size()>=policy.maxSuccessSamples()
+                    &&(!ownShare||!rebalanceFor(bucket))){skipSuccessQuota(bucket);return false;}
+            if(!ownShare&&!successOverflowAllowed()){skipSuccessQuota(bucket);return false;}
             successReservations.add(iterationId);
             successReservationBucket.put(iterationId,bucket);
             successReservedByWorkload.merge(bucket,1,Integer::sum);
+            if(!ownShare)borrowedSuccessReservations.add(iterationId);
             return true;
         }
         if (iterationId == null || reservedEvidence.contains(iterationId) || !policy.retainSuccess(iterationId)) return false;
@@ -212,14 +305,18 @@ public final class LoadEvidenceStore implements LoadEventListener {
         if(event.dropped()){releaseEvidence(event.iterationId());return;}
         if(!event.completed())return;
         String bucket=bucketFor(event.workloadId());
+        // A completed iteration is the signal that a workload had its chance to produce an
+        // eligible success; workloads without one stop holding capacity they are not using.
+        completedIterationsByWorkload.merge(bucket,1L,Long::sum);
         if(event.success()&&policy.retainSuccess(event.iterationId()))
             eligibleSuccessByWorkload.merge(bucket,1L,Long::sum);
         if(policy.splitQuotas()) {
             // Outcome reclassification also handles callers using the generic reservation API.
             if(!event.success()&&successReservations.contains(event.iterationId()))claimFailureEvidence(event.iterationId(),event.workloadId());
-            boolean reserved;
+            boolean reserved, borrowed=false;
             if(event.success()) {
                 reserved=successReservations.remove(event.iterationId());
+                borrowed=reserved&&borrowedSuccessReservations.remove(event.iterationId());
                 if(reserved) {
                     String reservationBucket=successReservationBucket.remove(event.iterationId());
                     if(reservationBucket!=null)successReservedByWorkload.merge(reservationBucket,-1,Integer::sum);
@@ -233,7 +330,14 @@ public final class LoadEvidenceStore implements LoadEventListener {
                 skippedMissingEvidenceCount++;skippedMissingByWorkload.merge(bucket,1L,Long::sum);return;
             }
             retained.add(event);
-            if(event.success()){retainedSuccessCount++;successRetainedByWorkload.merge(bucket,1,Integer::sum);}
+            if(event.success()){
+                retainedSuccessCount++;successRetainedByWorkload.merge(bucket,1,Integer::sum);
+                if(borrowed){
+                    borrowedRetained.put(event.iterationId(),event);
+                    borrowedRetainedBucket.put(event.iterationId(),bucket);
+                    borrowedRetainedByWorkload.merge(bucket,1,Integer::sum);
+                }
+            }
             else{retainedFailureCount++;failureRetainedByWorkload.merge(bucket,1,Integer::sum);}
             return;
         }
@@ -292,6 +396,8 @@ public final class LoadEvidenceStore implements LoadEventListener {
         result.put("failureQuotaExceeded",failureExhausted);
         result.put("skippedSuccessQuotaCount",skippedSuccessQuotaCount);result.put("skippedFailureQuotaCount",skippedFailureQuotaCount);
         result.put("skippedMissingEvidenceCount",skippedMissingEvidenceCount);
+        result.put("borrowedSuccessCount",borrowedRetained.size());
+        result.put("revokedBorrowedSuccessCount",revokedBorrowedSuccessCount);
         if(failureExhausted)result.put("warning","Failure evidence quota reached; additional failures remain in aggregate metrics but full iteration evidence cannot be retained.");
         Map<String,Object> byWorkload=new LinkedHashMap<String,Object>();
         for(String workload:allWorkloadBuckets()) {
@@ -303,7 +409,9 @@ public final class LoadEvidenceStore implements LoadEventListener {
             row.put("skippedFailureQuotaCount",skippedFailureQuotaByWorkload.getOrDefault(workload,0L));
             row.put("skippedMissingEvidenceCount",skippedMissingByWorkload.getOrDefault(workload,0L));
             row.put("successShare",successShareFor(workload));
-            row.put("successShareReleased",completedWorkloads.contains(workload));
+            row.put("successShareReleased",!shareIsHeld(workload));
+            row.put("borrowedSuccessCount",borrowedRetainedByWorkload.getOrDefault(workload,0));
+            row.put("borrowedSuccessRevokedCount",revokedBorrowedByWorkload.getOrDefault(workload,0L));
             byWorkload.put(DEFAULT_WORKLOAD.equals(workload)?"default":workload,row);
         }
         result.put("workloads",byWorkload);
@@ -318,6 +426,8 @@ public final class LoadEvidenceStore implements LoadEventListener {
         all.addAll(eligibleSuccessByWorkload.keySet());
         all.addAll(skippedQuotaByWorkload.keySet());
         all.addAll(skippedFailureQuotaByWorkload.keySet());
+        all.addAll(borrowedRetainedByWorkload.keySet());
+        all.addAll(revokedBorrowedByWorkload.keySet());
         return all;
     }
 

@@ -111,7 +111,11 @@ public final class LoadRunCoordinator implements AutoCloseable {
 
     public LoadRunResult run() throws Exception {
         resources.initializeExecutionNamespace(outputRoot.resolve("load").resolve(runId));
-        if (evidenceStore != null) for (LoadWorkload workload : scenario.workloads()) evidenceStore.registerWorkload(workload.id());
+        if (evidenceStore != null) {
+            // Bounds the revocation cleanup of a borrowed capture to this run's evidence tree.
+            evidenceStore.setEvidenceRoot(outputRoot.resolve("load"));
+            for (LoadWorkload workload : scenario.workloads()) evidenceStore.registerWorkload(workload.id());
+        }
         final LoadSchedulerTiming timing = LoadSchedulerTiming.system();
         final long rateWindow = LoadPhase.totalMs(scenario);
         final LoadMetrics[] aggregateHolder = new LoadMetrics[1];
@@ -184,8 +188,8 @@ public final class LoadRunCoordinator implements AutoCloseable {
                     try {
                         return scheduler.run();
                     } finally {
-                        // A workload that stopped reserving releases its unused evidence share so a
-                        // still-running workload can use the remaining success budget.
+                        // Terminal release: the store already lends a workload's unused share while the
+                        // run is in progress, and this guarantees a finished scheduler holds nothing.
                         if (evidenceStore != null) evidenceStore.completeWorkload(workloadId);
                     }
                 }));

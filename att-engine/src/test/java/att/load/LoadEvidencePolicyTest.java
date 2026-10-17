@@ -176,6 +176,83 @@ class LoadEvidencePolicyTest {
         assertFalse(store.reserveSuccessEvidence("busy-5","busy"),"Reclaimed capacity never exceeds the global cap");
     }
 
+    @Test void workloadWithoutEligibleSuccessesLendsItsUnusedMinimumWhileItIsStillRunning() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",6,"maxFailureSamples",6));
+        store.registerWorkload("fast");
+        store.registerWorkload("quiet");
+        assertTrue(store.reserveSuccessEvidence("fast-1","fast"));
+        assertTrue(store.reserveSuccessEvidence("fast-2","fast"));
+        assertTrue(store.reserveSuccessEvidence("fast-3","fast"));
+        // Both workloads are still starting up: the quiet workload keeps its minimum until its
+        // first iteration completes, exactly as two schedulers behave at the beginning of a run.
+        assertFalse(store.reserveSuccessEvidence("fast-4","fast"));
+        // quiet is running and fails, so it will never use a success sample.
+        store.onEvent(event("quiet-1","quiet",ResultStatus.FAIL));
+        assertTrue(store.reserveSuccessEvidence("fast-4","fast"),"A workload that completed iterations without an eligible success lends its unused minimum");
+        assertTrue(store.reserveSuccessEvidence("fast-5","fast"));
+        assertTrue(store.reserveSuccessEvidence("fast-6","fast"));
+        assertFalse(store.reserveSuccessEvidence("fast-7","fast"),"The configured global success cap still binds");
+
+        for(String id:new String[]{"fast-1","fast-2","fast-3","fast-4","fast-5","fast-6"})
+            store.onEvent(event(id,"fast",ResultStatus.PASS));
+        Map<String,Object> report=store.statistics();
+        assertEquals(6,report.get("retainedSuccessCount"));
+        assertEquals(3,report.get("borrowedSuccessCount"),"The busy workload borrowed exactly the repaid minimum");
+        assertEquals(0L,report.get("revokedBorrowedSuccessCount"));
+        assertEquals(3,row(report,"fast").get("borrowedSuccessCount"));
+        assertEquals(Boolean.FALSE,row(report,"fast").get("successShareReleased"));
+        Map<String,Object> quiet=row(report,"quiet");
+        assertEquals(0,quiet.get("retainedSuccessCount"));
+        assertEquals(0L,quiet.get("eligibleSuccessCount"));
+        assertEquals(Boolean.TRUE,quiet.get("successShareReleased"),"A workload with no eligible success stops holding capacity it does not use");
+    }
+
+    @Test void borrowedCapacityIsReturnedWhenTheQuietWorkloadBecomesEligible() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",6,"maxFailureSamples",6));
+        store.setEvidenceRoot(temp);
+        store.registerWorkload("fast");
+        store.registerWorkload("slow");
+        assertTrue(store.reserveSuccessEvidence("fast-1","fast"));
+        assertTrue(store.reserveSuccessEvidence("fast-2","fast"));
+        assertTrue(store.reserveSuccessEvidence("fast-3","fast"));
+        store.onEvent(event("slow-0","slow",ResultStatus.FAIL));
+        for(String id:new String[]{"fast-4","fast-5","fast-6"})assertTrue(store.reserveSuccessEvidence(id,"fast"));
+        for(String id:new String[]{"fast-1","fast-2","fast-3","fast-4","fast-5","fast-6"})
+            store.onEvent(event(id,"fast",ResultStatus.PASS));
+        assertEquals(3,store.statistics().get("borrowedSuccessCount"));
+
+        // The slow workload returns with real demand: the newest borrowed capture is reclaimed so it
+        // is no longer starved by capacity that was lent out while it looked inactive.
+        assertFalse(store.reserveSuccessEvidence("slow-1","slow"),"A workload without an eligible success cannot reclaim capacity yet");
+        store.onEvent(event("slow-1","slow",ResultStatus.PASS));
+        assertTrue(store.reserveSuccessEvidence("slow-2","slow"),"A workload below its minimum reclaims one borrowed slot once it proves demand");
+        store.onEvent(event("slow-2","slow",ResultStatus.PASS));
+        assertTrue(store.reserveSuccessEvidence("slow-3","slow"));
+        store.onEvent(event("slow-3","slow",ResultStatus.PASS));
+        assertTrue(store.reserveSuccessEvidence("slow-4","slow"));
+        store.onEvent(event("slow-4","slow",ResultStatus.PASS));
+        // fast is over its own minimum while slow still needs its share, so it may not take it back.
+        assertFalse(store.reserveSuccessEvidence("fast-7","fast"));
+        assertFalse(store.reserveSuccessEvidence("slow-5","slow"),"Every workload reached its minimum");
+
+        Map<String,Object> report=store.statistics();
+        assertEquals(6,report.get("retainedSuccessCount"),"Reclaiming never exceeds the global cap");
+        assertEquals(3L,report.get("revokedBorrowedSuccessCount"));
+        assertEquals(0,report.get("borrowedSuccessCount"));
+        assertEquals(3,row(report,"fast").get("retainedSuccessCount"));
+        assertEquals(3L,row(report,"fast").get("borrowedSuccessRevokedCount"));
+        assertEquals(3,row(report,"slow").get("retainedSuccessCount"));
+        assertEquals(3L,report.get("skippedSuccessQuotaCount"),
+                "Only the unproven first success and the two attempts after every minimum was reached are reported as quota misses");
+        assertTrue(store.events().stream().noneMatch(value->"fast-6".equals(value.iterationId())),
+                "A revoked borrowed capture is no longer reported");
+        assertTrue(store.events().stream().noneMatch(value->"fast-5".equals(value.iterationId())));
+        for(String revoked:new String[]{"fast-4","fast-5","fast-6"})
+            assertFalse(Files.exists(temp.resolve(revoked)),"Reclaimed sample artifacts are removed: "+revoked);
+        for(String own:new String[]{"fast-1","fast-2","fast-3"})
+            assertTrue(Files.isDirectory(temp.resolve(own)),"Own-minimum captures are never revoked: "+own);
+    }
+
     @Test void successSharesBoundCapsSmallerThanTheWorkloadCountAndIgnoreUnknownWorkloads() {
         LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSuccessSamples",2,"maxFailureSamples",1));
         store.registerWorkload("a");store.registerWorkload("b");store.registerWorkload("c");
@@ -352,5 +429,10 @@ class LoadEvidencePolicyTest {
 
     private LoadEvent event(String id, String workload, ResultStatus status) throws Exception {
         return event(id, status).withWorkloadId(workload);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String,Object> row(Map<String,Object> report, String workload) {
+        return (Map<String,Object>)((Map<String,Object>)report.get("workloads")).get(workload);
     }
 }
