@@ -96,7 +96,16 @@ async function main() {
     await page.locator('tr[aria-current="true"]').waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('.att-occurrence-table').isVisible(), true);
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    const mobileLayout = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+      overflow: [...document.querySelectorAll('body *')].map(element => ({
+        tag: element.tagName.toLowerCase(),
+        className: typeof element.className === 'string' ? element.className : '',
+        right: Math.round(element.getBoundingClientRect().right),
+      })).filter(item => item.right > window.innerWidth + 1).slice(0, 8),
+    }));
+    assert.ok(mobileLayout.scrollWidth <= mobileLayout.viewport, `History must fit a phone viewport: ${JSON.stringify(mobileLayout)}`);
     await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
     assert.deepEqual(await page.evaluate(async () => (await window.axe.run(document, {
       runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag22aa'] },
