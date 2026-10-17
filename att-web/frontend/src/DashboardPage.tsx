@@ -19,7 +19,8 @@ function ErrorText({ error }: { error: Error }) {
 }
 
 function PackagePanel({
-  state, onPackageChange, onRetry, heading = 'Configured packages', description = 'Open a package to inspect resources and run tests.',
+  state, onPackageChange, onRetry,
+  heading = 'Packages', description = 'Browse registered Packages and inspect their resources.',
 }: {
   state: AsyncState<PackageSummary[]>;
   onPackageChange(packageId: string): void;
@@ -49,8 +50,9 @@ function PackageState({ state, onPackageChange }: { state: AsyncState<PackageSum
         {state.data.map(item => (
           <li className="package-row" key={item.packageId}>
             <div className="package-mark" aria-hidden="true">P</div>
-            <div className="package-copy"><strong>{item.name || item.packageId}</strong><span>{item.name ? item.packageId : 'Package workspace'}</span></div>
-            <button className="button button-quiet" type="button" onClick={() => onPackageChange(item.packageId)}>Open package</button>
+            <div className="package-copy"><strong>{item.name || item.packageId}</strong><span>{item.packageId}</span>
+            </div>
+            <button className="button button-quiet" type="button" onClick={() => onPackageChange(item.packageId)}>Open Explorer</button>
           </li>
         ))}
       </ul>
@@ -140,21 +142,18 @@ function SummaryCards({ state }: { state: AppState }) {
 export function DashboardPage({
   view, state, onPackageChange, onJobChange, onRetryPackages, onRetryJobs, jobsRefreshing = false, jobsUpdatedAt = null,
 }: DashboardPageProps) {
-  const title = view === 'dashboard' ? 'Dashboard' : view === 'packages' ? 'Packages' : 'Jobs and results';
-  const description = view === 'dashboard' ? 'Monitor recent ATT activity and open a package workspace.'
-    : view === 'packages' ? 'Open a configured package workspace.'
+  const title = view === 'dashboard' ? 'Dashboard' : view === 'packages' ? 'Explorer' : 'Jobs and results';
+  const description = view === 'dashboard' ? 'Monitor recent ATT activity.'
+    : view === 'packages' ? 'Choose a package to browse its resources.'
       : 'Review jobs returned by the ATT Server API.';
   return (
     <div className="page-content">
       <div className="page-heading">
-        <div><p className="eyebrow">Workspace</p><h1 id="home-title">{title}</h1><p className="page-description">{description}</p></div>
+        <div><p className="eyebrow">ATT Studio</p><h1 id="home-title">{title}</h1><p className="page-description">{description}</p></div>
       </div>
       {view === 'dashboard' && <SummaryCards state={state} />}
       {view === 'dashboard'
-        ? <div className="dashboard-columns">
-            <PackagePanel state={state.packages} onPackageChange={onPackageChange} onRetry={onRetryPackages} />
-            <JobPanel state={state.jobs} onJobChange={onJobChange} onRetry={onRetryJobs} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />
-          </div>
+        ? <JobPanel state={state.jobs} onJobChange={onJobChange} onRetry={onRetryJobs} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />
         : view === 'packages'
           ? <PackagePanel state={state.packages} onPackageChange={onPackageChange} onRetry={onRetryPackages} />
           : <JobPanel state={state.jobs} onJobChange={onJobChange} onRetry={onRetryJobs} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />}
@@ -173,7 +172,7 @@ export function LoadLanding({
   return (
     <div className="page-content">
       <div className="page-heading">
-        <div><p className="eyebrow">Workspace</p><h1 id="home-title">{packageId ? 'Advanced Load' : 'Load testing'}</h1><p className="page-description">Choose a configured package to build a Load scenario.</p></div>
+        <div><p className="eyebrow">ATT Studio</p><h1 id="home-title">{packageId ? 'Advanced Load' : 'Load testing'}</h1><p className="page-description">Choose a configured package to build a Load scenario.</p></div>
       </div>
       <section className="panel" aria-labelledby="load-selection-heading">
         <div className="section-heading"><div><h2 id="load-selection-heading">Select a package</h2><p className="section-description">Load availability follows the Server capability response.</p></div></div>
@@ -189,7 +188,7 @@ export function PackageLanding({ packageId, resourceId, enabled }: { packageId: 
   return (
     <div className="page-content">
       <div className="page-heading">
-        <div><p className="eyebrow">Package workspace</p><h1 id="home-title">{resourceId || packageId}</h1><p className="page-description">{resourceId ? 'Selected package resource' : 'Package resources and Run actions are available from this route.'}</p></div>
+        <div><p className="eyebrow">Package resources</p><h1 id="home-title">{resourceId || packageId}</h1><p className="page-description">{resourceId ? 'Selected package resource' : 'Package resources and Run actions are available from this route.'}</p></div>
       </div>
       <section className="panel feature-placeholder">
         <span className="section-icon" aria-hidden="true">▦</span>

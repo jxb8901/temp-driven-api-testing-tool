@@ -265,7 +265,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     {!inlineLoadEnabled && <p className="callout callout-warning" role="status">Quick LOAD composition is disabled by Server policy. Valid package scenarios may still be run directly when Server execution policy allows.</p>}
     <section className="att-load-section" aria-labelledby="load-catalog-heading">
       <div className="att-section-heading"><div><h2 id="load-catalog-heading">Available Load YAML resources</h2><p>Scenario syntax is discovered in bounded pages; validate a scenario for the selected environment before running or scheduling.</p></div>
-        <button type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={catalogState === 'loading'}>{catalogState === 'loading' ? 'Refreshing…' : 'Refresh'}</button></div>
+        <button className="button button-quiet" type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={catalogState === 'loading'}>{catalogState === 'loading' ? 'Refreshing…' : 'Refresh'}</button></div>
       <div className="att-load-catalog-filters">
         <label>Search resources<input type="search" value={query} onChange={event => {
           const value = event.currentTarget.value;
@@ -280,7 +280,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
       {catalogState === 'loading' && <p role="status" aria-busy="true">Discovering package Load YAML resources…</p>}
       {catalogState === 'error' && <p className="att-inline-error" role="alert">{catalogError}</p>}
       {Object.entries(catalogFailures).map(([packageId, failure]) => <div className="att-inline-error" role="alert" key={packageId}>
-        {packageId}: {failure.message}{failure.suggestion ? ` ${failure.suggestion}` : ''} <button type="button" disabled={Object.values(catalogFailures).some(item => item.retrying)} onClick={() => void retryCatalogPackage(packageId)}>{failure.retrying ? 'Retrying…' : `Retry ${packageId}`}</button>
+        {packageId}: {failure.message}{failure.suggestion ? ` ${failure.suggestion}` : ''} <button className="button button-quiet" type="button" disabled={Object.values(catalogFailures).some(item => item.retrying)} onClick={() => void retryCatalogPackage(packageId)}>{failure.retrying ? 'Retrying…' : `Retry ${packageId}`}</button>
       </div>)}
       {notice && <p role="status" className="att-inline-error">{notice}</p>}
       {catalogState === 'ready' && visible.length === 0 && <p role="status">No Load YAML resources match these filters.</p>}
@@ -291,18 +291,18 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
             <span className={`att-load-validation validation-${item.validation}`}>{item.validation}</span></div>
           {item.diagnostic && <p className="att-help">{item.diagnostic}</p>}
           <div className="att-quick-load-actions">
-            {item.kind === 'scenario' && <button type="button" disabled={Boolean(actionKey)} onClick={() => void validateItem(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate for Environment'}</button>}
-            {item.kind === 'template' && <button type="button" disabled={Boolean(actionKey)} onClick={() => void validateTemplate(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>}
-            {item.kind === 'scenario' && <><button type="button" disabled={!item.runNow || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || Boolean(actionKey)} onClick={() => void runNow(item)}>{actionKey === item.resourceId ? 'Starting…' : 'Run Now'}</button>
-              <button type="button" disabled={!item.schedule || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || !schedulingEnabled} title={!schedulingEnabled ? 'Schedules are disabled by Server policy.' : item.validatedEnvironment !== environmentDraft ? 'Validate for the selected environment first.' : undefined}
+            {item.kind === 'scenario' && <button className="button button-quiet" type="button" disabled={Boolean(actionKey)} onClick={() => void validateItem(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate for Environment'}</button>}
+            {item.kind === 'template' && <button className="button button-quiet" type="button" disabled={Boolean(actionKey)} onClick={() => void validateTemplate(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>}
+            {item.kind === 'scenario' && <><button className="button button-primary" type="button" disabled={!item.runNow || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || Boolean(actionKey)} onClick={() => void runNow(item)}>{actionKey === item.resourceId ? 'Starting…' : 'Run Now'}</button>
+              <button className="button button-quiet" type="button" disabled={!item.schedule || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || !schedulingEnabled} title={!schedulingEnabled ? 'Schedules are disabled by Server policy.' : item.validatedEnvironment !== environmentDraft ? 'Validate for the selected environment first.' : undefined}
                 onClick={() => onSchedule({ packageId: item.packageId, environment: environmentDraft || undefined, scenario: item.path, executionType: 'load' })}>Schedule</button></>}
-            {item.kind === 'template' && <button type="button" disabled={!item.createQuickLoad || !inlineLoadEnabled}
+            {item.kind === 'template' && <button className="button button-quiet" type="button" disabled={!item.createQuickLoad || !inlineLoadEnabled}
               onClick={() => onQuickLoad(item.packageId, item)}>Create Quick LOAD</button>}
-            <button type="button" disabled={!item.sourceAvailable || Boolean(actionKey)} onClick={() => void showSource(item)}>{actionKey === `source:${item.resourceId}` ? 'Loading…' : 'View YAML'}</button>
+            <button className="button button-quiet" type="button" disabled={!item.sourceAvailable || Boolean(actionKey)} onClick={() => void showSource(item)}>{actionKey === `source:${item.resourceId}` ? 'Loading…' : 'View YAML'}</button>
           </div>
         </article>)}
       </div>}
-      {Object.keys(catalogCursors).length > 0 && <button type="button" disabled={catalogMoreLoading || catalogState === 'loading'}
+      {Object.keys(catalogCursors).length > 0 && <button className="button button-quiet" type="button" disabled={catalogMoreLoading || catalogState === 'loading'}
         onClick={() => {
           const controller = new AbortController();
           catalogRequestRef.current?.abort();
@@ -314,7 +314,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     </section>
     <section className="att-load-section" aria-labelledby="recent-load-jobs-heading">
       <div className="att-section-heading"><div><h2 id="recent-load-jobs-heading">Recent LOAD Jobs</h2><p>Execution history returned by the Server's authorized LOAD-only query.</p></div>
-        <button type="button" onClick={() => void loadJobs() } disabled={jobsState === 'loading'}>{jobsState === 'loading' ? 'Refreshing…' : 'Refresh'}</button></div>
+        <button className="button button-quiet" type="button" onClick={() => void loadJobs() } disabled={jobsState === 'loading'}>{jobsState === 'loading' ? 'Refreshing…' : 'Refresh'}</button></div>
       {jobsState === 'loading' && <p role="status" aria-busy="true">Loading recent LOAD jobs…</p>}
       {jobsState === 'error' && <p className="att-inline-error" role="alert">{jobsError}</p>}
       {jobsState === 'ready' && jobs.length === 0 && <p role="status">No LOAD jobs are available for this account.</p>}
@@ -327,12 +327,12 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
           {job.startedAt && <time title="Started">Started {new Date(job.startedAt).toLocaleString()}</time>}
           {job.finishedAt && <time title="Finished">Finished {new Date(job.finishedAt).toLocaleString()}</time>}
           {jobDuration(job) && <span>Duration {jobDuration(job)}</span>}</span>
-        <button className="text-link" type="button" onClick={() => onOpenJob(job.jobId)}>View Results</button>
+        <button className="button button-quiet" type="button" onClick={() => onOpenJob(job.jobId)}>View Results</button>
       </div>)}</div>}
-      {jobsMore !== null && <button type="button" onClick={() => void loadJobs(jobsMore, true)} disabled={jobsState === 'loading'}>Load more LOAD jobs</button>}
+      {jobsMore !== null && <button className="button button-quiet" type="button" onClick={() => void loadJobs(jobsMore, true)} disabled={jobsState === 'loading'}>Load more LOAD jobs</button>}
     </section>
     {source && <section className="att-load-section att-load-source-panel" aria-label={`Safe YAML source for ${source.item.path}`}>
-      <div className="att-section-heading"><div><h2>{source.item.path}</h2><p>{source.reason || 'Redacted read-only YAML preview'}</p></div><button type="button" onClick={() => setSource(null)}>Close preview</button></div>
+      <div className="att-section-heading"><div><h2>{source.item.path}</h2><p>{source.reason || 'Redacted read-only YAML preview'}</p></div><button className="button button-quiet" type="button" onClick={() => setSource(null)}>Close preview</button></div>
       {source.text ? <CodeEditor value={source.text} language="yaml" label={`Safe YAML preview for ${source.item.path}`} readOnly /> : <p role="status">{source.reason || 'Source is unavailable.'}</p>}
     </section>}
   </div>;

@@ -28,6 +28,11 @@ final class JobStore implements AutoCloseable {
         return null;
     }
 
+    boolean isActiveUser(String login) throws Exception {
+        Map<String,Object> user = login == null ? null : authUser(login);
+        return user != null && Boolean.TRUE.equals(user.get("active")) && "USER".equals(user.get("role"));
+    }
+
     private boolean isLocalAdmin(String login) throws Exception {
         Map<String,Object> user = login == null ? null : authUser(login);
         return user != null && Boolean.TRUE.equals(user.get("active")) && "ADMIN".equals(user.get("role"));
@@ -282,64 +287,18 @@ final class JobStore implements AutoCloseable {
     }
     synchronized long activeAdminCount() throws Exception {try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM auth_users WHERE role='ADMIN' AND active=TRUE")){r.next();return r.getLong(1);}}
     boolean ownsJob(String id,String login) throws Exception {
-        String owner;
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT principal FROM jobs WHERE job_id=?")) {
-            p.setString(1,id);
-            try(ResultSet r=p.executeQuery()) {
-                if(!r.next()) return false;
-                owner=r.getString(1);
-            }
-        }
-        if(login.equals(owner)) return true;
-        String scheduleId=scheduledScheduleId(owner);
-        if(scheduleId==null) return false;
-        // Schedule administration is ADMIN-only in local-auth mode, so any local
-        // ADMIN may read scheduled-job results even when another ADMIN created them.
-        if(isLocalAdmin(login)) return true;
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT schedule_json FROM load_schedules WHERE schedule_id=?")) {
-            p.setString(1,scheduleId);
-            try(ResultSet r=p.executeQuery()) {
-                return r.next()&&login.equals(ServerRuntime.JSON.readValue(r.getString(1),LoadSchedule.class).createdBy);
-            }
+        if(!isActiveUser(login))return false;
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT 1 FROM jobs WHERE job_id=?")) {
+            p.setString(1,id);try(ResultSet r=p.executeQuery()){return r.next();}
         }
     }
     synchronized List<Map<String,Object>> listOwned(int limit,String login) throws Exception {
-        boolean admin=isLocalAdmin(login);
-        List<String> schedulePrincipals=new ArrayList<>();
-        for(LoadSchedule schedule:schedules()) {
-            if(admin||login.equals(schedule.createdBy)) {
-                schedulePrincipals.add("load-schedule:"+schedule.id);
-                schedulePrincipals.add("debug-schedule:"+schedule.id);
-            }
-        }
-        String ownerPredicate=schedulePrincipals.isEmpty()?"":" OR principal IN ("+String.join(",",java.util.Collections.nCopies(schedulePrincipals.size(),"?"))+")";
-        List<Map<String,Object>> out=new ArrayList<>();
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code FROM jobs WHERE principal=?"+ownerPredicate+" ORDER BY created_at DESC LIMIT ?")) {
-            int index=1;p.setString(index++,login);
-            for(String owner:schedulePrincipals)p.setString(index++,owner);
-            p.setInt(index,limit);
-            try(ResultSet r=p.executeQuery()) {
-                while(r.next()) {
-                    Map<String,Object> m=new LinkedHashMap<>();
-                    m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));
-                    m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));
-                    m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));
-                    out.add(m);
-                }
-            }
-        }
-        return out;
+        if(!isActiveUser(login))return List.of();
+        return list(limit);
     }
     synchronized List<Map<String,Object>> listOwnedLoad(int limitPlusOne,int offset,String login) throws Exception {
-        boolean admin=isLocalAdmin(login);List<String> schedulePrincipals=new ArrayList<>();
-        for(LoadSchedule schedule:schedules())if(admin||login.equals(schedule.createdBy))schedulePrincipals.add("load-schedule:"+schedule.id);
-        String ownerPredicate=schedulePrincipals.isEmpty()?"":" OR principal IN ("+String.join(",",java.util.Collections.nCopies(schedulePrincipals.size(),"?"))+")";
-        List<Map<String,Object>> out=new ArrayList<>();
-        String sql="SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary FROM jobs WHERE command='load' AND (principal=?"+ownerPredicate+") ORDER BY created_at DESC,job_id DESC LIMIT ? OFFSET ?";
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)){
-            int index=1;p.setString(index++,login);for(String owner:schedulePrincipals)p.setString(index++,owner);p.setInt(index++,limitPlusOne);p.setInt(index,offset);
-            try(ResultSet r=p.executeQuery()){while(r.next())out.add(jobSummary(r));}
-        }return out;
+        if(!isActiveUser(login))return List.of();
+        return listLoad(limitPlusOne,offset);
     }
     synchronized List<Map<String,Object>> listLoad(int limitPlusOne,int offset) throws Exception {
         List<Map<String,Object>> out=new ArrayList<>();

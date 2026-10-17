@@ -21,7 +21,7 @@ describe('App Dashboard job refresh', () => {
     root = createRoot(host);
     vi.spyOn(api, 'getVersion').mockResolvedValue({ apiVersion: '1', inlineLoadEnabled: false });
     vi.spyOn(api, 'getPackages').mockResolvedValue({ items: [] });
-    vi.spyOn(api, 'getAuthCapabilities').mockResolvedValue({ configurationAdmin: false });
+    vi.spyOn(api, 'getAuthCapabilities').mockResolvedValue({ configurationAdmin: false, capabilities: { operate: true, accountManage: true } });
     vi.spyOn(api, 'listJobs').mockResolvedValue([]);
   });
 

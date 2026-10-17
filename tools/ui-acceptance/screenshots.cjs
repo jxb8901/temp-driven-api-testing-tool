@@ -16,7 +16,8 @@ async function main() {
       {
         name: 'dashboard', fixture: 'loaded', route: '',
         wait: async page => {
-          await page.locator('#packages-state').getByText(/configured package/i).waitFor();
+          await page.locator('.package-list li').first().waitFor();
+          if (await page.locator('.package-list li').count() !== 2) throw new Error('The fixture packages did not load.');
           await page.locator('#jobs-state').getByText(/recent job row/i).waitFor();
         },
       },
@@ -95,9 +96,13 @@ async function main() {
           const context = await browser.newContext({
             viewport: { width, height: 1000 },
             colorScheme: theme,
+            locale: 'en-US',
           });
           await selectFixture(context, fixture.origin, screen.fixture);
-          await context.addInitScript(value => localStorage.setItem('att-ui-theme', value), theme);
+          await context.addInitScript(({ theme, language }) => {
+            localStorage.setItem('att-ui-theme', theme);
+            localStorage.setItem('att-ui-language', language);
+          }, { theme, language: 'en' });
           const page = await context.newPage();
           const pageErrors = [];
           page.on('pageerror', error => pageErrors.push(error.message));

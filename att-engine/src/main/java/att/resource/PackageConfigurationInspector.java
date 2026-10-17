@@ -3,6 +3,7 @@ package att.resource;
 import att.config.DbHelperConfig;
 import att.config.FrameworkConfig;
 import att.config.FrameworkConfigLoader;
+import att.config.RuntimeConfigPath;
 import att.config.HttpHelperConfig;
 import att.config.MqHelperConfig;
 import att.config.SshConfig;
@@ -56,6 +57,7 @@ public final class PackageConfigurationInspector {
     private PackageConfigurationSnapshots snapshots;
     private Object snapshotContext;
     private final PackageResourceResolver resources;
+    private final PackageResourceResolver configResources;
     private final int maxResponseBytes;
     private final boolean redactionEnabled;
     private final boolean includeAllFields;
@@ -77,6 +79,8 @@ public final class PackageConfigurationInspector {
         this.resources = new PackageResourceResolver(packageRoot);
         this.packageRoot = resources.packageRoot();
         this.configPath = configPath == null ? Paths.get("config/config.yaml") : configPath;
+        Path effectiveConfig = RuntimeConfigPath.resolve(this.configPath, this.packageRoot);
+        this.configResources = new PackageResourceResolver(RuntimeConfigPath.root(effectiveConfig));
         if (maxResponseBytes < 1024) throw new IllegalArgumentException("maxResponseBytes must be at least 1024");
         this.maxResponseBytes = maxResponseBytes;
         this.redactionEnabled = redactionEnabled;
@@ -134,7 +138,8 @@ public final class PackageConfigurationInspector {
         PackageConfigurationSnapshots.Snapshot cached = configurationSnapshot(safeEnvironment);
         Map<?,?> raw = cached == null ? readConfig() : cached.raw;
         validateReferencedFiles(raw, safeEnvironment);
-        FrameworkConfig config = cached == null ? new FrameworkConfigLoader().load(configFile(), packageRoot, safeEnvironment) : cached.config;
+        Path file = configFile();
+        FrameworkConfig config = cached == null ? new FrameworkConfigLoader().load(file, RuntimeConfigPath.root(file), packageRoot, safeEnvironment) : cached.config;
         TestdataDescriptor selected = null;
         String selectedSource = null;
         for (Path path : config.testdataDescriptors()) {
@@ -268,7 +273,8 @@ public final class PackageConfigurationInspector {
             PackageConfigurationSnapshots.Snapshot cached = configurationSnapshot(safeEnvironment);
             Map<?, ?> raw = cached == null ? readConfig() : cached.raw;
             validateReferencedFiles(raw, safeEnvironment);
-            FrameworkConfig config = cached == null ? new FrameworkConfigLoader().load(configFile(), packageRoot, safeEnvironment) : cached.config;
+            Path file = configFile();
+            FrameworkConfig config = cached == null ? new FrameworkConfigLoader().load(file, RuntimeConfigPath.root(file), packageRoot, safeEnvironment) : cached.config;
             return snapshot(raw, config, "effective", section, offset, limit, query);
         } catch (ConfigurationLimitException exceeded) {
             throw exceeded;
@@ -844,16 +850,15 @@ public final class PackageConfigurationInspector {
 
     private PackageConfigurationSnapshots.Snapshot configurationSnapshot(String environment) throws Exception {
         if(snapshots == null)return null;
+        if(!configFile().startsWith(packageRoot))return null;
         try { return snapshots.get(packageRoot,configPath,environment,snapshotContext,true); }
         catch(Exception unavailable) { return null; } // Cache failures preserve the original uncached validation path.
     }
 
     private Map<?, ?> readConfig() throws Exception {
-        if(snapshots != null)try { return snapshots.get(packageRoot,configPath,null,snapshotContext,false).raw; }
+        if(snapshots != null&&configFile().startsWith(packageRoot))try { return snapshots.get(packageRoot,configPath,null,snapshotContext,false).raw; }
         catch(Exception unavailable) { /* Read and validate using the uncached path below. */ }
-        PackageResourceResolver.PackageResource resource = configPath.isAbsolute()
-                ? resources.fromInternalPath(configPath, PackageResourceResolver.Kind.FILE)
-                : resources.resolvePackageRelative(configPath.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE);
+        PackageResourceResolver.PackageResource resource = configResources.fromInternalPath(configFile(), PackageResourceResolver.Kind.FILE);
         if (Files.size(resource.canonicalPath()) > MAX_CONFIG_BYTES) throw new ConfigurationLimitException();
         long started=System.nanoTime();
         Object loaded = YamlSupport.load(resource.canonicalPath());
@@ -863,8 +868,8 @@ public final class PackageConfigurationInspector {
     }
 
     private Path configFile() throws Exception {
-        return configPath.isAbsolute() ? resources.fromInternalPath(configPath, PackageResourceResolver.Kind.FILE).canonicalPath()
-                : resources.resolvePackageRelative(configPath.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
+        Path effective = RuntimeConfigPath.resolve(configPath, packageRoot);
+        return configResources.fromInternalPath(effective, PackageResourceResolver.Kind.FILE).canonicalPath();
     }
 
     private void validateReferencedFiles(Map<?, ?> raw, String environment) throws Exception {
@@ -875,28 +880,32 @@ public final class PackageConfigurationInspector {
             List<?> values = listOrEmpty(raw.get(key));
             for (Object value : values) {
                 if (!(value instanceof String)) continue;
-                totalBytes = checkDescriptorLimit(++count, totalBytes, String.valueOf(value));
+                totalBytes = checkDescriptorLimit(++count, totalBytes, String.valueOf(value), true);
             }
         }
         for (String key : RESOURCE_LISTS) {
             Object configured = profile != null && profile.containsKey(key) ? profile.get(key) : raw.get(key);
             for (Object value : listOrEmpty(configured)) {
                 if (!(value instanceof String)) continue;
-                totalBytes = checkDescriptorLimit(++count, totalBytes, String.valueOf(value));
+                totalBytes = checkDescriptorLimit(++count, totalBytes, String.valueOf(value), !"testdata".equals(key));
             }
         }
     }
 
-    private long checkDescriptorLimit(int count, long totalBytes, String authored) throws Exception {
+    private long checkDescriptorLimit(int count, long totalBytes, String authored, boolean central) throws Exception {
         if (count > MAX_REFERENCED_FILES) throw new ConfigurationLimitException();
-        long nextBytes = totalBytes + checkDescriptor(authored);
+        long nextBytes = totalBytes + checkDescriptor(authored, central);
         if (nextBytes > MAX_TOTAL_DESCRIPTOR_BYTES) throw new ConfigurationLimitException();
         return nextBytes;
     }
 
-    private long checkDescriptor(String authored) throws Exception {
-        PackageResourceResolver.PackageResource resource = resources.resolvePackageRelative(authored, PackageResourceResolver.Kind.FILE);
-        Path logical = packageRoot.resolve(authored.replace('\\', '/')).normalize();
+    private long checkDescriptor(String authored, boolean central) throws Exception {
+        PackageResourceResolver resolver = central ? configResources : resources;
+        Path base = central ? RuntimeConfigPath.root(RuntimeConfigPath.resolve(configPath, packageRoot)) : packageRoot;
+        PackageResourceResolver.PackageResource resource = resolver.resolvePackageRelative(authored, PackageResourceResolver.Kind.FILE);
+        Path logical = base.resolve(authored.replace('\\', '/')).normalize();
+        if (central && !logical.startsWith(base.resolve("config")))
+            throw new IllegalArgumentException("Shared descriptor escaped config/");
         if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Package configuration descriptor is invalid");
         long size = Files.size(resource.canonicalPath());
         if (size > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException();
@@ -1034,7 +1043,9 @@ public final class PackageConfigurationInspector {
 
     private void logicalSource(Map<String, Object> entry, Path path) throws Exception {
         if (path == null) return;
-        PackageResourceResolver.PackageResource resource = resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE);
+        Path canonical=path.toRealPath();
+        PackageResourceResolver resolver=canonical.startsWith(packageRoot)?resources:configResources;
+        PackageResourceResolver.PackageResource resource = resolver.fromInternalPath(canonical, PackageResourceResolver.Kind.FILE);
         entry.put("source", resource.logicalName());
     }
 

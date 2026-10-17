@@ -43,11 +43,12 @@ class MqHelperConfigLoaderTest {
     }
 
     private MqHelperConfig loadRouting(String message,String instances) throws Exception {
-        Path helper=tempDir.resolve("routing.yaml");
+        Path helper=tempDir.resolve("config/mqhelpers/routing.yaml");
+        Files.createDirectories(helper.getParent());
         Files.write(helper,("schemaVersion: att-mqhelper/v1.3\nid: routing\nname: Routing\ndescription: Routing\n"
                 +"defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: CH}\n  message: "+message
                 +"\nselection: {strategy: roundRobin}\ninstances: "+instances+"\n").getBytes("UTF-8"));
-        return new MqHelperConfigLoader().load(java.util.Collections.singletonList("routing.yaml"),tempDir).get("routing");
+        return new MqHelperConfigLoader().load(java.util.Collections.singletonList("config/mqhelpers/routing.yaml"),tempDir).get("routing");
     }
 
     @Test void ignoresExtensionFieldsAcrossMqDescriptorObjects() throws Exception {

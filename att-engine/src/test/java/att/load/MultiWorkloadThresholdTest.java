@@ -29,7 +29,8 @@ class MultiWorkloadThresholdTest {
                 + "  load: {arrivalRate: 5/s, duration: 250ms, maxConcurrent: 2, overloadPolicy: drop}\n"
                 + "thresholds: {minThroughput: \">= 999999/s\"}\n").getBytes(StandardCharsets.UTF_8));
         LoadScenario scenario = new LoadScenarioLoader(root).load(file);
-        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        Path home = Paths.get("").toAbsolutePath().normalize();
+        FrameworkConfig config = new FrameworkConfigLoader().load(home.resolve("config/config.yaml"), home, root, "SIT");
         LoadScenario first = scenario.forWorkload(scenario.workloads().get(0));
         LoadTarget seedTarget = new LoadTargetResolver(root, config).resolve(first);
         LoadRunResult result;

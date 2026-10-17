@@ -428,7 +428,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   };
 
   return (
-    <div className="att-load-page">
+    <div className="page-content att-load-page">
       <header className="att-feature-header">
         <div>
           <p className="att-eyebrow">Load testing</p>

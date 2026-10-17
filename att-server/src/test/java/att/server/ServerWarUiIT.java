@@ -38,16 +38,17 @@ class ServerWarUiIT {
         assertServerApplicationJar(war);
 
         Path users = Files.writeString(temp.resolve("tomcat-users.xml"),
-                "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_SCHEDULE_ADMIN\"/>"
+                "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/>"
                         + "<user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/>"
-                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER,ATT_SCHEDULE_ADMIN\"/></tomcat-users>");
+                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER\"/>"
+                        + "<user username=\"system-admin\" password=\"secret\" roles=\"ATT_ADMIN\"/></tomcat-users>");
         Path packages = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(packages.resolve("payments"));
-        writeScheduledPackage(packageRoot);
+        writeScheduledPackage(packageRoot, localHome);
         // Keep Flow-link inspection in this isolated browser fixture, away from the scheduler capacity fixture.
         writeReferenceFlowSource(packageRoot);
         Path config = Files.writeString(temp.resolve("server.yaml"),
-                "server:\n  dataDir: " + yaml(temp.resolve("data")) + "\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n"
+                "server:\n  runtimeConfigPath: " + yaml(localHome.resolve("config/config.yaml")) + "\n  dataDir: " + yaml(temp.resolve("data")) + "\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n"
                         + "  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
                         + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n"
                         + "  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n"
@@ -78,11 +79,13 @@ class ServerWarUiIT {
                     "att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             String scheduleAdminAuth = "Basic " + Base64.getEncoder().encodeToString(
                     "schedule-admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String systemAdminAuth = "Basic " + Base64.getEncoder().encodeToString(
+                    "system-admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             assertEquals(401, get(port, "/tools/att/api/v1/load-schedules", null));
-            assertEquals(403, get(port, "/tools/att/api/v1/load-schedules", auth),
-                    "ordinary ATT_USER must not manage schedules");
+            assertEquals(200, get(port, "/tools/att/api/v1/load-schedules", auth),
+                    "Every active USER may manage shared schedules");
             assertEquals(200, get(port, "/tools/att/api/v1/load-schedules", scheduleAdminAuth),
-                    "the configured schedule-admin role may list schedules");
+                    "another active USER may list the same schedules");
             String previewPath = "/tools/att/api/v1/load-schedules/preview";
             String previewBody = "{\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}";
             assertEquals(403, postJson(port, previewPath, scheduleAdminAuth, "https://attacker.example", previewBody),
@@ -133,7 +136,8 @@ class ServerWarUiIT {
             assertTrue(cachedPage.getHeaderField("X-ATT-Inspection-Revision").matches("[A-Za-z0-9_-]{43}"));
             try(var input=cachedPage.getInputStream()){String body=new String(input.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);assertFalse(body.contains("revisionDigest"));assertFalse(body.contains("_cacheRevision"));}
             cachedPage.disconnect();
-            JsonNode inspectionMetrics=getJson(port,api+"/metrics",auth).path("inspection");
+            assertEquals(403,get(port,api+"/metrics",auth),"System metrics are restricted to ADMIN accounts.");
+            JsonNode inspectionMetrics=getJson(port,api+"/metrics",systemAdminAuth).path("inspection");
             assertTrue(inspectionMetrics.path("server").path("HTTP").path("count").asLong()>0);
             assertTrue(inspectionMetrics.path("workers").isArray());
             assertFalse(inspectionMetrics.toString().contains(packageRoot.toString()));
@@ -222,17 +226,17 @@ class ServerWarUiIT {
         Files.createDirectories(localHome.resolve("lib"));
         Path packages = Files.createDirectories(temp.resolve("scheduled-packages"));
         Path packageRoot = Files.createDirectories(packages.resolve("payments"));
-        writeScheduledPackage(packageRoot);
+        writeScheduledPackage(packageRoot, localHome);
         Path users = Files.writeString(temp.resolve("scheduled-tomcat-users.xml"),
-                "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_SCHEDULE_ADMIN\"/>"
+                "<tomcat-users><role rolename=\"ATT_USER\"/>"
                         + "<user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/>"
-                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER,ATT_SCHEDULE_ADMIN\"/></tomcat-users>");
+                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
         Path javaBin = Path.of(System.getProperty("java.home"), "bin", System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
         Path config = Files.writeString(temp.resolve("scheduled-war-server.yaml"),
-                "server:\n  dataDir: " + yaml(temp.resolve("scheduled-war-data")) + "\n  javaExecutable: " + yaml(javaBin)
+                "server:\n  runtimeConfigPath: " + yaml(localHome.resolve("config/config.yaml")) + "\n  dataDir: " + yaml(temp.resolve("scheduled-war-data")) + "\n  javaExecutable: " + yaml(javaBin)
                         + "\n  authenticationRequired: true\n  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
                         + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh"
-                        + "\n  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n    minimumIntervalMinutes: 1\n    pollIntervalSeconds: 5\n    maxConcurrentRuns: 1"
+                        + "\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    pollIntervalSeconds: 5\n    maxConcurrentRuns: 1"
                         + "\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - " + yaml(packages)
                         + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
         String oldConfig = System.getProperty("att.server.config");
@@ -252,7 +256,7 @@ class ServerWarUiIT {
             int port = tomcat.getConnector().getLocalPort();
             String origin = "http://127.0.0.1:" + port;
             assertEquals(401, get(port, api + "/load-schedules", null));
-            assertEquals(403, get(port, api + "/load-schedules", ordinary));
+            assertEquals(200, get(port, api + "/load-schedules", ordinary), "Every active USER can read shared schedules");
             assertEquals(200, get(port, api + "/load-schedules", admin));
             String configurationFilesPath = api + "/packages/payments/configuration/files?path=config&limit=100";
             assertEquals(401, get(port, configurationFilesPath, null), "Configuration file listings retain the Tomcat authentication boundary.");
@@ -300,21 +304,21 @@ class ServerWarUiIT {
             assertTrue(configurationOrigin.path("available").asBoolean(), configurationOrigin.toString());
             JsonNode configurationReference = null;
             for (JsonNode item : configurationOrigin.path("fileReferences"))
-                if ("templates/SCHEDULED/payload/request.txt".equals(item.path("logicalPath").asText())) configurationReference = item;
+                if ("config/tools/att-helper.sh".equals(item.path("logicalPath").asText())) configurationReference = item;
             assertNotNull(configurationReference, configurationOrigin.toString());
             String referenceId = configurationReference.path("referenceId").asText();
             assertTrue(referenceId.matches("[A-Za-z0-9_-]{20,4096}"), "The public reference is an opaque Server token.");
             String referencedSourcePath = api + "/packages/payments/configuration/source?path="
-                    + java.net.URLEncoder.encode("templates/SCHEDULED/payload/request.txt", java.nio.charset.StandardCharsets.UTF_8)
+                    + java.net.URLEncoder.encode("config/tools/att-helper.sh", java.nio.charset.StandardCharsets.UTF_8)
                     + "&origin=" + java.net.URLEncoder.encode("config/source-references.yaml", java.nio.charset.StandardCharsets.UTF_8)
                     + "&referenceId=" + java.net.URLEncoder.encode(referenceId, java.nio.charset.StandardCharsets.UTF_8);
             assertEquals(401, get(port, referencedSourcePath, null), "Referenced package files retain the Server authentication boundary.");
             JsonNode referencedSource = getJson(port, referencedSourcePath, ordinary);
             assertTrue(referencedSource.path("available").asBoolean());
-            assertEquals("templates/SCHEDULED/payload/request.txt", referencedSource.path("logicalPath").asText());
-            assertEquals("text", referencedSource.path("format").asText());
-            assertTrue(referencedSource.path("text").asText().contains("request: payload"));
-            assertFalse(referencedSource.path("text").asText().contains("template-secret"),
+            assertEquals("config/tools/att-helper.sh", referencedSource.path("logicalPath").asText());
+            assertEquals("shell", referencedSource.path("format").asText());
+            assertTrue(referencedSource.path("text").asText().contains("Safe configuration helper source"));
+            assertFalse(referencedSource.path("text").asText().contains("helper-secret"),
                     "Safe source projection must scrub classified-looking password values before the UI receives them.");
             assertTrue(referencedSource.path("redacted").asBoolean());
             String unverifiedReferencePath = referencedSourcePath.substring(0, referencedSourcePath.indexOf("&referenceId="));
@@ -337,7 +341,8 @@ class ServerWarUiIT {
             Map<String,Object> runScheduleInput=Map.of("name","One-time functional RUN","packageId","payments",
                     "environment","SIT","executionType","run","draftId",runDraftId,"enabled",false,
                     "runAt",java.time.Instant.now().plusSeconds(3600).toString());
-            assertEquals(403,apiStatus(port,"POST",api+"/schedules",ordinary,origin,runScheduleInput));
+            assertEquals(404,apiStatus(port,"POST",api+"/schedules",ordinary,origin,runScheduleInput),
+                    "A USER has schedule access, while validated drafts remain scoped to their creator");
             JsonNode runSchedule=apiJson(port,"POST",api+"/schedules",admin,origin,runScheduleInput,201);
             assertEquals("att-schedule/v2",runSchedule.path("schemaVersion").asText());
             assertFalse(runSchedule.has("runInput"));
@@ -379,7 +384,8 @@ class ServerWarUiIT {
             Map<String, Object> invalid = new java.util.LinkedHashMap<>(scheduleRequest("Invalid scenario", "load/invalid.yaml"));
             invalid.put("environment", "SIT");
             assertEquals(401, apiStatus(port, "POST", api + "/load-schedules", null, origin, invalid));
-            assertEquals(403, apiStatus(port, "POST", api + "/load-schedules", ordinary, origin, invalid));
+            assertEquals(400, apiStatus(port, "POST", api + "/load-schedules", ordinary, origin, invalid),
+                    "A USER reaches schedule validation instead of being denied by role");
             JsonNode invalidSchedule = apiJsonResponse(port, "POST", api + "/load-schedules", admin, origin, invalid, 400);
             JsonNode invalidDiagnostic = invalidSchedule.path("diagnostics").path(0);
             assertEquals("ATT-LOAD-001", invalidDiagnostic.path("code").asText());
@@ -408,7 +414,8 @@ class ServerWarUiIT {
             secondScheduleId = second.path("id").asText();
 
             assertEquals(401, apiStatus(port, "POST", api + "/load-schedules/" + firstScheduleId + "/trigger", null, origin, null));
-            assertEquals(403, apiStatus(port, "POST", api + "/load-schedules/" + firstScheduleId + "/trigger", ordinary, origin, null));
+            assertEquals(200, get(port, api + "/load-schedules/" + firstScheduleId, ordinary),
+                    "Schedules created by another USER remain visible");
             assertEquals(200, apiStatus(port, "POST", api + "/load-schedules/" + firstScheduleId + "/pause", admin, origin, null));
             assertFalse(getJson(port, api + "/load-schedules/" + firstScheduleId, admin).path("enabled").asBoolean());
             assertEquals(200, apiStatus(port, "POST", api + "/load-schedules/" + firstScheduleId + "/resume", admin, origin, null));
@@ -429,8 +436,7 @@ class ServerWarUiIT {
             assertEquals("skipped", rejected.path("status").asText(),
                     "A concurrent scheduled run must occupy global capacity; occurrence=" + rejected
                             + " job=" + getJson(port, api + "/jobs/" + jobId, admin)
-                            + " result=" + firstJobResult
-                            + " metrics=" + getJson(port, api + "/metrics", admin));
+                            + " result=" + firstJobResult);
             assertEquals("global-scheduled-load-capacity", rejected.path("reason").asText());
             JsonNode secondHistory = getJson(port, api + "/load-schedules/" + secondScheduleId + "/executions", admin);
             assertEquals("global-scheduled-load-capacity", secondHistory.path("items").get(0).path("reason").asText());
@@ -509,24 +515,22 @@ class ServerWarUiIT {
         return home;
     }
 
-    private static void writeScheduledPackage(Path packageRoot) throws Exception {
+    private static void writeScheduledPackage(Path packageRoot, Path localHome) throws Exception {
         Path templates = Files.createDirectories(packageRoot.resolve("templates/SCHEDULED"));
         Path loads = Files.createDirectories(packageRoot.resolve("load"));
         Files.createDirectories(packageRoot.resolve("testcase"));
-        Files.createDirectories(packageRoot.resolve("config"));
         Path nestedTool = Files.createDirectories(packageRoot.resolve("tools/mq")).resolve("check-queue.sh");
-        copySchemas(packageRoot);
-        Files.writeString(packageRoot.resolve("config/config.yaml"),
-                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [config/testdata/generated.yaml]\n"
+        Path configRoot = Files.createDirectories(localHome.resolve("config"));
+        Files.writeString(configRoot.resolve("config.yaml"),
+                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [testdata/generated.yaml]\n"
                         + "testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  checkQueue:\n"
                         + "    name: Check queue\n    description: Nested Tool script default source\n"
                         + "    command: [bash, tools/mq/check-queue.sh]\n    stdoutFormat: text\n    arguments: {}\n");
-        Files.writeString(packageRoot.resolve("config/source-references.yaml"),
-                "payload: '&{../templates/SCHEDULED/payload/request.txt}'\n");
+        Files.writeString(configRoot.resolve("source-references.yaml"), "payload: '&{config/tools/att-helper.sh}'\n");
+        Path tools = Files.createDirectories(configRoot.resolve("tools"));
+        Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\necho password=helper-secret\n");
         Files.writeString(nestedTool, "#!/bin/sh\n# package-local script source\necho safe\n");
-        Path testdata = Files.createDirectories(packageRoot.resolve("config/testdata"));
-        Path tools = Files.createDirectories(packageRoot.resolve("config/tools"));
-        Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\nexit 0\n");
+        Path testdata = Files.createDirectories(packageRoot.resolve("testdata"));
         Files.writeString(testdata.resolve("generated.yaml"),
                 "schemaVersion: att-testdata/v1.0\nid: generatedAccounts\nrecords:\n  generate:\n    seq:\n      from: 1000\n      to: 1120\n      format: '%06d'\n  record:\n    id: 'A-%{seq}'\n"
                         + "selection:\n  strategy: sequential\n  exhaustion: stop\n");
@@ -548,7 +552,7 @@ class ServerWarUiIT {
         String expression="&{./Pacs008.xml}";
         ProcessBuilder builder=new ProcessBuilder(Path.of(System.getProperty("java.home"),"bin","java").toString(),
                 "-Datt.home="+localHome,"-cp",localHome.resolve("lib").toString()+"/*","att.FrameworkRunner",
-                "debug","flow","diagnostic.fidelity.v1","--config",packageRoot.resolve("config/config.yaml").toString(),
+                "debug","flow","diagnostic.fidelity.v1","--config",localHome.resolve("config/config.yaml").toString(),
                 "--output-dir",temp.resolve("cli-diagnostic-output").toString(),"--format","json");
         builder.directory(packageRoot.toFile());
         builder.environment().put("ATT_PACKAGE_ROOT",packageRoot.toString());
@@ -614,7 +618,7 @@ class ServerWarUiIT {
     }
 
     private static void copySchemas(Path packageRoot) throws Exception {
-        Path source = Path.of("packages/default/schemas").toRealPath();
+        Path source = Path.of("schemas").toRealPath();
         Path destination = packageRoot.resolve("schemas");
         try (var paths = Files.walk(source)) {
             for (Path path : (Iterable<Path>) paths::iterator) {

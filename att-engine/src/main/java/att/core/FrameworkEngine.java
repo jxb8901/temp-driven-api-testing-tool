@@ -20,6 +20,7 @@ import att.report.HtmlReportGenerator;
 import att.report.CiReportWriter;
 import att.Version;
 import att.validation.JsonSchemaVerifier;
+import att.validation.SchemaFiles;
 import org.yaml.snakeyaml.Yaml;
 
 import java.nio.file.Files;
@@ -167,11 +168,11 @@ public class FrameworkEngine {
         profile.end("inputHashMs", phaseStarted);
         phaseStarted = profile.begin();
         new CiReportWriter().write(runDirectory, runId, config.environment(), summary, runStarted, runEnded, config.report().junitCaseLogEmbedThresholdBytes(), inputManifestHash, validationDiagnostics, options.ciOutputs());
-        if (options.ciOutputs().contains("json")) JsonSchemaVerifier.verifyJson(projectRoot.resolve("schemas/att-ci-summary-v2.1.schema.json"), runDirectory.resolve("ci/summary.json"));
+        if (options.ciOutputs().contains("json")) JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(projectRoot, "att-ci-summary-v2.1.schema.json"), runDirectory.resolve("ci/summary.json"));
         if (options.ciOutputs().contains("junit")) {
             javax.xml.validation.SchemaFactory schemaFactory = javax.xml.validation.SchemaFactory.newInstance(javax.xml.XMLConstants.W3C_XML_SCHEMA_NS_URI);
             schemaFactory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, ""); schemaFactory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-            javax.xml.validation.Validator validator = schemaFactory.newSchema(projectRoot.resolve("schemas/att-junit-v2.1.xsd").toFile()).newValidator();
+            javax.xml.validation.Validator validator = schemaFactory.newSchema(att.validation.SchemaFiles.resolve(projectRoot, "att-junit-v2.1.xsd").toFile()).newValidator();
             validator.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, ""); validator.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
             validator.validate(new javax.xml.transform.stream.StreamSource(runDirectory.resolve("ci/junit.xml").toFile()));
         }
@@ -498,7 +499,7 @@ public class FrameworkEngine {
         }
         history.put("cases", cases);
         Map<String, Object> outputs = new LinkedHashMap<String, Object>(); outputs.put("html", "report/index.html"); if (options.ciOutputs().contains("json")) outputs.put("json", "ci/summary.json"); if (options.ciOutputs().contains("junit")) { outputs.put("junit", "ci/junit.xml"); outputs.put("junitHtml", "report/junit.html"); } history.put("outputs", outputs);
-        JsonSchemaVerifier.verify(projectRoot.resolve("schemas/att-run-v2.1.schema.json"), history);
+        JsonSchemaVerifier.verify(SchemaFiles.resolve(projectRoot, "att-run-v2.1.schema.json"), history);
         byte[] bytes = new Yaml().dump(history).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         Files.write(runDirectory.resolve("run.yaml"), bytes);
     }
@@ -514,7 +515,9 @@ public class FrameworkEngine {
 
     private List<Map<String, Object>> inputHashes(ExecutionOptions options) throws Exception {
         List<Map<String, Object>> inputs = new ArrayList<Map<String, Object>>();
-        addInput(inputs, "global-config", resolve(options.configPath()));
+        Path runtimeConfig = att.config.RuntimeConfigPath.resolve(options.configPath(), projectRoot);
+        Path runtimeConfigRoot = att.config.RuntimeConfigPath.root(runtimeConfig);
+        addInput(inputs, "global-config", runtimeConfig, runtimeConfigRoot);
         for (Path suite : suites(options)) {
             Path workbook = resolve(suite);
             addInput(inputs, "workbook", workbook);
@@ -528,11 +531,11 @@ public class FrameworkEngine {
         java.util.Set<Path> toolSqlFiles = new java.util.LinkedHashSet<Path>();
         att.template.FileExpressionResolver toolFileExpressions = new att.template.FileExpressionResolver(projectRoot);
         for (att.config.ToolConfig tool : config.tools().values()) {
-            if (tool.sourceFile() != null && toolGroupFiles.add(tool.sourceFile())) addInput(inputs, "tool-group", tool.sourceFile());
+            if (tool.sourceFile() != null && toolGroupFiles.add(tool.sourceFile())) addInput(inputs, "tool-group", tool.sourceFile(), runtimeConfigRoot);
             if (tool.callBacked()) {
                 att.template.ToolCallParser.ParsedCall call = new att.template.ToolCallParser().parse(tool.call());
                 for (att.template.ToolCallParser.Argument argument : call.arguments()) {
-                    addToolFileExpressionInputs(inputs, toolFileExpressions, argument.expression(), projectRoot, toolSqlFiles);
+                    addToolFileExpressionInputs(inputs, toolFileExpressions, argument.expression(), projectRoot, toolSqlFiles, runtimeConfigRoot);
                 }
             }
             java.util.List<String> command = tool.groupScriptArgv().isEmpty() ? tool.commandArgv() : tool.groupScriptArgv();
@@ -542,23 +545,21 @@ public class FrameworkEngine {
         java.util.Set<Path> dbHelperFiles = new java.util.LinkedHashSet<Path>();
         for (att.config.DbHelperConfig helper : config.dbHelpers().values()) {
             if (helper.sourceFile() != null && dbHelperFiles.add(helper.sourceFile())) {
-                addInput(inputs, "dbhelper", helper.sourceFile());
+                addInput(inputs, "dbhelper", helper.sourceFile(), runtimeConfigRoot);
             }
         }
         java.util.Set<Path> mqHelperFiles = new java.util.LinkedHashSet<Path>();
         for (att.config.MqHelperConfig helper : config.mqHelpers().values()) {
             if (helper.sourceFile() != null && mqHelperFiles.add(helper.sourceFile())) {
-                addInput(inputs, "mqhelper", helper.sourceFile());
+                addInput(inputs, "mqhelper", helper.sourceFile(), runtimeConfigRoot);
             }
         }
-        Path schemas = projectRoot.resolve("schemas");
-        if (Files.isDirectory(schemas)) try (java.util.stream.Stream<Path> files = Files.walk(schemas)) { java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).sorted().iterator(); while (iterator.hasNext()) addInput(inputs, "schema", iterator.next()); }
         return inputs;
     }
     private void addToolFileExpressionInputs(List<Map<String, Object>> inputs,
                                               att.template.FileExpressionResolver resolver,
                                               String expression, Path sourceDirectory,
-                                              Set<Path> captured) throws Exception {
+                                              Set<Path> captured, Path runtimeConfigRoot) throws Exception {
         java.util.ArrayDeque<java.util.Map.Entry<String, Path>> pending = new java.util.ArrayDeque<java.util.Map.Entry<String, Path>>();
         for (String path : resolver.extractReferences(expression)) {
             pending.addLast(new java.util.AbstractMap.SimpleImmutableEntry<String, Path>(path, sourceDirectory));
@@ -567,14 +568,32 @@ public class FrameworkEngine {
             java.util.Map.Entry<String, Path> reference = pending.removeFirst();
             Path file = resolver.resolve(reference.getKey(), reference.getValue());
             if (!captured.add(file)) continue;
-            addInput(inputs, "tool-sql", file);
+            addInput(inputs, "tool-sql", file, runtimeConfigRoot);
             att.template.FileExpressionResolver.CompiledFilePlan plan = resolver.compile(reference.getKey(), reference.getValue());
             for (String nested : plan.filePaths()) {
                 pending.addLast(new java.util.AbstractMap.SimpleImmutableEntry<String, Path>(nested, plan.file().getParent()));
             }
         }
     }
-    private void addInput(List<Map<String, Object>> inputs, String kind, Path file) throws Exception { if (!Files.isRegularFile(file)) return; Path canonicalRoot = projectRoot.toRealPath(); Path canonicalFile = file.toRealPath(); if (!canonicalFile.startsWith(canonicalRoot)) throw new IllegalArgumentException("Run input escapes package root: " + file); Map<String, Object> item = new LinkedHashMap<String, Object>(); item.put("kind", kind); item.put("path", canonicalRoot.relativize(canonicalFile).toString().replace('\\', '/')); item.put("sha256", sha256(canonicalFile)); inputs.add(item); }
+    private void addInput(List<Map<String, Object>> inputs, String kind, Path file) throws Exception {
+        addInput(inputs, kind, file, null);
+    }
+
+    private void addInput(List<Map<String, Object>> inputs, String kind, Path file, Path runtimeConfigRoot) throws Exception {
+        if (!Files.isRegularFile(file)) return;
+        Path canonicalPackage = projectRoot.toRealPath();
+        Path canonicalFile = file.toRealPath();
+        String presentedPath;
+        if (canonicalFile.startsWith(canonicalPackage)) {
+            presentedPath = canonicalPackage.relativize(canonicalFile).toString().replace('\\', '/');
+        } else if (runtimeConfigRoot != null && canonicalFile.startsWith(runtimeConfigRoot.toRealPath())) {
+            presentedPath = "$ATT_HOME/" + runtimeConfigRoot.toRealPath().relativize(canonicalFile).toString().replace('\\', '/');
+        } else {
+            throw new IllegalArgumentException("Run input escapes the Package and shared ATT_HOME roots: " + file);
+        }
+        Map<String, Object> item = new LinkedHashMap<String, Object>();
+        item.put("kind", kind); item.put("path", presentedPath); item.put("sha256", sha256(canonicalFile)); inputs.add(item);
+    }
     private String sha256(Path file) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); try (java.io.InputStream input = Files.newInputStream(file)) { byte[] buffer = new byte[65536]; int count; while ((count = input.read(buffer)) >= 0) digest.update(buffer, 0, count); } byte[] hash = digest.digest(); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }
     private String sha256Bytes(byte[] bytes) throws Exception { java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256"); byte[] hash = digest.digest(bytes); StringBuilder out = new StringBuilder(); for (byte value : hash) out.append(String.format("%02x", value & 255)); return out.toString(); }
 

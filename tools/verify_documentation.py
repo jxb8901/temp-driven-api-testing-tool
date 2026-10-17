@@ -10,7 +10,7 @@ from documentation_contracts import active_schemas, current_files, current_block
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 PACKAGE_ROOT = ROOT / "packages" / "default"
-SCHEMAS = PACKAGE_ROOT / "schemas"
+SCHEMAS = ROOT / "schemas"
 MANIFEST = DOCS / "reference-manifest.txt"
 LANDING = DOCS / "README.md"
 HISTORY_INDEX = DOCS / "history" / "README.md"
@@ -290,7 +290,7 @@ def check_cli_documentation():
 
 def check_secret_placeholders():
     files = []
-    for root in (ROOT / "config", ROOT / "examples", PACKAGE_ROOT / "config", PACKAGE_ROOT / "templates"):
+    for root in (ROOT / "config", ROOT / "examples", PACKAGE_ROOT / "templates", PACKAGE_ROOT / "testdata"):
         if root.is_dir():
             files += [path for path in root.rglob("*")
                       if path.is_file() and path.suffix.lower() in
@@ -321,22 +321,22 @@ def check_critical_examples():
         "packages/default/templates/PAYMENT_INVOKE/debug.yaml",
         "examples/load/closed-smoke.yaml",
         "examples/load/arrival-smoke.yaml",
-        "packages/default/config/config.yaml",
-        "packages/default/config/environments/sit.yaml",
-        "packages/default/config/environments/uat.yaml",
-        "packages/default/config/dbhelpers/sit/orders.yaml",
-        "packages/default/config/dbhelpers/uat/orders.yaml",
-        "packages/default/config/mqhelpers/sit/payment.yaml",
-        "packages/default/config/mqhelpers/uat/payment.yaml",
-        "packages/default/config/tools/sample.yaml",
-        "packages/default/config/tools/orders-db.yaml",
+        "config/config.yaml",
+        "config/environments/sit.yaml",
+        "config/environments/uat.yaml",
+        "config/dbhelpers/sit/orders.yaml",
+        "config/dbhelpers/uat/orders.yaml",
+        "config/mqhelpers/sit/payment.yaml",
+        "config/mqhelpers/uat/payment.yaml",
+        "config/tools/sample.yaml",
+        "config/tools/orders-db.yaml",
     )
     for rel in assets:
         if not (ROOT / rel).is_file():
             fail("missing checked-in documentation example asset: %s" % rel)
 
-    command_group = PACKAGE_ROOT / "config/tools/sample.yaml"
-    call_group = PACKAGE_ROOT / "config/tools/orders-db.yaml"
+    command_group = ROOT / "config/tools/sample.yaml"
+    call_group = ROOT / "config/tools/orders-db.yaml"
     if command_group.is_file() and "command:" not in read(command_group):
         fail("config/tools/sample.yaml must remain a command-backed Tool documentation example")
     if call_group.is_file() and "call:" not in read(call_group):
@@ -349,8 +349,8 @@ def check_critical_examples():
         test_text = read(test)
         for rel in ("packages/default/testcase/payment2.xlsx", "packages/default/templates/PAYMENT_INVOKE/debug.yaml",
                     "examples/load/closed-smoke.yaml", "examples/load/arrival-smoke.yaml",
-                    "packages/default/config/environments/sit.yaml", "packages/default/config/environments/uat.yaml",
-                    "packages/default/config/mqhelpers/sit/payment.yaml", "packages/default/config/tools/orders-db.yaml"):
+                    "config/environments/sit.yaml", "config/environments/uat.yaml",
+                    "config/mqhelpers/sit/payment.yaml", "config/tools/orders-db.yaml"):
             if rel not in test_text:
                 fail("DocumentationExamplesTest does not regression-protect documented asset: %s" % rel)
 

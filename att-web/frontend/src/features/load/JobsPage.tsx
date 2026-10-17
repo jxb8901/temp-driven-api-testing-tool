@@ -292,7 +292,7 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
   const start = filtered.length ? currentPage * PAGE_SIZE + 1 : 0;
   const end = Math.min((currentPage + 1) * PAGE_SIZE, filtered.length);
 
-  return <div className="att-jobs-page" aria-labelledby="jobs-title">
+  return <div className="page-content att-jobs-page" aria-labelledby="jobs-title">
     <header className="att-feature-header">
       <div><p className="att-eyebrow">Jobs and results</p><h1 id="jobs-title">Jobs</h1>
         <p>Search and review jobs returned by the ATT Server.</p></div>
@@ -497,7 +497,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     document.getElementById(`job-tab-${tabs[next].id}`)?.focus();
   }
 
-  return <div className="att-job-detail" aria-labelledby="job-title">
+  return <div className="page-content att-job-detail" aria-labelledby="job-title">
     <header className="att-feature-header">
       <div><p className="att-eyebrow"><button className="att-link-button" type="button" onClick={onShowList}>Jobs and results</button></p>
         <h1 id="job-title">Job {jobId}</h1><p>Server status, live events, results, artifacts and reported metrics.</p></div>

@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:load:v1.5",
+  "title": "ATT unified load descriptor with executable workloads and policy defaults",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": { "const": "att-load/v1.5" },
+    "seed": { "type": "integer" },
+    "testdata": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "pattern": "\\.ya?ml$" } },
+    "load": { "$ref": "#/$defs/loadOverride" },
+    "workloads": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/workload" }
+    },
+    "thresholds": { "$ref": "#/$defs/thresholds" },
+    "evidence": { "$ref": "#/$defs/evidence" },
+    "execution": { "$ref": "#/$defs/rootExecution" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "not": { "required": ["workloads"] }
+      },
+      "then": {
+        "required": ["load"],
+        "properties": {
+          "load": { "$ref": "#/$defs/load" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "workload": {
+      "type": "object",
+      "required": ["id", "target"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "target": { "$ref": "#/$defs/target" },
+        "inputs": { "type": "object", "additionalProperties": true },
+        "vars": { "type": "object", "additionalProperties": true },
+        "testdata": { "$ref": "#/$defs/workloadTestdata" },
+        "load": { "$ref": "#/$defs/loadOverride" },
+        "execution": { "$ref": "#/$defs/workloadExecution" },
+        "thresholds": { "$ref": "#/$defs/thresholds" }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "enum": ["template", "flow", "tool"] },
+        "id": { "type": "string", "minLength": 1 },
+        "arguments": { "type": "object", "additionalProperties": true }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "workloadTestdata": {
+      "type": "object",
+      "propertyNames": {
+        "anyOf": [
+          { "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
+          { "pattern": "^x-" }
+        ]
+      },
+      "patternProperties": {
+        "^(?!x-)[A-Za-z][A-Za-z0-9_-]*$": {
+          "type": "object",
+          "properties": {
+            "scope": { "enum": ["workload", "user", "iteration"] },
+            "selection": { "$ref": "#/$defs/selection" }
+          },
+          "patternProperties": { "^x-": {} },
+          "additionalProperties": false
+        },
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "selection": {
+      "type": "object",
+      "required": ["strategy"],
+      "properties": {
+        "strategy": { "enum": ["sequential", "roundRobin", "random"] },
+        "exhaustion": { "enum": ["error", "recycle", "stop"] },
+        "seed": { "type": "integer" }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "load": {
+      "type": "object",
+      "required": ["duration"],
+      "properties": {
+        "users": { "type": "integer", "minimum": 1 },
+        "arrivalRate": { "type": "string", "pattern": "^[1-9][0-9]*(\\.[0-9]+)?/(s|m)$" },
+        "warmup": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+        "rampUp": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+        "duration": { "type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$" },
+        "rampDown": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+        "maxConcurrent": { "type": "integer", "minimum": 1 },
+        "overloadPolicy": { "const": "drop" }
+      },
+      "oneOf": [
+        { "required": ["users"], "not": { "anyOf": [{ "required": ["arrivalRate"] }, { "required": ["maxConcurrent"] }, { "required": ["overloadPolicy"] }] } },
+        { "required": ["arrivalRate", "maxConcurrent", "overloadPolicy"], "not": { "required": ["users"] } }
+      ],
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "loadOverride": {
+      "type": "object",
+      "properties": {
+        "users": { "type": "integer", "minimum": 1 },
+        "arrivalRate": { "type": "string", "pattern": "^[1-9][0-9]*(\\.[0-9]+)?/(s|m)$" },
+        "warmup": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+        "rampUp": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+        "duration": { "type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$" },
+        "rampDown": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+        "maxConcurrent": { "type": "integer", "minimum": 1 },
+        "overloadPolicy": { "const": "drop" }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "workloadExecution": {
+      "type": "object",
+      "properties": {
+        "thinkTime": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+            { "type": "object", "required": ["min", "max"], "properties": {
+              "min": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+              "max": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" }
+            }, "patternProperties": { "^x-": {} }, "additionalProperties": false }
+          ]
+        }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "rootExecution": {
+      "type": "object",
+      "properties": {
+        "execIdFormat": { "type": "string", "minLength": 1 },
+        "thinkTime": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+            { "type": "object", "required": ["min", "max"], "properties": {
+              "min": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
+              "max": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" }
+            }, "patternProperties": { "^x-": {} }, "additionalProperties": false }
+          ]
+        }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "thresholds": {
+      "type": "object",
+      "properties": {
+        "errorRate": { "type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?%$" },
+        "p95": { "type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?ms$" },
+        "p99": { "type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?ms$" },
+        "minThroughput": { "type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?/(s|m)$" },
+        "droppedRate": { "type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?%$" },
+        "achievedArrivalRate": { "type": "string", "pattern": "^(<|<=|>|>=|==)\\s*[0-9]+(\\.[0-9]+)?(%|/(s|m))$" }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "success": { "enum": ["none", "sample", "full"] },
+        "failure": { "enum": ["none", "full"] },
+        "mode": { "enum": ["metrics", "failures", "samples", "all"] },
+        "sampleRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "maxSamples": { "type": "integer", "minimum": 0 },
+        "resources": { "type": "object", "properties": { "output": { "enum": ["inherit", "none"], "default": "inherit" } }, "patternProperties": { "^x-": {} }, "additionalProperties": false }
+      },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": false
+    }
+  },
+  "patternProperties": { "^x-": {} },
+  "additionalProperties": false
+}

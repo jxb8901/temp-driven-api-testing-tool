@@ -200,7 +200,10 @@ export const api = {
   getCurrentUser(signal?: AbortSignal): Promise<{ loginId: string; displayName: string; role: 'ADMIN' | 'USER'; csrfToken?: string }> {
     return request('auth/me', { signal });
   },
-  getAuthCapabilities(signal?: AbortSignal): Promise<{ configurationAdmin: boolean }> {
+  getAuthCapabilities(signal?: AbortSignal): Promise<{
+    configurationAdmin: boolean;
+    capabilities?: { operate?: boolean; accountManage?: boolean; systemSettingsWrite?: boolean; configurationAdmin?: boolean };
+  }> {
     return request('auth/capabilities', { signal });
   },
   logout(): Promise<{ loggedOut: boolean }> {

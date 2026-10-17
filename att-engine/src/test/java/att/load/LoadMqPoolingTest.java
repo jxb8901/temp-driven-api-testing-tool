@@ -147,11 +147,12 @@ class LoadMqPoolingTest {
                 + "id: load.mq.request.v1\nname: Load MQ request\ndescription: scheduler MQ flow\nactions:\n"
                 + "  request:\n    type: tool\n    call: \"#{mq.broker.request(payload=&{./request.xml}, waitMs=1000)}\"\n").getBytes("UTF-8"));
         FrameworkConfig base = config(2, 0, 1000L);
-        Files.write(project.resolve("mq-routing.yaml"),("schemaVersion: att-mqhelper/v1.3\nid: broker\nname: Broker\ndescription: Queue routing\n"
+        Path helper = project.resolve("config/mqhelpers/mq-routing.yaml"); Files.createDirectories(helper.getParent());
+        Files.write(helper,("schemaVersion: att-mqhelper/v1.3\nid: broker\nname: Broker\ndescription: Queue routing\n"
                 +"defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: CH}\n"
                 +"  message: {requestQueues: [REQUEST.A, REQUEST.B], requestQueueSelection: {strategy: roundRobin}, replyQueue: REPLY.Q}\n"
                 +"instances: [{id: primary}]\n").getBytes("UTF-8"));
-        Map<String,MqHelperConfig> routed = new att.config.MqHelperConfigLoader().load(Collections.singletonList("mq-routing.yaml"),project);
+        Map<String,MqHelperConfig> routed = new att.config.MqHelperConfigLoader().load(Collections.singletonList("config/mqhelpers/mq-routing.yaml"),project);
         FrameworkConfig config = new FrameworkConfig(base.outputDirectory(),base.reportDirectory(),base.logDirectory(),base.environment(),
                 base.timeoutMs(),base.templatesRoot(),base.testcasesRoot(),base.tools(),base.dbHelpers(),routed,null,null,
                 null,"","",null,null,1,"ignore","",false,ProcessOutputConfig.defaults());

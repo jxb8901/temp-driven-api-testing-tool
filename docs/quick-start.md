@@ -26,7 +26,7 @@ packages/default/testcase/quick_start.xlsx
 packages/default/testcase/quick_start.yaml
 packages/default/testcase/quick_start.xml
 packages/default/templates/QUICK_START/template.yaml
-packages/default/config/config.yaml
+config/config.yaml
 ```
 
 The workbook contains two Testcases:

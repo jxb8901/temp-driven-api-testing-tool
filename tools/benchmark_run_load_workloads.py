@@ -242,7 +242,7 @@ def install_package(runtime_root, destination, http_port, case_count):
         package_source = runtime_root
     schemas_source = package_source / "schemas"
     if not schemas_source.is_dir():
-        raise RuntimeError("Runtime distribution must contain packages/default/schemas/")
+        raise RuntimeError("Runtime distribution must contain schemas/")
 
     shutil.copy2(launcher, destination / launcher_name)
     if os.name != "nt":

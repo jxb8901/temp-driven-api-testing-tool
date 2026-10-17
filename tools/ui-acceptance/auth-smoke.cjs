@@ -123,7 +123,12 @@ async function main() {
 
     await selectFixture(context, fixture.origin, 'auth-container');
     await page.goto(`${base}#/settings`);
-    await page.getByText('ATT account controls are unavailable because credentials are managed by Tomcat or your SSO provider.').waitFor();
+    try {
+      await page.getByText('ATT account controls are unavailable because credentials are managed by Tomcat or your SSO provider.').waitFor();
+    } catch (error) {
+      console.error(JSON.stringify({ url: page.url(), text: await page.locator('#main-content').innerText() }));
+      throw error;
+    }
     assert.equal(await page.getByRole('button', { name: 'Change password', exact: true }).count(), 0);
     assert.equal(await page.getByRole('button', { name: 'Create User', exact: true }).count(), 0);
 

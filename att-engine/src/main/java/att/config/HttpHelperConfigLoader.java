@@ -32,6 +32,8 @@ public final class HttpHelperConfigLoader {
                 throw new IllegalArgumentException("httphelper path must be a YAML file");
             Path relative = IdentifierValidator.relativePath((String) value, "httphelper path");
             Path logical = root.resolve(relative).normalize();
+            if (!logical.startsWith(root.resolve("config")))
+                throw new IllegalArgumentException("httphelper files must remain inside shared config/");
             if (Files.isSymbolicLink(logical))
                 throw new IllegalArgumentException("Unsafe HTTP helper path: " + value);
             Path file = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
@@ -109,6 +111,8 @@ public final class HttpHelperConfigLoader {
             String configured = secret(tls.get("trustStore"), "tls.trustStore");
             Path relative = IdentifierValidator.relativePath(configured, "tls.trustStore");
             Path logical = root.resolve(relative).normalize();
+            if (!logical.startsWith(root.resolve("config")))
+                throw new IllegalArgumentException("httphelper truststores must remain inside shared config/");
             if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe HTTP TLS trustStore path");
             trust = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
             if (!Files.isRegularFile(trust)) throw new IllegalArgumentException("Missing or unsafe HTTP TLS trustStore");

@@ -24,7 +24,8 @@ class LoadAcceptanceTest {
 
     @Test void everyDocumentedExampleResolvesAndValidatesBeforeScheduling() throws Exception {
         Path root = projectRoot();
-        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        Path home = Paths.get("").toAbsolutePath().normalize();
+        FrameworkConfig config = new FrameworkConfigLoader().load(home.resolve("config/config.yaml"), home, root, "SIT");
         List<String> examples = Arrays.asList("closed-minimal.yaml", "closed-smoke.yaml", "closed.yaml", "arrival-smoke.yaml", "arrival-rate.yaml", "tool.yaml");
         for (String name : examples) {
             Path scenarioFile = Paths.get("").toAbsolutePath().normalize().resolve("examples/load").resolve(name);
@@ -163,7 +164,8 @@ class LoadAcceptanceTest {
         Path stderr = temp.resolve(runId + ".stderr");
         List<String> arguments = new java.util.ArrayList<String>(Arrays.asList(javaExecutable(), "-cp", System.getProperty("java.class.path"),
                 "att.FrameworkRunner", "load", scenario.toString(), "--output-dir", output.toString(),
-                "--run-id", runId, "--format", format));
+                "--run-id", runId, "--format", format, "--config",
+                Paths.get("").toAbsolutePath().normalize().resolve("config/config.yaml").toString()));
         arguments.addAll(Arrays.asList(extra));
         ProcessBuilder command = new ProcessBuilder(arguments);
         command.directory(root.toFile());

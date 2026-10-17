@@ -139,7 +139,7 @@ async function main() {
     await selectFixture(context, fixture.origin, 'schedule-forbidden');
     await page.reload();
     await waitForScheduleList(page);
-    assert.match(await page.locator('#main-content').innerText(), /administrator role/);
+    assert.match(await page.locator('#main-content').innerText(), /operational access/);
     await selectFixture(context, fixture.origin, 'schedule-unauthenticated');
     await page.reload();
     await waitForScheduleList(page);

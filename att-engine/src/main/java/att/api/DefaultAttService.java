@@ -2,6 +2,7 @@ package att.api;
 
 import att.config.FrameworkConfig;
 import att.config.FrameworkConfigLoader;
+import att.config.RuntimeConfigPath;
 import att.core.ExecutionOptions;
 import att.core.FrameworkEngine;
 import att.core.RunSummary;
@@ -29,14 +30,14 @@ public final class DefaultAttService implements AttService {
             boolean rerun, boolean dry, boolean failFast, String scope, String targetType, String targetId,
             Path input, boolean unsafe, Path scenario, String users, String rate, String warmup, String rampUp,
             String duration, String rampDown, String thinkTime, String maxConcurrent, String overload, List<String> overrides) {
-        return ExecutionOptions.forApi(command, request.configPath(), request.environment(), suites, suiteDirectory,
+        return ExecutionOptions.forApi(command, RuntimeConfigPath.resolve(request.configPath(), request.packageRoot()), request.environment(), suites, suiteDirectory,
                 cases, tags, excluded, request.runId(), all, rerun, dry, failFast, request.outputDirectory(), scope,
                 targetType, targetId, input, unsafe, scenario, users, rate, warmup, rampUp, duration, rampDown,
                 thinkTime, maxConcurrent, overload, overrides);
     }
     private static FrameworkConfig config(AttRequest request) throws Exception {
-        Path config = request.configPath().isAbsolute() ? request.configPath() : request.packageRoot().resolve(request.configPath());
-        return new FrameworkConfigLoader().load(config, request.packageRoot(), request.environment());
+        Path config = RuntimeConfigPath.resolve(request.configPath(), request.packageRoot());
+        return new FrameworkConfigLoader().load(config, RuntimeConfigPath.root(config), request.packageRoot(), request.environment());
     }
     private static Map<String,String> paths(String... pairs) { Map<String,String> out=new LinkedHashMap<String,String>(); for(int i=0;i+1<pairs.length;i+=2) if(pairs[i+1]!=null) out.put(pairs[i],pairs[i+1]); return out; }
 
@@ -58,7 +59,8 @@ public final class DefaultAttService implements AttService {
                     Collections.<String,Object>emptyMap()));
         }
         engine.assertRunIdAvailable(opts);
-        phase=profile.begin(); PackageValidator.ValidationSummary validation=new PackageValidator(request.packageRoot(),cfg).validate(opts);
+        phase=profile.begin(); PackageValidator.ValidationSummary validation=new PackageValidator(request.packageRoot(),cfg,
+                RuntimeConfigPath.resolve(request.configPath(), request.packageRoot())).validate(opts);
         profile.end("validationMs",phase);
         if(!validation.valid()) return new RunResult(opts.runId(),"INVALID",2,elapsed(started),validation.diagnostics,Collections.<String,String>emptyMap(),validationMap(validation));
         if(request.observer()!=null) {
@@ -108,7 +110,8 @@ public final class DefaultAttService implements AttService {
         long configPhase=profile==null?0L:profile.begin();
         FrameworkConfig cfg=config(request);
         if(profile!=null)profile.end("configLoadMs",configPhase);
-        DebugEngine.Result result=new DebugEngine(request.packageRoot(),cfg).run(opts,profile);
+        DebugEngine.Result result=new DebugEngine(request.packageRoot(), RuntimeConfigPath.resolve(request.configPath(), request.packageRoot()), cfg,
+                new att.exec.IbmMqClientFactory(), true, Collections.<String>emptyList(), Collections.<String>emptyList()).run(opts,profile);
         if(profile!=null) {
             if(startupMetrics!=null&&startupMetrics.hasFirstConsoleEvent())
                 profile.durationNanos("processToFirstConsoleEventMs",
@@ -123,7 +126,8 @@ public final class DefaultAttService implements AttService {
     @Override public ValidateResult validate(ValidateRequest request) throws Exception {
         long started=System.nanoTime();
         ExecutionOptions opts=options(request,"validate",request.suites(),request.suiteDirectory(),request.caseIds(),request.tags(),request.excludeTags(),request.all(),false,true,false,request.scope(),null,null,null,false,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList());
-        PackageValidator.ValidationSummary result=new PackageValidator(request.packageRoot(),config(request)).validate(opts);
+        PackageValidator.ValidationSummary result=new PackageValidator(request.packageRoot(),config(request),
+                RuntimeConfigPath.resolve(request.configPath(), request.packageRoot())).validate(opts);
         return new ValidateResult(null,result.valid()?"PASS":"INVALID",result.valid()?0:2,elapsed(started),result.diagnostics,Collections.<String,String>emptyMap(),validationMap(result));
     }
     @Override public SnapshotResult snapshot(SnapshotRequest request) throws Exception {
@@ -144,7 +148,8 @@ public final class DefaultAttService implements AttService {
         if(scenario!=null) { /* CLI supplied the already parsed typed scenario. */ }
         else if(request.scenario()!=null) scenario=loader.load(request.scenario(),LoadOverrides.from(opts));
         else {
-            Map<String,Object> promoted=new DebugEngine(request.packageRoot(),cfg).loadBootstrapInputForLoad(opts);
+            Map<String,Object> promoted=new DebugEngine(request.packageRoot(), RuntimeConfigPath.resolve(request.configPath(), request.packageRoot()), cfg,
+                    new att.exec.IbmMqClientFactory(), true, Collections.<String>emptyList(), Collections.<String>emptyList()).loadBootstrapInputForLoad(opts);
             scenario=loader.fromDebugInput((Path)promoted.get("source"),request.debugTargetType(),request.debugTargetId(),
                     map(promoted.get("inputs")),map(promoted.get("vars")),map(promoted.get("arguments")),loader.loadDefaultPolicy(),opts);
         }

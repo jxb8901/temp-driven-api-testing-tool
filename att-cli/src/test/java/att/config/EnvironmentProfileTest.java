@@ -39,8 +39,8 @@ class EnvironmentProfileTest {
 
     @Test
     void checkedInProfilesBindStableLogicalDbAndMqIdsToDifferentPhysicalDescriptors() throws Exception {
-        Path root = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
-        Map<?, ?> rootConfig = (Map<?, ?>) YamlSupport.load(root.resolve("config/config.yaml"));
+        Path projectRoot = Paths.get("").toAbsolutePath().normalize();
+        Map<?, ?> rootConfig = (Map<?, ?>) YamlSupport.load(projectRoot.resolve("config/config.yaml"));
         Map<?, ?> profiles = (Map<?, ?>) rootConfig.get("environments");
         Map<?, ?> sit = (Map<?, ?>) profiles.get("SIT");
         Map<?, ?> uat = (Map<?, ?>) profiles.get("UAT");
@@ -50,10 +50,10 @@ class EnvironmentProfileTest {
         assertEquals(Arrays.asList("config/dbhelpers/uat/orders.yaml"), uat.get("dbhelpers"));
         assertEquals(Arrays.asList("config/mqhelpers/uat/payment.yaml"), uat.get("mqhelpers"));
 
-        Map<?, ?> sitDb = (Map<?, ?>) YamlSupport.load(root.resolve("config/dbhelpers/sit/orders.yaml"));
-        Map<?, ?> uatDb = (Map<?, ?>) YamlSupport.load(root.resolve("config/dbhelpers/uat/orders.yaml"));
-        Map<?, ?> sitMq = (Map<?, ?>) YamlSupport.load(root.resolve("config/mqhelpers/sit/payment.yaml"));
-        Map<?, ?> uatMq = (Map<?, ?>) YamlSupport.load(root.resolve("config/mqhelpers/uat/payment.yaml"));
+        Map<?, ?> sitDb = (Map<?, ?>) YamlSupport.load(projectRoot.resolve("config/dbhelpers/sit/orders.yaml"));
+        Map<?, ?> uatDb = (Map<?, ?>) YamlSupport.load(projectRoot.resolve("config/dbhelpers/uat/orders.yaml"));
+        Map<?, ?> sitMq = (Map<?, ?>) YamlSupport.load(projectRoot.resolve("config/mqhelpers/sit/payment.yaml"));
+        Map<?, ?> uatMq = (Map<?, ?>) YamlSupport.load(projectRoot.resolve("config/mqhelpers/uat/payment.yaml"));
         assertEquals("orders", sitDb.get("id"));
         assertEquals("orders", uatDb.get("id"));
         assertEquals("payment", sitMq.get("id"));
@@ -64,8 +64,9 @@ class EnvironmentProfileTest {
 
     @Test
     void checkedInProfilesUseTheSameEffectiveContractInValidateDebugAndLoad() throws Exception {
-        Path root = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
-        String config = root.resolve("config/config.yaml").toString();
+        Path projectRoot = Paths.get("").toAbsolutePath().normalize();
+        Path root = projectRoot.resolve("packages/default");
+        String config = projectRoot.resolve("config/config.yaml").toString();
         for (String environment : Arrays.asList("SIT", "UAT")) {
             CliResult validation = runCli(root, "validate", "--config", config, "--env", environment,
                     "--package", "--format", "json", "--quiet");
@@ -79,7 +80,7 @@ class EnvironmentProfileTest {
         assertEquals(0, debug.exitCode, debug.stderr);
 
         Path loadOutput = temp.resolve("load-output");
-        CliResult load = runCli(root, "load", Paths.get("").toAbsolutePath().normalize().resolve("examples/load/closed-smoke.yaml").toString(),
+        CliResult load = runCli(root, "load", projectRoot.resolve("examples/load/closed-smoke.yaml").toString(),
                 "--config", config, "--env", "UAT", "--output-dir", loadOutput.toString(),
                 "--run-id", "profile-load", "--duration", "25ms", "--format", "json", "--quiet");
         assertEquals(0, load.exitCode, load.stderr);
@@ -91,23 +92,23 @@ class EnvironmentProfileTest {
         Path config = write("config.yaml", "schemaVersion: att-config/v2.12\n"
                 + "environment: SIT\n"
                 + "templates: {root: templates}\n"
-                + "dbhelpers: [db/common.yaml]\n"
-                + "mqhelpers: [mq/common.yaml]\n"
+                + "dbhelpers: [config/db/common.yaml]\n"
+                + "mqhelpers: [config/mq/common.yaml]\n"
                 + "environments:\n"
                 + "  SIT:\n"
-                + "    dbhelpers: [db/sit.yaml]\n"
+                + "    dbhelpers: [config/db/sit.yaml]\n"
                 + "  UAT:\n"
-                + "    dbhelpers: [db/uat.yaml]\n"
-                + "    mqhelpers: [mq/uat.yaml]\n");
-        write("db/sit.yaml", db("orders", "jdbc:sit"));
-        write("db/uat.yaml", db("orders", "jdbc:uat"));
-        write("db/common.yaml", db("audit", "jdbc:common"));
-        write("mq/common.yaml", mq("payment", "sit-mq"));
-        write("mq/uat.yaml", mq("payment", "uat-mq"));
+                + "    dbhelpers: [config/db/uat.yaml]\n"
+                + "    mqhelpers: [config/mq/uat.yaml]\n");
+        write("config/db/sit.yaml", db("orders", "jdbc:sit"));
+        write("config/db/uat.yaml", db("orders", "jdbc:uat"));
+        write("config/db/common.yaml", db("audit", "jdbc:common"));
+        write("config/mq/common.yaml", mq("payment", "sit-mq"));
+        write("config/mq/uat.yaml", mq("payment", "uat-mq"));
 
         FrameworkConfig defaultConfig = new FrameworkConfigLoader().load(config, temp);
         FrameworkConfig uat = new FrameworkConfigLoader().load(config, temp, "uat");
-        JsonSchemaVerifier.verify(Paths.get("packages/default/schemas/att-config-v2.12.schema.json"), YamlSupport.load(config));
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(temp, "att-config-v2.12.schema.json"), YamlSupport.load(config));
 
         assertEquals("SIT", defaultConfig.environment());
         assertEquals("jdbc:sit", defaultConfig.dbHelper("orders").url());

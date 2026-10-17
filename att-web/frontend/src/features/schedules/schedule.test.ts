@@ -44,7 +44,7 @@ describe('Scheduled execution draft helpers', () => {
     expect(draft.enabled).toBe(false);
     expect(scheduleInputFromDraft(draft)).toMatchObject({
       name: 'Nightly', packageId: 'payments', scenario: 'load/nightly.yaml', timezone: 'UTC',
-      cron: '0 2 * * *', tags: ['nightly', 'smoke'], enabled: false,
+      config: 'config/config.yaml', cron: '0 2 * * *', tags: ['nightly', 'smoke'], enabled: false,
     });
     expect(() => scheduleInputFromDraft({ ...draft, load: '{"users": 10}' })).toThrow(/string values/);
     expect(() => scheduleInputFromDraft({ ...draft, timezone: 'invalid-zone' })).toThrow(/IANA timezone/);

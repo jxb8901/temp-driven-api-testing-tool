@@ -6,6 +6,7 @@ import static att.metrics.InspectionMetrics.Stage.*;
 import att.resource.PackageResourceInspector;
 import att.resource.PackageConfigurationInspector;
 import att.resource.PackageConfigurationFileInspector;
+import att.config.RuntimeConfigPath;
 import att.server.api.internal.DiagnosticSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -204,7 +205,7 @@ public final class WorkerMain {
                 int maxResponseBytes = r.maxResponseBytes == null ? 262144 : r.maxResponseBytes;
                 Map<String,Object> inspected;
                 if ("files".equals(r.inspectionAction)) {
-                    PackageConfigurationFileInspector files = new PackageConfigurationFileInspector(root,
+                    PackageConfigurationFileInspector files = new PackageConfigurationFileInspector(RuntimeConfigPath.root(config),
                             new java.util.HashSet<>(r.safeTextSources == null ? Collections.emptyList() : r.safeTextSources),
                             r.maxSourceBytes == null ? 65536 : r.maxSourceBytes, maxResponseBytes,
                             !Boolean.FALSE.equals(r.sourceBrowsingEnabled),r.sourceBrowsingPolicy,r.sourceDenyGlobs);
@@ -212,7 +213,7 @@ public final class WorkerMain {
                             r.inspectionOffset == null ? 0 : r.inspectionOffset,
                             r.inspectionLimit == null ? 50 : r.inspectionLimit);
                 } else if ("source".equals(r.inspectionAction)) {
-                    inspected = resourceInspector(root, config, r).inspectPackageFileSource(r.inspectionPath, r.inspectionOrigin,r.inspectionReferenceId);
+                    inspected = resourceInspector(RuntimeConfigPath.root(config), config, r).inspectPackageFileSource(r.inspectionPath, r.inspectionOrigin,r.inspectionReferenceId);
                 } else {
                     PackageConfigurationInspector inspector = new PackageConfigurationInspector(root, config,
                             maxResponseBytes, Boolean.TRUE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns,

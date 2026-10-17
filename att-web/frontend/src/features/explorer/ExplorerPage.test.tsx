@@ -228,14 +228,14 @@ describe('Explorer page integration', () => {
     const onResourceRouteChange = vi.fn();
     await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="SIT"
       registerUnsavedChanges={() => () => {}} onResourceRouteChange={onResourceRouteChange}
-      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+      onJobAccepted={() => {}} />);
     await settle();
 
     expect(container.querySelector('.att-explorer-workspace')?.classList.contains('is-list-first')).toBe(true);
     expect(container.querySelector('[aria-label="Resource details"]')?.hasAttribute('hidden')).toBe(true);
     expect(container.querySelector('[aria-label="Contextual actions"]')?.hasAttribute('hidden')).toBe(true);
     expect([...container.querySelectorAll('label')].some(label => label.textContent?.includes('Run, Debug, and Load environment'))).toBe(false);
-    expect(container.textContent).toContain('Package resources and counts are independent of runtime environment.');
+    expect(container.textContent).toContain('Choose an execution environment from the RUN or Quick LOAD editor.');
     expect(container.querySelector('.att-explorer-table')?.closest('.att-explorer-navigation')).not.toBeNull();
   });
 
@@ -289,7 +289,7 @@ describe('Explorer page integration', () => {
     const onResourceRouteChange = vi.fn();
     await render(<ExplorerPage api={api} packageId="payments" resourceRoute={{ type: 'flow', resourceId: 'payment-flow', tab: 'relations' }} environment="SIT"
       registerUnsavedChanges={() => () => {}} onResourceRouteChange={onResourceRouteChange}
-      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+      onJobAccepted={() => {}} />);
     await settle();
 
     expect(container.querySelector('[data-tab="relations"]')?.getAttribute('aria-selected')).toBe('true');
@@ -301,7 +301,7 @@ describe('Explorer page integration', () => {
     }), definition: {} })) });
     await render(<ExplorerPage api={helperApi} packageId="payments" resourceRoute={{ type: 'flow', resourceId: 'helper-caller', tab: 'relations' }} environment="SIT"
       registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}}
-      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+      onJobAccepted={() => {}} />);
     await settle();
     expect(container.textContent).toContain('This call resolves through the package Helper configuration.');
     expect(container.textContent).toContain('It is not a separate Tool resource');
@@ -395,7 +395,7 @@ describe('Explorer page integration', () => {
     await render(<ExplorerPage api={api} packageId="payments"
       resourceRoute={{ type: 'template' as const, resourceId: 'checkout' }} environment=""
       registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}}
-      onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+      onJobAccepted={() => {}} />);
     await settle();
 
     click(button('Run this target'));
@@ -422,7 +422,7 @@ describe('Explorer page integration', () => {
   it('shows anonymous unauthorized resource errors in the page without exposing the response body', async () => {
     const api = apiWith({ listResources: vi.fn(async () => { throw Object.assign(new Error('authorization header rejected'), { status: 401 }); }) });
     await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment=""
-      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onEnvironmentChange={() => {}} onJobAccepted={() => {}} />);
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
     await settle();
     expect(container.textContent).toContain('Your session has expired.');
     expect(container.textContent).not.toContain('authorization header rejected');

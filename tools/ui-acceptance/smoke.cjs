@@ -6,23 +6,41 @@ async function main() {
   let browser;
   try {
     browser = await launchBrowser();
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, bypassCSP: true });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, bypassCSP: true, locale: 'en-US' });
+    await context.addInitScript(() => localStorage.setItem('att-ui-language', 'en'));
     const page = await context.newPage();
     const pageErrors = [];
+    const apiResponses = [];
     page.on('pageerror', error => pageErrors.push(error.message));
+    page.on('response', response => {
+      const url = new URL(response.url());
+      if (url.pathname.includes('/api/v1/')) apiResponses.push(`${response.status()} ${url.pathname}`);
+    });
     const base = `${fixture.origin}/att/ui/`;
 
     await selectFixture(context, fixture.origin, 'loaded');
     const indexResponse = await page.goto(base);
     assert.equal(indexResponse.status(), 200, 'the UI must serve below the non-root /att context');
-    await page.locator('#packages-state').getByText(/configured package/i).waitFor();
+    await page.waitForFunction(() => {
+      const card = [...document.querySelectorAll('.summary-card')]
+        .find(item => item.textContent?.includes('Configured packages'));
+      return card?.querySelector('.summary-value')?.textContent?.trim() === '2';
+    });
+    const dashboardPackageCount = await page.locator('.summary-card')
+      .filter({ hasText: 'Configured packages' }).locator('.summary-value').textContent();
+    assert.equal(dashboardPackageCount.trim(), '2',
+      `the dashboard package total should load; API=${apiResponses.join(', ')}; page errors=${pageErrors.join(' | ')}`);
     await page.locator('#jobs-state').getByText(/recent job row/i).waitFor();
-    await page.getByText('payments', { exact: true }).first().waitFor();
     await page.getByText('JOB-4821', { exact: true }).waitFor();
     assert.equal(new URL(page.url()).pathname, '/att/ui/', 'the UI should retain its non-root path');
+    await page.goto(`${base}#/packages`);
+    await page.locator('.package-list li').first().waitFor();
+    assert.equal(await page.locator('.package-list li').count(), 2, 'the Explorer package list should load');
+    assert.equal(await page.locator('.package-list li').filter({ hasText: 'payments' }).count(), 1,
+      'the Explorer list should include the payments Package');
 
     for (const [route, title, activeNav] of [
-      ['#/packages', 'Packages', 'packages'],
+      ['#/packages', 'Explorer', 'explorer'],
       ['#/jobs', 'Jobs', 'jobs'],
       ['#/advanced-load', 'Load testing', 'load-testing'],
       ['#/settings', 'Settings', 'settings'],
@@ -38,7 +56,8 @@ async function main() {
     }
 
     await page.goto(base);
-    await page.getByRole('button', { name: 'Open package' }).first().click();
+    await page.getByRole('link', { name: 'Browse packages' }).click();
+    await page.getByRole('heading', { name: 'Explorer', exact: true }).waitFor();
     await page.locator('[data-nav="load-testing"]').click();
     await page.getByRole('heading', { name: 'LOAD Catalog', exact: true }).waitFor();
     await page.getByRole('heading', { name: 'Available Load YAML resources', exact: true }).waitFor();
@@ -73,37 +92,63 @@ async function main() {
     ]) {
       await selectFixture(context, fixture.origin, scenario);
       await page.setExtraHTTPHeaders(headers);
+      await page.reload();
       await page.goto(`${base}#/packages`);
-      await page.locator('#packages-state').getByText(/2 configured packages/).waitFor();
+      await page.locator('.package-list li').first().waitFor();
+      assert.equal(await page.locator('.package-list li').count(), 2, 'both configured packages should load');
       await page.goto(`${base}#/jobs`);
       await page.getByRole('heading', { name: 'Jobs', exact: true }).waitFor();
       await page.locator('.att-jobs-table tbody tr').first().waitFor();
     }
 
-    await selectFixture(context, fixture.origin, 'authenticated');
-    await page.setExtraHTTPHeaders({});
-    await page.goto(base);
-    await page.getByText(/Could not load packages/i).waitFor();
-    await page.getByText(/Could not load recent jobs/i).waitFor();
-    assert.equal(await page.locator('#retry-packages').isVisible(), true, 'authentication errors remain retryable');
+    // A fresh browser context avoids Chromium's cached HTTP Basic credentials from
+    // the preceding authenticated/anonymous package checks.
+    const authFailureContext = await browser.newContext({ viewport: { width: 1440, height: 1000 }, bypassCSP: true, locale: 'en-US' });
+    const authFailurePage = await authFailureContext.newPage();
+    const authFailureResponses = [];
+    authFailurePage.on('response', response => {
+      const url = new URL(response.url());
+      if (url.pathname.includes('/api/v1/')) authFailureResponses.push(`${response.status()} ${url.pathname}`);
+    });
+    await selectFixture(authFailureContext, fixture.origin, 'authenticated');
+    await authFailurePage.setExtraHTTPHeaders({ Authorization: 'Basic Zm9vOmJhcg==' });
+    await authFailurePage.goto(base);
+    await authFailurePage.getByText(/Could not load recent jobs/i).waitFor();
+    await authFailurePage.goto(`${base}#/packages`);
+    try { await authFailurePage.getByText(/Could not load packages/i).waitFor({ timeout: 10000 }); }
+    catch (error) {
+      console.error(JSON.stringify({ url: authFailurePage.url(), apiResponses: authFailureResponses, body: await authFailurePage.locator('body').innerText() }));
+      throw error;
+    }
+    assert.equal(await authFailurePage.locator('#retry-packages').isVisible(), true, 'authentication errors remain retryable');
+    await authFailureContext.close();
 
     await selectFixture(context, fixture.origin, 'empty');
+    await page.reload();
     await page.goto(base);
+    await page.locator('.summary-card').filter({ hasText: 'Configured packages' }).getByText('0', { exact: true }).waitFor();
+    await page.goto(`${base}#/packages`);
     await page.locator('#packages-state').getByText(/No packages are configured yet/i).waitFor();
-    await page.locator('#jobs-state').getByText(/No jobs yet/i).waitFor();
+    await page.goto(base);
+    await page.locator('.summary-card').filter({ hasText: 'Latest job' }).getByText('No jobs yet', { exact: true }).waitFor();
 
     await selectFixture(context, fixture.origin, 'error');
+    await page.reload();
     await page.goto(base);
-    await page.getByText(/Could not load packages/i).waitFor();
     await page.getByText(/Could not load recent jobs/i).waitFor();
+    await page.goto(`${base}#/packages`);
+    await page.getByText(/Could not load packages/i).waitFor();
     assert.equal(await page.locator('#retry-packages').isVisible(), true);
 
     await selectFixture(context, fixture.origin, 'loading');
-    await page.goto(base);
+    await page.reload();
+    await page.goto(`${base}#/packages`);
     await page.waitForFunction(() => document.querySelector('#packages-state')?.getAttribute('aria-busy') === 'true');
+    await page.goto(base);
     await page.waitForFunction(() => document.querySelector('#jobs-state')?.getAttribute('aria-busy') === 'true');
 
     await selectFixture(context, fixture.origin, 'loaded');
+    await page.reload();
     await page.goto(base);
     await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => document.activeElement.classList.contains('skip-link')), true, 'the first Tab should focus the skip link');

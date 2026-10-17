@@ -36,6 +36,8 @@ public final class MqHelperConfigLoader {
             }
             Path relative = IdentifierValidator.relativePath(text, "mqhelper path");
             Path logical = resources.packageRoot().resolve(relative).normalize();
+            if (!logical.startsWith(resources.packageRoot().resolve("config")))
+                throw new IllegalArgumentException("mqhelper files must remain inside shared config/");
             if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe MQ helper file: " + text);
             Path file = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
             if (!Files.isRegularFile(file)) {

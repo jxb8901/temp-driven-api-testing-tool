@@ -121,7 +121,7 @@ final class ServerRuntime implements AutoCloseable {
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
         if(config.scheduling.enabled) {
             store.recoverScheduleExecutions();
-            if(!config.authenticationRequired&&config.scheduling.allowAnonymousManagement)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Scheduled Load management is enabled without authentication; anonymous clients share full schedule control");
+            if(!config.authenticationRequired&&config.authorization.allowAnonymousOperations)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("ATT operations are enabled without authentication; anonymous clients share operational access");
             loadScheduleScheduler=new LoadScheduleScheduler(config.scheduling,store,this::submitScheduledJob,clock);
             loadScheduleScheduler.start();
         } else loadScheduleScheduler=null;
@@ -169,17 +169,17 @@ final class ServerRuntime implements AutoCloseable {
             @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(scenarioNode,Map.class);
             if(scheduleIssued)validateScheduledLoadLimits(config.inlineLoad,scenario);else enforceInlineLoadLimits(scenario);
         }
-        String packageId=required(input,"packageId");Path root=config.packages.get(packageId);
+        String packageId=required(input,"packageId");Path root=packageRoot(packageId);
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
         validatePackageRoot(root);
         WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
         request.protocolVersion="att-worker/v1";request.command=command;request.packageRoot=root.toString();
-        request.outputDirectory=null;request.config=safeRelative(request.config,"config");request.environment=safeText(request.environment,128,"environment");
+        request.outputDirectory=null;request.config=config.runtimeConfigPath.toString();request.environment=safeText(request.environment,128,"environment");
         request.runId=safeText(request.runId,128,"runId");request.debugId=safeText(request.debugId,128,"debugId");request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");
         request.scenario=safeRelative(request.scenario,"scenario");request.debugInput=safeRelative(request.debugInput,"debugInput");
         request.unsafeFailureDetails=false;
         request.suites=safePaths(request.suites,"suites");
-        validatePackagePath(root,request.config,"config");validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
+        validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
         validatePackagePath(root,request.scenario,"scenario");validatePackagePath(root,request.debugInput,"debugInput");
         if(request.suites!=null)for(String suite:request.suites)validatePackagePath(root,suite,"suites");
         if("debug".equals(command)||("run".equals(command)&&request.target!=null))validateTarget(request.target);
@@ -223,7 +223,7 @@ final class ServerRuntime implements AutoCloseable {
                 // one that follows launch always sees and terminates that exact process.
                 if(job.terminal())return;
                 transition(job,"PREPARING");
-                validatePackageRoot(config.packages.get(job.packageId));
+                validatePackageRoot(packageRoot(job.packageId));
                 job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
                 List<String> classpathEntries=workerClasspath();
                 String cp=String.join(java.io.File.pathSeparator,classpathEntries);
@@ -232,7 +232,7 @@ final class ServerRuntime implements AutoCloseable {
                 if(config.workerHeapMaxMb>0)command.add("-Xmx"+config.workerHeapMaxMb+"m");
                 command.add("-cp");command.add(cp);command.add("att.worker.WorkerMain");
                 ProcessBuilder builder=new ProcessBuilder(command);
-                builder.directory(config.packages.get(job.packageId).toFile());
+                builder.directory(packageRoot(job.packageId).toFile());
                 job.workerSpawnStartedNanos=System.nanoTime();process=processLauncher.start(builder);job.workerSpawnedNanos=System.nanoTime();job.process=process;job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");
             }
             Thread stderr=new Thread(()->{try(var in=process.getErrorStream()){byte[] buf=new byte[8192];while(in.read(buf)>=0){/* drain; protocol and safe diagnostics use stdout */}}catch(Exception ignored){}});stderr.setDaemon(true);stderr.start();
@@ -277,17 +277,18 @@ final class ServerRuntime implements AutoCloseable {
     }
     void requireJobOwner(String id,String principal) throws Exception {
         if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
-        if("local".equals(config.authMode)&&!store.ownsJob(id,principal))throw new NotFoundException();
+        if(store.get(id)==null)throw new NotFoundException();
+        if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
     }
     List<Map<String,Object>> jobsFor(String principal,String search) throws Exception {
-        if("local".equals(config.authMode)){List<Map<String,Object>> owned=store.listOwned(100,principal);if(search==null||search.isBlank())return owned;String q=search.toLowerCase(java.util.Locale.ROOT);return owned.stream().filter(row->String.valueOf(row.get("principal")).toLowerCase(java.util.Locale.ROOT).contains(q)).toList();}
         return store.list(100,search);
     }
     List<Map<String,Object>> loadJobsFor(String principal,int offset,int limit) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(offset<0||offset>1000000||limit<1||limit>100)throw new IllegalArgumentException("Load job pagination is invalid");
         int fetch=limit==Integer.MAX_VALUE?limit:limit+1;
-        return "local".equals(config.authMode)?store.listOwnedLoad(fetch,offset,principal):store.listLoad(fetch,offset);
+        if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
+        return store.listLoad(fetch,offset);
     }
     Job job(String id){if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Job j=jobs.get(id);if(j==null)throw new NotFoundException();return j;}
     Map<String,Object> jobRecord(String id) throws Exception {
@@ -330,8 +331,30 @@ final class ServerRuntime implements AutoCloseable {
         out.put("diagnostic",diagnosticJson==null?null:publicJson(id,diagnosticJson));
         return out;
     }
-    List<Map<String,Object>> packages(){List<Map<String,Object>> out=new ArrayList<>();config.packages.forEach((id,path)->out.add(Map.of("packageId",id,"name",path.getFileName().toString())));return out;}
-    Map<String,Object> packageView(String id){Path root=config.packages.get(id);if(root==null)throw new NotFoundException();return Map.of("packageId",id,"name",root.getFileName().toString());}
+    List<Map<String,Object>> packages(String principal) throws Exception {
+        List<Map<String,Object>> out=new ArrayList<>();
+        for(Map.Entry<String,Path> entry:packageRoots().entrySet())out.add(packageMetadata(entry.getKey(),entry.getValue(),principal));
+        return out;
+    }
+    Map<String,Object> packageView(String id,String principal) throws Exception {
+        Path root=packageRoot(id);if(root==null)throw new NotFoundException();return packageMetadata(id,root,principal);
+    }
+    private Map<String,Object> packageMetadata(String id,Path root,String principal) throws Exception {
+        Map<String,Object> item=new LinkedHashMap<>();item.put("packageId",id);item.put("name",root.getFileName().toString());
+        item.put("canExecute",isOperationalPrincipal(principal));
+        return item;
+    }
+    private boolean isOperationalPrincipal(String principal) throws Exception {
+        if(principal==null||principal.isBlank()||RequestIdentity.ANONYMOUS.equals(principal))return config.authorization.allowAnonymousOperations&&!config.authenticationRequired;
+        if("local".equals(config.authMode))return store.isActiveUser(principal);
+        return true; // The servlet layer has already verified the configured trusted USER role.
+    }
+    private Path packageRoot(String id) {
+        return config.packages.get(id);
+    }
+    private Map<String,Path> packageRoots() {
+        return config.packages;
+    }
     Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String principal) throws Exception {
         return inspectResource(packageId,action,type,resourceId,query,requestedLimit,cursor,"name","asc",null,principal);
     }
@@ -342,7 +365,7 @@ final class ServerRuntime implements AutoCloseable {
                                        String sort,String direction,String sourceOriginPath,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(!List.of("list","detail","source","source-file").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
         if(type!=null&&!List.of("case","template","flow","tool").contains(type))throw new IllegalArgumentException("Unsupported resource type");
         String normalizedSort=sort==null||sort.isBlank()?"name":sort;
@@ -375,7 +398,7 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> inspectLoadCatalog(String packageId,String query,int requestedLimit,String cursor,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String normalizedQuery=query==null?"":query.trim();
         if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
         int limit=requestedLimit==0?50:requestedLimit;if(limit<1||limit>100)throw new IllegalArgumentException("limit must be between 1 and 100");
@@ -404,7 +427,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-source";request.inspectionPath=resourceId;
         return executeInspection(root,request);
     }
@@ -412,7 +435,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionAction="load-scenario";request.inspectionPath=resourceId;
         Map<String,Object> result=executeInspection(root,request);
@@ -430,7 +453,7 @@ final class ServerRuntime implements AutoCloseable {
         requireInlineLoadEnabled();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!"virtualUsers".equals(model)&&!"arrivalRate".equals(model))throw new IllegalArgumentException("model is invalid");
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(resourceId==null||resourceId.isBlank()||resourceId.length()>512)throw new IllegalArgumentException("resourceId is invalid");
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,environment);
@@ -442,7 +465,7 @@ final class ServerRuntime implements AutoCloseable {
         requireInlineLoadEnabled();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!"virtualUsers".equals(model)&&!"arrivalRate".equals(model))throw new IllegalArgumentException("model is invalid");
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,environment);
         request.inspectionAction="quick-load-policy";request.loadModel=model;request.inspectionPath=templateId;
@@ -452,7 +475,7 @@ final class ServerRuntime implements AutoCloseable {
                                                         String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(resourceId==null||resourceId.isBlank()||resourceId.length()>512)throw new IllegalArgumentException("resourceId is invalid");
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,environment);
@@ -473,7 +496,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!config.inspection.enabled)throw new NotFoundException();
         requireObject(input,"A JSON object is required");
         requireOnlyFields(input,"packageId","environment","target","input");
-        String packageId=required(input,"packageId");Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         JsonNode targetNode=input.get("target");requireObject(targetNode,"target must be a JSON object");requireOnlyFields(targetNode,"type","id");
         String type=required(targetNode,"type"),logicalId=required(targetNode,"id");
@@ -510,7 +533,7 @@ final class ServerRuntime implements AutoCloseable {
         requireInlineLoadEnabled();
         requireObject(input,"A JSON object is required");
         requireOnlyFields(input,"packageId","environment","target","model","input","load","execution","testdata");
-        String packageId=required(input,"packageId");Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         JsonNode targetNode=input.get("target");requireObject(targetNode,"target must be a JSON object");requireOnlyFields(targetNode,"type","id");
         String type=required(targetNode,"type"),logicalId=required(targetNode,"id");
@@ -555,7 +578,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
         requireObject(input,"A JSON object is required");requireOnlyFields(input,"packageId","environment","scenario");
-        String packageId=required(input,"packageId");Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         JsonNode scenarioNode=input.get("scenario");requireObject(scenarioNode,"scenario must be a JSON object");
         @SuppressWarnings("unchecked") Map<String,Object> scenarioInput=(Map<String,Object>)JSON.convertValue(scenarioNode,Map.class);
@@ -610,8 +633,12 @@ final class ServerRuntime implements AutoCloseable {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         String packageId=run.workerInput.path("packageId").asText();
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         ObjectNode input=run.workerInput.deepCopy();
+        // The request omits config when using the Server's shared runtime configuration.
+        // Persist its absolute canonical path so draft revision checks and scheduled RUNs
+        // keep resolving the same file outside the package root.
+        input.put("config",config.runtimeConfigPath.toString());
         if(input.path("rerunFailed").asBoolean(false))resolveFailedCases(input,principal,packageId);
         Map<String,Object> preview;DebugDraft resourceDebugDraft=null;String revision;
         if(run.resourceTarget) {
@@ -626,7 +653,7 @@ final class ServerRuntime implements AutoCloseable {
             WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
             request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();
             request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.inspectionAction="run-input";
-            request.config=safeRelative(request.config,"config");validatePackagePath(root,request.config,"config");
+            request.config=config.runtimeConfigPath.toString();
             request.suites=safePaths(request.suites,"suites");if(request.suites!=null)for(String suite:request.suites)validatePackagePath(root,suite,"suites");
             request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
             if(request.environment!=null)request.environment=inspectionEnvironment(request.environment,"environment");
@@ -694,10 +721,10 @@ final class ServerRuntime implements AutoCloseable {
         RunDraft draft=runDraft(required(body,"draftId"),principal,required(body,"packageId"));
         synchronized(draft) {
             if(runDrafts.get(draft.id)!=draft)throw new NotFoundException();
-            WorkerRequest revisionRequest=inspectionRequest(draft.packageId,config.packages.get(draft.packageId),draft.workerInput.path("environment").isTextual()?draft.workerInput.path("environment").asText():null);
+            WorkerRequest revisionRequest=inspectionRequest(draft.packageId,packageRoot(draft.packageId),draft.workerInput.path("environment").isTextual()?draft.workerInput.path("environment").asText():null);
             if(draft.workerInput.path("config").isTextual())revisionRequest.config=draft.workerInput.path("config").asText();
             revisionRequest.inspectionAction="revision";revisionRequest.expectedRevisionDigest=draft.revision;
-            try { executeInspection(config.packages.get(draft.packageId),revisionRequest); }
+            try { executeInspection(packageRoot(draft.packageId),revisionRequest); }
             catch(StaleCursorException stale) {runDrafts.remove(draft.id,draft);throw new StaleDraftException();}
             Map<String,Object> accepted=submit("run",draft.workerInput,persistedPrincipal,true);
             runDrafts.remove(draft.id,draft);
@@ -828,7 +855,7 @@ final class ServerRuntime implements AutoCloseable {
         catch(StaleCursorException|NotFoundException changed){throw new StaleDraftException();}
     }
     private void verifyPackageRevision(String packageId,String environment,String revision) throws Exception {
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction="revision";request.expectedRevisionDigest=revision;
         executeInspection(root,request);
     }
@@ -840,7 +867,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     private WorkerRequest inspectionRequest(String packageId,Path root,String environment) {
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";
-        request.packageRoot=root.toString();request.config="config/config.yaml";request.environment=environment;
+        request.packageRoot=root.toString();request.config=config.runtimeConfigPath.toString();request.environment=environment;
         request.maxResponseBytes=config.inspection.maxResponseBytes;request.maxSourceBytes=config.inspection.maxSourceBytes;
         request.safeTextSources=config.inspection.safeTextSources(packageId);
         request.externalTextSources=config.inspection.externalTextSources(packageId);
@@ -1021,7 +1048,7 @@ final class ServerRuntime implements AutoCloseable {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(offset<0||limit<1||limit>TESTDATA_RECORD_MAX_PAGE_SIZE)
             throw new IllegalArgumentException("Testdata pagination is invalid");
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionType="configuration";
         request.inspectionAction="testdata-records";request.inspectionResourceId=descriptorId;request.inspectionSection=descriptorId;
@@ -1057,7 +1084,7 @@ final class ServerRuntime implements AutoCloseable {
                                             boolean includeAllFields,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        Path root=config.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(!List.of("declared","effective","compare","testdata-records","files","source").contains(action))
             throw new IllegalArgumentException("Unsupported configuration inspection action");
         if(offset<0||limit<0||limit>100||"testdata-records".equals(action)&&limit<1)
@@ -1199,7 +1226,7 @@ final class ServerRuntime implements AutoCloseable {
     private String configuredPackageId(Path root) {
         if(root==null)return null;
         Path normalized=root.toAbsolutePath().normalize();
-        for(Map.Entry<String,Path> entry:config.packages.entrySet())
+        for(Map.Entry<String,Path> entry:packageRoots().entrySet())
             if(entry.getValue().toAbsolutePath().normalize().equals(normalized))return entry.getKey();
         return null;
     }
@@ -1253,14 +1280,14 @@ final class ServerRuntime implements AutoCloseable {
                 if(worker.process!=null&&!worker.process.isAlive())worker.discard();
                 List<ServerConfig.WarmupKey> assigned=new ArrayList<>();
                 for(int i=slot;i<keys.size();i+=config.inspection.warmup.workers())assigned.add(keys.get(i));
-                if(assigned.isEmpty()&&!config.packages.isEmpty())assigned.add(new ServerConfig.WarmupKey(config.packages.keySet().iterator().next(),null));
+                if(assigned.isEmpty()&&!packageRoots().isEmpty())assigned.add(new ServerConfig.WarmupKey(packageRoots().keySet().iterator().next(),null));
                 for(ServerConfig.WarmupKey key:assigned) {
                     int attempts=worker.warmAttempts.getOrDefault(key,0);
                     if(worker.warmed.contains(key)||attempts>=3||System.nanoTime()<worker.warmRetryAt)continue;
                     worker.warmAttempts.put(key,attempts+1);
                     worker.warming=true;
                     try {
-                        Path root=config.packages.get(key.packageId());
+                        Path root=packageRoot(key.packageId());
                         if(root==null)continue; // Missing packages never affect Server startup.
                         WorkerRequest request=inspectionRequest(key.packageId(),root,key.environment());
                         request.inspectionAction="list";request.inspectionType="template";request.inspectionLimit=1;request.inspectionOffset=0;
@@ -1526,6 +1553,7 @@ final class ServerRuntime implements AutoCloseable {
     List<Map<String,Object>> loadScheduleExecutions(String id,int limit) throws Exception {requireSchedulingEnabled();if(store.schedule(id)==null&&store.scheduleExecutions(id,1).isEmpty())throw new NotFoundException();return store.scheduleExecutions(id,limit);}
     LoadSchedule createLoadSchedule(JsonNode input,String principal) throws Exception {
         requireSchedulingEnabled();
+        requireLocalOperator(principal);
         LoadSchedule schedule=buildLoadSchedule(input,null,principal);schedule.id="S"+UUID.randomUUID().toString().replace("-","").toUpperCase();schedule.createdBy=principal;schedule.createdAt=clock.instant().toString();
         store.createSchedule(schedule,config.scheduling.maxSchedules);store.audit(principal,"SCHEDULE_CREATE",null,schedule.packageId,"CREATED");return schedule;
     }
@@ -1546,6 +1574,7 @@ final class ServerRuntime implements AutoCloseable {
         return Map.of("timezone",timezone,"cron",cronText,"nextRunAt",nextOccurrences.get(0),"nextOccurrences",List.copyOf(nextOccurrences));
     }
     LoadSchedule updateLoadSchedule(String id,JsonNode input,String principal) throws Exception {
+        requireLocalOperator(principal);
         requireSchedulingEnabled();LoadSchedule prior=store.schedule(id);if(prior==null)throw new NotFoundException();
         LoadSchedule schedule=buildLoadSchedule(input,prior,principal);schedule.id=id;schedule.createdBy=prior.createdBy;schedule.createdAt=prior.createdAt;
         schedule.updatedBy=principal;schedule.updatedAt=clock.instant().toString();
@@ -1556,6 +1585,7 @@ final class ServerRuntime implements AutoCloseable {
         store.audit(principal,"SCHEDULE_UPDATE",null,schedule.packageId,"UPDATED");return updated;
     }
     LoadSchedule setLoadScheduleEnabled(String id,boolean enabled,String principal) throws Exception {
+        requireLocalOperator(principal);
         requireSchedulingEnabled();Instant now=clock.instant();LoadSchedule schedule;
         synchronized(store) {
             LoadSchedule current=store.schedule(id);if(current==null)throw new NotFoundException();
@@ -1566,14 +1596,16 @@ final class ServerRuntime implements AutoCloseable {
         store.audit(principal,enabled?"SCHEDULE_RESUME":"SCHEDULE_PAUSE",null,schedule.packageId,enabled?"ENABLED":"PAUSED");
         return schedule;
     }
-    void deleteLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();store.deleteSchedule(id);store.audit(principal,"SCHEDULE_DELETE",null,schedule.packageId,"DELETED");}
-    Map<String,Object> triggerLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule);store.audit(principal,"SCHEDULE_TRIGGER",String.valueOf(occurrence.get("jobId")),schedule.packageId,String.valueOf(occurrence.get("status")));return occurrence;}
+    void deleteLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();requireLocalOperator(principal);LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();store.deleteSchedule(id);store.audit(principal,"SCHEDULE_DELETE",null,schedule.packageId,"DELETED");}
+    Map<String,Object> triggerLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();requireLocalOperator(principal);LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule);store.audit(principal,"SCHEDULE_TRIGGER",String.valueOf(occurrence.get("jobId")),schedule.packageId,String.valueOf(occurrence.get("status")));return occurrence;}
+
+    private void requireLocalOperator(String principal) throws Exception {
+        if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
+    }
 
     private Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId) throws Exception {
-        if("local".equals(config.authMode)) {
-            Map<String,Object> owner=store.authUser(schedule.createdBy);
-            if(owner==null||!Boolean.TRUE.equals(owner.get("active"))||!"ADMIN".equals(owner.get("role")))throw new IllegalArgumentException("Schedule owner is no longer authorized");
-        }
+        if("local".equals(config.authMode)&&!store.isActiveUser(schedule.createdBy))
+            throw new IllegalArgumentException("Schedule owner is no longer authorized");
         if("run".equals(schedule.effectiveJobType()))return submitScheduledRun(schedule,occurrenceId);
         return "debug".equals(schedule.effectiveJobType())
                 ? submitScheduledDebug(schedule,occurrenceId)
@@ -1588,12 +1620,12 @@ final class ServerRuntime implements AutoCloseable {
         return accepted;
     }
     private void validateScheduledRun(LoadSchedule schedule) throws Exception {
-        Path root=config.packages.get(schedule.packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Path root=packageRoot(schedule.packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(schedule.runInput==null||schedule.expectedRevisionDigest==null)throw new IllegalArgumentException("Scheduled RUN snapshot is incomplete");
         if(schedule.inlineDebugInput!=null)validateScheduledDebugInput(root,schedule);
         else {
             WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
-            if(schedule.config!=null){request.config=safeRelative(schedule.config,"config");validatePackagePath(root,request.config,"config");}
+            request.config=config.runtimeConfigPath.toString();
             request.inspectionAction="revision";request.expectedRevisionDigest=schedule.expectedRevisionDigest;
             try { executeInspection(root,request); }
             catch(StaleCursorException stale) {throw new StaleDraftException();}
@@ -1601,7 +1633,7 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private Map<String,Object> submitScheduledLoad(LoadSchedule schedule,String occurrenceId) throws Exception {
-        Path root=config.packages.get(schedule.packageId);
+        Path root=packageRoot(schedule.packageId);
         if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new IllegalArgumentException("Configured schedule package is no longer available");
         validatePackageRoot(root);
@@ -1614,7 +1646,7 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private Map<String,Object> submitScheduledDebug(LoadSchedule schedule,String occurrenceId) throws Exception {
-        Path root=config.packages.get(schedule.packageId);
+        Path root=packageRoot(schedule.packageId);
         if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new IllegalArgumentException("Configured schedule package is no longer available");
         validatePackageRoot(root);
@@ -1635,7 +1667,7 @@ final class ServerRuntime implements AutoCloseable {
                 ||!schedule.expectedRevisionDigest.matches("[a-f0-9]{64}"))
             throw new IllegalArgumentException("Scheduled Debug snapshot is incomplete");
         WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
-        if(schedule.config!=null){request.config=safeRelative(schedule.config,"config");validatePackagePath(root,request.config,"config");}
+        request.config=config.runtimeConfigPath.toString();
         request.inspectionAction="debug-input";request.inspectionType=schedule.debugTargetType;
         request.inspectionTargetId=schedule.debugTargetId;request.inlineDebugInput=deepMap(schedule.inlineDebugInput);
         Map<String,Object> inspected=executeInspection(root,request);
@@ -1685,7 +1717,7 @@ final class ServerRuntime implements AutoCloseable {
     private ValidatedScheduledScenario validateScheduledScenario(Path root,LoadSchedule schedule,Map<String,Object> scenario,
                                                                   boolean packageFile) throws Exception {
         WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
-        if(schedule.config!=null){request.config=safeRelative(schedule.config,"config");validatePackagePath(root,request.config,"config");}
+        request.config=config.runtimeConfigPath.toString();
         request.inspectionAction="load-scenario";request.inlineLoadScenario=scenario;
         if(packageFile)request.inspectionPath=schedule.scenario;
         Map<String,Object> inspected=executeInspection(root,request);
@@ -1795,15 +1827,18 @@ final class ServerRuntime implements AutoCloseable {
         if("debug".equals(s.effectiveJobType())&&s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("Debug schedules cannot use Load option overrides");
         if(s.name.isBlank()||s.name.length()>120||containsControl(s.name))throw new IllegalArgumentException("name must be 1 to 120 characters without control characters");
         if(s.description!=null&&(s.description.length()>500||containsControl(s.description)))throw new IllegalArgumentException("description must be at most 500 characters without control characters");
-        if(!config.packages.containsKey(s.packageId))throw new IllegalArgumentException("Unknown packageId");
-        Path root=config.packages.get(s.packageId);validatePackageRoot(root);
-        s.config=safeRelative(s.config,"config");validatePackagePath(root,s.config,"config");
+        if(packageRoot(s.packageId)==null)throw new IllegalArgumentException("Unknown packageId");
+        Path root=packageRoot(s.packageId);validatePackageRoot(root);
+        if(s.config!=null&&!s.config.isBlank()&&!("config/config.yaml".equals(s.config)||config.runtimeConfigPath.toString().equals(s.config)))
+            throw new IllegalArgumentException("A schedule must use the shared runtime configuration");
+        s.config="config/config.yaml";
         s.environment=s.environment==null||s.environment.isBlank()?null:safeText(s.environment,128,"environment");
         if("run".equals(s.effectiveJobType())) {
             JsonNode snapshot=JSON.valueToTree(s.runInput);
             String expectedEnvironment=snapshot.path("environment").isTextual()?snapshot.path("environment").asText():null;
             String expectedConfig=snapshot.path("config").isTextual()?snapshot.path("config").asText():null;
-            if(!s.packageId.equals(snapshot.path("packageId").asText())||!java.util.Objects.equals(s.environment,expectedEnvironment)||!java.util.Objects.equals(s.config,expectedConfig))
+            boolean sameRuntimeConfig="config/config.yaml".equals(expectedConfig)||config.runtimeConfigPath.toString().equals(expectedConfig);
+            if(!s.packageId.equals(snapshot.path("packageId").asText())||!java.util.Objects.equals(s.environment,expectedEnvironment)||!sameRuntimeConfig)
                 throw new IllegalArgumentException("A RUN snapshot is immutable; create a new schedule for changed values");
             if(input.has("scenario")||s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("RUN schedules cannot use Load fields");
             validateScheduledRun(s);
@@ -1949,10 +1984,10 @@ final class ServerRuntime implements AutoCloseable {
     private static void validateTarget(Map<String,Object> target){if(target==null)throw new IllegalArgumentException("target is required");Object type=target.get("type"),id=target.get("id");if(!(type instanceof String)||!(id instanceof String))throw new IllegalArgumentException("target.type and target.id are required");}
     Path packageRootForJob(String id) throws Exception {
         Job active=jobs.get(id);
-        if(active!=null)return config.packages.get(active.packageId);
+        if(active!=null)return packageRoot(active.packageId);
         Map<String,Object> row=store.get(id);
         if(row==null)throw new NotFoundException();
-        return config.packages.get(String.valueOf(row.get("packageId")));
+        return packageRoot(String.valueOf(row.get("packageId")));
     }
     Path outputDirectoryForJob(String id) {
         return config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();

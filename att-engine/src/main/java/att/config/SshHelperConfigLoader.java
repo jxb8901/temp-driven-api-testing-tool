@@ -27,6 +27,8 @@ public final class SshHelperConfigLoader {
             if (!(item instanceof String) || !((String) item).matches(".+\\.ya?ml")) throw new IllegalArgumentException("sshhelpers path must be a YAML file");
             Path relative = IdentifierValidator.relativePath((String) item, "sshhelper path");
             Path logical = root.resolve(relative).normalize();
+            if (!logical.startsWith(root.resolve("config")))
+                throw new IllegalArgumentException("sshhelper files must remain inside shared config/");
             if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe SSH helper path: " + item);
             PackageResourceResolver.PackageResource resource = resources.resolvePackageRelative(
                     relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE);

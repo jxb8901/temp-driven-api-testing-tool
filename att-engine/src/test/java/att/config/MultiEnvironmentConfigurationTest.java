@@ -17,15 +17,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MultiEnvironmentConfigurationTest {
-    private final Path root = Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
+    private final Path home = Paths.get("").toAbsolutePath().normalize();
+    private final Path root = home.resolve("packages/default");
 
     @Test
     void checkedInSitAndUatConfigsKeepSharedRegistryAndValidateDescriptors() throws Exception {
-        Map<?, ?> sit = yaml(root.resolve("config/environments/sit.yaml"));
-        Map<?, ?> uat = yaml(root.resolve("config/environments/uat.yaml"));
+        Map<?, ?> sit = yaml(home.resolve("config/environments/sit.yaml"));
+        Map<?, ?> uat = yaml(home.resolve("config/environments/uat.yaml"));
 
-        JsonSchemaVerifier.verify(root.resolve("schemas/att-config-v2.12.schema.json"), sit);
-        JsonSchemaVerifier.verify(root.resolve("schemas/att-config-v2.12.schema.json"), uat);
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(root, "att-config-v2.12.schema.json"), sit);
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(root, "att-config-v2.12.schema.json"), uat);
 
         assertEquals("SIT", sit.get("environment"));
         assertEquals("UAT", uat.get("environment"));
@@ -47,10 +48,10 @@ class MultiEnvironmentConfigurationTest {
         validateDescriptor(sit, "mqhelpers", "schemas/att-mqhelper-v1.3.schema.json");
         validateDescriptor(uat, "mqhelpers", "schemas/att-mqhelper-v1.3.schema.json");
 
-        Map<?, ?> sitDb = yaml(root.resolve("config/dbhelpers/sit/orders.yaml"));
-        Map<?, ?> uatDb = yaml(root.resolve("config/dbhelpers/uat/orders.yaml"));
-        Map<?, ?> sitMq = yaml(root.resolve("config/mqhelpers/sit/payment.yaml"));
-        Map<?, ?> uatMq = yaml(root.resolve("config/mqhelpers/uat/payment.yaml"));
+        Map<?, ?> sitDb = yaml(home.resolve("config/dbhelpers/sit/orders.yaml"));
+        Map<?, ?> uatDb = yaml(home.resolve("config/dbhelpers/uat/orders.yaml"));
+        Map<?, ?> sitMq = yaml(home.resolve("config/mqhelpers/sit/payment.yaml"));
+        Map<?, ?> uatMq = yaml(home.resolve("config/mqhelpers/uat/payment.yaml"));
         assertEquals("orders", sitDb.get("id"));
         assertEquals("orders", uatDb.get("id"));
         assertEquals("payment", sitMq.get("id"));
@@ -62,9 +63,9 @@ class MultiEnvironmentConfigurationTest {
     private void validateDescriptor(Map<?, ?> config, String field, String schema) throws Exception {
         List<?> paths = list(config.get(field));
         assertEquals(1, paths.size());
-        Path descriptor = root.resolve(String.valueOf(paths.get(0)));
+        Path descriptor = home.resolve(String.valueOf(paths.get(0)));
         assertTrue(Files.isRegularFile(descriptor), descriptor.toString());
-        JsonSchemaVerifier.verify(root.resolve(schema), yaml(descriptor));
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(root, schema.substring(schema.lastIndexOf('/') + 1)), yaml(descriptor));
     }
 
     private Map<?, ?> yaml(Path file) throws Exception {

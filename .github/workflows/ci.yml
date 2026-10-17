@@ -54,7 +54,7 @@ jobs:
           cache: maven
 
       - name: Verify Java 8 modules
-        run: mvn -B -ntp -pl att-engine,att-cli,att-worker -am clean verify
+        run: mvn -B -ntp -U -pl att-engine,att-cli,att-worker -am clean verify
 
       - name: Upload test reports on failure
         if: failure()
@@ -135,7 +135,7 @@ jobs:
         # Each test class gets a separate JVM, isolating Tomcat, global properties,
         # authentication state and temporary database files. Tests within a class
         # remain sequential; no tests or assertions are excluded.
-        run: mvn -B -ntp -T 1C -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=2 -DreuseForks=false test
+        run: mvn -B -ntp -U -T 1C -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=2 -DreuseForks=false test
 
       - name: Upload Server unit reports on failure
         if: failure()
@@ -333,4 +333,4 @@ jobs:
           cache: maven
 
       - name: Verify Java 8 Windows Tool cancellation and source-tree launcher
-        run: mvn -B -ntp -pl att-cli,att-worker -am "-Dtest=ProcessTreeTerminatorWindowsTest,WorkerMainTest#terminatingWorkerStopsAnActiveCommandBackedTool,WindowsLauncherTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
+        run: mvn -B -ntp -U -pl att-cli,att-worker -am "-Dtest=ProcessTreeTerminatorWindowsTest,WorkerMainTest#terminatingWorkerStopsAnActiveCommandBackedTool,WindowsLauncherTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
