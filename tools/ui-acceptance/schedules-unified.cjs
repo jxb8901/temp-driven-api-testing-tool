@@ -126,7 +126,10 @@ async function main() {
     await page.getByRole('button', { name: 'Discard changes and continue', exact: true }).click();
     await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Save schedule', exact: true }).click();
-    await page.getByRole('heading', { name: 'Run', exact: true }).waitFor();
+    await page.locator('#schedules-title').waitFor();
+    await page.getByText(/Saved .*\(ID: S-NEW\)/).waitFor();
+    await page.getByRole('button', { name: 'View schedule history', exact: true }).waitFor();
+    assert.match(page.url(), /#\/schedules$/);
     const created = mutations.find(item => item.method === 'POST' && item.path === '');
     assert.equal(created.body.executionType, 'run');
     assert.equal(created.body.draftId, 'R-FROZEN');
