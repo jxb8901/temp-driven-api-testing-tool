@@ -79,6 +79,7 @@ public final class ResourceInspection {
 
     public static final class Diagnostic {
         public String severity;
+        public String state;
         public String environment;
         public String helperType;
         public String helperId;

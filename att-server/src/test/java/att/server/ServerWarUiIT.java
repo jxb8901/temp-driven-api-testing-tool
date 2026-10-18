@@ -964,7 +964,9 @@ class ServerWarUiIT {
         Files.writeString(localHome.resolve("config/db-discovery.yaml"),
                 "schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: Discovery fixture\n"
                         + "connection: {url: 'jdbc:unused', password: '${ENV:" + variable + "}'}\n");
-        Files.writeString(localHome.resolve("config/config.yaml"), "\ndbhelpers: [config/db-discovery.yaml]\n",
+        Files.writeString(localHome.resolve("config/db-invalid.yaml"), "[invalid: PRIVATE_HELPER_SOURCE_CANARY\n");
+        Files.writeString(localHome.resolve("config/config.yaml"),
+                "\ndbhelpers: [config/db-discovery.yaml, config/db-absent.yaml, config/db-invalid.yaml]\n",
                 java.nio.file.StandardOpenOption.APPEND);
         Path target = Files.createDirectories(packageRoot.resolve("templates/DEGRADED"));
         Files.writeString(target.resolve("template.yaml"),
@@ -982,6 +984,9 @@ class ServerWarUiIT {
         assertEquals("available", item.path("metadataState").asText(), item.toString());
         assertEquals("dependency-unresolved", item.path("executionReadiness").path("state").asText());
         assertTrue(item.path("executionReadiness").toString().contains(variable));
+        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
+        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"));
+        assertFalse(resources.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
         assertFalse(resources.toString().contains(localHome.toString()));
         assertFalse(resources.toString().contains(packageRoot.toString()));
         assertEquals(401, get(port, api + "/packages/payments/resources?type=template&query=DEGRADED", null));

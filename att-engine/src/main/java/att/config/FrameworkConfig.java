@@ -12,6 +12,7 @@ import java.util.Map;
 /** Immutable global or suite-resolved V2 configuration. */
 public final class FrameworkConfig {
     private final List<EnvironmentRequirement> environmentRequirements;
+    private final List<HelperDiscoveryFailure> helperDiscoveryFailures;
     private final boolean discoveryOnly;
     private final Path outputDirectory;
     private final Path reportDirectory;
@@ -179,6 +180,7 @@ public final class FrameworkConfig {
                            List<Path> testdataDescriptors) {
         this.discoveryOnly = false;
         this.environmentRequirements = Collections.emptyList();
+        this.helperDiscoveryFailures = Collections.emptyList();
         this.outputDirectory = outputDirectory == null ? Paths.get("output") : outputDirectory;
         this.reportDirectory = reportDirectory == null ? Paths.get("report") : reportDirectory;
         this.logDirectory = logDirectory == null ? Paths.get("logs") : logDirectory;
@@ -209,8 +211,9 @@ public final class FrameworkConfig {
         if (!("ignore".equals(this.xmlNamespaceMode) || "preserve".equals(this.xmlNamespaceMode))) throw new IllegalArgumentException("xml.namespaceMode must be ignore or preserve");
     }
 
-    private FrameworkConfig(FrameworkConfig source, List<EnvironmentRequirement> requirements) {
+    private FrameworkConfig(FrameworkConfig source, List<EnvironmentRequirement> requirements, List<HelperDiscoveryFailure> failures) {
         this.discoveryOnly = true;
+        this.helperDiscoveryFailures = Collections.unmodifiableList(new ArrayList<HelperDiscoveryFailure>(failures));
         this.environmentRequirements = Collections.unmodifiableList(new ArrayList<EnvironmentRequirement>(requirements));
         this.outputDirectory = source.outputDirectory;
         this.reportDirectory = source.reportDirectory;
@@ -239,7 +242,10 @@ public final class FrameworkConfig {
         this.testdataDescriptors = source.testdataDescriptors;
     }
 
-    FrameworkConfig forDiscovery(List<EnvironmentRequirement> requirements) { return new FrameworkConfig(this, requirements); }
+    FrameworkConfig forDiscovery(List<EnvironmentRequirement> requirements, List<HelperDiscoveryFailure> failures) {
+        return new FrameworkConfig(this, requirements, failures);
+    }
+    public List<HelperDiscoveryFailure> helperDiscoveryFailures() { return helperDiscoveryFailures; }
     public boolean discoveryOnly() { return discoveryOnly; }
     public List<EnvironmentRequirement> environmentRequirements() { return environmentRequirements; }
     public void requireExecutionConfig() {

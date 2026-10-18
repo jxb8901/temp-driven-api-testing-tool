@@ -1750,6 +1750,12 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private void resolveReadiness(Index index, FrameworkConfig config) {
         index.environment = config.environment();
+        List<att.config.HelperDiscoveryFailure> failures = config.helperDiscoveryFailures();
+        for (int i = 0; i < Math.min(4, failures.size()); i++)
+            index.diagnostics.add(failures.get(i).diagnostic(index.environment));
+        if (failures.size() > 4)
+            index.diagnostics.add(diagnostic("ATT-RESOURCE-HELPER-DIAGNOSTICS-TRUNCATED",
+                    "Additional invalid or unavailable Helper descriptors: " + (failures.size() - 4)));
         for (EnvironmentRequirement requirement : config.environmentRequirements()) {
             String key = (requirement.helperType() + "." + requirement.helperId()).toLowerCase(Locale.ROOT);
             List<EnvironmentRequirement> requirements = index.helperRequirements.get(key);

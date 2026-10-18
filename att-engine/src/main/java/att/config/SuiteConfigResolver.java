@@ -65,7 +65,7 @@ public final class SuiteConfigResolver {
                     report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows,
                     global.xmlNamespaceMode(), workbookId, global.caseLogYamlAnchors(), global.processOutput(),
                     global.testdataDescriptors());
-            return global.discoveryOnly() ? resolved.forDiscovery(global.environmentRequirements()) : resolved;
+            return global.discoveryOnly() ? resolved.forDiscovery(global.environmentRequirements(), global.helperDiscoveryFailures()) : resolved;
         } catch (att.validation.DiagnosticException e) {
             throw YamlSupport.locate(e, sidecar, e.field());
         } catch (Exception e) {

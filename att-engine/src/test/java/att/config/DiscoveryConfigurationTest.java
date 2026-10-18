@@ -65,9 +65,9 @@ class DiscoveryConfigurationTest {
     @Test void discoveryPreservesStructuralProfileAndPathSecurityChecks() throws Exception {
         Path config = config("dbhelpers: [config/db.yaml]\n");
         write("config/db.yaml", "schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: Invalid\nconnection: {url: 42}\n");
-        assertThrows(IllegalArgumentException.class, () -> discovery(config, null));
+        assertEquals("invalid", discovery(config, null).helperDiscoveryFailures().get(0).diagnostic("SIT").get("state"));
         write("config/db.yaml", "[malformed\n");
-        assertThrows(IllegalArgumentException.class, () -> discovery(config, null));
+        assertEquals("invalid", discovery(config, null).helperDiscoveryFailures().get(0).diagnostic("SIT").get("state"));
         config("dbhelpers: [../outside.yaml]\n");
         assertThrows(IllegalArgumentException.class, () -> discovery(config, null));
         Path outside = write("outside.yaml", "schemaVersion: att-dbhelper/v2.6\n");
@@ -126,6 +126,96 @@ class DiscoveryConfigurationTest {
         assertThrows(IllegalStateException.class, () -> new att.debug.DebugEngine(root, metadata).run(null));
         assertThrows(IllegalStateException.class, () -> new att.core.FrameworkEngine(root, metadata).run(null));
         assertThrows(IllegalStateException.class, () -> new att.exec.ToolInvoker(root, metadata).invoke(null, "missing", null, null, null));
+    }
+
+    @Test void isolatesMissingAndMalformedDescriptorsForAllHelperKindsWithoutLeakingSources() throws Exception {
+        for (String type : new String[] { "db", "mq", "ssh", "http" }) {
+            write("config/invalid-" + type + ".yaml", "[invalid: PRIVATE_DISCOVERY_CANARY\n");
+            Path config = config(type + "helpers: [config/missing.yaml, config/invalid-" + type + ".yaml]\n");
+            FrameworkConfig metadata = discovery(config, null);
+            assertEquals(2, metadata.helperDiscoveryFailures().size(), type);
+            assertTrue(metadata.environmentRequirements().isEmpty());
+            assertEquals("unavailable", metadata.helperDiscoveryFailures().get(0).diagnostic("SIT").get("state"));
+            assertEquals("invalid", metadata.helperDiscoveryFailures().get(1).diagnostic("SIT").get("state"));
+            assertThrows(UnsupportedOperationException.class, () -> metadata.helperDiscoveryFailures().clear());
+            assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config, root));
+            try (PackageResourceInspector inspector = inspector(config, null)) {
+                Map<String, Object> page = inspector.inspect("list", "template", null, null, 0, 50);
+                assertTrue(page.get("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"), type);
+                assertFalse(page.toString().contains("PRIVATE_DISCOVERY_CANARY"));
+                assertFalse(page.toString().contains(root.toString()));
+                assertNotNull(inspector.inspectLoadCatalog("", 0, 50, null));
+            }
+        }
+    }
+
+    @Test void retainsHealthyHelpersAndUnrelatedResourcesWhileFailedHelpersRemainUnresolved() throws Exception {
+        write("config/good.yaml", "schemaVersion: att-dbhelper/v2.6\nid: healthy\nname: Healthy\ndescription: Healthy DB\n"
+                + "connection: {url: 'jdbc:unused', password: '${ENV:" + MISSING + "}'}\n");
+        write("config/bad.yaml", "schemaVersion: att-dbhelper/v2.6\nid: broken\nname: Broken\ndescription: Broken DB\n"
+                + "connection: {url: 'jdbc:unused', password: '${ENV:ROLL_BACK_THIS_REQUIREMENT}'}\nresult: {maxCellBytes: 1024, maxBytes: 1}\n");
+        Path config = config("dbhelpers: [config/bad.yaml, config/good.yaml]\n");
+        FrameworkConfig metadata = discovery(config, null);
+        assertNotNull(metadata.dbHelper("healthy"));
+        assertNull(metadata.dbHelper("broken"));
+        assertEquals(1, metadata.environmentRequirements().size());
+        assertEquals(MISSING, metadata.environmentRequirements().get(0).variable());
+        write("testcase/cases.yaml", "schemaVersion: att-sidecar/v2.2\nid: cases\nexcel: {sheet: Cases, caseId: Case ID, tags: Tags}\nstages:\n"
+                + "  - key: invoke\n    template: INDEPENDENT\n");
+        FrameworkConfig suite = new SuiteConfigResolver(root, metadata).resolve(root.resolve("testcase/cases.xlsx"));
+        assertEquals(1, suite.helperDiscoveryFailures().size());
+        assertThrows(IllegalStateException.class, suite::requireExecutionConfig);
+        write("templates/DEPENDENT/template.yaml", "schemaVersion: att-template/v3.6\nname: DEPENDENT\ndescription: Dependent\nactions:\n"
+                + "  query: {type: tool, call: \"#{db.broken.query(sql='select 1')}\"}\n");
+        write("templates/INDEPENDENT/template.yaml", "schemaVersion: att-template/v3.6\nname: INDEPENDENT\ndescription: Independent\nactions:\n"
+                + "  note: {type: log, message: safe}\n");
+        try (PackageResourceInspector inspector = inspector(config, null)) {
+            @SuppressWarnings("unchecked") List<Map<String, Object>> items = (List<Map<String, Object>>)
+                    inspector.inspect("list", "template", null, null, 0, 50).get("items");
+            assertEquals(2, items.size());
+            for (Map<String, Object> item : items)
+                assertEquals("DEPENDENT".equals(item.get("name")) ? "dependency-unresolved" : "not-validated",
+                        ((Map<?, ?>) item.get("executionReadiness")).get("state"));
+        }
+    }
+
+    @Test void unsafeMissingPathsDuplicateIdsAndExcessiveDiscoveryRemainFatal() throws Exception {
+        Path config = config("dbhelpers: [config/../outside.yaml]\n");
+        assertThrows(IllegalArgumentException.class, () -> discovery(config, null));
+        config("dbhelpers: [config/missing.yaml, config/missing.yaml]\n");
+        assertThrows(IllegalArgumentException.class, () -> discovery(config, null));
+        String helper = "schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: DB\nconnection: {url: 'jdbc:unused'}\n";
+        write("config/one.yaml", helper);
+        write("config/two.yaml", helper.replace("id: orders", "id: ORDERS"));
+        config("dbhelpers: [config/one.yaml, config/two.yaml]\n");
+        assertThrows(IllegalArgumentException.class, () -> discovery(config, null));
+        config("dbhelpers: [" + java.util.stream.IntStream.range(0, 257).mapToObj(i -> "config/missing" + i + ".yaml")
+                .collect(Collectors.joining(",")) + "]\n");
+        assertThrows(IllegalArgumentException.class, () -> discovery(config, null));
+        Files.createSymbolicLink(root.resolve("config/link"), root.resolve("templates"));
+        config("dbhelpers: [config/link/absent.yaml]\n");
+        assertThrows(IllegalArgumentException.class, () -> discovery(config, null));
+    }
+
+    @Test void oversizedDescriptorsRemainFatalAndPackageSchemasCannotOverrideTrustedRegistry() throws Exception {
+        Path config = config("dbhelpers: [config/oversized.yaml]\n");
+        Files.write(root.resolve("config/oversized.yaml"), new byte[3_000_001]);
+        assertThrows(IllegalArgumentException.class, () -> discovery(config, null));
+        config("dbhelpers: [config/missing.yaml]\n");
+        Files.write(root.resolve("schemas/att-dbhelper-v2.6.schema.json"), "{broken".getBytes(StandardCharsets.UTF_8));
+        assertEquals("unavailable", discovery(config, null).helperDiscoveryFailures().get(0).diagnostic("SIT").get("state"));
+    }
+
+    @Test void manyMissingHelpersDoNotOverflowAnOtherwiseUsableMetadataPage() throws Exception {
+        Path config = config("dbhelpers: [" + java.util.stream.IntStream.range(0, 100).mapToObj(i -> "config/missing" + i + ".yaml")
+                .collect(Collectors.joining(",")) + "]\n");
+        try (PackageResourceInspector inspector = inspector(config, null)) {
+            Map<String, Object> page = inspector.inspect("list", "template", null, null, 0, 50);
+            List<?> diagnostics = (List<?>) page.get("diagnostics");
+            assertEquals(5, diagnostics.size());
+            assertTrue(diagnostics.get(4).toString().contains("DIAGNOSTICS-TRUNCATED"));
+            assertTrue(diagnostics.get(4).toString().contains("96"));
+        }
     }
 
     private FrameworkConfig discovery(Path config, String environment) throws Exception {

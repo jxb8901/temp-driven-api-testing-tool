@@ -53,7 +53,7 @@ public final class FrameworkConfigLoader {
                                          String selectedEnvironment) throws IOException {
         EnvironmentReferences references = EnvironmentReferences.discovery();
         return loadInternal(path, runtimeConfigRoot, packageRoot, selectedEnvironment, null, false, references)
-                .forDiscovery(references.requirements());
+                .forDiscovery(references.requirements(), references.helperFailures());
     }
 
     private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
@@ -111,10 +111,12 @@ public final class FrameworkConfigLoader {
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
             Map<String, SshHelperConfig> sshHelpers = (v29 || v28 || v27)
-                    ? new SshHelperConfigLoader(references).load(map.get("sshhelpers"), runtimeConfigRoot)
+                    ? HelperDiscoveryLoader.load("ssh", map.get("sshhelpers"), runtimeConfigRoot, references,
+                            new SshHelperConfigLoader(references)::load)
                     : Collections.<String, SshHelperConfig>emptyMap();
             Map<String, HttpHelperConfig> httpHelpers = (v29 || v28)
-                    ? new HttpHelperConfigLoader(references).load(map.get("httphelpers"), runtimeConfigRoot)
+                    ? HelperDiscoveryLoader.load("http", map.get("httphelpers"), runtimeConfigRoot, references,
+                            new HttpHelperConfigLoader(references)::load)
                     : Collections.<String, HttpHelperConfig>emptyMap();
             SshConfig globalSsh = ssh(map.get("ssh"), "config.ssh");
             try {
@@ -127,10 +129,12 @@ public final class FrameworkConfigLoader {
                         "Check the qualified tool/group name, required metadata, declared arguments, command placeholders, and executable path.");
             }
             Map<String, DbHelperConfig> dbHelpers = (v29 || v28 || v27 || v26 || v25)
-                    ? new DbHelperConfigLoader(references).load(map.get("dbhelpers"), runtimeConfigRoot)
+                    ? HelperDiscoveryLoader.load("db", map.get("dbhelpers"), runtimeConfigRoot, references,
+                            new DbHelperConfigLoader(references)::load)
                     : Collections.<String, DbHelperConfig>emptyMap();
             Map<String, MqHelperConfig> mqHelpers = (v29 || v28 || v27 || v26)
-                    ? new MqHelperConfigLoader(references).load(map.get("mqhelpers"), runtimeConfigRoot)
+                    ? HelperDiscoveryLoader.load("mq", map.get("mqhelpers"), runtimeConfigRoot, references,
+                            new MqHelperConfigLoader(references)::load)
                     : Collections.<String, MqHelperConfig>emptyMap();
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
