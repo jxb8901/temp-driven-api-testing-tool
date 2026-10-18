@@ -122,7 +122,7 @@ public final class FrameworkConfigLoader {
             try {
                 addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "", "", "tools", path,
                         v29 || v28 || v27 || v26, !(v29 || v28 || v27 || v26), v29, v210);
-                if (v29 || v28 || v27 || v26 || v25 || v22) addToolGroups(map.get("toolGroups"), runtimeConfigRoot, tools, sshHelpers);
+                if (v29 || v28 || v27 || v26 || v25 || v22) addToolGroups(map.get("toolGroups"), runtimeConfigRoot, tools, sshHelpers, references.isDiscovery());
             } catch (Exception e) {
                 throw att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.TOOL_INVALID,
                         "Invalid tool configuration", e, path.toString(), "tools/toolGroups",
@@ -583,7 +583,7 @@ public final class FrameworkConfigLoader {
     }
 
     private static void addToolGroups(Object configured, Path projectRoot, Map<String, ToolConfig> tools,
-                                      Map<String, SshHelperConfig> sshHelpers) throws IOException {
+                                      Map<String, SshHelperConfig> sshHelpers, boolean discovery) throws IOException {
         if (configured == null) return;
         if (!(configured instanceof Iterable)) throw new IllegalArgumentException("toolGroups must be a list");
         Set<Path> paths = new LinkedHashSet<Path>();
@@ -600,12 +600,12 @@ public final class FrameworkConfigLoader {
             Path file = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
             if (!Files.isRegularFile(file)) throw new IllegalArgumentException("Missing/unsafe tool group file: " + value);
             if (!paths.add(file)) throw new IllegalArgumentException("Duplicate tool group path: " + value);
-            loadToolGroup(file, projectRoot, tools, ids, sshHelpers);
+            loadToolGroup(file, projectRoot, tools, ids, sshHelpers, discovery);
         }
     }
 
     private static void loadToolGroup(Path file, Path projectRoot, Map<String, ToolConfig> tools, Set<String> ids,
-                                      Map<String, SshHelperConfig> sshHelpers) {
+                                      Map<String, SshHelperConfig> sshHelpers, boolean discovery) {
         try {
             Map<?, ?> group = yaml(file, "Tool group");
             att.testdata.TestdataSyntax.rejectDirectReferences(group, "Tool group " + file.getFileName());
@@ -646,7 +646,8 @@ public final class FrameworkConfigLoader {
                 }
                 boolean found = false;
                 for (String helperId : sshHelpers.keySet()) if (helperId.equalsIgnoreCase(sshHelper)) { sshHelper = helperId; found = true; break; }
-                if (!found) throw new IllegalArgumentException("Unknown SSH helper '" + sshHelper + "' in tool group " + id);
+                // Keep the authored binding for readiness diagnostics; strict loads still reject it.
+                if (!found && !discovery) throw new IllegalArgumentException("Unknown SSH helper '" + sshHelper + "' in tool group " + id);
             } else ssh = ssh(group.get("ssh"), "tool group " + id + ".ssh");
             if (!(group.get("tools") instanceof Map) || ((Map<?, ?>) group.get("tools")).isEmpty()) throw new IllegalArgumentException("Tool group tools must be a non-empty map: " + id);
             int toolCountBefore = tools.size();

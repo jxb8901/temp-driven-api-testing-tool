@@ -1569,6 +1569,8 @@ public final class PackageResourceInspector implements AutoCloseable {
             resource.description = scrub(tool.description());
             resource.state = "ready";
             resource.definition = toolDefinition(tool);
+            if (!tool.sshHelper().isEmpty())
+                resource.relations.add(new Relation("tool", "ssh." + tool.sshHelper() + ".execute", null));
             if (tool.callBacked()) {
                 Set<String> builtIns = new att.template.DefaultBuiltInProvider().names();
                 for (String call : toolCalls(tool.call())) {

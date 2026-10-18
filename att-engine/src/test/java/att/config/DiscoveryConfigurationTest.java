@@ -218,6 +218,74 @@ class DiscoveryConfigurationTest {
         }
     }
 
+    @Test void unavailableSshBindingsDoNotHideToolsOrUnrelatedTemplates() throws Exception {
+        Path config = config("sshhelpers: [config/ssh.yaml]\ntoolGroups: [config/tools/remote.yaml]\n");
+        write("config/tools/remote.yaml", "schemaVersion: att-tool-group/v2.9\nid: remote\nname: Remote\ndescription: Remote tools\n"
+                + "ssh: {helper: app}\ntools:\n  check:\n    name: Check\n    description: Check remote status\n    command: [echo, safe]\n    stdoutFormat: text\n");
+        write("templates/DEPENDENT/template.yaml", "schemaVersion: att-template/v3.6\nname: DEPENDENT\ndescription: Dependent\nactions:\n"
+                + "  check: {type: tool, call: '#{remote.check()}'}\n");
+        write("templates/INDEPENDENT/template.yaml", "schemaVersion: att-template/v3.6\nname: INDEPENDENT\ndescription: Independent\nactions:\n"
+                + "  note: {type: log, message: safe}\n");
+        // Missing, malformed, and undeclared bindings must all remain metadata-only.
+        for (int state = 0; state < 3; state++) {
+            if (state == 1) write("config/ssh.yaml", "[invalid: PRIVATE_SSH_DISCOVERY_CANARY\n");
+            if (state == 2) config("toolGroups: [config/tools/remote.yaml]\n");
+            FrameworkConfig metadata = discovery(config, null);
+            assertEquals("app", metadata.tool("remote.check").sshHelper());
+            assertThrows(IllegalStateException.class, metadata::requireExecutionConfig);
+            assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader().load(config, root));
+            try (PackageResourceInspector inspector = inspector(config, null)) {
+                Map<String, Object> page = inspector.inspect("list", "template", null, null, 0, 50);
+                assertFalse(page.toString().contains("PRIVATE_SSH_DISCOVERY_CANARY"));
+                assertFalse(page.toString().contains(root.toString()));
+                for (Object item : (List<?>) page.get("items")) {
+                    Map<?, ?> row = (Map<?, ?>) item;
+                    assertEquals("DEPENDENT".equals(row.get("name")) ? "dependency-unresolved" : "not-validated",
+                            ((Map<?, ?>) row.get("executionReadiness")).get("state"));
+                }
+                Map<?, ?> tool = (Map<?, ?>) ((List<?>) inspector.inspect("list", "tool", null, null, 0, 50).get("items")).get(0);
+                assertEquals("dependency-unresolved", ((Map<?, ?>) tool.get("executionReadiness")).get("state"));
+                assertNotNull(inspector.inspectLoadCatalog("", 0, 50, null));
+                assertThrows(IllegalArgumentException.class,
+                        () -> inspector.validateDebugInput("tool", "remote.check", Collections.emptyMap()));
+            }
+        }
+    }
+
+    @Test void sshGroupDependenciesPropagateEnvironmentRequirementsTransitively() throws Exception {
+        Path config = config("sshhelpers: [config/ssh.yaml]\ntoolGroups: [config/tools/remote.yaml]\n");
+        write("config/ssh.yaml", "schemaVersion: att-sshhelper/v1.0\nid: app\ndefaults: {user: deploy, identityFile: '${ENV:"
+                + MISSING + "}'}\ninstances: [{id: primary, host: localhost}]\n");
+        write("config/tools/remote.yaml", "schemaVersion: att-tool-group/v2.9\nid: remote\nname: Remote\ndescription: Remote tools\n"
+                + "ssh: {helper: APP}\ntools:\n  check:\n    name: Check\n    description: Check remote status\n    command: [echo, safe]\n    stdoutFormat: text\n");
+        write("templates/DEPENDENT/template.yaml", "schemaVersion: att-template/v3.6\nname: DEPENDENT\ndescription: Dependent\nactions:\n"
+                + "  check: {type: tool, call: '#{remote.check()}'}\n");
+        assertEquals("app", discovery(config, null).tool("remote.check").sshHelper());
+        try (PackageResourceInspector inspector = inspector(config, null)) {
+            for (String type : new String[] {"tool", "template"}) {
+                Map<?, ?> row = (Map<?, ?>) ((List<?>) inspector.inspect("list", type, null, null, 0, 50).get("items")).get(0);
+                Map<?, ?> readiness = (Map<?, ?>) row.get("executionReadiness");
+                assertEquals("dependency-unresolved", readiness.get("state"));
+                assertTrue(readiness.toString().contains(MISSING));
+                assertFalse(readiness.toString().contains(root.toString()));
+            }
+        }
+        write("config/ssh.yaml", "schemaVersion: att-sshhelper/v1.0\nid: app\ndefaults: {user: deploy}\n"
+                + "instances: [{id: primary, host: localhost}]\n");
+        try (PackageResourceInspector inspector = inspector(config, null)) {
+            Map<?, ?> row = (Map<?, ?>) ((List<?>) inspector.inspect("list", "tool", null, null, 0, 50).get("items")).get(0);
+            assertEquals("not-validated", ((Map<?, ?>) row.get("executionReadiness")).get("state"));
+        }
+    }
+
+    @Test void discoveryStillRejectsStructurallyInvalidSshToolGroups() throws Exception {
+        Path config = config("toolGroups: [config/tools/remote.yaml]\n");
+        write("config/tools/remote.yaml", "schemaVersion: att-tool-group/v2.9\nid: remote\nname: Remote\ndescription: Remote tools\n"
+                + "ssh: {helper: absent, selection: {strategy: invalid}}\ntools:\n  check:\n    name: Check\n"
+                + "    description: Check remote status\n    command: [echo, safe]\n    stdoutFormat: text\n");
+        assertThrows(IllegalArgumentException.class, () -> discovery(config, null));
+    }
+
     private FrameworkConfig discovery(Path config, String environment) throws Exception {
         return new FrameworkConfigLoader().loadDiscovery(config, root, root, environment);
     }
