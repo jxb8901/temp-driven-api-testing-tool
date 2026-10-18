@@ -2897,7 +2897,9 @@ Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candida
 
 #### Recovery 及 expiry
 
-失敗時保留私有 output，並在可用時選擇 **Retry archive**。Restart 及定期 reconciliation 會透過相同發佈政策遷移 terminal legacy loose-output Jobs、驗證已原子提交但狀態未更新的 ZIP，並清理 staging 及剩餘 loose output；不會直接提供 legacy raw files。若來源已不存在，損壞 ZIP 無法重建，archive 會維持不可用。
+失敗時保留私有 output，並在可用時選擇 **Retry archive**。同時提出的 retry 會合併；若上一個 writer 正在結束，已接受的 retry 會保留為下一次 publication，不會被靜默丟棄。Restart 及定期 reconciliation 會透過相同發佈政策遷移 terminal legacy loose-output Jobs、驗證已原子提交但狀態未更新的 ZIP，並清理 staging 及剩餘 loose output；不會直接提供 legacy raw files。若來源已不存在，損壞 ZIP 無法重建，archive 會維持不可用。
+
+Worker 的 terminal RESULT 不代表 execution cleanup 已完成。Publication 會等到記憶體中的 execution 結束並釋放 admission lease。Restart 後，publication 和 retention 會檢查已保存的 Worker PID 與 start time；相符的 live process，或 start identity 未知的 live PID，會阻止 publication/deletion。Archive status `FAILED`、reason `worker_active` 會保留 private output；請在該 Worker 停止後 retry。已知但不同的 start time 表示 PID reuse，而非原本的 Worker。這些 parent-process 檢查尚不能證明任意 detached descendant 已被限制及停止。
 
 既有 `server.jobRetentionDays` 會連同 ZIP 一併到期刪除完整 Job；active readers/writers 存在時不會刪除使用中的 archive。Classification 及發佈結果寫入不含 raw values 的 audit。失敗的發佈不會刪除唯一未封存的來源。
 

@@ -488,6 +488,21 @@ final class JobStore implements AutoCloseable {
         try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT job_id,worker_pid,worker_start_time FROM jobs WHERE status IN ('QUEUED','PREPARING','RUNNING') AND worker_pid IS NOT NULL")) {while(r.next()){var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("pid",r.getLong(2));m.put("start",r.getString(3));rows.add(m);}}
         return rows;
     }
+    /** Terminal result delivery can precede process exit, including across a restart. */
+    synchronized boolean workerMayBeAlive(String id) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT worker_pid,worker_start_time FROM jobs WHERE job_id=?")) {
+            p.setString(1,id);
+            try(ResultSet r=p.executeQuery()) {
+                if(!r.next()||r.getObject(1)==null)return false;
+                java.util.Optional<ProcessHandle> process=ProcessHandle.of(r.getLong(1));
+                if(process.isEmpty()||!process.get().isAlive())return false;
+                String expected=r.getString(2);
+                java.util.Optional<Instant> actual=process.get().info().startInstant();
+                // Unknown process identity cannot prove the old writer has stopped.
+                return expected==null||actual.isEmpty()||expected.equals(actual.get().toString());
+            }
+        }
+    }
     synchronized void interruptStale(String id) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET status='ERROR',finished_at=?,diagnostic_json=? WHERE job_id=? AND status IN ('QUEUED','PREPARING','RUNNING')")) {
             p.setString(1,Instant.now().toString());p.setString(2,"{\"code\":\"ATT-SERVER-INTERRUPTED\",\"summary\":\"Job was interrupted by Server restart and was not rerun\"}");p.setString(3,id);p.executeUpdate();

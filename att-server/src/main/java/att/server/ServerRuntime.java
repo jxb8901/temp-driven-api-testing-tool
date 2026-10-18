@@ -72,8 +72,10 @@ final class ServerRuntime implements AutoCloseable {
     final AuthService auth;
     final ThreadPoolExecutor workers,streams,inspectors;
     private final ThreadPoolExecutor artifactWriters;
+    private final ArtifactPublisher artifactPublisher;
     private final Semaphore artifactReadSlots=new Semaphore(8,true);
     private final Set<String> pendingArtifactJobs=ConcurrentHashMap.newKeySet();
+    private final Set<String> requestedArtifactRetries=ConcurrentHashMap.newKeySet();
     private final java.util.concurrent.locks.ReentrantReadWriteLock artifactLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
@@ -111,8 +113,11 @@ final class ServerRuntime implements AutoCloseable {
         this(config,workerLibs,processLauncher,Clock.systemUTC());
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock) throws Exception {
+        this(config,workerLibs,processLauncher,clock,ArtifactArchive::build);
+    }
+    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.auth=new AuthService(config,store);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.auth=new AuthService(config,store);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -253,7 +258,27 @@ final class ServerRuntime implements AutoCloseable {
             else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
         } catch(InterruptedException e){Thread.currentThread().interrupt();stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
           catch(Exception e){stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
-        finally {if(job.process!=null&&!job.process.isAlive()){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;try{store.update(job);}catch(Exception ignored){}}if(job.terminal())scheduleArtifactArchive(job.id);tasks.remove(job.id);leases.remove(job.id);if(job.terminal())jobs.remove(job.id,job);lease.release();completed.incrementAndGet();}
+        finally {
+            boolean stopped=job.process==null||!job.process.isAlive();
+            if(stopped&&job.process!=null){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;try{store.update(job);}catch(Exception ignored){}}
+            tasks.remove(job.id);completed.incrementAndGet();
+            // A terminal RESULT is not the execution cleanup fence. Publish only
+            // after cleanup and admission release, never while this Job is active.
+            if(stopped)releaseStoppedWorker(job,lease);
+            else {
+                // A failed/interrupted kill must not free capacity or expose files
+                // until the exact Process reports exit. Keep the Job as a fence.
+                job.process.onExit().thenRun(()->releaseStoppedWorker(job,lease));
+            }
+        }
+    }
+    private void releaseStoppedWorker(Job job,AdmissionLease lease) {
+        if(job.process!=null&&job.process.isAlive())return;
+        if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();
+        job.process=null;
+        try{store.update(job);}catch(Exception ignored){}
+        leases.remove(job.id,lease);lease.release();
+        if(job.terminal()){jobs.remove(job.id,job);scheduleArtifactArchive(job.id);}
     }
     private List<String> workerClasspath() {
         return WorkerRuntimeClasspath.entries(workerLibs,config.workerLibraryDirs);
@@ -2161,17 +2186,22 @@ final class ServerRuntime implements AutoCloseable {
     void retryArtifactArchive(String id) throws Exception {
         if(!terminal(id))throw new IllegalArgumentException("Artifacts can be published after the Job has ended");
         if(!Files.isDirectory(outputDirectoryForJob(id)))throw new IllegalArgumentException("Private source output is unavailable for retry");
+        requestedArtifactRetries.add(id);
         scheduleArtifactArchive(id);
     }
     void scheduleArtifactArchive(String id) {
         if(closing||!pendingArtifactJobs.add(id))return;
+        requestedArtifactRetries.remove(id);
         try { artifactWriters.execute(() -> {
             artifactLifecycle.readLock().lock();
             Path output=outputDirectoryForJob(id), archive=artifactArchivePath(id);
             try {
                 if(store.get(id)==null||!terminal(id))return;
-                Job active=jobs.get(id);
-                if(active!=null&&active.process!=null&&active.process.isAlive())return;
+                if(jobs.containsKey(id))return;
+                if(store.workerMayBeAlive(id)) {
+                    archiveStatus(id,"FAILED","worker_active");
+                    return;
+                }
                 if(Files.isRegularFile(archive)) {
                     try { ArtifactArchive.verify(archive,true); }
                     catch(Exception corrupt) {
@@ -2183,7 +2213,7 @@ final class ServerRuntime implements AutoCloseable {
                     archiveStatus(id,"ARCHIVING","");
                     if(!Files.isDirectory(output))throw new java.io.IOException("Worker output is unavailable");
                     cleanupArtifactStaging(archive.getParent());
-                    ArtifactArchive.build(output,archive,file->publicArtifact(id,file));
+                    artifactPublisher.publish(output,archive,file->publicArtifact(id,file));
                 }
                 archiveStatus(id,"READY","");
                 store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,"READY");
@@ -2193,7 +2223,12 @@ final class ServerRuntime implements AutoCloseable {
                 boolean policy=failure instanceof IllegalArgumentException;
                 try {archiveStatus(id,"FAILED",policy?"policy_limit":"publication_failed");store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,policy?"REJECTED_POLICY":"FAILED_IO");}catch(Exception ignored){}
                 java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact publication failed for Job "+id);
-            } finally {pendingArtifactJobs.remove(id);artifactLifecycle.readLock().unlock();}
+            } finally {
+                pendingArtifactJobs.remove(id);artifactLifecycle.readLock().unlock();
+                // FAILED becomes observable before this task leaves the pending
+                // set. Coalesce, rather than lose, retries accepted in that gap.
+                if(requestedArtifactRetries.remove(id))scheduleArtifactArchive(id);
+            }
         }); } catch(RejectedExecutionException full) {
             pendingArtifactJobs.remove(id);
             // Recovery retries when writer capacity becomes available; a retry cannot replace a READY state.
@@ -2280,7 +2315,7 @@ final class ServerRuntime implements AutoCloseable {
         Instant cutoff=Instant.now().minus(java.time.Duration.ofDays(config.jobRetentionDays));
         if(!artifactLifecycle.writeLock().tryLock())return;
         try {
-            for(String id:store.expiredJobIds(cutoff))if(!jobs.containsKey(id)&&!pendingArtifactJobs.contains(id))try{
+            for(String id:store.expiredJobIds(cutoff))if(!jobs.containsKey(id)&&!pendingArtifactJobs.contains(id)&&!store.workerMayBeAlive(id))try{
                 deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);
             }catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to remove expired ATT Server job "+id);}
         } finally {artifactLifecycle.writeLock().unlock();}
@@ -2297,6 +2332,7 @@ final class ServerRuntime implements AutoCloseable {
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
+    @FunctionalInterface interface ArtifactPublisher { Path publish(Path output,Path archive,ArtifactArchive.Publisher publisher) throws Exception; }
     private static final class AdmissionLease {
         private final Semaphore admission,load;private final java.util.concurrent.atomic.AtomicBoolean released=new java.util.concurrent.atomic.AtomicBoolean();
         AdmissionLease(Semaphore admission,Semaphore load){this.admission=admission;this.load=load;}

@@ -2977,7 +2977,9 @@ Every route requires the shared OPERATE capability. Active USER accounts can acc
 
 #### Recover and expire archives
 
-After a failure, keep the private output and use **Retry archive** when available. Restart and periodic reconciliation retry terminal legacy loose-output Jobs through this same publication contract. Recovery validates a ZIP committed before its status update and removes abandoned staging and leftover loose output. It never serves legacy raw files directly. A missing private source cannot be reconstructed from a corrupt ZIP; the archive remains unavailable.
+After a failure, keep the private output and use **Retry archive** when available. Concurrent retries are coalesced; a retry accepted while the previous writer is finishing is retained for one follow-up publication instead of being silently dropped. Restart and periodic reconciliation retry terminal legacy loose-output Jobs through this same publication contract. Recovery validates a ZIP committed before its status update and removes abandoned staging and leftover loose output. It never serves legacy raw files directly. A missing private source cannot be reconstructed from a corrupt ZIP; the archive remains unavailable.
+
+A terminal Worker RESULT is not an execution-cleanup fence. Publication waits until the in-memory execution has finished and its admission lease is released. On restart, publication and retention check the persisted Worker PID and start time; a matching live process, or a live PID with unknown start identity, prevents publication/deletion. Archive status `FAILED` with reason `worker_active` preserves the private output; retry after that Worker has stopped. A different known start time identifies PID reuse, not the original Worker. These parent-process checks do not yet prove containment of arbitrary detached descendants.
 
 The existing `server.jobRetentionDays` policy expires the complete Job, including its ZIP. Retention waits for active archive readers/writers rather than deleting a file in use. Classification and publication outcomes are audited without raw values. Publication failures never delete the only unarchived source.
 
