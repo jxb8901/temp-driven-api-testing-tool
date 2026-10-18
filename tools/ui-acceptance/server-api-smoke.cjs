@@ -221,7 +221,16 @@ async function main() {
       return button && !button.disabled;
     });
     await page.getByRole('button', { name: 'Validate' }).click();
-    await page.getByText('The Server accepted this draft for review.').waitFor();
+    await page.waitForFunction(() => {
+      const state = document.querySelector('.att-quick-load-page .att-validation-state');
+      const message = state?.textContent || '';
+      return state?.getAttribute('aria-busy') === 'false'
+        && !message.includes('Validating the single-target scenario on the Server…')
+        && message !== 'Validate this single target before running.';
+    });
+    const quickLoadValidation = await page.locator('.att-quick-load-page .att-validation-state').innerText();
+    assert.ok(quickLoadValidation.includes('The Server accepted this draft for review.'),
+      `Quick Load should validate a ready Flow under UAT: ${quickLoadValidation}`);
     assert.equal(await page.getByRole('button', { name: 'Run Now' }).isDisabled(), false,
       'a ready Flow should validate as a Quick Load target under UAT');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
