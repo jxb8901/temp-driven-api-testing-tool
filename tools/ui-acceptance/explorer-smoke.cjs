@@ -475,12 +475,15 @@ async function main() {
     await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
     await page.getByText(/^Next run:/).waitFor();
     await page.getByRole('button', { name: 'Save schedule', exact: true }).click();
-    await page.waitForURL(`**/#${quickLoadUrl.split('#')[1]}`);
-    await page.getByRole('heading', { name: 'Quick Load', level: 1 }).waitFor();
+    await page.locator('#schedules-title').waitFor();
+    await page.getByText(/Saved .*\(ID: schedule-inline-99\)/).waitFor();
+    await page.getByRole('button', { name: 'View schedule history', exact: true }).waitFor();
+    assert.match(page.url(), /#\/schedules$/);
     assert.equal(submittedScheduleInput.draftId, 'LOAD-DRAFT-QUICK-99');
     assert.equal(submittedScheduleInput.executionType, 'load');
     assert.equal(Object.hasOwn(submittedScheduleInput, 'scenario'), false, 'scheduling submits the validated draft ID, not a scenario path');
-    assert.equal(page.url(), quickLoadUrl, 'Saving returns to the originating Quick Load route');
+    await page.goto(quickLoadUrl);
+    await page.getByRole('heading', { name: 'Quick Load', level: 1 }).waitFor();
     assert.deepEqual(pageErrors, [], 'Configuration and Quick Load should not produce uncaught browser errors');
 
     authFailure = true;
