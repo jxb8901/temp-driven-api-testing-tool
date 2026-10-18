@@ -7,6 +7,10 @@ import { api } from './api';
 import type { JobSummary } from './types';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+if (!HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+  HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+}
 
 describe('App Dashboard job refresh', () => {
   let host: HTMLDivElement;
@@ -97,5 +101,67 @@ describe('App Dashboard job refresh', () => {
     expect(getJobs).toHaveBeenCalledTimes(2);
     expect(host.querySelector('[aria-label="Dashboard summary"]')?.textContent).toContain('PASS');
     expect(host.querySelector('[aria-label="Dashboard summary"]')?.textContent).toContain('1');
+  });
+
+  it('keeps a dirty Quick Load environment switch transactional across Cancel and Confirm', async () => {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search
+      + '#/quick-load/payments/template/checkout?environment=SIT');
+    vi.mocked(api.getVersion).mockResolvedValue({ apiVersion: '1', inlineLoadEnabled: true });
+    vi.spyOn(api, 'getDeclaredConfiguration').mockResolvedValue({ environments: [
+      { name: 'SIT', state: 'active' }, { name: 'UAT', state: 'active' },
+    ] });
+    vi.spyOn(api, 'getLoadPolicy').mockImplementation(async (_packageId, _model, environment) => ({
+      model: 'virtualUsers',
+      policy: { schemaVersion: 'att-load/v1.6', load: environment === 'UAT' ? { users: 9, duration: '90s' } : { users: 2, duration: '30s' } },
+    }));
+    vi.spyOn(api, 'getTargetLoadForm').mockImplementation(async (_packageId, type, resourceId, _model, environment) => ({
+      target: { type, id: resourceId }, model: 'virtualUsers',
+      input: { inputs: { region: environment === 'UAT' ? 'uat-region' : 'sit-region' }, vars: {} },
+    }));
+    vi.spyOn(api, 'getJobs').mockResolvedValue({ items: [] });
+
+    await act(async () => root.render(<App />));
+    await settle();
+    expect(host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')?.value).toBe('30s');
+    const environmentText = () => [...host.querySelectorAll<HTMLElement>('.context-chip')]
+      .find(item => item.querySelector('span')?.textContent === 'Environment')?.querySelector('strong')?.textContent;
+    const initialSharedEnvironment = environmentText();
+
+    const duration = host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(duration, '5m');
+      duration.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const environment = () => host.querySelectorAll('select')[2] as HTMLSelectElement;
+    await act(async () => {
+      environment().value = 'UAT';
+      environment().dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(host.querySelector('.discard-dialog[open]')).not.toBeNull();
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Stay on this page')!.click());
+    await settle();
+    expect(window.location.hash).toContain('environment=SIT');
+    expect(environment().value).toBe('SIT');
+    expect(environmentText()).toBe(initialSharedEnvironment);
+    expect(host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')?.value).toBe('5m');
+
+    await act(async () => {
+      environment().value = 'UAT';
+      environment().dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(host.querySelector('.discard-dialog[open]')).not.toBeNull();
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Discard changes and continue')!.click());
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    await settle();
+
+    expect(window.location.hash).toContain('environment=UAT');
+    expect(environmentText()).toBe('UAT');
+    expect(host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')?.value).toBe('90s');
+    expect(host.querySelector<HTMLInputElement>('input[type="number"]')?.value).toBe('9');
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="region value"]')?.value).toBe('uat-region');
+
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Back to Explorer')!.click());
+    expect(host.querySelector('.discard-dialog[open]')).toBeNull();
+    expect(window.location.hash).not.toContain('quick-load');
   });
 });

@@ -153,6 +153,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
   const identityKey = activeTarget ? `${packageId}:${activeTarget.type}:${activeTarget.resourceId}:${activeTarget.logicalId || ''}` : `${packageId}:select-target`;
   const availableTemplates = templates;
   const previousIdentity = useRef(identityKey);
+  const previousEnvironment = useRef(environment);
   const dirtyRef = useRef(false);
   const templateBusiness = useRef<SidecarObject>({ inputs: {}, vars: {} });
   const policySequence = useRef(0);
@@ -193,6 +194,26 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
 
   useEffect(() => registerUnsavedChanges(dirty, 'Quick Load draft'), [dirty, registerUnsavedChanges]);
   useEffect(() => () => { validationController.current?.abort(); }, []);
+  useEffect(() => {
+    if (previousEnvironment.current === environment) return;
+    previousEnvironment.current = environment;
+    invalidateDraft();
+    dirtyRef.current = false;
+    setDirty(false);
+    setBusiness({ inputs: {}, vars: {} });
+    setBusinessValid(true);
+    templateBusiness.current = { inputs: {}, vars: {} };
+    setModel(initialModel);
+    setTemplateId(initialTemplateId);
+    setPreset('package-policy');
+    setUsers('1'); setTps('1/s'); setMaxConcurrent('1'); setDuration('');
+    setTiming({ warmup: '', rampUp: '', rampDown: '' });
+    setAdvanced({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '' });
+    setLogicalTargetId(target?.logicalId || '');
+    pendingModelPolicySelection.current = false;
+    pendingTemplatePolicySelection.current = false;
+    setResetKey(value => value + 1);
+  }, [environment, initialModel, initialTemplateId, target?.logicalId]);
   useEffect(() => {
     const identityChanged = previousIdentity.current !== identityKey;
     if (identityChanged) { previousIdentity.current = identityKey; invalidateDraft(); dirtyRef.current = false; setDirty(false); setBusiness({ inputs: {}, vars: {} }); setLogicalTargetId(activeTarget?.logicalId || ''); }
@@ -367,7 +388,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
           {availableTemplates.map(item => <option key={item.id} value={item.id}>{item.name} · {item.model === 'virtualUsers' ? 'Virtual Users' : 'Arrival Rate'}{item.bundled ? ' · bundled' : ''}</option>)}
         </select><small className="att-help">Selecting a template loads its supported settings into this single-target draft. It never starts a job; validate before running.{templateCatalogTruncated ? ' The package template catalog reached its display limit.' : ''}</small></label>
         <label>Load model<select value={model} onChange={event => selectModel(event.currentTarget.value as LoadModel)} disabled={!inlineLoadEnabled}><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select></label>
-        <label>Environment<select value={environment} onChange={event => { invalidateDraft(); onEnvironmentChange(event.currentTarget.value); setPreset('custom'); dirtyRef.current = true; setDirty(true); }}><option value="">Package default</option>{environments.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label>Environment<select value={environment} onChange={event => onEnvironmentChange(event.currentTarget.value)}><option value="">Package default</option>{environments.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
         {model === 'virtualUsers' ? <label>Users<input type="number" min="1" step="1" value={users} onChange={event => change(setUsers, event.currentTarget.value)} /></label>
           : <label>Target TPS<input value={tps} onChange={event => change(setTps, event.currentTarget.value)} placeholder="e.g. 5/s" /></label>}
         {model === 'arrivalRate' && <label>Maximum concurrent<input type="number" min="1" step="1" value={maxConcurrent} onChange={event => change(setMaxConcurrent, event.currentTarget.value)} /></label>}

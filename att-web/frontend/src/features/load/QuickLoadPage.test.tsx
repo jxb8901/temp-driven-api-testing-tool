@@ -9,7 +9,13 @@ import { ApiError } from '../../types';
 vi.mock('../code/CodeEditor', () => ({
   CodeEditor: ({ value, label }: { value: string; label: string }) => <pre aria-label={label}>{value}</pre>,
 }));
-vi.mock('../explorer/TypedSidecarForm', () => ({ TypedSidecarForm: () => <div>Target inputs</div> }));
+vi.mock('../explorer/TypedSidecarForm', () => ({
+  TypedSidecarForm: ({ value, onChange }: {
+    value: { inputs?: Record<string, unknown>; [key: string]: unknown };
+    onChange: (value: { inputs: Record<string, unknown>; [key: string]: unknown }) => void;
+  }) => <><div>Target inputs</div><input aria-label="Target input region" value={String(value.inputs?.region ?? '')}
+    onChange={event => onChange({ ...value, inputs: { ...value.inputs, region: event.currentTarget.value } })} /></>,
+}));
 
 let host: HTMLDivElement;
 let root: Root;
@@ -28,6 +34,60 @@ async function flush() {
 }
 
 describe('QuickLoadPage', () => {
+  it('reloads policy and sidecar defaults for an accepted pristine environment switch', async () => {
+    let environment = 'SIT';
+    const api = {
+      getLoadPolicy: vi.fn(async (_packageId: string, _model: 'virtualUsers' | 'arrivalRate', selectedEnvironment?: string) => ({
+        model: 'virtualUsers' as const,
+        policy: { schemaVersion: 'att-load/v1.6', load: selectedEnvironment === 'UAT' ? { users: 7, duration: '90s' } : { users: 2, duration: '30s' } },
+      })),
+      getTargetLoadForm: vi.fn(async (_packageId: string, type: LoadTargetType, resourceId: string, _model: 'virtualUsers' | 'arrivalRate', selectedEnvironment?: string) => ({
+        target: { type, id: resourceId }, model: 'virtualUsers' as const,
+        input: { inputs: { region: selectedEnvironment === 'UAT' ? 'uat-region' : 'sit-region' }, vars: {} },
+      })),
+      createLoadDraft: vi.fn(async () => ({
+        draftId: 'L0123456789ABCDEF0123456789ABCDEF', packageId: 'payments', model: 'virtualUsers' as const,
+        previewYaml: 'schemaVersion: att-load/v1.6\n', expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      })),
+    } as unknown as LoadJobsApi;
+    const onEnvironmentChange = vi.fn();
+    const renderPage = () => root.render(<QuickLoadPage api={api} packageId="payments"
+      target={{ type: 'template', resourceId: 'checkout' }} environment={environment}
+      environments={['SIT', 'UAT']} environmentState="ready" inlineLoadEnabled
+      onEnvironmentChange={onEnvironmentChange} onJobAccepted={vi.fn()} onCancel={vi.fn()}
+      registerUnsavedChanges={() => () => {}} />);
+    await act(async () => renderPage());
+    await flush();
+    expect(host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')?.value).toBe('30s');
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Target input region"]')?.value).toBe('sit-region');
+
+    await act(async () => {
+      const select = host.querySelectorAll('select')[2] as HTMLSelectElement;
+      select.value = 'UAT';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      environment = 'UAT';
+      renderPage();
+    });
+    await flush();
+
+    expect(onEnvironmentChange).toHaveBeenCalledWith('UAT');
+    expect(api.getLoadPolicy).toHaveBeenLastCalledWith('payments', 'virtualUsers', 'UAT', expect.any(AbortSignal), undefined);
+    expect(api.getTargetLoadForm).toHaveBeenLastCalledWith('payments', 'template', 'checkout', 'virtualUsers', 'UAT', expect.any(AbortSignal));
+    expect(host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')?.value).toBe('90s');
+    expect(host.querySelector<HTMLInputElement>('input[type="number"]')?.value).toBe('7');
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Target input region"]')?.value).toBe('uat-region');
+
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!.click());
+    await flush();
+    const input = vi.mocked(api.createLoadDraft).mock.calls[0][0];
+    const scenario = input.scenario as Record<string, unknown>;
+    const workload = (scenario.workloads as Array<Record<string, unknown>>)[0];
+    expect(input.environment).toBe('UAT');
+    expect(workload.load).toEqual({ users: 7 });
+    expect(workload.inputs).toEqual({ region: 'uat-region' });
+    expect((scenario.load as Record<string, unknown>).duration).toBe('90s');
+  });
+
   it('shows server diagnostics and focuses the matching field from the review action', async () => {
     const api = {
       getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
