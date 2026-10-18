@@ -100,7 +100,22 @@ public final class ApiServlet extends HttpServlet {
                 }
                 return;
             }
-            if(path.startsWith("/jobs/")&&path.contains("/artifacts/view/")){String prefix=path.substring(0,path.indexOf("/artifacts/view/"));String id=segment(prefix,2);String relative=path.substring(path.indexOf("/artifacts/view/")+"/artifacts/view/".length());byte[] bytes=runtime.archiveEntry(id,relative);String ext=relative.substring(relative.lastIndexOf('.')+1).toLowerCase(java.util.Locale.ROOT);String mime=switch(ext){case "html","htm"->"text/html";case "css"->"text/css";default->"text/plain";};res.setHeader("X-Frame-Options","SAMEORIGIN");res.setHeader("Referrer-Policy","no-referrer");res.setContentType(mime+"; charset=UTF-8");res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Cache-Control","private, no-store");res.setHeader("Content-Disposition","inline");if("html".equals(ext)||"htm".equals(ext))res.setHeader("Content-Security-Policy","sandbox allow-scripts; "+ArtifactHtmlPolicy.CONTENT_POLICY+"; frame-ancestors 'self'");res.setContentLengthLong(bytes.length);res.getOutputStream().write(bytes);return;}
+            if(path.startsWith("/jobs/")&&path.contains("/artifacts/view/")) {
+                int boundary=path.indexOf("/artifacts/view/");
+                String id=segment(path.substring(0,boundary),2),relative=path.substring(boundary+"/artifacts/view/".length());
+                byte[] bytes=runtime.archiveEntry(id,relative);
+                String ext=relative.substring(relative.lastIndexOf('.')+1).toLowerCase(java.util.Locale.ROOT);
+                boolean html="html".equals(ext)||"htm".equals(ext);
+                String mime=html?"text/html":"css".equals(ext)?"text/css":"text/plain";
+                res.setHeader("X-Frame-Options","SAMEORIGIN");res.setHeader("Referrer-Policy","no-referrer");
+                res.setContentType(mime+"; charset=UTF-8");res.setHeader("X-Content-Type-Options","nosniff");
+                res.setHeader("Cache-Control","private, no-store");res.setHeader("Content-Disposition","inline");
+                // Text destinations must remain navigable inside the report iframe, not inherit API frame denial.
+                String policy=html?"sandbox allow-scripts; "+ArtifactHtmlPolicy.CONTENT_POLICY
+                        :"sandbox; default-src 'none'; base-uri 'none'; form-action 'none'";
+                res.setHeader("Content-Security-Policy",policy+"; frame-ancestors 'self'");
+                res.setContentLengthLong(bytes.length);res.getOutputStream().write(bytes);return;
+            }
             if(path.startsWith("/jobs/")&&path.contains("/artifacts/"))throw new ServerRuntime.NotFoundException();
             if(path.matches("/jobs/[^/]+/artifacts")){String id=segment(path,2);Map<String,Object> listing=runtime.artifactIndex(id,parseOffset(req.getParameter("offset")),parseConfigurationLimit(req.getParameter("limit")));listing.put("requestId",requestId);json(res,200,listing);return;}
             if(path.matches("/jobs/[^/]+/result")){Map<String,Object> result=runtime.resultRecord(segment(path,2));result.put("requestId",requestId);json(res,200,result);return;}

@@ -190,6 +190,7 @@ class AuthenticationIntegrationTest {
                 assertEquals(401,send(client,port,"GET",route,null,null,null).statusCode(),"Anonymous access denied: "+route);
             }
             HttpResponse<String> archivedLog=sendWithCookie(client,port,"GET",artifactBase+"/view/case.log",viewerCookie,null,null,null);
+            assertEquals("sandbox; default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",archivedLog.headers().firstValue("Content-Security-Policy").orElseThrow());
             assertFalse(archivedLog.body().contains("export-canary"));assertTrue(archivedLog.body().contains("business=preserved"));
             assertTrue(archivedLog.headers().firstValue("Content-Type").orElseThrow().startsWith("text/plain"));
             HttpResponse<String> archivedHtml=sendWithCookie(client,port,"GET",artifactBase+"/view/report.html",viewerCookie,null,null,null);

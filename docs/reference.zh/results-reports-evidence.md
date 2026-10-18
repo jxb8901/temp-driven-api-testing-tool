@@ -1,5 +1,48 @@
 # 結果、報告與 evidence
 
+## ATT Server Job artifact 發佈
+
+Worker 檔案在 Server 核准其最終 bytes 前，均屬 **Raw/Trusted Worker Output**；只符合目錄邊界不代表可安全匯出。此邊界適用於 RUN（含 Debug mode、Case、Template、Flow、Tool、batch）、LOAD 及保留的 legacy Jobs。
+
+執行結束後，Server 非同步建立唯一的 `artifacts.zip`。Archive 狀態為 `PENDING`、`ARCHIVING`、`READY` 或 `FAILED`，與 Job result 分開；PASS/FAIL/ERROR/INVALID/CANCELLED 不會因發佈未完成而改變。驗證及原子發佈成功後刪除 loose output。ZIP 是唯一持久 artifact payload；metadata、audit、events 及 archive-status 記錄另行保留。
+
+### 發佈及敏感資料政策
+
+只接納一般、非 symlink 的 UTF-8 檔案，副檔名包括 `txt`、`log`、`json`、`yaml`、`yml`、`xml`、`html`、`htm`、`css`、`csv`、`md`。Binary、無效 UTF-8、無效 structured data、巢狀 archive 及不支援格式會被排除；公開 manifest 不會列出被拒絕的檔名。Studio 會顯示 omissions，不會把不完整匯出稱為完整 raw output。
+
+Logs、文字、XML、HTML、CSV 會套用必要的 secret-field、authorization header、bearer/basic token、連線 URL 憑證、private key 及 cookie 保護，並投影 host-local paths。JSON/YAML（包括 Tool/DB 結果、服務回應及 Evidence）先經有界 safe loader 解析，再遞迴保護敏感欄位及明確分類為 `secret` 的 record，最後序列化為有效格式。一般 business values（包括姓名或可能受規管的資料）若不符合明確敏感規則便會保留；不提供任意 PII 自動偵測。操作 Job 的授權不等於 raw-secret 匯出權限，也沒有公開 raw-export 或 raw-file fallback。
+
+支援的敏感名稱包括 password/passphrase、token、secret、credentials、API/access/private key、authorization、cookies。敏感 business data 應放在明確敏感的欄位，或把其所屬 structured record 分類為 `secret`。
+
+HTML 發佈前經 parser 清理：保留已核准的 relative links、inline styling 及 digest allowlist 中經審核的內建 RUN search/sort script；移除其他 script、active markup、external links、base URL 及離開已核准 archive 的 navigation。缺少或排除的 evidence link 會標示 unavailable。最終 HTML 內含 offline CSP；online viewer 另加 opaque-origin sandbox、相同 restrictive CSP、禁止 forms 及 Studio-origin 權限。任意自訂 raw HTML 的 controls 因而可能與發佈版本不同。
+
+### Manifest 及 Resource limits
+
+`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-safe-text-v2`。每個 entry 記錄 logical path、media type、byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用完全相同的最終 bytes；GET 不會再次獨立遮罩。
+
+Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candidates、深度 64、10,000 已發佈 entries、每項 16 MiB、總 bytes 128 MiB、manifest 8 MiB。超出總量上限會使發佈失敗並保留私有來源。ZIP 使用 STORED encoding，避免重複 log 的 compression-ratio 歧義。Reader 拒絕不安全路徑、control characters、encoded traversal、重複或大小寫衝突名稱、過大或高壓縮比 entries、未列入 manifest 的 entries 及 integrity mismatch。Writer 為單一有界佇列，同時最多八個 artifact reads。
+
+### 檢視及下載 Job archive
+
+在 Job Details 開啟 **Artifacts**。報告清單獨立於分頁；使用 **View Report** 或 **Preview** 開啟內容。文字 viewer 提供唯讀、search、copy、line numbers，顯示最多 200,000 characters；**Load more artifacts** 載入後續頁面。**Download Artifacts (.zip)** 是唯一下載操作。解壓後可直接開啟 HTML，relative links 保持相同 archive hierarchy。
+
+解壓後的 `file://` 報告由瀏覽器決定如何開啟 linked file types；例如 Chromium 可能下載 linked YAML，而非直接顯示。Link 仍指向同一份已核准的解壓 bytes；Studio 會在 viewer 中以 inline text 提供這些 entries。
+
+| 方法 | 相對於 `/api/v1` 的路徑 | 結果 |
+|---|---|---|
+| GET | `/jobs/{jobId}/artifacts?offset=0&limit=100` | Archive 狀態、分頁 entries、完整 primary reports 及安全 omissions |
+| GET | `/jobs/{jobId}/artifacts/archive.zip` | 已驗證的最終 ZIP attachment |
+| GET | `/jobs/{jobId}/artifacts/view/{entryPath}` | Manifest 核准的 HTML/CSS 或 inline text，保留相對目錄 |
+| POST | `/jobs/{jobId}/artifacts/retry` | 私有來源仍存在時，安排 terminal Job 重試發佈 |
+
+所有路徑均要求共用 OPERATE capability。Active USER 可存取其他 USER 建立的已核准 Job archives；creator 僅作 audit metadata。ADMIN-only 沒有隱含操作權限。Authentication、disabled-account 檢查、local CSRF 及設定的 Origin 政策均適用。回應使用 private/no-store；loose-file download 回傳 404。未完成或不可用 archive 回傳 `ATT-SERVER-ARCHIVE-UNAVAILABLE`（409）；read capacity 已滿則回傳 `ATT-SERVER-ARTIFACT-CAPACITY`（503）。
+
+### Recovery 及 expiry
+
+失敗時保留私有 output，並在可用時選擇 **Retry archive**。Restart 及定期 reconciliation 會透過相同發佈政策遷移 terminal legacy loose-output Jobs、驗證已原子提交但狀態未更新的 ZIP，並清理 staging 及剩餘 loose output；不會直接提供 legacy raw files。若來源已不存在，損壞 ZIP 無法重建，archive 會維持不可用。
+
+既有 `server.jobRetentionDays` 會連同 ZIP 一併到期刪除完整 Job；active readers/writers 存在時不會刪除使用中的 archive。Classification 及發佈結果寫入不含 raw values 的 audit。失敗的發佈不會刪除唯一未封存的來源。
+
 Run 會執行 authored Testcase，並為每個選中的 row 記錄一次 Case execution。Testcase 是 Workbook data；Case execution 是使用相同完整 Case ID 標識的 runtime result。閱讀 status、日誌、報表和 evidence 時使用 Case execution。
 
 | 任務 | 前往 |

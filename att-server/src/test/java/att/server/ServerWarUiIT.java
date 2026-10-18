@@ -30,6 +30,118 @@ class ServerWarUiIT {
     @TempDir Path temp;
 
     @Test
+    void packagedWarPublishesRunAndMultiWorkloadLoadArchives() throws Exception {
+        Path war=Path.of(System.getProperty("att.server.war"));
+        assertTrue(Files.isRegularFile(war));
+        Path home=createScheduledLocalRuntime();
+        Path packages=Files.createDirectories(temp.resolve("packages"));
+        Path pkg=Files.createDirectory(packages.resolve("payments"));
+        writeScheduledPackage(pkg,home);
+        copySchemas(pkg);
+        Files.writeString(pkg.resolve("templates/SCHEDULED/debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var out=Files.newOutputStream(pkg.resolve("testcase/archive.xlsx"))) {
+            var sheet=book.createSheet("Cases");var header=sheet.createRow(0);header.createCell(0).setCellValue("ID");header.createCell(1).setCellValue("Template");header.createCell(2).setCellValue("Tags");
+            var row=sheet.createRow(1);row.createCell(0).setCellValue("C1");row.createCell(1).setCellValue("name: SCHEDULED");row.createCell(2).setCellValue("smoke");book.write(out);
+        }
+        Files.writeString(pkg.resolve("testcase/archive.yaml"),"schemaVersion: att-sidecar/v2.2\nid: archive\nexcel:\n  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
+        new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(pkg,home.resolve("config/config.yaml"),"SIT",List.of(pkg.resolve("testcase/archive.xlsx")),null,Set.of(),false));
+        Files.writeString(pkg.resolve("load/archive.yaml"),
+                "schemaVersion: att-load/v1.6\nevidence:\n  mode: all\nworkloads:\n"
+                +"  - id: first\n    target: {type: template, id: SCHEDULED}\n    load: {users: 1, duration: 300ms}\n    execution: {thinkTime: 50ms}\n"
+                +"  - id: second\n    target: {type: template, id: SCHEDULED}\n    load: {users: 1, duration: 300ms}\n    execution: {thinkTime: 50ms}\n");
+        Path config=Files.writeString(temp.resolve("server.yaml"),
+                "server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))+"\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n"
+                +"workers:\n  maxConcurrent: 1\n  queuedLimit: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    payments: "+yaml(pkg)+"\n");
+        Path users=Files.writeString(temp.resolve("users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/>"
+                +"<user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"colleague\" password=\"secret\" roles=\"ATT_USER\"/>"
+                +"<user username=\"admin\" password=\"secret\" roles=\"ATT_ADMIN\"/></tomcat-users>");
+        String oldConfig=System.getProperty("att.server.config"),oldHome=System.getProperty("att.home");
+        System.setProperty("att.server.config",config.toString());System.setProperty("att.home",home.toString());
+        Tomcat tomcat=new Tomcat();tomcat.setBaseDir(temp.resolve("tomcat").toString());tomcat.setPort(0);tomcat.getConnector();
+        MemoryRealm realm=new MemoryRealm();realm.setPathname(users.toString());tomcat.getEngine().setRealm(realm);
+        ((StandardHost)tomcat.getHost()).setUnpackWARs(false);tomcat.addWebapp("/tools/att",war.toString());
+        try {
+            tomcat.start();int port=tomcat.getConnector().getLocalPort();String origin="http://127.0.0.1:"+port,api="/tools/att/api/v1";
+            String auth=basic("att"),peer=basic("colleague"),admin=basic("admin");
+            var fixtures=new java.util.ArrayList<Map<String,Object>>();
+            for(String command:List.of("run","load")) {
+                Object input="run".equals(command)?Map.of("packageId","payments","suites",List.of("testcase/archive.xlsx"))
+                        :Map.of("packageId","payments","scenario","load/archive.yaml");
+                String id=apiJsonResponse(port,"POST",api+"/jobs/"+command,auth,origin,input,202).path("jobId").asText();
+                JsonNode index=awaitArchive(port,api,id,peer);
+                assertEquals("PASS",getJson(port,api+"/jobs/"+id,peer).path("status").asText(),getJson(port,api+"/jobs/"+id+"/result",peer).toString());
+                assertTrue(index.path("primaryReports").size()>0,index.toString());
+                String archiveRoute=api+"/jobs/"+id+"/artifacts/archive.zip";
+                HttpURLConnection download=open(port,archiveRoute,peer);byte[] bytes;
+                try {
+                    assertEquals(200,download.getResponseCode());assertEquals("application/zip",download.getContentType());
+                    assertTrue(download.getHeaderField("Content-Disposition").contains("attachment"));
+                    try(var in=download.getInputStream()){bytes=in.readAllBytes();}
+                } finally {download.disconnect();}
+                Path zip=Files.write(temp.resolve(id+".zip"),bytes);JsonNode manifest=ServerRuntime.JSON.valueToTree(ArtifactArchive.verify(zip,true));
+                Path extracted=Files.createDirectory(temp.resolve(id+"-offline"));
+                try(var archive=new java.util.zip.ZipFile(zip.toFile())) {
+                    for(JsonNode entry:manifest.path("entries")) {
+                        String logical=entry.path("path").asText();byte[] published;
+                        try(var in=archive.getInputStream(archive.getEntry(logical))){published=in.readAllBytes();}
+                        HttpURLConnection preview=open(port,api+"/jobs/"+id+"/artifacts/view/"+encodeEntry(logical),peer);
+                        try {
+                            assertEquals(200,preview.getResponseCode(),logical);assertTrue(preview.getHeaderField("Cache-Control").contains("no-store"));
+                            assertFalse(preview.getHeaderField("Content-Disposition").contains("attachment"));
+                            try(var in=preview.getInputStream()){assertArrayEquals(published,in.readAllBytes(),logical);}
+                            if(entry.path("report").asBoolean())assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox allow-scripts"));
+                            else assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox; default-src 'none'"));
+                            assertTrue(preview.getHeaderField("Content-Security-Policy").contains("frame-ancestors 'self'"));
+                        } finally {preview.disconnect();}
+                        Path target=extracted.resolve(logical).normalize();assertTrue(target.startsWith(extracted));
+                        Files.createDirectories(target.getParent());Files.write(target,published);
+                    }
+                }
+                for(JsonNode report:index.path("primaryReports")) {
+                    Path html=extracted.resolve(report.path("path").asText());
+                    for(var link:org.jsoup.Jsoup.parse(Files.readString(html)).select("a[href]")) {
+                        java.net.URI href=new java.net.URI(link.attr("href"));assertFalse(href.isAbsolute());
+                        Path destination=href.getPath().isEmpty()?html:html.getParent().resolve(href.getPath()).normalize();
+                        assertTrue(Files.isRegularFile(destination),link.outerHtml());
+                    }
+                }
+                for(String route:List.of(api+"/jobs/"+id+"/artifacts",archiveRoute,
+                        api+"/jobs/"+id+"/artifacts/view/"+encodeEntry(index.path("primaryReports").get(0).path("path").asText()))) {
+                    assertEquals(401,get(port,route,null));assertEquals(403,get(port,route,admin));assertEquals(200,get(port,route,auth));
+                }
+                long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+                Path output=temp.resolve("data/jobs").resolve(id).resolve("output");
+                while(Files.exists(output)&&System.nanoTime()<deadline)Thread.sleep(10);
+                assertFalse(Files.exists(output),"Verified publication must remove loose output");
+                assertEquals(404,get(port,api+"/jobs/"+id+"/artifacts/"+encodeEntry(index.path("primaryReports").get(0).path("path").asText()),peer));
+                fixtures.add(Map.of("jobId",id,"archivePath",zip.toString(),"offlineRoot",extracted.toString(),"reports",index.path("primaryReports"),"entries",manifest.path("entries")));
+            }
+            if("1".equals(System.getenv("ATT_UI_SERVER_PLAYWRIGHT"))) {
+                Path fixture=Files.write(temp.resolve("archive-browser.json"),ServerRuntime.JSON.writeValueAsBytes(fixtures));
+                Path log=temp.resolve("archive-browser.log");
+                Process browser=new ProcessBuilder("node","artifact-archive-smoke.cjs",origin,fixture.toString())
+                        .directory(Path.of("tools/ui-acceptance").toFile()).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+                if(!browser.waitFor(120,TimeUnit.SECONDS)){browser.destroyForcibly();fail("Archive browser timeout: "+Files.readString(log));}
+                assertEquals(0,browser.exitValue(),Files.readString(log));
+            }
+        } finally {
+            try{tomcat.stop();}finally{tomcat.destroy();}
+            if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);
+            if(oldHome==null)System.clearProperty("att.home");else System.setProperty("att.home",oldHome);
+        }
+    }
+
+    private static String basic(String username) {return "Basic "+Base64.getEncoder().encodeToString((username+":secret").getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+    private static String encodeEntry(String path) {return java.util.Arrays.stream(path.split("/")).map(p->java.net.URLEncoder.encode(p,java.nio.charset.StandardCharsets.UTF_8).replace("+","%20")).collect(java.util.stream.Collectors.joining("/"));}
+    private static JsonNode awaitArchive(int port,String api,String id,String auth) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(45);JsonNode index;
+        do {index=getJson(port,api+"/jobs/"+id+"/artifacts",auth);if("READY".equals(index.path("archiveStatus").asText()))return index;
+            assertNotEquals("FAILED",index.path("archiveStatus").asText(),index.toString());Thread.sleep(30);
+        }while(System.nanoTime()<deadline);
+        fail("Archive did not become READY: "+index);return index;
+    }
+
+    @Test
     void packagedWarServesAuthenticatedUiAssetsUnderNonRootContext() throws Exception {
         Path war = Path.of(System.getProperty("att.server.war"));
         assertTrue(Files.isRegularFile(war), "Packaged server WAR must exist: " + war);
@@ -574,11 +686,11 @@ class ServerWarUiIT {
         assertFalse(publicText.contains(packageRoot.toString()),publicText);
         assertTrue(publicText.contains("flow.yaml"),publicText);
         assertTrue(publicText.contains("line") || publicText.contains("sourceColumn"),publicText);
-        JsonNode artifacts=getJson(port,api+"/jobs/"+jobId+"/artifacts",auth);
+        JsonNode artifacts=awaitArchive(port,api,jobId,auth);
         boolean checked=false;
         for(JsonNode item:artifacts.path("items")) if(item.path("path").asText().endsWith("case.log")) {
             String path=item.path("path").asText();
-            String log=getText(port,api+"/jobs/"+jobId+"/artifacts/"+path,auth);
+            String log=getText(port,api+"/jobs/"+jobId+"/artifacts/view/"+encodeEntry(path),auth);
             assertTrue(log.contains(expression),log);assertFalse(log.contains(packageRoot.toString()),log);checked=true;
         }
         assertTrue(checked,"Failed Debug must retain its diagnostic Case Log");

@@ -1542,7 +1542,7 @@
           } catch (error) { message(error.message); more.disabled = false; }
         });
       }
-      if (data.archiveStatus === 'PENDING') setTimeout(() => { if (generation === navigation && activeJob === id) loadArtifacts(id, generation); }, 2000);
+      if (data.archiveStatus === 'PENDING' || data.archiveStatus === 'ARCHIVING') setTimeout(() => { if (generation === navigation && activeJob === id) loadArtifacts(id, generation); }, 2000);
     } catch (error) {
       if (requestSequence === artifactRequestSequence && generation === navigation && activeJob === id) message(error.message);
     }

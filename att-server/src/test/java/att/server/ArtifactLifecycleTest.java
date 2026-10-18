@@ -92,6 +92,55 @@ class ArtifactLifecycleTest {
         }
     }
 
+    @Test void retentionWaitsForOpenDownloadsAndReaderCapacityIsReleased() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            String id="J0000000000000001";Job expired=job(runtime,id,"PASS");
+            expired.finishedAt=Instant.now().minus(java.time.Duration.ofDays(runtime.config.jobRetentionDays+1L));runtime.store.update(expired);
+            Files.writeString(runtime.outputDirectoryForJob(id).resolve("case.log"),"retained until reader closes");
+            runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
+            var readers=new java.util.ArrayList<ServerRuntime.ArtifactRead>();
+            try {
+                for(int i=0;i<8;i++)readers.add(runtime.openArtifactArchive(id,true));
+                assertThrows(ServerRuntime.ArtifactCapacityException.class,()->runtime.openArtifactArchive(id,true));
+                java.util.concurrent.CompletableFuture.runAsync(()->{
+                    try{runtime.cleanupExpiredJobs();}catch(Exception failure){throw new java.util.concurrent.CompletionException(failure);}
+                }).get(5,TimeUnit.SECONDS);
+                assertNotNull(runtime.jobRecord(id));assertTrue(Files.isRegularFile(readers.get(0).path));
+                assertEquals("retained until reader closes",new String(ArtifactArchive.read(readers.get(0).path,"case.log"),java.nio.charset.StandardCharsets.UTF_8));
+            } finally {for(var reader:readers)reader.close();}
+            try(var reopened=runtime.openArtifactArchive(id,true)){assertTrue(Files.isRegularFile(reopened.path));}
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            do{runtime.cleanupExpiredJobs();if(runtime.store.get(id)==null)break;Thread.sleep(10);}while(System.nanoTime()<deadline);
+            assertNull(runtime.store.get(id));assertFalse(Files.exists(runtime.artifactArchivePath(id).getParent()));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.openArtifactArchive(id,true));
+        }
+    }
+
+    @Test void corruptionNeverFallsBackToRawAndRecoveryOnlyRebuildsWhenSourceStillExists() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            String id="J0000000000000001";job(runtime,id,"PASS");
+            Path output=runtime.outputDirectoryForJob(id);Files.writeString(output.resolve("case.log"),"password=private-canary\nbusiness=retained");
+            Files.writeString(runtime.artifactArchivePath(id),"partial central directory");
+            Files.writeString(output.getParent().resolve("archive-status.json"),"{\"state\":\"READY\"}");
+            assertEquals("FAILED",runtime.artifactIndex(id).get("archiveStatus"));
+            assertThrows(ServerRuntime.ArchiveUnavailableException.class,()->runtime.archiveEntry(id,"case.log"));
+            assertTrue(Files.readString(output.resolve("case.log")).contains("private-canary"),"Failure must retain private source, not publish it");
+            runtime.retryArtifactArchive(id);awaitState(runtime,id,"READY");
+            String published=new String(runtime.archiveEntry(id,"case.log"),java.nio.charset.StandardCharsets.UTF_8);
+            assertFalse(published.contains("private-canary"));assertTrue(published.contains("business=retained"));
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(Files.exists(output)&&System.nanoTime()<deadline)Thread.sleep(10);
+            assertFalse(Files.exists(output));
+            Files.writeString(runtime.artifactArchivePath(id),"corrupt after source cleanup");
+            runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"FAILED");
+            assertEquals(false,runtime.artifactIndex(id).get("retryable"));
+            assertThrows(ServerRuntime.ArchiveUnavailableException.class,()->runtime.openArtifactArchive(id,true));
+            assertThrows(IllegalArgumentException.class,()->runtime.retryArtifactArchive(id));
+            Files.writeString(output.getParent().resolve("archive-status.json"),"not valid JSON");
+            assertEquals("invalid_metadata",runtime.artifactIndex(id).get("reason"));
+        }
+    }
+
     private ServerRuntime runtime() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("packages"));Path pkg=Files.createDirectories(packages.resolve("p"));
         Path config=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: '"+temp.resolve("data")+"'\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 4\npackages:\n  allowedRoots:\n    - '"+packages+"'\n  entries:\n    p: '"+pkg+"'\n");

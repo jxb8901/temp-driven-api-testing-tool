@@ -100,6 +100,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Exit codes](#exit-codes)
   - [Complete option matrix](#complete-option-matrix)
 - [Results, reports, and evidence](#results-reports-and-evidence)
+  - [ATT Server Job artifact publication](#att-server-job-artifact-publication)
   - [Find artifacts for a Run](#find-artifacts-for-a-run)
   - [Find Case execution results in the HTML report](#find-case-execution-results-in-the-html-report)
   - [Diagnose Tool evidence collector failures](#diagnose-tool-evidence-collector-failures)
@@ -2931,6 +2932,54 @@ fields use `[HIDDEN]` and `UNAVAILABLE_BY_POLICY` or `OPTIONAL_FIELD_POLICY`.
 Source traversal, symlink, deny-glob, sensitive-file and size restrictions remain active.
 
 ## Results, reports, and evidence
+
+### ATT Server Job artifact publication
+
+Worker files are **Raw/Trusted Worker Output** until the Server's publication step approves their final bytes. Directory containment alone does not make content safe to export. This boundary applies to RUN (including Debug mode, Case, Template, Flow, Tool and batch), LOAD, and retained legacy Jobs.
+
+After execution ends, the Server asynchronously builds one `artifacts.zip`. Its status is independent of the Job result: `PENDING`, `ARCHIVING`, `READY`, or `FAILED`. A PASS/FAIL/ERROR/INVALID/CANCELLED Job remains terminal while publication runs. On successful verification and atomic publication, loose output is removed. The ZIP is the only persistent artifact payload; metadata, audit, events and archive-status records remain separate.
+
+#### Publication and sensitive-data policy
+
+The publisher accepts regular, non-symlink UTF-8 files with these extensions: `txt`, `log`, `json`, `yaml`, `yml`, `xml`, `html`, `htm`, `css`, `csv`, and `md`. Binary, malformed UTF-8, invalid structured data, nested archives and unsupported formats are excluded. Rejected filenames are not recorded in the public manifest. Studio displays omissions explicitly; an incomplete export does not claim to contain all raw output.
+
+| Input | Publication behavior |
+|---|---|
+| Logs, text, XML, HTML, CSV | Apply mandatory secret-field, authorization-header, bearer/basic token, connection-URL credential, private-key and cookie protection; project host-local paths |
+| JSON and YAML, including Tool/DB results, service responses and Evidence | Parse with bounded safe loaders; protect sensitive field names recursively, including nested values and records explicitly classified as `secret`; serialize valid structured output |
+| Ordinary business values, including names and potentially regulated data | Preserve values unless they match an explicit sensitive-field or secret-text rule; arbitrary PII detection is not provided |
+| HTML | Preserve approved relative links and inline styling; remove active markup and unapproved scripts; mark excluded targets as unavailable |
+
+Supported sensitive names include password/passphrase, token, secret, credentials, API/access/private keys, authorization and cookies. Put sensitive business data under an explicitly sensitive field or classify its enclosing structured record as `secret`. An unrelated field containing arbitrary business data is not automatically confidential. Authorization to operate Jobs does not authorize raw-secret export. There is no public raw-export capability or raw-file fallback.
+
+HTML passes through a parser before publication. Only the reviewed, digest-allowlisted built-in RUN search/sort script survives. The same finalized HTML includes an offline Content Security Policy (CSP), so extracted reports do not depend on Studio or remote assets. Online reports use a sandbox with an opaque origin, a matching restrictive CSP, no forms and no Studio-origin privileges. Unknown scripts, external links, missing evidence links, base URLs and navigation out of the approved archive are removed. Report controls may therefore differ from arbitrary raw user-authored HTML.
+
+#### Manifest and resource limits
+
+`export-manifest-v1.json` uses manifest version `1` and policy `att-export-safe-text-v2`. Each entry records its logical path, media type, byte size, SHA-256, report/preview eligibility, classification and publication decision. `complete` and aggregate `omissions` describe excluded output without rejected filenames or values. ZIP, preview and extracted files use the same finalized bytes; GET requests never independently redact them.
+
+Inventory is independent of `server.maxArtifacts`: up to 50,000 filesystem candidates, depth 64, 10,000 published entries, 16 MiB per entry and 128 MiB total published bytes. The manifest is limited to 8 MiB. Crossing aggregate limits fails publication and preserves private source output. ZIP entries use STORED encoding to avoid compression-ratio ambiguity for repetitive logs. Readers reject unsafe paths, control characters, encoded traversal, duplicate/case-colliding names, oversized or high-ratio entries, unmanifested entries and integrity mismatches. Publication uses one writer with a bounded queue; at most eight artifact reads run concurrently.
+
+#### View and download a Job archive
+
+In Job Details, open **Artifacts**. Reports appear independently of listing pagination. Choose **View Report** or **Preview** for read-only text with search, copy and line numbers. Text rendering is capped at 200,000 characters. Use **Load more artifacts** for subsequent pages. **Download Artifacts (.zip)** is the sole download action. Extract the ZIP and open its HTML report for offline browsing; relative links preserve the same archive hierarchy.
+
+For extracted `file://` reports, the browser controls how linked file types open. For example, Chromium may download a linked YAML file instead of displaying it. The link still targets the same approved extracted bytes; Studio serves those entries as inline text in its viewer.
+
+| Method | Path relative to `/api/v1` | Result |
+|---|---|---|
+| GET | `/jobs/{jobId}/artifacts?offset=0&limit=100` | Archive state, paginated entries, primary reports and safe omissions |
+| GET | `/jobs/{jobId}/artifacts/archive.zip` | Verified finalized ZIP attachment |
+| GET | `/jobs/{jobId}/artifacts/view/{entryPath}` | Manifest-approved HTML/CSS or inline text; directory-preserving relative links |
+| POST | `/jobs/{jobId}/artifacts/retry` | Schedule a terminal Job's retry while private source remains available |
+
+Every route requires the shared OPERATE capability. Active USER accounts can access other USERs' approved Job archives; creator identity remains audit metadata. ADMIN-only accounts have no implicit operational access. Authentication, disabled-account checks, local CSRF and configured Origin policy apply. Responses use private/no-store caching; loose-file download routes return 404. Pending or unavailable archive reads return `ATT-SERVER-ARCHIVE-UNAVAILABLE` (409); exhausted read capacity returns `ATT-SERVER-ARTIFACT-CAPACITY` (503).
+
+#### Recover and expire archives
+
+After a failure, keep the private output and use **Retry archive** when available. Restart and periodic reconciliation retry terminal legacy loose-output Jobs through this same publication contract. Recovery validates a ZIP committed before its status update and removes abandoned staging and leftover loose output. It never serves legacy raw files directly. A missing private source cannot be reconstructed from a corrupt ZIP; the archive remains unavailable.
+
+The existing `server.jobRetentionDays` policy expires the complete Job, including its ZIP. Retention waits for active archive readers/writers rather than deleting a file in use. Classification and publication outcomes are audited without raw values. Publication failures never delete the only unarchived source.
 
 Run executes authored Testcases and records one Case execution for each selected row. A Testcase is workbook data; a Case execution is the runtime result identified by the same full Case ID. Use the runtime term when reading statuses, logs, reports, and evidence.
 
