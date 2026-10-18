@@ -193,6 +193,8 @@ async function main() {
       }
     }
     await page.getByRole('button', { name: 'Back to Explorer' }).click();
+    await page.getByRole('heading', { name: 'Resource details' }).waitFor();
+    await page.getByRole('button', { name: 'Back to resources', exact: true }).click();
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
 
     await page.setViewportSize({ width: 768, height: 1024 });
