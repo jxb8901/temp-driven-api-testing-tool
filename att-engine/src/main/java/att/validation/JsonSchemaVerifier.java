@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -14,7 +15,9 @@ import java.util.regex.Pattern;
 /** Draft 2020-12 validation backed by the NetworkNT production validator. */
 public final class JsonSchemaVerifier {
     private static final ObjectMapper JSON = JsonSupport.mapper();
-    private static final Map<SchemaKey, com.networknt.schema.JsonSchema> CACHE = new LinkedHashMap<SchemaKey, com.networknt.schema.JsonSchema>();
+    private static final int MAX_CACHED_SCHEMAS = 128;
+    private static final Map<SchemaKey, com.networknt.schema.JsonSchema> CACHE =
+            new LinkedHashMap<SchemaKey, com.networknt.schema.JsonSchema>(16, 0.75f, true);
     private static final AtomicLong COMPILES = new AtomicLong();
     private static final AtomicLong HITS = new AtomicLong();
     private static final Pattern UNKNOWN_PROPERTY = Pattern.compile("property '([A-Za-z_][A-Za-z0-9_-]*)' is not defined in the schema");
@@ -47,25 +50,50 @@ public final class JsonSchemaVerifier {
     private static com.networknt.schema.JsonSchema schema(JsonNode schema) { com.networknt.schema.SchemaValidatorsConfig config = new com.networknt.schema.SchemaValidatorsConfig(); config.setFailFast(false); config.setTypeLoose(false); return com.networknt.schema.JsonSchemaFactory.getInstance(com.networknt.schema.SpecVersion.VersionFlag.V202012).getSchema(schema, config); }
 
     private static com.networknt.schema.JsonSchema compiled(Path schemaFile) throws Exception {
-        Path canonical = schemaFile.toRealPath();
-        SchemaKey key = new SchemaKey(canonical, Files.size(canonical), Files.getLastModifiedTime(canonical).toMillis());
+        SchemaFiles.SchemaResource resource = SchemaFiles.readSchema(schemaFile);
+        SchemaKey key = new SchemaKey(resource.identity());
         synchronized (CACHE) {
             com.networknt.schema.JsonSchema cached = CACHE.get(key);
             if (cached != null) { HITS.incrementAndGet(); return cached; }
         }
-        JsonNode source;
-        try (java.io.InputStream input = Files.newInputStream(canonical)) { source = JSON.readTree(input); }
+        JsonNode source = JSON.readTree(resource.bytes());
+        validateLocalReferences(source, "$");
         com.networknt.schema.JsonSchema loaded = schema(source);
         synchronized (CACHE) {
-            java.util.Iterator<SchemaKey> keys = CACHE.keySet().iterator();
-            while (keys.hasNext()) if (keys.next().path.equals(canonical)) keys.remove();
             com.networknt.schema.JsonSchema previous = CACHE.put(key, loaded);
-            if (previous == null) COMPILES.incrementAndGet(); else return previous;
+            if (previous != null) return previous;
+            COMPILES.incrementAndGet();
+            while (CACHE.size() > MAX_CACHED_SCHEMAS) {
+                Iterator<SchemaKey> keys = CACHE.keySet().iterator();
+                keys.next();
+                keys.remove();
+            }
         }
         return loaded;
     }
 
+    /** Embedded ATT schemas may only reference fragments in the same schema document. */
+    private static void validateLocalReferences(JsonNode node, String path) {
+        if (node == null) return;
+        if (node.isObject()) {
+            java.util.Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                String name = field.getKey();
+                JsonNode value = field.getValue();
+                if ("$ref".equals(name) || "$dynamicRef".equals(name) || "$recursiveRef".equals(name)) {
+                    if (!value.isTextual() || !value.asText().startsWith("#"))
+                        throw new IllegalArgumentException("Schema reference must remain within its embedded resource at " + path + "." + name);
+                }
+                validateLocalReferences(value, path + "." + name);
+            }
+        } else if (node.isArray()) {
+            for (int i = 0; i < node.size(); i++) validateLocalReferences(node.get(i), path + "[" + i + "]");
+        }
+    }
+
     public static Stats stats() { return new Stats(COMPILES.get(), HITS.get()); }
+    static int cachedValidatorCount() { synchronized (CACHE) { return CACHE.size(); } }
     static void clearForTests() { synchronized (CACHE) { CACHE.clear(); } COMPILES.set(0); HITS.set(0); }
 
     public static final class Stats {
@@ -76,10 +104,10 @@ public final class JsonSchemaVerifier {
     }
 
     private static final class SchemaKey {
-        private final Path path; private final long size; private final long modified;
-        private SchemaKey(Path path, long size, long modified) { this.path = path; this.size = size; this.modified = modified; }
-        @Override public boolean equals(Object value) { if (!(value instanceof SchemaKey)) return false; SchemaKey other = (SchemaKey) value; return size == other.size && modified == other.modified && path.equals(other.path); }
-        @Override public int hashCode() { int result = path.hashCode(); result = 31 * result + Long.valueOf(size).hashCode(); return 31 * result + Long.valueOf(modified).hashCode(); }
+        private final String identity;
+        private SchemaKey(String identity) { this.identity = identity; }
+        @Override public boolean equals(Object value) { return value instanceof SchemaKey && identity.equals(((SchemaKey) value).identity); }
+        @Override public int hashCode() { return identity.hashCode(); }
     }
 
     public static final class SchemaValidationException extends IllegalArgumentException {

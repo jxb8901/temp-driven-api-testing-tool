@@ -172,7 +172,15 @@ public class FrameworkEngine {
         if (options.ciOutputs().contains("junit")) {
             javax.xml.validation.SchemaFactory schemaFactory = javax.xml.validation.SchemaFactory.newInstance(javax.xml.XMLConstants.W3C_XML_SCHEMA_NS_URI);
             schemaFactory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, ""); schemaFactory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-            javax.xml.validation.Validator validator = schemaFactory.newSchema(att.validation.SchemaFiles.resolve(projectRoot, "att-junit-v2.1.xsd").toFile()).newValidator();
+            att.validation.SchemaFiles.SchemaResource junitSchema = att.validation.SchemaFiles.readSchema(
+                    att.validation.SchemaFiles.resolve(projectRoot, "att-junit-v2.1.xsd"));
+            javax.xml.validation.Schema compiledSchema;
+            try (java.io.InputStream schemaBytes = new java.io.ByteArrayInputStream(junitSchema.bytes())) {
+                javax.xml.transform.stream.StreamSource schemaSource = new javax.xml.transform.stream.StreamSource(schemaBytes);
+                schemaSource.setSystemId(junitSchema.identity());
+                compiledSchema = schemaFactory.newSchema(schemaSource);
+            }
+            javax.xml.validation.Validator validator = compiledSchema.newValidator();
             validator.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, ""); validator.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
             validator.validate(new javax.xml.transform.stream.StreamSource(runDirectory.resolve("ci/junit.xml").toFile()));
         }

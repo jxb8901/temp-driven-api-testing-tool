@@ -69,6 +69,19 @@ class JsonSchemaVerifierTest {
         assertEquals(1, JsonSchemaVerifier.stats().compiles());
         assertEquals(1, JsonSchemaVerifier.stats().hits());
     }
+    @Test void schemaValidatorCacheIsBoundedAndExternalReferencesFailClosed() throws Exception {
+        JsonSchemaVerifier.clearForTests();
+        for (int i = 0; i < 140; i++) {
+            Path schema = tempDir.resolve("schema-" + i + ".json");
+            Files.write(schema, ("{\"$id\":\"urn:att:test:" + i + "\",\"type\":\"object\"}").getBytes("UTF-8"));
+            JsonSchemaVerifier.compile(schema);
+        }
+        assertTrue(JsonSchemaVerifier.cachedValidatorCount() <= 128,
+                "compiled validators should be evicted from the per-JVM cache after its bound is reached");
+        Path external = tempDir.resolve("external-ref.json");
+        Files.write(external, "{\"$ref\":\"file:///etc/passwd\"}".getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.compile(external));
+    }
     @Test void jsonWriterEscapesEveryControlCharacter() throws Exception {
         String json=JsonSupport.write(java.util.Collections.singletonMap("value", "a\t\b\f\u0001z"));
         assertEquals("a\t\b\f\u0001z", JsonSupport.mapper().readTree(json).get("value").asText());

@@ -168,6 +168,10 @@ class SchemaMigrationGuidanceTest {
         }
         assertTrue(Arrays.equals(embedded, Files.readAllBytes(fromPackage)),
                 "Resolved bytes must match the JAR-embedded official schema");
+        assertTrue(Arrays.equals(embedded, SchemaFiles.readSchema(fromPackage).bytes()),
+                "Runtime validation must read the authoritative schema bytes from the Engine Classpath");
+        assertTrue(SchemaFiles.readSchema(fromPackage).identity().contains(SchemaFiles.registryDigest()),
+                "the in-memory validator identity must bind to the matching Engine registry digest");
         assertDoesNotThrow(() -> SchemaFiles.validateCatalog(packageRoot));
     }
 }

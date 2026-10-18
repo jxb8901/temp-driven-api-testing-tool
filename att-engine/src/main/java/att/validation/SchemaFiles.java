@@ -40,6 +40,9 @@ public final class SchemaFiles {
     private static final int MAX_SCHEMA_REGISTRY_BYTES = 16 * 1024 * 1024;
     private static volatile Path trustedRoot;
     private static volatile String trustedRegistryDigest;
+    private static volatile Map<String, byte[]> trustedResources = Collections.emptyMap();
+    private static volatile Map<String, String> trustedSchemaPaths = Collections.emptyMap();
+    private static volatile List<RegisteredSchema> trustedJsonSchemas = Collections.emptyList();
     // Retain these references so the OS use-lease stays held for this JVM's lifetime.
     private static volatile FileChannel cacheLeaseChannel;
     private static volatile FileLock cacheLease;
@@ -62,41 +65,14 @@ public final class SchemaFiles {
         try { root = trustedRoot(); }
         catch (Exception error) { throw unavailable("Trusted schema registry is unavailable", error.getMessage(), "Restore the ATT runtime schema resources."); }
         Path schemas = root.resolve("schemas");
-        Path catalog = schemas.resolve("catalog.yaml");
         try {
-            requireSchemaDirectory(schemas);
-            requireRegular(catalog, "Schema catalog is unavailable", "Restore the embedded ATT runtime schema catalog in the matching Engine JAR.");
-            Path canonicalCatalog = new PackageResourceResolver(root)
-                    .fromInternalPath(catalog, PackageResourceResolver.Kind.FILE).canonicalPath();
-            Object loaded = YamlSupport.load(canonicalCatalog);
-            if (!(loaded instanceof Map) || !"att-schema-catalog/v3.0".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion"))))
-                throw unavailable("Schema catalog is invalid", "catalog=schemas/catalog.yaml",
-                        "Restore a valid embedded att-schema-catalog/v3.0 catalog in the matching Engine JAR.");
-            Object registry = ((Map<?, ?>) loaded).get("schemas");
-            if (!(registry instanceof Map)) throw unavailable("Schema catalog is invalid", "catalog.schemas is missing",
-                    "Restore a valid schema registry in the matching Engine JAR.");
-            String registeredPath = null;
-            for (Object value : ((Map<?, ?>) registry).values()) {
-                if (!(value instanceof String)) continue;
-                String path = ((String) value).replace('\\', '/');
-                if (filename.equals(path) || ("history/" + filename).equals(path)) {
-                    if (registeredPath != null && !registeredPath.equals(path))
-                        throw unavailable("Schema catalog has ambiguous registrations", "schema=" + filename,
-                                "Keep one authoritative current or historical catalog path for this schema.");
-                    registeredPath = path;
-                }
-            }
+            String registeredPath = trustedSchemaPaths.get(filename);
             if (registeredPath == null) throw unavailable("Schema resource is not registered", "schema=" + filename,
                     "Use a schema registered in the matching Engine JAR; ATT will not guess or fall back to another schema.");
             Path selected = schemas.resolve(registeredPath).normalize();
             if (!selected.startsWith(schemas) || !filename.equals(selected.getFileName().toString()))
                 throw unavailable("Schema catalog contains an unsafe path", "schema=" + filename + ", registered=" + registeredPath,
                         "Use a safe relative path under the embedded registry's schemas/ directory.");
-            Path other = registeredPath.startsWith("history/")
-                    ? schemas.resolve(filename) : schemas.resolve("history").resolve(filename);
-            if (Files.exists(other, LinkOption.NOFOLLOW_LINKS))
-                throw unavailable("Duplicate current/historical schema", "schema=" + filename + ", registered=" + registeredPath,
-                        "Keep the schema only at its catalog-registered location.");
             requireRegular(selected, "Registered schema resource is unavailable",
                     "Restore the registered schema at " + registeredPath + "; ATT will not skip validation or fall back to another copy.");
             return new PackageResourceResolver(root).fromInternalPath(selected, PackageResourceResolver.Kind.FILE).canonicalPath();
@@ -155,42 +131,9 @@ public final class SchemaFiles {
     }
 
     private static List<RegisteredSchema> registeredJsonSchemas(Path projectRoot) {
-        Path root;
-        try { root = trustedRoot(); }
+        try { trustedRoot(); }
         catch (IOException error) { throw unavailable("Trusted schema registry is unavailable", error.getMessage(), "Restore the ATT runtime schema resources."); }
-        validateCatalog(root);
-        Path schemas = root.resolve("schemas");
-        Path catalog = schemas.resolve("catalog.yaml");
-        try {
-            Path canonicalCatalog = new PackageResourceResolver(root)
-                    .fromInternalPath(catalog, PackageResourceResolver.Kind.FILE).canonicalPath();
-            Object loaded = YamlSupport.load(canonicalCatalog);
-            Object registry = ((Map<?, ?>) loaded).get("schemas");
-            List<RegisteredSchema> result = new ArrayList<RegisteredSchema>();
-            Set<String> versions = new HashSet<String>();
-            for (Object rawPath : ((Map<?, ?>) registry).values()) {
-                String path = String.valueOf(rawPath).replace('\\', '/');
-                if (!path.endsWith(".json")) continue;
-                Path resource = schemas.resolve(path).normalize();
-                if (!resource.startsWith(schemas)) throw unavailable("Schema catalog contains an unsafe path", "path=" + path,
-                        "Use a safe relative path under the embedded registry's schemas/ directory.");
-                Path canonicalResource = new PackageResourceResolver(root)
-                        .fromInternalPath(resource, PackageResourceResolver.Kind.FILE).canonicalPath();
-                com.fasterxml.jackson.databind.JsonNode document = JsonSupport.mapper().readTree(Files.readAllBytes(canonicalResource));
-                com.fasterxml.jackson.databind.JsonNode versionNode = document.path("properties").path("schemaVersion").path("const");
-                if (!versionNode.isTextual()) continue;
-                String version = versionNode.asText();
-                if (!versions.add(version)) throw unavailable("Schema catalog has duplicate schema versions", "schemaVersion=" + version,
-                        "Register each schemaVersion at exactly one path.");
-                result.add(new RegisteredSchema(version, path, path.startsWith("history/")));
-            }
-            return result;
-        } catch (DiagnosticException error) {
-            throw error;
-        } catch (Exception error) {
-            throw unavailable("Schema catalog cannot be read", "catalog=schemas/catalog.yaml, reason=" + att.core.PathPresentation.displayDiagnosticText(error.getMessage(), root),
-                    "Restore a readable schema catalog and its registered JSON Schema resources.");
-        }
+        return trustedJsonSchemas;
     }
 
     private static String family(String version) {
@@ -208,48 +151,38 @@ public final class SchemaFiles {
 
     /** Verifies every current and historical schema resource registered by this package. */
     public static void validateCatalog(Path projectRoot) {
-        Path root;
-        try { root = trustedRoot(); }
-        catch (Exception error) { throw unavailable("Trusted schema registry is unavailable", error.getMessage(), "Restore the ATT runtime schema resources."); }
-        Path schemas = root.resolve("schemas");
-        Path catalog = schemas.resolve("catalog.yaml");
-        try {
-            requireSchemaDirectory(schemas);
-            requireRegular(catalog, "Schema catalog is unavailable", "Restore the embedded ATT runtime schema catalog in the matching Engine JAR.");
-            Object loaded = YamlSupport.load(catalog);
-            if (!(loaded instanceof Map) || !"att-schema-catalog/v3.0".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion"))))
-                throw unavailable("Schema catalog is invalid", "catalog=schemas/catalog.yaml",
-                        "Restore a valid embedded att-schema-catalog/v3.0 catalog in the matching Engine JAR.");
-            Object registry = ((Map<?, ?>) loaded).get("schemas");
-            if (!(registry instanceof Map) || ((Map<?, ?>) registry).isEmpty())
-                throw unavailable("Schema catalog is invalid", "catalog.schemas is missing or empty",
-                        "Restore a non-empty schema registry in the matching Engine JAR.");
-            Set<String> filenames = new HashSet<String>();
-            for (Map.Entry<?, ?> entry : ((Map<?, ?>) registry).entrySet()) {
-                if (!(entry.getKey() instanceof String) || !(entry.getValue() instanceof String))
-                    throw unavailable("Schema catalog is invalid", "every schema registration must have a string key and path",
-                            "Restore a valid embedded schema catalog in the matching Engine JAR.");
-                String path = ((String) entry.getValue()).replace('\\', '/');
-                if (!path.matches("(?:history/)?[A-Za-z0-9._-]+\\.(?:json|xsd)"))
-                    throw unavailable("Schema catalog contains an unsafe path", "registration=" + entry.getKey() + ", path=" + path,
-                            "Use a safe relative path under the embedded registry's schemas/ directory.");
-                String filename = path.substring(path.lastIndexOf('/') + 1);
-                if (!filenames.add(filename))
-                    throw unavailable("Schema catalog has duplicate schema registrations", "filename=" + filename,
-                            "Register each schema filename at exactly one current or historical location.");
-                Path resource = schemas.resolve(path).normalize();
-                if (!resource.startsWith(schemas))
-                    throw unavailable("Schema catalog contains an unsafe path", "registration=" + entry.getKey() + ", path=" + path,
-                            "Use a safe relative path under the embedded registry's schemas/ directory.");
-                requireRegular(resource, "Registered schema resource is unavailable",
-                        "Restore the registered schema at " + path + "; ATT will not skip validation or fall back to another copy.");
-            }
-        } catch (DiagnosticException error) {
-            throw error;
-        } catch (Exception error) {
-            throw unavailable("Schema catalog cannot be read", "catalog=schemas/catalog.yaml, reason=" + att.core.PathPresentation.displayDiagnosticText(error.getMessage(), root),
-                    "Restore a readable embedded schema catalog and every registered resource in the matching Engine JAR.");
+        try { trustedRoot(); }
+        catch (Exception error) { throw unavailable("Trusted schema registry is unavailable", error.getMessage(), "Restore the embedded ATT runtime schema resources in the matching Engine JAR."); }
+        if (trustedResources.isEmpty() || trustedSchemaPaths.isEmpty())
+            throw unavailable("Schema catalog is invalid", "catalog.schemas is missing or empty",
+                    "Restore a non-empty embedded schema registry in the matching Engine JAR.");
+    }
+
+    /** Returns trusted Classpath bytes and a Runtime-digest identity for validation. */
+    public static SchemaResource readSchema(Path schemaFile) throws IOException {
+        Path root = trustedRoot();
+        Path schemas = root.resolve("schemas").toAbsolutePath().normalize();
+        Path requested = schemaFile.toAbsolutePath().normalize();
+        if (requested.startsWith(schemas)) {
+            String relative = schemas.relativize(requested).toString().replace('\\', '/');
+            byte[] bytes = trustedResources.get(relative);
+            if (bytes == null) throw new IOException("Schema path is not registered in the embedded Engine registry");
+            return new SchemaResource("classpath:" + trustedRegistryDigest + ":" + relative, bytes);
         }
+        Path canonical = schemaFile.toRealPath();
+        byte[] bytes = Files.readAllBytes(canonical);
+        return new SchemaResource("file:" + canonical + ":" + fingerprintBytes(bytes), bytes);
+    }
+
+    public static final class SchemaResource {
+        private final String identity;
+        private final byte[] bytes;
+        private SchemaResource(String identity, byte[] bytes) {
+            this.identity = identity;
+            this.bytes = bytes.clone();
+        }
+        public String identity() { return identity; }
+        public byte[] bytes() { return bytes.clone(); }
     }
 
     /** Shares one private materialization per packaged schema version across Worker JVMs. */
@@ -275,6 +208,7 @@ public final class SchemaFiles {
             packagedFiles.put("catalog.yaml", catalogBytes);
             long registryBytes = catalogBytes.length;
             Set<String> filenames = new HashSet<String>();
+            Map<String, String> schemaPaths = new TreeMap<String, String>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) rawSchemas).entrySet()) {
                 if (!(entry.getKey() instanceof String) || !(entry.getValue() instanceof String))
                     throw new IOException("The packaged schema registry contains a non-string registration");
@@ -288,6 +222,22 @@ public final class SchemaFiles {
                     registryBytes += schemaBytes.length;
                     packagedFiles.put(relative, schemaBytes);
                 }
+                schemaPaths.put(filename, relative);
+            }
+            List<RegisteredSchema> jsonSchemas = new ArrayList<RegisteredSchema>();
+            Set<String> schemaVersions = new HashSet<String>();
+            for (Map.Entry<String, String> entry : schemaPaths.entrySet()) {
+                if (!entry.getKey().endsWith(".json")) continue;
+                com.fasterxml.jackson.databind.JsonNode document;
+                try { document = JsonSupport.mapper().readTree(packagedFiles.get(entry.getValue())); }
+                catch (Exception invalidJson) { throw new IOException("The embedded JSON Schema is unreadable: " + entry.getValue(), invalidJson); }
+                if (document == null || !document.isObject()) throw new IOException("The embedded JSON Schema is not an object: " + entry.getValue());
+                com.fasterxml.jackson.databind.JsonNode versionNode = document.path("properties").path("schemaVersion").path("const");
+                if (!versionNode.isTextual()) continue;
+                String version = versionNode.asText();
+                if (!schemaVersions.add(version)) throw new IOException("The embedded schema registry contains duplicate schemaVersion " + version);
+                String path = entry.getValue();
+                jsonSchemas.add(new RegisteredSchema(version, path, path.startsWith("history/")));
             }
             Path cacheBase = cacheBase();
             String fingerprint = fingerprint(packagedFiles);
@@ -342,6 +292,9 @@ public final class SchemaFiles {
                 pruneOldCaches(cacheBase, root);
             }
             trustedRegistryDigest = fingerprint;
+            trustedResources = Collections.unmodifiableMap(new TreeMap<String, byte[]>(packagedFiles));
+            trustedSchemaPaths = Collections.unmodifiableMap(schemaPaths);
+            trustedJsonSchemas = Collections.unmodifiableList(jsonSchemas);
             trustedRoot = root;
             return root;
         }
@@ -484,6 +437,10 @@ public final class SchemaFiles {
         } catch (NoSuchAlgorithmException error) {
             throw new IOException("SHA-256 is unavailable for the trusted schema cache", error);
         }
+    }
+
+    private static String fingerprintBytes(byte[] bytes) throws IOException {
+        return fingerprint(Collections.singletonMap("schema", bytes));
     }
 
     private static void deleteTree(Path root) throws IOException {
