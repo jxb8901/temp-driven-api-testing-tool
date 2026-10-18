@@ -26,6 +26,9 @@ final class ArtifactArchive {
     static final int MAX_ENTRIES = 10_000;
     static final long MAX_ENTRY_BYTES = 16L * 1024 * 1024;
     static final long MAX_TOTAL_BYTES = 128L * 1024 * 1024;
+    static final int MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
+    static final int MAX_CANDIDATES = 50_000;
+    static final long MAX_ARCHIVE_BYTES = MAX_TOTAL_BYTES + MAX_MANIFEST_BYTES + 4L * 1024 * 1024;
     private static final Set<String> SAFE_EXTENSIONS = Set.of("txt", "log", "json", "yaml", "yml", "xml", "html", "htm", "css", "csv", "md");
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -36,77 +39,146 @@ final class ArtifactArchive {
 
     static Path build(Path output, Path archive, Publisher publisher) throws Exception {
         if (Files.isSymbolicLink(output)) throw new IllegalArgumentException("Job output root must not be a symbolic link");
-        Path requestedRoot = output.toAbsolutePath().normalize();
-        Path root = output.toRealPath();
-        if (!root.equals(requestedRoot)) throw new IllegalArgumentException("Job output root resolved outside its private directory");
-        Path destination = archive.toAbsolutePath().normalize();
-        Files.createDirectories(destination.getParent());
-        Path staging = Files.createTempFile(destination.getParent(), ".artifact-", ".zip.tmp");
-        List<Entry> entries = new ArrayList<>();
-        Set<String> names = new HashSet<>();
-        long total = 0;
-        int omitted = 0;
-        boolean published = false;
+        Path requestedRoot=output.toAbsolutePath().normalize(),root=output.toRealPath();
+        if (!root.equals(requestedRoot.getParent().toRealPath().resolve(requestedRoot.getFileName()))) throw new IllegalArgumentException("Job output escaped its private directory");
+        Path destination=archive.toAbsolutePath().normalize();Files.createDirectories(destination.getParent());
+        Path staging=Files.createTempFile(destination.getParent(),".artifact-",".zip.tmp");
+        Path exports=Files.createTempDirectory(destination.getParent(),".artifact-export-");
+        boolean published=false;
         try {
             List<Path> candidates;
-            try (var paths = Files.walk(root)) { candidates = paths.sorted(Comparator.comparing(p -> root.relativize(p).toString())).toList(); }
-            try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(staging))) {
-                for (Path candidate : candidates) {
-                    if (candidate.equals(root) || Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
-                    if (Files.isSymbolicLink(candidate) || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
-                    String relative = root.relativize(candidate).toString().replace('\\', '/');
-                    String lower = relative.toLowerCase(Locale.ROOT);
-                    if (!safePath(relative) || lower.equals(MANIFEST) || !SAFE_EXTENSIONS.contains(extension(relative)) || names.contains(lower)) { omitted++; continue; }
-                    if (entries.size() >= MAX_ENTRIES) { omitted++; continue; }
-                    long sourceSize = Files.size(candidate);
-                    if (sourceSize > MAX_ENTRY_BYTES || total + sourceSize > MAX_TOTAL_BYTES) { omitted++; continue; }
-                    byte[] bytes;
-                    try { bytes = publisher.publish(candidate); }
-                    catch (IllegalArgumentException rejected) { omitted++; continue; }
-                    if (bytes.length > MAX_ENTRY_BYTES || total + bytes.length > MAX_TOTAL_BYTES) { omitted++; continue; }
-                    names.add(lower); total += bytes.length;
-                    Entry info = new Entry(relative, mediaType(relative), bytes.length, sha256(bytes), "textual-output", "sanitized-once", relative.toLowerCase(Locale.ROOT).endsWith(".html") || relative.toLowerCase(Locale.ROOT).endsWith(".htm"), true);
-                    entries.add(info);
-                    zip.putNextEntry(new ZipEntry(relative)); zip.write(bytes); zip.closeEntry();
-                }
-                Map<String, Object> manifest = new LinkedHashMap<>();
-                manifest.put("version", 1); manifest.put("policy", "att-export-safe-text-v1"); manifest.put("entries", entries);
-                manifest.put("omissions", omitted==0?List.of():List.of(Map.of("count", omitted, "reason", "unsupported, unsafe, duplicate, binary, oversized, or unapproved output")));
-                zip.putNextEntry(new ZipEntry(MANIFEST)); zip.write(JSON.writeValueAsBytes(manifest)); zip.closeEntry();
+            try(var paths=Files.walk(root,64)){candidates=paths.limit(MAX_CANDIDATES+1L).toList();}
+            if(candidates.size()>MAX_CANDIDATES)throw new IllegalArgumentException("Artifact inventory exceeds limits");
+            candidates=candidates.stream().sorted(Comparator.comparing(p->root.relativize(p).toString())).toList();
+            Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;
+            for(Path candidate:candidates) {
+                if(root.relativize(candidate).getNameCount()>=64&&Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Artifact directory depth exceeds limits");
+                if(candidate.equals(root)||Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))continue;
+                if(Files.isSymbolicLink(candidate)||!Files.isRegularFile(candidate,LinkOption.NOFOLLOW_LINKS)){omitted++;continue;}
+                if(!candidate.toRealPath().startsWith(root))throw new IllegalArgumentException("Artifact escaped its private directory");
+                String relative=root.relativize(candidate).toString().replace('\\','/'),lower=relative.toLowerCase(Locale.ROOT);
+                if(!safePath(relative)||lower.equals(MANIFEST)||!SAFE_EXTENSIONS.contains(extension(relative))||names.contains(lower)){omitted++;continue;}
+                if(approved.size()>=MAX_ENTRIES)throw new IllegalArgumentException("Artifact entry count exceeds limits");
+                long sourceSize=Files.size(candidate);
+                if(sourceSize>MAX_ENTRY_BYTES){omitted++;continue;}
+                byte[] bytes;
+                try{bytes=publisher.publish(candidate);}catch(IllegalArgumentException rejected){omitted++;continue;}
+                if(bytes.length>MAX_ENTRY_BYTES){omitted++;continue;}
+                if(total+bytes.length>MAX_TOTAL_BYTES)throw new IllegalArgumentException("Artifact total size exceeds limits");
+                names.add(lower);approved.add(relative);total+=bytes.length;
+                Path target=exports.resolve(relative);Files.createDirectories(target.getParent());Files.write(target,bytes);
             }
-            try (ZipFile check = new ZipFile(staging.toFile())) {
-                for (Entry item : entries) {
-                    ZipEntry zipped = check.getEntry(item.path());
-                    if (zipped == null || zipped.getSize() != item.size()) throw new IllegalStateException("Published archive verification failed");
-                    try (InputStream input = check.getInputStream(zipped)) {
-                        byte[] actual = input.readNBytes((int) MAX_ENTRY_BYTES + 1);
-                        if (actual.length != item.size() || !sha256(actual).equals(item.sha256())) throw new IllegalStateException("Published archive integrity check failed");
-                    }
+            // Resolve report links only after classification, so omitted evidence never leaves a dangling raw link.
+            Set<String> paths=Set.copyOf(approved);List<Entry> entries=new ArrayList<>();total=0;
+            try(ZipOutputStream zip=new ZipOutputStream(Files.newOutputStream(staging))) {
+                for(String relative:approved) {
+                    byte[] bytes=Files.readAllBytes(exports.resolve(relative));
+                    boolean report=Set.of("html","htm").contains(extension(relative));
+                    if(report)bytes=ArtifactHtmlPolicy.publish(bytes,relative,paths);
+                    if(bytes.length>MAX_ENTRY_BYTES||total+bytes.length>MAX_TOTAL_BYTES)throw new IllegalArgumentException("Final artifact size exceeds limits");
+                    total+=bytes.length;
+                    entries.add(new Entry(relative,mediaType(relative),bytes.length,sha256(bytes),"textual-output","sanitized-once",report,true));
+                    writeEntry(zip,relative,bytes);
                 }
+                Map<String,Object> manifest=new LinkedHashMap<>();
+                manifest.put("version",1);manifest.put("policy","att-export-safe-text-v2");manifest.put("entries",entries);manifest.put("complete",omitted==0);
+                manifest.put("omissions",omitted==0?List.of():List.of(Map.of("count",omitted,"reason","unsupported, unsafe, duplicate, binary, oversized, or unapproved output")));
+                byte[] bytes=JSON.writeValueAsBytes(manifest);
+                if(bytes.length>MAX_MANIFEST_BYTES)throw new IllegalArgumentException("Artifact manifest exceeds limits");
+                writeEntry(zip,MANIFEST,bytes);
             }
-            try { Files.move(staging, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
-            catch (java.nio.file.AtomicMoveNotSupportedException unsupported) { Files.move(staging, destination, StandardCopyOption.REPLACE_EXISTING); }
-            published = true;
-            return destination;
-        } finally { if (!published) Files.deleteIfExists(staging); }
+            verify(staging,true);
+            try(var channel=java.nio.channels.FileChannel.open(staging,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
+            Files.move(staging,destination,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
+            published=true;return destination;
+        } finally {
+            if(!published)Files.deleteIfExists(staging);
+            try(var paths=Files.walk(exports)){for(Path file:paths.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(file);}
+        }
     }
 
     static byte[] read(Path archive, String requested) throws Exception {
         if (!safePath(requested) || MANIFEST.equals(requested)) throw new IllegalArgumentException("Invalid archive entry path");
+        Map<String,Object> manifest = verify(archive, false);
+        Map<?,?> approved = ((List<?>) manifest.get("entries")).stream().filter(item -> item instanceof Map<?,?> row && requested.equals(row.get("path")))
+                .map(item -> (Map<?,?>)item).findFirst().orElseThrow(java.io.FileNotFoundException::new);
         try (ZipFile zip = new ZipFile(archive.toFile())) {
             ZipEntry entry = zip.getEntry(requested);
             if (entry == null || entry.isDirectory() || entry.getSize() < 0 || entry.getSize() > MAX_ENTRY_BYTES) throw new java.io.FileNotFoundException();
             try (InputStream input = zip.getInputStream(entry)) {
                 byte[] bytes = input.readNBytes((int) MAX_ENTRY_BYTES + 1);
-                if (bytes.length > MAX_ENTRY_BYTES || bytes.length != entry.getSize()) throw new IllegalArgumentException("Archive entry exceeds limits or is corrupt");
+                if (bytes.length > MAX_ENTRY_BYTES || bytes.length != entry.getSize() || !sha256(bytes).equals(approved.get("sha256")) || !validCrc(entry,bytes)) throw new IllegalArgumentException("Archive entry exceeds limits or is corrupt");
                 return bytes;
             }
         }
     }
 
+    /** Validate the entire directory against the bounded manifest before trusting any entry. */
+    @SuppressWarnings("unchecked")
+    static Map<String,Object> verify(Path archive, boolean digests) throws Exception {
+        if (Files.isSymbolicLink(archive) || !Files.isRegularFile(archive, LinkOption.NOFOLLOW_LINKS) || Files.size(archive) > MAX_ARCHIVE_BYTES)
+            throw new IllegalArgumentException("Invalid artifact archive");
+        try (ZipFile zip = new ZipFile(archive.toFile())) {
+            Set<String> names = new HashSet<>();
+            long total = 0;
+            int count = 0;
+            var directory = zip.entries();
+            while (directory.hasMoreElements()) {
+                ZipEntry entry = directory.nextElement();
+                long cap = MANIFEST.equals(entry.getName()) ? MAX_MANIFEST_BYTES : MAX_ENTRY_BYTES;
+                if (++count > MAX_ENTRIES + 1 || !safePath(entry.getName()) || entry.isDirectory()
+                        || !names.add(entry.getName().toLowerCase(Locale.ROOT)) || entry.getSize() < 0 || entry.getSize() > cap
+                        || entry.getCompressedSize() < 0 || entry.getSize() > Math.max(1, entry.getCompressedSize()) * 200L)
+                    throw new IllegalArgumentException("Unsafe archive directory");
+                if (!MANIFEST.equals(entry.getName())) total += entry.getSize();
+                if (total > MAX_TOTAL_BYTES) throw new IllegalArgumentException("Archive total exceeds limits");
+            }
+            ZipEntry manifestEntry = zip.getEntry(MANIFEST);
+            if (manifestEntry == null) throw new IllegalArgumentException("Archive manifest is missing");
+            Map<String,Object> manifest;
+            try (InputStream input = zip.getInputStream(manifestEntry)) {
+                byte[] bytes = input.readNBytes(MAX_MANIFEST_BYTES + 1);
+                if (bytes.length != manifestEntry.getSize() || !validCrc(manifestEntry,bytes)) throw new IllegalArgumentException("Invalid manifest size");
+                manifest = JSON.readValue(bytes, Map.class);
+            }
+            if (!(manifest.get("version") instanceof Number version) || version.intValue() != 1
+                    || !"att-export-safe-text-v2".equals(manifest.get("policy")) || !(manifest.get("entries") instanceof List<?> entries)
+                    || entries.size() != count - 1) throw new IllegalArgumentException("Invalid archive manifest");
+            Set<String> approved = new HashSet<>();
+            for (Object value : entries) {
+                if (!(value instanceof Map<?,?> row) || !(row.get("path") instanceof String path) || !safePath(path)
+                        || MANIFEST.equalsIgnoreCase(path) || !approved.add(path.toLowerCase(Locale.ROOT)) || !SAFE_EXTENSIONS.contains(extension(path)))
+                    throw new IllegalArgumentException("Invalid manifest entry");
+                ZipEntry entry = zip.getEntry(path);
+                if (entry == null || !(row.get("size") instanceof Number size) || size.longValue() != entry.getSize()
+                        || !(row.get("sha256") instanceof String digest) || !digest.matches("[a-f0-9]{64}")
+                        || !mediaType(path).equals(row.get("mediaType")) || !"textual-output".equals(row.get("classification"))
+                        || !"sanitized-once".equals(row.get("decision")) || !Boolean.TRUE.equals(row.get("preview"))
+                        || !Boolean.valueOf(Set.of("html","htm").contains(extension(path))).equals(row.get("report")))
+                    throw new IllegalArgumentException("Archive does not match manifest");
+                if (digests) try (InputStream input = zip.getInputStream(entry)) {
+                    byte[] bytes = input.readNBytes((int)MAX_ENTRY_BYTES + 1);
+                    if (bytes.length != entry.getSize() || !sha256(bytes).equals(digest) || !validCrc(entry,bytes)) throw new IllegalArgumentException("Archive integrity check failed");
+                }
+            }
+            return manifest;
+        }
+    }
+
+    private static void writeEntry(ZipOutputStream zip, String path, byte[] bytes) throws Exception {
+        // STORED makes size/ratio limits deterministic even for highly repetitive legitimate logs.
+        var crc = new java.util.zip.CRC32(); crc.update(bytes);
+        ZipEntry entry = new ZipEntry(path); entry.setMethod(ZipEntry.STORED); entry.setSize(bytes.length); entry.setCompressedSize(bytes.length); entry.setCrc(crc.getValue());
+        zip.putNextEntry(entry); zip.write(bytes); zip.closeEntry();
+    }
+
+    private static boolean validCrc(ZipEntry entry,byte[] bytes) {
+        var crc=new java.util.zip.CRC32();crc.update(bytes);return crc.getValue()==entry.getCrc();
+    }
+
     static boolean safePath(String name) {
-        if (name == null || name.isBlank() || name.startsWith("/") || name.indexOf('\\') >= 0 || name.indexOf('%') >= 0 || name.indexOf(':') >= 0 || name.indexOf('\0') >= 0) return false;
-        for (String part : name.split("/", -1)) if (part.isBlank() || part.equals(".") || part.equals("..")) return false;
+        if (name == null || name.isBlank() || name.length() > 2048 || name.startsWith("/") || !java.text.Normalizer.isNormalized(name,java.text.Normalizer.Form.NFC) || name.indexOf('\\') >= 0 || name.indexOf('%') >= 0 || name.indexOf(':') >= 0 || name.indexOf('?') >= 0 || name.indexOf('#') >= 0 || name.chars().anyMatch(c -> c < 32 || c == 127 || "<>\"|*".indexOf(c)>=0)) return false;
+        for (String part : name.split("/", -1)) if (part.isBlank() || part.equals(".") || part.equals("..") || part.endsWith(".") || part.endsWith(" ") || part.matches("(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\..*)?")) return false;
         return true;
     }
     private static String extension(String path) { int dot = path.lastIndexOf('.'); return dot < 0 ? "" : path.substring(dot + 1).toLowerCase(Locale.ROOT); }

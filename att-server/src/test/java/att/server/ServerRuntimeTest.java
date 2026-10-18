@@ -352,8 +352,11 @@ class ServerRuntimeTest {
             Map<String,Object> report=runtime.resultRecord(jobId);
             assertEquals("PASS",((Map<?,?>)report.get("job")).get("status"));assertNotNull(report.get("result"));
             Path output=data.resolve("jobs").resolve(jobId).resolve("output");
-            assertTrue(Files.isDirectory(output));
-            try(var files=Files.walk(output)){assertTrue(files.anyMatch(Files::isRegularFile),"A standard Load run should produce artifacts");}
+            long archiveDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+            while((!"READY".equals(runtime.artifactIndex(jobId).get("archiveStatus"))||Files.exists(output))&&System.nanoTime()<archiveDeadline)Thread.sleep(20);
+            assertEquals("READY",runtime.artifactIndex(jobId).get("archiveStatus"));
+            assertFalse(Files.exists(output),"Verified scheduled Load artifacts live only in the ZIP");
+            assertFalse(((List<?>)runtime.artifactIndex(jobId).get("primaryReports")).isEmpty(),"The archived Load report is discovered independently of pagination");
 
             LoadSchedule restoredDebug=runtime.loadSchedule(debugScheduleId);
             assertEquals("debug",restoredDebug.effectiveJobType());assertTrue(restoredDebug.inlineDebugInput.toString().contains("@{edda.currency}"));

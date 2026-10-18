@@ -73,6 +73,8 @@ final class ServerRuntime implements AutoCloseable {
     final ThreadPoolExecutor workers,streams,inspectors;
     private final ThreadPoolExecutor artifactWriters;
     private final Semaphore artifactReadSlots=new Semaphore(8,true);
+    private final Set<String> pendingArtifactJobs=ConcurrentHashMap.newKeySet();
+    private final java.util.concurrent.locks.ReentrantReadWriteLock artifactLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
@@ -2089,68 +2091,131 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> artifactIndex(String id) throws Exception { return artifactIndex(id,0,100); }
     Map<String,Object> artifactIndex(String id,int offset,int limit) throws Exception {
         if(offset<0||offset>1_000_000||limit<1||limit>100)throw new IllegalArgumentException("Artifact listing pagination is invalid");
-        if(store.get(id)==null)throw new NotFoundException();
-        Path archive=artifactArchivePath(id),statusFile=archive.resolveSibling("archive-status.json");
-        Map<String,Object> out=new LinkedHashMap<>();
-        if(Files.isRegularFile(archive)) {
-            try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(archive.toFile())) {
-                var manifest=zip.getEntry(ArtifactArchive.MANIFEST);
-                if(manifest==null)throw new IllegalStateException("Archive manifest is missing");
-                Map<?,?> data;try(var input=zip.getInputStream(manifest)){data=JSON.readValue(input,Map.class);}
-                if(!(data.get("version") instanceof Number version)||version.intValue()!=1)throw new IllegalStateException("Archive manifest version is unsupported");
-                Object entries=data.get("entries");List<?> all=entries instanceof List<?>? (List<?>)entries:List.of();
-                int start=Math.min(offset,all.size()),end=Math.min(all.size(),start+limit);
-                out.put("items",all.subList(start,end));out.put("nextOffset",end<all.size()?end:null);
-                out.put("primaryReports",all.stream().filter(item->item instanceof Map<?,?> row&&Boolean.TRUE.equals(row.get("report"))).toList());
-                out.put("archiveStatus","READY");
-            }
-        } else {
-            out.put("items",List.of());out.put("nextOffset",null);out.put("primaryReports",List.of());
-            out.put("archiveStatus",Files.isRegularFile(statusFile)?JSON.readTree(statusFile.toFile()).path("state").asText("FAILED"):"PENDING");
-        }
-        out.put("downloadPath","archive.zip");return out;
-    }
-    byte[] archiveEntry(String id,String requested) throws Exception {
         if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
+        artifactLifecycle.readLock().lock();
         try {
             if(store.get(id)==null)throw new NotFoundException();
-            Path archive=artifactArchivePath(id);if(!Files.isRegularFile(archive))throw new NotFoundException();
-            byte[] bytes=ArtifactArchive.read(archive,requested);
-            try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(archive.toFile());var input=zip.getInputStream(zip.getEntry(ArtifactArchive.MANIFEST))) {
-                Map<?,?> manifest=JSON.readValue(input,Map.class);if(!(manifest.get("version") instanceof Number version)||version.intValue()!=1)throw new NotFoundException();Object entries=manifest.get("entries");boolean approved=false;
-                if(entries instanceof List<?> list)for(Object item:list)if(item instanceof Map<?,?> row&&requested.equals(row.get("path"))&&row.get("size") instanceof Number size&&size.longValue()==bytes.length&&ArtifactArchive.sha256(bytes).equals(row.get("sha256"))){approved=true;break;}
-                if(!approved)throw new NotFoundException();
+            Path archive=artifactArchivePath(id),statusFile=archive.resolveSibling("archive-status.json");
+            Map<String,Object> out=new LinkedHashMap<>();
+            JsonNode publication=readArchiveStatus(statusFile);
+            String state=publication.path("state").asText("FAILED");
+            out.put("reason",publication.path("reason").asText(""));
+            if(Files.isRegularFile(archive)&&"READY".equals(state)) {
+                try {
+                    Map<String,Object> data=ArtifactArchive.verify(archive,false);
+                    List<?> all=(List<?>)data.get("entries");
+                    int start=Math.min(offset,all.size()),end=Math.min(all.size(),start+limit);
+                    out.put("items",all.subList(start,end));out.put("nextOffset",end<all.size()?end:null);
+                    out.put("primaryReports",all.stream().filter(item->item instanceof Map<?,?> row&&Boolean.TRUE.equals(row.get("report"))).toList());
+                    out.put("archiveStatus","READY");out.put("omissions",data.get("omissions"));out.put("complete",data.get("complete"));
+                } catch(Exception corrupt) { state="FAILED"; }
             }
-            return bytes;
-        } finally { artifactReadSlots.release(); }
+            if(!out.containsKey("archiveStatus")) {
+                out.put("items",List.of());out.put("nextOffset",null);out.put("primaryReports",List.of());out.put("archiveStatus",state);
+            }
+            out.put("retryable","FAILED".equals(out.get("archiveStatus"))&&Files.isDirectory(outputDirectoryForJob(id)));
+            out.put("downloadPath","archive.zip");return out;
+        } finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
+    }
+    byte[] archiveEntry(String id,String requested) throws Exception {
+        if(!ArtifactArchive.safePath(requested)||ArtifactArchive.MANIFEST.equalsIgnoreCase(requested))throw new IllegalArgumentException("Invalid archive entry path");
+        try(ArtifactRead read=openArtifactArchive(id,false)) { return ArtifactArchive.read(read.path,requested); }
+        catch(java.io.FileNotFoundException missing){throw new NotFoundException();}
+    }
+    final class ArtifactRead implements AutoCloseable {
+        final Path path;
+        ArtifactRead(Path path){this.path=path;}
+        @Override public void close(){artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
+    }
+    ArtifactRead openArtifactArchive(String id,boolean digests) throws Exception {
+        if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
+        artifactLifecycle.readLock().lock();
+        try {
+            if(store.get(id)==null)throw new NotFoundException();
+            Path archive=artifactArchivePath(id),status=archive.resolveSibling("archive-status.json");
+            if(!"READY".equals(readArchiveStatus(status).path("state").asText()))throw new ArchiveUnavailableException();
+            try { ArtifactArchive.verify(archive,digests); }
+            catch(Exception invalid){throw new ArchiveUnavailableException();}
+            return new ArtifactRead(archive);
+        } catch(Exception failure){artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
+    }
+    private void archiveStatus(String id,String state,String reason) throws Exception {
+        Path target=artifactArchivePath(id).resolveSibling("archive-status.json");
+        Files.createDirectories(target.getParent());
+        Path temporary=Files.createTempFile(target.getParent(),".archive-status-",".tmp");
+        try {
+            Files.write(temporary,JSON.writeValueAsBytes(Map.of("state",state,"reason",reason,"manifestVersion",1)));
+            try(var channel=java.nio.channels.FileChannel.open(temporary,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
+            Files.move(temporary,target,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } finally { Files.deleteIfExists(temporary); }
+    }
+    private static JsonNode readArchiveStatus(Path status) {
+        try {
+            if(!Files.isRegularFile(status))return JSON.valueToTree(Map.of("state","PENDING"));
+            if(Files.size(status)>4096)throw new IllegalArgumentException();
+            JsonNode value=JSON.readTree(status.toFile());
+            if(value==null||!Set.of("PENDING","ARCHIVING","READY","FAILED").contains(value.path("state").asText()))throw new IllegalArgumentException();
+            return value;
+        } catch(Exception invalid){return JSON.valueToTree(Map.of("state","FAILED","reason","invalid_metadata"));}
     }
     void retryArtifactArchive(String id) throws Exception {
         if(!terminal(id))throw new IllegalArgumentException("Artifacts can be published after the Job has ended");
-        Files.deleteIfExists(artifactArchivePath(id).resolveSibling("archive-status.json"));scheduleArtifactArchive(id);
+        if(!Files.isDirectory(outputDirectoryForJob(id)))throw new IllegalArgumentException("Private source output is unavailable for retry");
+        scheduleArtifactArchive(id);
     }
     void scheduleArtifactArchive(String id) {
-        if(Files.isRegularFile(artifactArchivePath(id)))return;
+        if(closing||!pendingArtifactJobs.add(id))return;
         try { artifactWriters.execute(() -> {
-            Path output=outputDirectoryForJob(id), archive=artifactArchivePath(id), status=archive.resolveSibling("archive-status.json");
+            artifactLifecycle.readLock().lock();
+            Path output=outputDirectoryForJob(id), archive=artifactArchivePath(id);
             try {
-                if(!Files.isDirectory(output)) throw new java.io.IOException("Worker output is unavailable");
-                Files.deleteIfExists(status);
-                ArtifactArchive.build(output,archive,file->publicArtifact(id,file));
-                Files.writeString(status,"{\"state\":\"READY\",\"manifestVersion\":1}",StandardCharsets.UTF_8);
-                try { deleteTree(output); }
-                catch(Exception cleanupFailure) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Published artifacts but could not remove loose output for Job "+id); }
+                if(store.get(id)==null||!terminal(id))return;
+                Job active=jobs.get(id);
+                if(active!=null&&active.process!=null&&active.process.isAlive())return;
+                if(Files.isRegularFile(archive)) {
+                    try { ArtifactArchive.verify(archive,true); }
+                    catch(Exception corrupt) {
+                        if(!Files.isDirectory(output))throw corrupt;
+                        Files.delete(archive);
+                    }
+                }
+                if(!Files.isRegularFile(archive)) {
+                    archiveStatus(id,"ARCHIVING","");
+                    if(!Files.isDirectory(output))throw new java.io.IOException("Worker output is unavailable");
+                    cleanupArtifactStaging(archive.getParent());
+                    ArtifactArchive.build(output,archive,file->publicArtifact(id,file));
+                }
+                archiveStatus(id,"READY","");
+                store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,"READY");
+                try {deleteTree(output);cleanupArtifactStaging(archive.getParent());}
+                catch(Exception cleanupFailure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact cleanup will be retried for Job "+id);}
             } catch(Exception failure) {
-                try { Files.deleteIfExists(archive); Files.writeString(status,"{\"state\":\"FAILED\",\"reason\":\"publication_failed\",\"retryable\":true}",StandardCharsets.UTF_8); }
-                catch(Exception ignored) { }
-                java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact publication failed for Job "+id+": "+safeMessage(failure));
-            }
+                boolean policy=failure instanceof IllegalArgumentException;
+                try {archiveStatus(id,"FAILED",policy?"policy_limit":"publication_failed");store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,policy?"REJECTED_POLICY":"FAILED_IO");}catch(Exception ignored){}
+                java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact publication failed for Job "+id);
+            } finally {pendingArtifactJobs.remove(id);artifactLifecycle.readLock().unlock();}
         }); } catch(RejectedExecutionException full) {
-            try { Files.writeString(artifactArchivePath(id).resolveSibling("archive-status.json"),"{\"state\":\"FAILED\",\"reason\":\"writer_capacity\",\"retryable\":true}",StandardCharsets.UTF_8); } catch(Exception ignored) { }
+            pendingArtifactJobs.remove(id);
+            // Recovery retries when writer capacity becomes available; a retry cannot replace a READY state.
+        }
+    }
+    private static void cleanupArtifactStaging(Path jobDirectory) throws Exception {
+        try(var files=Files.list(jobDirectory)) {
+            for(Path file:files.filter(p->{String name=p.getFileName().toString();return name.startsWith(".artifact-export-")||name.startsWith(".artifact-")&&name.endsWith(".zip.tmp")||name.startsWith(".archive-status-")&&name.endsWith(".tmp");}).toList())deleteTree(file);
         }
     }
     private void recoverArtifactArchivesSafely() {
-        try { for(String id:store.terminalJobIds())if(!Files.isRegularFile(artifactArchivePath(id))&&Files.isDirectory(outputDirectoryForJob(id)))scheduleArtifactArchive(id); }
-        catch(Exception failure) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to recover pending artifact publications: "+safeMessage(failure)); }
+        try {for(String id:store.terminalJobIds()) {
+            Path archive=artifactArchivePath(id);
+            boolean unfinished=Files.isDirectory(outputDirectoryForJob(id));
+            if(!unfinished&&Files.isRegularFile(archive)) {
+                Path status=archive.resolveSibling("archive-status.json");
+                try {unfinished=!Files.isRegularFile(status)||!"READY".equals(JSON.readTree(status.toFile()).path("state").asText());}
+                catch(Exception invalid){unfinished=true;}
+                if(!unfinished)try(var files=Files.list(archive.getParent())){unfinished=files.anyMatch(p->p.getFileName().toString().startsWith(".artifact-"));}
+            }
+            if(unfinished)scheduleArtifactArchive(id);
+        }} catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to recover pending artifact publications");}
     }
     Object publicEventData(Object data,Path output,Path packageRoot) throws Exception {
         JsonNode node=JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(data));
@@ -2177,7 +2242,7 @@ final class ServerRuntime implements AutoCloseable {
     private static String readBoundedLine(BufferedReader reader,int limit) throws java.io.IOException {StringBuilder line=new StringBuilder();boolean oversized=false;int c;while((c=reader.read())!=-1){if(c=='\n')break;if(c=='\r')continue;if(line.length()<limit)line.append((char)c);else oversized=true;}if(c==-1&&line.isEmpty()&&!oversized)return null;return oversized?"\u0000OVERSIZED":line.toString();}
     JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob):active.events;}
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
-    /** Downloads are projections; raw trusted evidence stays on disk. Binary disclosure has no public policy. */
+    /** One-time export projection; no public GET reads trusted Worker files. */
     byte[] publicArtifact(String id, Path file) throws Exception {
         final int limit=16*1024*1024;
         byte[] bytes;
@@ -2188,6 +2253,23 @@ final class ServerRuntime implements AutoCloseable {
                 .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString(); }
         catch(java.nio.charset.CharacterCodingException invalid){throw new IllegalArgumentException("Binary artifacts require trusted filesystem access");}
         if(text.indexOf('\0')>=0)throw new IllegalArgumentException("Binary artifacts require trusted filesystem access");
+        String filename=file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        if(filename.endsWith(".json")||filename.endsWith(".yaml")||filename.endsWith(".yml")) {
+            try {
+                boolean json=filename.endsWith(".json");
+                Object raw;
+                if(json)raw=JSON.readValue(text,Object.class);
+                else {
+                    org.yaml.snakeyaml.LoaderOptions options=new org.yaml.snakeyaml.LoaderOptions();
+                    options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(0);options.setNestingDepthLimit(64);options.setCodePointLimit(limit);
+                    raw=new org.yaml.snakeyaml.Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor(options)).load(text);
+                }
+                JsonNode projected=sanitize(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),outputDirectoryForJob(id),packageRootForJob(id));
+                if(json)return JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(projected);
+                org.yaml.snakeyaml.DumperOptions options=new org.yaml.snakeyaml.DumperOptions();options.setDefaultFlowStyle(org.yaml.snakeyaml.DumperOptions.FlowStyle.BLOCK);
+                return new org.yaml.snakeyaml.Yaml(options).dump(JSON.convertValue(projected,Object.class)).getBytes(StandardCharsets.UTF_8);
+            } catch(Exception invalid){throw new IllegalArgumentException("Structured artifact cannot be safely published");}
+        }
         text=att.server.api.internal.DiagnosticSanitizer.redactText(text);
         text=replacePathPrefix(text,outputDirectoryForJob(id).toString(),"artifact");
         text=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,packageRootForJob(id));
@@ -2196,10 +2278,14 @@ final class ServerRuntime implements AutoCloseable {
     Path artifact(String id,String requested) throws Exception {Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();Job j=jobs.get(id);if(j!=null)return artifact(j,requested);Path base=config.dataDir.resolve("jobs").resolve(id).resolve("output").toRealPath();Path relative=Paths.get(requested);if(relative.isAbsolute())throw new IllegalArgumentException("Artifact path must be relative to job output");Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base)||!Files.exists(candidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new NotFoundException();Path walk=base;for(Path part:base.relativize(candidate)){walk=walk.resolve(part);if(Files.isSymbolicLink(walk))throw new NotFoundException();}Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;}
     void cleanupExpiredJobs() throws Exception {
         Instant cutoff=Instant.now().minus(java.time.Duration.ofDays(config.jobRetentionDays));
-        for(String id:store.expiredJobIds(cutoff))if(!jobs.containsKey(id))try{
-            deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);
-        }catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to remove expired ATT Server job "+id+": "+safeMessage(failure));}
+        if(!artifactLifecycle.writeLock().tryLock())return;
+        try {
+            for(String id:store.expiredJobIds(cutoff))if(!jobs.containsKey(id)&&!pendingArtifactJobs.contains(id))try{
+                deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);
+            }catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to remove expired ATT Server job "+id);}
+        } finally {artifactLifecycle.writeLock().unlock();}
     }
+
     private void cleanupExpiredJobsSafely(){try{cleanupExpiredJobs();}catch(Exception e){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to clean expired ATT Server jobs: "+safeMessage(e));}}
     private static void deleteTree(Path root)throws java.io.IOException {
         if(!Files.exists(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))return;
@@ -2207,7 +2293,7 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();artifactWriters.shutdown();try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();artifactWriters.shutdown();try{if(!artifactWriters.awaitTermination(30,TimeUnit.SECONDS))artifactWriters.shutdownNow();}catch(InterruptedException interrupted){artifactWriters.shutdownNow();Thread.currentThread().interrupt();}try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
@@ -2232,6 +2318,7 @@ final class ServerRuntime implements AutoCloseable {
     static final class DraftCapacityException extends RuntimeException {}
     static final class InlineLoadDisabledException extends RuntimeException {}
     static final class ArtifactCapacityException extends RuntimeException {}
+    static final class ArchiveUnavailableException extends RuntimeException {}
     static final class InlineLoadLimitException extends IllegalArgumentException {
         InlineLoadLimitException(String message){super(message);}
     }

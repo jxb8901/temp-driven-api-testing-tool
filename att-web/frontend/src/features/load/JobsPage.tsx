@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import './load.css';
-import type { JobArtifact, JobEvent, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps } from './types';
+import { JobArtifacts } from './JobArtifacts';
+import type { JobEvent, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps } from './types';
 
 function executionType(job: JobSummary): string { return job.executionType || (job.command === 'debug' ? 'run' : job.command); }
 
@@ -369,9 +370,6 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const [result, setResult] = useState<JobResultResponse | null>(null);
   const [resultState, setResultState] = useState<LoadState>('loading');
   const [resultError, setResultError] = useState('');
-  const [artifacts, setArtifacts] = useState<JobArtifact[]>([]);
-  const [artifactState, setArtifactState] = useState<LoadState>('loading');
-  const [artifactError, setArtifactError] = useState('');
   const [activeTab, setActiveTab] = useState<JobTab>('overview');
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
   const [events, setEvents] = useState<JobEvent[]>([]);
@@ -391,8 +389,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     const controller = new AbortController();
     setJobState(job ? 'refreshing' : 'loading');
     setResultState(result ? 'refreshing' : 'loading');
-    setArtifactState(artifacts.length ? 'refreshing' : 'loading');
-    setDetailError(''); setResultError(''); setArtifactError('');
+    setDetailError(''); setResultError('');
     api.getJob(jobId, controller.signal).then(value => {
       if (!controller.signal.aborted) { setJob(value); setJobState('ready'); }
     }).catch(error => {
@@ -402,11 +399,6 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
       if (!controller.signal.aborted) { setResult(value); setResultState('ready'); }
     }).catch(error => {
       if (!controller.signal.aborted) { setResultError(toError(error, 'Job result is not available.').message); setResultState('error'); }
-    });
-    api.getJobArtifacts(jobId, controller.signal).then(value => {
-      if (!controller.signal.aborted) { setArtifacts(value); setArtifactState('ready'); }
-    }).catch(error => {
-      if (!controller.signal.aborted) { setArtifactError(toError(error, 'Job artifacts are not available.').message); setArtifactState('error'); }
     });
     return () => controller.abort();
   }, [api, jobId, detailRefresh]);
@@ -582,10 +574,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     </section>
     <section className="att-job-panel" role="tabpanel" id="job-panel-artifacts" aria-labelledby="job-tab-artifacts" hidden={activeTab !== 'artifacts'} tabIndex={0}>
       <h2>Artifacts</h2>
-      {artifactState === 'loading' && <p role="status" aria-busy="true">Loading artifacts…</p>}
-      {artifactError && <p role="alert" className="att-inline-error">{artifactError}</p>}
-      {artifactState === 'ready' && artifacts.length === 0 && <p>No artifacts were returned for this job.</p>}
-      {artifacts.length > 0 && <ul>{artifacts.map(item => <li key={item.path}><a href={api.artifactHref(jobId, item.path)}>{item.path}</a>{typeof item.size === 'number' && <span> · {item.size.toLocaleString()} bytes</span>}</li>)}</ul>}
+      <JobArtifacts key={jobId} api={api} jobId={jobId} refresh={detailRefresh} />
     </section>
     <section className="att-job-panel" role="tabpanel" id="job-panel-metrics" aria-labelledby="job-tab-metrics" hidden={activeTab !== 'metrics'} tabIndex={0}>
       <h2>Metrics</h2>

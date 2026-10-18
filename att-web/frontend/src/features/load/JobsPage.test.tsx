@@ -66,6 +66,46 @@ async function click(element: Element) {
 }
 
 describe('JobsPage React feature', () => {
+  it('discovers reports independently of pagination and offers only an archive download', async () => {
+    const report = { path: 'load/run/report/index.html', report: true, size: 900 };
+    const api = makeApi({
+      getJobArtifactArchive: vi.fn(async (_id: string, offset?: number) => ({ archiveStatus: 'READY' as const, primaryReports: [report],
+        items: [{ path: offset ? 'nested/evidence.json' : 'case.log', size: 5 }], nextOffset: offset ? null : 100,
+        complete: false, omissions: [{ count: 1, reason: 'unsupported output' }] })),
+      artifactArchiveHref: () => '/archive.zip',
+    });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    const panel = host.querySelector('#job-panel-artifacts')!;
+    expect(panel.textContent).toContain('View Report: load/run/report/index.html');
+    expect([...panel.querySelectorAll('a')].map(link => link.textContent)).toEqual(['Download Artifacts (.zip)']);
+    expect(panel.textContent).toContain('Some output was excluded');
+    await click([...panel.querySelectorAll('button')].find(button => button.textContent === 'Load more artifacts')!);
+    expect(panel.textContent).toContain('nested/evidence.json');
+    expect(panel.textContent).toContain('case.log');
+    await click([...panel.querySelectorAll('button')].find(button => button.textContent?.startsWith('View Report:'))!);
+    const frame = panel.querySelector('iframe')!;
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frame.getAttribute('src')).toContain('load/run/report/index.html');
+  });
+
+  it('polls archive status separately from the terminal job result and retries failures', async () => {
+    const getArchive = vi.fn().mockResolvedValueOnce({ archiveStatus: 'PENDING', items: [], primaryReports: [] })
+      .mockResolvedValueOnce({ archiveStatus: 'FAILED', items: [], primaryReports: [], retryable: true })
+      .mockResolvedValue({ archiveStatus: 'READY', items: [], primaryReports: [] });
+    const retryArchive = vi.fn(async () => ({}));
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })), getJobArtifactArchive: getArchive, retryJobArtifactArchive: retryArchive });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    expect(host.querySelector('#job-panel-artifacts')?.textContent).toContain('PENDING');
+    await advance(2100);
+    const retryButton = [...host.querySelectorAll('button')].find(button => button.textContent === 'Retry archive')!;
+    await click(retryButton);await advance();
+    expect(retryArchive).toHaveBeenCalledWith('JOB-204');
+    expect(host.querySelector('#job-panel-artifacts')?.textContent).toContain('READY');
+    expect(host.querySelector('#job-panel-overview')?.textContent).toContain('PASS');
+  });
+
   it('renders stable job tabs and API-backed content for a loaded job', async () => {
     const api = makeApi();
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));

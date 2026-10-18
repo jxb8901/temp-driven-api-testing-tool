@@ -176,6 +176,18 @@ export interface JobResultResponse {
 export interface JobArtifact {
   path: string;
   size?: number;
+  report?: boolean;
+  mediaType?: string;
+}
+
+export interface JobArtifactArchive {
+  archiveStatus: 'PENDING' | 'ARCHIVING' | 'READY' | 'FAILED' | 'EXPIRED';
+  items: JobArtifact[];
+  primaryReports: JobArtifact[];
+  nextOffset?: number | null;
+  complete?: boolean;
+  omissions?: Array<{ count: number; reason: string }>;
+  retryable?: boolean;
 }
 
 export interface JobEvent {
@@ -214,6 +226,10 @@ export interface LoadJobsApi {
   getJob(jobId: string, signal?: AbortSignal): Promise<JobView>;
   getJobResult(jobId: string, signal?: AbortSignal): Promise<JobResultResponse>;
   getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]>;
+  getJobArtifactArchive?(jobId: string, offset?: number, signal?: AbortSignal): Promise<JobArtifactArchive>;
+  getJobArtifactText?(jobId: string, path: string, signal?: AbortSignal): Promise<string>;
+  retryJobArtifactArchive?(jobId: string): Promise<unknown>;
+  artifactArchiveHref?(jobId: string): string;
   cancelJob(jobId: string): Promise<{ jobId: string; status: JobStatus }>;
   subscribeJob(jobId: string, handlers: JobEventHandlers): () => void;
   artifactHref(jobId: string, path: string): string;

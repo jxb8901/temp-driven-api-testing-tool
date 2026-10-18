@@ -187,15 +187,29 @@ public final class RemoteCommand {
     }
     private static int artifacts(RemoteHttpClient c,List<String>a,String f)throws Exception {
         String id=jobId(a,1);String directory=null;for(int i=2;i<a.size();i++){if("--download".equals(a.get(i))){if(++i>=a.size())throw new IllegalArgumentException("--download requires a local directory");directory=a.get(i);}else throw new IllegalArgumentException("Unknown artifacts option: "+a.get(i));}
-        JsonNode items=c.get("/jobs/"+id+"/artifacts").path("items");if("json".equals(f))System.out.println(items.toString());else {System.out.println("TYPE\tNAME\tSIZE");for(JsonNode item:items){String name=item.path("path").asText();String type=name.contains("/")?name.substring(0,name.indexOf('/')):"artifact";System.out.println(type+"\t"+name+"\t"+item.path("size").asLong()+" bytes");}}
-        if(directory!=null)for(JsonNode item:items){String name=item.path("path").asText();Path saved=ArtifactDownloader.download(c,id,name,Paths.get(directory));if(!"json".equals(f))System.out.println("Downloaded: "+saved);}
+        JsonNode archive=c.get("/jobs/"+id+"/artifacts");
+        com.fasterxml.jackson.databind.node.ArrayNode items=att.remote.http.RemoteHttpClient.JSON.createArrayNode();
+        JsonNode page=archive;
+        int pages=0;
+        do {
+            if(page.path("items").isArray())for(JsonNode item:page.path("items"))items.add(item);
+            JsonNode next=page.get("nextOffset");
+            if(next==null||next.isNull())break;
+            if(!next.canConvertToInt()||next.asInt()<0||++pages>100)throw new RemoteException("Invalid archive pagination");
+            page=c.get("/jobs/"+id+"/artifacts?offset="+next.asInt()+"&limit=100");
+        } while(true);
+        if("json".equals(f))System.out.println(items.toString());
+        else {System.out.println("Archive: "+archive.path("archiveStatus").asText("PENDING"));System.out.println("TYPE\tNAME\tSIZE");for(JsonNode item:items){String name=item.path("path").asText();System.out.println((item.path("report").asBoolean()?"report":"artifact")+"\t"+name+"\t"+item.path("size").asLong()+" bytes");}}
+        if(directory!=null){
+            if(!"READY".equals(archive.path("archiveStatus").asText()))throw new RemoteException("Artifact archive is not ready; retry after publication completes");
+            Path saved=ArtifactDownloader.download(c,id,"artifacts.zip",Paths.get(directory));if(!"json".equals(f))System.out.println("Downloaded: "+saved);
+        }
         return 0;
     }
     private static int artifact(RemoteHttpClient c,List<String>a)throws Exception {
         if(a.size()!=5||!"--download".equals(a.get(3)))throw new IllegalArgumentException("Usage: att remote artifact <jobId> <logicalName> --download <directory>");
-        String id=jobId(a,1),name=a.get(2);JsonNode items=c.get("/jobs/"+id+"/artifacts").path("items");boolean listed=false;
-        for(JsonNode item:items)if(name.equals(item.path("path").asText())){listed=true;break;}
-        if(!listed)throw new RemoteException("Artifact name is not present in the Server's logical artifact list");
+        String id=jobId(a,1),name=a.get(2);
+        if(!"artifacts.zip".equals(name))throw new RemoteException("Individual artifact downloads are unavailable; use att remote artifacts <jobId> --download <directory>");
         Path saved=ArtifactDownloader.download(c,id,name,Paths.get(a.get(4)));System.out.println("Downloaded: "+saved);return 0;
     }
     private static Credentials password(ServerProfile profile,Map<String,String> environment,CredentialPrompt console)throws RemoteException {
@@ -230,5 +244,5 @@ public final class RemoteCommand {
     private static String segment(String value){try{return java.net.URLEncoder.encode(value,"UTF-8").replace("+","%20");}catch(java.io.UnsupportedEncodingException impossible){throw new IllegalStateException(impossible);}}
     private static int fail(String message,int code,String format){String safe=message==null?"Remote command failed":message.replaceAll("(?i)(password|authorization)\\s*[:=]\\s*[^ ,]+","$1=[REDACTED_SECRET]");if("json".equals(format)){ObjectNode out=RemoteHttpClient.JSON.createObjectNode();out.put("error",safe);out.put("exitCode",code);System.err.println(out.toString());}else System.err.println("ATT Remote: "+safe);return code;}
     private static String safe(Exception e){String m=e.getMessage();return m==null?e.getClass().getSimpleName():m;}
-    private static void help(){System.out.println("Usage: att remote [--server <profile|url>] [--format human|json] [--no-auth] <command>\nCommands: ping, version, packages, package <id>, run|debug|load|validate <packageId> [--principal <name>], jobs [--principal <search>], job|watch|result|cancel <jobId>, artifacts <jobId>, artifact <jobId> <name> --download <directory>\n--server accepts a named profile or an HTTP(S) base URL. ATT_SERVER accepts either value and overrides the YAML default. Basic authentication, including credentials entered for a direct URL, requires HTTPS.");}
+    private static void help(){System.out.println("Usage: att remote [--server <profile|url>] [--format human|json] [--no-auth] <command>\nCommands: ping, version, packages, package <id>, run|debug|load|validate <packageId> [--principal <name>], jobs [--principal <search>], job|watch|result|cancel <jobId>, artifacts <jobId> [--download <directory>], artifact <jobId> artifacts.zip --download <directory>\n--server accepts a named profile or an HTTP(S) base URL. ATT_SERVER accepts either value and overrides the YAML default. Basic authentication, including credentials entered for a direct URL, requires HTTPS.");}
 }

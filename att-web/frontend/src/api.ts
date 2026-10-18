@@ -165,7 +165,7 @@ function artifactUrl(jobId: string, path: string): string {
   if (!segments.length || segments.some(segment => !segment || segment === '.' || segment === '..')) return '#invalid-artifact';
   const base = apiBaseUrl();
   const encodedPath = segments.map(encodeURIComponent).join('/');
-  const url = new URL('jobs/' + encodeURIComponent(jobId) + '/artifacts/' + encodedPath, base);
+  const url = new URL('jobs/' + encodeURIComponent(jobId) + '/artifacts/view/' + encodedPath, base);
   if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname)) return '#invalid-artifact';
   return url.toString();
 }

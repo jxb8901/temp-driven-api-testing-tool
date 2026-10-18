@@ -10,7 +10,7 @@ Local `ADMIN` 可前往 **Settings → User Management**，以登入 ID、顯示
 
 只有已驗證的 local `ADMIN` 可檢視帳戶列表及控制項。其他本地用戶看不到帳戶資料或管理功能。Container mode 的 Settings 會說明帳戶由 Tomcat 或設定的 SSO provider 管理；ATT 不會把外部帳戶顯示成由 ATT 管理。Settings 可使用英文或繁體中文、跟隨瀏覽器語言，或在此瀏覽器保存語言選擇；存取控制及密碼政策仍由 Server 執行。
 
-主控台會列出已設定的邏輯套件 ID 與近期持久化工作。選擇套件後可提交 Run、Debug、Load 或 Validate，接著開啟工作以追蹤進度、檢視終端結果與安全診斷、取消執行中的工作，或下載邏輯 artifact。套件資源欄位使用相對於所選套件的邏輯路徑。UI 不接受或顯示 `PACKAGE_ROOT` 或 Server 儲存路徑。Artifact 以附件下載；UI 不會呈現 artifact HTML。 工作深層連結（例如 `/ui/jobs/J10045`）會轉址至標準 hash route，並透過公開 API 與 SSE 重新載入工作狀態。
+主控台會列出已設定的邏輯套件 ID 與近期持久化工作。選擇套件後可提交 Run、Debug、Load 或 Validate，接著開啟工作以追蹤進度、檢視終端結果與安全診斷、取消執行中的工作，或下載邏輯 artifact。套件資源欄位使用相對於所選套件的邏輯路徑。UI 不接受或顯示 `PACKAGE_ROOT` 或 Server 儲存路徑。Artifacts 分頁顯示封存狀態，並從經驗證的 ZIP 預覽報告及文字。**Download Artifacts (.zip)** 是唯一下載操作；HTML 報告使用隔離的檢視器。詳見 [Artifact 發布與復原](reference/results-reports-evidence.md#att-server-job-artifact-publication)。 工作深層連結（例如 `/ui/jobs/J10045`）會轉址至標準 hash route，並透過公開 API 與 SSE 重新載入工作狀態。
 
 Package Resource Explorer 會按 package-scoped 邏輯資源 ID 列出已設定的 Case、Template、Flow 及 Tool，並支援類型與文字篩選、跨所有符合項目排序後再分頁、加密 cursor、資源詳細資料及安全關聯。在預設 `safe-package-files` policy 下，已授權 source 所連結的合資格 package-local Tool scripts 及安全 `&{...}` targets 無須逐檔設定即可開啟；Template/Flow YAML 仍以淨化投影回傳。`allowlist-only` 使用完全相同的 package-relative `server.inspection.safeTextSources` 路徑。External scripts 必須位於已設定的 external root 並列入每 package canonical 精確 allowlist，回應會隱藏 filesystem path。Case 詳細資料會顯示身份及 Stage/Template 中繼資料，並隱藏 workbook 業務值。反向關聯最多內嵌 100 筆，並同時回傳準確數量及 `referencedByHasMore`。Explorer 不會瀏覽任意檔案、不會執行 Tool，也不會修改 package 內容。若分頁期間 package 或排序/篩選條件有變更，Server 會拒絕過期 cursor，UI 可重新整理清單。
 
